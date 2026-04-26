@@ -84,7 +84,7 @@
 <div id="toast" class="toast"></div>
 
 <script>
-// 已为你填入完整的Supabase信息
+// 你的Supabase信息
 const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
 
@@ -94,10 +94,8 @@ const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 // 全局状态
 const state = {
   username: localStorage.getItem('username') || '',
-  visitorId: localStorage.getItem('visitorId') || crypto.randomUUID(),
   posts: []
 };
-localStorage.setItem('visitorId', state.visitorId);
 
 // DOM元素
 const feed = document.getElementById('feed');
@@ -113,47 +111,32 @@ function toast(msg) {
   setTimeout(() => toastEl.classList.remove('show'), 1800);
 }
 
-// 统计数据
-function renderStats() {
-  const views = state.posts.reduce((n, p) => n + (p.view_count || 0), 0);
-  const likes = state.posts.reduce((n, p) => n + (p.like_count || 0), 0);
-  const comments = state.posts.reduce((n, p) => n + (p.comments?.length || 0), 0);
-  stats.innerHTML = `总浏览：${views} 次<br>总点赞：${likes} 次<br>总评论：${comments} 条`;
-}
-
-// 渲染卡片
+// 渲染卡片（适配你现有的posts表字段）
 function card(p) {
-  const comments = (p.comments || []).slice(-3).map(c =>
-    `<div class='small'>${c.nickname}：${c.content}</div>`
-  ).join('') || "<div class='small'>暂无评论</div>";
   return `
   <article class='post' data-id='${p.id}'>
-    <div><strong>@${p.author}</strong></div>
+    <div><strong>@${state.username || '游客'}</strong></div>
     <div class='meta'>${fmt(p.created_at)}</div>
     <p>${p.content}</p>
     <div class='actions'>
-      <button class='btn btn-ghost' data-a='view'>👁 浏览（${p.view_count || 0}）</button>
-      <button class='btn btn-ghost' data-a='like'>👍 点赞（${p.like_count || 0}）</button>
+      <button class='btn btn-ghost' data-a='view'>👁 浏览</button>
+      <button class='btn btn-ghost' data-a='like'>👍 点赞</button>
       <button class='btn btn-ghost' data-a='comment'>💬 评论</button>
     </div>
-    <div style='margin-top:8px'>${comments}</div>
   </article>`;
 }
 
 // 渲染页面
 function render() {
   feed.innerHTML = state.posts.map(card).join('') || '<div class="small">还没有动态，发第一条试试 ✨</div>';
-  renderStats();
+  stats.innerHTML = `总动态：${state.posts.length} 条`;
 }
 
-// 加载动态
+// 加载动态（适配你现有的posts表字段）
 async function load() {
   const { data, error } = await supabase
     .from('posts')
-    .select(`
-      *,
-      comments(*)
-    `)
+    .select('id, content, created_at')
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -174,7 +157,7 @@ function login() {
   toast('登录成功');
 }
 
-// 发布动态
+// 发布动态（适配你现有的posts表字段）
 async function publish(e) {
   e.preventDefault();
   if (!state.username) {
@@ -183,10 +166,7 @@ async function publish(e) {
   }
   const content = e.target.content.value.trim();
   const { error } = await supabase.from('posts').insert([{
-    author: state.username,
-    content: content,
-    view_count: 0,
-    like_count: 0
+    content: content
   }]);
 
   if (error) {
@@ -198,64 +178,7 @@ async function publish(e) {
   await load();
 }
 
-// 浏览计数
-async function viewPost(id) {
-  const post = state.posts.find(p => p.id === id);
-  if (!post) return;
-  await supabase.from('posts').update({
-    view_count: (post.view_count || 0) + 1
-  }).eq('id', id);
-  await load();
-}
-
-// 点赞功能
-async function likePost(id) {
-  const post = state.posts.find(p => p.id === id);
-  if (!post) return;
-  await supabase.from('posts').update({
-    like_count: (post.like_count || 0) + 1
-  }).eq('id', id);
-  await load();
-  toast('点赞成功');
-}
-
-// 评论功能
-async function commentPost(id) {
-  const content = prompt('输入评论内容');
-  if (!content) return;
-  const nickname = prompt('昵称（可空）', state.username || '') || '游客';
-
-  const { error } = await supabase.from('comments').insert([{
-    post_id: id,
-    nickname: nickname,
-    content: content
-  }]);
-
-  if (error) {
-    toast('评论失败：' + error.message);
-    return;
-  }
-  await load();
-  toast('评论成功');
-}
-
-// 实时刷新
-function realtime() {
-  setInterval(load, 5000);
-}
-
 // 事件绑定
-feed.addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-a]');
-  if (!btn) return;
-  const el = btn.closest('.post');
-  if (!el) return;
-  const id = el.dataset.id;
-  if (btn.dataset.a === 'view') await viewPost(id);
-  if (btn.dataset.a === 'like') await likePost(id);
-  if (btn.dataset.a === 'comment') await commentPost(id);
-});
-
 document.getElementById('publishForm').addEventListener('submit', publish);
 loginBtn.addEventListener('click', login);
 
@@ -263,7 +186,6 @@ loginBtn.addEventListener('click', login);
 (async () => {
   if (state.username) loginBtn.textContent = `已登录：${state.username}`;
   await load();
-  realtime();
   toast("页面加载完成 ✅");
 })();
 </script>
