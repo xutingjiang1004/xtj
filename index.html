@@ -9,11 +9,23 @@
     .success { color: #27ae60; font-size: 20px; margin-top: 30px; }
     .error { color: #e74c3c; font-size: 20px; margin-top: 30px; }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
   <h1>🌐 我的互联网站测试页</h1>
   <div id="result">正在连接后端...</div>
+// 替换成你自己的信息！
+const supabaseUrl = "你的Project URL（比如https://xxx.supabase.co）";
+const supabaseAnonKey = "你的Publishable API Key（sb_publishable_xxxx）";
 
+// 初始化Supabase客户端
+const supabase = supabase.createClient(supabaseUrl, supabaseAnonKey);
+
+// 生成游客唯一ID（用来防重复点赞）
+if (!localStorage.getItem("visitor_id")) {
+  localStorage.setItem("visitor_id", "visitor_" + Math.random().toString(36).slice(2));
+}
+const visitorId = localStorage.getItem("visitor_id");
   <script>
     fetch('/api/hello')
       .then(res => res.json())
