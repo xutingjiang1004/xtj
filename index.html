@@ -1,193 +1,165 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>液态玻璃朋友圈</title>
-  <!-- 引入 Supabase 后端工具 -->
+  <meta charset="UTF-8">
+  <title>朋友圈</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <style>
-    :root{--txt:#0f172a;--sub:#475569;--pri:#6366f1;--line:rgba(255,255,255,.35)}
-    *{box-sizing:border-box}
-    body{margin:0;min-height:100vh;color:var(--txt);font-family:"PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(130deg,#c7d2fe 0%,#dbeafe 35%,#fae8ff 70%,#bfdbfe 100%);overflow-x:hidden}
-    .bg-blob{position:fixed;filter:blur(40px);z-index:-1;opacity:.45;animation:float 12s ease-in-out infinite}
-    .b1{width:320px;height:320px;background:#818cf8;border-radius:48% 52% 45% 55%/58% 41% 59% 42%;left:-80px;top:-70px}
-    .b2{width:420px;height:420px;background:#22d3ee;border-radius:60% 40% 63% 37%/44% 58% 42% 56%;right:-120px;top:120px;animation-delay:1.5s}
-    .b3{width:380px;height:380px;background:#f472b6;border-radius:53% 47% 37% 63%/36% 67% 33% 64%;left:20%;bottom:-140px;animation-delay:2.5s}
-
-    .app{max-width:1120px;margin:0 auto;padding:18px}
-    .glass{background:rgba(255,255,255,.28);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid var(--line);box-shadow:0 20px 40px rgba(15,23,42,.15)}
-
-    .top{position:sticky;top:14px;z-index:20;border-radius:20px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;animation:enter .5s ease}
-    .title{font-size:24px;font-weight:800;letter-spacing:.4px}
-    .sub{font-size:12px;color:var(--sub)}
-
-    .grid{display:grid;grid-template-columns:1fr 340px;gap:14px;margin-top:14px}
-    .panel{border-radius:20px;padding:14px}
-    .feed{display:grid;gap:12px}
-
-    .post{border-radius:16px;padding:12px;background:rgba(255,255,255,.45);border:1px solid rgba(255,255,255,.5);transition:all .25s ease;animation:rise .35s ease}
-    .post:hover{transform:translateY(-3px);box-shadow:0 16px 28px rgba(30,41,59,.14)}
-    .meta{font-size:12px;color:var(--sub)}
-    .small{font-size:12px;color:var(--sub)}
-
-    .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-    .btn{border:0;border-radius:12px;padding:9px 12px;cursor:pointer;font-weight:700;transition:all .2s ease}
-    .btn:hover{transform:translateY(-1px)} .btn:active{transform:translateY(1px) scale(.99)}
-    .btn-primary{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;box-shadow:0 10px 20px rgba(99,102,241,.3)}
-    .btn-ghost{background:rgba(255,255,255,.62);color:#312e81;border:1px solid rgba(255,255,255,.7)}
-
-    textarea,input{width:100%;border:1px solid rgba(255,255,255,.55);background:rgba(255,255,255,.56);border-radius:12px;padding:10px;font:inherit;outline:none;transition:border-color .2s ease,box-shadow .2s ease}
-    textarea:focus,input:focus{border-color:#818cf8;box-shadow:0 0 0 3px rgba(129,140,248,.25)}
-    textarea{min-height:102px;resize:vertical}
-
-    .toast{position:fixed;right:18px;bottom:18px;background:rgba(15,23,42,.9);color:#fff;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(10px);transition:all .2s ease;pointer-events:none}
-    .toast.show{opacity:1;transform:none}
-
-    @keyframes float{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-14px) rotate(8deg)}}
-    @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-    @keyframes enter{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
-    @media (max-width:940px){.grid{grid-template-columns:1fr}.title{font-size:22px}}
-  </style>
 </head>
+
 <body>
-<div class="bg-blob b1"></div><div class="bg-blob b2"></div><div class="bg-blob b3"></div>
 
-<div class="app">
-  <header class="top glass">
-    <div>
-      <div class="title">💧 液态玻璃朋友圈</div>
-      <div class="sub">Supabase云端后端：登录发布、游客评论点赞、浏览计数、实时同步</div>
-    </div>
-    <button id="loginBtn" class="btn btn-primary">登录</button>
-  </header>
+<h2>登录</h2>
+<input id="username" placeholder="输入昵称">
+<button onclick="login()">登录</button>
 
-  <main class="grid">
-    <section class="panel glass">
-      <div style="font-weight:800;margin-bottom:8px">动态广场</div>
-      <div id="feed" class="feed"></div>
-    </section>
+<h2>发布</h2>
+<textarea id="content" placeholder="说点什么..."></textarea><br>
+<input type="file" id="file">
+<button onclick="post()">发布</button>
 
-    <aside class="panel glass">
-      <div style="font-weight:800;margin:14px 0 6px">发布文字动态</div>
-      <form id="publishForm">
-        <textarea name="content" placeholder="发一条你此刻的心情..." required></textarea>
-        <button class="btn btn-primary" type="submit" style="margin-top:8px">发布</button>
-      </form>
-
-      <div style="font-weight:800;margin:14px 0 6px">全站统计</div>
-      <div id="stats" class="small">加载中...</div>
-    </aside>
-  </main>
-</div>
-
-<div id="toast" class="toast"></div>
+<h2>动态</h2>
+<div id="feed">加载中...</div>
 
 <script>
-// 你的Supabase信息
-const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
+const supabaseClient = supabase.createClient(
+  "https://ithowxqignlhkwaykglt.supabase.co",
+  "sb_publishable_RFqxlLe3nKnbs_PUHrJjpg_AUVaOGbu"
+);
 
-// 初始化后端连接
-const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let user = "";
 
-// 全局状态
-const state = {
-  username: localStorage.getItem('username') || '',
-  posts: []
-};
-
-// DOM元素
-const feed = document.getElementById('feed');
-const stats = document.getElementById('stats');
-const loginBtn = document.getElementById('loginBtn');
-const toastEl = document.getElementById('toast');
-
-// 工具函数
-const fmt = (t) => new Date(t).toLocaleString('zh-CN', { hour12: false });
-function toast(msg) {
-  toastEl.textContent = msg;
-  toastEl.classList.add('show');
-  setTimeout(() => toastEl.classList.remove('show'), 1800);
+// 登录
+function login(){
+  user = document.getElementById("username").value;
+  if(!user){
+    alert("先输名字");
+    return;
+  }
+  alert("登录成功：" + user);
 }
 
-// 渲染卡片（适配你现有的posts表字段）
-function card(p) {
-  return `
-  <article class='post' data-id='${p.id}'>
-    <div><strong>@${state.username || '游客'}</strong></div>
-    <div class='meta'>${fmt(p.created_at)}</div>
-    <p>${p.content}</p>
-    <div class='actions'>
-      <button class='btn btn-ghost' data-a='view'>👁 浏览</button>
-      <button class='btn btn-ghost' data-a='like'>👍 点赞</button>
-      <button class='btn btn-ghost' data-a='comment'>💬 评论</button>
-    </div>
-  </article>`;
+// 发布
+async function post(){
+  if(!user){
+    alert("先登录");
+    return;
+  }
+
+  let content = document.getElementById("content").value;
+  let file = document.getElementById("file").files[0];
+
+  let media_url = "";
+  let media_type = "";
+
+  if(file){
+    const fileName = Date.now() + "_" + file.name;
+
+    const { data, error } = await supabaseClient.storage
+      .from('uploads')
+      .upload(fileName, file);
+
+    if(error){
+      alert("上传失败");
+      console.log(error);
+      return;
+    }
+
+    const { data: urlData } = supabaseClient.storage
+      .from('uploads')
+      .getPublicUrl(fileName);
+
+    media_url = urlData.publicUrl;
+    media_type = file.type.startsWith("image") ? "image" : "video";
+  }
+
+  const { error } = await supabaseClient.from('posts').insert({
+    user_name: user,
+    content: content,
+    media_url: media_url,
+    media_type: media_type
+  });
+
+  if(error){
+    alert("发布失败");
+    console.log(error);
+    return;
+  }
+
+  document.getElementById("content").value = "";
+  document.getElementById("file").value = "";
+
+  load();
 }
 
-// 渲染页面
-function render() {
-  feed.innerHTML = state.posts.map(card).join('') || '<div class="small">还没有动态，发第一条试试 ✨</div>';
-  stats.innerHTML = `总动态：${state.posts.length} 条`;
-}
-
-// 加载动态（适配你现有的posts表字段）
-async function load() {
-  const { data, error } = await supabase
+// 加载动态
+async function load(){
+  const { data, error } = await supabaseClient
     .from('posts')
-    .select('id, content, created_at')
+    .select('*')
     .order('created_at', { ascending: false });
 
-  if (error) {
-    toast("加载失败：" + error.message);
+  if(error){
+    document.getElementById("feed").innerHTML = "加载失败";
+    console.log(error);
     return;
   }
-  state.posts = data;
-  render();
+
+  let html = "";
+
+  data.forEach(p => {
+    html += `
+      <div style="border:1px solid #ccc;margin:10px;padding:10px">
+        <b>${p.user_name}</b><br>
+        ${p.content}<br>
+        ${p.media_type==="image" ? `<img src="${p.media_url}" width="200">` : ""}
+        ${p.media_type==="video" ? `<video src="${p.media_url}" width="200" controls></video>` : ""}
+        <br>
+        <button onclick="like('${p.id}')">点赞</button>
+        <button onclick="comment('${p.id}')">评论</button>
+      </div>
+    `;
+  });
+
+  document.getElementById("feed").innerHTML = html || "还没有动态";
 }
 
-// 登录功能
-function login() {
-  const username = prompt('输入昵称（发布动态需要登录）', state.username || '');
-  if (!username) return;
-  state.username = username;
-  localStorage.setItem('username', state.username);
-  loginBtn.textContent = `已登录：${state.username}`;
-  toast('登录成功');
-}
-
-// 发布动态（适配你现有的posts表字段）
-async function publish(e) {
-  e.preventDefault();
-  if (!state.username) {
-    toast('请先登录');
+// 点赞
+async function like(id){
+  if(!user){
+    alert("先登录");
     return;
   }
-  const content = e.target.content.value.trim();
-  const { error } = await supabase.from('posts').insert([{
-    content: content
-  }]);
 
-  if (error) {
-    toast('发布失败：' + error.message);
-    return;
-  }
-  e.target.reset();
-  toast('发布成功');
-  await load();
+  await supabaseClient.from('likes').insert({
+    post_id: id,
+    user_name: user
+  });
+
+  alert("点赞成功");
 }
 
-// 事件绑定
-document.getElementById('publishForm').addEventListener('submit', publish);
-loginBtn.addEventListener('click', login);
+// 评论
+async function comment(id){
+  if(!user){
+    alert("先登录");
+    return;
+  }
 
-// 初始化
-(async () => {
-  if (state.username) loginBtn.textContent = `已登录：${state.username}`;
-  await load();
-  toast("页面加载完成 ✅");
-})();
+  let text = prompt("输入评论");
+
+  if(!text) return;
+
+  await supabaseClient.from('comments').insert({
+    post_id: id,
+    user_name: user,
+    content: text
+  });
+
+  alert("评论成功");
+}
+
+load();
 </script>
+
 </body>
 </html>
