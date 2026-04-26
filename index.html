@@ -1,165 +1,516 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <title>朋友圈</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>液态朋友圈</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root{
+      --bg: rgba(255,255,255,.12);
+      --bg2: rgba(255,255,255,.18);
+      --line: rgba(255,255,255,.18);
+      --text: #f7f7fb;
+      --muted: rgba(255,255,255,.72);
+      --shadow: 0 20px 60px rgba(0,0,0,.22);
+      --radius: 24px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      color:var(--text);
+      min-height:100vh;
+      background:
+        radial-gradient(circle at top left, rgba(117,196,255,.45), transparent 30%),
+        radial-gradient(circle at top right, rgba(191,125,255,.35), transparent 28%),
+        radial-gradient(circle at bottom center, rgba(78,210,174,.25), transparent 28%),
+        linear-gradient(135deg, #0b1020, #141a33 45%, #0a0f1f);
+      padding:24px;
+    }
+    .wrap{
+      max-width:1200px;
+      margin:0 auto;
+      display:grid;
+      grid-template-columns: 360px 1fr;
+      gap:20px;
+      align-items:start;
+    }
+    .card{
+      background:var(--bg);
+      border:1px solid var(--line);
+      box-shadow:var(--shadow);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border-radius:var(--radius);
+    }
+    .panel{padding:20px}
+    h1,h2,h3,p{margin:0}
+    h1{font-size:28px; margin-bottom:6px}
+    .sub{color:var(--muted); font-size:14px; line-height:1.6}
+    .block{margin-top:18px}
+    input, textarea, button, select{
+      width:100%;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.10);
+      color:var(--text);
+      outline:none;
+      padding:12px 14px;
+      font-size:15px;
+    }
+    textarea{min-height:110px; resize:vertical}
+    input::placeholder, textarea::placeholder{color:rgba(255,255,255,.5)}
+    button{
+      cursor:pointer;
+      background: linear-gradient(135deg, rgba(124,92,255,.95), rgba(60,180,255,.92));
+      border:none;
+      font-weight:700;
+      transition:.18s transform ease, .18s opacity ease;
+      margin-top:10px;
+    }
+    button:hover{transform: translateY(-1px); opacity:.95}
+    button.secondary{
+      background: rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.16);
+      font-weight:600;
+    }
+    .stats{
+      display:grid;
+      grid-template-columns: repeat(3,1fr);
+      gap:10px;
+      margin-top:14px;
+    }
+    .stat{
+      padding:14px;
+      border-radius:18px;
+      background: rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.12);
+    }
+    .stat b{display:block; font-size:22px; margin-bottom:4px}
+    .stat span{font-size:12px; color:var(--muted)}
+    .feed{
+      display:grid;
+      gap:16px;
+    }
+    .post{
+      padding:18px;
+      border-radius:22px;
+      background: rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.14);
+    }
+    .meta{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:center;
+      color:var(--muted);
+      font-size:13px;
+      margin-bottom:12px;
+    }
+    .user{
+      font-weight:700;
+      color:var(--text);
+      font-size:15px;
+    }
+    .content{white-space:pre-wrap; line-height:1.7; margin-bottom:12px}
+    .media{
+      width:100%;
+      border-radius:18px;
+      overflow:hidden;
+      margin:10px 0 12px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.18);
+    }
+    .media img, .media video{
+      display:block;
+      width:100%;
+      max-height:420px;
+      object-fit:contain;
+    }
+    .actions{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      margin-top:10px;
+    }
+    .actions button{
+      width:auto;
+      margin-top:0;
+      padding:10px 14px;
+      border-radius:999px;
+      background: rgba(255,255,255,.10);
+      border:1px solid rgba(255,255,255,.16);
+      font-weight:600;
+    }
+    .comments{
+      margin-top:12px;
+      padding-top:12px;
+      border-top:1px solid rgba(255,255,255,.10);
+      display:grid;
+      gap:8px;
+    }
+    .comment{
+      padding:10px 12px;
+      border-radius:14px;
+      background: rgba(255,255,255,.07);
+      border:1px solid rgba(255,255,255,.08);
+      font-size:14px;
+      line-height:1.6;
+    }
+    .comment b{font-weight:700}
+    .small{font-size:12px; color:var(--muted)}
+    .toprow{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:center;
+      margin-bottom:10px;
+    }
+    .tag{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:8px 12px;
+      border-radius:999px;
+      background: rgba(255,255,255,.08);
+      color:var(--muted);
+      font-size:12px;
+      border:1px solid rgba(255,255,255,.10);
+    }
+    .empty{
+      padding:26px;
+      text-align:center;
+      color:var(--muted);
+    }
+    @media (max-width: 980px){
+      .wrap{grid-template-columns:1fr}
+    }
+  </style>
 </head>
-
 <body>
+  <div class="wrap">
+    <div class="card panel">
+      <h1>液态朋友圈</h1>
+      <p class="sub">昵称登录、发动态、传图传视频、点赞、评论、浏览统计。先把能跑的做出来，别一上来就拿“未来感”糊墙。</p>
 
-<h2>登录</h2>
-<input id="username" placeholder="输入昵称">
-<button onclick="login()">登录</button>
+      <div class="block card panel" style="padding:16px;">
+        <div class="toprow">
+          <div>
+            <div class="small">当前身份</div>
+            <div id="whoami" style="font-weight:700;margin-top:4px;">未登录</div>
+          </div>
+          <span class="tag">昵称登录</span>
+        </div>
+        <input id="nickname" placeholder="输入昵称" />
+        <button id="loginBtn">登录 / 切换昵称</button>
+        <button id="logoutBtn" class="secondary">退出</button>
+      </div>
 
-<h2>发布</h2>
-<textarea id="content" placeholder="说点什么..."></textarea><br>
-<input type="file" id="file">
-<button onclick="post()">发布</button>
+      <div class="block card panel" style="padding:16px;">
+        <div class="small">发布动态</div>
+        <textarea id="postText" placeholder="写点什么..."></textarea>
+        <input id="fileInput" type="file" accept="image/*,video/*" />
+        <button id="postBtn">发布</button>
+      </div>
 
-<h2>动态</h2>
-<div id="feed">加载中...</div>
+      <div class="stats">
+        <div class="stat"><b id="sPosts">0</b><span>总动态</span></div>
+        <div class="stat"><b id="sViews">0</b><span>总浏览</span></div>
+        <div class="stat"><b id="sLikes">0</b><span>总点赞</span></div>
+      </div>
 
-<script>
-const supabaseClient = supabase.createClient(
-  "https://ithowxqignlhkwaykglt.supabase.co",
-  "sb_publishable_RFqxlLe3nKnbs_PUHrJjpg_AUVaOGbu"
-);
+      <div class="block small" id="status" style="line-height:1.7;">准备就绪。</div>
+    </div>
 
-let user = "";
+    <div class="card panel">
+      <div class="toprow">
+        <div>
+          <h2 style="font-size:22px;">动态流</h2>
+          <div class="small">右边这栏就是内容，不是装饰品。</div>
+        </div>
+        <button id="refreshBtn" class="secondary" style="width:auto;padding:10px 14px;">刷新</button>
+      </div>
+      <div id="feed" class="feed">
+        <div class="empty">加载中...</div>
+      </div>
+    </div>
+  </div>
 
-// 登录
-function login(){
-  user = document.getElementById("username").value;
-  if(!user){
-    alert("先输名字");
-    return;
-  }
-  alert("登录成功：" + user);
-}
+  <script>
+    const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
+    const SUPABASE_KEY = "sb_publishable_RFqxlLe3nKnbs_PUHrJjpg_AUVaOGbu";
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// 发布
-async function post(){
-  if(!user){
-    alert("先登录");
-    return;
-  }
+    let currentUser = localStorage.getItem("xtj_user") || "";
+    let postsCache = [];
+    let commentsCache = [];
+    const viewedKey = (id) => `xtj_viewed_${id}`;
 
-  let content = document.getElementById("content").value;
-  let file = document.getElementById("file").files[0];
+    const el = (id) => document.getElementById(id);
+    const status = (msg) => { el("status").textContent = msg; };
 
-  let media_url = "";
-  let media_type = "";
-
-  if(file){
-    const fileName = Date.now() + "_" + file.name;
-
-    const { data, error } = await supabaseClient.storage
-      .from('uploads')
-      .upload(fileName, file);
-
-    if(error){
-      alert("上传失败");
-      console.log(error);
-      return;
+    function escapeHtml(text) {
+      return String(text ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
     }
 
-    const { data: urlData } = supabaseClient.storage
-      .from('uploads')
-      .getPublicUrl(fileName);
+    function renderUser() {
+      el("whoami").textContent = currentUser ? `@${currentUser}` : "未登录";
+      el("nickname").value = currentUser;
+    }
 
-    media_url = urlData.publicUrl;
-    media_type = file.type.startsWith("image") ? "image" : "video";
-  }
+    async function login() {
+      const name = el("nickname").value.trim();
+      if (!name) {
+        alert("先输昵称");
+        return;
+      }
+      currentUser = name;
+      localStorage.setItem("xtj_user", currentUser);
+      renderUser();
+      status(`已登录：@${currentUser}`);
+    }
 
-  const { error } = await supabaseClient.from('posts').insert({
-    user_name: user,
-    content: content,
-    media_url: media_url,
-    media_type: media_type
-  });
+    function logout() {
+      currentUser = "";
+      localStorage.removeItem("xtj_user");
+      renderUser();
+      status("已退出登录");
+    }
 
-  if(error){
-    alert("发布失败");
-    console.log(error);
-    return;
-  }
+    async function uploadMedia(file) {
+      const safeName = `${Date.now()}_${crypto.randomUUID()}_${file.name.replace(/[^\w.\-]/g, "_")}`;
+      const { data, error } = await client.storage.from("uploads").upload(safeName, file, {
+        cacheControl: "3600",
+        upsert: false
+      });
+      if (error) throw error;
+      const { data: urlData } = client.storage.from("uploads").getPublicUrl(data.path);
+      return urlData.publicUrl;
+    }
 
-  document.getElementById("content").value = "";
-  document.getElementById("file").value = "";
+    async function publishPost() {
+      if (!currentUser) {
+        alert("先登录");
+        return;
+      }
 
-  load();
-}
+      const content = el("postText").value.trim();
+      const file = el("fileInput").files[0];
 
-// 加载动态
-async function load(){
-  const { data, error } = await supabaseClient
-    .from('posts')
-    .select('*')
-    .order('created_at', { ascending: false });
+      if (!content && !file) {
+        alert("至少写点文字或上传一个文件");
+        return;
+      }
 
-  if(error){
-    document.getElementById("feed").innerHTML = "加载失败";
-    console.log(error);
-    return;
-  }
+      status("正在发布...");
 
-  let html = "";
+      let media_url = "";
+      let media_type = "";
 
-  data.forEach(p => {
-    html += `
-      <div style="border:1px solid #ccc;margin:10px;padding:10px">
-        <b>${p.user_name}</b><br>
-        ${p.content}<br>
-        ${p.media_type==="image" ? `<img src="${p.media_url}" width="200">` : ""}
-        ${p.media_type==="video" ? `<video src="${p.media_url}" width="200" controls></video>` : ""}
-        <br>
-        <button onclick="like('${p.id}')">点赞</button>
-        <button onclick="comment('${p.id}')">评论</button>
-      </div>
-    `;
-  });
+      try {
+        if (file) {
+          media_url = await uploadMedia(file);
+          media_type = file.type.startsWith("image/") ? "image" : "video";
+        }
 
-  document.getElementById("feed").innerHTML = html || "还没有动态";
-}
+        const { error } = await client.from("posts").insert([{
+          user_name: currentUser,
+          content,
+          media_url,
+          media_type
+        }]);
 
-// 点赞
-async function like(id){
-  if(!user){
-    alert("先登录");
-    return;
-  }
+        if (error) throw error;
 
-  await supabaseClient.from('likes').insert({
-    post_id: id,
-    user_name: user
-  });
+        el("postText").value = "";
+        el("fileInput").value = "";
+        status("发布成功");
+        await loadAll();
+      } catch (err) {
+        console.error(err);
+        status("发布失败，打开控制台看报错");
+        alert("发布失败");
+      }
+    }
 
-  alert("点赞成功");
-}
+    async function likePost(postId) {
+      if (!currentUser) {
+        alert("先登录");
+        return;
+      }
+      try {
+        const { error } = await client.from("likes").insert([{
+          post_id: postId,
+          user_name: currentUser
+        }]);
+        if (error) {
+          if (String(error.message || "").toLowerCase().includes("duplicate")) {
+            alert("你已经点过赞了");
+            return;
+          }
+          throw error;
+        }
+        await loadAll();
+      } catch (err) {
+        console.error(err);
+        alert("点赞失败");
+      }
+    }
 
-// 评论
-async function comment(id){
-  if(!user){
-    alert("先登录");
-    return;
-  }
+    async function commentPost(postId) {
+      if (!currentUser) {
+        alert("先登录");
+        return;
+      }
+      const text = prompt("输入评论");
+      if (!text || !text.trim()) return;
 
-  let text = prompt("输入评论");
+      try {
+        const { error } = await client.from("comments").insert([{
+          post_id: postId,
+          user_name: currentUser,
+          content: text.trim()
+        }]);
+        if (error) throw error;
+        await loadAll();
+      } catch (err) {
+        console.error(err);
+        alert("评论失败");
+      }
+    }
 
-  if(!text) return;
+    async function trackView(postId) {
+      if (localStorage.getItem(viewedKey(postId)) === "1") return;
+      localStorage.setItem(viewedKey(postId), "1");
+      try {
+        const { error } = await client.rpc("increment_post_views", { p_post_id: postId });
+        if (error) throw error;
+      } catch (err) {
+        console.error("view error:", err);
+      }
+    }
 
-  await supabaseClient.from('comments').insert({
-    post_id: id,
-    user_name: user,
-    content: text
-  });
+    function groupCommentsByPost(comments) {
+      const map = {};
+      for (const c of comments) {
+        if (!map[c.post_id]) map[c.post_id] = [];
+        map[c.post_id].push(c);
+      }
+      return map;
+    }
 
-  alert("评论成功");
-}
+    function renderFeed() {
+      const feed = el("feed");
+      if (!postsCache.length) {
+        feed.innerHTML = `<div class="empty">还没有动态，先发一条。人总得干点什么，不然网页就只剩空气。</div>`;
+        return;
+      }
 
-load();
-</script>
+      const commentMap = groupCommentsByPost(commentsCache);
+      feed.innerHTML = postsCache.map((p) => {
+        const comments = commentMap[p.id] || [];
+        const media = p.media_url ? (
+          p.media_type === "image"
+            ? `<div class="media"><img src="${escapeHtml(p.media_url)}" alt="media" /></div>`
+            : `<div class="media"><video src="${escapeHtml(p.media_url)}" controls></video></div>`
+        ) : "";
 
+        const commentsHtml = comments.length
+          ? comments.map(c => `
+              <div class="comment">
+                <b>${escapeHtml(c.user_name)}</b>：${escapeHtml(c.content)}
+              </div>
+            `).join("")
+          : `<div class="small">暂无评论</div>`;
+
+        queueMicrotask(() => trackView(p.id));
+
+        return `
+          <article class="post">
+            <div class="meta">
+              <div class="user">${escapeHtml(p.user_name)}</div>
+              <div>${new Date(p.created_at).toLocaleString()}</div>
+            </div>
+
+            <div class="content">${escapeHtml(p.content)}</div>
+
+            ${media}
+
+            <div class="small">
+              浏览 ${p.views || 0} · 点赞 ${p.likes_count || 0} · 评论 ${p.comments_count || 0}
+            </div>
+
+            <div class="actions">
+              <button onclick="likePost('${p.id}')">点赞</button>
+              <button onclick="commentPost('${p.id}')">评论</button>
+            </div>
+
+            <div class="comments">
+              ${commentsHtml}
+            </div>
+          </article>
+        `;
+      }).join("");
+    }
+
+    async function loadAll() {
+      try {
+        status("加载中...");
+        const [postRes, commentRes] = await Promise.all([
+          client.from("posts").select("*").order("created_at", { ascending: false }),
+          client.from("comments").select("*").order("created_at", { ascending: true })
+        ]);
+
+        if (postRes.error) throw postRes.error;
+        if (commentRes.error) throw commentRes.error;
+
+        postsCache = postRes.data || [];
+        commentsCache = commentRes.data || [];
+
+        const totalPosts = postsCache.length;
+        const totalViews = postsCache.reduce((sum, p) => sum + (p.views || 0), 0);
+        const totalLikes = postsCache.reduce((sum, p) => sum + (p.likes_count || 0), 0);
+
+        el("sPosts").textContent = totalPosts;
+        el("sViews").textContent = totalViews;
+        el("sLikes").textContent = totalLikes;
+
+        renderFeed();
+        status(`已加载 ${totalPosts} 条动态`);
+      } catch (err) {
+        console.error(err);
+        el("feed").innerHTML = `<div class="empty">加载失败。先看控制台报错，别让浏览器自己扛锅。</div>`;
+        status("加载失败");
+      }
+    }
+
+    function setupRealtime() {
+      client.channel("xtj-feed")
+        .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, loadAll)
+        .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, loadAll)
+        .on("postgres_changes", { event: "*", schema: "public", table: "likes" }, loadAll)
+        .subscribe();
+    }
+
+    window.login = login;
+    window.logout = logout;
+    window.likePost = likePost;
+    window.commentPost = commentPost;
+
+    el("loginBtn").addEventListener("click", login);
+    el("logoutBtn").addEventListener("click", logout);
+    el("postBtn").addEventListener("click", publishPost);
+    el("refreshBtn").addEventListener("click", loadAll);
+
+    renderUser();
+    loadAll();
+    setupRealtime();
+  </script>
 </body>
 </html>
