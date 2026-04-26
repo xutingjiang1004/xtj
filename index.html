@@ -2,549 +2,197 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>分享社区</title>
+  <title>我的第一个互联网站</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      background: #f0f2f5;
-      min-height: 100vh;
-    }
-    .container { max-width: 900px; margin: 0 auto; padding: 20px; }
-    /* 导航栏 */
-    .navbar {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      padding: 15px 20px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-    .nav-title { color: white; font-size: 22px; font-weight: bold; }
-    .nav-actions { display: flex; gap: 10px; }
-    .btn {
-      padding: 10px 20px;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 500;
-      transition: all 0.2s;
-    }
-    .btn-primary { background: white; color: #667eea; }
-    .btn-primary:hover { transform: translateY(-1px); }
-    .btn-outline { background: transparent; color: white; border: 1px solid white; }
-    /* 登录模态框 */
-    .modal-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.5);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      z-index: 200;
-    }
-    .modal {
-      background: white;
-      padding: 30px;
-      border-radius: 16px;
-      width: 90%;
-      max-width: 400px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-    }
-    .modal h2 { margin-bottom: 20px; text-align: center; color: #333; }
-    .form-group { margin-bottom: 15px; }
-    .form-group label { display: block; margin-bottom: 5px; color: #666; font-size: 14px; }
-    .form-group input, .form-group textarea {
-      width: 100%;
-      padding: 12px;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      font-size: 14px;
-    }
-    .form-group textarea { resize: vertical; min-height: 100px; }
-    .btn-block { width: 100%; padding: 14px; }
-    .btn-gradient { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
-    .error { color: #e74c3c; text-align: center; margin-bottom: 15px; font-size: 14px; }
-    /* 发布表单 */
-    .publish-section {
-      background: white;
-      padding: 20px;
-      border-radius: 12px;
-      margin-bottom: 20px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    }
-    .file-preview {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-      gap: 10px;
-      margin-top: 10px;
-    }
-    .file-preview-item {
-      position: relative;
-      aspect-ratio: 1;
-      background: #f5f5f5;
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .file-preview-item img, .file-preview-item video {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-    }
-    .file-preview-item .remove {
-      position: absolute;
-      top: 4px;
-      right: 4px;
-      background: rgba(0,0,0,0.5);
-      color: white;
-      border: none;
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      cursor: pointer;
-    }
-    /* 帖子列表 */
-    .post {
-      background: white;
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 15px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    }
-    .post-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    .post-author { font-weight: 600; color: #333; }
-    .post-time { font-size: 12px; color: #999; }
-    .post-title { font-size: 18px; font-weight: 600; color: #333; margin-bottom: 8px; }
-    .post-content { color: #555; line-height: 1.6; margin-bottom: 12px; }
-    .post-files { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px; }
-    .file-item { position: relative; background: #f5f5f5; border-radius: 8px; overflow: hidden; }
-    .file-item img { width: 100%; display: block; }
-    .file-item video { width: 100%; display: block; }
-    .file-download {
-      position: absolute; bottom: 8px; right: 8px;
-      background: rgba(0,0,0,0.6); color: white; padding: 6px 12px;
-      border-radius: 4px; font-size: 12px; text-decoration: none;
-    }
-    .post-actions {
-      display: flex; gap: 20px; border-top: 1px solid #eee; padding-top: 12px;
-    }
-    .action-btn {
-      display: flex; align-items: center; gap: 6px; cursor: pointer; color: #666;
-      transition: color 0.2s;
-    }
-    .action-btn:hover { color: #667eea; }
-    .action-btn.liked { color: #e74c3c; }
-    /* 评论区 */
-    .comments-section { margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee; }
-    .comment-form { display: flex; gap: 10px; margin-bottom: 15px; }
-    .comment-input { flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px; }
-    .comment-list { display: flex; flex-direction: column; gap: 10px; }
-    .comment { padding: 10px; background: #f5f7fa; border-radius: 8px; }
-    .comment-author { font-weight: 600; font-size: 14px; color: #333; }
-    .comment-time { font-size: 12px; color: #999; margin-left: 8px; }
-    .comment-content { font-size: 14px; color: #555; margin-top: 4px; }
-    .hidden { display: none !important; }
-    /* 提示 */
-    .toast {
-      position: fixed; top: 80px; left: 50%; transform: translateX(-50%);
-      background: #333; color: white; padding: 12px 24px; border-radius: 8px;
-      z-index: 300; animation: fadeIn 0.3s;
-    }
-    @keyframes fadeIn { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+    body { font-family: 微软雅黑; text-align: center; padding-top: 100px; }
+    h1 { color: #2c3e50; }
+    .success { color: #27ae60; font-size: 20px; margin-top: 30px; }
+    .error { color: #e74c3c; font-size: 20px; margin-top: 30px; }
   </style>
 </head>
 <body>
-  <nav class="navbar">
-    <div class="nav-title">🌐 分享社区</div>
-    <div class="nav-actions">
-      <button class="btn btn-outline" id="nav-publish" onclick="showPublishForm()">📝 发布</button>
-      <button class="btn btn-primary" id="nav-login" onclick="showLoginModal()">登录</button>
-    </div>
-  </nav>
-
-  <div class="container">
-    <!-- 发布表单 -->
-    <div class="publish-section hidden" id="publish-section">
-      <h3 style="margin-bottom: 15px;">📝 发布内容</h3>
-      <form id="publish-form" onsubmit="handlePublish(event)">
-        <div class="form-group">
-          <input type="text" id="publish-title" placeholder="标题（可选）">
-        </div>
-        <div class="form-group">
-          <textarea id="publish-content" placeholder="分享你的内容..."></textarea>
-        </div>
-        <div class="form-group">
-          <input type="file" id="publish-files" accept="image/*,video/*" multiple onchange="handleFileSelect(event)">
-        </div>
-        <div class="file-preview" id="file-preview"></div>
-        <button type="submit" class="btn btn-gradient btn-block">发布</button>
-      </form>
-    </div>
-
-    <!-- 帖子列表 -->
-    <div id="posts-container"></div>
-  </div>
-
-  <!-- 登录模态框 -->
-  <div class="modal-overlay hidden" id="login-modal">
-    <div class="modal">
-      <h2>🔐 登录</h2>
-      <div class="error hidden" id="login-error"></div>
-      <form onsubmit="handleLogin(event)">
-        <div class="form-group">
-          <label>用户名</label>
-          <input type="text" id="login-username" required>
-        </div>
-        <div class="form-group">
-          <label>密码</label>
-          <input type="password" id="login-password" required>
-        </div>
-        <button type="submit" class="btn btn-gradient btn-block">登录</button>
-        <button type="button" class="btn btn-block" onclick="hideLoginModal()" style="margin-top: 10px; background: #eee;">取消</button>
-      </form>
-    </div>
-  </div>
+  <h1>🌐 我的互联网站测试页</h1>
+  <div id="result">正在连接后端...</div>
 
   <script>
-    // 状态管理
-    let state = { user: null, posts: [], ws: null, selectedFiles: [] };
-
-    // 初始化
-    document.addEventListener('DOMContentLoaded', () => {
-      checkLogin();
-      loadPosts();
-      connectWebSocket();
-    });
-
-    // ==================== WebSocket ====================
-    function connectWebSocket() {
-      try {
-        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        state.ws = new WebSocket(`${protocol}//${location.host}`);
-        state.ws.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          handleWebSocketMessage(data);
-        };
-        state.ws.onerror = (error) => {
-          console.log('WebSocket 连接失败（服务可能未启动）', error);
-        };
-        state.ws.onclose = () => {
-          setTimeout(connectWebSocket, 5000);
-        };
-      } catch (e) {
-        console.log('WebSocket 连接出错', e);
-        setTimeout(connectWebSocket, 5000);
-      }
-    }
-
-    function handleWebSocketMessage(msg) {
-      switch (msg.type) {
-        case 'newPost':
-          loadPosts();
-          showToast('✨ 有新内容发布了！');
-          break;
-        case 'newComment':
-          const post = state.posts.find(p => p.id === msg.data.postId);
-          if (post) {
-            post.comments = post.comments || [];
-            post.comments.push(msg.data.comment);
-            renderPosts();
-          }
-          break;
-        case 'likeUpdate':
-          const likedPost = state.posts.find(p => p.id === msg.data.postId);
-          if (likedPost) {
-            likedPost.likeCount = msg.data.likeCount;
-            renderPosts();
-          }
-          break;
-        case 'viewUpdate':
-          const viewedPost = state.posts.find(p => p.id === msg.data.postId);
-          if (viewedPost) {
-            viewedPost.viewCount = msg.data.viewCount;
-            renderPosts();
-          }
-          break;
-      }
-    }
-
-    // ==================== 登录相关 ====================
-    async function checkLogin() {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-      try {
-        const res = await fetch('/api/check-login', {
-          headers: { 'Authorization': 'Bearer ' + token }
-        });
-        const data = await res.json();
-        if (data.isLogin) {
-          state.user = data.user;
-          updateLoginButton();
-        }
-      } catch (e) { console.error(e); }
-    }
-
-    function showLoginModal() { document.getElementById('login-modal').classList.remove('hidden'); }
-    function hideLoginModal() { document.getElementById('login-modal').classList.add('hidden'); }
-
-    async function handleLogin(e) {
-      e.preventDefault();
-      const username = document.getElementById('login-username').value;
-      const password = document.getElementById('login-password').value;
-      try {
-        const res = await fetch('/api/login', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password })
-        });
-        const data = await res.json();
-        if (data.code === 200) {
-          localStorage.setItem('token', data.token);
-          state.user = data.user;
-          updateLoginButton();
-          hideLoginModal();
-          showToast('🎉 登录成功！');
-        } else {
-          const el = document.getElementById('login-error');
-          el.textContent = data.message;
-          el.classList.remove('hidden');
-        }
-      } catch (e) {
-        showToast('网络错误');
-      }
-    }
-
-    async function handleLogout() {
-      try {
-        await fetch('/api/logout', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
-        });
-      } catch (e) {}
-      localStorage.removeItem('token');
-      state.user = null;
-      updateLoginButton();
-      showToast('已退出登录');
-    }
-
-    function updateLoginButton() {
-      const btn = document.getElementById('nav-login');
-      const publishBtn = document.getElementById('nav-publish');
-      if (state.user) {
-        btn.textContent = state.user.nickname + ' (退出)';
-        btn.onclick = handleLogout;
-        publishBtn.classList.remove('hidden');
-      } else {
-        btn.textContent = '登录';
-        btn.onclick = showLoginModal;
-        publishBtn.classList.add('hidden');
-        document.getElementById('publish-section').classList.add('hidden');
-      }
-    }
-
-    // ==================== 发布相关 ====================
-    function showPublishForm() {
-      if (!state.user) {
-        showLoginModal();
-        return;
-      }
-      document.getElementById('publish-section').classList.toggle('hidden');
-    }
-
-    function handleFileSelect(e) {
-      state.selectedFiles = Array.from(e.target.files);
-      renderFilePreview();
-    }
-
-    function renderFilePreview() {
-      const container = document.getElementById('file-preview');
-      container.innerHTML = state.selectedFiles.map((file, idx) => {
-        const url = URL.createObjectURL(file);
-        const isVideo = file.type.startsWith('video/');
-        return `
-          <div class="file-preview-item">
-            ${isVideo ? `<video src="${url}"></video>` : `<img src="${url}">`}
-            <button class="remove" onclick="removeFile(${idx})">×</button>
-          </div>
-        `;
-      }).join('');
-    }
-
-    function removeFile(idx) {
-      state.selectedFiles.splice(idx, 1);
-      renderFilePreview();
-    }
-
-    async function handlePublish(e) {
-      e.preventDefault();
-      if (!state.user) { showLoginModal(); return; }
-      const formData = new FormData();
-      formData.append('title', document.getElementById('publish-title').value);
-      formData.append('content', document.getElementById('publish-content').value);
-      state.selectedFiles.forEach(file => formData.append('files', file));
-      try {
-        const res = await fetch('/api/posts', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') },
-          body: formData
-        });
-        const data = await res.json();
-        if (data.code === 200) {
-          showToast('✅ 发布成功！');
-          document.getElementById('publish-form').reset();
-          state.selectedFiles = [];
-          document.getElementById('file-preview').innerHTML = '';
-          document.getElementById('publish-section').classList.add('hidden');
-        } else {
-          showToast(data.message);
-        }
-      } catch (e) {
-        showToast('发布失败');
-      }
-    }
-
-    // ==================== 帖子相关 ====================
-    async function loadPosts() {
-      try {
-        const res = await fetch('/api/posts');
-        const data = await res.json();
-        if (data.code === 200) {
-          state.posts = data.data;
-          renderPosts();
-        }
-      } catch (e) { console.error(e); }
-    }
-
-    function renderPosts() {
-      const container = document.getElementById('posts-container');
-      container.innerHTML = state.posts.map(post => `
-        <div class="post" data-id="${post.id}">
-          <div class="post-header">
-            <div class="post-author">👤 ${escapeHtml(post.username)}</div>
-            <div class="post-time">${new Date(post.createdAt).toLocaleString()}</div>
-          </div>
-          ${post.title ? `<div class="post-title">${escapeHtml(post.title)}</div>` : ''}
-          ${post.content ? `<div class="post-content">${escapeHtml(post.content)}</div>` : ''}
-          ${post.files?.length ? `
-            <div class="post-files">
-              ${post.files.map(file => {
-                const isVideo = file.mimetype.startsWith('video/');
-                return `
-                  <div class="file-item">
-                    ${isVideo ? `<video src="${file.path}" controls></video>` : `<img src="${file.path}">`}
-                    <a class="file-download" href="/api/download${file.path}" download="${file.originalName}">⬇️ 下载</a>
-                  </div>
-                `;
-              }).join('')}
-            </div>
-          ` : ''}
-          <div class="post-actions">
-            <div class="action-btn" onclick="handleView('${post.id}')">
-              👁️ <span class="view-count">${post.viewCount}</span>
-            </div>
-            <div class="action-btn" onclick="handleLike('${post.id}')">
-              ❤️ <span class="like-count">${post.likeCount}</span>
-            </div>
-            <div class="action-btn" onclick="toggleComments('${post.id}')">
-              💬 ${(post.comments || []).length}
-            </div>
-          </div>
-          <div class="comments-section hidden" id="comments-${post.id}">
-            <div class="comment-form">
-              <input type="text" class="comment-input" placeholder="游客也可以评论哦..." id="comment-input-${post.id}">
-              <button class="btn btn-gradient" onclick="handleComment('${post.id}')">发送</button>
-            </div>
-            <div class="comment-list">
-              ${(post.comments || []).map(comment => `
-                <div class="comment">
-                  <div><span class="comment-author">${escapeHtml(comment.username)}</span><span class="comment-time">${new Date(comment.createdAt).toLocaleString()}</span></div>
-                  <div class="comment-content">${escapeHtml(comment.content)}</div>
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </div>
-      `).join('');
-    }
-
-    async function handleView(postId) {
-      try {
-        await fetch(`/api/posts/${postId}/view`, { method: 'POST' });
-      } catch (e) {}
-    }
-
-    async function handleLike(postId) {
-      try {
-        const res = await fetch(`/api/posts/${postId}/like`, {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + localStorage.getItem('token') }
-        });
-        const data = await res.json();
-        if (data.code === 200) {
-          const post = state.posts.find(p => p.id === postId);
-          if (post) {
-            post.likeCount = data.data.likeCount;
-            renderPosts();
-          }
-        }
-      } catch (e) {}
-    }
-
-    function toggleComments(postId) {
-      const el = document.getElementById(`comments-${postId}`);
-      el.classList.toggle('hidden');
-      handleView(postId);
-    }
-
-    async function handleComment(postId) {
-      const input = document.getElementById(`comment-input-${postId}`);
-      const content = input.value.trim();
-      if (!content) return;
-      const body = { content };
-      if (!state.user) {
-        const name = prompt('请输入你的昵称');
-        if (name) body.guestName = name;
-      }
-      try {
-        const res = await fetch(`/api/posts/${postId}/comments`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(state.user ? { 'Authorization': 'Bearer ' + localStorage.getItem('token') } : {})
-          },
-          body: JSON.stringify(body)
-        });
-        const data = await res.json();
-        if (data.code === 200) {
-          input.value = '';
-          showToast('评论成功！');
-        } else {
-          showToast(data.message);
-        }
-      } catch (e) {
-        showToast('评论失败');
-      }
-    }
-
-    // ==================== 工具 ====================
-    function showToast(msg) {
-      const el = document.createElement('div');
-      el.className = 'toast';
-      el.textContent = msg;
-      document.body.appendChild(el);
-      setTimeout(() => el.remove(), 2500);
-    }
-
-    function escapeHtml(str) {
-      if (!str) return '';
-      const div = document.createElement('div');
-      div.textContent = str;
-      return div.innerHTML;
-    }
+    fetch('/api/hello')
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('result').className = 'success';
+        document.getElementById('result').innerText = data.message;
+      })
+      .catch(err => {
+        document.getElementById('result').className = 'error';
+        document.getElementById('result').innerText = "❌ 后端连接失败，请检查服务是否启动";
+      });
   </script>
+</body>
+</html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>液态玻璃朋友圈</title>
+  <style>
+    :root{--txt:#0f172a;--sub:#475569;--pri:#6366f1;--line:rgba(255,255,255,.35)}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;color:var(--txt);font-family:"PingFang SC","Microsoft YaHei",sans-serif;background:linear-gradient(130deg,#c7d2fe 0%,#dbeafe 35%,#fae8ff 70%,#bfdbfe 100%);overflow-x:hidden}
+    .bg-blob{position:fixed;filter:blur(40px);z-index:-1;opacity:.45;animation:float 12s ease-in-out infinite}
+    .b1{width:320px;height:320px;background:#818cf8;border-radius:48% 52% 45% 55%/58% 41% 59% 42%;left:-80px;top:-70px}
+    .b2{width:420px;height:420px;background:#22d3ee;border-radius:60% 40% 63% 37%/44% 58% 42% 56%;right:-120px;top:120px;animation-delay:1.5s}
+    .b3{width:380px;height:380px;background:#f472b6;border-radius:53% 47% 37% 63%/36% 67% 33% 64%;left:20%;bottom:-140px;animation-delay:2.5s}
+
+    .app{max-width:1120px;margin:0 auto;padding:18px}
+    .glass{background:rgba(255,255,255,.28);backdrop-filter:blur(20px) saturate(160%);-webkit-backdrop-filter:blur(20px) saturate(160%);border:1px solid var(--line);box-shadow:0 20px 40px rgba(15,23,42,.15)}
+
+    .top{position:sticky;top:14px;z-index:20;border-radius:20px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;animation:enter .5s ease}
+    .title{font-size:24px;font-weight:800;letter-spacing:.4px}
+    .sub{font-size:12px;color:var(--sub)}
+
+    .grid{display:grid;grid-template-columns:1fr 340px;gap:14px;margin-top:14px}
+    .panel{border-radius:20px;padding:14px}
+    .feed{display:grid;gap:12px}
+
+    .post{border-radius:16px;padding:12px;background:rgba(255,255,255,.45);border:1px solid rgba(255,255,255,.5);transition:all .25s ease;animation:rise .35s ease}
+    .post:hover{transform:translateY(-3px);box-shadow:0 16px 28px rgba(30,41,59,.14)}
+    .meta{font-size:12px;color:var(--sub)}
+    .small{font-size:12px;color:var(--sub)}
+
+    .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+    .btn{border:0;border-radius:12px;padding:9px 12px;cursor:pointer;font-weight:700;transition:all .2s ease}
+    .btn:hover{transform:translateY(-1px)} .btn:active{transform:translateY(1px) scale(.99)}
+    .btn-primary{background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;box-shadow:0 10px 20px rgba(99,102,241,.3)}
+    .btn-ghost{background:rgba(255,255,255,.62);color:#312e81;border:1px solid rgba(255,255,255,.7)}
+
+    textarea,input{width:100%;border:1px solid rgba(255,255,255,.55);background:rgba(255,255,255,.56);border-radius:12px;padding:10px;font:inherit;outline:none;transition:border-color .2s ease,box-shadow .2s ease}
+    textarea:focus,input:focus{border-color:#818cf8;box-shadow:0 0 0 3px rgba(129,140,248,.25)}
+    textarea{min-height:102px;resize:vertical}
+
+    .toast{position:fixed;right:18px;bottom:18px;background:rgba(15,23,42,.9);color:#fff;padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(10px);transition:all .2s ease;pointer-events:none}
+    .toast.show{opacity:1;transform:none}
+
+    @keyframes float{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-14px) rotate(8deg)}}
+    @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+    @keyframes enter{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+    @media (max-width:940px){.grid{grid-template-columns:1fr}.title{font-size:22px}}
+  </style>
+</head>
+<body>
+<div class="bg-blob b1"></div><div class="bg-blob b2"></div><div class="bg-blob b3"></div>
+
+<div class="app">
+  <header class="top glass">
+    <div>
+      <div class="title">💧 液态玻璃朋友圈</div>
+      <div class="sub">Vercel Serverless 内存模式：登录发布、游客评论点赞、浏览计数、实时同步 · UI版本 liquid-glass-v2</div>
+    </div>
+    <button id="loginBtn" class="btn btn-primary">登录</button>
+  </header>
+
+  <main class="grid">
+    <section class="panel glass">
+      <div style="font-weight:800;margin-bottom:8px">动态广场</div>
+      <div id="feed" class="feed"></div>
+    </section>
+
+    <aside class="panel glass">
+      <div style="font-weight:800;margin-bottom:8px">发布文字动态</div>
+      <form id="publishForm">
+        <textarea name="content" placeholder="发一条你此刻的心情..." required></textarea>
+        <button class="btn btn-primary" type="submit" style="margin-top:8px">发布</button>
+      </form>
+
+      <div style="font-weight:800;margin:14px 0 6px">全站统计</div>
+      <div id="stats" class="small">加载中...</div>
+    </aside>
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+const state={token:localStorage.getItem('token')||'',username:localStorage.getItem('username')||'',visitorId:localStorage.getItem('visitorId')||crypto.randomUUID(),posts:[]};
+localStorage.setItem('visitorId',state.visitorId);
+const feed=document.getElementById('feed');
+const stats=document.getElementById('stats');
+const loginBtn=document.getElementById('loginBtn');
+const toastEl=document.getElementById('toast');
+
+const fmt=(t)=>new Date(t).toLocaleString('zh-CN',{hour12:false});
+function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');setTimeout(()=>toastEl.classList.remove('show'),1800);}
+
+function renderStats(){
+  const views=state.posts.reduce((n,p)=>n+p.viewCount,0);
+  const likes=state.posts.reduce((n,p)=>n+p.likes,0);
+  const comments=state.posts.reduce((n,p)=>n+p.comments.length,0);
+  stats.innerHTML=`总浏览：${views} 次<br>总点赞：${likes} 次<br>总评论：${comments} 条`;
+}
+
+function card(p){
+  const comments=p.comments.slice(-3).map(c=>`<div class='small'>${c.nickname}：${c.content}</div>`).join('')||"<div class='small'>暂无评论</div>";
+  const viewers=(p.recentViewers||[]).map(v=>v.viewer).join('、')||'暂无';
+  return `<article class='post' data-id='${p.id}'><div><strong>@${p.author}</strong></div><div class='meta'>${fmt(p.createdAt)}</div><p>${p.content}</p><div class='actions'><button class='btn btn-ghost' data-a='view'>👁 浏览（${p.viewCount}）</button><button class='btn btn-ghost' data-a='like'>👍 点赞（${p.likes}）</button><button class='btn btn-ghost' data-a='comment'>💬 评论</button></div><div class='small'>最近浏览：${viewers}</div><div style='margin-top:8px'>${comments}</div></article>`;
+}
+
+function render(){feed.innerHTML=state.posts.map(card).join('')||'<div class="small">还没有动态，发第一条试试 ✨</div>';renderStats();}
+
+async function load(){const r=await fetch('/api/posts');state.posts=await r.json();render();}
+
+async function login(){
+  const username=prompt('输入昵称（发布动态需要登录）',state.username||'');
+  if(!username) return;
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username})});
+  const d=await r.json();
+  if(!r.ok) return toast(d.message||'登录失败');
+  state.token=d.token;state.username=d.user.username;localStorage.setItem('token',state.token);localStorage.setItem('username',state.username);loginBtn.textContent=`已登录：${state.username}`;toast('登录成功');
+}
+
+async function publish(e){
+  e.preventDefault();
+  if(!state.token) return toast('请先登录');
+  const content=e.target.content.value.trim();
+  const r=await fetch('/api/posts',{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${state.token}`},body:JSON.stringify({content})});
+  const d=await r.json();
+  if(!r.ok) return toast(d.message||'发布失败');
+  e.target.reset();toast('发布成功');await load();
+}
+
+async function viewPost(id){
+  const r=await fetch(`/api/posts/${id}?name=${encodeURIComponent(state.username||'游客')}`);
+  const d=await r.json();
+  if(!r.ok) return toast(d.message||'浏览失败');
+  const i=state.posts.findIndex(p=>p.id===id);if(i>=0) state.posts[i]=d;render();
+}
+
+async function likePost(id){
+  const r=await fetch(`/api/posts/${id}/likes`,{method:'POST',headers:{'x-visitor-id':state.visitorId}});
+  const d=await r.json();
+  if(!r.ok) return toast(d.message||'点赞失败');
+  const p=state.posts.find(i=>i.id===id);if(p) p.likes=d.likes;render();
+}
+
+async function commentPost(id){
+  const content=prompt('输入评论内容');if(!content) return;
+  const nickname=prompt('昵称（可空）',state.username||'')||'游客';
+  const r=await fetch(`/api/posts/${id}/comments`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nickname,content})});
+  const d=await r.json();
+  if(!r.ok) return toast(d.message||'评论失败');
+  const p=state.posts.find(i=>i.id===id);if(p) p.comments.push(d);render();toast('评论成功');
+}
+
+function realtime(){
+  toast('已启用稳定轮询模式');
+  setInterval(load,5000);
+}
+
+feed.addEventListener('click',async(e)=>{const btn=e.target.closest('button[data-a]');if(!btn) return;const el=e.target.closest('.post');if(!el) return;const id=el.dataset.id;if(btn.dataset.a==='view') await viewPost(id);if(btn.dataset.a==='like') await likePost(id);if(btn.dataset.a==='comment') await commentPost(id);});
+document.getElementById('publishForm').addEventListener('submit',publish);
+loginBtn.addEventListener('click',login);
+
+window.addEventListener('error',()=>toast('页面脚本异常，请刷新后重试'));
+
+(async()=>{if(state.username) loginBtn.textContent=`已登录：${state.username}`;await load();realtime();})();
+</script>
 </body>
 </html>
