@@ -324,6 +324,9 @@
     const SUPABASE_URL = window.SUPABASE_URL || "https://ithowxqignlhkwaykglt.supabase.co";
     const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
     // ======================================
+  <script>
+    const SUPABASE_URL = window.SUPABASE_URL || "https://ithowxqignlhkwaykglt.supabase.co";
+    const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: false }
     });
@@ -467,6 +470,12 @@
       try {
         const { error } = await client.from("comments").insert([{
           post_id: pendingCommentPostId,
+      const text = prompt("输入评论");
+      if (!text || !text.trim()) return;
+
+      try {
+        const { error } = await client.from("comments").insert([{
+          post_id: postId,
           user_name: currentUser,
           content: text.trim(),
           actor_key: deviceId
@@ -494,6 +503,11 @@
         if (error) throw error;
         if (!data) return alert("你不是发布者，不能删除这条动态");
         closeDeleteModal();
+      if (!confirm("确认删除这条动态吗？删除后不可恢复。")) return;
+      try {
+        const { data, error } = await client.rpc("delete_post_with_actor", { p_post_id: postId, p_actor_key: deviceId });
+        if (error) throw error;
+        if (!data) return alert("你不是发布者，不能删除这条动态");
         status("删除成功");
         await loadAll();
       } catch (err) {
@@ -564,6 +578,7 @@
           <article class="post" style="animation:fadeUp .35s ease both;">
             <div class="meta">
               <div class="user">${avatarOf(p.user_name)}${escapeHtml(p.user_name)}</div>
+              <div class="user">${escapeHtml(p.user_name)}</div>
               <div>${new Date(p.created_at).toLocaleString()}</div>
             </div>
             <div class="content">${escapeHtml(p.content)}</div>

@@ -1,72 +1,41 @@
-# xtj（Vercel + Supabase + 可选 Render）
+# 液态玻璃朋友圈（Vercel + Supabase，可选 Render API）
 
-你现在的目标是：**登录后才能发布/点赞/评论**、点赞可见、发布者可删除自己的帖子、页面流畅。
+## 你现在点不动登录/评论的核心原因
+1. 前端使用了 `sb_publishable_...`，但 `supabase-js` 浏览器初始化应使用 anon JWT key。  
+2. 缺少 `likes/comments` 表、唯一约束、RLS policy 或 `increment_post_views` 函数时，前端会请求失败。  
 
-## 本次已修复
-- 站点名称已改为 `xtj`。
-- 点赞/评论/发布都强制登录后才能执行。
-- 点赞计数改为直接统计 `likes` 表，避免旧数据下 `likes_count` 不更新导致“看起来没点赞”。
-- 新增“发布者删除帖子”能力（通过 `delete_post_with_actor` RPC，按 `post_id + actor_key` 校验）。
-- 新增动效：帖子进入动画 + hover 过渡。
+## 已在本仓库做的修复
+- 前端改成 anon key，支持**登录/游客模式**。  
+- 支持发布文字/图片/视频；游客可点赞评论。  
+- 点赞防重复：`likes(post_id, actor_key)` 唯一约束。  
+- 浏览计数：前端首次浏览触发 `rpc(increment_post_views)`。  
+- 实时同步：监听 `posts/comments/likes` 的 realtime。  
 
-## SQL 交付（按你要求给两套）
-### A. 全量重置（推荐排障时使用）
-执行：`supabase/reset.sql`
-- 会清空旧表并重建。
-- 适合结构混乱、字段缺失时。
+## 一次性初始化 Supabase（必须）
+在 Supabase SQL Editor 执行：
 
-### B. 增量更新（保留数据）
-执行：`supabase/incremental.sql`
-- 会 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 补字段。
-- 不会清空旧数据。
+- `supabase/init.sql`
 
-> 注意：SQL 已改为兼容写法：`DROP POLICY IF EXISTS ...; CREATE POLICY ...;`，不使用 PG15 才支持的 `CREATE POLICY IF NOT EXISTS`。
+> 你已经有 `posts` 和 `uploads`，这份 SQL 会 `if not exists` 兼容创建。
 
-### C. 本次 UI 功能的增量补丁（不重置）
-执行：`supabase/incremental_ui_v2.sql`
-- 仅补齐 `delete_post_with_actor` / `increment_post_views` 函数与授权；
-- 补齐 `uploads` 桶的读取/上传策略（若策略不存在会先删后建）；
-- 适合你“站点已在跑，只想补新功能”。
+## 部署
+### 1) 前端（Vercel）
+这是纯静态站点，直接导入仓库部署即可（Framework 选 Other）。
 
-## 部署配置（必须逐项确认）
-### Vercel（前端）
-- Framework Preset: **Other**
-- Root Directory: 仓库根目录（本项目就是根目录）
-- Build Command: 留空
-- Output Directory: 留空
-
-### Render（可选后端写入代理）
-- Root Directory: `render-api`
-- Build Command: `npm install`
-- Start Command: `npm start`
+### 2) 后端（Render，可选但推荐）
+若你后续要做更强的防刷、IP 频控、敏感词审核：
+- 用 `render-api/` 部署 Node 服务。
 - 环境变量：
   - `SUPABASE_URL=https://ithowxqignlhkwaykglt.supabase.co`
-  - `SUPABASE_SERVICE_ROLE_KEY=你的 service_role key`
+  - `SUPABASE_SERVICE_ROLE_KEY=...`（仅 Render 后端保存，不能进前端）
+- 然后前端把写入动作改成调用 Render API。
 
-如果 Render 报 lock 文件问题：删除 `package-lock.json` 后重新部署。
-
-## 前端 Supabase 配置
-当前代码把私有配置隔离在脚本顶部的独立区块：
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-
-后续功能更新只改“配置区下面”的业务代码，尽量避免覆盖你自己的私有配置。
-
-你也可以改成运行时注入：
-```html
-<script>
-  window.SUPABASE_URL = '...';
-  window.SUPABASE_ANON_KEY = '...';
-</script>
-```
-
-## Storage（图片/视频上传）
-你已创建 `uploads` 桶。请确认：
-1. bucket 为 public；
-2. `storage.objects` 对 `uploads` 有 anon insert/read policy（或由后端代理上传）。
+## 用 Codex 的最佳方式
+1. 先把你“当前报错截图 + 控制台报错 + Supabase policy 截图”贴给 Codex。  
+2. 让 Codex只做一件事：先打通 `登录/发帖/评论`。  
+3. 验证通过后，再让 Codex加“防刷 / 审核 / 后台管理”。
 
 ---
-如果你要下一步，我可以继续给你做：
-1. iCity 风格头像与发帖卡片布局；
-2. 登录改为 Supabase Auth（手机号/邮箱），不再是纯昵称；
-3. 点赞/评论防刷（IP + 频率限制，走 Render API）。
+如果你愿意，我下一步可以直接给你：
+- 一份「前端走 Vercel，写操作走 Render」的完整 `fetch` 版本；
+- 外加 `vercel.json` 和生产环境变量清单。
