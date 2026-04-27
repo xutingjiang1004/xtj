@@ -1,529 +1,324 @@
+
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>xtj - 社区精英版</title>
+  <title>xtj - 极简精英版</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
-      /* 浅色液态玻璃风格 - 极致优化版 */
-      --bg-base: #f4f7fb;
-      --glass-bg: rgba(255, 255, 255, 0.7);
-      --glass-border: rgba(255, 255, 255, 0.8);
-      --glass-highlight: inset 0 1px 2px rgba(255, 255, 255, 1);
-      --glass-shadow: 0 12px 40px rgba(31, 38, 135, 0.07);
-      --glass-blur: blur(20px);
-      
-      --text-main: #1a1a20;
-      --text-muted: #787a8d;
-      --primary: #7c5cff;
-      --primary-hover: #6a4deb;
-      --admin-color: #ff9f0a; /* 管理员专属金橙色 */
-      --like-color: #ff3b60;
-      --like-bg: rgba(255, 59, 96, 0.1);
-      
-      --radius-sm: 14px;
-      --radius-md: 20px;
+      /* 浅色液态玻璃主题 */
+      --bg-base: #f0f4f8;
+      --glass-bg: rgba(255, 255, 255, 0.75);
+      --glass-border: rgba(255, 255, 255, 0.9);
+      --glass-blur: blur(25px);
+      --primary: #6366f1;
+      --admin-gold: #f59e0b;
+      --danger: #ef4444;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
       --radius-lg: 28px;
-      
-      --transition-smooth: all 0.4s cubic-bezier(0.23, 1, 0.32, 1);
-      --transition-bounce: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      --radius-md: 18px;
+      --transition-main: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+      --transition-bounce: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
 
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     
     body {
       margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", sans-serif;
-      color: var(--text-main);
-      background-color: var(--bg-base);
+      font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
+      background: var(--bg-base);
       background-image: 
-        radial-gradient(circle at 5% 10%, rgba(124, 92, 255, 0.08), transparent 30%),
-        radial-gradient(circle at 95% 20%, rgba(60, 180, 255, 0.1), transparent 30%),
-        radial-gradient(circle at 50% 80%, rgba(255, 159, 10, 0.05), transparent 40%);
+        radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 100% 100%, rgba(245, 158, 11, 0.05) 0%, transparent 40%);
       background-attachment: fixed;
+      color: var(--text-main);
       min-height: 100vh;
-      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
     }
+
+    /* 顶部导航 */
+    nav {
+      position: sticky;
+      top: 0; z-index: 100;
+      padding: 12px 20px;
+      display: flex; justify-content: space-between; align-items: center;
+      background: rgba(255, 255, 255, 0.4);
+      backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
+      border-bottom: 1px solid rgba(0,0,0,0.03);
+    }
+
+    h1 { font-size: 20px; font-weight: 800; margin: 0; background: linear-gradient(135deg, #6366f1, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+    .user-tag { 
+      padding: 4px 12px; border-radius: 99px; font-size: 13px; font-weight: 600; 
+      display: flex; align-items: center; gap: 6px; background: white; border: 1px solid rgba(0,0,0,0.05);
+    }
+
+    /* 容器 */
+    .container { max-width: 600px; margin: 20px auto 80px; padding: 0 16px; }
 
     .glass-card {
       background: var(--glass-bg);
       border: 1px solid var(--glass-border);
-      box-shadow: var(--glass-shadow), var(--glass-highlight);
-      backdrop-filter: var(--glass-blur);
-      -webkit-backdrop-filter: var(--glass-blur);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.04);
+      backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+      border-radius: var(--radius-md);
+      transition: var(--transition-main);
     }
-
-    /* 导航栏优化 */
-    .top-nav {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      padding: 10px 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: rgba(255, 255, 255, 0.5);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border-bottom: 1px solid rgba(0,0,0,0.04);
-    }
-
-    h1 { 
-      margin: 0; 
-      font-size: 18px; 
-      font-weight: 850; 
-      letter-spacing: -0.8px; 
-      background: linear-gradient(135deg, #4b32c3, #007aff); 
-      -webkit-background-clip: text; 
-      -webkit-text-fill-color: transparent; 
-    }
-    
-    #status { font-size: 11px; color: var(--text-muted); font-weight: 500; display: flex; align-items: center; gap: 5px; opacity: 0.8;}
-    #status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #4ed2ae; }
-
-    .nav-auth { display: flex; align-items: center; gap: 8px; }
-
-    /* 登录输入框与按钮 */
-    .auth-input-group { display: flex; gap: 6px; align-items: center; background: rgba(255,255,255,0.6); padding: 4px; border-radius: 99px; border: 1px solid rgba(0,0,0,0.05); }
-    .auth-input-group input { border: none; background: transparent; padding: 4px 12px; width: 110px; font-size: 13px; font-weight: 500; }
-    .auth-input-group input:focus { outline: none; box-shadow: none; }
-
-    .user-pill {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 3px 10px 3px 3px;
-      background: #fff;
-      border: 1px solid rgba(0,0,0,0.05);
-      border-radius: 99px;
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    /* 容器布局 */
-    .wrap {
-      max-width: 620px;
-      margin: 20px auto 60px;
-      padding: 0 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
-    button {
-      cursor: pointer;
-      border: none;
-      font-weight: 600;
-      transition: var(--transition-smooth);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .btn-primary {
-      background: var(--primary);
-      color: #fff;
-      border-radius: 99px;
-      padding: 6px 16px;
-      font-size: 13px;
-      box-shadow: 0 4px 12px rgba(124, 92, 255, 0.2);
-    }
-    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(124, 92, 255, 0.3); }
-
-    .btn-secondary {
-      background: rgba(0,0,0,0.04);
-      color: var(--text-muted);
-      border-radius: 99px;
-      padding: 6px 14px;
-      font-size: 12px;
-    }
-    .btn-secondary:hover { background: rgba(0,0,0,0.08); color: var(--text-main); }
+    .glass-card:hover { transform: translateY(-2px); box-shadow: 0 15px 40px rgba(0,0,0,0.06); }
 
     /* 发布框 */
-    .publish-box {
-      padding: 18px;
-      border-radius: var(--radius-md);
-      transition: var(--transition-smooth);
+    .publish-area { padding: 20px; margin-bottom: 24px; }
+    textarea {
+      width: 100%; min-height: 80px; border: none; background: transparent;
+      font-size: 16px; resize: none; outline: none; margin-bottom: 15px;
     }
-    .publish-box textarea {
-      width: 100%; min-height: 70px; border: none; background: transparent; 
-      resize: none; font-size: 15px; line-height: 1.6; color: var(--text-main);
-    }
-    .publish-box textarea::placeholder { color: #b0b1bd; }
-    .publish-box textarea:focus { outline: none; }
+    .publish-btns { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(0,0,0,0.04); padding-top: 15px; }
 
-    .publish-footer {
-      display: flex; justify-content: space-between; align-items: center; 
-      margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.03);
+    button {
+      cursor: pointer; border: none; outline: none; font-weight: 600;
+      transition: var(--transition-main); border-radius: 99px;
     }
-
-    /* 数据统计 */
-    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-    .stat-card { padding: 12px; border-radius: var(--radius-sm); text-align: center; }
-    .stat-card b { display: block; font-size: 20px; color: var(--primary); }
-    .stat-card span { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+    .btn-primary { background: var(--primary); color: white; padding: 8px 20px; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3); }
+    .btn-primary:hover { transform: scale(1.05); filter: brightness(1.1); }
+    .btn-primary:active { transform: scale(0.95); }
 
     /* 动态卡片 */
-    .post {
-      padding: 20px; border-radius: var(--radius-md); 
-      animation: fadeUp 0.6s var(--transition-smooth) both;
+    .post { padding: 20px; margin-bottom: 20px; position: relative; overflow: hidden; }
+    .post.deleting { transform: scale(0.9); opacity: 0; transition: 0.4s ease; filter: blur(10px); }
+    
+    .post-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .avatar { 
+      width: 36px; height: 36px; border-radius: 50%; background: #ddd; 
+      display: flex; align-items: center; justify-content: center; color: white; font-weight: 800;
     }
-    .post-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-    .post-user { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
-    .post-time { font-size: 11px; color: var(--text-muted); }
+    .avatar.admin { background: var(--admin-gold); box-shadow: 0 0 15px rgba(245, 158, 11, 0.3); }
+    
+    .u-name { font-weight: 700; font-size: 15px; }
+    .admin-badge { font-size: 10px; background: var(--admin-gold); color: white; padding: 1px 6px; border-radius: 4px; margin-left: 5px; }
 
-    .avatar {
-      width: 32px; height: 32px; border-radius: 50%;
-      background: linear-gradient(135deg, #7c5cff, #5eb4ff);
-      display: flex; align-items: center; justify-content: center;
-      color: #fff; font-size: 14px; font-weight: 800;
-      box-shadow: 0 4px 10px rgba(124, 92, 255, 0.2);
-    }
-    .avatar.admin {
-      background: linear-gradient(135deg, #ff9f0a, #ff3b60);
-      box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3);
-    }
+    .content { font-size: 15.5px; line-height: 1.6; color: #334155; margin-bottom: 15px; }
+    .media img { width: 100%; border-radius: 12px; margin-bottom: 15px; }
 
-    .content { font-size: 15px; line-height: 1.6; margin-bottom: 14px; color: #333; }
-    .media { border-radius: var(--radius-sm); overflow: hidden; margin-bottom: 14px; border: 1px solid rgba(0,0,0,0.03); }
-    .media img, .media video { width: 100%; display: block; max-height: 450px; object-fit: contain; background: #fafafa; }
-
-    .post-actions { display: flex; gap: 8px; align-items: center; }
-    .action-btn {
-      padding: 6px 14px; border-radius: 99px; font-size: 12px; font-weight: 600;
-      background: rgba(0,0,0,0.03); color: var(--text-muted);
-    }
+    .actions { display: flex; gap: 12px; border-top: 1px solid rgba(0,0,0,0.03); padding-top: 12px; }
+    .action-btn { background: rgba(0,0,0,0.03); color: var(--text-muted); padding: 6px 15px; font-size: 12px; }
     .action-btn:hover { background: rgba(0,0,0,0.06); color: var(--text-main); }
-    
-    .action-btn.liked { 
-      background: var(--like-bg); color: var(--like-color); 
-      animation: bounce 0.4s var(--transition-bounce);
-    }
-    
-    .delete-btn { color: #ff3b30 !important; background: transparent; font-weight: 500; opacity: 0.6; }
-    .delete-btn:hover { opacity: 1; background: rgba(255,59,48,0.05); }
+    .action-btn.del { color: var(--danger); background: rgba(239, 68, 68, 0.05); margin-left: auto; }
+    .action-btn.del:hover { background: rgba(239, 68, 68, 0.1); }
 
-    .admin-tag {
-      background: var(--admin-color); color: #fff; font-size: 10px; padding: 1px 6px; 
-      border-radius: 4px; margin-left: 4px; vertical-align: middle;
-    }
-
-    /* 评论 */
-    .comment-list { margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(0,0,0,0.03); display: grid; gap: 6px; }
-    .comment-item { padding: 8px 12px; background: rgba(0,0,0,0.02); border-radius: 12px; font-size: 13px; line-height: 1.5; }
-    .comment-item b { font-weight: 700; margin-right: 4px; }
-
-    /* 弹窗 */
-    .modal {
-      position: fixed; inset: 0; background: rgba(255,255,255,0.6); backdrop-filter: blur(10px);
-      z-index: 200; display: none; align-items: center; justify-content: center; padding: 20px;
+    /* 弹窗动画 */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.2); 
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      display: none; align-items: center; justify-content: center; z-index: 1000;
       opacity: 0; transition: opacity 0.3s ease;
     }
-    .modal.show { display: flex; opacity: 1; }
-    .modal-content {
-      width: 100%; max-width: 400px; padding: 24px; border-radius: var(--radius-lg);
-      transform: scale(0.9); transition: 0.4s var(--transition-bounce);
-    }
-    .modal.show .modal-content { transform: scale(1); }
-
-    @keyframes fadeUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes bounce { 0% { transform: scale(1); } 50% { transform: scale(1.15); } 100% { transform: scale(1); } }
+    .modal-overlay.active { display: flex; opacity: 1; }
     
-    .empty-tip { text-align: center; padding: 60px 0; color: var(--text-muted); font-size: 14px; }
+    .modal-box {
+      width: 90%; max-width: 340px; padding: 30px; text-align: center;
+      transform: scale(0.8); transition: var(--transition-bounce);
+    }
+    .modal-overlay.active .modal-box { transform: scale(1); }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .post { animation: fadeIn 0.5s ease both; }
   </style>
 </head>
 <body>
 
-  <nav class="top-nav">
-    <div class="nav-left">
-      <h1>xtj</h1>
-      <span id="status">● 正在连接</span>
-    </div>
-    <div class="nav-auth" id="authBox">
-      <div id="unauthUI" class="auth-input-group">
-        <input id="nicknameInp" type="text" placeholder="输入昵称..." maxlength="15" />
-        <button class="btn-primary" onclick="handleLogin()">登录</button>
+  <nav>
+    <h1>xtj</h1>
+    <div id="authArea">
+      <div id="loginForm" style="display: flex; gap: 8px;">
+        <input id="nickInp" placeholder="昵称" style="width: 80px; border: none; background: white; border-radius: 99px; padding: 4px 12px; font-size: 12px; outline: none;" />
+        <button class="btn-primary" onclick="doLogin()" style="padding: 4px 15px; font-size: 12px;">登录</button>
       </div>
-      <div id="authUI" style="display: none;">
-        <div class="user-pill">
-          <div class="avatar" id="myAvatar" style="width:20px; height:20px; font-size:10px;"></div>
-          <span id="myName"></span>
-          <button onclick="handleLogout()" style="background:none; color:var(--text-muted); font-size:18px; margin-left:4px;">&times;</button>
-        </div>
+      <div id="userInfo" style="display: none;" class="user-tag">
+        <span id="curName"></span>
+        <span onclick="doLogout()" style="cursor:pointer; opacity: 0.5;">&times;</span>
       </div>
     </div>
   </nav>
 
-  <div class="wrap">
-    <div class="publish-box glass-card">
-      <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
-      <div class="publish-footer">
-        <input type="file" id="fileInp" accept="image/*,video/*" style="font-size:11px; color:var(--text-muted);" />
-        <button class="btn-primary" id="pubBtn" onclick="handlePublish()">发布动态</button>
+  <div class="container">
+    <div class="publish-area glass-card">
+      <textarea id="postInp" placeholder="此刻在想什么？"></textarea>
+      <div class="publish-btns">
+        <input type="file" id="fileInp" style="font-size: 11px; color: var(--text-muted);" />
+        <button class="btn-primary" id="pubBtn" onclick="doPublish()">发布</button>
       </div>
     </div>
 
-    <div class="stats">
-      <div class="stat-card glass-card"><b id="countPosts">0</b><span>动态</span></div>
-      <div class="stat-card glass-card"><b id="countViews">0</b><span>浏览</span></div>
-      <div class="stat-card glass-card"><b id="countLikes">0</b><span>获赞</span></div>
-    </div>
-
     <div id="feed">
-      <div class="empty-tip">数据加载中...</div>
+      <div style="text-align:center; padding: 40px; opacity:0.5;">加载中...</div>
     </div>
   </div>
 
-  <div class="modal" id="commentModal">
-    <div class="modal-content glass-card">
-      <h3 style="margin:0 0 16px 0; font-size:16px;">发表评论</h3>
-      <textarea id="commInp" style="width:100%; min-height:100px; padding:12px; border-radius:12px; border:1px solid rgba(0,0,0,0.08); margin-bottom:16px; outline:none;" placeholder="写下你的想法..."></textarea>
-      <div style="display:flex; gap:10px; justify-content:flex-end;">
-        <button class="btn-secondary" onclick="closeModal('commentModal')">取消</button>
-        <button class="btn-primary" id="commSubmitBtn">发布评论</button>
+  <div class="modal-overlay" id="delModal">
+    <div class="modal-box glass-card">
+      <div style="font-size: 40px; margin-bottom: 10px;">🗑️</div>
+      <h3 style="margin: 0 0 10px 0;">确认删除？</h3>
+      <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 25px;">此操作不可撤销，动态将被永远抹除。</p>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn-primary" style="background: #e2e8f0; color: #475569; flex: 1;" onclick="closeDelModal()">取消</button>
+        <button class="btn-primary" style="background: var(--danger); flex: 1;" id="finalDelBtn">删除</button>
       </div>
     </div>
   </div>
 
   <script>
-    // 基础配置
     const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // 管理员配置
     const ADMIN_NAME = "xxz";
-    const ADMIN_KEY = "xxz123"; // 你可以修改这个管理员登录密码
+    const ADMIN_PW = "xxz123"; // 管理员密码
 
-    let user = localStorage.getItem("xtj_v2_user") || "";
-    const actorKey = localStorage.getItem("xtj_v2_actor") || crypto.randomUUID();
-    localStorage.setItem("xtj_v2_actor", actorKey);
+    let user = localStorage.getItem("xtj_user") || "";
+    const deviceId = localStorage.getItem("xtj_device") || crypto.randomUUID();
+    localStorage.setItem("xtj_device", deviceId);
 
-    const el = id => document.getElementById(id);
-    const isAdmin = () => user === ADMIN_NAME;
+    function isAdmin() { return user === ADMIN_NAME; }
 
-    // 登录逻辑
-    async function handleLogin() {
-      const name = el("nicknameInp").value.trim();
-      if (!name) return alert("请输入昵称");
-      
-      // 特殊逻辑：如果是管理员名字
+    // 登录
+    async function doLogin() {
+      const name = document.getElementById("nickInp").value.trim();
+      if (!name) return;
       if (name === ADMIN_NAME) {
-        const pw = prompt("检测到管理员账号，请输入密钥：");
-        if (pw !== ADMIN_KEY) return alert("密钥错误，无法使用该昵称");
-      } else {
-        // 如果普通人想用管理员的名字（防止通过名字伪造）
-        if (name.toLowerCase() === ADMIN_NAME) return alert("该昵称已被保留");
+        const pw = prompt("请输入管理员密码：");
+        if (pw !== ADMIN_PW) return alert("密码错误");
       }
-
       user = name;
-      localStorage.setItem("xtj_v2_user", user);
-      initUser();
-      await loadAll();
+      localStorage.setItem("xtj_user", user);
+      location.reload();
     }
 
-    function handleLogout() {
-      user = "";
-      localStorage.removeItem("xtj_v2_user");
-      initUser();
+    function doLogout() {
+      localStorage.removeItem("xtj_user");
+      location.reload();
     }
 
-    function initUser() {
-      if (user) {
-        el("unauthUI").style.display = "none";
-        el("authUI").style.display = "flex";
-        el("myName").textContent = user;
-        el("myAvatar").textContent = user.slice(0,1).toUpperCase();
-        el("myAvatar").className = isAdmin() ? "avatar admin" : "avatar";
-        if(isAdmin()) {
-            const tag = document.createElement("span");
-            tag.className = "admin-tag";
-            tag.textContent = "STAFF";
-            el("myName").appendChild(tag);
-        }
-      } else {
-        el("unauthUI").style.display = "flex";
-        el("authUI").style.display = "none";
-      }
-    }
-
-    // 核心功能
-    async function handlePublish() {
+    // 发布
+    async function doPublish() {
       if (!user) return alert("请先登录");
-      const content = el("postInp").value.trim();
-      const file = el("fileInp").files[0];
+      const content = document.getElementById("postInp").value.trim();
+      const file = document.getElementById("fileInp").files[0];
       if (!content && !file) return;
 
-      const btn = el("pubBtn");
+      const btn = document.getElementById("pubBtn");
       btn.disabled = true;
-      btn.textContent = "正在发布...";
+      btn.innerText = "正在发布...";
+
+      let media_url = "";
+      if (file) {
+        const path = `up/${Date.now()}_${file.name}`;
+        await sb.storage.from("uploads").upload(path, file);
+        media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
+      }
+
+      await sb.from("posts").insert([{ 
+        user_name: user, 
+        content, 
+        media_url, 
+        actor_key: deviceId 
+      }]);
+
+      location.reload();
+    }
+
+    // 删除逻辑改进
+    let postToDelete = null;
+
+    function askDelete(postId) {
+      postToDelete = postId;
+      const modal = document.getElementById("delModal");
+      modal.classList.add("active");
+    }
+
+    function closeDelModal() {
+      document.getElementById("delModal").classList.remove("active");
+    }
+
+    document.getElementById("finalDelBtn").onclick = async () => {
+      if (!postToDelete) return;
+      
+      // 添加视觉反馈
+      const card = document.querySelector(`[data-id="${postToDelete}"]`);
+      if (card) card.classList.add("deleting");
+      
+      closeDelModal();
 
       try {
-        let media_url = "";
-        let media_type = "";
-
-        if (file) {
-          const path = `${Date.now()}_${file.name}`;
-          const { data, error } = await sb.storage.from("uploads").upload(path, file);
+        if (isAdmin()) {
+          // 管理员直接删除任何 ID 的记录（前提：Supabase RLS 策略已允许或未启用）
+          const { error } = await sb.from("posts").delete().eq("id", postToDelete);
           if (error) throw error;
-          media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
-          media_type = file.type.startsWith("image") ? "image" : "video";
-        }
-
-        await sb.from("posts").insert([{ user_name: user, content, media_url, media_type, actor_key: actorKey }]);
-        el("postInp").value = "";
-        el("fileInp").value = "";
-        await loadAll();
-      } catch (e) {
-        alert("发布失败: " + e.message);
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "发布动态";
-      }
-    }
-
-    async function handleLike(postId, btn) {
-      if (!user) return alert("请登录后操作");
-      const isLiked = btn.classList.contains("liked");
-      
-      // 乐观更新
-      btn.classList.toggle("liked");
-      
-      try {
-        if (isLiked) {
-          await sb.from("likes").delete().match({ post_id: postId, actor_key: actorKey });
         } else {
-          await sb.from("likes").insert([{ post_id: postId, user_name: user, actor_key: actorKey }]);
+          // 普通人调用 RPC 校验本人身份
+          const { error } = await sb.rpc("delete_post_with_actor", { 
+            p_post_id: postToDelete, 
+            p_actor_key: deviceId 
+          });
+          if (error) throw error;
         }
-        loadAll(true);
+        setTimeout(() => loadFeed(), 400); // 等待动画完成再刷新
       } catch (e) {
-        console.error(e);
+        alert("删除失败: " + e.message);
+        if (card) card.classList.remove("deleting");
       }
-    }
-
-    let activePostId = null;
-    function openComment(postId) {
-      if (!user) return alert("请登录后操作");
-      activePostId = postId;
-      el("commInp").value = "";
-      el("commentModal").style.display = "flex";
-      setTimeout(() => el("commentModal").classList.add("show"), 10);
-    }
-
-    function closeModal(id) {
-      el(id).classList.remove("show");
-      setTimeout(() => el(id).style.display = "none", 300);
-    }
-
-    el("commSubmitBtn").onclick = async () => {
-      const content = el("commInp").value.trim();
-      if (!content) return;
-      await sb.from("comments").insert([{ post_id: activePostId, user_name: user, content, actor_key: actorKey }]);
-      closeModal("commentModal");
-      loadAll(true);
     };
 
-    async function handleDelete(postId) {
-      if (!confirm("确认删除这条内容吗？")) return;
-      try {
-        // 使用你的数据库函数 delete_post_with_actor
-        // 如果是 xxz，通常后端函数需要支持管理员逻辑，这里我们传递 actorKey
-        // 如果后端做了权限校验，非本人无法删除。
-        // 安全审计建议：建议在 Supabase 的 RPC 函数中加入：IF p_actor_key = 'ADMIN_KEY' OR ...
-        const { error } = await sb.rpc("delete_post_with_actor", { p_post_id: postId, p_actor_key: actorKey });
-        if (error) {
-            // 如果 RPC 失败（因为 actor_key 不匹配且不是物理本人），管理员尝试直接删除
-            if(isAdmin()) {
-                await sb.from("posts").delete().eq("id", postId);
-            } else {
-                throw error;
-            }
-        }
-        loadAll();
-      } catch (e) {
-        alert("删除失败，可能无权限或函数未定义");
-      }
-    }
-
-    // 渲染与加载
-    async function loadAll(silent = false) {
-      if (!silent) el("status").textContent = "● 同步中...";
-      
+    // 加载内容
+    async function loadFeed() {
       const { data: posts } = await sb.from("posts").select("*").order("created_at", { ascending: false });
-      const { data: likes } = await sb.from("likes").select("*");
-      const { data: comms } = await sb.from("comments").select("*").order("created_at", { ascending: true });
+      const feed = document.getElementById("feed");
+      
+      if (!posts || posts.length === 0) {
+        feed.innerHTML = `<div style="text-align:center; padding: 40px; opacity:0.5;">暂无动态</div>`;
+        return;
+      }
 
-      if (!posts) return;
-
-      // 更新统计
-      el("countPosts").textContent = posts.length;
-      el("countViews").textContent = posts.reduce((a, b) => a + (b.views || 0), 0);
-      el("countLikes").textContent = likes ? likes.length : 0;
-
-      const feed = el("feed");
-      feed.innerHTML = posts.map((p, i) => {
-        const postLikes = likes ? likes.filter(l => l.post_id === p.id) : [];
-        const isLiked = postLikes.some(l => l.actor_key === actorKey);
-        const postComms = comms ? comms.filter(c => c.post_id === p.id) : [];
-        
-        // 关键逻辑：本人或者管理员 xxz 均可看到删除按钮
-        const canDelete = (p.actor_key === actorKey) || isAdmin();
-        const isUserAdmin = (p.user_name === ADMIN_NAME);
+      feed.innerHTML = posts.map(p => {
+        const isMyPost = p.actor_key === deviceId;
+        const isPostAdmin = p.user_name === ADMIN_NAME;
+        // 关键：本人或者管理员 xxz 均可看到删除按钮
+        const canDelete = isMyPost || isAdmin();
 
         return `
-          <div class="post glass-card" style="animation-delay: ${i * 0.05}s">
+          <div class="post glass-card" data-id="${p.id}">
             <div class="post-header">
-              <div class="post-user">
-                <div class="avatar ${isUserAdmin ? 'admin' : ''}">${p.user_name.slice(0,1).toUpperCase()}</div>
-                ${p.user_name} ${isUserAdmin ? '<span class="admin-tag">STAFF</span>' : ''}
+              <div class="avatar ${isPostAdmin ? 'admin' : ''}">${p.user_name[0].toUpperCase()}</div>
+              <div class="u-name">
+                ${p.user_name}
+                ${isPostAdmin ? '<span class="admin-badge">STAFF</span>' : ''}
               </div>
-              <div class="post-time">${new Date(p.created_at).toLocaleString()}</div>
             </div>
             <div class="content">${p.content}</div>
-            ${p.media_url ? `
-              <div class="media">
-                ${p.media_type === 'video' ? `<video src="${p.media_url}" controls></video>` : `<img src="${p.media_url}" loading="lazy" />`}
-              </div>
-            ` : ''}
-            <div style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">
-               ${p.views || 0} 浏览 · ${postLikes.length} 点赞 · ${postComms.length} 评论
+            ${p.media_url ? `<div class="media"><img src="${p.media_url}" /></div>` : ''}
+            <div class="actions">
+              <button class="action-btn">赞</button>
+              <button class="action-btn">评论</button>
+              ${canDelete ? `<button class="action-btn del" onclick="askDelete('${p.id}')">删除</button>` : ''}
             </div>
-            <div class="post-actions">
-              <button class="action-btn ${isLiked ? 'liked' : ''}" onclick="handleLike('${p.id}', this)">
-                ${isLiked ? '已赞' : '点赞'}
-              </button>
-              <button class="action-btn" onclick="openComment('${p.id}')">评论</button>
-              ${canDelete ? `<button class="action-btn delete-btn" onclick="handleDelete('${p.id}')">删除</button>` : ''}
-            </div>
-            ${postComms.length > 0 ? `
-              <div class="comment-list">
-                ${postComms.map(c => `<div class="comment-item"><b>${c.user_name}:</b>${c.content}</div>`).join('')}
-              </div>
-            ` : ''}
           </div>
         `;
       }).join("");
-
-      el("status").textContent = "● 已实时同步";
-      // 自动增加浏览量逻辑
-      posts.forEach(p => {
-         const key = `viewed_${p.id}`;
-         if(!localStorage.getItem(key)) {
-             sb.rpc('increment_post_views', { p_post_id: p.id });
-             localStorage.setItem(key, "1");
-         }
-      });
     }
 
-    // 实时订阅
-    sb.channel('any').on('postgres_changes', { event: '*', schema: 'public' }, () => loadAll(true)).subscribe();
+    // 初始化界面
+    if (user) {
+      document.getElementById("loginForm").style.display = "none";
+      document.getElementById("userInfo").style.display = "flex";
+      document.getElementById("curName").innerText = user + (isAdmin() ? " (管理员)" : "");
+    }
 
-    // 初始化
-    initUser();
-    loadAll();
-
+    loadFeed();
+    // 实时监听
+    sb.channel('any').on('postgres_changes', { event: '*', schema: 'public' }, () => loadFeed()).subscribe();
   </script>
 </body>
 </html>
