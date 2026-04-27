@@ -48,6 +48,18 @@
     h1,h2,h3,p{margin:0}
     h1{font-size:28px; margin-bottom:6px}
     .sub{color:var(--muted); font-size:14px; line-height:1.6}
+    .loginbar{
+      margin-top:12px;
+      padding:10px 12px;
+      border-radius:14px;
+      background: rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.12);
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      font-size:13px;
+      color:var(--muted);
+    }
     .block{margin-top:18px}
     input, textarea, button, select{
       width:100%;
@@ -112,6 +124,21 @@
       font-weight:700;
       color:var(--text);
       font-size:15px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .avatar{
+      width:26px;
+      height:26px;
+      border-radius:50%;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:12px;
+      color:#fff;
+      background: linear-gradient(135deg, #7c5cff, #3cb4ff);
+      border:1px solid rgba(255,255,255,.2);
     }
     .content{white-space:pre-wrap; line-height:1.7; margin-bottom:12px}
     .media{
@@ -183,6 +210,32 @@
       text-align:center;
       color:var(--muted);
     }
+    .modal{
+      position:fixed;
+      inset:0;
+      background:rgba(5,10,24,.52);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:50;
+      padding:16px;
+    }
+    .modal.show{display:flex}
+    .modal-card{
+      width:min(560px,100%);
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,.18);
+      background:rgba(22,28,52,.92);
+      box-shadow:0 18px 56px rgba(0,0,0,.35);
+      padding:16px;
+    }
+    .modal-actions{
+      margin-top:12px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+    }
+    .modal-actions button{width:auto;margin-top:0}
     @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     .post{transition:transform .2s ease, box-shadow .2s ease;}
     .post:hover{transform:translateY(-2px); box-shadow:0 12px 30px rgba(0,0,0,.18);}
@@ -196,6 +249,10 @@
     <div class="card panel">
       <h1>xtj</h1>
       <p class="sub">昵称登录、发动态、传图传视频、点赞、评论、浏览统计。先把能跑的做出来，别一上来就拿“未来感”糊墙。</p>
+      <div class="loginbar">
+        <span>登录状态</span>
+        <b id="loginState">未登录</b>
+      </div>
 
       <div class="block card panel" style="padding:16px;">
         <div class="toprow">
@@ -240,6 +297,33 @@
     </div>
   </div>
 
+  <div class="modal" id="commentModal">
+    <div class="modal-card">
+      <h3 style="margin-bottom:8px;">发表评论</h3>
+      <textarea id="commentText" placeholder="写下你的想法..." style="min-height:120px;"></textarea>
+      <div class="modal-actions">
+        <button class="secondary" id="commentCancelBtn" type="button">取消</button>
+        <button id="commentSubmitBtn" type="button">发布评论</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="deleteModal">
+    <div class="modal-card">
+      <h3 style="margin-bottom:8px;">删除确认</h3>
+      <p class="small">删除后不可恢复，确认继续吗？</p>
+      <div class="modal-actions">
+        <button class="secondary" id="deleteCancelBtn" type="button">取消</button>
+        <button id="deleteConfirmBtn" type="button">确认删除</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ===== 用户私有配置区（建议只改这里）=====
+    const SUPABASE_URL = window.SUPABASE_URL || "https://ithowxqignlhkwaykglt.supabase.co";
+    const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
+    // ======================================
   <script>
     const SUPABASE_URL = window.SUPABASE_URL || "https://ithowxqignlhkwaykglt.supabase.co";
     const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
@@ -254,6 +338,8 @@
     let postsCache = [];
     let commentsCache = [];
     let likesCache = [];
+    let pendingCommentPostId = null;
+    let pendingDeletePostId = null;
     const viewedKey = (id) => `xtj_viewed_${id}`;
 
     const el = (id) => document.getElementById(id);
@@ -278,6 +364,7 @@
     function renderUser() {
       el("whoami").textContent = currentUser ? `@${currentUser}` : "未登录";
       el("nickname").value = currentUser;
+      el("loginState").textContent = currentUser ? `@${currentUser}` : "未登录";
     }
 
     async function login() {
@@ -370,6 +457,19 @@
 
     async function commentPost(postId) {
       if (!requireLogin("评论")) return;
+      pendingCommentPostId = postId;
+      el("commentText").value = "";
+      el("commentModal").classList.add("show");
+      el("commentText").focus();
+    }
+
+    async function submitCommentModal() {
+      const text = el("commentText").value.trim();
+      if (!text || !text.trim() || !pendingCommentPostId) return;
+
+      try {
+        const { error } = await client.from("comments").insert([{
+          post_id: pendingCommentPostId,
       const text = prompt("输入评论");
       if (!text || !text.trim()) return;
 
@@ -381,6 +481,7 @@
           actor_key: deviceId
         }]);
         if (error) throw error;
+        closeCommentModal();
         status("评论成功");
         await loadAll();
       } catch (err) {
@@ -391,6 +492,17 @@
 
     async function deletePost(postId) {
       if (!requireLogin("删除")) return;
+      pendingDeletePostId = postId;
+      el("deleteModal").classList.add("show");
+    }
+
+    async function submitDeleteModal() {
+      if (!pendingDeletePostId) return;
+      try {
+        const { data, error } = await client.rpc("delete_post_with_actor", { p_post_id: pendingDeletePostId, p_actor_key: deviceId });
+        if (error) throw error;
+        if (!data) return alert("你不是发布者，不能删除这条动态");
+        closeDeleteModal();
       if (!confirm("确认删除这条动态吗？删除后不可恢复。")) return;
       try {
         const { data, error } = await client.rpc("delete_post_with_actor", { p_post_id: postId, p_actor_key: deviceId });
@@ -402,6 +514,20 @@
         console.error(err);
         alert("删除失败，请确认 delete_post_with_actor 函数已创建");
       }
+    }
+
+    function closeCommentModal() {
+      pendingCommentPostId = null;
+      el("commentModal").classList.remove("show");
+    }
+
+    function closeDeleteModal() {
+      pendingDeletePostId = null;
+      el("deleteModal").classList.remove("show");
+    }
+
+    function avatarOf(name) {
+      return `<span class="avatar">${escapeHtml(String(name || "?").slice(0, 1).toUpperCase())}</span>`;
     }
 
     async function trackView(postId) {
@@ -451,6 +577,7 @@
         return `
           <article class="post" style="animation:fadeUp .35s ease both;">
             <div class="meta">
+              <div class="user">${avatarOf(p.user_name)}${escapeHtml(p.user_name)}</div>
               <div class="user">${escapeHtml(p.user_name)}</div>
               <div>${new Date(p.created_at).toLocaleString()}</div>
             </div>
@@ -516,6 +643,17 @@
     el("logoutBtn").addEventListener("click", logout);
     el("postBtn").addEventListener("click", publishPost);
     el("refreshBtn").addEventListener("click", loadAll);
+    el("commentCancelBtn").addEventListener("click", closeCommentModal);
+    el("commentSubmitBtn").addEventListener("click", submitCommentModal);
+    el("deleteCancelBtn").addEventListener("click", closeDeleteModal);
+    el("deleteConfirmBtn").addEventListener("click", submitDeleteModal);
+    el("commentModal").addEventListener("click", (e) => { if (e.target.id === "commentModal") closeCommentModal(); });
+    el("deleteModal").addEventListener("click", (e) => { if (e.target.id === "deleteModal") closeDeleteModal(); });
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      closeCommentModal();
+      closeDeleteModal();
+    });
 
     renderUser();
     loadAll();
