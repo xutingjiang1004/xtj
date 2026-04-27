@@ -7,31 +7,26 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
-      /* 更通透的液态玻璃变量 */
       --bg-base: #e8ecf2;
-      --glass-bg: rgba(255, 255, 255, 0.45);
-      --glass-border: rgba(255, 255, 255, 0.7);
-      --glass-highlight: inset 0 1px 2px rgba(255, 255, 255, 0.95);
+      --glass-bg: rgba(255, 255, 255, 0.4);
+      --glass-border: rgba(255, 255, 255, 0.65);
+      --glass-highlight: inset 0 1px 2px rgba(255, 255, 255, 0.9);
       --glass-shadow: 0 12px 36px rgba(31, 38, 135, 0.06);
-      --glass-blur: blur(30px);
-      
+      --glass-blur: blur(32px);
       --text-main: #1d1d24;
       --text-muted: #6b6c7a;
       --primary: #7c5cff;
       --primary-hover: #6a4deb;
       --like-color: #ff3b60;
       --like-bg: rgba(255, 59, 96, 0.1);
-      
       --radius-sm: 14px;
       --radius-md: 20px;
       --radius-lg: 28px;
-      
       --transition-smooth: all 0.4s cubic-bezier(0.25, 1, 0.3, 1);
       --transition-bounce: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
     }
 
     * { box-sizing: border-box; }
-    
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -58,10 +53,10 @@
       position: sticky; top: 0; z-index: 40;
       padding: 12px 24px; display: flex; justify-content: space-between; align-items: center;
       border-bottom: 1px solid rgba(255,255,255,0.5);
-      background: rgba(255, 255, 255, 0.5);
+      background: rgba(255, 255, 255, 0.45);
       backdrop-filter: blur(35px);
       -webkit-backdrop-filter: blur(35px);
-      box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.02);
     }
 
     .nav-left { display: flex; align-items: baseline; gap: 16px; }
@@ -82,10 +77,10 @@
     .user-pill {
       display: flex; align-items: center; gap: 8px;
       padding: 4px 12px 4px 4px;
-      background: rgba(255,255,255,0.7);
-      border: 1px solid rgba(255,255,255,0.8);
+      background: rgba(255,255,255,0.65);
+      border: 1px solid rgba(255,255,255,0.75);
       border-radius: 99px; font-size: 13px; font-weight: 600;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.03);
     }
 
     .wrap { max-width: 680px; margin: 24px auto 60px; padding: 0 16px; display: flex; flex-direction: column; gap: 24px; }
@@ -93,11 +88,11 @@
     input, textarea, button { font-family: inherit; outline: none; transition: var(--transition-smooth); }
     input, textarea {
       width: 100%; border-radius: var(--radius-sm); border: 1px solid rgba(0, 0, 0, 0.06);
-      background: rgba(255, 255, 255, 0.7); color: var(--text-main); padding: 10px 14px; font-size: 14px;
+      background: rgba(255, 255, 255, 0.65); color: var(--text-main); padding: 10px 14px; font-size: 14px;
       box-shadow: inset 0 2px 4px rgba(0,0,0,0.01);
     }
     input:focus, textarea:focus {
-      border-color: rgba(124, 92, 255, 0.4); background: rgba(255,255,255,0.9);
+      border-color: rgba(124, 92, 255, 0.4); background: rgba(255,255,255,0.85);
       box-shadow: inset 0 2px 4px rgba(0,0,0,0.01), 0 0 0 3px rgba(124, 92, 255, 0.1);
     }
     input::placeholder, textarea::placeholder { color: #a0a0ab; }
@@ -110,26 +105,26 @@
     button:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(124, 92, 255, 0.35); filter: brightness(1.05); }
     button:active { transform: translateY(1px); box-shadow: 0 2px 8px rgba(124, 92, 255, 0.2); }
     button.secondary {
-      background: rgba(255, 255, 255, 0.7); color: var(--text-main);
-      border: 1px solid rgba(0, 0, 0, 0.06); box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+      background: rgba(255, 255, 255, 0.65); color: var(--text-main);
+      border: 1px solid rgba(0, 0, 0, 0.06); box-shadow: 0 2px 6px rgba(0,0,0,0.02);
     }
-    button.secondary:hover { background: rgba(255,255,255,0.9); box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+    button.secondary:hover { background: rgba(255,255,255,0.85); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
 
     .publish-box { padding: 18px; border-radius: var(--radius-md); display: flex; flex-direction: column; gap: 12px; }
     .publish-box textarea { min-height: 80px; resize: vertical; background: transparent; border: none; padding: 4px; font-size: 15px; box-shadow: none; }
     .publish-box textarea:focus { background: transparent; box-shadow: none; }
-    .publish-actions { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.06); }
+    .publish-actions { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.05); }
 
     input[type="file"] { padding: 0; background: transparent; border: none; box-shadow: none; font-size: 12px; width: auto; color: var(--text-muted); }
     input[type="file"]::file-selector-button {
-      background: rgba(255, 255, 255, 0.7); border: 1px solid rgba(0,0,0,0.06); color: var(--text-main);
+      background: rgba(255, 255, 255, 0.65); border: 1px solid rgba(0,0,0,0.06); color: var(--text-main);
       padding: 6px 12px; border-radius: 99px; cursor: pointer; margin-right: 12px;
     }
-    input[type="file"]::file-selector-button:hover { background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.04); }
+    input[type="file"]::file-selector-button:hover { background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.03); }
 
     .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
     .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--transition-smooth); }
-    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 16px 40px rgba(31, 38, 135, 0.1); }
+    .stat-card:hover { transform: translateY(-2px); box-shadow: 0 16px 40px rgba(31, 38, 135, 0.08); }
     .stat-card b { display: block; font-size: 22px; font-weight: 800; margin-bottom: 2px; color: var(--primary); }
     .stat-card span { font-size: 12px; color: var(--text-muted); font-weight: 500;}
 
@@ -138,7 +133,7 @@
     .feed { display: grid; gap: 20px; }
 
     .post { padding: 20px; border-radius: var(--radius-md); transition: var(--transition-smooth); }
-    .post:hover { transform: translateY(-3px); box-shadow: 0 20px 48px rgba(31, 38, 135, 0.1), var(--glass-highlight); }
+    .post:hover { transform: translateY(-3px); box-shadow: 0 20px 48px rgba(31, 38, 135, 0.08), var(--glass-highlight); }
     .meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 13px; color: var(--text-muted); }
     .user { font-weight: 700; color: var(--text-main); font-size: 14px; display: flex; align-items: center; gap: 8px; }
     .avatar {
@@ -146,7 +141,7 @@
       display: inline-flex; align-items: center; justify-content: center;
       font-size: 14px; font-weight: bold; color: #fff;
       background: linear-gradient(135deg, #7c5cff, #3cb4ff);
-      box-shadow: 0 4px 10px rgba(124, 92, 255, 0.25);
+      box-shadow: 0 4px 10px rgba(124, 92, 255, 0.2);
     }
     .content { white-space: pre-wrap; line-height: 1.6; font-size: 15px; margin-bottom: 14px; word-break: break-word;}
     .media { width: 100%; border-radius: var(--radius-sm); overflow: hidden; margin: 12px 0; border: 1px solid rgba(0,0,0,0.04); background: rgba(0,0,0,0.01); }
@@ -154,10 +149,10 @@
     .post-stats { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; font-weight: 500; }
     .actions { display: flex; gap: 10px; flex-wrap: wrap; }
     .actions button {
-      background: rgba(255,255,255,0.55); border: 1px solid rgba(0,0,0,0.04);
+      background: rgba(255,255,255,0.5); border: 1px solid rgba(0,0,0,0.04);
       padding: 6px 16px; color: var(--text-muted); box-shadow: 0 2px 6px rgba(0,0,0,0.01);
     }
-    .actions button:hover { background: #ffffff; color: var(--text-main); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .actions button:hover { background: #ffffff; color: var(--text-main); box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
 
     @keyframes heartBounce {
       0% { transform: scale(1); }
@@ -177,30 +172,30 @@
     }
 
     .comments {
-      margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05);
+      margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.04);
       display: grid; gap: 8px;
     }
     .comment {
       padding: 12px 14px; border-radius: var(--radius-sm);
-      background: rgba(255,255,255,0.45); font-size: 13px; line-height: 1.6;
+      background: rgba(255,255,255,0.4); font-size: 13px; line-height: 1.6;
       border: 1px solid rgba(0,0,0,0.02); transition: var(--transition-smooth);
     }
-    .comment:hover { background: rgba(255,255,255,0.7); box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
+    .comment:hover { background: rgba(255,255,255,0.65); box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
     .comment b { font-weight: 700; color: var(--text-main); }
 
     .empty { padding: 40px; text-align: center; color: var(--text-muted); font-size: 14px; }
 
     .modal {
-      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.25); backdrop-filter: blur(12px);
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.2); backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px); display: none; align-items: center; justify-content: center;
       z-index: 50; padding: 16px; opacity: 0; transition: opacity 0.4s cubic-bezier(0.25, 1, 0.3, 1);
     }
     .modal.show { display: flex; opacity: 1; }
     .modal-card {
       width: min(480px, 100%); padding: 24px; border-radius: var(--radius-lg);
-      background: rgba(255, 255, 255, 0.85); box-shadow: 0 32px 64px rgba(0,0,0,0.12), inset 0 1px 2px #fff;
+      background: rgba(255, 255, 255, 0.8); box-shadow: 0 32px 64px rgba(0,0,0,0.1), inset 0 1px 2px #fff;
       transform: scale(0.95) translateY(20px); transition: var(--transition-bounce);
-      border: 1px solid rgba(255,255,255,0.8);
+      border: 1px solid rgba(255,255,255,0.75);
     }
     .modal.show .modal-card { transform: scale(1) translateY(0); }
     .modal-card h3 { margin: 0 0 12px 0; font-size: 18px; color: var(--text-main); font-weight: 700; }
@@ -297,7 +292,6 @@
       auth: { persistSession: false }
     });
 
-    // 管理员配置
     const ADMIN_NAME = "xxz";
     const ADMIN_KEY = "xxz123";
 
@@ -527,11 +521,10 @@
 
       try {
         if (currentUser === ADMIN_NAME) {
-          // 管理员删除：使用 .delete().select() 以保证确实删除了行
           const { data, error } = await client.from("posts").delete().eq("id", postId).select();
           if (error) throw error;
           if (!data || data.length === 0) {
-            throw new Error("删除失败：没有权限或帖子不存在。\n请确保 Supabase 的 posts 表已开启「允许认证用户删除」的策略，或执行以下 SQL 授权：\nCREATE POLICY \"admin_delete\" ON public.posts FOR DELETE USING (auth.uid() IS NOT NULL);");
+            throw new Error("删除失败：帖子不存在或权限不足");
           }
         } else {
           const { data, error } = await client.rpc("delete_post_with_actor", { p_post_id: postId, p_actor_key: deviceId });
@@ -539,7 +532,6 @@
           if (!data) return alert("你不是发布者，不能删除这条动态");
         }
 
-        // 局部动画移除卡片
         const postEl = document.getElementById(`post-${postId}`);
         if (postEl) {
           postEl.classList.add("removing");
@@ -652,7 +644,7 @@
       try {
         if (!isSilent) status("加载中...");
         const [postRes, commentRes, likeRes] = await Promise.all([
-          client.from("posts").select("*").order("created_at", { ascending: false }),
+          client.from("posts").select("*").eq("is_deleted", false).order("created_at", { ascending: false }),
           client.from("comments").select("*").order("created_at", { ascending: true }),
           client.from("likes").select("*")
         ]);
@@ -661,60 +653,4 @@
         if (commentRes.error) throw commentRes.error;
         if (likeRes.error) throw likeRes.error;
 
-        postsCache = postRes.data || [];
-        commentsCache = commentRes.data || [];
-        likesCache = likeRes.data || [];
-
-        el("sPosts").textContent = postsCache.length;
-        el("sViews").textContent = postsCache.reduce((sum, p) => sum + (p.views || 0), 0);
-        el("sLikes").textContent = likesCache.length;
-
-        renderFeed();
-        if (!isSilent) status("内容已更新");
-      } catch (err) {
-        console.error(err);
-        if (!isSilent) {
-          el("feed").innerHTML = `<div class="empty">加载失败：${escapeHtml(err.message || "未知错误")}</div>`;
-          status("加载失败");
-        }
-      }
-    }
-
-    function setupRealtime() {
-      client.channel("xtj-feed")
-        .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, () => loadAll(true))
-        .on("postgres_changes", { event: "*", schema: "public", table: "comments" }, () => loadAll(true))
-        .on("postgres_changes", { event: "*", schema: "public", table: "likes" }, () => loadAll(true))
-        .subscribe();
-    }
-
-    window.handleLike = handleLike;
-    window.commentPost = commentPost;
-    window.deletePost = deletePost;
-
-    el("loginBtn").addEventListener("click", login);
-    el("logoutBtn").addEventListener("click", logout);
-    el("nickname").addEventListener("keypress", (e) => { if(e.key === "Enter") login() });
-    el("postBtn").addEventListener("click", publishPost);
-    el("refreshBtn").addEventListener("click", () => loadAll(false));
-    el("commentCancelBtn").addEventListener("click", closeCommentModal);
-    el("commentSubmitBtn").addEventListener("click", submitCommentModal);
-    el("deleteCancelBtn").addEventListener("click", closeDeleteModal);
-    el("deleteConfirmBtn").addEventListener("click", submitDeleteModal);
-    
-    el("commentModal").addEventListener("click", (e) => { if (e.target.id === "commentModal") closeCommentModal(); });
-    el("deleteModal").addEventListener("click", (e) => { if (e.target.id === "deleteModal") closeDeleteModal(); });
-    
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        closeCommentModal();
-        closeDeleteModal();
-      }
-    });
-
-    renderUser();
-    loadAll();
-    setupRealtime();
-  </script>
-</body>
-</html>
+        postsCache
