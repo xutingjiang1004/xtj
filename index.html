@@ -238,11 +238,16 @@
   </div>
 
   <script>
-    const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
-    const SUPABASE_KEY = "sb_publishable_RFqxlLe3nKnbs_PUHrJjpg_AUVaOGbu";
-    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const SUPABASE_URL = window.SUPABASE_URL || "https://ithowxqignlhkwaykglt.supabase.co";
+    const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false }
+    });
 
     let currentUser = localStorage.getItem("xtj_user") || "";
+    const deviceId = localStorage.getItem("xtj_device_id") || crypto.randomUUID();
+    localStorage.setItem("xtj_device_id", deviceId);
+
     let postsCache = [];
     let commentsCache = [];
     const viewedKey = (id) => `xtj_viewed_${id}`;
@@ -259,8 +264,12 @@
         .replaceAll("'", "&#39;");
     }
 
+    function activeName() {
+      return currentUser || `游客-${deviceId.slice(0, 6)}`;
+    }
+
     function renderUser() {
-      el("whoami").textContent = currentUser ? `@${currentUser}` : "未登录";
+      el("whoami").textContent = currentUser ? `@${currentUser}` : `${activeName()}（游客）`;
       el("nickname").value = currentUser;
     }
 
@@ -280,11 +289,11 @@
       currentUser = "";
       localStorage.removeItem("xtj_user");
       renderUser();
-      status("已退出登录");
+      status(`已切到游客模式：${activeName()}`);
     }
 
     async function uploadMedia(file) {
-      const safeName = `${Date.now()}_${crypto.randomUUID()}_${file.name.replace(/[^\w.\-]/g, "_")}`;
+      const safeName = `${Date.now()}_${deviceId}_${file.name.replace(/[^\w.\-]/g, "_")}`;
       const { data, error } = await client.storage.from("uploads").upload(safeName, file, {
         cacheControl: "3600",
         upsert: false
@@ -295,11 +304,6 @@
     }
 
     async function publishPost() {
-      if (!currentUser) {
-        alert("先登录");
-        return;
-      }
-
       const content = el("postText").value.trim();
       const file = el("fileInput").files[0];
 
@@ -320,10 +324,11 @@
         }
 
         const { error } = await client.from("posts").insert([{
-          user_name: currentUser,
+          user_name: activeName(),
           content,
           media_url,
-          media_type
+          media_type,
+          actor_key: deviceId
         }]);
 
         if (error) throw error;
@@ -334,23 +339,20 @@
         await loadAll();
       } catch (err) {
         console.error(err);
-        status("发布失败，打开控制台看报错");
-        alert("发布失败");
+        status(`发布失败：${err.message || "未知错误"}`);
+        alert("发布失败，请先执行 README 里的 SQL 初始化。");
       }
     }
 
     async function likePost(postId) {
-      if (!currentUser) {
-        alert("先登录");
-        return;
-      }
       try {
         const { error } = await client.from("likes").insert([{
           post_id: postId,
-          user_name: currentUser
+          user_name: activeName(),
+          actor_key: deviceId
         }]);
         if (error) {
-          if (String(error.message || "").toLowerCase().includes("duplicate")) {
+          if (error.code === "23505" || String(error.message || "").toLowerCase().includes("duplicate")) {
             alert("你已经点过赞了");
             return;
           }
@@ -359,29 +361,26 @@
         await loadAll();
       } catch (err) {
         console.error(err);
-        alert("点赞失败");
+        alert("点赞失败，请确认 likes 表和唯一约束已创建");
       }
     }
 
     async function commentPost(postId) {
-      if (!currentUser) {
-        alert("先登录");
-        return;
-      }
       const text = prompt("输入评论");
       if (!text || !text.trim()) return;
 
       try {
         const { error } = await client.from("comments").insert([{
           post_id: postId,
-          user_name: currentUser,
-          content: text.trim()
+          user_name: activeName(),
+          content: text.trim(),
+          actor_key: deviceId
         }]);
         if (error) throw error;
         await loadAll();
       } catch (err) {
         console.error(err);
-        alert("评论失败");
+        alert("评论失败，请确认 comments 表已开启 insert 策略");
       }
     }
 
@@ -485,8 +484,8 @@
         status(`已加载 ${totalPosts} 条动态`);
       } catch (err) {
         console.error(err);
-        el("feed").innerHTML = `<div class="empty">加载失败。先看控制台报错，别让浏览器自己扛锅。</div>`;
-        status("加载失败");
+        el("feed").innerHTML = `<div class="empty">加载失败。请按 README 初始化 SQL/RLS 后再刷新。</div>`;
+        status(`加载失败：${err.message || "未知错误"}`);
       }
     }
 
@@ -511,6 +510,7 @@
     renderUser();
     loadAll();
     setupRealtime();
+
   </script>
 </body>
 </html>
