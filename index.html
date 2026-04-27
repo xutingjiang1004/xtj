@@ -1,324 +1,310 @@
-
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>xtj - 极简精英版</title>
+  <title>XTJ - 灵动社区</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
-      /* 浅色液态玻璃主题 */
-      --bg-base: #f0f4f8;
-      --glass-bg: rgba(255, 255, 255, 0.75);
-      --glass-border: rgba(255, 255, 255, 0.9);
-      --glass-blur: blur(25px);
-      --primary: #6366f1;
-      --admin-gold: #f59e0b;
-      --danger: #ef4444;
-      --text-main: #1e293b;
-      --text-muted: #64748b;
-      --radius-lg: 28px;
-      --radius-md: 18px;
-      --transition-main: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-      --transition-bounce: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+      /* 极致浅色调 */
+      --main-bg: #f8faff;
+      --glass: rgba(255, 255, 255, 0.75);
+      --glass-stroke: rgba(255, 255, 255, 0.9);
+      --accent: #6366f1;
+      --accent-gradient: linear-gradient(135deg, #6366f1, #a855f7);
+      --text: #1e293b;
+      --text-light: #64748b;
+      --danger: #ff4757;
+      
+      --shadow: 0 16px 40px rgba(0, 0, 0, 0.04);
+      --radius: 30px;
+      --blur: blur(30px);
+      --ease: cubic-bezier(0.25, 1, 0.5, 1);
     }
 
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     
     body {
       margin: 0;
-      font-family: -apple-system, "SF Pro Text", "PingFang SC", sans-serif;
-      background: var(--bg-base);
-      background-image: 
-        radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
-        radial-gradient(circle at 100% 100%, rgba(245, 158, 11, 0.05) 0%, transparent 40%);
-      background-attachment: fixed;
-      color: var(--text-main);
+      font-family: -apple-system, "SF Pro Display", "PingFang SC", sans-serif;
+      background: var(--main-bg);
+      color: var(--text);
       min-height: 100vh;
       overflow-x: hidden;
     }
 
-    /* 顶部导航 */
+    /* 动态液态背景 */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background: 
+        radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.06), transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(168, 85, 247, 0.06), transparent 40%);
+      z-index: -1;
+    }
+
+    /* 玻璃导航 */
     nav {
-      position: sticky;
-      top: 0; z-index: 100;
-      padding: 12px 20px;
+      position: sticky; top: 0; z-index: 100;
+      padding: 12px 24px;
       display: flex; justify-content: space-between; align-items: center;
-      background: rgba(255, 255, 255, 0.4);
-      backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
-      border-bottom: 1px solid rgba(0,0,0,0.03);
+      background: rgba(255, 255, 255, 0.3);
+      backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+      border-bottom: 1px solid rgba(255,255,255,0.4);
     }
 
-    h1 { font-size: 20px; font-weight: 800; margin: 0; background: linear-gradient(135deg, #6366f1, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    h1 { font-size: 24px; font-weight: 800; margin: 0; letter-spacing: -1px; background: var(--accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
-    .user-tag { 
-      padding: 4px 12px; border-radius: 99px; font-size: 13px; font-weight: 600; 
-      display: flex; align-items: center; gap: 6px; background: white; border: 1px solid rgba(0,0,0,0.05);
+    .nav-user { display: flex; align-items: center; gap: 12px; }
+    .user-card { 
+      background: #fff; padding: 6px 14px; border-radius: 100px; font-size: 13px; font-weight: 600; 
+      box-shadow: 0 4px 12px rgba(0,0,0,0.03); border: 1px solid rgba(0,0,0,0.02);
+      display: flex; align-items: center; gap: 6px;
     }
 
-    /* 容器 */
-    .container { max-width: 600px; margin: 20px auto 80px; padding: 0 16px; }
+    /* 核心容器 */
+    .wrap { max-width: 640px; margin: 30px auto 100px; padding: 0 20px; }
 
     .glass-card {
-      background: var(--glass-bg);
-      border: 1px solid var(--glass-border);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.04);
-      backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
-      border-radius: var(--radius-md);
-      transition: var(--transition-main);
+      background: var(--glass);
+      backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+      border: 1px solid var(--glass-stroke);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      transition: var(--ease) 0.4s;
     }
-    .glass-card:hover { transform: translateY(-2px); box-shadow: 0 15px 40px rgba(0,0,0,0.06); }
 
-    /* 发布框 */
-    .publish-area { padding: 20px; margin-bottom: 24px; }
+    /* 发布区域 */
+    .publisher { padding: 25px; margin-bottom: 30px; }
     textarea {
-      width: 100%; min-height: 80px; border: none; background: transparent;
-      font-size: 16px; resize: none; outline: none; margin-bottom: 15px;
+      width: 100%; min-height: 90px; border: none; background: transparent;
+      font-size: 17px; line-height: 1.6; outline: none; color: var(--text); resize: none;
     }
-    .publish-btns { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(0,0,0,0.04); padding-top: 15px; }
+    .publisher-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 15px; padding-top: 15px; border-top: 1px solid rgba(0,0,0,0.04); }
 
     button {
-      cursor: pointer; border: none; outline: none; font-weight: 600;
-      transition: var(--transition-main); border-radius: 99px;
+      cursor: pointer; border: none; font-weight: 700; border-radius: 100px; transition: 0.3s var(--ease);
+      display: inline-flex; align-items: center; justify-content: center;
     }
-    .btn-primary { background: var(--primary); color: white; padding: 8px 20px; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3); }
-    .btn-primary:hover { transform: scale(1.05); filter: brightness(1.1); }
-    .btn-primary:active { transform: scale(0.95); }
+    .btn-main { background: var(--accent-gradient); color: #fff; padding: 10px 24px; font-size: 14px; box-shadow: 0 8px 20px rgba(99, 102, 241, 0.25); }
+    .btn-main:hover { transform: translateY(-2px); box-shadow: 0 12px 25px rgba(99, 102, 241, 0.35); }
+    .btn-main:active { transform: translateY(0); }
 
-    /* 动态卡片 */
-    .post { padding: 20px; margin-bottom: 20px; position: relative; overflow: hidden; }
-    .post.deleting { transform: scale(0.9); opacity: 0; transition: 0.4s ease; filter: blur(10px); }
-    
-    .post-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    /* 动态卡片样式 */
+    .post { padding: 25px; margin-bottom: 25px; animation: slideIn 0.6s var(--ease) both; }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+    .post-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
     .avatar { 
-      width: 36px; height: 36px; border-radius: 50%; background: #ddd; 
-      display: flex; align-items: center; justify-content: center; color: white; font-weight: 800;
+      width: 44px; height: 44px; border-radius: 50%; 
+      background: #eef2ff; display: flex; align-items: center; justify-content: center;
+      font-weight: 800; color: var(--accent); font-size: 18px;
     }
-    .avatar.admin { background: var(--admin-gold); box-shadow: 0 0 15px rgba(245, 158, 11, 0.3); }
+    .avatar.admin { background: var(--accent-gradient); color: #fff; box-shadow: 0 5px 15px rgba(168, 85, 247, 0.3); }
+
+    .user-info b { font-size: 16px; display: flex; align-items: center; gap: 6px; }
+    .badge { font-size: 10px; background: var(--accent); color: #fff; padding: 2px 6px; border-radius: 4px; }
+
+    .post-content { font-size: 16px; line-height: 1.7; margin-bottom: 15px; white-space: pre-wrap; }
+    .post-img { width: 100%; border-radius: 20px; margin-bottom: 15px; border: 1px solid rgba(0,0,0,0.03); }
+
+    .post-foot { display: flex; gap: 15px; align-items: center; }
+    .action { font-size: 13px; color: var(--text-light); font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+    .action:hover { color: var(--accent); }
+    .action.del { color: var(--danger); margin-left: auto; opacity: 0.6; }
+    .action.del:hover { opacity: 1; }
+
+    /* 拟物化弹窗 */
+    .modal-wrap {
+      position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,0.1); backdrop-filter: blur(10px);
+      display: none; align-items: center; justify-content: center; opacity: 0; transition: 0.3s;
+    }
+    .modal-wrap.show { display: flex; opacity: 1; }
+    .modal {
+      width: 90%; max-width: 320px; padding: 30px; text-align: center;
+      transform: scale(0.9); transition: 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    .modal-wrap.show .modal { transform: scale(1); }
+
+    .input-style {
+      background: rgba(0,0,0,0.04); border: none; padding: 8px 15px; border-radius: 10px; outline: none; width: 100%;
+    }
     
-    .u-name { font-weight: 700; font-size: 15px; }
-    .admin-badge { font-size: 10px; background: var(--admin-gold); color: white; padding: 1px 6px; border-radius: 4px; margin-left: 5px; }
-
-    .content { font-size: 15.5px; line-height: 1.6; color: #334155; margin-bottom: 15px; }
-    .media img { width: 100%; border-radius: 12px; margin-bottom: 15px; }
-
-    .actions { display: flex; gap: 12px; border-top: 1px solid rgba(0,0,0,0.03); padding-top: 12px; }
-    .action-btn { background: rgba(0,0,0,0.03); color: var(--text-muted); padding: 6px 15px; font-size: 12px; }
-    .action-btn:hover { background: rgba(0,0,0,0.06); color: var(--text-main); }
-    .action-btn.del { color: var(--danger); background: rgba(239, 68, 68, 0.05); margin-left: auto; }
-    .action-btn.del:hover { background: rgba(239, 68, 68, 0.1); }
-
-    /* 弹窗动画 */
-    .modal-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.2); 
-      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-      display: none; align-items: center; justify-content: center; z-index: 1000;
-      opacity: 0; transition: opacity 0.3s ease;
-    }
-    .modal-overlay.active { display: flex; opacity: 1; }
-    
-    .modal-box {
-      width: 90%; max-width: 340px; padding: 30px; text-align: center;
-      transform: scale(0.8); transition: var(--transition-bounce);
-    }
-    .modal-overlay.active .modal-box { transform: scale(1); }
-
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    .post { animation: fadeIn 0.5s ease both; }
+    .loading-ui { text-align: center; padding: 50px; opacity: 0.5; font-weight: 600; }
   </style>
 </head>
 <body>
 
   <nav>
-    <h1>xtj</h1>
-    <div id="authArea">
-      <div id="loginForm" style="display: flex; gap: 8px;">
-        <input id="nickInp" placeholder="昵称" style="width: 80px; border: none; background: white; border-radius: 99px; padding: 4px 12px; font-size: 12px; outline: none;" />
-        <button class="btn-primary" onclick="doLogin()" style="padding: 4px 15px; font-size: 12px;">登录</button>
+    <h1>XTJ</h1>
+    <div class="nav-user" id="authBox">
+      <div id="loginGroup" style="display:flex; gap:8px;">
+        <input type="text" id="nickInp" class="input-style" placeholder="起个名字" style="width: 100px;">
+        <button class="btn-main" onclick="handleLogin()" style="padding: 6px 16px; font-size: 12px;">进入</button>
       </div>
-      <div id="userInfo" style="display: none;" class="user-tag">
-        <span id="curName"></span>
-        <span onclick="doLogout()" style="cursor:pointer; opacity: 0.5;">&times;</span>
+      <div id="userGroup" style="display:none;" class="user-card">
+        <span id="curNick"></span>
+        <span onclick="handleLogout()" style="cursor:pointer; opacity:0.3; margin-left:5px;">&times;</span>
       </div>
     </div>
   </nav>
 
-  <div class="container">
-    <div class="publish-area glass-card">
-      <textarea id="postInp" placeholder="此刻在想什么？"></textarea>
-      <div class="publish-btns">
-        <input type="file" id="fileInp" style="font-size: 11px; color: var(--text-muted);" />
-        <button class="btn-primary" id="pubBtn" onclick="doPublish()">发布</button>
+  <div class="wrap">
+    <div class="publisher glass-card">
+      <textarea id="postInp" placeholder="在这里写下你的灵感..."></textarea>
+      <div class="publisher-footer">
+        <input type="file" id="fileInp" style="font-size: 12px; color: var(--text-light);">
+        <button class="btn-main" id="pubBtn" onclick="handlePublish()">发布动态</button>
       </div>
     </div>
 
     <div id="feed">
-      <div style="text-align:center; padding: 40px; opacity:0.5;">加载中...</div>
+      <div class="loading-ui">正在加载灵感...</div>
     </div>
   </div>
 
-  <div class="modal-overlay" id="delModal">
-    <div class="modal-box glass-card">
+  <div class="modal-wrap" id="delModal">
+    <div class="modal glass-card">
       <div style="font-size: 40px; margin-bottom: 10px;">🗑️</div>
-      <h3 style="margin: 0 0 10px 0;">确认删除？</h3>
-      <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 25px;">此操作不可撤销，动态将被永远抹除。</p>
-      <div style="display: flex; gap: 10px;">
-        <button class="btn-primary" style="background: #e2e8f0; color: #475569; flex: 1;" onclick="closeDelModal()">取消</button>
-        <button class="btn-primary" style="background: var(--danger); flex: 1;" id="finalDelBtn">删除</button>
+      <h3 style="margin: 0 0 10px 0;">删除动态？</h3>
+      <p style="font-size: 14px; color: var(--text-light); margin-bottom: 25px;">删除后无法撤销，请三思。</p>
+      <div style="display:flex; gap:10px;">
+        <button class="btn-main" style="background:#e2e8f0; color:#475569; flex:1; box-shadow:none;" onclick="closeDel()">取消</button>
+        <button class="btn-main" style="background:var(--danger); flex:1; box-shadow:0 8px 20px rgba(255,71,87,0.3);" id="confirmDelBtn">确认删除</button>
       </div>
     </div>
   </div>
 
   <script>
-    const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
-    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
-    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // 1. 初始化 Supabase
+    const SB_URL = "https://ithowxqignlhkwaykglt.supabase.co";
+    const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
+    const sb = window.supabase.createClient(SB_URL, SB_KEY);
 
-    const ADMIN_NAME = "xxz";
-    const ADMIN_PW = "xxz123"; // 管理员密码
+    const ADMIN = "xxz";
+    const ADMIN_PASS = "xxz123";
 
-    let user = localStorage.getItem("xtj_user") || "";
-    const deviceId = localStorage.getItem("xtj_device") || crypto.randomUUID();
-    localStorage.setItem("xtj_device", deviceId);
+    let currentUser = localStorage.getItem("xtj_v3_user") || "";
+    let deviceKey = localStorage.getItem("xtj_v3_key") || crypto.randomUUID();
+    localStorage.setItem("xtj_v3_key", deviceKey);
 
-    function isAdmin() { return user === ADMIN_NAME; }
-
-    // 登录
-    async function doLogin() {
-      const name = document.getElementById("nickInp").value.trim();
-      if (!name) return;
-      if (name === ADMIN_NAME) {
-        const pw = prompt("请输入管理员密码：");
-        if (pw !== ADMIN_PW) return alert("密码错误");
+    // 2. 登录/退出
+    function handleLogin() {
+      const nick = document.getElementById("nickInp").value.trim();
+      if(!nick) return;
+      if(nick === ADMIN) {
+        if(prompt("管理员密钥：") !== ADMIN_PASS) return alert("密码错误");
       }
-      user = name;
-      localStorage.setItem("xtj_user", user);
+      currentUser = nick;
+      localStorage.setItem("xtj_v3_user", currentUser);
       location.reload();
     }
 
-    function doLogout() {
-      localStorage.removeItem("xtj_user");
+    function handleLogout() {
+      localStorage.removeItem("xtj_v3_user");
       location.reload();
     }
 
-    // 发布
-    async function doPublish() {
-      if (!user) return alert("请先登录");
+    // 3. 发布功能
+    async function handlePublish() {
+      if(!currentUser) return alert("请先登录");
       const content = document.getElementById("postInp").value.trim();
       const file = document.getElementById("fileInp").files[0];
-      if (!content && !file) return;
+      if(!content && !file) return;
 
       const btn = document.getElementById("pubBtn");
-      btn.disabled = true;
-      btn.innerText = "正在发布...";
+      btn.disabled = true; btn.innerText = "传输中...";
 
       let media_url = "";
-      if (file) {
-        const path = `up/${Date.now()}_${file.name}`;
+      if(file) {
+        const path = `v3/${Date.now()}_${file.name}`;
         await sb.storage.from("uploads").upload(path, file);
         media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
       }
 
-      await sb.from("posts").insert([{ 
-        user_name: user, 
-        content, 
-        media_url, 
-        actor_key: deviceId 
+      const { error } = await sb.from("posts").insert([{
+        user_name: currentUser,
+        content: content,
+        media_url: media_url,
+        actor_key: deviceKey
       }]);
 
+      if(error) alert("发布失败，请确认 SQL 已运行");
       location.reload();
     }
 
-    // 删除逻辑改进
-    let postToDelete = null;
-
-    function askDelete(postId) {
-      postToDelete = postId;
-      const modal = document.getElementById("delModal");
-      modal.classList.add("active");
+    // 4. 删除逻辑 (核心改进)
+    let pendingDelId = null;
+    function askDelete(id) {
+      pendingDelId = id;
+      document.getElementById("delModal").classList.add("show");
+    }
+    function closeDel() {
+      document.getElementById("delModal").classList.remove("show");
     }
 
-    function closeDelModal() {
-      document.getElementById("delModal").classList.remove("active");
-    }
-
-    document.getElementById("finalDelBtn").onclick = async () => {
-      if (!postToDelete) return;
+    document.getElementById("confirmDelBtn").onclick = async () => {
+      if(!pendingDelId) return;
       
-      // 添加视觉反馈
-      const card = document.querySelector(`[data-id="${postToDelete}"]`);
-      if (card) card.classList.add("deleting");
+      // 如果是管理员或者自己，直接进行删除尝试
+      const { error } = await sb.from("posts").delete().eq("id", pendingDelId);
       
-      closeDelModal();
-
-      try {
-        if (isAdmin()) {
-          // 管理员直接删除任何 ID 的记录（前提：Supabase RLS 策略已允许或未启用）
-          const { error } = await sb.from("posts").delete().eq("id", postToDelete);
-          if (error) throw error;
-        } else {
-          // 普通人调用 RPC 校验本人身份
-          const { error } = await sb.rpc("delete_post_with_actor", { 
-            p_post_id: postToDelete, 
-            p_actor_key: deviceId 
-          });
-          if (error) throw error;
-        }
-        setTimeout(() => loadFeed(), 400); // 等待动画完成再刷新
-      } catch (e) {
-        alert("删除失败: " + e.message);
-        if (card) card.classList.remove("deleting");
+      if(error) {
+        alert("删除失败：" + error.message);
+      } else {
+        closeDel();
+        loadFeed();
       }
     };
 
-    // 加载内容
+    // 5. 渲染动态
     async function loadFeed() {
       const { data: posts } = await sb.from("posts").select("*").order("created_at", { ascending: false });
-      const feed = document.getElementById("feed");
+      const container = document.getElementById("feed");
       
-      if (!posts || posts.length === 0) {
-        feed.innerHTML = `<div style="text-align:center; padding: 40px; opacity:0.5;">暂无动态</div>`;
+      if(!posts || posts.length === 0) {
+        container.innerHTML = `<div class="loading-ui">这里空空如也...</div>`;
         return;
       }
 
-      feed.innerHTML = posts.map(p => {
-        const isMyPost = p.actor_key === deviceId;
-        const isPostAdmin = p.user_name === ADMIN_NAME;
-        // 关键：本人或者管理员 xxz 均可看到删除按钮
-        const canDelete = isMyPost || isAdmin();
+      container.innerHTML = posts.map((p, i) => {
+        const isMe = p.actor_key === deviceKey;
+        const isAdmin = currentUser === ADMIN;
+        const isPostAdmin = p.user_name === ADMIN;
 
         return `
-          <div class="post glass-card" data-id="${p.id}">
-            <div class="post-header">
+          <div class="post glass-card" style="animation-delay: ${i*0.1}s">
+            <div class="post-head">
               <div class="avatar ${isPostAdmin ? 'admin' : ''}">${p.user_name[0].toUpperCase()}</div>
-              <div class="u-name">
-                ${p.user_name}
-                ${isPostAdmin ? '<span class="admin-badge">STAFF</span>' : ''}
+              <div class="user-info">
+                <b>${p.user_name} ${isPostAdmin ? '<span class="badge">STAFF</span>' : ''}</b>
+                <span style="font-size:11px; opacity:0.4;">${new Date(p.created_at).toLocaleString()}</span>
               </div>
             </div>
-            <div class="content">${p.content}</div>
-            ${p.media_url ? `<div class="media"><img src="${p.media_url}" /></div>` : ''}
-            <div class="actions">
-              <button class="action-btn">赞</button>
-              <button class="action-btn">评论</button>
-              ${canDelete ? `<button class="action-btn del" onclick="askDelete('${p.id}')">删除</button>` : ''}
+            <div class="post-content">${p.content}</div>
+            ${p.media_url ? `<img class="post-img" src="${p.media_url}" />` : ''}
+            <div class="post-foot">
+              <div class="action">❤️ 赞</div>
+              <div class="action">💬 评论</div>
+              ${(isMe || isAdmin) ? `<div class="action del" onclick="askDelete('${p.id}')">删除</div>` : ''}
             </div>
           </div>
         `;
       }).join("");
     }
 
-    // 初始化界面
-    if (user) {
-      document.getElementById("loginForm").style.display = "none";
-      document.getElementById("userInfo").style.display = "flex";
-      document.getElementById("curName").innerText = user + (isAdmin() ? " (管理员)" : "");
+    // 6. 初始化界面
+    if(currentUser) {
+      document.getElementById("loginGroup").style.display = "none";
+      document.getElementById("userGroup").style.display = "flex";
+      document.getElementById("curNick").innerText = currentUser;
     }
 
     loadFeed();
     // 实时监听
-    sb.channel('any').on('postgres_changes', { event: '*', schema: 'public' }, () => loadFeed()).subscribe();
+    sb.channel('v3-realtime').on('postgres_changes', { event: '*', schema: 'public' }, () => loadFeed()).subscribe();
   </script>
 </body>
 </html>
