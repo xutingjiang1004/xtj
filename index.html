@@ -2,18 +2,20 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>xtj</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root{
-      --bg: rgba(255,255,255,.12);
-      --bg2: rgba(255,255,255,.18);
-      --line: rgba(255,255,255,.18);
-      --text: #f7f7fb;
-      --muted: rgba(255,255,255,.72);
-      --shadow: 0 20px 60px rgba(0,0,0,.22);
+      --bg: rgba(255,255,255,.10);
+      --bg2: rgba(255,255,255,.16);
+      --line: rgba(255,255,255,.15);
+      --text: #f4f4fa;
+      --muted: rgba(255,255,255,.70);
+      --shadow: 0 20px 50px rgba(0,0,0,.25);
       --radius: 24px;
+      --accent: #8b7cf0;
+      --accent2: #5cc8ff;
     }
     *{box-sizing:border-box}
     body{
@@ -22,17 +24,20 @@
       color:var(--text);
       min-height:100vh;
       background:
-        radial-gradient(circle at top left, rgba(117,196,255,.45), transparent 30%),
-        radial-gradient(circle at top right, rgba(191,125,255,.35), transparent 28%),
-        radial-gradient(circle at bottom center, rgba(78,210,174,.25), transparent 28%),
-        linear-gradient(135deg, #0b1020, #141a33 45%, #0a0f1f);
+        radial-gradient(circle at 0% 0%, rgba(130,180,255,.35), transparent 35%),
+        radial-gradient(circle at 100% 0%, rgba(180,130,255,.30), transparent 30%),
+        radial-gradient(circle at 50% 100%, rgba(100,210,170,.25), transparent 30%),
+        linear-gradient(135deg, #0b1020 0%, #121a2f 50%, #0a0f1f 100%);
       padding:24px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
     }
     .wrap{
       max-width:1200px;
-      margin:0 auto;
+      width:100%;
       display:grid;
-      grid-template-columns: 360px 1fr;
+      grid-template-columns: 340px 1fr;
       gap:20px;
       align-items:start;
     }
@@ -40,76 +45,179 @@
       background:var(--bg);
       border:1px solid var(--line);
       box-shadow:var(--shadow);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border-radius:var(--radius);
+      transition: border-color .3s ease, box-shadow .3s ease;
     }
-    .panel{padding:20px}
+    .card:hover{
+      border-color: rgba(255,255,255,.22);
+      box-shadow: 0 24px 60px rgba(0,0,0,.30);
+    }
+    .panel{padding:18px 20px}
     h1,h2,h3,p{margin:0}
-    h1{font-size:28px; margin-bottom:6px}
-    .sub{color:var(--muted); font-size:14px; line-height:1.6}
-    .loginbar{
-      margin-top:12px;
-      padding:10px 12px;
-      border-radius:14px;
-      background: rgba(255,255,255,.08);
-      border:1px solid rgba(255,255,255,.12);
-      display:flex;
-      justify-content:space-between;
-      align-items:center;
-      font-size:13px;
-      color:var(--muted);
+    h1{font-size:26px; font-weight:700; letter-spacing: -0.3px; margin-bottom:4px}
+    .sub{color:var(--muted); font-size:13px; line-height:1.6}
+
+    /* 顶部紧凑登录区域 */
+    .auth-mini{
+      display: flex;
+      flex-direction: column;
+      gap:8px;
+      margin-top:4px;
+      margin-bottom:14px;
     }
-    .block{margin-top:18px}
+    .auth-mini input{
+      padding:10px 12px;
+      font-size:14px;
+      border-radius:14px;
+    }
+    .auth-row{
+      display: flex;
+      gap:8px;
+      align-items: center;
+    }
+    .auth-row button{
+      flex:1;
+      font-size:14px;
+      padding:10px 0;
+      margin:0;
+      white-space: nowrap;
+    }
+
+    .user-card{
+      display: flex;
+      align-items: center;
+      gap:10px;
+      background: rgba(255,255,255,.06);
+      border-radius:18px;
+      padding:10px 12px;
+      margin-bottom:12px;
+    }
+    .avatar-box{
+      position: relative;
+      width:40px;
+      height:40px;
+      border-radius:50%;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight:600;
+      color:#fff;
+      overflow:hidden;
+      flex-shrink:0;
+      box-shadow: 0 6px 18px rgba(0,0,0,.25);
+    }
+    .avatar-box img{
+      width:100%;
+      height:100%;
+      object-fit: cover;
+    }
+    .avatar-placeholder{
+      position: absolute;
+      inset:0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size:18px;
+      font-weight:700;
+      color:#fff;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+    }
+    .user-meta{
+      flex:1;
+      min-width:0;
+    }
+    .user-meta .name{
+      font-weight:700;
+      font-size:15px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .user-meta .status{
+      font-size:12px;
+      color:var(--muted);
+      margin-top:2px;
+    }
+    .logout-link{
+      color:var(--muted);
+      font-size:12px;
+      cursor:pointer;
+      text-decoration: underline;
+      margin-left:auto;
+    }
+
+    .block{margin-top:12px}
     input, textarea, button, select{
       width:100%;
       border-radius:16px;
       border:1px solid rgba(255,255,255,.16);
-      background: rgba(255,255,255,.10);
+      background: rgba(255,255,255,.08);
       color:var(--text);
       outline:none;
-      padding:12px 14px;
-      font-size:15px;
+      padding:11px 14px;
+      font-size:14px;
+      transition: .18s ease;
     }
-    textarea{min-height:110px; resize:vertical}
-    input::placeholder, textarea::placeholder{color:rgba(255,255,255,.5)}
+    input:focus, textarea:focus{
+      border-color: rgba(255,255,255,.35);
+      background: rgba(255,255,255,.12);
+      box-shadow: 0 0 0 3px rgba(120,120,255,.08);
+    }
+    textarea{min-height:100px; resize:vertical}
+    input::placeholder, textarea::placeholder{color:rgba(255,255,255,.45)}
     button{
       cursor:pointer;
-      background: linear-gradient(135deg, rgba(124,92,255,.95), rgba(60,180,255,.92));
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
       border:none;
       font-weight:700;
-      transition:.18s transform ease, .18s opacity ease;
-      margin-top:10px;
+      letter-spacing: 0.2px;
+      transition: transform .18s ease, opacity .18s ease, box-shadow .18s ease;
+      margin-top:8px;
+      position: relative;
+      overflow: hidden;
     }
-    button:hover{transform: translateY(-1px); opacity:.95}
+    button:active{ transform: scale(0.97); }
+    button:hover{ transform: translateY(-1px); opacity:.95; box-shadow: 0 12px 24px rgba(100,100,255,.18); }
     button.secondary{
-      background: rgba(255,255,255,.10);
-      border:1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.14);
       font-weight:600;
+      color:var(--text);
     }
+    button.secondary:hover{ background: rgba(255,255,255,.14); }
+
     .stats{
       display:grid;
       grid-template-columns: repeat(3,1fr);
-      gap:10px;
+      gap:8px;
       margin-top:14px;
     }
     .stat{
-      padding:14px;
-      border-radius:18px;
-      background: rgba(255,255,255,.08);
-      border:1px solid rgba(255,255,255,.12);
+      padding:12px 8px;
+      border-radius:16px;
+      background: rgba(255,255,255,.06);
+      border:1px solid rgba(255,255,255,.10);
+      text-align: center;
     }
-    .stat b{display:block; font-size:22px; margin-bottom:4px}
-    .stat span{font-size:12px; color:var(--muted)}
-    .feed{
-      display:grid;
-      gap:16px;
-    }
+    .stat b{display:block; font-size:20px; margin-bottom:2px}
+    .stat span{font-size:11px; color:var(--muted)}
+
+    .feed{ display:grid; gap:16px; }
     .post{
       padding:18px;
       border-radius:22px;
-      background: rgba(255,255,255,.10);
-      border:1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.12);
+      transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .3s ease, border-color .3s ease;
+      will-change: transform;
+    }
+    .post:hover{
+      transform: translateY(-2px);
+      box-shadow: 0 14px 35px rgba(0,0,0,.25);
+      border-color: rgba(255,255,255,.20);
     }
     .meta{
       display:flex;
@@ -118,7 +226,7 @@
       align-items:center;
       color:var(--muted);
       font-size:13px;
-      margin-bottom:12px;
+      margin-bottom:10px;
     }
     .user{
       font-weight:700;
@@ -129,25 +237,28 @@
       gap:8px;
     }
     .avatar{
-      width:26px;
-      height:26px;
+      width:30px;
+      height:30px;
       border-radius:50%;
       display:inline-flex;
       align-items:center;
       justify-content:center;
-      font-size:12px;
+      font-size:13px;
+      font-weight:700;
       color:#fff;
-      background: linear-gradient(135deg, #7c5cff, #3cb4ff);
-      border:1px solid rgba(255,255,255,.2);
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      overflow:hidden;
+      border:1px solid rgba(255,255,255,.15);
     }
-    .content{white-space:pre-wrap; line-height:1.7; margin-bottom:12px}
+    .avatar img{ width:100%; height:100%; object-fit:cover; }
+    .content{white-space:pre-wrap; line-height:1.7; margin-bottom:10px; word-break: break-word;}
     .media{
       width:100%;
       border-radius:18px;
       overflow:hidden;
       margin:10px 0 12px;
-      border:1px solid rgba(255,255,255,.10);
-      background: rgba(0,0,0,.18);
+      border:1px solid rgba(255,255,255,.08);
+      background: rgba(0,0,0,.20);
     }
     .media img, .media video{
       display:block;
@@ -157,34 +268,47 @@
     }
     .actions{
       display:flex;
-      gap:10px;
+      gap:8px;
       flex-wrap:wrap;
-      margin-top:10px;
+      align-items:center;
+      margin-top:8px;
     }
     .actions button{
       width:auto;
       margin-top:0;
-      padding:10px 14px;
+      padding:8px 14px;
       border-radius:999px;
-      background: rgba(255,255,255,.10);
-      border:1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.14);
       font-weight:600;
+      font-size:13px;
     }
+    .actions button:disabled{ opacity:0.5; cursor:default; transform:none; }
     .comments{
       margin-top:12px;
-      padding-top:12px;
-      border-top:1px solid rgba(255,255,255,.10);
+      padding-top:10px;
+      border-top:1px solid rgba(255,255,255,.08);
       display:grid;
-      gap:8px;
+      gap:6px;
     }
     .comment{
       padding:10px 12px;
       border-radius:14px;
-      background: rgba(255,255,255,.07);
-      border:1px solid rgba(255,255,255,.08);
-      font-size:14px;
+      background: rgba(255,255,255,.05);
+      border:1px solid rgba(255,255,255,.07);
+      font-size:13px;
       line-height:1.6;
+      display: flex;
+      gap:8px;
+      align-items: flex-start;
     }
+    .comment .avatar{
+      width:24px;
+      height:24px;
+      font-size:11px;
+      flex-shrink:0;
+    }
+    .comment-body{ flex:1; min-width:0; }
     .comment b{font-weight:700}
     .small{font-size:12px; color:var(--muted)}
     .toprow{
@@ -197,23 +321,25 @@
     .tag{
       display:inline-flex;
       align-items:center;
-      gap:6px;
-      padding:8px 12px;
+      gap:5px;
+      padding:6px 12px;
       border-radius:999px;
-      background: rgba(255,255,255,.08);
+      background: rgba(255,255,255,.07);
       color:var(--muted);
-      font-size:12px;
-      border:1px solid rgba(255,255,255,.10);
+      font-size:11px;
+      border:1px solid rgba(255,255,255,.08);
     }
     .empty{
-      padding:26px;
+      padding:28px;
       text-align:center;
       color:var(--muted);
     }
+
     .modal{
       position:fixed;
       inset:0;
-      background:rgba(5,10,24,.52);
+      background:rgba(5,10,24,.60);
+      backdrop-filter: blur(6px);
       display:none;
       align-items:center;
       justify-content:center;
@@ -223,22 +349,53 @@
     .modal.show{display:flex}
     .modal-card{
       width:min(560px,100%);
-      border-radius:18px;
-      border:1px solid rgba(255,255,255,.18);
-      background:rgba(22,28,52,.92);
-      box-shadow:0 18px 56px rgba(0,0,0,.35);
-      padding:16px;
+      border-radius:20px;
+      border:1px solid rgba(255,255,255,.15);
+      background:rgba(18,24,44,.90);
+      box-shadow:0 18px 56px rgba(0,0,0,.40);
+      padding:20px;
+      backdrop-filter: blur(18px);
     }
     .modal-actions{
-      margin-top:12px;
+      margin-top:14px;
       display:flex;
       gap:10px;
       justify-content:flex-end;
     }
     .modal-actions button{width:auto;margin-top:0}
-    @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-    .post{transition:transform .2s ease, box-shadow .2s ease;}
-    .post:hover{transform:translateY(-2px); box-shadow:0 12px 30px rgba(0,0,0,.18);}
+
+    /* 点赞回弹动画 */
+    .like-pop{
+      animation: likeBounce 0.35s cubic-bezier(.34,1.56,.64,1);
+    }
+    @keyframes likeBounce{
+      0%{ transform: scale(1); }
+      30%{ transform: scale(1.25); }
+      60%{ transform: scale(0.95); }
+      100%{ transform: scale(1); }
+    }
+    @keyframes fadeUp{
+      from{ opacity:0; transform:translateY(8px); }
+      to{ opacity:1; transform:translateY(0); }
+    }
+    .post{ animation: fadeUp .3s ease both; }
+
+    /* 文件上传按钮样式 */
+    .file-label{
+      display: inline-block;
+      padding:8px 14px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.14);
+      color:var(--text);
+      font-size:13px;
+      cursor:pointer;
+      transition: .18s ease;
+      margin-top:6px;
+    }
+    .file-label:hover{ background: rgba(255,255,255,.14); }
+    input[type=file]{ display: none; }
+
     @media (max-width: 980px){
       .wrap{grid-template-columns:1fr}
     }
@@ -246,50 +403,69 @@
 </head>
 <body>
   <div class="wrap">
+    <!-- 左侧：个人信息 + 发布 -->
     <div class="card panel">
       <h1>xtj</h1>
-      <p class="sub">昵称登录、发动态、传图传视频、点赞、评论、浏览统计。先把能跑的做出来，别一上来就拿“未来感”糊墙。</p>
-      <div class="loginbar">
-        <span>登录状态</span>
-        <b id="loginState">未登录</b>
-      </div>
+      <p class="sub">轻量社区·先让核心跑起来</p>
 
-      <div class="block card panel" style="padding:16px;">
-        <div class="toprow">
-          <div>
-            <div class="small">当前身份</div>
-            <div id="whoami" style="font-weight:700;margin-top:4px;">未登录</div>
-          </div>
-          <span class="tag">昵称登录</span>
+      <!-- 登录/注册区域 -->
+      <div id="authArea" class="auth-mini">
+        <input id="nickname" placeholder="昵称 (2-20字符)" />
+        <input id="password" type="password" placeholder="密码 (6位以上)" />
+        <div class="auth-row">
+          <button id="loginBtn">登录</button>
+          <button id="registerBtn" class="secondary">注册</button>
         </div>
-        <input id="nickname" placeholder="输入昵称" />
-        <button id="loginBtn">登录 / 切换昵称</button>
-        <button id="logoutBtn" class="secondary">退出</button>
       </div>
 
-      <div class="block card panel" style="padding:16px;">
-        <div class="small">发布动态</div>
+      <!-- 已登录状态卡片 -->
+      <div id="userCard" class="user-card" style="display:none;">
+        <div class="avatar-box">
+          <img id="userAvatarImg" src="" alt="avatar" style="display:none;" />
+          <div id="userAvatarPlaceholder" class="avatar-placeholder">?</div>
+        </div>
+        <div class="user-meta">
+          <div class="name" id="userNameDisplay"></div>
+          <div class="status" id="userStatus"></div>
+        </div>
+        <span class="logout-link" id="logoutLink">退出</span>
+      </div>
+
+      <!-- 头像上传 -->
+      <div id="avatarUploadArea" style="margin-bottom:12px; display:none;">
+        <label for="avatarFileInput" class="file-label">📷 上传头像</label>
+        <input type="file" id="avatarFileInput" accept="image/*" />
+      </div>
+
+      <!-- 发布动态 -->
+      <div class="block card panel" style="padding:14px;">
+        <div class="small" style="margin-bottom:6px;">发布动态</div>
         <textarea id="postText" placeholder="写点什么..."></textarea>
-        <input id="fileInput" type="file" accept="image/*,video/*" />
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <label for="fileInput" class="file-label">📎 图片/视频</label>
+          <input id="fileInput" type="file" accept="image/*,video/*" />
+          <span id="fileNameDisplay" class="small" style="margin-left:4px;"></span>
+        </div>
         <button id="postBtn">发布</button>
       </div>
 
       <div class="stats">
-        <div class="stat"><b id="sPosts">0</b><span>总动态</span></div>
-        <div class="stat"><b id="sViews">0</b><span>总浏览</span></div>
-        <div class="stat"><b id="sLikes">0</b><span>总点赞</span></div>
+        <div class="stat"><b id="sPosts">0</b><span>动态</span></div>
+        <div class="stat"><b id="sViews">0</b><span>浏览</span></div>
+        <div class="stat"><b id="sLikes">0</b><span>点赞</span></div>
       </div>
 
       <div class="block small" id="status" style="line-height:1.7;">准备就绪。</div>
     </div>
 
+    <!-- 右侧：动态流 -->
     <div class="card panel">
       <div class="toprow">
         <div>
-          <h2 style="font-size:22px;">动态流</h2>
-          <div class="small">右边这栏就是内容，不是装饰品。</div>
+          <h2 style="font-size:20px;">动态流</h2>
+          <div class="small">内容实时更新</div>
         </div>
-        <button id="refreshBtn" class="secondary" style="width:auto;padding:10px 14px;">刷新</button>
+        <button id="refreshBtn" class="secondary" style="width:auto;padding:8px 14px;">刷新</button>
       </div>
       <div id="feed" class="feed">
         <div class="empty">加载中...</div>
@@ -297,6 +473,7 @@
     </div>
   </div>
 
+  <!-- 评论模态框 -->
   <div class="modal" id="commentModal">
     <div class="modal-card">
       <h3 style="margin-bottom:8px;">发表评论</h3>
@@ -308,6 +485,7 @@
     </div>
   </div>
 
+  <!-- 删除确认模态框 -->
   <div class="modal" id="deleteModal">
     <div class="modal-card">
       <h3 style="margin-bottom:8px;">删除确认</h3>
@@ -320,26 +498,36 @@
   </div>
 
   <script>
+    // ---------- 配置 ----------
     const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
+
+    // ---------- 初始化 Supabase 客户端 ----------
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { persistSession: false }
     });
 
-    let currentUser = localStorage.getItem("xtj_user") || "";
-    const deviceId = localStorage.getItem("xtj_device_id") || crypto.randomUUID();
-    localStorage.setItem("xtj_device_id", deviceId);
-
+    // ---------- 全局状态 ----------
+    let currentUser = "";               // 当前登录用户名
+    let sessionToken = null;           // JWT token
+    let avatarUrl = "";                // 当前用户头像 URL
     let postsCache = [];
     let commentsCache = [];
     let likesCache = [];
+    let avatarMap = {};                // username -> avatar URL 缓存
     let pendingCommentPostId = null;
     let pendingDeletePostId = null;
+    const deviceId = localStorage.getItem("xtj_device_id") || crypto.randomUUID();
+    localStorage.setItem("xtj_device_id", deviceId);
+
+    // 浏览去重 key
     const viewedKey = (id) => `xtj_viewed_${id}`;
 
+    // ---------- DOM 工具 ----------
     const el = (id) => document.getElementById(id);
     const status = (msg) => { el("status").textContent = msg; };
 
+    // ---------- 安全工具 ----------
     function escapeHtml(text) {
       return String(text ?? "")
         .replaceAll("&", "&amp;")
@@ -349,38 +537,228 @@
         .replaceAll("'", "&#39;");
     }
 
+    function sanitizeInput(str) {
+      return str.replace(/[<>"']/g, "");
+    }
+
+    // 防抖
+    function debounce(fn, delay = 300) {
+      let timer;
+      return function(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+      };
+    }
+
+    // ---------- 认证与登录 ----------
     function requireLogin(actionName = "操作") {
-      if (currentUser) return true;
+      if (sessionToken && currentUser) return true;
       alert(`请先登录后再${actionName}`);
       el("nickname").focus();
       return false;
     }
 
-    function renderUser() {
-      el("whoami").textContent = currentUser ? `@${currentUser}` : "未登录";
-      el("nickname").value = currentUser;
-      el("loginState").textContent = currentUser ? `@${currentUser}` : "未登录";
+    function showAuthUI() {
+      el("authArea").style.display = "flex";
+      el("userCard").style.display = "none";
+      el("avatarUploadArea").style.display = "none";
+    }
+
+    function showUserUI() {
+      el("authArea").style.display = "none";
+      el("userCard").style.display = "flex";
+      el("avatarUploadArea").style.display = "flex";
+      el("userNameDisplay").textContent = `@${currentUser}`;
+      el("userStatus").textContent = "已登录";
+      updateAvatarDisplay();
+    }
+
+    function updateAvatarDisplay() {
+      const img = el("userAvatarImg");
+      const placeholder = el("userAvatarPlaceholder");
+      if (avatarUrl) {
+        img.src = avatarUrl;
+        img.style.display = "block";
+        placeholder.style.display = "none";
+      } else {
+        img.style.display = "none";
+        placeholder.style.display = "flex";
+        placeholder.textContent = (currentUser || "?").slice(0,1).toUpperCase();
+      }
+    }
+
+    async function restoreSession() {
+      const savedToken = localStorage.getItem("xtj_token");
+      const savedUser = localStorage.getItem("xtj_user");
+      if (savedToken && savedUser) {
+        try {
+          const { error } = await client.auth.setSession({ access_token: savedToken, refresh_token: "" });
+          if (error) throw error;
+          sessionToken = savedToken;
+          currentUser = savedUser;
+          avatarUrl = localStorage.getItem("xtj_avatar") || "";
+          showUserUI();
+          status(`已恢复登录：@${currentUser}`);
+          return true;
+        } catch (e) {
+          console.warn("会话恢复失败，请重新登录", e);
+          clearSession();
+        }
+      }
+      showAuthUI();
+      return false;
+    }
+
+    function clearSession() {
+      sessionToken = null;
+      currentUser = "";
+      avatarUrl = "";
+      localStorage.removeItem("xtj_token");
+      localStorage.removeItem("xtj_user");
+      localStorage.removeItem("xtj_avatar");
+      client.auth.signOut().catch(() => {});
+      showAuthUI();
+      el("nickname").value = "";
+      el("password").value = "";
     }
 
     async function login() {
-      const name = el("nickname").value.trim();
-      if (!name) return alert("请输入昵称");
-      if (name.length < 2 || name.length > 20) return alert("昵称长度需在 2~20 之间");
-      currentUser = name;
-      localStorage.setItem("xtj_user", currentUser);
-      renderUser();
-      status(`已登录：@${currentUser}`);
+      const nickname = el("nickname").value.trim();
+      const password = el("password").value;
+      if (!nickname || !password) return alert("请输入昵称和密码");
+      if (nickname.length < 2 || nickname.length > 20) return alert("昵称长度 2-20 字符");
+      if (password.length < 6) return alert("密码至少6位");
+
+      status("登录中...");
+      try {
+        const { data, error } = await client.rpc("login_user", {
+          p_nickname: nickname,
+          p_password: password
+        });
+        if (error) throw error;
+        if (!data || !data.token) throw new Error("登录失败，服务器返回异常");
+
+        // 设置 session
+        const { error: authError } = await client.auth.setSession({
+          access_token: data.token,
+          refresh_token: ""
+        });
+        if (authError) throw authError;
+
+        sessionToken = data.token;
+        currentUser = data.user_name || nickname;
+        avatarUrl = data.avatar_url || "";
+        localStorage.setItem("xtj_token", sessionToken);
+        localStorage.setItem("xtj_user", currentUser);
+        localStorage.setItem("xtj_avatar", avatarUrl);
+
+        showUserUI();
+        status(`已登录：@${currentUser}`);
+        await loadAll();
+      } catch (err) {
+        console.error(err);
+        alert("登录失败：" + (err.message || "未知错误"));
+        status("登录失败");
+        clearSession();
+      }
     }
 
-    function logout() {
-      currentUser = "";
-      localStorage.removeItem("xtj_user");
-      renderUser();
+    async function register() {
+      const nickname = el("nickname").value.trim();
+      const password = el("password").value;
+      if (!nickname || !password) return alert("请输入昵称和密码");
+      if (nickname.length < 2 || nickname.length > 20) return alert("昵称长度 2-20 字符");
+      if (password.length < 6) return alert("密码至少6位");
+
+      status("注册中...");
+      try {
+        const { data, error } = await client.rpc("register_user", {
+          p_nickname: nickname,
+          p_password: password
+        });
+        if (error) throw error;
+        if (!data || !data.token) throw new Error("注册失败，服务器返回异常");
+
+        const { error: authError } = await client.auth.setSession({
+          access_token: data.token,
+          refresh_token: ""
+        });
+        if (authError) throw authError;
+
+        sessionToken = data.token;
+        currentUser = data.user_name || nickname;
+        avatarUrl = data.avatar_url || "";
+        localStorage.setItem("xtj_token", sessionToken);
+        localStorage.setItem("xtj_user", currentUser);
+        localStorage.setItem("xtj_avatar", avatarUrl);
+
+        showUserUI();
+        status(`注册成功，已登录：@${currentUser}`);
+        await loadAll();
+      } catch (err) {
+        console.error(err);
+        alert("注册失败：" + (err.message || "未知错误"));
+        status("注册失败");
+      }
+    }
+
+    async function logout() {
+      clearSession();
       status("已退出登录");
+      await loadAll(); // 刷新公开内容
     }
 
+    // ---------- 头像上传 ----------
+    async function uploadAvatar(file) {
+      if (!requireLogin("上传头像")) return;
+      if (!file) return;
+      // 文件类型校验
+      const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+      if (!allowedTypes.includes(file.type)) return alert("头像仅支持 JPEG/PNG/WebP/GIF");
+      if (file.size > 2 * 1024 * 1024) return alert("头像大小不能超过 2MB");
+
+      const safeName = `avatar_${currentUser}_${Date.now()}.${file.name.split(".").pop()}`;
+      status("上传头像中...");
+      try {
+        const { error: uploadError } = await client.storage.from("avatars").upload(safeName, file, {
+          cacheControl: "3600",
+          upsert: true
+        });
+        if (uploadError) throw uploadError;
+        const { data: urlData } = client.storage.from("avatars").getPublicUrl(safeName);
+        const newAvatarUrl = urlData.publicUrl;
+
+        // 更新用户头像
+        const { error: updateError } = await client.rpc("update_user_avatar", {
+          p_avatar_url: newAvatarUrl
+        });
+        if (updateError) throw updateError;
+
+        avatarUrl = newAvatarUrl;
+        localStorage.setItem("xtj_avatar", avatarUrl);
+        updateAvatarDisplay();
+        status("头像更新成功");
+        await loadAll(); // 刷新内容中的头像显示
+      } catch (err) {
+        console.error(err);
+        alert("头像上传失败：" + (err.message || "未知错误"));
+        status("头像上传失败");
+      }
+    }
+
+    // ---------- 媒体上传（发布用） ----------
     async function uploadMedia(file) {
-      const safeName = `${Date.now()}_${deviceId}_${file.name.replace(/[^\w.\-]/g, "_")}`;
+      const maxImageSize = 5 * 1024 * 1024;
+      const maxVideoSize = 20 * 1024 * 1024;
+      const imageTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+      const videoTypes = ["video/mp4", "video/webm"];
+
+      if (imageTypes.includes(file.type) && file.size > maxImageSize) throw new Error("图片不能超过5MB");
+      if (videoTypes.includes(file.type) && file.size > maxVideoSize) throw new Error("视频不能超过20MB");
+      if (!imageTypes.includes(file.type) && !videoTypes.includes(file.type)) throw new Error("不支持的文件类型");
+
+      const ext = file.name.split(".").pop();
+      const safeName = `${Date.now()}_${deviceId}.${ext}`;
       const { data, error } = await client.storage.from("uploads").upload(safeName, file, {
         cacheControl: "3600",
         upsert: false
@@ -390,13 +768,14 @@
       return urlData.publicUrl;
     }
 
-    async function publishPost() {
+    // ---------- 发布动态 ----------
+    const publishPost = debounce(async function() {
       if (!requireLogin("发布")) return;
       const content = el("postText").value.trim();
       const file = el("fileInput").files[0];
-      if (!content && !file) return alert("至少写点文字或上传一个文件");
+      if (!content && !file) return alert("至少写点文字或上传文件");
 
-      status("正在发布...");
+      status("发布中...");
       let media_url = "";
       let media_type = "";
 
@@ -417,23 +796,32 @@
 
         el("postText").value = "";
         el("fileInput").value = "";
+        el("fileNameDisplay").textContent = "";
         status("发布成功");
         await loadAll();
       } catch (err) {
         console.error(err);
-        status(`发布失败：${err.message || "未知错误"}`);
+        alert("发布失败：" + (err.message || "未知错误"));
+        status("发布失败");
       }
-    }
+    }, 500);
 
-    async function likePost(postId) {
+    // ---------- 点赞 ----------
+    async function likePost(postId, event) {
       if (!requireLogin("点赞")) return;
+      // 动画触发
+      const btn = event?.currentTarget;
+      if (btn) {
+        btn.classList.add("like-pop");
+        setTimeout(() => btn.classList.remove("like-pop"), 400);
+      }
+
       try {
         const { error } = await client.from("likes").insert([{
           post_id: postId,
           user_name: currentUser,
           actor_key: deviceId
         }]);
-
         if (error) {
           if (error.code === "23505" || String(error.message || "").toLowerCase().includes("duplicate")) {
             status("你已经点过赞了");
@@ -441,16 +829,16 @@
           }
           throw error;
         }
-
         status("点赞成功");
         await loadAll();
       } catch (err) {
         console.error(err);
-        alert("点赞失败，请确认数据库约束和 RLS");
+        alert("点赞失败，请确认权限设定");
       }
     }
 
-    async function commentPost(postId) {
+    // ---------- 评论 ----------
+    function commentPost(postId) {
       if (!requireLogin("评论")) return;
       pendingCommentPostId = postId;
       el("commentText").value = "";
@@ -460,13 +848,12 @@
 
     async function submitCommentModal() {
       const text = el("commentText").value.trim();
-      if (!text || !text.trim() || !pendingCommentPostId) return;
-
+      if (!text || !pendingCommentPostId) return;
       try {
         const { error } = await client.from("comments").insert([{
           post_id: pendingCommentPostId,
           user_name: currentUser,
-          content: text.trim(),
+          content: text,
           actor_key: deviceId
         }]);
         if (error) throw error;
@@ -475,10 +862,11 @@
         await loadAll();
       } catch (err) {
         console.error(err);
-        alert("评论失败，请确认 comments 表权限");
+        alert("评论失败：" + (err.message || "未知错误"));
       }
     }
 
+    // ---------- 删除与私密 ----------
     async function deletePost(postId) {
       if (!requireLogin("删除")) return;
       pendingDeletePostId = postId;
@@ -488,32 +876,58 @@
     async function submitDeleteModal() {
       if (!pendingDeletePostId) return;
       try {
-        const { data, error } = await client.rpc("delete_post_with_actor", { p_post_id: pendingDeletePostId, p_actor_key: deviceId });
+        const { data, error } = await client.rpc("delete_post_with_actor", {
+          p_post_id: pendingDeletePostId
+        });
         if (error) throw error;
-        if (!data) return alert("你不是发布者，不能删除这条动态");
+        if (!data) {
+          alert("你没有权限删除此动态");
+        } else {
+          status("删除成功");
+        }
         closeDeleteModal();
-        status("删除成功");
         await loadAll();
       } catch (err) {
         console.error(err);
-        alert("删除失败，请确认 delete_post_with_actor 函数已创建");
+        alert("删除失败：" + (err.message || "未知错误"));
       }
     }
 
+    async function togglePrivacy(postId) {
+      if (!requireLogin("修改权限")) return;
+      try {
+        const { error } = await client.rpc("toggle_post_privacy", {
+          p_post_id: postId
+        });
+        if (error) throw error;
+        status("私密状态已更新");
+        await loadAll();
+      } catch (err) {
+        console.error(err);
+        alert("操作失败：" + (err.message || "未知错误"));
+      }
+    }
+
+    // ---------- 模态框控制 ----------
     function closeCommentModal() {
       pendingCommentPostId = null;
       el("commentModal").classList.remove("show");
     }
-
     function closeDeleteModal() {
       pendingDeletePostId = null;
       el("deleteModal").classList.remove("show");
     }
 
-    function avatarOf(name) {
-      return `<span class="avatar">${escapeHtml(String(name || "?").slice(0, 1).toUpperCase())}</span>`;
+    // ---------- 头像辅助 ----------
+    function getUserAvatar(name) {
+      const url = avatarMap[name];
+      if (url) {
+        return `<img src="${escapeHtml(url)}" alt="avatar" />`;
+      }
+      return escapeHtml((name || "?").slice(0, 1).toUpperCase());
     }
 
+    // ---------- 浏览统计 ----------
     async function trackView(postId) {
       if (localStorage.getItem(viewedKey(postId)) === "1") return;
       localStorage.setItem(viewedKey(postId), "1");
@@ -521,6 +935,7 @@
       if (error) console.error("view error:", error);
     }
 
+    // ---------- 数据分组 ----------
     function groupByPost(rows) {
       const map = {};
       for (const row of rows) {
@@ -530,6 +945,7 @@
       return map;
     }
 
+    // ---------- 渲染动态流 ----------
     function renderFeed() {
       const feed = el("feed");
       if (!postsCache.length) {
@@ -543,34 +959,48 @@
       feed.innerHTML = postsCache.map((p) => {
         const comments = commentMap[p.id] || [];
         const likes = likeMap[p.id] || [];
-        const likedByMe = likes.some((l) => l.actor_key === deviceId);
-        const canDelete = p.actor_key === deviceId;
+        const likedByMe = likes.some((l) => l.user_name === currentUser);
+        const isAuthor = (p.user_name === currentUser);
+        const canDelete = isAuthor;
+        const privacyLabel = p.is_private ? " 🔒 私密" : "";
 
         const media = p.media_url ? (
           p.media_type === "image"
-            ? `<div class="media"><img src="${escapeHtml(p.media_url)}" alt="media" /></div>`
-            : `<div class="media"><video src="${escapeHtml(p.media_url)}" controls></video></div>`
+            ? `<div class="media"><img src="${escapeHtml(p.media_url)}" alt="media" loading="lazy" /></div>`
+            : `<div class="media"><video src="${escapeHtml(p.media_url)}" controls preload="metadata"></video></div>`
         ) : "";
 
         const commentsHtml = comments.length
-          ? comments.map(c => `<div class="comment"><b>${escapeHtml(c.user_name)}</b>：${escapeHtml(c.content)}</div>`).join("")
+          ? comments.map(c => {
+              const cAvatar = getUserAvatar(c.user_name);
+              return `<div class="comment">
+                <div class="avatar">${cAvatar}</div>
+                <div class="comment-body"><b>${escapeHtml(c.user_name)}</b>：${escapeHtml(c.content)}</div>
+              </div>`;
+            }).join("")
           : `<div class="small">暂无评论</div>`;
 
         queueMicrotask(() => trackView(p.id));
 
         return `
-          <article class="post" style="animation:fadeUp .35s ease both;">
+          <article class="post">
             <div class="meta">
-              <div class="user">${avatarOf(p.user_name)}${escapeHtml(p.user_name)}</div>
+              <div class="user">
+                <div class="avatar">${getUserAvatar(p.user_name)}</div>
+                ${escapeHtml(p.user_name)}${privacyLabel}
+              </div>
               <div>${new Date(p.created_at).toLocaleString()}</div>
             </div>
             <div class="content">${escapeHtml(p.content)}</div>
             ${media}
             <div class="small">浏览 ${p.views || 0} · 点赞 ${likes.length} · 评论 ${comments.length}</div>
             <div class="actions">
-              <button ${likedByMe ? "disabled" : ""} onclick="likePost('${p.id}')">${likedByMe ? "已点赞" : "点赞"}</button>
-              <button onclick="commentPost('${p.id}')">评论</button>
-              ${canDelete ? `<button onclick="deletePost('${p.id}')">删除</button>` : ""}
+              <button ${likedByMe ? "disabled" : ""} onclick="likePost('${p.id}', event)" title="${likedByMe ? '已点赞' : '点赞'}">
+                ${likedByMe ? "❤️ 已点赞" : "🤍 点赞"}
+              </button>
+              <button onclick="commentPost('${p.id}')">💬 评论</button>
+              ${canDelete ? `<button onclick="deletePost('${p.id}')">🗑 删除</button>` : ""}
+              ${isAuthor ? `<button onclick="togglePrivacy('${p.id}')">${p.is_private ? '🔓 设为公开' : '🔒 设为私密'}</button>` : ""}
             </div>
             <div class="comments">${commentsHtml}</div>
           </article>
@@ -578,6 +1008,7 @@
       }).join("");
     }
 
+    // ---------- 加载所有数据 ----------
     async function loadAll() {
       try {
         status("加载中...");
@@ -599,6 +1030,21 @@
         el("sViews").textContent = postsCache.reduce((sum, p) => sum + (p.views || 0), 0);
         el("sLikes").textContent = likesCache.length;
 
+        // 批量获取用户头像
+        const usernames = new Set();
+        postsCache.forEach(p => usernames.add(p.user_name));
+        commentsCache.forEach(c => usernames.add(c.user_name));
+        if (currentUser) usernames.add(currentUser);
+        if (usernames.size > 0) {
+          const { data: usersData } = await client.from("users")
+            .select("user_name, avatar_url")
+            .in("user_name", Array.from(usernames));
+          if (usersData) {
+            avatarMap = {};
+            usersData.forEach(u => { avatarMap[u.user_name] = u.avatar_url; });
+          }
+        }
+
         renderFeed();
         status(`已加载 ${postsCache.length} 条动态`);
       } catch (err) {
@@ -608,6 +1054,7 @@
       }
     }
 
+    // ---------- 实时订阅 ----------
     function setupRealtime() {
       client.channel("xtj-feed")
         .on("postgres_changes", { event: "*", schema: "public", table: "posts" }, loadAll)
@@ -616,18 +1063,22 @@
         .subscribe();
     }
 
+    // ---------- 事件绑定 ----------
     window.login = login;
+    window.register = register;
     window.logout = logout;
     window.likePost = likePost;
     window.commentPost = commentPost;
     window.deletePost = deletePost;
+    window.togglePrivacy = togglePrivacy;
     window.submitCommentModal = submitCommentModal;
     window.submitDeleteModal = submitDeleteModal;
     window.closeCommentModal = closeCommentModal;
     window.closeDeleteModal = closeDeleteModal;
 
     el("loginBtn").addEventListener("click", login);
-    el("logoutBtn").addEventListener("click", logout);
+    el("registerBtn").addEventListener("click", register);
+    el("logoutLink").addEventListener("click", logout);
     el("postBtn").addEventListener("click", publishPost);
     el("refreshBtn").addEventListener("click", loadAll);
     el("commentCancelBtn").addEventListener("click", closeCommentModal);
@@ -642,9 +1093,23 @@
       closeDeleteModal();
     });
 
-    renderUser();
-    loadAll();
-    setupRealtime();
+    // 文件选择显示文件名
+    el("fileInput").addEventListener("change", () => {
+      const file = el("fileInput").files[0];
+      el("fileNameDisplay").textContent = file ? file.name : "";
+    });
+
+    // 头像上传
+    el("avatarFileInput").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (file) uploadAvatar(file);
+    });
+
+    // 启动时恢复会话
+    restoreSession().then(() => {
+      loadAll();
+      setupRealtime();
+    });
   </script>
 </body>
 </html>
