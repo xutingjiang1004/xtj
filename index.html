@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>液态朋友圈</title>
+  <title>xtj</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root{
@@ -48,6 +48,18 @@
     h1,h2,h3,p{margin:0}
     h1{font-size:28px; margin-bottom:6px}
     .sub{color:var(--muted); font-size:14px; line-height:1.6}
+    .loginbar{
+      margin-top:12px;
+      padding:10px 12px;
+      border-radius:14px;
+      background: rgba(255,255,255,.08);
+      border:1px solid rgba(255,255,255,.12);
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      font-size:13px;
+      color:var(--muted);
+    }
     .block{margin-top:18px}
     input, textarea, button, select{
       width:100%;
@@ -112,6 +124,21 @@
       font-weight:700;
       color:var(--text);
       font-size:15px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+    .avatar{
+      width:26px;
+      height:26px;
+      border-radius:50%;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      font-size:12px;
+      color:#fff;
+      background: linear-gradient(135deg, #7c5cff, #3cb4ff);
+      border:1px solid rgba(255,255,255,.2);
     }
     .content{white-space:pre-wrap; line-height:1.7; margin-bottom:12px}
     .media{
@@ -183,6 +210,35 @@
       text-align:center;
       color:var(--muted);
     }
+    .modal{
+      position:fixed;
+      inset:0;
+      background:rgba(5,10,24,.52);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      z-index:50;
+      padding:16px;
+    }
+    .modal.show{display:flex}
+    .modal-card{
+      width:min(560px,100%);
+      border-radius:18px;
+      border:1px solid rgba(255,255,255,.18);
+      background:rgba(22,28,52,.92);
+      box-shadow:0 18px 56px rgba(0,0,0,.35);
+      padding:16px;
+    }
+    .modal-actions{
+      margin-top:12px;
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+    }
+    .modal-actions button{width:auto;margin-top:0}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .post{transition:transform .2s ease, box-shadow .2s ease;}
+    .post:hover{transform:translateY(-2px); box-shadow:0 12px 30px rgba(0,0,0,.18);}
     @media (max-width: 980px){
       .wrap{grid-template-columns:1fr}
     }
@@ -191,8 +247,12 @@
 <body>
   <div class="wrap">
     <div class="card panel">
-      <h1>液态朋友圈</h1>
+      <h1>xtj</h1>
       <p class="sub">昵称登录、发动态、传图传视频、点赞、评论、浏览统计。先把能跑的做出来，别一上来就拿“未来感”糊墙。</p>
+      <div class="loginbar">
+        <span>登录状态</span>
+        <b id="loginState">未登录</b>
+      </div>
 
       <div class="block card panel" style="padding:16px;">
         <div class="toprow">
@@ -237,14 +297,46 @@
     </div>
   </div>
 
+  <div class="modal" id="commentModal">
+    <div class="modal-card">
+      <h3 style="margin-bottom:8px;">发表评论</h3>
+      <textarea id="commentText" placeholder="写下你的想法..." style="min-height:120px;"></textarea>
+      <div class="modal-actions">
+        <button class="secondary" id="commentCancelBtn" type="button">取消</button>
+        <button id="commentSubmitBtn" type="button">发布评论</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="deleteModal">
+    <div class="modal-card">
+      <h3 style="margin-bottom:8px;">删除确认</h3>
+      <p class="small">删除后不可恢复，确认继续吗？</p>
+      <div class="modal-actions">
+        <button class="secondary" id="deleteCancelBtn" type="button">取消</button>
+        <button id="deleteConfirmBtn" type="button">确认删除</button>
+      </div>
+    </div>
+  </div>
+
   <script>
-    const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
-    const SUPABASE_KEY = "sb_publishable_RFqxlLe3nKnbs_PUHrJjpg_AUVaOGbu";
-    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    // ===== 用户私有配置区（建议只改这里）=====
+    const SUPABASE_URL = window.SUPABASE_URL || "https://ithowxqignlhkwaykglt.supabase.co";
+    const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
+    // ======================================
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false }
+    });
 
     let currentUser = localStorage.getItem("xtj_user") || "";
+    const deviceId = localStorage.getItem("xtj_device_id") || crypto.randomUUID();
+    localStorage.setItem("xtj_device_id", deviceId);
+
     let postsCache = [];
     let commentsCache = [];
+    let likesCache = [];
+    let pendingCommentPostId = null;
+    let pendingDeletePostId = null;
     const viewedKey = (id) => `xtj_viewed_${id}`;
 
     const el = (id) => document.getElementById(id);
@@ -259,17 +351,23 @@
         .replaceAll("'", "&#39;");
     }
 
+    function requireLogin(actionName = "操作") {
+      if (currentUser) return true;
+      alert(`请先登录后再${actionName}`);
+      el("nickname").focus();
+      return false;
+    }
+
     function renderUser() {
       el("whoami").textContent = currentUser ? `@${currentUser}` : "未登录";
       el("nickname").value = currentUser;
+      el("loginState").textContent = currentUser ? `@${currentUser}` : "未登录";
     }
 
     async function login() {
       const name = el("nickname").value.trim();
-      if (!name) {
-        alert("先输昵称");
-        return;
-      }
+      if (!name) return alert("请输入昵称");
+      if (name.length < 2 || name.length > 20) return alert("昵称长度需在 2~20 之间");
       currentUser = name;
       localStorage.setItem("xtj_user", currentUser);
       renderUser();
@@ -284,7 +382,7 @@
     }
 
     async function uploadMedia(file) {
-      const safeName = `${Date.now()}_${crypto.randomUUID()}_${file.name.replace(/[^\w.\-]/g, "_")}`;
+      const safeName = `${Date.now()}_${deviceId}_${file.name.replace(/[^\w.\-]/g, "_")}`;
       const { data, error } = await client.storage.from("uploads").upload(safeName, file, {
         cacheControl: "3600",
         upsert: false
@@ -295,21 +393,12 @@
     }
 
     async function publishPost() {
-      if (!currentUser) {
-        alert("先登录");
-        return;
-      }
-
+      if (!requireLogin("发布")) return;
       const content = el("postText").value.trim();
       const file = el("fileInput").files[0];
-
-      if (!content && !file) {
-        alert("至少写点文字或上传一个文件");
-        return;
-      }
+      if (!content && !file) return alert("至少写点文字或上传一个文件");
 
       status("正在发布...");
-
       let media_url = "";
       let media_type = "";
 
@@ -321,11 +410,11 @@
 
         const { error } = await client.from("posts").insert([{
           user_name: currentUser,
+          actor_key: deviceId,
           content,
           media_url,
           media_type
         }]);
-
         if (error) throw error;
 
         el("postText").value = "";
@@ -334,73 +423,111 @@
         await loadAll();
       } catch (err) {
         console.error(err);
-        status("发布失败，打开控制台看报错");
-        alert("发布失败");
+        status(`发布失败：${err.message || "未知错误"}`);
       }
     }
 
     async function likePost(postId) {
-      if (!currentUser) {
-        alert("先登录");
-        return;
-      }
+      if (!requireLogin("点赞")) return;
       try {
         const { error } = await client.from("likes").insert([{
           post_id: postId,
-          user_name: currentUser
+          user_name: currentUser,
+          actor_key: deviceId
         }]);
+
         if (error) {
-          if (String(error.message || "").toLowerCase().includes("duplicate")) {
-            alert("你已经点过赞了");
+          if (error.code === "23505" || String(error.message || "").toLowerCase().includes("duplicate")) {
+            status("你已经点过赞了");
             return;
           }
           throw error;
         }
+
+        status("点赞成功");
         await loadAll();
       } catch (err) {
         console.error(err);
-        alert("点赞失败");
+        alert("点赞失败，请确认数据库约束和 RLS");
       }
     }
 
     async function commentPost(postId) {
-      if (!currentUser) {
-        alert("先登录");
-        return;
-      }
-      const text = prompt("输入评论");
-      if (!text || !text.trim()) return;
+      if (!requireLogin("评论")) return;
+      pendingCommentPostId = postId;
+      el("commentText").value = "";
+      el("commentModal").classList.add("show");
+      el("commentText").focus();
+    }
+
+    async function submitCommentModal() {
+      const text = el("commentText").value.trim();
+      if (!text || !text.trim() || !pendingCommentPostId) return;
 
       try {
         const { error } = await client.from("comments").insert([{
-          post_id: postId,
+          post_id: pendingCommentPostId,
           user_name: currentUser,
-          content: text.trim()
+          content: text.trim(),
+          actor_key: deviceId
         }]);
         if (error) throw error;
+        closeCommentModal();
+        status("评论成功");
         await loadAll();
       } catch (err) {
         console.error(err);
-        alert("评论失败");
+        alert("评论失败，请确认 comments 表权限");
       }
+    }
+
+    async function deletePost(postId) {
+      if (!requireLogin("删除")) return;
+      pendingDeletePostId = postId;
+      el("deleteModal").classList.add("show");
+    }
+
+    async function submitDeleteModal() {
+      if (!pendingDeletePostId) return;
+      try {
+        const { data, error } = await client.rpc("delete_post_with_actor", { p_post_id: pendingDeletePostId, p_actor_key: deviceId });
+        if (error) throw error;
+        if (!data) return alert("你不是发布者，不能删除这条动态");
+        closeDeleteModal();
+        status("删除成功");
+        await loadAll();
+      } catch (err) {
+        console.error(err);
+        alert("删除失败，请确认 delete_post_with_actor 函数已创建");
+      }
+    }
+
+    function closeCommentModal() {
+      pendingCommentPostId = null;
+      el("commentModal").classList.remove("show");
+    }
+
+    function closeDeleteModal() {
+      pendingDeletePostId = null;
+      el("deleteModal").classList.remove("show");
+    }
+
+    function avatarOf(name) {
+      return `<span class="avatar">${escapeHtml(String(name || "?").slice(0, 1).toUpperCase())}</span>`;
     }
 
     async function trackView(postId) {
       if (localStorage.getItem(viewedKey(postId)) === "1") return;
       localStorage.setItem(viewedKey(postId), "1");
-      try {
-        const { error } = await client.rpc("increment_post_views", { p_post_id: postId });
-        if (error) throw error;
-      } catch (err) {
-        console.error("view error:", err);
-      }
+      const { error } = await client.rpc("increment_post_views", { p_post_id: postId });
+      if (error) console.error("view error:", error);
     }
 
-    function groupCommentsByPost(comments) {
+    function groupByPost(rows) {
       const map = {};
-      for (const c of comments) {
-        if (!map[c.post_id]) map[c.post_id] = [];
-        map[c.post_id].push(c);
+      for (const row of rows) {
+        if (!map[row.post_id]) map[row.post_id] = [];
+        map[row.post_id].push(row);
       }
       return map;
     }
@@ -408,13 +535,19 @@
     function renderFeed() {
       const feed = el("feed");
       if (!postsCache.length) {
-        feed.innerHTML = `<div class="empty">还没有动态，先发一条。人总得干点什么，不然网页就只剩空气。</div>`;
+        feed.innerHTML = `<div class="empty">还没有动态，先发一条。</div>`;
         return;
       }
 
-      const commentMap = groupCommentsByPost(commentsCache);
+      const commentMap = groupByPost(commentsCache);
+      const likeMap = groupByPost(likesCache);
+
       feed.innerHTML = postsCache.map((p) => {
         const comments = commentMap[p.id] || [];
+        const likes = likeMap[p.id] || [];
+        const likedByMe = likes.some((l) => l.actor_key === deviceId);
+        const canDelete = p.actor_key === deviceId;
+
         const media = p.media_url ? (
           p.media_type === "image"
             ? `<div class="media"><img src="${escapeHtml(p.media_url)}" alt="media" /></div>`
@@ -422,38 +555,26 @@
         ) : "";
 
         const commentsHtml = comments.length
-          ? comments.map(c => `
-              <div class="comment">
-                <b>${escapeHtml(c.user_name)}</b>：${escapeHtml(c.content)}
-              </div>
-            `).join("")
+          ? comments.map(c => `<div class="comment"><b>${escapeHtml(c.user_name)}</b>：${escapeHtml(c.content)}</div>`).join("")
           : `<div class="small">暂无评论</div>`;
 
         queueMicrotask(() => trackView(p.id));
 
         return `
-          <article class="post">
+          <article class="post" style="animation:fadeUp .35s ease both;">
             <div class="meta">
-              <div class="user">${escapeHtml(p.user_name)}</div>
+              <div class="user">${avatarOf(p.user_name)}${escapeHtml(p.user_name)}</div>
               <div>${new Date(p.created_at).toLocaleString()}</div>
             </div>
-
             <div class="content">${escapeHtml(p.content)}</div>
-
             ${media}
-
-            <div class="small">
-              浏览 ${p.views || 0} · 点赞 ${p.likes_count || 0} · 评论 ${p.comments_count || 0}
-            </div>
-
+            <div class="small">浏览 ${p.views || 0} · 点赞 ${likes.length} · 评论 ${comments.length}</div>
             <div class="actions">
-              <button onclick="likePost('${p.id}')">点赞</button>
+              <button ${likedByMe ? "disabled" : ""} onclick="likePost('${p.id}')">${likedByMe ? "已点赞" : "点赞"}</button>
               <button onclick="commentPost('${p.id}')">评论</button>
+              ${canDelete ? `<button onclick="deletePost('${p.id}')">删除</button>` : ""}
             </div>
-
-            <div class="comments">
-              ${commentsHtml}
-            </div>
+            <div class="comments">${commentsHtml}</div>
           </article>
         `;
       }).join("");
@@ -462,30 +583,29 @@
     async function loadAll() {
       try {
         status("加载中...");
-        const [postRes, commentRes] = await Promise.all([
+        const [postRes, commentRes, likeRes] = await Promise.all([
           client.from("posts").select("*").order("created_at", { ascending: false }),
-          client.from("comments").select("*").order("created_at", { ascending: true })
+          client.from("comments").select("*").order("created_at", { ascending: true }),
+          client.from("likes").select("*")
         ]);
 
         if (postRes.error) throw postRes.error;
         if (commentRes.error) throw commentRes.error;
+        if (likeRes.error) throw likeRes.error;
 
         postsCache = postRes.data || [];
         commentsCache = commentRes.data || [];
+        likesCache = likeRes.data || [];
 
-        const totalPosts = postsCache.length;
-        const totalViews = postsCache.reduce((sum, p) => sum + (p.views || 0), 0);
-        const totalLikes = postsCache.reduce((sum, p) => sum + (p.likes_count || 0), 0);
-
-        el("sPosts").textContent = totalPosts;
-        el("sViews").textContent = totalViews;
-        el("sLikes").textContent = totalLikes;
+        el("sPosts").textContent = postsCache.length;
+        el("sViews").textContent = postsCache.reduce((sum, p) => sum + (p.views || 0), 0);
+        el("sLikes").textContent = likesCache.length;
 
         renderFeed();
-        status(`已加载 ${totalPosts} 条动态`);
+        status(`已加载 ${postsCache.length} 条动态`);
       } catch (err) {
         console.error(err);
-        el("feed").innerHTML = `<div class="empty">加载失败。先看控制台报错，别让浏览器自己扛锅。</div>`;
+        el("feed").innerHTML = `<div class="empty">加载失败：${escapeHtml(err.message || "未知错误")}</div>`;
         status("加载失败");
       }
     }
@@ -502,15 +622,28 @@
     window.logout = logout;
     window.likePost = likePost;
     window.commentPost = commentPost;
+    window.deletePost = deletePost;
 
     el("loginBtn").addEventListener("click", login);
     el("logoutBtn").addEventListener("click", logout);
     el("postBtn").addEventListener("click", publishPost);
     el("refreshBtn").addEventListener("click", loadAll);
+    el("commentCancelBtn").addEventListener("click", closeCommentModal);
+    el("commentSubmitBtn").addEventListener("click", submitCommentModal);
+    el("deleteCancelBtn").addEventListener("click", closeDeleteModal);
+    el("deleteConfirmBtn").addEventListener("click", submitDeleteModal);
+    el("commentModal").addEventListener("click", (e) => { if (e.target.id === "commentModal") closeCommentModal(); });
+    el("deleteModal").addEventListener("click", (e) => { if (e.target.id === "deleteModal") closeDeleteModal(); });
+    window.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      closeCommentModal();
+      closeDeleteModal();
+    });
 
     renderUser();
     loadAll();
     setupRealtime();
+
   </script>
 </body>
 </html>
