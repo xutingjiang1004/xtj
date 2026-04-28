@@ -43,6 +43,8 @@
       min-height: 100vh;
       overflow-x: hidden;
       -webkit-font-smoothing: antialiased;
+      position: relative;
+      isolation: isolate;
       background:
         radial-gradient(circle at top left, rgba(124, 92, 255, 0.10), transparent 28%),
         radial-gradient(circle at bottom right, rgba(60, 180, 255, 0.10), transparent 30%),
@@ -53,19 +55,19 @@
     .liquid-bg {
       position: fixed;
       inset: 0;
-      z-index: -1;
+      z-index: 0;
       overflow: hidden;
       pointer-events: none;
       background:
-        radial-gradient(circle at top left, rgba(124, 92, 255, 0.08), transparent 30%),
-        radial-gradient(circle at bottom right, rgba(60, 180, 255, 0.08), transparent 32%),
+        radial-gradient(circle at top left, rgba(124, 92, 255, 0.12), transparent 30%),
+        radial-gradient(circle at bottom right, rgba(60, 180, 255, 0.12), transparent 32%),
         linear-gradient(135deg, #f7f9ff 0%, #eef4ff 50%, #f8f4ff 100%);
     }
     .liquid-blob {
       position: absolute;
       border-radius: 50%;
-      filter: blur(48px);
-      opacity: 0.38;
+      filter: blur(60px);
+      opacity: 0.48;
       will-change: transform, border-radius;
       mix-blend-mode: screen;
     }
@@ -143,9 +145,9 @@
       border: 1px solid rgba(255,255,255,0.9); border-radius: 99px; font-size: 13px; font-weight: 600;
     }
 
-    .wrap { max-width: 640px; margin: 24px auto 80px; padding: 0 16px; display: flex; flex-direction: column; gap: 24px; }
+    .wrap { position: relative; z-index: 1; max-width: 640px; margin: 24px auto 80px; padding: 0 16px; display: flex; flex-direction: column; gap: 24px; }
 
-    .publish-box { padding: 20px; border-radius: var(--radius-md); transition: var(--trans-smooth); }
+    .publish-box { position: relative; z-index: 1; padding: 20px; border-radius: var(--radius-md); transition: var(--trans-smooth); }
     .publish-box:hover { transform: translateY(-2px); }
     .publish-box textarea {
       width: 100%; min-height: 80px; border: none; background: transparent; resize: none; font-size: 16px; color: var(--text-main); outline: none;
@@ -157,7 +159,7 @@
       background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.7); padding: 4px 12px; border-radius: 99px; cursor: pointer; transition: 0.3s;
     }
 
-    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
     .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); }
     .stat-card:hover {
       transform: translateY(-4px) scale(1.02);
@@ -166,7 +168,7 @@
     .stat-card b { display: block; font-size: 22px; color: var(--primary); font-weight: 800; }
     .stat-card span { font-size: 12px; color: var(--text-muted); }
 
-    .feed { display: flex; flex-direction: column; gap: 20px; }
+    .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; }
     .post { 
       padding: 24px; border-radius: var(--radius-md); 
       opacity: 0;
@@ -496,47 +498,84 @@
       closeModal("commentModal"); loadFeed();
     };
 
-    // ========== ✅ 修复4：评论删除（加入 actor_key 过滤，符合 RLS 策略） ==========
-    function openDeleteComment(commentId) { delCommentId = commentId; document.getElementById("delCommentModal").classList.add("active"); }
+    // ========== ✅ 修复4：评论删除（先尝试 RPC，再回落到直删；成功后只局部更新） ==========
+    function openDeleteComment(commentId) {
+      delCommentId = commentId;
+      document.getElementById("delCommentModal").classList.add("active");
+    }
+
+    async function deleteCommentWithFallback(commentId) {
+      const actorKey = deviceId;
+
+      // 如果数据库里有这个 RPC，就走它。没有也不报废，继续走直删。
+      try {
+        const { data: rpcData, error: rpcError } = await sb.rpc("delete_comment_with_actor", {
+          p_comment_id: commentId,
+          p_actor_key: actorKey
+        });
+        if (!rpcError && rpcData !== undefined) {
+          return { data: rpcData, error: null };
+        }
+      } catch (_) {}
+
+      if (isAdmin()) {
+        return await sb.from("comments").delete().eq("id", commentId).select("id");
+      }
+
+      return await sb
+        .from("comments")
+        .delete()
+        .eq("id", commentId)
+        .eq("actor_key", actorKey)
+        .select("id");
+    }
+
     document.getElementById("delCommentBtn").onclick = async () => {
       if (!delCommentId) return;
       const btn = document.getElementById("delCommentBtn");
-      btn.disabled = true; btn.textContent = "删除中...";
+      btn.disabled = true;
+      btn.textContent = "删除中...";
+
       try {
-        // 先找到评论节点，方便成功后局部更新，不整页重刷
         const el = document.querySelector(`[data-comment-id="${delCommentId}"]`);
         const postId = el?.dataset?.postId || null;
 
-        // 非管理员必须带 actor_key，避免 RLS 拦截
-        let q = sb.from("comments").delete().eq("id", delCommentId).select("id");
-        if (!isAdmin()) q = q.eq("actor_key", deviceId);
+        const result = await deleteCommentWithFallback(delCommentId);
+        if (result?.error) throw result.error;
 
-        const { data, error } = await q;
-        if (error) throw error;
-        if (!data || data.length === 0) throw new Error("未删除成功");
+        // Supabase 有时会返回空数组但实际上删成功，这里再查一次确认
+        const verify = await sb.from("comments").select("id").eq("id", delCommentId);
+        if (verify.error) throw verify.error;
+        if (verify.data && verify.data.length > 0) throw new Error("未删除成功");
 
-        // 局部移除评论
         if (el) {
           el.style.transition = "all 0.25s ease";
           el.style.opacity = "0";
           el.style.transform = "scale(0.95)";
-          setTimeout(() => el.remove(), 250);
+          setTimeout(() => el.remove(), 220);
         }
 
-        // 局部减掉评论数
         if (postId) {
           const post = document.querySelector(`[data-post-id="${postId}"]`);
           const stat = post?.querySelector(".post-stats-text");
-          if (stat) stat.innerHTML = stat.innerHTML.replace(/评论\s*(\d+)/, (_, n) => `评论 ${Math.max(0, Number(n) - 1)}`);
+          if (stat) {
+            const m = stat.innerHTML.match(/评论\s*(\d+)/);
+            if (m) {
+              const next = Math.max(0, Number(m[1]) - 1);
+              stat.innerHTML = stat.innerHTML.replace(/评论\s*(\d+)/, `评论 ${next}`);
+            }
+          }
         }
 
         closeModal("delCommentModal");
         delCommentId = null;
+        setTimeout(() => loadFeed(), 180);
       } catch(e) {
         console.error(e);
         alert("删除失败，请重试");
       } finally {
-        btn.disabled = false; btn.textContent = "确认删除";
+        btn.disabled = false;
+        btn.textContent = "确认删除";
       }
     };
 
@@ -588,14 +627,14 @@
             <div class="actions">
               <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">${isLiked?'已点赞':'点赞'}</button>
               <button class="action-btn" onclick="openComment('${p.id}')">评论</button>
-              ${canDelPost?`<button class="action-btn del" onclick="openDelete('${p.id}', '${p.actor_key}')">删除</button>`:''}
+              ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${p.id}', '${p.actor_key}')">删除</button>`:''}
             </div>
             ${pComms.length?`
               <div class="comments">
                 ${pComms.map(c=>`
                   <div class="comment-item" data-comment-id="${c.id}" data-post-id="${p.id}">
                     <div><b>${c.user_name}:</b>${c.content}</div>
-                    ${(c.actor_key===deviceId || isAdmin())?`<button class="comment-del-btn" onclick="openDeleteComment('${c.id}')">×</button>`:''}
+                    ${(c.actor_key===deviceId || isAdmin())?`<button type="button" class="comment-del-btn" onclick="openDeleteComment('${c.id}')">×</button>`:''}
                   </div>
                 `).join('')}
               </div>
