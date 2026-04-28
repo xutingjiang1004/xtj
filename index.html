@@ -7,12 +7,12 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
-      /* 高透液态玻璃变量 */
+      /* 1. 优化液态玻璃变量 - 减少磨砂，增强透明液体感 */
       --bg-color: #f0f5ff;
-      --glass-bg: rgba(255, 255, 255, 0.25); /* 透明度调高 */
-      --glass-border: rgba(255, 255, 255, 0.4);
-      --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.08);
-      --glass-blur: blur(35px); /* 强模糊制造玻璃感 */
+      --glass-bg: rgba(255, 255, 255, 0.4); /* 提高透明度，减少磨砂感 */
+      --glass-border: rgba(255, 255, 255, 0.5);
+      --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.12);
+      --glass-blur: blur(12px); /* 降低模糊度，增强通透感 */
       
       --primary: #7c5cff;
       --primary-hover: #6a4deb;
@@ -28,6 +28,8 @@
       
       --trans-smooth: all 0.4s cubic-bezier(0.25, 1, 0.3, 1);
       --trans-bounce: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+      /* 新增：物理回弹曲线 */
+      --trans-spring: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
 
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -41,50 +43,75 @@
       overflow-x: hidden;
     }
 
-    /* 动态液态背景 (核心视觉) */
+    /* 2. 强化液态背景效果 - 更明显的液体流动感 */
     .liquid-bg {
       position: fixed; inset: 0; z-index: -1; overflow: hidden; background: var(--bg-color);
     }
     .liquid-blob {
-      position: absolute; border-radius: 50%; filter: blur(80px); opacity: 0.6;
-      animation: floatBlob 12s infinite alternate cubic-bezier(0.4, 0, 0.2, 1);
+      position: absolute; border-radius: 50%; filter: blur(60px); /* 降低模糊，增强液体轮廓 */
+      opacity: 0.7; /* 提高不透明度，增强液体存在感 */
+      animation: floatBlob 15s infinite alternate cubic-bezier(0.4, 0, 0.2, 1);
     }
-    .blob-1 { top: -10%; left: -10%; width: 50vw; height: 50vw; background: rgba(124, 92, 255, 0.4); }
-    .blob-2 { bottom: -20%; right: -10%; width: 60vw; height: 60vw; background: rgba(60, 180, 255, 0.3); animation-delay: -4s; }
-    .blob-3 { top: 40%; left: 40%; width: 40vw; height: 40vw; background: rgba(78, 210, 174, 0.2); animation-delay: -8s; }
+    .blob-1 { 
+      top: -10%; left: -10%; width: 50vw; height: 50vw; 
+      background: rgba(124, 92, 255, 0.5); /* 提高浓度 */
+      /* 新增：径向渐变增强液体质感 */
+      background: radial-gradient(circle, rgba(124, 92, 255, 0.6) 0%, rgba(124, 92, 255, 0.3) 100%);
+    }
+    .blob-2 { 
+      bottom: -20%; right: -10%; width: 60vw; height: 60vw; 
+      background: rgba(60, 180, 255, 0.4); /* 提高浓度 */
+      background: radial-gradient(circle, rgba(60, 180, 255, 0.7) 0%, rgba(60, 180, 255, 0.2) 100%);
+      animation-delay: -4s; 
+    }
+    .blob-3 { 
+      top: 40%; left: 40%; width: 40vw; height: 40vw; 
+      background: rgba(78, 210, 174, 0.3); /* 提高浓度 */
+      background: radial-gradient(circle, rgba(78, 210, 174, 0.5) 0%, rgba(78, 210, 174, 0.1) 100%);
+      animation-delay: -8s; 
+    }
 
     @keyframes floatBlob {
       0% { transform: translate(0, 0) scale(1); }
-      50% { transform: translate(5%, 10%) scale(1.1); }
-      100% { transform: translate(-5%, -5%) scale(0.95); }
+      50% { transform: translate(8%, 12%) scale(1.15); /* 增强位移和缩放 */ }
+      100% { transform: translate(-8%, -8%) scale(0.9); }
     }
 
-    /* 玻璃形态基类 */
+    /* 玻璃形态基类 - 优化透明液体感 */
     .glass {
       background: var(--glass-bg);
       border: 1px solid var(--glass-border);
       box-shadow: var(--glass-shadow);
       backdrop-filter: var(--glass-blur);
       -webkit-backdrop-filter: var(--glass-blur);
+      /* 新增：轻微的渐变增强液体玻璃质感 */
+      background: linear-gradient(135deg, 
+        rgba(255, 255, 255, 0.45) 0%, 
+        rgba(255, 255, 255, 0.35) 100%);
+      /* 新增：液体边缘光效 */
+      box-shadow: 
+        0 8px 32px rgba(31, 38, 135, 0.12),
+        inset 0 1px 0 rgba(255, 255, 255, 0.6);
     }
 
     /* 导航栏 */
     nav {
       position: sticky; top: 0; z-index: 50; padding: 12px 24px;
       display: flex; justify-content: space-between; align-items: center;
-      border-bottom: 1px solid rgba(255,255,255,0.3);
-      background: rgba(255, 255, 255, 0.15);
-      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255,255,255,0.4); /* 增强边框 */
+      background: rgba(255, 255, 255, 0.25); /* 提高透明度 */
+      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     }
 
     h1 { margin: 0; font-size: 22px; font-weight: 800; background: linear-gradient(135deg, #7c5cff, #3cb4ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
     .nav-auth { display: flex; align-items: center; gap: 8px; }
     .nav-input {
-      background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.6);
+      background: rgba(255,255,255,0.6); /* 提高透明度 */
+      border: 1px solid rgba(255,255,255,0.7);
       padding: 6px 14px; border-radius: 99px; outline: none; width: 120px; font-size: 13px; transition: var(--trans-smooth);
     }
-    .nav-input:focus { background: rgba(255,255,255,0.8); border-color: var(--primary); }
+    .nav-input:focus { background: rgba(255,255,255,0.9); border-color: var(--primary); }
     
     .btn {
       cursor: pointer; border: none; font-weight: 600; padding: 6px 16px; border-radius: 99px;
@@ -96,7 +123,8 @@
 
     .user-pill {
       display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px;
-      background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.8); border-radius: 99px; font-size: 13px; font-weight: 600;
+      background: rgba(255,255,255,0.7); /* 提高透明度 */
+      border: 1px solid rgba(255,255,255,0.9); border-radius: 99px; font-size: 13px; font-weight: 600;
     }
 
     /* 容器布局 */
@@ -104,7 +132,10 @@
 
     /* 发布框 */
     .publish-box { padding: 20px; border-radius: var(--radius-md); transition: var(--trans-smooth); }
-    .publish-box:hover { background: rgba(255, 255, 255, 0.35); }
+    .publish-box:hover { 
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0.35) 100%);
+      transform: translateY(-2px); /* 新增：hover回弹效果 */
+    }
     .publish-box textarea {
       width: 100%; min-height: 80px; border: none; background: transparent; resize: none; font-size: 16px; color: var(--text-main); outline: none;
     }
@@ -113,23 +144,59 @@
 
     input[type="file"] { font-size: 12px; color: var(--text-muted); }
     input[type="file"]::file-selector-button {
-      background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.6); padding: 4px 12px; border-radius: 99px; cursor: pointer; transition: 0.3s;
+      background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.7); padding: 4px 12px; border-radius: 99px; cursor: pointer; transition: 0.3s;
+    }
+    input[type="file"]::file-selector-button:hover {
+      background: rgba(255,255,255,0.8);
+      transform: translateY(-1px); /* 新增：回弹效果 */
     }
 
     /* 统计 */
     .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-    .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; }
+    .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); }
+    .stat-card:hover {
+      transform: translateY(-4px) scale(1.02); /* 新增：hover回弹放大 */
+      box-shadow: 0 8px 24px rgba(124, 92, 255, 0.15);
+    }
     .stat-card b { display: block; font-size: 22px; color: var(--primary); font-weight: 800; }
     .stat-card span { font-size: 12px; color: var(--text-muted); font-weight: 500; }
 
     /* 动态流 */
     .feed { display: flex; flex-direction: column; gap: 20px; }
-    .post { padding: 24px; border-radius: var(--radius-md); animation: fadeUp 0.6s var(--trans-bounce) both; }
-    .post:hover { box-shadow: 0 12px 40px rgba(31, 38, 135, 0.12); border-color: rgba(255,255,255,0.8); }
+    /* 3. 新增：帖子滚动动画基础样式 */
+    .post { 
+      padding: 24px; border-radius: var(--radius-md); 
+      /* 初始状态：不可见 */
+      opacity: 0;
+      transform: translateY(30px) scale(0.95);
+      transition: 
+        opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+        transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+        box-shadow 0.4s ease;
+    }
+    /* 可见状态：淡入弹入 */
+    .post.visible {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    /* 离开视口：淡出弹出 */
+    .post.hidden {
+      opacity: 0;
+      transform: translateY(-30px) scale(0.95);
+    }
+    .post:hover { 
+      box-shadow: 0 12px 40px rgba(31, 38, 135, 0.12); 
+      border-color: rgba(255,255,255,0.8);
+      transform: translateY(-2px); /* 新增：hover回弹 */
+    }
 
     .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-    .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #7c5cff, #3cb4ff); color: white; font-weight: bold; font-size: 16px; }
+    .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #7c5cff, #3cb4ff); color: white; font-weight: bold; font-size: 16px; transition: var(--trans-spring); }
     .avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3); }
+    .avatar:hover {
+      transform: scale(1.1); /* 新增：头像回弹 */
+      box-shadow: 0 4px 16px rgba(124, 92, 255, 0.2);
+    }
     
     .user-info { display: flex; flex-direction: column; }
     .user-name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; }
@@ -137,19 +204,63 @@
     .post-time { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
 
     .content { font-size: 15px; line-height: 1.6; margin-bottom: 16px; white-space: pre-wrap; word-break: break-word; }
-    .media { width: 100%; border-radius: 16px; overflow: hidden; margin-bottom: 16px; background: rgba(0,0,0,0.02); }
+    .media { width: 100%; border-radius: 16px; overflow: hidden; margin-bottom: 16px; background: rgba(0,0,0,0.02); transition: var(--trans-smooth); }
+    .media:hover {
+      transform: scale(1.02); /* 新增：媒体内容回弹 */
+    }
     .media img, .media video { width: 100%; max-height: 400px; object-fit: contain; display: block; }
 
     .post-stats-text { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
 
     /* 动作按钮 */
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .action-btn { background: rgba(255,255,255,0.4); border: 1px solid rgba(255,255,255,0.6); padding: 6px 16px; border-radius: 99px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: var(--trans-smooth); font-weight: 600;}
-    .action-btn:hover { background: rgba(255,255,255,0.8); color: var(--text-main); }
+    .action-btn { 
+      background: rgba(255,255,255,0.5); 
+      border: 1px solid rgba(255,255,255,0.7); 
+      padding: 6px 16px; border-radius: 99px; font-size: 13px; color: var(--text-muted); cursor: pointer; 
+      transition: var(--trans-spring); /* 改用物理回弹曲线 */
+      font-weight: 600;
+      position: relative; /* 为点赞粒子做准备 */
+      overflow: hidden;
+    }
+    .action-btn:hover { 
+      background: rgba(255,255,255,0.9); 
+      color: var(--text-main);
+      transform: translateY(-2px); /* 新增：按钮回弹 */
+    }
     
-    /* 点赞动效 */
-    @keyframes heartBeat { 0% { transform: scale(1); } 40% { transform: scale(1.15); } 60% { transform: scale(0.95); } 80% { transform: scale(1.05); } 100% { transform: scale(1); } }
-    .action-btn.liked { background: rgba(255, 59, 96, 0.1); color: var(--like-color); border-color: rgba(255, 59, 96, 0.2); animation: heartBeat 0.4s var(--trans-bounce); }
+    /* 1. 增强点赞动效 - 更细腻的回弹+粒子特效 */
+    @keyframes heartBeat { 
+      0% { transform: scale(1); } 
+      20% { transform: scale(1.2); } /* 更强的缩放 */
+      40% { transform: scale(0.95); } 
+      60% { transform: scale(1.1); } 
+      80% { transform: scale(0.98); } 
+      100% { transform: scale(1); } 
+    }
+    .action-btn.liked { 
+      background: rgba(255, 59, 96, 0.15); 
+      color: var(--like-color); 
+      border-color: rgba(255, 59, 96, 0.3); 
+      animation: heartBeat 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* 物理回弹曲线 */
+    }
+    /* 新增：点赞粒子特效 */
+    .action-btn.liked::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 0;
+      height: 0;
+      background: rgba(255, 59, 96, 0.2);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      animation: likeRipple 0.8s ease-out forwards;
+    }
+    @keyframes likeRipple {
+      0% { width: 0; height: 0; opacity: 1; }
+      100% { width: 100px; height: 100px; opacity: 0; }
+    }
     
     /* 删除按钮 */
     .action-btn.del { background: transparent; border-color: transparent; color: rgba(255, 59, 96, 0.6); margin-left: auto; }
@@ -157,7 +268,16 @@
 
     /* 评论区 */
     .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05); display: grid; gap: 8px; }
-    .comment-item { padding: 10px 14px; background: rgba(255,255,255,0.4); border-radius: 12px; font-size: 13px; line-height: 1.5; border: 1px solid rgba(255,255,255,0.5); }
+    .comment-item { 
+      padding: 10px 14px; background: rgba(255,255,255,0.5); 
+      border-radius: 12px; font-size: 13px; line-height: 1.5; 
+      border: 1px solid rgba(255,255,255,0.6);
+      transition: var(--trans-smooth);
+    }
+    .comment-item:hover {
+      transform: translateX(4px); /* 新增：评论项回弹 */
+      background: rgba(255,255,255,0.7);
+    }
     .comment-item b { font-weight: 700; margin-right: 6px; }
 
     /* 拟物弹窗 */
@@ -168,11 +288,15 @@
     .modal-overlay.active { display: flex; opacity: 1; }
     .modal-box {
       width: 90%; max-width: 400px; padding: 24px; border-radius: var(--radius-lg);
-      transform: scale(0.9) translateY(10px); transition: var(--trans-bounce);
+      transform: scale(0.9) translateY(10px); transition: var(--trans-spring); /* 改用物理回弹 */
     }
     .modal-overlay.active .modal-box { transform: scale(1) translateY(0); }
     .modal-box h3 { margin: 0 0 16px 0; font-size: 18px; }
-    .modal-textarea { width: 100%; min-height: 100px; background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.8); border-radius: 16px; padding: 12px; font-size: 14px; outline: none; resize: none; margin-bottom: 16px; }
+    .modal-textarea { width: 100%; min-height: 100px; background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.9); border-radius: 16px; padding: 12px; font-size: 14px; outline: none; resize: none; margin-bottom: 16px; transition: var(--trans-smooth); }
+    .modal-textarea:focus {
+      background: rgba(255,255,255,0.9);
+      transform: translateY(-2px); /* 新增：输入框回弹 */
+    }
 
     @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     .loading { text-align: center; padding: 40px; color: var(--text-muted); font-weight: 500; }
@@ -446,7 +570,7 @@
         trackView(p.id);
 
         return `
-          <div class="post glass" style="animation-delay: ${i * 0.05}s">
+          <div class="post glass" data-post-id="${p.id}">
             <div class="post-header">
               <div class="avatar ${isPostAdmin ? 'admin' : ''}">${p.user_name[0].toUpperCase()}</div>
               <div class="user-info">
@@ -483,9 +607,46 @@
           </div>
         `;
       }).join("");
+
+      // 初始化帖子滚动动画监听
+      initPostScrollAnimation();
     }
 
-    // --- 10. 初始化与实时刷新 ---
+    // --- 10. 新增：帖子滚动动画逻辑 ---
+    let observer = null;
+    function initPostScrollAnimation() {
+      // 销毁旧的观察者
+      if (observer) {
+        observer.disconnect();
+      }
+
+      // 创建Intersection Observer
+      observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          const post = entry.target;
+          if (entry.isIntersecting) {
+            // 进入视口：淡入弹入
+            post.classList.remove('hidden');
+            post.classList.add('visible');
+          } else {
+            // 离开视口：淡出弹出
+            post.classList.add('hidden');
+            post.classList.remove('visible');
+          }
+        });
+      }, {
+        root: null, // 视口作为根
+        rootMargin: '0px',
+        threshold: 0.1 // 元素10%可见时触发
+      });
+
+      // 监听所有帖子元素
+      document.querySelectorAll('.post').forEach(post => {
+        observer.observe(post);
+      });
+    }
+
+    // --- 11. 初始化与实时刷新 ---
     initUI();
     loadFeed();
     
