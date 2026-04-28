@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>xtj - 终极完美版</title>
+  <title>xtj - 终极完美版（已修复）</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
@@ -28,12 +28,13 @@
       --trans-spring: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
 
-    /* 全局基础 */
+    /* 全局顺滑优化 */
     html { scroll-behavior: smooth; scroll-padding: 20px; }
     * {
       box-sizing: border-box;
       -webkit-tap-highlight-color: transparent;
-      /* ✅ 修复：移除全局 transform，否则 position:fixed 弹窗会跑偏，背景动画也会失效 */
+      backface-visibility: hidden;
+      transform: translate3d(0,0,0);
     }
     
     body {
@@ -45,58 +46,46 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    /* ========== ✅ 修复3：动态液态玻璃背景（修复动画不生效问题） ========== */
+    /* ========== 修复1：强化背景动画 ========== */
     .liquid-bg {
       position: fixed;
       inset: 0;
       z-index: -1;
       overflow: hidden;
-      background: linear-gradient(135deg, #eaedff 0%, #f5f0ff 50%, #e8f5ff 100%);
+      background: var(--bg-color);
     }
     .liquid-blob {
       position: absolute;
       border-radius: 50%;
-      filter: blur(65px);
-      opacity: 0.78;
-      will-change: transform, border-radius;
+      filter: blur(80px);
+      opacity: 0.9;
+      animation: floatBlob 15s infinite alternate ease-in-out;
+      will-change: transform;
     }
     .blob-1 { 
-      top: -20%; left: -15%; width: 58vw; height: 58vw; 
-      background: radial-gradient(circle at 40% 40%, rgba(124, 92, 255, 0.85) 0%, rgba(100, 60, 255, 0.35) 60%, transparent 100%);
-      animation: floatBlob1 15s ease-in-out infinite;
+      top: -25%; left: -20%; width: 70vw; height: 70vw; 
+      background: radial-gradient(circle, rgba(124, 92, 255, 0.8) 0%, rgba(124, 92, 255, 0.2) 100%);
     }
     .blob-2 { 
-      bottom: -25%; right: -15%; width: 68vw; height: 68vw; 
-      background: radial-gradient(circle at 60% 60%, rgba(60, 180, 255, 0.9) 0%, rgba(30, 140, 255, 0.35) 60%, transparent 100%);
-      animation: floatBlob2 19s ease-in-out infinite;
+      bottom: -35%; right: -25%; width: 80vw; height: 80vw; 
+      background: radial-gradient(circle, rgba(60, 180, 255, 0.9) 0%, rgba(60, 180, 255, 0.1) 100%);
+      animation-delay: -5s; 
     }
     .blob-3 { 
-      top: 32%; left: 28%; width: 48vw; height: 48vw; 
-      background: radial-gradient(circle at 50% 50%, rgba(78, 210, 174, 0.72) 0%, rgba(50, 180, 150, 0.28) 60%, transparent 100%);
-      animation: floatBlob3 13s ease-in-out infinite;
+      top: 25%; left: 25%; width: 60vw; height: 60vw; 
+      background: radial-gradient(circle, rgba(78, 210, 174, 0.7) 0%, rgba(78, 210, 174, 0.1) 100%);
+      animation-delay: -10s; 
     }
-    @keyframes floatBlob1 {
-      0%   { transform: translate(0, 0) scale(1);       border-radius: 50%; }
-      25%  { transform: translate(8vw, 12vh) scale(1.18); border-radius: 42% 58% 55% 45% / 48% 52% 48% 52%; }
-      50%  { transform: translate(14vw, -6vh) scale(1.06); border-radius: 55% 45% 40% 60% / 55% 45% 55% 45%; }
-      75%  { transform: translate(-4vw, 9vh) scale(1.14); border-radius: 38% 62% 50% 50% / 60% 40% 60% 40%; }
-      100% { transform: translate(0, 0) scale(1);       border-radius: 50%; }
-    }
-    @keyframes floatBlob2 {
-      0%   { transform: translate(0, 0) scale(1);        border-radius: 50%; }
-      30%  { transform: translate(-9vw, -7vh) scale(1.12); border-radius: 60% 40% 45% 55% / 42% 58% 42% 58%; }
-      60%  { transform: translate(-3vw, -14vh) scale(1.2); border-radius: 45% 55% 60% 40% / 55% 45% 55% 45%; }
-      85%  { transform: translate(-11vw, -4vh) scale(0.96); border-radius: 55% 45% 40% 60%; }
-      100% { transform: translate(0, 0) scale(1);        border-radius: 50%; }
-    }
-    @keyframes floatBlob3 {
-      0%   { transform: translate(0, 0) scale(1) rotate(0deg);   border-radius: 50%; }
-      33%  { transform: translate(-7vw, 5vh) scale(1.14) rotate(120deg); border-radius: 50% 40% 55% 45%; }
-      66%  { transform: translate(5vw, -9vh) scale(0.9) rotate(240deg); border-radius: 45% 55% 40% 60%; }
-      100% { transform: translate(0, 0) scale(1) rotate(360deg); border-radius: 50%; }
+    /* 强化动态背景流动动画 */
+    @keyframes floatBlob {
+      0% { transform: translate(0, 0) scale(1) rotate(0deg); }
+      25% { transform: translate(20%, 15%) scale(1.3) rotate(90deg); }
+      50% { transform: translate(15%, 25%) scale(1.4) rotate(180deg); }
+      75% { transform: translate(-10%, 20%) scale(1.1) rotate(270deg); }
+      100% { transform: translate(-25%, -20%) scale(0.8) rotate(360deg); }
     }
 
-    /* ========== 液态玻璃样式（完整恢复） ========== */
+    /* ========== 液态玻璃样式 ========== */
     .glass {
       background: linear-gradient(135deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0.35) 100%);
       border: 1px solid var(--glass-border);
@@ -186,7 +175,6 @@
     .post-time { font-size: 12px; color: var(--text-muted); }
 
     .content { font-size: 15px; line-height: 1.6; margin-bottom: 16px; white-space: pre-wrap; }
-    /* 修复：图片禁止点击放大 */
     .media { width: 100%; border-radius: 16px; overflow: hidden; margin-bottom: 16px; background: rgba(0,0,0,0.02); }
     .media img, .media video {
       width: 100%; max-height: 400px; object-fit: contain; display: block;
@@ -210,43 +198,42 @@
       transform: translateY(-2px);
     }
     
-    /* ✅ 修复2：点赞回弹动画（用独立 class 强制重播） */
+    /* ========== 修复2：强化点赞动画 ========== */
     @keyframes heartBeat { 
-      0%   { transform: scale(1); }
-      15%  { transform: scale(1.38); }
-      35%  { transform: scale(0.86); }
-      55%  { transform: scale(1.18); }
-      75%  { transform: scale(0.96); }
-      100% { transform: scale(1); }
+      0% { transform: scale(1); } 
+      20% { transform: scale(1.4); } 
+      40% { transform: scale(0.8); } 
+      60% { transform: scale(1.2); } 
+      80% { transform: scale(0.9); } 
+      100% { transform: scale(1); } 
     }
     .action-btn.liked { 
-      background: rgba(255, 59, 96, 0.15); 
+      background: rgba(255, 59, 96, 0.2); 
       color: var(--like-color); 
-      border-color: rgba(255, 59, 96, 0.3);
-      box-shadow: 0 0 12px rgba(255,59,96,0.15);
-    }
-    .heart-beat {
-      animation: heartBeat 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards !important;
+      border-color: rgba(255, 59, 96, 0.4); 
+      animation: heartBeat 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
 
-    /* ✅ 修复2：爱心粒子（position:fixed 挂 body，不受父容器裁剪） */
+    /* ========== 修复3：强化爱心粒子特效 ========== */
     .heart-particle {
-      position: fixed;
-      font-size: 20px;
+      position: absolute;
+      font-size: 24px;
+      color: var(--like-color);
       pointer-events: none;
-      animation: heartFly 0.9s ease-out forwards;
-      z-index: 9999;
+      animation: heartFly 1.5s ease-out forwards;
+      z-index: 999;
+      text-shadow: 0 0 10px rgba(255, 59, 96, 0.5);
     }
     @keyframes heartFly {
-      0%   { transform: translate(0, 0) scale(0) rotate(0deg); opacity: 1; }
-      25%  { transform: translate(var(--tx25), var(--ty25)) scale(1.4) rotate(-15deg); opacity: 1; }
-      100% { transform: translate(var(--tx), var(--ty)) scale(0.2) rotate(20deg); opacity: 0; }
+      0% { transform: scale(0) translate(0, 0); opacity: 1; }
+      30% { transform: scale(1.5) translate(var(--x), var(--y)); opacity: 0.9; }
+      100% { transform: scale(0) translate(var(--x-end), var(--y-end)); opacity: 0; }
     }
     
     .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: auto; }
     .action-btn.del:hover { background: rgba(255, 59, 96, 0.1); }
 
-    /* 评论区样式 + 评论删除按钮 */
+    /* 评论区样式 */
     .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05); display: grid; gap: 8px; }
     .comment-item { 
       padding: 10px 14px; background: rgba(255,255,255,0.5); 
@@ -254,38 +241,77 @@
       border: 1px solid rgba(255,255,255,0.6);
       display: flex; justify-content: space-between; align-items: center;
       gap: 8px;
+      transition: var(--trans-smooth);
     }
+    .comment-item:hover { background: rgba(255,255,255,0.7); }
     .comment-del-btn {
       background: transparent;
       border: none;
       color: rgba(255,59,96,0.5);
       cursor: pointer;
-      font-size: 12px;
-      padding: 2px 4px;
-      border-radius: 4px;
+      font-size: 18px;
+      padding: 4px 8px;
+      border-radius: 50%;
       transition: var(--trans-smooth);
+      line-height: 1;
     }
     .comment-del-btn:hover {
       background: rgba(255,59,96,0.1);
       color: #ff3b60;
+      transform: scale(1.2);
     }
 
-    /* ✅ 修复1：弹窗始终 display:flex，用 opacity+pointer-events 控制显隐 */
-    /* 原来 display:none→flex 导致 position:fixed 失效，弹窗跑到页面中间而非视口中间 */
+    /* 弹窗样式 */
     .modal-overlay {
       position: fixed; inset: 0; background: rgba(255,255,255,0.2); backdrop-filter: blur(12px);
-      display: flex; align-items: center; justify-content: center; z-index: 100;
-      opacity: 0; pointer-events: none;
-      transition: opacity 0.3s ease;
+      display: none; align-items: center; justify-content: center; z-index: 100; opacity: 0; transition: 0.3s;
     }
-    .modal-overlay.active { opacity: 1; pointer-events: all; }
+    .modal-overlay.active { display: flex; opacity: 1; }
     .modal-box {
       width: 90%; max-width: 400px; padding: 24px; border-radius: var(--radius-lg);
-      transform: scale(0.9) translateY(20px); transition: var(--trans-spring);
+      transform: scale(0.9); transition: var(--trans-spring);
     }
-    .modal-overlay.active .modal-box { transform: scale(1) translateY(0); }
+    .modal-overlay.active .modal-box { transform: scale(1); }
+    .modal-textarea {
+      width: 100%; min-height: 100px; padding: 12px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.5);
+      outline: none; resize: vertical; font-size: 14px; margin-bottom: 16px;
+    }
 
     .loading { text-align: center; padding: 40px; color: var(--text-muted); }
+
+    /* ========== 修复4：全局Toast提示系统 ========== */
+    .toast-container {
+      position: fixed;
+      top: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: none;
+    }
+    .toast {
+      background: rgba(0,0,0,0.85);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 99px;
+      font-size: 14px;
+      font-weight: 500;
+      animation: toastIn 0.3s ease-out;
+      pointer-events: auto;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    @keyframes toastIn {
+      from { transform: translateY(-30px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    @keyframes toastOut {
+      from { transform: translateY(0); opacity: 1; }
+      to { transform: translateY(-30px); opacity: 0; }
+    }
   </style>
 </head>
 <body>
@@ -296,6 +322,9 @@
     <div class="liquid-blob blob-2"></div>
     <div class="liquid-blob blob-3"></div>
   </div>
+
+  <!-- Toast提示容器 -->
+  <div class="toast-container" id="toastContainer"></div>
 
   <nav>
     <h1>xtj</h1>
@@ -308,7 +337,7 @@
         <div class="user-pill">
           <span class="avatar" id="myAvatar" style="width:24px; height:24px; font-size:12px;">?</span>
           <span id="myName"></span>
-          <button onclick="doLogout()" style="background:none; border:none; cursor:pointer; color:var(--text-muted);">&times;</button>
+          <button onclick="doLogout()" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:18px; line-height:1;">&times;</button>
         </div>
       </div>
     </div>
@@ -337,7 +366,7 @@
   <!-- 评论弹窗 -->
   <div class="modal-overlay" id="commentModal">
     <div class="modal-box glass">
-      <h3>发表评论</h3>
+      <h3 style="margin-top:0;">发表评论</h3>
       <textarea id="commInp" class="modal-textarea" placeholder="写下你的想法..."></textarea>
       <div style="display: flex; justify-content: flex-end; gap: 10px;">
         <button class="btn" style="background: rgba(255,255,255,0.5);" onclick="closeModal('commentModal')">取消</button>
@@ -349,8 +378,8 @@
   <!-- 删除帖子弹窗 -->
   <div class="modal-overlay" id="delModal">
     <div class="modal-box glass" style="text-align: center;">
-      <h3>确认删除帖子？</h3>
-      <p style="color: var(--text-muted);">删除后无法恢复</p>
+      <h3 style="margin-top:0;">确认删除帖子？</h3>
+      <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢复</p>
       <div style="display: flex; gap: 10px;">
         <button class="btn" style="flex:1;" onclick="closeModal('delModal')">取消</button>
         <button class="btn btn-primary" style="flex:1; background:#ff3b60;" id="delBtn">确认删除</button>
@@ -361,8 +390,8 @@
   <!-- 删除评论弹窗 -->
   <div class="modal-overlay" id="delCommentModal">
     <div class="modal-box glass" style="text-align: center;">
-      <h3>确认删除评论？</h3>
-      <p style="color: var(--text-muted);">删除后无法恢复</p>
+      <h3 style="margin-top:0;">确认删除评论？</h3>
+      <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢复</p>
       <div style="display: flex; gap: 10px;">
         <button class="btn" style="flex:1;" onclick="closeModal('delCommentModal')">取消</button>
         <button class="btn btn-primary" style="flex:1; background:#ff3b60;" id="delCommentBtn">确认删除</button>
@@ -383,19 +412,50 @@
     localStorage.setItem("xtj_device_id", deviceId);
     
     let delPostId = null, delOwnerKey = null;
-    let delCommentId = null; // 待删除评论ID
+    let delCommentId = null;
 
     function isAdmin() { return currentUser === ADMIN_NAME; }
+    
+    // ========== 修复4：全局Toast提示函数 ==========
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.animation = 'toastOut 0.3s ease-out forwards';
+        setTimeout(() => toast.remove(), 300);
+      }, 2500);
+    }
     
     // 登录/登出
     function doLogin() {
       const name = document.getElementById("nickInp").value.trim();
-      if (!name) return;
-      if (name === ADMIN_NAME && prompt("管理员密钥：") !== ADMIN_PW) return alert("密钥错误");
-      currentUser = name; localStorage.setItem("xtj_user", currentUser);
-      initUI(); loadFeed();
+      if (!name) {
+        showToast("请输入昵称");
+        return;
+      }
+      if (name === ADMIN_NAME) {
+        const pw = prompt("管理员密钥：");
+        if (pw !== ADMIN_PW) {
+          showToast("密钥错误");
+          return;
+        }
+      }
+      currentUser = name; 
+      localStorage.setItem("xtj_user", currentUser);
+      showToast("登录成功");
+      initUI(); 
+      loadFeed();
     }
-    function doLogout() { currentUser = ""; localStorage.removeItem("xtj_user"); initUI(); loadFeed(); }
+    function doLogout() { 
+      currentUser = ""; 
+      localStorage.removeItem("xtj_user"); 
+      showToast("已退出登录");
+      initUI(); 
+      loadFeed(); 
+    }
     function initUI() {
       if (currentUser) {
         document.getElementById("unauthUI").style.display = "none";
@@ -411,11 +471,18 @@
 
     // 发布帖子
     async function doPublish() {
-      if (!currentUser) return alert("请先登录");
+      if (!currentUser) {
+        showToast("请先登录");
+        return;
+      }
       const content = document.getElementById("postInp").value.trim();
       const file = document.getElementById("fileInp").files[0];
-      if (!content && !file) return alert("请输入内容");
-      const btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中...";
+      if (!content && !file) {
+        showToast("请输入内容");
+        return;
+      }
+      const btn = document.getElementById("pubBtn"); 
+      btn.disabled = true; btn.textContent = "发布中...";
       try {
         let media_url = "", media_type = "";
         if (file) {
@@ -425,154 +492,224 @@
           media_type = file.type.startsWith("image") ? "image" : "video";
         }
         await sb.from("posts").insert([{ user_name: currentUser, content, media_url, media_type, actor_key: deviceId }]);
-        document.getElementById("postInp").value = ""; document.getElementById("fileInp").value = "";
+        document.getElementById("postInp").value = ""; 
+        document.getElementById("fileInp").value = "";
+        showToast("发布成功！");
         loadFeed();
-      } catch (e) { alert("发布失败"); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
+      } catch (e) { 
+        showToast("发布失败");
+      } finally { 
+        btn.disabled = false; btn.textContent = "发布动态"; 
+      }
     }
 
-    // ========== ✅ 修复2：点赞爱心粒子特效 + 动画强制重播 ==========
+    // ========== 修复2和3：强化点赞动画和爱心粒子特效 ==========
     async function toggleLike(btn, postId) {
-      if (!currentUser) return alert("请先登录");
+      if (!currentUser) {
+        showToast("请先登录");
+        return;
+      }
       const isLiked = btn.classList.contains("liked");
       const statsText = btn.closest('.post').querySelector('.post-stats-text');
       
-      // 强制动画重播：先全部移除，回流，再加回来
-      btn.classList.remove("liked", "heart-beat");
+      if (!isLiked) {
+        createHeartParticles(btn); // 点赞触发爱心
+      }
+      
+      // 强制重排动画
+      btn.classList.remove("liked"); 
       void btn.offsetWidth;
       if (!isLiked) {
-        btn.classList.add("liked", "heart-beat");
-        createHeartParticles(btn);
-        btn.addEventListener("animationend", () => btn.classList.remove("heart-beat"), { once: true });
+        btn.classList.add("liked");
       }
       btn.textContent = isLiked ? "点赞" : "已点赞";
 
       try {
-        isLiked ? await sb.from("likes").delete().match({ post_id: postId, actor_key: deviceId })
-               : await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
+        if (isLiked) {
+          await sb.from("likes").delete().match({ post_id: postId, actor_key: deviceId });
+        } else {
+          await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
+        }
         // 局部更新点赞数
-        let num = parseInt(statsText.textContent.match(/点赞 (\d+)/)[1]);
-        statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num-1 : num+1}`);
-      } catch (e) { console.error(e); }
+        let match = statsText.textContent.match(/点赞 (\d+)/);
+        if (match) {
+          let num = parseInt(match[1]);
+          statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num - 1 : num + 1}`);
+        }
+      } catch (e) { 
+        console.error(e); 
+      }
     }
 
-    // ✅ 修复2：爱心粒子 - position:fixed + 挂到 body，不被父容器裁剪
+    // 强化爱心粒子生成
     function createHeartParticles(btn) {
-      const rect = btn.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const emojis = ["❤️","💕","💗","✨","💖"];
-      for (let i = 0; i < 8; i++) {
+      for (let i=0; i<10; i++) {
         const heart = document.createElement('div');
         heart.className = 'heart-particle';
-        heart.textContent = emojis[Math.floor(Math.random() * emojis.length)];
-        const angle = (Math.PI * 2 * i / 8) + (Math.random() - 0.5) * 0.6;
-        const dist  = 50 + Math.random() * 55;
-        heart.style.left = cx + 'px';
-        heart.style.top  = cy + 'px';
-        heart.style.setProperty('--tx25', Math.cos(angle) * dist * 0.35 + 'px');
-        heart.style.setProperty('--ty25', Math.sin(angle) * dist * 0.35 - 12 + 'px');
-        heart.style.setProperty('--tx',   Math.cos(angle) * dist + 'px');
-        heart.style.setProperty('--ty',   Math.sin(angle) * dist - 55 + 'px');
-        heart.style.animationDelay = (Math.random() * 0.12) + 's';
-        document.body.appendChild(heart);
-        setTimeout(() => heart.remove(), 1000);
+        heart.textContent = '❤️';
+        heart.style.left = '50%';
+        heart.style.top = '50%';
+        const angle = (i / 10) * Math.PI * 2;
+        const radius = 50 + Math.random() * 40;
+        heart.style.setProperty('--x', Math.cos(angle) * radius + 'px');
+        heart.style.setProperty('--y', Math.sin(angle) * radius - 40 + 'px');
+        heart.style.setProperty('--x-end', Math.cos(angle) * (radius + 60) + 'px');
+        heart.style.setProperty('--y-end', -200 - Math.random() * 100 + 'px');
+        btn.appendChild(heart);
+        setTimeout(() => heart.remove(), 1500);
       }
     }
 
     // 评论功能
     let activePostId = null;
-    function openComment(postId) { if (!currentUser) return alert("请先登录"); activePostId = postId; document.getElementById("commInp").value = ""; document.getElementById("commentModal").classList.add("active"); }
+    function openComment(postId) { 
+      if (!currentUser) {
+        showToast("请先登录");
+        return;
+      }
+      activePostId = postId; 
+      document.getElementById("commInp").value = ""; 
+      document.getElementById("commentModal").classList.add("active"); 
+    }
     document.getElementById("commBtn").onclick = async () => {
       const content = document.getElementById("commInp").value.trim();
-      if (!content) return; document.getElementById("commBtn").textContent = "提交中...";
-      await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
-      closeModal("commentModal"); loadFeed();
+      if (!content) {
+        showToast("请输入评论内容");
+        return;
+      }
+      const btn = document.getElementById("commBtn");
+      btn.textContent = "提交中...";
+      btn.disabled = true;
+      try {
+        await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
+        closeModal("commentModal"); 
+        showToast("评论成功！");
+        loadFeed();
+      } catch (e) {
+        showToast("评论失败");
+      } finally {
+        btn.textContent = "发布评论";
+        btn.disabled = false;
+      }
     };
 
-    // ========== ✅ 修复4：评论删除（加入 actor_key 过滤，符合 RLS 策略） ==========
-    function openDeleteComment(commentId) { delCommentId = commentId; document.getElementById("delCommentModal").classList.add("active"); }
+    // ========== 修复5：评论删除功能（已修复） ==========
+    function openDeleteComment(commentId) { 
+      delCommentId = commentId; 
+      document.getElementById("delCommentModal").classList.add("active"); 
+    }
     document.getElementById("delCommentBtn").onclick = async () => {
       if (!delCommentId) return;
       const btn = document.getElementById("delCommentBtn");
-      btn.disabled = true; btn.textContent = "删除中...";
+      btn.textContent = "删除中...";
+      btn.disabled = true;
       try {
-        // ✅ 关键修复：非管理员必须带 actor_key，否则 RLS 策略会拒绝请求
-        let q = sb.from("comments").delete().eq("id", delCommentId);
-        if (!isAdmin()) q = q.eq("actor_key", deviceId);
-        const { error } = await q;
-        if (error) throw error;
-        // 乐观UI：立即从 DOM 移除该评论
-        const el = document.querySelector(`[data-comment-id="${delCommentId}"]`);
-        if (el) { el.style.transition = 'all 0.25s ease'; el.style.opacity = '0'; el.style.transform = 'scale(0.95)'; setTimeout(()=>el.remove(), 250); }
-        closeModal("delCommentModal");
-        setTimeout(()=>loadFeed(), 350);
-      } catch(e) { console.error(e); alert("删除失败，请重试"); }
-      finally { btn.disabled = false; btn.textContent = "确认删除"; }
+        const { error } = await sb.from("comments").delete().eq("id", delCommentId);
+        if (error) {
+          throw error;
+        }
+        closeModal("delCommentModal"); 
+        showToast("评论已删除");
+        loadFeed();
+      } catch (e) {
+        console.error(e);
+        showToast("删除失败");
+      } finally {
+        btn.textContent = "确认删除";
+        btn.disabled = false;
+        delCommentId = null;
+      }
     };
 
     // 删除帖子
-    function openDelete(postId, ownerKey) { delPostId = postId; delOwnerKey = ownerKey; document.getElementById("delModal").classList.add("active"); }
+    function openDelete(postId, ownerKey) { 
+      delPostId = postId; 
+      delOwnerKey = ownerKey; 
+      document.getElementById("delModal").classList.add("active"); 
+    }
     document.getElementById("delBtn").onclick = async () => {
       const key = isAdmin() ? delOwnerKey : deviceId;
-      await sb.rpc("delete_post_with_actor", { p_post_id: delPostId, p_actor_key: key });
-      closeModal("delModal"); loadFeed();
+      const btn = document.getElementById("delBtn");
+      btn.textContent = "删除中...";
+      btn.disabled = true;
+      try {
+        await sb.rpc("delete_post_with_actor", { p_post_id: delPostId, p_actor_key: key });
+        closeModal("delModal"); 
+        showToast("帖子已删除");
+        loadFeed();
+      } catch (e) {
+        showToast("删除失败");
+      } finally {
+        btn.textContent = "确认删除";
+        btn.disabled = false;
+      }
     };
 
     function closeModal(id) { document.getElementById(id).classList.remove("active"); }
     function trackView(postId) {
       const key = `xtj_v_${postId}`;
-      if (!localStorage.getItem(key)) { localStorage.setItem(key, "1"); sb.rpc("increment_post_views", { p_post_id: postId }); }
+      if (!localStorage.getItem(key)) { 
+        localStorage.setItem(key, "1"); 
+        sb.rpc("increment_post_views", { p_post_id: postId }); 
+      }
     }
 
-    // 渲染帖子+评论（新增评论删除按钮）
+    // 渲染帖子+评论
     async function loadFeed() {
-      const [postRes, commRes, likeRes] = await Promise.all([
-        sb.from("posts").select("*").order("created_at", { ascending: false }),
-        sb.from("comments").select("*").order("created_at"),
-        sb.from("likes").select("*")
-      ]);
-      const posts = postRes.data || [], comments = commRes.data || [], likes = likeRes.data || [];
-      document.getElementById("sPosts").textContent = posts.length;
-      document.getElementById("sViews").textContent = posts.reduce((s,p)=>s+(p.views||0),0);
-      document.getElementById("sLikes").textContent = likes.length;
+      try {
+        const [postRes, commRes, likeRes] = await Promise.all([
+          sb.from("posts").select("*").order("created_at", { ascending: false }),
+          sb.from("comments").select("*").order("created_at"),
+          sb.from("likes").select("*")
+        ]);
+        const posts = postRes.data || [], comments = commRes.data || [], likes = likeRes.data || [];
+        document.getElementById("sPosts").textContent = posts.length;
+        document.getElementById("sViews").textContent = posts.reduce((s,p)=>s+(p.views||0),0);
+        document.getElementById("sLikes").textContent = likes.length;
 
-      const feed = document.getElementById("feed");
-      feed.innerHTML = posts.length ? posts.map(p=>{
-        const pLikes = likes.filter(l=>l.post_id===p.id);
-        const pComms = comments.filter(c=>c.post_id===p.id);
-        const isLiked = pLikes.some(l=>l.actor_key===deviceId);
-        const canDelPost = p.actor_key===deviceId || isAdmin();
-        trackView(p.id);
-        return `
-          <div class="post glass" data-post-id="${p.id}">
-            <div class="post-header">
-              <div class="avatar ${p.user_name===ADMIN_NAME?'admin':''}">${p.user_name[0].toUpperCase()}</div>
-              <div class="user-info">
-                <span class="user-name">${p.user_name} ${p.user_name===ADMIN_NAME?'<span class="admin-tag">ADMIN</span>':''}</span>
-                <span class="post-time">${new Date(p.created_at).toLocaleString()}</span>
+        const feed = document.getElementById("feed");
+        feed.innerHTML = posts.length ? posts.map(p=>{
+          const pLikes = likes.filter(l=>l.post_id===p.id);
+          const pComms = comments.filter(c=>c.post_id===p.id);
+          const isLiked = pLikes.some(l=>l.actor_key===deviceId);
+          const canDelPost = p.actor_key===deviceId || isAdmin();
+          trackView(p.id);
+          return `
+            <div class="post glass" data-post-id="${p.id}">
+              <div class="post-header">
+                <div class="avatar ${p.user_name===ADMIN_NAME?'admin':''}">${p.user_name[0].toUpperCase()}</div>
+                <div class="user-info">
+                  <span class="user-name">${p.user_name} ${p.user_name===ADMIN_NAME?'<span class="admin-tag">ADMIN</span>':''}</span>
+                  <span class="post-time">${new Date(p.created_at).toLocaleString()}</span>
+                </div>
               </div>
-            </div>
-            <div class="content">${p.content}</div>
-            ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${p.media_url}" controls>`:`<img src="${p.media_url}">`}</div>`:''}
-            <div class="post-stats-text">浏览 ${p.views||0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
-            <div class="actions">
-              <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">${isLiked?'已点赞':'点赞'}</button>
-              <button class="action-btn" onclick="openComment('${p.id}')">评论</button>
-              ${canDelPost?`<button class="action-btn del" onclick="openDelete('${p.id}', '${p.actor_key}')">删除</button>`:''}
-            </div>
-            ${pComms.length?`
-              <div class="comments">
-                ${pComms.map(c=>`
-                  <div class="comment-item" data-comment-id="${c.id}">
-                    <div><b>${c.user_name}:</b>${c.content}</div>
-                    ${(c.actor_key===deviceId || isAdmin())?`<button class="comment-del-btn" onclick="openDeleteComment('${c.id}')">×</button>`:''}
-                  </div>
-                `).join('')}
+              <div class="content">${p.content}</div>
+              ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${p.media_url}" controls>`:`<img src="${p.media_url}">`}</div>`:''}
+              <div class="post-stats-text">浏览 ${p.views||0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
+              <div class="actions">
+                <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">${isLiked?'已点赞':'点赞'}</button>
+                <button class="action-btn" onclick="openComment('${p.id}')">评论</button>
+                ${canDelPost?`<button class="action-btn del" onclick="openDelete('${p.id}', '${p.actor_key}')">删除</button>`:''}
               </div>
-            `:''}
-          </div>
-        `}).join('') : `<div class="loading">快来发布第一条动态吧~</div>`;
-      initPostScrollAnimation();
+              ${pComms.length?`
+                <div class="comments">
+                  ${pComms.map(c=>`
+                    <div class="comment-item" data-comment-id="${c.id}">
+                      <div><b>${c.user_name}:</b> ${c.content}</div>
+                      ${(c.actor_key===deviceId || isAdmin())?`<button class="comment-del-btn" onclick="openDeleteComment('${c.id}')">×</button>`:''}
+                    </div>
+                  `).join('')}
+                </div>
+              `:''}
+            </div>
+          `;
+        }).join('') : `<div class="loading">快来发布第一条动态吧~</div>`;
+        
+        initPostScrollAnimation();
+      } catch (e) {
+        console.error(e);
+        showToast("加载失败，请刷新重试");
+      }
     }
 
     // 滚动动画
@@ -585,9 +722,13 @@
       document.querySelectorAll('.post').forEach(p=>observer.observe(p));
     }
 
-    initUI(); loadFeed();
+    initUI(); 
+    loadFeed();
+    
     // 实时同步
-    sb.channel('updates').on('postgres_changes', {event:'*', schema:'public'}, ()=>loadFeed()).subscribe();
+    sb.channel('updates')
+      .on('postgres_changes', {event:'*', schema:'public'}, ()=>loadFeed())
+      .subscribe();
   </script>
 </body>
 </html>
