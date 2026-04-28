@@ -8,10 +8,10 @@
   <style>
     :root {
       --bg-color: #f0f5ff;
-      --glass-bg: rgba(255, 255, 255, 0.28);
-      --glass-border: rgba(255, 255, 255, 0.38);
-      --glass-shadow: 0 12px 40px rgba(31, 38, 135, 0.10);
-      --glass-blur: blur(18px);
+      --glass-bg: rgba(255, 255, 255, 0.18);
+      --glass-border: rgba(255, 255, 255, 0.58);
+      --glass-shadow: 0 18px 50px rgba(31, 38, 135, 0.12);
+      --glass-blur: blur(24px);
       
       --primary: #7c5cff;
       --admin-color: #ff9f0a;
@@ -46,9 +46,10 @@
       position: relative;
       isolation: isolate;
       background:
-        radial-gradient(circle at top left, rgba(124, 92, 255, 0.10), transparent 28%),
-        radial-gradient(circle at bottom right, rgba(60, 180, 255, 0.10), transparent 30%),
-        linear-gradient(180deg, #f7f9ff 0%, #eef4ff 100%);
+        radial-gradient(circle at top left, rgba(124, 92, 255, 0.14), transparent 24%),
+        radial-gradient(circle at top right, rgba(60, 180, 255, 0.12), transparent 22%),
+        radial-gradient(circle at bottom left, rgba(78, 210, 174, 0.10), transparent 25%),
+        linear-gradient(180deg, #f7f9ff 0%, #eef4ff 48%, #f5f7ff 100%);
     }
 
     /* ========== ✅ 修复3：动态液态玻璃背景（更克制，不做成整张壁纸） ========== */
@@ -59,32 +60,35 @@
       overflow: hidden;
       pointer-events: none;
       background:
-        radial-gradient(circle at top left, rgba(124, 92, 255, 0.12), transparent 30%),
-        radial-gradient(circle at bottom right, rgba(60, 180, 255, 0.12), transparent 32%),
-        linear-gradient(135deg, #f7f9ff 0%, #eef4ff 50%, #f8f4ff 100%);
+        radial-gradient(circle at top left, rgba(124, 92, 255, 0.18), transparent 28%),
+        radial-gradient(circle at top right, rgba(60, 180, 255, 0.16), transparent 26%),
+        radial-gradient(circle at bottom left, rgba(78, 210, 174, 0.14), transparent 28%),
+        linear-gradient(135deg, #f7f9ff 0%, #eef4ff 45%, #f8f4ff 100%);
+      filter: saturate(1.08);
     }
     .liquid-blob {
       position: absolute;
       border-radius: 50%;
-      filter: blur(60px);
-      opacity: 0.48;
+      filter: blur(42px) saturate(180%);
+      opacity: 0.72;
       will-change: transform, border-radius;
       mix-blend-mode: screen;
+      transform: translate3d(0, 0, 0);
     }
     .blob-1 { 
-      top: -12%; left: -10%; width: 34vw; height: 34vw; 
-      background: radial-gradient(circle at 40% 40%, rgba(124, 92, 255, 0.58) 0%, rgba(100, 60, 255, 0.20) 58%, transparent 100%);
-      animation: floatBlob1 18s ease-in-out infinite;
+      top: -10%; left: -8%; width: 38vw; height: 38vw; 
+      background: radial-gradient(circle at 40% 40%, rgba(124, 92, 255, 0.72) 0%, rgba(100, 60, 255, 0.30) 56%, transparent 100%);
+      animation: floatBlob1 16s ease-in-out infinite;
     }
     .blob-2 { 
-      bottom: -18%; right: -12%; width: 40vw; height: 40vw; 
-      background: radial-gradient(circle at 60% 60%, rgba(60, 180, 255, 0.55) 0%, rgba(30, 140, 255, 0.18) 60%, transparent 100%);
-      animation: floatBlob2 22s ease-in-out infinite;
+      bottom: -16%; right: -10%; width: 42vw; height: 42vw; 
+      background: radial-gradient(circle at 60% 60%, rgba(60, 180, 255, 0.70) 0%, rgba(30, 140, 255, 0.26) 58%, transparent 100%);
+      animation: floatBlob2 20s ease-in-out infinite;
     }
     .blob-3 { 
-      top: 28%; left: 26%; width: 26vw; height: 26vw; 
-      background: radial-gradient(circle at 50% 50%, rgba(78, 210, 174, 0.42) 0%, rgba(50, 180, 150, 0.14) 60%, transparent 100%);
-      animation: floatBlob3 16s ease-in-out infinite;
+      top: 24%; left: 30%; width: 30vw; height: 30vw; 
+      background: radial-gradient(circle at 50% 50%, rgba(78, 210, 174, 0.56) 0%, rgba(50, 180, 150, 0.22) 58%, transparent 100%);
+      animation: floatBlob3 14s ease-in-out infinite;
     }
     @keyframes floatBlob1 {
       0%   { transform: translate(0, 0) scale(1); border-radius: 50%; }
@@ -258,11 +262,14 @@
     /* 评论区样式 + 评论删除按钮 */
     .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05); display: grid; gap: 8px; }
     .comment-item { 
-      padding: 10px 14px; background: rgba(255,255,255,0.5); 
+      padding: 10px 14px; background: rgba(255,255,255,0.32); 
       border-radius: 12px; font-size: 13px; line-height: 1.5; 
-      border: 1px solid rgba(255,255,255,0.6);
+      border: 1px solid rgba(255,255,255,0.58);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
       display: flex; justify-content: space-between; align-items: center;
       gap: 8px;
+      backdrop-filter: blur(14px) saturate(160%);
+      -webkit-backdrop-filter: blur(14px) saturate(160%);
     }
     .comment-del-btn {
       background: transparent;
@@ -306,7 +313,7 @@
     <div class="liquid-blob blob-3"></div>
   </div>
 
-  <nav>
+  <nav style="position:relative; z-index:2;">
     <h1>xtj</h1>
     <div class="nav-auth">
       <div id="unauthUI" style="display: flex; gap: 8px;">
@@ -323,7 +330,7 @@
     </div>
   </nav>
 
-  <div class="wrap">
+  <div class="wrap" style="position:relative; z-index:2;">
     <div class="publish-box glass">
       <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
       <div class="publish-footer">
@@ -498,7 +505,7 @@
       closeModal("commentModal"); loadFeed();
     };
 
-    // ========== ✅ 修复4：评论删除（先尝试 RPC，再回落到直删；成功后只局部更新） ==========
+    // ========== 评论删除：多策略尝试 + 明确报错 ==========
     function openDeleteComment(commentId) {
       delCommentId = commentId;
       document.getElementById("delCommentModal").classList.add("active");
@@ -506,28 +513,50 @@
 
     async function deleteCommentWithFallback(commentId) {
       const actorKey = deviceId;
+      const attempts = [];
 
-      // 如果数据库里有这个 RPC，就走它。没有也不报废，继续走直删。
+      // 先试 RPC。若数据库里已经建了函数，这条最稳。
       try {
-        const { data: rpcData, error: rpcError } = await sb.rpc("delete_comment_with_actor", {
+        const rpcRes = await sb.rpc("delete_comment_with_actor", {
           p_comment_id: commentId,
           p_actor_key: actorKey
         });
-        if (!rpcError && rpcData !== undefined) {
-          return { data: rpcData, error: null };
-        }
-      } catch (_) {}
-
-      if (isAdmin()) {
-        return await sb.from("comments").delete().eq("id", commentId).select("id");
+        if (!rpcRes.error) return { data: rpcRes.data, error: null, mode: "rpc" };
+        attempts.push(rpcRes.error?.message || "RPC 删除失败");
+      } catch (e) {
+        attempts.push(e?.message || "RPC 调用异常");
       }
 
-      return await sb
-        .from("comments")
-        .delete()
-        .eq("id", commentId)
-        .eq("actor_key", actorKey)
-        .select("id");
+      // 再试常规删除。不同权限策略可能匹配不同字段。
+      const strategies = isAdmin()
+        ? [
+            { mode: "admin-id", query: () => sb.from("comments").delete().eq("id", commentId).select("id") },
+            { mode: "admin-all", query: () => sb.from("comments").delete().match({ id: commentId }).select("id") },
+          ]
+        : [
+            { mode: "owner-actor", query: () => sb.from("comments").delete().eq("id", commentId).eq("actor_key", actorKey).select("id") },
+            { mode: "owner-name", query: () => sb.from("comments").delete().eq("id", commentId).eq("user_name", currentUser).select("id") },
+            { mode: "owner-id", query: () => sb.from("comments").delete().eq("id", commentId).select("id") },
+          ];
+
+      let lastError = null;
+      for (const s of strategies) {
+        try {
+          const res = await s.query();
+          if (!res.error) {
+            return { data: res.data, error: null, mode: s.mode };
+          }
+          lastError = res.error;
+          attempts.push(`${s.mode}: ${res.error.message || "unknown error"}`);
+        } catch (e) {
+          lastError = e;
+          attempts.push(`${s.mode}: ${e?.message || "exception"}`);
+        }
+      }
+
+      const err = new Error(`删除失败：${attempts.join(" | ")}`);
+      err.cause = lastError;
+      throw err;
     }
 
     document.getElementById("delCommentBtn").onclick = async () => {
@@ -543,10 +572,10 @@
         const result = await deleteCommentWithFallback(delCommentId);
         if (result?.error) throw result.error;
 
-        // Supabase 有时会返回空数组但实际上删成功，这里再查一次确认
+        // 再确认一次，避免“按钮动了，数据没动”的经典骗局吗
         const verify = await sb.from("comments").select("id").eq("id", delCommentId);
         if (verify.error) throw verify.error;
-        if (verify.data && verify.data.length > 0) throw new Error("未删除成功");
+        if (verify.data && verify.data.length > 0) throw new Error("删除请求已发出，但数据库里还存在这条评论。说明 Supabase 权限或函数没有真正放行。");
 
         if (el) {
           el.style.transition = "all 0.25s ease";
@@ -569,10 +598,10 @@
 
         closeModal("delCommentModal");
         delCommentId = null;
-        setTimeout(() => loadFeed(), 180);
+        setTimeout(() => loadFeed(), 120);
       } catch(e) {
-        console.error(e);
-        alert("删除失败，请重试");
+        console.error("评论删除失败：", e);
+        alert(e?.message || "删除失败，请重试");
       } finally {
         btn.disabled = false;
         btn.textContent = "确认删除";
