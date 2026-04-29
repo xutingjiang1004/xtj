@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>xtj - </title>
+  <title>xtj</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
@@ -28,7 +28,6 @@
       --trans-spring: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
 
-    /* 全局基础 */
     html { scroll-behavior: smooth; scroll-padding: 20px; }
     * {
       box-sizing: border-box;
@@ -51,7 +50,6 @@
         linear-gradient(180deg, #f7f9ff 0%, #eef4ff 48%, #f5f7ff 100%);
     }
 
-    /* 动态液态玻璃背景 */
     .liquid-bg {
       position: fixed;
       inset: 0;
@@ -109,7 +107,6 @@
       66%  { transform: translate(4vw, -6vh) scale(0.94) rotate(220deg); border-radius: 45% 55% 40% 60%; }
       100% { transform: translate(0, 0) scale(1) rotate(360deg); border-radius: 50%; }
     }
-    /* 液态玻璃样式 */
     .glass {
       background: linear-gradient(135deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.18) 100%);
       border: 1px solid rgba(255, 255, 255, 0.42);
@@ -255,7 +252,6 @@
     .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: auto; }
     .action-btn.del:hover { background: rgba(255, 59, 96, 0.1); }
 
-    /* 评论区样式 */
     .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05); display: grid; gap: 8px; }
     .comment-item { 
       padding: 10px 14px; background: rgba(255,255,255,0.32); 
@@ -282,7 +278,6 @@
       color: #ff3b60;
     }
 
-    /* 弹窗样式 */
     .modal-overlay {
       position: fixed; inset: 0; background: rgba(255,255,255,0.2); backdrop-filter: blur(12px);
       display: flex; align-items: center; justify-content: center; z-index: 100;
@@ -300,7 +295,6 @@
   </style>
 </head>
 <body>
-  <!-- 动态液态玻璃背景 -->
   <div class="liquid-bg">
     <div class="liquid-blob blob-1"></div>
     <div class="liquid-blob blob-2"></div>
@@ -344,36 +338,33 @@
     </div>
   </div>
 
-  <!-- 评论弹窗 -->
   <div class="modal-overlay" id="commentModal">
     <div class="modal-box glass">
       <h3>发表评论</h3>
-      <textarea id="commInp" class="modal-textarea" placeholder="写下你的想法..."></textarea>
-      <div style="display: flex; justify-content: flex-end; gap: 10px;">
+      <textarea id="commInp" class="modal-textarea" placeholder="写下你的想法..." style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top:16px;">
         <button class="btn" style="background: rgba(255,255,255,0.5);" onclick="closeModal('commentModal')">取消</button>
         <button class="btn btn-primary" id="commBtn">发布评论</button>
       </div>
     </div>
   </div>
 
-  <!-- 删除帖子弹窗 -->
   <div class="modal-overlay" id="delModal">
     <div class="modal-box glass" style="text-align: center;">
       <h3>确认删除帖子？</h3>
       <p style="color: var(--text-muted);">删除后无法恢复</p>
-      <div style="display: flex; gap: 10px;">
+      <div style="display: flex; gap: 10px; margin-top:20px;">
         <button class="btn" style="flex:1;" onclick="closeModal('delModal')">取消</button>
         <button class="btn btn-primary" style="flex:1; background:#ff3b60;" id="delBtn">确认删除</button>
       </div>
     </div>
   </div>
 
-  <!-- 删除评论弹窗 -->
   <div class="modal-overlay" id="delCommentModal">
     <div class="modal-box glass" style="text-align: center;">
       <h3>确认删除评论？</h3>
       <p style="color: var(--text-muted);">删除后无法恢复</p>
-      <div style="display: flex; gap: 10px;">
+      <div style="display: flex; gap: 10px; margin-top:20px;">
         <button class="btn" style="flex:1;" onclick="closeModal('delCommentModal')">取消</button>
         <button class="btn btn-primary" style="flex:1; background:#ff3b60;" id="delCommentBtn">确认删除</button>
       </div>
@@ -381,13 +372,16 @@
   </div>
 
   <script>
+    // Supabase配置，和你原有项目完全匹配
     const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    // 管理员配置
     const ADMIN_NAME = "xxz";
     const ADMIN_PW = "xxz123";
 
+    // 全局状态
     let currentUser = localStorage.getItem("xtj_user") || "";
     const deviceId = localStorage.getItem("xtj_device_id") || crypto.randomUUID();
     localStorage.setItem("xtj_device_id", deviceId);
@@ -398,7 +392,7 @@
     const CACHE_DURATION = 30 * 1000;
     const viewTracked = new Set();
 
-    // 复用IntersectionObserver
+    // 滚动动画Observer
     let observer = new IntersectionObserver(e=>{
       e.forEach(i=>{
         if (i.isIntersecting) {
@@ -408,6 +402,7 @@
       });
     }, { threshold:0.1 });
 
+    // 工具函数
     function isAdmin() { return currentUser === ADMIN_NAME; }
     
     // 登录/登出
@@ -476,7 +471,7 @@
       } catch (e) { console.error(e); }
     }
 
-    // 爱心粒子
+    // 爱心粒子动画
     function createHeartParticles(btn) {
       const rect = btn.getBoundingClientRect();
       const cx = rect.left + rect.width / 2;
@@ -524,39 +519,40 @@
       }
     };
 
-    // 删除评论（RPC方式）
+    // ==============================================
+    // 评论删除功能，和帖子删除100%对齐
+    // ==============================================
     function openDeleteComment(commentId) {
       delCommentId = commentId;
       document.getElementById("delCommentModal").classList.add("active");
     }
 
-    // 评论删除逻辑，和帖子删除100%一致，变量名和你原有代码完全对齐
-async function deleteCommentWithFallback(commentId) {
-  try {
-    // 直接用sb.from，和你帖子删除的原生API写法完全一样
-    const { error } = await sb
-      .from('comments')
-      .delete()
-      .eq('id', commentId);
+    async function deleteCommentWithFallback(commentId) {
+      try {
+        // 和帖子删除完全一致的原生API写法
+        const { error } = await sb
+          .from('comments')
+          .delete()
+          .eq('id', commentId);
 
-    if (error) throw new Error(`删除失败：${error.message}`);
+        if (error) throw new Error(`删除失败：${error.message}`);
 
-    // 验证是否真的从数据库删除
-    const { data: verifyData } = await sb
-      .from('comments')
-      .select('id')
-      .eq('id', commentId);
-    
-    if (verifyData && verifyData.length > 0) {
-      throw new Error("评论未删除，请检查Supabase的RLS权限");
+        // 验证删除结果
+        const { data: verifyData } = await sb
+          .from('comments')
+          .select('id')
+          .eq('id', commentId);
+        
+        if (verifyData && verifyData.length > 0) {
+          throw new Error("数据库删除未执行，请刷新页面重试");
+        }
+
+        return { success: true };
+      } catch (e) {
+        console.error("删除评论异常：", e);
+        throw e;
+      }
     }
-
-    return { success: true };
-  } catch (e) {
-    console.error("删除评论异常：", e);
-    throw e;
-  }
-}
 
     document.getElementById("delCommentBtn").onclick = async () => {
       if (!delCommentId) return;
@@ -599,7 +595,7 @@ async function deleteCommentWithFallback(commentId) {
       }
     };
 
-    // 删除帖子
+    // 帖子删除功能
     function openDelete(postId, ownerKey) { 
       delPostId = postId; 
       delOwnerKey = ownerKey; 
@@ -635,7 +631,7 @@ async function deleteCommentWithFallback(commentId) {
       }
     }
 
-    // 加载Feed（带缓存）
+    // 加载Feed（带缓存优化）
     async function loadFeed(forceRefresh = false) {
       const now = Date.now();
       if (!forceRefresh && feedCache.data && (now - feedCache.timestamp) < CACHE_DURATION) {
@@ -720,13 +716,13 @@ async function deleteCommentWithFallback(commentId) {
       });
     }
 
-    // 初始化
+    // 页面初始化
     document.addEventListener('DOMContentLoaded', async () => {
       initUI();
       setTimeout(() => loadFeed(), 0);
     });
 
-    // 实时同步（只监听必要表）
+    // 实时数据同步
     sb.channel('updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => loadFeed(true))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => loadFeed(true))
