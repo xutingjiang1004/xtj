@@ -915,17 +915,17 @@
                     if (!isAdmin()) {
                         query = query.eq('actor_key', deviceId);
                     }
-                    const { error } = await query;
+                    const { data, error } = await query.select();
                     if (error) {
-                        showToast("删除失败，请在Supabase SQL Editor运行: CREATE POLICY \"anon_delete_comments\" ON comments FOR DELETE USING (true);");
-                        btn.disabled = false;
-                        btn.textContent = "确认删除";
-                        return;
+                        showToast("删除失败：" + error.message);
+                    } else if (!data || data.length === 0) {
+                        showToast("没有权限删除，请先设置数据库策略");
+                    } else {
+                        closeModal("delCommentModal");
+                        showToast("评论已删除");
+                        delCommentId = null;
+                        await loadFeed(true);
                     }
-                    closeModal("delCommentModal");
-                    showToast("评论已删除");
-                    delCommentId = null;
-                    await loadFeed(true);
                 } catch (e) {
                     showToast("删除失败，请重试");
                     console.error(e);
