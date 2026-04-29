@@ -911,12 +911,12 @@
                 btn.disabled = true;
                 btn.textContent = "删除中...";
                 try {
-                    const { error } = await sb.rpc("delete_comment_with_actor", {
+                    const result = await sb.rpc("delete_comment_with_actor", {
                         p_comment_id: delCommentId,
                         p_actor_key: isAdmin() ? 'admin_override' : deviceId
                     });
-                    if (error) {
-                        showToast("删除失败，需创建RPC函数");
+                    if (result.error) {
+                        showToast("删除失败：" + (result.error.message || result.error.code || "未知错误"));
                     } else {
                         closeModal("delCommentModal");
                         showToast("评论已删除");
