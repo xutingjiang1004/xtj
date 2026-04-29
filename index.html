@@ -188,18 +188,75 @@
             display: flex; flex-direction: column; gap: 24px;
         }
 
-        .publish-box { position: relative; z-index: 1; padding: 20px; border-radius: var(--radius-md); transition: var(--trans-smooth); }
-        .publish-box:hover { transform: translateY(-2px); box-shadow: var(--glass-shadow); }
+        .publish-box {
+            position: relative; z-index: 1; padding: 24px; border-radius: var(--radius-md);
+            transition: var(--trans-smooth);
+            background: linear-gradient(135deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.12) 100%);
+            border: 1px solid rgba(255,255,255,0.4);
+            backdrop-filter: blur(22px) saturate(175%);
+            -webkit-backdrop-filter: blur(22px) saturate(175%);
+            box-shadow: 0 10px 34px rgba(5, 150, 105, 0.06), inset 0 1px 0 rgba(255,255,255,0.6);
+        }
+        .publish-box::before {
+            content: ''; position: absolute; inset: -1px; border-radius: inherit;
+            background: linear-gradient(135deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 50%, rgba(5,150,105,0.08) 100%);
+            pointer-events: none; z-index: -1;
+        }
+        .publish-box:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 16px 48px rgba(5, 150, 105, 0.1), inset 0 1px 0 rgba(255,255,255,0.7);
+            border-color: rgba(255,255,255,0.55);
+        }
+        .publish-box:focus-within {
+            border-color: rgba(5, 150, 105, 0.15);
+            box-shadow: 0 12px 40px rgba(5, 150, 105, 0.08), 0 0 0 3px rgba(5, 150, 105, 0.06), inset 0 1px 0 rgba(255,255,255,0.7);
+        }
         .publish-box textarea {
             width: 100%; min-height: 80px; border: none; background: transparent; resize: none;
             font-size: 16px; color: var(--text-main); outline: none;
+            transition: var(--trans-smooth);
         }
-        .publish-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.05); }
-
-        input[type="file"] { font-size: 12px; color: var(--text-muted); }
-        input[type="file"]::file-selector-button {
-            background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.8);
-            padding: 4px 12px; border-radius: 99px; cursor: pointer; transition: 0.3s;
+        .publish-box textarea::placeholder { color: rgba(107, 108, 122, 0.6); }
+        .publish-box textarea:focus::placeholder { color: rgba(107, 108, 122, 0.3); }
+        .publish-footer {
+            display: flex; justify-content: space-between; align-items: center;
+            padding-top: 14px; margin-top: 4px;
+            border-top: 1px solid rgba(255,255,255,0.25);
+            position: relative;
+        }
+        .publish-footer::after {
+            content: ''; position: absolute; top: -1px; left: 0; right: 60%;
+            height: 1px;
+            background: linear-gradient(90deg, rgba(5,150,105,0.2), transparent);
+            pointer-events: none;
+        }
+        .publish-footer input[type="file"] {
+            font-size: 12px; color: var(--text-muted);
+            background: rgba(255,255,255,0.2);
+            padding: 4px 10px; border-radius: 99px;
+            border: 1px solid rgba(255,255,255,0.15);
+            backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+            transition: var(--trans-smooth);
+            max-width: 140px;
+        }
+        .publish-footer input[type="file"]:hover {
+            background: rgba(255,255,255,0.35);
+            border-color: rgba(255,255,255,0.3);
+        }
+        .publish-footer input[type="file"]::file-selector-button {
+            background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.5);
+            padding: 4px 12px; border-radius: 99px; cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 11px;
+            margin-right: 6px;
+        }
+        .publish-footer input[type="file"]::file-selector-button:hover {
+            background: rgba(255,255,255,0.85);
+            transform: scale(1.04);
+        }
+        .publish-footer .btn-primary {
+            padding: 8px 22px; font-size: 14px;
+            backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
         }
 
         .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
@@ -288,14 +345,6 @@
             display: flex; justify-content: space-between; align-items: center; gap: 8px;
             backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
         }
-        .comment-del-btn {
-            background: transparent; border: none; color: rgba(255,59,96,0.5);
-            cursor: pointer; font-size: 16px; padding: 4px 8px; border-radius: 50%;
-            transition: var(--trans-spring);
-            line-height: 1;
-        }
-        .comment-del-btn:hover { background: rgba(255,59,96,0.15); color: #ff3b60; transform: scale(1.25); }
-
         .modal-overlay {
             position: fixed; inset: 0; background: rgba(0,0,0,0.15);
             backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
@@ -371,18 +420,38 @@
             backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
             display: flex; align-items: center; justify-content: center;
             opacity: 0; pointer-events: none;
-            transition: opacity 0.4s cubic-bezier(0.16,1,0.3,1);
+            transition: opacity 0.3s cubic-bezier(0.16,1,0.3,1);
+            will-change: opacity;
+            -webkit-user-select: none; user-select: none;
+            -webkit-touch-callout: none;
+            touch-action: none;
         }
         .img-viewer.active { opacity: 1; pointer-events: all; }
+        .img-viewer .iv-wrapper {
+            display: flex; align-items: center; justify-content: center;
+            width: 100%; height: 100%;
+            will-change: transform;
+            transform: scale(0.92);
+            transition: transform 0.35s cubic-bezier(0.16,1,0.3,1);
+            -webkit-transform: scale(0.92);
+            -webkit-transition: -webkit-transform 0.35s cubic-bezier(0.16,1,0.3,1);
+        }
+        .img-viewer.active .iv-wrapper { transform: scale(1); -webkit-transform: scale(1); }
+        .img-viewer .iv-wrapper.instant {
+            transition: none !important;
+            -webkit-transition: none !important;
+        }
         .img-viewer img {
             max-width: 92vw; max-height: 88vh;
             object-fit: contain;
             border-radius: 12px;
             box-shadow: 0 20px 80px rgba(0,0,0,0.6);
-            transform: scale(0.92);
-            transition: transform 0.4s cubic-bezier(0.16,1,0.3,1);
+            display: block;
+            -webkit-user-select: none; user-select: none;
+            -webkit-touch-callout: none;
+            touch-action: none;
+            pointer-events: none;
         }
-        .img-viewer.active img { transform: scale(1); }
         .img-viewer .iv-close {
             position: fixed; top: 20px; right: 24px;
             width: 44px; height: 44px;
@@ -393,26 +462,25 @@
             transition: all 0.3s;
             display: flex; align-items: center; justify-content: center;
             backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            z-index: 10;
         }
         .img-viewer .iv-close:hover { background: rgba(255,255,255,0.25); transform: scale(1.1); }
-        .img-viewer .iv-download {
+        .img-viewer .iv-zoom-hint {
             position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
-            background: rgba(255,255,255,0.15);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255,255,255,0.2);
-            padding: 12px 32px;
+            background: rgba(255,255,255,0.1);
+            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 8px 18px;
             border-radius: 99px;
-            color: white;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
+            color: rgba(255,255,255,0.5);
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.6s ease;
+            white-space: nowrap;
         }
-        .img-viewer .iv-download:hover { background: rgba(255,255,255,0.25); transform: translateX(-50%) scale(1.04); }
+        .img-viewer .iv-zoom-hint.show { opacity: 1; }
     </style>
 </head>
 <body>
@@ -482,17 +550,6 @@
         </div>
     </div>
 
-    <div class="modal-overlay" id="delCommentModal">
-        <div class="modal-box glass" style="text-align: center;">
-            <h3 style="margin-top:0;">确认删除评论？</h3>
-            <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢复</p>
-            <div style="display: flex; gap: 10px;">
-                <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delCommentModal')">取消</button>
-                <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delCommentBtn">确认删除</button>
-            </div>
-        </div>
-    </div>
-
     <!-- ========== 登录模态框 ========== -->
     <div class="modal-overlay" id="loginModal" onclick="if(event.target===this)closeModal('loginModal')">
         <div class="modal-box glass" style="padding: 32px;" onclick="event.stopPropagation()">
@@ -520,10 +577,12 @@
     </div>
 
     <!-- ========== 图片查看器 ========== -->
-    <div class="img-viewer" id="imgViewer" onclick="if(event.target===this)closeImageViewer()">
+    <div class="img-viewer" id="imgViewer">
         <button class="iv-close" onclick="closeImageViewer()">&times;</button>
-        <img id="ivImg" src="" alt="预览" />
-        <a class="iv-download" id="ivDownload" download="image">⬇ 下载图片</a>
+        <div class="iv-wrapper" id="ivWrapper">
+            <img id="ivImg" src="" alt="预览" draggable="false" />
+        </div>
+        <div class="iv-zoom-hint" id="ivZoomHint">捏合双指可缩放</div>
     </div>
 
     <script>
@@ -542,7 +601,6 @@
             }
 
             let delPostId = null, delOwnerKey = null;
-            let delCommentId = null;
             let activePostId = null;
             const viewTracked = new Set();
             const CACHE_KEY = "xtj_feed_cache";
@@ -900,38 +958,6 @@
                 }
             };
 
-            // ===================== 评论删除（修复：改用 RPC，与帖子删除逻辑一致） =====================
-            window.openDeleteComment = function (commentId) {
-                delCommentId = commentId;
-                document.getElementById("delCommentModal").classList.add("active");
-            };
-            document.getElementById("delCommentBtn").onclick = async () => {
-                if (!delCommentId) return;
-                const btn = document.getElementById("delCommentBtn");
-                btn.disabled = true;
-                btn.textContent = "删除中...";
-                try {
-                    const { error } = await sb.rpc("del_com", {
-                        cid: delCommentId,
-                        ak: isAdmin() ? 'admin' : deviceId
-                    });
-                    if (error) {
-                        showToast("删除失败: " + error.message);
-                    } else {
-                        closeModal("delCommentModal");
-                        showToast("评论已删除");
-                        delCommentId = null;
-                        await loadFeed(true);
-                    }
-                } catch (e) {
-                    showToast("删除失败，请重试");
-                    console.error(e);
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = "确认删除";
-                }
-            };
-
             // ===================== 删除帖子 =====================
             window.openDelete = function (postId, ownerKey) {
                 delPostId = postId;
@@ -968,20 +994,202 @@
 
             window.closeModal = function (id) { document.getElementById(id).classList.remove("active"); };
 
-            // ===================== 图片查看器 =====================
+            // ===================== 图片查看器 - 高性能缩放 =====================
+            const ivZoomState = { scale: 1, tx: 0, ty: 0 };
+            let ivIsZooming = false;
+            let ivIsPanning = false;
+            let ivLastDist = 0;
+            let ivPanStartX = 0, ivPanStartY = 0;
+            let ivStartTx = 0, ivStartTy = 0;
+            let ivLastTapTime = 0;
+            let ivDoubleTapTimer = null;
+            let ivHintTimer = null;
+            let ivTouchEndTime = 0;
+
+            function ivApplyTransform() {
+                const w = document.getElementById('ivWrapper');
+                const v = ivZoomState;
+                const t = `translate3d(${v.tx}px, ${v.ty}px, 0) scale(${v.scale})`;
+                w.style.transform = t;
+                w.style.webkitTransform = t;
+            }
+
+            function ivResetZoom(instant = false) {
+                const w = document.getElementById('ivWrapper');
+                ivZoomState.scale = 1;
+                ivZoomState.tx = 0;
+                ivZoomState.ty = 0;
+                if (instant) {
+                    w.classList.add('instant');
+                    w.style.transform = '';
+                    w.style.webkitTransform = '';
+                    void w.offsetWidth;
+                    w.classList.remove('instant');
+                } else {
+                    w.style.transform = '';
+                    w.style.webkitTransform = '';
+                }
+            }
+
+            function ivShowHint() {
+                const h = document.getElementById('ivZoomHint');
+                h.classList.add('show');
+                clearTimeout(ivHintTimer);
+                ivHintTimer = setTimeout(() => h.classList.remove('show'), 2000);
+            }
+
             window.openImageViewer = function (src) {
-                document.getElementById('ivImg').src = src;
-                document.getElementById('ivDownload').href = src;
-                document.getElementById('imgViewer').classList.add('active');
+                const viewer = document.getElementById('imgViewer');
+                const img = document.getElementById('ivImg');
+                ivResetZoom(true);
+                img.src = src;
+                viewer.classList.add('active');
                 document.body.style.overflow = 'hidden';
             };
+
             window.closeImageViewer = function () {
-                document.getElementById('imgViewer').classList.remove('active');
+                const viewer = document.getElementById('imgViewer');
+                const wrapper = document.getElementById('ivWrapper');
+                wrapper.classList.remove('instant');
+                ivResetZoom(false);
+                viewer.classList.remove('active');
                 document.body.style.overflow = '';
             };
+
             document.addEventListener('keydown', function (e) {
                 if (e.key === 'Escape') closeImageViewer();
             });
+
+            // ========== 触摸/交互事件 ==========
+            const ivViewerEl = document.getElementById('imgViewer');
+            const ivWrapperEl = document.getElementById('ivWrapper');
+
+            ivViewerEl.addEventListener('click', function (e) {
+                if (Date.now() - ivTouchEndTime < 120) return;
+                if (e.target === ivViewerEl || e.target === ivWrapperEl) {
+                    closeImageViewer();
+                }
+            });
+
+            ivViewerEl.addEventListener('contextmenu', function (e) {
+                e.preventDefault();
+            });
+
+            ivViewerEl.addEventListener('touchstart', function (e) {
+                if (e.target.closest('.iv-close')) return;
+
+                if (e.touches.length === 2) {
+                    e.preventDefault();
+                    ivIsZooming = true;
+                    const t = e.touches;
+                    ivLastDist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+                    ivStartTx = ivZoomState.tx;
+                    ivStartTy = ivZoomState.ty;
+                    ivWrapperEl.classList.add('instant');
+                } else if (e.touches.length === 1) {
+                    const now = Date.now();
+                    if (now - ivLastTapTime < 320) {
+                        clearTimeout(ivDoubleTapTimer);
+                        ivLastTapTime = 0;
+                        if (ivZoomState.scale > 1.5) {
+                            ivResetZoom(false);
+                        } else {
+                            ivWrapperEl.classList.add('instant');
+                            ivZoomState.scale = 2.5;
+                            ivZoomState.tx = 0;
+                            ivZoomState.ty = 0;
+                            ivApplyTransform();
+                            void ivWrapperEl.offsetWidth;
+                            ivWrapperEl.classList.remove('instant');
+                            ivShowHint();
+                        }
+                        return;
+                    }
+                    ivLastTapTime = now;
+                    ivDoubleTapTimer = setTimeout(() => { ivLastTapTime = 0; }, 350);
+
+                    if (ivZoomState.scale > 1) {
+                        ivIsPanning = true;
+                        ivWrapperEl.classList.add('instant');
+                        ivPanStartX = e.touches[0].clientX;
+                        ivPanStartY = e.touches[0].clientY;
+                        ivStartTx = ivZoomState.tx;
+                        ivStartTy = ivZoomState.ty;
+                    }
+                }
+            }, { passive: false });
+
+            ivViewerEl.addEventListener('touchmove', function (e) {
+                if (ivIsZooming && e.touches.length === 2) {
+                    e.preventDefault();
+                    const t = e.touches;
+                    const dist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+                    const newScale = Math.max(1, Math.min(6, ivZoomState.scale * (dist / ivLastDist)));
+
+                    const cx = (t[0].clientX + t[1].clientX) / 2;
+                    const cy = (t[0].clientY + t[1].clientY) / 2;
+                    const ratio = newScale / ivZoomState.scale;
+
+                    ivZoomState.tx = cx - ratio * (cx - ivStartTx);
+                    ivZoomState.ty = cy - ratio * (cy - ivStartTy);
+                    ivZoomState.scale = newScale;
+                    ivLastDist = dist;
+                    ivStartTx = ivZoomState.tx;
+                    ivStartTy = ivZoomState.ty;
+
+                    ivApplyTransform();
+                    ivShowHint();
+                } else if (ivIsPanning && e.touches.length === 1) {
+                    e.preventDefault();
+                    const dx = e.touches[0].clientX - ivPanStartX;
+                    const dy = e.touches[0].clientY - ivPanStartY;
+                    ivZoomState.tx = ivStartTx + dx;
+                    ivZoomState.ty = ivStartTy + dy;
+                    ivApplyTransform();
+                }
+            }, { passive: false });
+
+            ivViewerEl.addEventListener('touchend', function (e) {
+                ivTouchEndTime = Date.now();
+                if (ivIsZooming) {
+                    ivIsZooming = false;
+                    if (ivZoomState.scale <= 1) {
+                        ivResetZoom(false);
+                    } else {
+                        setTimeout(() => ivWrapperEl.classList.remove('instant'), 50);
+                    }
+                }
+                if (ivIsPanning) {
+                    ivIsPanning = false;
+                    setTimeout(() => ivWrapperEl.classList.remove('instant'), 50);
+                }
+            });
+
+            ivViewerEl.addEventListener('wheel', function (e) {
+                if (!ivViewerEl.classList.contains('active')) return;
+                e.preventDefault();
+
+                const delta = -e.deltaY * 0.001;
+                const newScale = Math.max(1, Math.min(6, ivZoomState.scale * (1 + delta)));
+
+                const rect = ivViewerEl.getBoundingClientRect();
+                const cx = e.clientX - rect.left;
+                const cy = e.clientY - rect.top;
+                const ratio = newScale / ivZoomState.scale;
+
+                ivZoomState.tx = cx - ratio * (cx - ivZoomState.tx);
+                ivZoomState.ty = cy - ratio * (cy - ivZoomState.ty);
+                ivZoomState.scale = newScale;
+
+                ivWrapperEl.classList.add('instant');
+                ivApplyTransform();
+                ivShowHint();
+
+                if (ivZoomState.scale <= 1) {
+                    setTimeout(() => ivResetZoom(false), 10);
+                }
+                setTimeout(() => ivWrapperEl.classList.remove('instant'), 100);
+            }, { passive: false });
 
             // ===================== 浏览量统计 =====================
             function trackView(postId) {
@@ -1059,7 +1267,6 @@
                     ${pComms.map(c=>`
                     <div class="comment-item" data-comment-id="${c.id}">
                       <div><b>${c.user_name}:</b>${c.content}</div>
-                      ${(c.actor_key===deviceId || isAdmin())?`<button type="button" class="comment-del-btn" onclick="openDeleteComment('${c.id}')">×</button>`:''}
                     </div>
                     `).join('')}
                   </div>
