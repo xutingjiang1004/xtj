@@ -30,7 +30,6 @@
             scroll-behavior: smooth;
             scroll-padding: 20px;
         }
-
         * {
             box-sizing: border-box;
             -webkit-tap-highlight-color: transparent;
@@ -38,7 +37,8 @@
 
         body {
             margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC",
+                sans-serif;
             color: var(--text-main);
             min-height: 100vh;
             overflow-x: hidden;
@@ -47,25 +47,18 @@
             isolation: isolate;
         }
 
-        /* 动态下雨与玻璃背景层 */
+        /* ========== 雨天玻璃背景（纯浅色渐变，无图片） ========== */
         .rain-bg-container {
             position: fixed;
             inset: 0;
-            z-index: 0;
-            background: linear-gradient(135deg, #dcedc8 0%, #a5d6a7 50%, #81c784 100%);
+            z-index: -999;
             overflow: hidden;
             pointer-events: none;
+            /* 浅绿色渐变，替代图片 */
+            background: linear-gradient(135deg, #dcedc8 0%, #a5d6a7 50%, #81c784 100%);
         }
 
-        .rain-glass-layer {
-            position: absolute;
-            inset: 0;
-            z-index: 1;
-            backdrop-filter: blur(6px);
-            -webkit-backdrop-filter: blur(6px);
-            background: rgba(255, 255, 255, 0.25);
-        }
-
+        /* 动态雨滴 Canvas（保留） */
         #rainCanvas {
             position: absolute;
             top: 0;
@@ -73,10 +66,22 @@
             width: 100%;
             height: 100%;
             display: block;
-            z-index: 2;
+            z-index: 1;
             pointer-events: none;
         }
 
+        /* 玻璃反光与雨滴覆盖层（保留） */
+        .rain-glass-layer {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            background: rgba(255, 255, 255, 0.15);
+            pointer-events: none;
+        }
+
+        /* ========== 原有样式（未改动） ========== */
         .glass {
             background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.2) 100%);
             border: 1px solid rgba(255, 255, 255, 0.5);
@@ -113,7 +118,6 @@
             align-items: center;
             gap: 8px;
         }
-
         .nav-input {
             background: rgba(255, 255, 255, 0.7);
             border: 1px solid rgba(255, 255, 255, 0.8);
@@ -124,12 +128,10 @@
             font-size: 13px;
             transition: var(--trans-smooth);
         }
-
         .nav-input:focus {
             background: rgba(255, 255, 255, 0.95);
             border-color: var(--primary);
         }
-
         .btn {
             cursor: pointer;
             border: none;
@@ -142,18 +144,15 @@
             align-items: center;
             justify-content: center;
         }
-
         .btn-primary {
             background: linear-gradient(135deg, var(--primary), #10b981);
             color: white;
             box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
         }
-
         .btn-primary:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35);
         }
-
         .user-pill {
             display: flex;
             align-items: center;
@@ -165,7 +164,6 @@
             font-size: 13px;
             font-weight: 600;
         }
-
         .wrap {
             position: relative;
             z-index: 2;
@@ -176,7 +174,6 @@
             flex-direction: column;
             gap: 24px;
         }
-
         .publish-box {
             position: relative;
             z-index: 1;
@@ -184,12 +181,10 @@
             border-radius: var(--radius-md);
             transition: var(--trans-smooth);
         }
-
         .publish-box:hover {
             transform: translateY(-2px);
             box-shadow: var(--glass-shadow);
         }
-
         .publish-box textarea {
             width: 100%;
             min-height: 80px;
@@ -200,7 +195,6 @@
             color: var(--text-main);
             outline: none;
         }
-
         .publish-footer {
             display: flex;
             justify-content: space-between;
@@ -208,12 +202,10 @@
             padding-top: 12px;
             border-top: 1px solid rgba(0, 0, 0, 0.05);
         }
-
         input[type="file"] {
             font-size: 12px;
             color: var(--text-muted);
         }
-
         input[type="file"]::file-selector-button {
             background: rgba(255, 255, 255, 0.7);
             border: 1px solid rgba(255, 255, 255, 0.8);
@@ -222,7 +214,6 @@
             cursor: pointer;
             transition: 0.3s;
         }
-
         .stats {
             position: relative;
             z-index: 1;
@@ -230,31 +221,26 @@
             grid-template-columns: repeat(3, 1fr);
             gap: 12px;
         }
-
         .stat-card {
             padding: 16px;
             border-radius: var(--radius-sm);
             text-align: center;
             transition: var(--trans-spring);
         }
-
         .stat-card:hover {
             transform: translateY(-4px) scale(1.02);
             box-shadow: 0 8px 24px rgba(5, 150, 105, 0.15);
         }
-
         .stat-card b {
             display: block;
             font-size: 22px;
             color: var(--primary);
             font-weight: 800;
         }
-
         .stat-card span {
             font-size: 12px;
             color: var(--text-muted);
         }
-
         .feed {
             position: relative;
             z-index: 1;
@@ -262,32 +248,28 @@
             flex-direction: column;
             gap: 20px;
         }
-
         .post {
             padding: 24px;
             border-radius: var(--radius-md);
             opacity: 0;
             transform: translateY(30px) scale(0.95);
-            transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
+                transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
-
         .post.visible {
             opacity: 1;
             transform: translateY(0) scale(1);
         }
-
         .post:hover {
             box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12);
             transform: translateY(-2px);
         }
-
         .post-header {
             display: flex;
             align-items: center;
             gap: 12px;
             margin-bottom: 16px;
         }
-
         .avatar {
             width: 40px;
             height: 40px;
@@ -301,26 +283,21 @@
             font-size: 16px;
             transition: var(--trans-spring);
         }
-
         .avatar.admin {
             background: linear-gradient(135deg, #ff9f0a, #ff3b60);
             box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3);
         }
-
         .avatar:hover {
             transform: scale(1.1);
         }
-
         .user-info {
             display: flex;
             flex-direction: column;
         }
-
         .user-name {
             font-weight: 700;
             font-size: 15px;
         }
-
         .admin-tag {
             font-size: 10px;
             background: var(--admin-color);
@@ -329,19 +306,16 @@
             border-radius: 4px;
             margin-left: 4px;
         }
-
         .post-time {
             font-size: 12px;
             color: var(--text-muted);
         }
-
         .content {
             font-size: 15px;
             line-height: 1.6;
             margin-bottom: 16px;
             white-space: pre-wrap;
         }
-
         .media {
             width: 100%;
             border-radius: 16px;
@@ -349,7 +323,6 @@
             margin-bottom: 16px;
             background: rgba(0, 0, 0, 0.02);
         }
-
         .media img,
         .media video {
             width: 100%;
@@ -359,20 +332,17 @@
             pointer-events: none;
             transform: none !important;
         }
-
         .post-stats-text {
             font-size: 12px;
             color: var(--text-muted);
             margin-bottom: 12px;
         }
-
         .actions {
             display: flex;
             gap: 8px;
             flex-wrap: wrap;
             position: relative;
         }
-
         .action-btn {
             background: rgba(255, 255, 255, 0.6);
             border: 1px solid rgba(255, 255, 255, 0.8);
@@ -391,12 +361,10 @@
             align-items: center;
             box-sizing: border-box;
         }
-
         .action-btn:hover {
             background: rgba(255, 255, 255, 1);
             transform: translateY(-2px);
         }
-
         @keyframes likePulse {
             0% {
                 box-shadow: 0 0 0px rgba(255, 59, 96, 0.4);
@@ -408,7 +376,6 @@
                 box-shadow: 0 0 12px rgba(255, 59, 96, 0.15);
             }
         }
-
         .action-btn.liked {
             background: rgba(255, 59, 96, 0.15);
             color: var(--like-color);
@@ -416,7 +383,6 @@
             box-shadow: 0 0 12px rgba(255, 59, 96, 0.15);
             animation: likePulse 0.45s ease;
         }
-
         .heart-particle {
             position: fixed;
             font-size: 20px;
@@ -424,7 +390,6 @@
             animation: heartFly 0.9s ease-out forwards;
             z-index: 9999;
         }
-
         @keyframes heartFly {
             0% {
                 transform: translate(0, 0) scale(0) rotate(0deg);
@@ -439,18 +404,15 @@
                 opacity: 0;
             }
         }
-
         .action-btn.del {
             background: transparent;
             border-color: transparent;
             color: #ff3b60;
             margin-left: auto;
         }
-
         .action-btn.del:hover {
             background: rgba(255, 59, 96, 0.1);
         }
-
         .comments {
             margin-top: 16px;
             padding-top: 16px;
@@ -458,7 +420,6 @@
             display: grid;
             gap: 8px;
         }
-
         .comment-item {
             padding: 10px 14px;
             background: rgba(255, 255, 255, 0.4);
@@ -474,7 +435,6 @@
             backdrop-filter: blur(14px) saturate(160%);
             -webkit-backdrop-filter: blur(14px) saturate(160%);
         }
-
         .comment-del-btn {
             background: transparent;
             border: none;
@@ -485,12 +445,10 @@
             border-radius: 4px;
             transition: var(--trans-smooth);
         }
-
         .comment-del-btn:hover {
             background: rgba(255, 59, 96, 0.1);
             color: #ff3b60;
         }
-
         .modal-overlay {
             position: fixed;
             inset: 0;
@@ -503,14 +461,13 @@
             z-index: 100;
             opacity: 0;
             pointer-events: none;
-            transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), backdrop-filter 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+                backdrop-filter 0.5s cubic-bezier(0.16, 1, 0.3, 1);
         }
-
         .modal-overlay.active {
             opacity: 1;
             pointer-events: all;
         }
-
         .modal-box {
             width: 90%;
             max-width: 400px;
@@ -520,12 +477,10 @@
             opacity: 0;
             transition: var(--trans-ppt);
         }
-
         .modal-overlay.active .modal-box {
             transform: translateY(0) scale(1);
             opacity: 1;
         }
-
         .loading {
             text-align: center;
             padding: 40px;
@@ -534,11 +489,13 @@
     </style>
 </head>
 <body>
+    <!-- 雨天玻璃背景（已移除图片，使用浅绿色渐变） -->
     <div class="rain-bg-container">
-        <div class="rain-glass-layer"></div>
         <canvas id="rainCanvas"></canvas>
+        <div class="rain-glass-layer"></div>
     </div>
 
+    <!-- 页面原有内容（未改动） -->
     <nav style="position:relative; z-index:3;">
         <h1>xtj</h1>
         <div class="nav-auth">
@@ -550,7 +507,8 @@
                 <div class="user-pill">
                     <span class="avatar" id="myAvatar" style="width:24px; height:24px; font-size:12px;">?</span>
                     <span id="myName"></span>
-                    <button onclick="doLogout()" style="background:none; border:none; cursor:pointer; color:var(--text-muted);">&times;</button>
+                    <button onclick="doLogout()"
+                        style="background:none; border:none; cursor:pointer; color:var(--text-muted);">&times;</button>
                 </div>
             </div>
         </div>
@@ -579,9 +537,11 @@
     <div class="modal-overlay" id="commentModal">
         <div class="modal-box glass">
             <h3>发表评论</h3>
-            <textarea id="commInp" class="modal-textarea" placeholder="写下你的想法..." style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
+            <textarea id="commInp" class="modal-textarea" placeholder="写下你的想法..."
+                style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top:16px;">
-                <button class="btn" style="background: rgba(255,255,255,0.7);" onclick="closeModal('commentModal')">取消</button>
+                <button class="btn" style="background: rgba(255,255,255,0.7);"
+                    onclick="closeModal('commentModal')">取消</button>
                 <button class="btn btn-primary" id="commBtn">发布评论</button>
             </div>
         </div>
@@ -592,8 +552,11 @@
             <h3>确认删除帖子？</h3>
             <p style="color: var(--text-muted);">删除后无法恢复</p>
             <div style="display: flex; gap: 10px; margin-top:20px;">
-                <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);" onclick="closeModal('delModal')">取消</button>
-                <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
+                <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);"
+                    onclick="closeModal('delModal')">取消</button>
+                <button class="btn btn-primary"
+                    style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);"
+                    id="delBtn">确认删除</button>
             </div>
         </div>
     </div>
@@ -603,14 +566,17 @@
             <h3>确认删除评论？</h3>
             <p style="color: var(--text-muted);">删除后无法恢复</p>
             <div style="display: flex; gap: 10px; margin-top:20px;">
-                <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);" onclick="closeModal('delCommentModal')">取消</button>
-                <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delCommentBtn">确认删除</button>
+                <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);"
+                    onclick="closeModal('delCommentModal')">取消</button>
+                <button class="btn btn-primary"
+                    style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);"
+                    id="delCommentBtn">确认删除</button>
             </div>
         </div>
     </div>
 
     <script>
-        (function() {
+        (function () {
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
             const SUPABASE_ANON_KEY =
                 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
@@ -629,14 +595,13 @@
             let activePostId = null;
             const viewTracked = new Set();
             const CACHE_KEY = "xtj_feed_cache";
-            const CACHE_DURATION = 2 * 60 * 1000; // 2分钟缓存
+            const CACHE_DURATION = 2 * 60 * 1000;
 
             function isAdmin() {
                 return currentUser === ADMIN_NAME;
             }
 
-            // 登录/登出
-            window.doLogin = function() {
+            window.doLogin = function () {
                 const name = document.getElementById("nickInp").value.trim();
                 if (!name) return;
                 if (name === ADMIN_NAME && prompt("管理员密钥：") !== ADMIN_PW) return alert("密钥错误");
@@ -645,8 +610,7 @@
                 initUI();
                 initialLoad(true);
             };
-
-            window.doLogout = function() {
+            window.doLogout = function () {
                 currentUser = "";
                 localStorage.removeItem("xtj_user");
                 initUI();
@@ -669,13 +633,13 @@
                 }
             }
 
-            // 雨滴动画
             function initRainAnimation() {
                 const canvas = document.getElementById('rainCanvas');
                 if (!canvas) return;
                 const ctx = canvas.getContext('2d');
                 let w, h;
                 let drops = [];
+                let slideDrops = [];
                 let staticDrops = [];
 
                 function resize() {
@@ -685,32 +649,40 @@
                 window.addEventListener('resize', resize);
                 resize();
 
-                for (let i = 0; i < 100; i++) {
+                for (let i = 0; i < 150; i++) {
                     drops.push({
                         x: Math.random() * w,
                         y: Math.random() * h,
                         len: Math.random() * 15 + 10,
                         xs: -1.5 + Math.random() * 2,
-                        ys: Math.random() * 12 + 12
+                        ys: Math.random() * 14 + 10
                     });
                 }
-                for (let i = 0; i < 120; i++) {
+                for (let i = 0; i < 40; i++) {
+                    slideDrops.push({
+                        x: Math.random() * w,
+                        y: Math.random() * h,
+                        speed: Math.random() * 1.2 + 0.3,
+                        trail: Math.random() * 18 + 8,
+                        opacity: Math.random() * 0.4 + 0.2
+                    });
+                }
+                for (let i = 0; i < 200; i++) {
                     staticDrops.push({
                         x: Math.random() * w,
                         y: Math.random() * h,
-                        r: Math.random() * 2.5 + 0.5,
-                        o: Math.random() * 0.4 + 0.2
+                        r: Math.random() * 2.2 + 0.8,
+                        o: Math.random() * 0.5 + 0.25
                     });
                 }
 
                 function draw() {
                     ctx.clearRect(0, 0, w, h);
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
                     ctx.lineCap = 'round';
                     ctx.lineWidth = 1.2;
                     ctx.beginPath();
-                    for (let i = 0; i < drops.length; i++) {
-                        let p = drops[i];
+                    for (let p of drops) {
                         ctx.moveTo(p.x, p.y);
                         ctx.lineTo(p.x + p.xs, p.y + p.ys);
                         p.x += p.xs;
@@ -722,11 +694,33 @@
                     }
                     ctx.stroke();
 
-                    for (let i = 0; i < staticDrops.length; i++) {
-                        let sd = staticDrops[i];
+                    for (let sd of slideDrops) {
+                        ctx.beginPath();
+                        ctx.strokeStyle = `rgba(255, 255, 255, ${sd.opacity})`;
+                        ctx.lineWidth = 2.5;
+                        ctx.lineCap = 'round';
+                        ctx.moveTo(sd.x, sd.y);
+                        ctx.lineTo(sd.x, sd.y - sd.trail);
+                        ctx.stroke();
+                        ctx.fillStyle = `rgba(255, 255, 255, ${sd.opacity + 0.2})`;
+                        ctx.beginPath();
+                        ctx.arc(sd.x, sd.y, 2, 0, Math.PI * 2);
+                        ctx.fill();
+                        sd.y += sd.speed;
+                        if (sd.y - sd.trail > h) {
+                            sd.y = -sd.trail;
+                            sd.x = Math.random() * w;
+                        }
+                    }
+
+                    for (let sd of staticDrops) {
                         ctx.fillStyle = `rgba(255, 255, 255, ${sd.o})`;
                         ctx.beginPath();
                         ctx.arc(sd.x, sd.y, sd.r, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.fillStyle = `rgba(255, 255, 255, ${sd.o * 1.3})`;
+                        ctx.beginPath();
+                        ctx.arc(sd.x - sd.r * 0.3, sd.y - sd.r * 0.3, sd.r * 0.25, 0, Math.PI * 2);
                         ctx.fill();
                     }
                     requestAnimationFrame(draw);
@@ -734,8 +728,7 @@
                 draw();
             }
 
-            // 发布帖子
-            window.doPublish = async function() {
+            window.doPublish = async function () {
                 if (!currentUser) return alert("请先登录");
                 const content = document.getElementById("postInp").value.trim();
                 const file = document.getElementById("fileInp").files[0];
@@ -770,8 +763,7 @@
                 }
             };
 
-            // 点赞（不再缩放按钮）
-            window.toggleLike = async function(btn, postId) {
+            window.toggleLike = async function (btn, postId) {
                 if (!currentUser) return alert("请先登录");
                 const isLiked = btn.classList.contains("liked");
                 const statsText = btn.closest('.post').querySelector('.post-stats-text');
@@ -786,8 +778,7 @@
                     if (isLiked) {
                         await sb.from("likes").delete().match({ post_id: postId, actor_key: deviceId });
                     } else {
-                        await sb.from("likes").insert([{ post_id: postId, user_name: currentUser,
-                            actor_key: deviceId }]);
+                        await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
                     }
                     let num = parseInt(statsText.textContent.match(/点赞 (\d+)/)[1]);
                     statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num - 1 : num + 1}`);
@@ -819,8 +810,7 @@
                 }
             }
 
-            // 评论
-            window.openComment = function(postId) {
+            window.openComment = function (postId) {
                 if (!currentUser) return alert("请先登录");
                 activePostId = postId;
                 document.getElementById("commInp").value = "";
@@ -832,8 +822,7 @@
                 if (!content) return;
                 document.getElementById("commBtn").textContent = "提交中...";
                 try {
-                    await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content,
-                        actor_key: deviceId }]);
+                    await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
                     closeModal("commentModal");
                     loadFeed(true);
                 } catch (e) {
@@ -844,7 +833,7 @@
                 }
             };
 
-            window.openDeleteComment = function(commentId) {
+            window.openDeleteComment = function (commentId) {
                 delCommentId = commentId;
                 document.getElementById("delCommentModal").classList.add("active");
             };
@@ -866,8 +855,7 @@
                 }
             };
 
-            // 帖子删除（所有用户可删自己的）
-            window.openDelete = function(postId, ownerKey) {
+            window.openDelete = function (postId, ownerKey) {
                 delPostId = postId;
                 delOwnerKey = ownerKey;
                 document.getElementById("delModal").classList.add("active");
@@ -895,7 +883,7 @@
                 }
             };
 
-            window.closeModal = function(id) {
+            window.closeModal = function (id) {
                 document.getElementById(id).classList.remove("active");
             };
 
@@ -925,7 +913,7 @@
                                 renderFeed(parsed.data);
                                 return;
                             }
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                 }
 
@@ -1021,17 +1009,15 @@
                             const parsed = JSON.parse(cached);
                             if (parsed && parsed.data && (Date.now() - parsed.timestamp < CACHE_DURATION)) {
                                 renderFeed(parsed.data);
-                                // 静默刷新
                                 loadFeed(true);
                                 return;
                             }
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                 }
                 await loadFeed(false);
             }
 
-            // 实时同步
             sb.channel('updates')
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => loadFeed(true))
                 .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => loadFeed(true))
