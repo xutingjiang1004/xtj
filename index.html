@@ -911,12 +911,11 @@
                 btn.disabled = true;
                 btn.textContent = "删除中...";
                 try {
-                    const result = await sb.rpc("delete_comment_with_actor", {
-                        p_comment_id: delCommentId,
-                        p_actor_key: isAdmin() ? 'admin_override' : deviceId
-                    });
-                    if (result.error) {
-                        showToast("删除失败：" + (result.error.message || result.error.code || "未知错误"));
+                    const { data, error } = await sb.from('comments').delete().eq('id', delCommentId).select();
+                    if (error) {
+                        showToast("删除失败：" + error.message);
+                    } else if (!data || data.length === 0) {
+                        showToast("删除失败，需要重启Supabase PostgREST");
                     } else {
                         closeModal("delCommentModal");
                         showToast("评论已删除");
