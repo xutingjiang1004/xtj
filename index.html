@@ -312,22 +312,56 @@
 
         .loading { text-align: center; padding: 40px; color: var(--text-muted); }
 
-        .nav-mode-tip {
-            font-size: 11px;
+        .auth-form { display: flex; flex-direction: column; gap: 16px; }
+        .auth-form .af-input {
+            width: 100%;
+            padding: 14px 18px;
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,0.5);
+            background: rgba(255,255,255,0.55);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            font-size: 15px;
+            color: var(--text-main);
+            outline: none;
+            transition: var(--trans-smooth);
+            box-sizing: border-box;
+        }
+        .auth-form .af-input:focus {
+            background: rgba(255,255,255,0.85);
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15);
+        }
+        .auth-form .af-input::placeholder { color: var(--text-muted); }
+        .auth-form .af-btn {
+            width: 100%;
+            padding: 14px;
+            border-radius: 14px;
+            font-size: 16px;
+            font-weight: 700;
+        }
+        .auth-form .af-link {
+            text-align: center;
+            font-size: 13px;
             color: var(--text-muted);
-            padding: 2px 8px;
-            border-radius: 99px;
-            background: rgba(255,255,255,0.4);
             cursor: pointer;
             transition: var(--trans-smooth);
-            user-select: none;
+            padding: 4px;
         }
-        .nav-mode-tip:hover { background: rgba(255,255,255,0.7); }
+        .auth-form .af-link:hover { color: var(--primary); }
+        .auth-form .af-title {
+            text-align: center;
+            font-size: 22px;
+            font-weight: 800;
+            margin: 0;
+            background: linear-gradient(135deg, #059669, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
 
         @media (max-width: 480px) {
             .toast { white-space: normal; text-align: center; padding: 10px 18px; font-size: 13px; }
             nav { padding: 10px 12px; }
-            .nav-input { width: 80px; font-size: 12px; padding: 5px 10px; }
             .btn { font-size: 12px; padding: 5px 12px; }
         }
     </style>
@@ -344,11 +378,8 @@
         <h1>xtj</h1>
         <div class="nav-auth">
             <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
-                <input id="nickInp" class="nav-input" placeholder="昵称" autocomplete="off" />
-                <input id="pwInp" class="nav-input" type="password" placeholder="密码" />
-                <button class="btn btn-primary" id="loginBtn">登录</button>
-                <button class="btn btn-ghost" id="registerBtn">注册</button>
-                <span class="nav-mode-tip" id="modeTip">当前：登录模式</span>
+                <button class="btn btn-primary" onclick="openAuthModal('login')">登录</button>
+                <button class="btn btn-ghost" onclick="openAuthModal('register')">注册</button>
             </div>
             <div id="authUI" style="display: none;">
                 <div class="user-pill">
@@ -413,6 +444,32 @@
         </div>
     </div>
 
+    <!-- ========== 登录模态框 ========== -->
+    <div class="modal-overlay" id="loginModal" onclick="if(event.target===this)closeModal('loginModal')">
+        <div class="modal-box glass" style="padding: 32px;" onclick="event.stopPropagation()">
+            <div class="auth-form">
+                <p class="af-title">欢迎回来</p>
+                <input id="loginNickInp" class="af-input" placeholder="昵称" autocomplete="off" />
+                <input id="loginPwInp" class="af-input" type="password" placeholder="密码" />
+                <button class="btn btn-primary af-btn" id="loginSubmitBtn">登录</button>
+                <span class="af-link" onclick="closeModal('loginModal');openAuthModal('register')">没有账号？去注册</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== 注册模态框 ========== -->
+    <div class="modal-overlay" id="registerModal" onclick="if(event.target===this)closeModal('registerModal')">
+        <div class="modal-box glass" style="padding: 32px;" onclick="event.stopPropagation()">
+            <div class="auth-form">
+                <p class="af-title">创建账号</p>
+                <input id="regNickInp" class="af-input" placeholder="昵称" autocomplete="off" />
+                <input id="regPwInp" class="af-input" type="password" placeholder="密码（至少3位）" />
+                <button class="btn btn-primary af-btn" id="registerSubmitBtn">注册</button>
+                <span class="af-link" onclick="closeModal('registerModal');openAuthModal('login')">已有账号？去登录</span>
+            </div>
+        </div>
+    </div>
+
     <script>
         (function () {
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
@@ -473,73 +530,43 @@
                 return data;
             }
 
-            let isRegisterMode = false;
+            // ========== 模态框控制 ==========
+            window.openAuthModal = function (mode) {
+                const id = mode === 'login' ? 'loginModal' : 'registerModal';
+                document.getElementById(id).classList.add('active');
+                setTimeout(() => {
+                    const nickInp = document.getElementById(mode === 'login' ? 'loginNickInp' : 'regNickInp');
+                    if (nickInp) nickInp.focus();
+                }, 200);
+            };
 
-            function updateModeTip() {
-                const tip = document.getElementById('modeTip');
-                if (tip) tip.textContent = isRegisterMode ? '当前：注册模式' : '当前：登录模式';
-                const loginBtn = document.getElementById('loginBtn');
-                const registerBtn = document.getElementById('registerBtn');
-                if (loginBtn) loginBtn.textContent = isRegisterMode ? '注册' : '登录';
-                if (registerBtn) registerBtn.textContent = isRegisterMode ? '登录' : '注册';
-            }
-
-            document.getElementById('modeTip').addEventListener('click', function () {
-                isRegisterMode = !isRegisterMode;
-                updateModeTip();
+            // ========== 登录提交 ==========
+            document.getElementById('loginSubmitBtn').addEventListener('click', doLogin);
+            document.getElementById('loginPwInp').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') doLogin();
             });
-
-            document.getElementById('registerBtn').addEventListener('click', function () {
-                isRegisterMode = !isRegisterMode;
-                updateModeTip();
-                if (isRegisterMode) {
-                    document.getElementById('loginBtn').textContent = '注册';
-                    document.getElementById('registerBtn').textContent = '登录';
-                } else {
-                    document.getElementById('loginBtn').textContent = '登录';
-                    document.getElementById('registerBtn').textContent = '注册';
-                }
-            });
-
-            document.getElementById('loginBtn').addEventListener('click', async function () {
-                if (isRegisterMode) {
-                    await doRegister();
-                } else {
-                    await doLogin();
-                }
-            });
-
-            document.getElementById('pwInp').addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') {
-                    document.getElementById('loginBtn').click();
-                }
-            });
-            document.getElementById('nickInp').addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') {
-                    document.getElementById('pwInp').focus();
-                }
+            document.getElementById('loginNickInp').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') document.getElementById('loginPwInp').focus();
             });
 
             async function doLogin() {
-                const name = document.getElementById("nickInp").value.trim();
-                const pw = document.getElementById("pwInp").value;
+                const name = document.getElementById("loginNickInp").value.trim();
+                const pw = document.getElementById("loginPwInp").value;
                 if (!name) { showToast("请输入昵称"); return; }
                 if (!pw) { showToast("请输入密码"); return; }
 
-                const btn = document.getElementById("loginBtn");
+                const btn = document.getElementById("loginSubmitBtn");
                 btn.disabled = true;
                 btn.textContent = "验证中...";
 
                 try {
                     if (name === ADMIN_NAME) {
-                        // 管理员先用硬编码密码验证
                         if (pw !== "xxz123") {
                             showToast("密码错误");
                             btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                     } else {
-                        // 普通用户：从 posts 表查账号记录
                         const authRec = await findAuthRecord(name);
                         if (!authRec) {
                             showToast("账号不存在，请先注册");
@@ -557,6 +584,7 @@
                     currentUser = name;
                     localStorage.setItem("xtj_user", currentUser);
                     showToast("登录成功，欢迎回来 " + name);
+                    closeModal('loginModal');
                     initUI();
                     initialLoad(true);
                 } catch (e) {
@@ -564,24 +592,31 @@
                     showToast("登录失败，请重试");
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = isRegisterMode ? "注册" : "登录";
+                    btn.textContent = "登录";
                 }
             }
 
+            // ========== 注册提交 ==========
+            document.getElementById('registerSubmitBtn').addEventListener('click', doRegister);
+            document.getElementById('regPwInp').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') doRegister();
+            });
+            document.getElementById('regNickInp').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') document.getElementById('regPwInp').focus();
+            });
+
             async function doRegister() {
-                const name = document.getElementById("nickInp").value.trim();
-                const pw = document.getElementById("pwInp").value;
+                const name = document.getElementById("regNickInp").value.trim();
+                const pw = document.getElementById("regPwInp").value;
                 if (!name) { showToast("请输入昵称"); return; }
                 if (!pw) { showToast("请输入密码"); return; }
                 if (pw.length < 3) { showToast("密码至少3位"); return; }
-                if (name.length < 1) { showToast("昵称不能为空"); return; }
 
-                const btn = document.getElementById("loginBtn");
+                const btn = document.getElementById("registerSubmitBtn");
                 btn.disabled = true;
                 btn.textContent = "注册中...";
 
                 try {
-                    // 检查昵称是否已被注册（查 posts 表里的 __auth__ 记录）
                     const existing = await findAuthRecord(name);
                     if (existing) {
                         showToast("昵称 '" + name + "' 已被注册，请换一个");
@@ -590,7 +625,6 @@
                     }
 
                     const pwHash = await hashPassword(pw);
-                    // 存入 posts 表，media_type='__auth__' 标记为账号
                     const { error } = await sb.from("posts").insert([{
                         user_name: name,
                         content: AUTH_MARKER,
@@ -607,8 +641,7 @@
                     currentUser = name;
                     localStorage.setItem("xtj_user", currentUser);
                     showToast("注册成功，欢迎 " + name);
-                    isRegisterMode = false;
-                    updateModeTip();
+                    closeModal('registerModal');
                     initUI();
                     initialLoad(true);
                 } catch (e) {
@@ -616,17 +649,17 @@
                     showToast("注册失败，请重试");
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = isRegisterMode ? "注册" : "登录";
+                    btn.textContent = "注册";
                 }
             }
 
             window.doLogout = function () {
                 currentUser = "";
                 localStorage.removeItem("xtj_user");
-                document.getElementById("nickInp").value = "";
-                document.getElementById("pwInp").value = "";
-                isRegisterMode = false;
-                updateModeTip();
+                document.getElementById("loginNickInp").value = "";
+                document.getElementById("loginPwInp").value = "";
+                document.getElementById("regNickInp").value = "";
+                document.getElementById("regPwInp").value = "";
                 showToast("已退出登录");
                 initUI();
                 initialLoad(true);
