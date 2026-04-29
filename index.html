@@ -911,15 +911,12 @@
                 btn.disabled = true;
                 btn.textContent = "删除中...";
                 try {
-                    let query = sb.from('comments').delete().eq('id', delCommentId);
-                    if (!isAdmin()) {
-                        query = query.eq('actor_key', deviceId);
-                    }
-                    const { data, error } = await query.select();
+                    const { error } = await sb.rpc("delete_comment_with_actor", {
+                        p_comment_id: delCommentId,
+                        p_actor_key: isAdmin() ? 'admin_override' : deviceId
+                    });
                     if (error) {
-                        showToast("删除失败：" + error.message);
-                    } else if (!data || data.length === 0) {
-                        showToast("没有权限删除，请先设置数据库策略");
+                        showToast("删除失败，需创建RPC函数");
                     } else {
                         closeModal("delCommentModal");
                         showToast("评论已删除");
