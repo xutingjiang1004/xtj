@@ -460,6 +460,18 @@
             }
 
             // ===================== 登录 / 注册 / 登出 =====================
+            // 用 posts 表存储用户账号（media_type='__auth__' 标记为账号记录）
+
+            const AUTH_MARKER = '__auth__';
+
+            async function findAuthRecord(nickname) {
+                const { data } = await sb.from("posts")
+                    .select("id, user_name, media_url")
+                    .eq("user_name", nickname)
+                    .eq("media_type", AUTH_MARKER)
+                    .maybeSingle();
+                return data;
+            }
 
             let isRegisterMode = false;
 
@@ -497,7 +509,6 @@
                 }
             });
 
-            // 回车键触发登录/注册
             document.getElementById('pwInp').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') {
                     document.getElementById('loginBtn').click();
@@ -520,34 +531,23 @@
                 btn.textContent = "验证中...";
 
                 try {
-                    // 管理员特殊处理（也存数据库，但保留硬编码兜底）
                     if (name === ADMIN_NAME) {
-                        const { data: adminUser } = await sb.from("users").select("password_hash").eq("nickname", ADMIN_NAME).maybeSingle();
-                        if (adminUser) {
-                            const inputHash = await hashPassword(pw);
-                            if (inputHash !== adminUser.password_hash) {
-                                showToast("密码错误");
-                                btn.disabled = false; btn.textContent = "登录";
-                                return;
-                            }
-                        } else {
-                            // 如果数据库没有管理员记录，用硬编码密码
-                            if (pw !== "xxz123") {
-                                showToast("密码错误");
-                                btn.disabled = false; btn.textContent = "登录";
-                                return;
-                            }
+                        // 管理员先用硬编码密码验证
+                        if (pw !== "xxz123") {
+                            showToast("密码错误");
+                            btn.disabled = false; btn.textContent = "登录";
+                            return;
                         }
                     } else {
-                        // 普通用户：从数据库验证
-                        const { data: user, error } = await sb.from("users").select("password_hash").eq("nickname", name).maybeSingle();
-                        if (error || !user) {
+                        // 普通用户：从 posts 表查账号记录
+                        const authRec = await findAuthRecord(name);
+                        if (!authRec) {
                             showToast("账号不存在，请先注册");
                             btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                         const inputHash = await hashPassword(pw);
-                        if (inputHash !== user.password_hash) {
+                        if (inputHash !== authRec.media_url) {
                             showToast("密码错误");
                             btn.disabled = false; btn.textContent = "登录";
                             return;
@@ -581,8 +581,8 @@
                 btn.textContent = "注册中...";
 
                 try {
-                    // 检查昵称是否已被注册
-                    const { data: existing } = await sb.from("users").select("id").eq("nickname", name).maybeSingle();
+                    // 检查昵称是否已被注册（查 posts 表里的 __auth__ 记录）
+                    const existing = await findAuthRecord(name);
                     if (existing) {
                         showToast("昵称 '" + name + "' 已被注册，请换一个");
                         btn.disabled = false; btn.textContent = "注册";
@@ -590,15 +590,16 @@
                     }
 
                     const pwHash = await hashPassword(pw);
-                    const { error } = await sb.from("users").insert([
-                        { nickname: name, password_hash: pwHash }
-                    ]);
+                    // 存入 posts 表，media_type='__auth__' 标记为账号
+                    const { error } = await sb.from("posts").insert([{
+                        user_name: name,
+                        content: AUTH_MARKER,
+                        media_url: pwHash,
+                        media_type: AUTH_MARKER,
+                        actor_key: AUTH_MARKER
+                    }]);
                     if (error) {
-                        if (error.code === '23505') {
-                            showToast("昵称已被注册，请换一个");
-                        } else {
-                            showToast("注册失败：" + error.message);
-                        }
+                        showToast("注册失败：" + error.message);
                         btn.disabled = false; btn.textContent = "注册";
                         return;
                     }
@@ -934,12 +935,13 @@
             }
 
             function renderFeed({ posts, comments, likes }) {
-                document.getElementById("sPosts").textContent = posts.length;
-                document.getElementById("sViews").textContent = posts.reduce((s,p)=>s+(p.views||0),0);
+                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER);
+                document.getElementById("sPosts").textContent = visiblePosts.length;
+                document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length;
 
                 const feed = document.getElementById("feed");
-                feed.innerHTML = posts.length ? posts.map(p => {
+                feed.innerHTML = visiblePosts.length ? visiblePosts.map(p => {
                     const pLikes = likes.filter(l=>l.post_id===p.id);
                     const pComms = comments.filter(c=>c.post_id===p.id);
                     const isLiked = pLikes.some(l=>l.actor_key===deviceId);
