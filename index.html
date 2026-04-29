@@ -46,7 +46,7 @@
             z-index: -999;
             overflow: hidden;
             pointer-events: none;
-            background: linear-gradient(135deg, #dcedc8 0%, #a5d6a7 50%, #81c784 100%);
+            background: linear-gradient(135deg, #f5f5f7 0%, #e8e8ed 50%, #dddde3 100%);
         }
 
         #rainCanvas {
@@ -234,7 +234,7 @@
         .media { width: 100%; border-radius: 16px; overflow: hidden; margin-bottom: 16px; background: rgba(0,0,0,0.02); }
         .media img, .media video {
             width: 100%; max-height: 400px; object-fit: contain; display: block;
-            pointer-events: none; transform: none !important;
+            cursor: pointer;
         }
 
         .post-stats-text { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
@@ -364,6 +364,55 @@
             nav { padding: 10px 12px; }
             .btn { font-size: 12px; padding: 5px 12px; }
         }
+
+        .img-viewer {
+            position: fixed; inset: 0; z-index: 1000;
+            background: rgba(0,0,0,0.92);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            display: flex; align-items: center; justify-content: center;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.4s cubic-bezier(0.16,1,0.3,1);
+        }
+        .img-viewer.active { opacity: 1; pointer-events: all; }
+        .img-viewer img {
+            max-width: 92vw; max-height: 88vh;
+            object-fit: contain;
+            border-radius: 12px;
+            box-shadow: 0 20px 80px rgba(0,0,0,0.6);
+            transform: scale(0.92);
+            transition: transform 0.4s cubic-bezier(0.16,1,0.3,1);
+        }
+        .img-viewer.active img { transform: scale(1); }
+        .img-viewer .iv-close {
+            position: fixed; top: 20px; right: 24px;
+            width: 44px; height: 44px;
+            background: rgba(255,255,255,0.12);
+            border: none; border-radius: 50%;
+            color: white; font-size: 28px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex; align-items: center; justify-content: center;
+            backdrop-filter: blur(8px);
+        }
+        .img-viewer .iv-close:hover { background: rgba(255,255,255,0.25); transform: scale(1.1); }
+        .img-viewer .iv-download {
+            position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.2);
+            padding: 12px 32px;
+            border-radius: 99px;
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .img-viewer .iv-download:hover { background: rgba(255,255,255,0.25); transform: translateX(-50%) scale(1.04); }
     </style>
 </head>
 <body>
@@ -468,6 +517,13 @@
                 <span class="af-link" onclick="closeModal('registerModal');openAuthModal('login')">已有账号？去登录</span>
             </div>
         </div>
+    </div>
+
+    <!-- ========== 图片查看器 ========== -->
+    <div class="img-viewer" id="imgViewer" onclick="if(event.target===this)closeImageViewer()">
+        <button class="iv-close" onclick="closeImageViewer()">&times;</button>
+        <img id="ivImg" src="" alt="预览" />
+        <a class="iv-download" id="ivDownload" download="image">⬇ 下载图片</a>
     </div>
 
     <script>
@@ -700,7 +756,7 @@
                 let animId = null;
                 function draw() {
                     ctx.clearRect(0,0,w,h);
-                    ctx.strokeStyle = 'rgba(200,230,220,0.7)';
+                    ctx.strokeStyle = 'rgba(180,190,210,0.45)';
                     ctx.lineCap = 'round';
                     ctx.lineWidth = 1.5;
                     ctx.beginPath();
@@ -715,12 +771,12 @@
                     for (let sd of slideDrops) {
                         ctx.beginPath();
                         ctx.arc(sd.x, sd.y, 2.5, 0, Math.PI*2);
-                        ctx.fillStyle = 'rgba(200,230,220,0.5)';
+                        ctx.fillStyle = 'rgba(180,190,210,0.3)';
                         ctx.fill();
                         ctx.beginPath();
                         ctx.moveTo(sd.x, sd.y);
                         ctx.lineTo(sd.x, sd.y + sd.trail);
-                        ctx.strokeStyle = 'rgba(200,230,220,0.2)';
+                        ctx.strokeStyle = 'rgba(180,190,210,0.15)';
                         ctx.lineWidth = 1.5;
                         ctx.stroke();
                         sd.y += sd.speed;
@@ -855,28 +911,17 @@
                 btn.disabled = true;
                 btn.textContent = "删除中...";
                 try {
-                    // 方式一：先尝试通过 RPC 删除（与帖子删除逻辑一致）
-                    const { error: rpcError } = await sb.rpc("delete_comment_with_actor", {
-                        p_comment_id: delCommentId,
-                        p_actor_key: deviceId
-                    });
-
-                    if (rpcError) {
-                        // 方式二：如果 RPC 不存在或失败，降级为直接删除
-                        console.warn("RPC删除失败，尝试直接删除:", rpcError.message);
-                        let query = sb.from('comments').delete().eq('id', delCommentId);
-                        if (!isAdmin()) {
-                            query = query.eq('actor_key', deviceId);
-                        }
-                        const { error: delError } = await query;
-                        if (delError) {
-                            showToast("删除失败：" + delError.message);
-                            btn.disabled = false;
-                            btn.textContent = "确认删除";
-                            return;
-                        }
+                    let query = sb.from('comments').delete().eq('id', delCommentId);
+                    if (!isAdmin()) {
+                        query = query.eq('actor_key', deviceId);
                     }
-
+                    const { error } = await query;
+                    if (error) {
+                        showToast("删除失败，请在Supabase SQL Editor运行: CREATE POLICY \"anon_delete_comments\" ON comments FOR DELETE USING (true);");
+                        btn.disabled = false;
+                        btn.textContent = "确认删除";
+                        return;
+                    }
                     closeModal("delCommentModal");
                     showToast("评论已删除");
                     delCommentId = null;
@@ -925,6 +970,21 @@
             };
 
             window.closeModal = function (id) { document.getElementById(id).classList.remove("active"); };
+
+            // ===================== 图片查看器 =====================
+            window.openImageViewer = function (src) {
+                document.getElementById('ivImg').src = src;
+                document.getElementById('ivDownload').href = src;
+                document.getElementById('imgViewer').classList.add('active');
+                document.body.style.overflow = 'hidden';
+            };
+            window.closeImageViewer = function () {
+                document.getElementById('imgViewer').classList.remove('active');
+                document.body.style.overflow = '';
+            };
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') closeImageViewer();
+            });
 
             // ===================== 浏览量统计 =====================
             function trackView(postId) {
@@ -990,7 +1050,7 @@
                     </div>
                   </div>
                   <div class="content">${p.content}</div>
-                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${p.media_url}" controls preload="none">`:`<img src="${p.media_url}" loading="lazy">`}</div>`:''}
+                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${p.media_url}" controls preload="none">`:`<img src="${p.media_url}" loading="lazy" onclick="openImageViewer('${p.media_url}')">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
                   <div class="actions">
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">${isLiked?'已点赞':'点赞'}</button>
