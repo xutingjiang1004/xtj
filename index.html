@@ -3,416 +3,200 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>xtj</title>
+  <title>xtj - 纯净雨境版</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
-      /* 升级为浅绿色主题 */
-      --bg-color: #e8f5e9;
-      --glass-bg: rgba(255, 255, 255, 0.25);
-      --glass-border: rgba(255, 255, 255, 0.58);
-      --glass-shadow: 0 18px 50px rgba(5, 150, 105, 0.08);
-      --glass-blur: blur(24px);
-      
-      --primary: #059669; /* 翡翠绿 */
-      --admin-color: #ff9f0a;
-      --like-color: #ff3b60;
-      
+      /* 浅绿玻璃主题 */
+      --primary: #059669;
+      --bg-light-green: #eef7f2;
       --text-main: #1d1d24;
       --text-muted: #6b6c7a;
-      
-      --radius-sm: 16px;
       --radius-md: 24px;
-      --radius-lg: 32px;
-      
-      --trans-smooth: all 0.4s cubic-bezier(0.25, 1, 0.3, 1);
-      --trans-spring: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
       --trans-ppt: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+      --trans-spring: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
 
-    html { scroll-behavior: smooth; scroll-padding: 20px; }
-    * {
-      box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
-    }
-    
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
-      color: var(--text-main);
-      min-height: 100vh;
-      overflow-x: hidden;
-      -webkit-font-smoothing: antialiased;
-      position: relative;
-      isolation: isolate;
+      margin: 0; font-family: -apple-system, system-ui, sans-serif;
+      color: var(--text-main); background: var(--bg-light-green);
+      min-height: 100vh; overflow-x: hidden;
     }
 
-    /* 动态下雨与玻璃背景层 */
-    .rain-bg-container {
-      position: fixed;
-      inset: 0;
-      z-index: 0;
-      background: linear-gradient(135deg, #dcedc8 0%, #a5d6a7 50%, #81c784 100%);
-      overflow: hidden;
-      pointer-events: none;
+    /* 动态雨滴背景系统 */
+    .background-system {
+      position: fixed; inset: 0; z-index: -1;
+      background: linear-gradient(160deg, #e8f5e9 0%, #c8e6c9 100%);
     }
-    #rainCanvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-    }
-    .rain-glass-layer {
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      backdrop-filter: blur(8px);
-      -webkit-backdrop-filter: blur(8px);
-      background: rgba(255, 255, 255, 0.2);
+    #rainCanvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .glass-overlay {
+      position: absolute; inset: 0;
+      backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+      background: rgba(255, 255, 255, 0.15);
     }
 
     .glass {
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.2) 100%);
+      background: rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
       border: 1px solid rgba(255, 255, 255, 0.5);
-      box-shadow: 0 10px 34px rgba(5, 150, 105, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.65);
-      backdrop-filter: blur(18px) saturate(165%);
-      -webkit-backdrop-filter: blur(18px) saturate(165%);
+      box-shadow: 0 8px 32px rgba(5, 150, 105, 0.05);
     }
+
     nav {
-      position: sticky; top: 0; z-index: 50; padding: 12px 24px;
+      position: sticky; top: 0; z-index: 100; padding: 12px 20px;
       display: flex; justify-content: space-between; align-items: center;
-      border-bottom: 1px solid rgba(255,255,255,0.4);
-      background: rgba(255, 255, 255, 0.35);
-      backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      background: rgba(255, 255, 255, 0.4); backdrop-filter: blur(10px);
+      border-bottom: 1px solid rgba(255,255,255,0.3);
     }
+    h1 { margin: 0; font-size: 20px; background: linear-gradient(135deg, #059669, #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
-    h1 { margin: 0; font-size: 22px; font-weight: 800; background: linear-gradient(135deg, #059669, #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-
-    .nav-auth { display: flex; align-items: center; gap: 8px; }
+    .nav-auth { display: flex; gap: 8px; }
     .nav-input {
-      background: rgba(255,255,255,0.7);
-      border: 1px solid rgba(255,255,255,0.8);
-      padding: 6px 14px; border-radius: 99px; outline: none; width: 120px; font-size: 13px; transition: var(--trans-smooth);
+      background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.8);
+      padding: 6px 12px; border-radius: 99px; outline: none; width: 110px; font-size: 13px;
     }
-    .nav-input:focus { background: rgba(255,255,255,0.95); border-color: var(--primary); }
-    
     .btn {
-      cursor: pointer; border: none; font-weight: 600; padding: 6px 16px; border-radius: 99px;
+      cursor: pointer; border: none; font-weight: 600; padding: 7px 16px; border-radius: 99px;
       font-size: 13px; transition: var(--trans-spring); display: inline-flex; align-items: center; justify-content: center;
     }
-    .btn-primary { background: linear-gradient(135deg, var(--primary), #10b981); color: white; box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25); }
-    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
+    .btn-primary { background: var(--primary); color: white; }
 
-    .user-pill {
-      display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px;
-      background: rgba(255,255,255,0.8);
-      border: 1px solid rgba(255,255,255,0.9); border-radius: 99px; font-size: 13px; font-weight: 600;
-    }
+    .wrap { max-width: 600px; margin: 20px auto; padding: 0 16px; position: relative; z-index: 1; }
 
-    .wrap { position: relative; z-index: 1; max-width: 640px; margin: 24px auto 80px; padding: 0 16px; display: flex; flex-direction: column; gap: 24px; }
-
-    .publish-box { position: relative; z-index: 1; padding: 20px; border-radius: var(--radius-md); transition: var(--trans-smooth); }
-    .publish-box:hover { transform: translateY(-2px); box-shadow: var(--glass-shadow); }
+    .publish-box { padding: 20px; border-radius: var(--radius-md); margin-bottom: 24px; }
     .publish-box textarea {
-      width: 100%; min-height: 80px; border: none; background: transparent; resize: none; font-size: 16px; color: var(--text-main); outline: none;
-    }
-    .publish-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.05); }
-
-    input[type="file"] { font-size: 12px; color: var(--text-muted); }
-    input[type="file"]::file-selector-button {
-      background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.8); padding: 4px 12px; border-radius: 99px; cursor: pointer; transition: 0.3s;
+      width: 100%; min-height: 60px; border: none; background: transparent; resize: none; font-size: 15px; outline: none;
     }
 
-    .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-    .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); }
-    .stat-card:hover {
-      transform: translateY(-4px) scale(1.02);
-      box-shadow: 0 8px 24px rgba(5, 150, 105, 0.15);
-    }
-    .stat-card b { display: block; font-size: 22px; color: var(--primary); font-weight: 800; }
-    .stat-card span { font-size: 12px; color: var(--text-muted); }
-
-    .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; }
+    .feed { display: flex; flex-direction: column; gap: 16px; }
     .post { 
-      padding: 24px; border-radius: var(--radius-md); 
-      opacity: 0;
-      transform: translateY(30px) scale(0.95);
-      transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+      padding: 20px; border-radius: var(--radius-md); 
+      opacity: 0; transform: translateY(20px); transition: var(--trans-ppt);
     }
-    .post.visible {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-    .post:hover { 
-      box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12); 
-      transform: translateY(-2px);
-    }
+    .post.visible { opacity: 1; transform: translateY(0); }
 
-    .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-    .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #059669, #34d399); color: white; font-weight: bold; font-size: 16px; transition: var(--trans-spring); }
-    .avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3); }
-    .avatar:hover { transform: scale(1.1); }
-    
-    .user-info { display: flex; flex-direction: column; }
-    .user-name { font-weight: 700; font-size: 15px; }
-    .admin-tag { font-size: 10px; background: var(--admin-color); color: white; padding: 2px 6px; border-radius: 4px; }
-    .post-time { font-size: 12px; color: var(--text-muted); }
+    .post-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: #059669; color: white; font-weight: bold; }
+    .avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); }
+    .user-name { font-weight: 700; font-size: 14px; }
+    .admin-tag { font-size: 10px; background: #ff9f0a; color: white; padding: 1px 5px; border-radius: 4px; margin-left: 4px; }
 
-    .content { font-size: 15px; line-height: 1.6; margin-bottom: 16px; white-space: pre-wrap; }
-    .media { width: 100%; border-radius: 16px; overflow: hidden; margin-bottom: 16px; background: rgba(0,0,0,0.02); }
-    .media img, .media video {
-      width: 100%; max-height: 400px; object-fit: contain; display: block;
-      pointer-events: none; transform: none !important;
-    }
+    .content { font-size: 15px; line-height: 1.5; margin-bottom: 12px; }
+    .media img { width: 100%; border-radius: 12px; margin-bottom: 12px; }
 
     .post-stats-text { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
 
-    .actions { display: flex; gap: 8px; flex-wrap: wrap; position: relative; }
-    
-    /* 优化按钮：锁定最小宽度和布局，防止文本改变导致闪动 */
+    .actions { display: flex; gap: 8px; align-items: center; }
+
+    /* 修复按钮对齐问题：固定宽度 + Flex居中 */
     .action-btn { 
-      background: rgba(255,255,255,0.6); 
-      border: 1px solid rgba(255,255,255,0.8); 
-      padding: 6px 16px; border-radius: 99px; font-size: 13px; color: var(--text-muted); cursor: pointer; 
-      transition: var(--trans-spring);
-      font-weight: 600;
-      position: relative;
-      overflow: visible !important;
-      min-width: 86px; /* 锁定宽度 */
-      display: inline-flex;
-      justify-content: center;
-      align-items: center;
-      box-sizing: border-box;
+      background: rgba(255,255,255,0.5); 
+      border: 1px solid rgba(255,255,255,0.5); 
+      padding: 6px 0; border-radius: 99px; font-size: 13px; color: var(--text-muted); 
+      width: 82px; /* 固定宽度防止跳动 */
+      display: inline-flex; justify-content: center; align-items: center;
+      transition: var(--trans-spring); font-weight: 600; cursor: pointer;
     }
-    .action-btn:hover { 
-      background: rgba(255,255,255,1); 
-      transform: translateY(-2px);
-    }
-    
-    @keyframes heartBeat { 
-      0%   { transform: scale(1); }
-      15%  { transform: scale(1.25); }
-      35%  { transform: scale(0.9); }
-      55%  { transform: scale(1.15); }
-      75%  { transform: scale(0.95); }
-      100% { transform: scale(1); }
-    }
-    .action-btn.liked { 
-      background: rgba(255, 59, 96, 0.15); 
-      color: var(--like-color); 
-      border-color: rgba(255, 59, 96, 0.3);
-      box-shadow: 0 0 12px rgba(255,59,96,0.15);
-    }
-    .heart-beat {
-      animation: heartBeat 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards !important;
-    }
+    .action-btn.liked { color: #ff3b60; background: rgba(255, 59, 96, 0.08); border-color: rgba(255, 59, 96, 0.2); }
+    .action-btn.del { width: auto; padding: 6px 12px; margin-left: auto; color: #ff3b60; background: transparent; border: none; }
 
-    .heart-particle {
-      position: fixed;
-      font-size: 20px;
-      pointer-events: none;
-      animation: heartFly 0.9s ease-out forwards;
-      z-index: 9999;
-    }
-    @keyframes heartFly {
-      0%   { transform: translate(0, 0) scale(0) rotate(0deg); opacity: 1; }
-      25%  { transform: translate(var(--tx25), var(--ty25)) scale(1.4) rotate(-15deg); opacity: 1; }
-      100% { transform: translate(var(--tx), var(--ty)) scale(0.2) rotate(20deg); opacity: 0; }
-    }
-    
-    .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: auto; }
-    .action-btn.del:hover { background: rgba(255, 59, 96, 0.1); }
-
-    .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05); display: grid; gap: 8px; }
+    .comments { margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.05); display: grid; gap: 6px; }
     .comment-item { 
-      padding: 10px 14px; background: rgba(255,255,255,0.4); 
-      border-radius: 12px; font-size: 13px; line-height: 1.5; 
-      border: 1px solid rgba(255,255,255,0.6);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+      padding: 8px 12px; background: rgba(255,255,255,0.3); border-radius: 10px; font-size: 13px;
       display: flex; justify-content: space-between; align-items: center;
-      gap: 8px;
-      backdrop-filter: blur(14px) saturate(160%);
-      -webkit-backdrop-filter: blur(14px) saturate(160%);
     }
-    .comment-del-btn {
-      background: transparent;
-      border: none;
-      color: rgba(255,59,96,0.5);
-      cursor: pointer;
-      font-size: 12px;
-      padding: 2px 4px;
-      border-radius: 4px;
-      transition: var(--trans-smooth);
-    }
-    .comment-del-btn:hover {
-      background: rgba(255,59,96,0.1);
-      color: #ff3b60;
-    }
+    .comment-del-btn { background: transparent; border: none; color: #ff3b60; opacity: 0.4; cursor: pointer; padding: 2px 8px; }
 
-    /* 优化后的 PPT 级模态框动画 */
+    /* PPT级平滑弹窗动画 */
     .modal-overlay {
-      position: fixed; inset: 0; 
-      background: rgba(0, 0, 0, 0.15); 
-      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-      display: flex; align-items: center; justify-content: center; z-index: 100;
-      opacity: 0; pointer-events: none;
-      transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), backdrop-filter 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.2); 
+      backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; z-index: 200;
+      opacity: 0; pointer-events: none; transition: opacity 0.4s ease;
     }
     .modal-overlay.active { opacity: 1; pointer-events: all; }
-    
     .modal-box {
-      width: 90%; max-width: 400px; padding: 24px; border-radius: var(--radius-lg);
-      transform: translateY(35px) scale(0.96); 
-      opacity: 0;
-      transition: var(--trans-ppt);
+      width: 85%; max-width: 360px; padding: 24px; border-radius: 30px;
+      transform: translateY(40px) scale(0.95); opacity: 0;
+      transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     }
-    .modal-overlay.active .modal-box { 
-      transform: translateY(0) scale(1); 
-      opacity: 1;
-    }
+    .modal-overlay.active .modal-box { transform: translateY(0) scale(1); opacity: 1; }
 
-    .loading { text-align: center; padding: 40px; color: var(--text-muted); }
+    .loading-state { text-align: center; padding: 30px; color: var(--text-muted); font-size: 13px; }
   </style>
 </head>
 <body>
-  <div class="rain-bg-container">
+
+  <div class="background-system">
     <canvas id="rainCanvas"></canvas>
-    <div class="rain-glass-layer"></div>
+    <div class="glass-overlay"></div>
   </div>
 
-  <nav style="position:relative; z-index:2;">
+  <nav>
     <h1>xtj</h1>
     <div class="nav-auth">
-      <div id="unauthUI" style="display: flex; gap: 8px;">
-        <input id="nickInp" class="nav-input" placeholder="输入昵称登录" />
+      <div id="unauthUI">
+        <input id="nickInp" class="nav-input" placeholder="输入昵称" />
         <button class="btn btn-primary" onclick="doLogin()">登录</button>
       </div>
       <div id="authUI" style="display: none;">
-        <div class="user-pill">
-          <span class="avatar" id="myAvatar" style="width:24px; height:24px; font-size:12px;">?</span>
-          <span id="myName"></span>
-          <button onclick="doLogout()" style="background:none; border:none; cursor:pointer; color:var(--text-muted);">&times;</button>
-        </div>
+        <span id="myName" style="font-weight:700; font-size:13px; margin-right:10px;"></span>
+        <button class="btn" style="padding:4px 10px;" onclick="doLogout()">退出</button>
       </div>
     </div>
   </nav>
 
-  <div class="wrap" style="position:relative; z-index:2;">
+  <div class="wrap">
     <div class="publish-box glass">
-      <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
-      <div class="publish-footer">
-        <input type="file" id="fileInp" accept="image/*,video/*" />
+      <textarea id="postInp" placeholder="此刻在想什么..."></textarea>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+        <input type="file" id="fileInp" style="font-size:12px; width:150px;" />
         <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
       </div>
     </div>
 
-    <div class="stats">
-      <div class="stat-card glass"><b id="sPosts">0</b><span>总动态</span></div>
-      <div class="stat-card glass"><b id="sViews">0</b><span>总浏览</span></div>
-      <div class="stat-card glass"><b id="sLikes">0</b><span>总点赞</span></div>
-    </div>
-
     <div id="feed" class="feed">
-      <div class="loading">内容加载中...</div>
+      <div class="loading-state">正在同步雨境动态...</div>
     </div>
   </div>
 
   <div class="modal-overlay" id="commentModal">
     <div class="modal-box glass">
-      <h3>发表评论</h3>
-      <textarea id="commInp" class="modal-textarea" placeholder="写下你的想法..." style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
-      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top:16px;">
-        <button class="btn" style="background: rgba(255,255,255,0.7);" onclick="closeModal('commentModal')">取消</button>
-        <button class="btn btn-primary" id="commBtn">发布评论</button>
+      <h3 style="margin-top:0">发表评论</h3>
+      <textarea id="commInp" style="width:100%; min-height:80px; border:none; background:transparent; outline:none; font-size:16px;"></textarea>
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+        <button class="btn" onclick="closeModal('commentModal')">取消</button>
+        <button class="btn btn-primary" id="commBtn">发送</button>
       </div>
     </div>
   </div>
 
   <div class="modal-overlay" id="delModal">
-    <div class="modal-box glass" style="text-align: center;">
-      <h3>确认删除帖子？</h3>
-      <p style="color: var(--text-muted);">删除后无法恢复</p>
-      <div style="display: flex; gap: 10px; margin-top:20px;">
-        <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);" onclick="closeModal('delModal')">取消</button>
-        <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="modal-overlay" id="delCommentModal">
-    <div class="modal-box glass" style="text-align: center;">
-      <h3>确认删除评论？</h3>
-      <p style="color: var(--text-muted);">删除后无法恢复</p>
-      <div style="display: flex; gap: 10px; margin-top:20px;">
-        <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);" onclick="closeModal('delCommentModal')">取消</button>
-        <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delCommentBtn">确认删除</button>
+    <div class="modal-box glass" style="text-align:center">
+      <h3>确认删除动态？</h3>
+      <div style="display:flex; gap:10px; margin-top:20px;">
+        <button class="btn" style="flex:1" onclick="closeModal('delModal')">算了</button>
+        <button class="btn btn-primary" style="flex:1; background:#ff3b60" id="delBtn">确认删除</button>
       </div>
     </div>
   </div>
 
   <script>
-    // Supabase配置
     const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // 管理员配置
     const ADMIN_NAME = "xxz";
-    const ADMIN_PW = "xxz123";
-
-    // 全局状态
     let currentUser = localStorage.getItem("xtj_user") || "";
     const deviceId = localStorage.getItem("xtj_device_id") || crypto.randomUUID();
     localStorage.setItem("xtj_device_id", deviceId);
-    
-    let delPostId = null, delOwnerKey = null;
-    let delCommentId = null;
-    let feedCache = { data: null, timestamp: 0 };
-    const CACHE_DURATION = 30 * 1000;
-    const viewTracked = new Set();
 
-    // 滚动动画Observer
-    let observer = new IntersectionObserver(e=>{
-      e.forEach(i=>{
-        if (i.isIntersecting) {
-          i.target.classList.add('visible');
-          observer.unobserve(i.target);
-        }
-      });
-    }, { threshold:0.1 });
-
-    // 工具函数
-    function isAdmin() { return currentUser === ADMIN_NAME; }
-    
-    // 登录/登出
-    function doLogin() {
-      const name = document.getElementById("nickInp").value.trim();
-      if (!name) return;
-      if (name === ADMIN_NAME && prompt("管理员密钥：") !== ADMIN_PW) return alert("密钥错误");
-      currentUser = name; localStorage.setItem("xtj_user", currentUser);
-      initUI(); loadFeed(true);
-    }
-    function doLogout() { currentUser = ""; localStorage.removeItem("xtj_user"); initUI(); loadFeed(true); }
-    function initUI() {
-      if (currentUser) {
-        document.getElementById("unauthUI").style.display = "none";
-        document.getElementById("authUI").style.display = "flex";
-        document.getElementById("myName").textContent = currentUser;
-        document.getElementById("myAvatar").textContent = currentUser[0].toUpperCase();
-        document.getElementById("myAvatar").className = isAdmin() ? "avatar admin" : "avatar";
-      } else {
-        document.getElementById("unauthUI").style.display = "flex";
-        document.getElementById("authUI").style.display = "none";
-      }
-    }
-
-    // 初始化动态背景（雨滴与玻璃效果）
-    function initRainAnimation() {
+    // 核心：雨滴引擎
+    function initRain() {
       const canvas = document.getElementById('rainCanvas');
-      if (!canvas) return;
       const ctx = canvas.getContext('2d');
       let w, h;
-      let drops = [];
-      let staticDrops = [];
+      let rain = [];
 
       function resize() {
         w = canvas.width = window.innerWidth;
@@ -421,331 +205,162 @@
       window.addEventListener('resize', resize);
       resize();
 
-      // 动态下落的雨滴
-      for (let i = 0; i < 60; i++) {
-        drops.push({
-          x: Math.random() * w,
-          y: Math.random() * h,
-          len: Math.random() * 15 + 10,
-          xs: -1.5 + Math.random() * 2, // 微风侧向吹
-          ys: Math.random() * 12 + 12
-        });
-      }
-      // 附着在玻璃上的静态雨滴
-      for (let i = 0; i < 90; i++) {
-        staticDrops.push({
-          x: Math.random() * w,
-          y: Math.random() * h,
-          r: Math.random() * 2.5 + 0.5,
-          o: Math.random() * 0.35 + 0.1
-        });
+      for(let i=0; i<80; i++) {
+        rain.push({ x: Math.random()*w, y: Math.random()*h, l: Math.random()*15+5, s: Math.random()*10+10 });
       }
 
       function draw() {
-        ctx.clearRect(0, 0, w, h);
-        
-        // 绘制下落的雨
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.clearRect(0,0,w,h);
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 1.5;
         ctx.lineCap = 'round';
-        ctx.lineWidth = 1.2;
         ctx.beginPath();
-        for (let i = 0; i < drops.length; i++) {
-          let p = drops[i];
+        rain.forEach(p => {
           ctx.moveTo(p.x, p.y);
-          ctx.lineTo(p.x + p.xs, p.y + p.ys);
-          p.x += p.xs;
-          p.y += p.ys;
-          if (p.y > h || p.x > w || p.x < 0) {
-            p.x = Math.random() * w;
-            p.y = -20;
-          }
-        }
+          ctx.lineTo(p.x, p.y + p.l);
+          p.y += p.s;
+          if(p.y > h) { p.y = -20; p.x = Math.random()*w; }
+        });
         ctx.stroke();
-
-        // 绘制玻璃上的水珠
-        for (let i = 0; i < staticDrops.length; i++) {
-          let sd = staticDrops[i];
-          ctx.fillStyle = `rgba(255, 255, 255, ${sd.o})`;
-          ctx.beginPath();
-          ctx.arc(sd.x, sd.y, sd.r, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
         requestAnimationFrame(draw);
       }
       draw();
     }
 
-    // 发布帖子
-    async function doPublish() {
-      if (!currentUser) return alert("请先登录");
-      const content = document.getElementById("postInp").value.trim();
-      const file = document.getElementById("fileInp").files[0];
-      if (!content && !file) return alert("请输入内容");
-      const btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中...";
-      try {
-        let media_url = "", media_type = "";
-        if (file) {
-          const path = `${Date.now()}_${file.name}`;
-          await sb.storage.from("uploads").upload(path, file);
-          media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
-          media_type = file.type.startsWith("image") ? "image" : "video";
-        }
-        await sb.from("posts").insert([{ user_name: currentUser, content, media_url, media_type, actor_key: deviceId }]);
-        document.getElementById("postInp").value = ""; document.getElementById("fileInp").value = "";
-        loadFeed(true);
-      } catch (e) { alert("发布失败"); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
+    // 登录与UI
+    function initUI() {
+      const isLogged = !!currentUser;
+      document.getElementById("unauthUI").style.display = isLogged ? "none" : "flex";
+      document.getElementById("authUI").style.display = isLogged ? "flex" : "none";
+      if(isLogged) document.getElementById("myName").textContent = currentUser;
     }
+    function doLogin() {
+      const n = document.getElementById("nickInp").value.trim();
+      if(!n) return; currentUser = n; localStorage.setItem("xtj_user", n); initUI(); loadFeed();
+    }
+    function doLogout() { currentUser = ""; localStorage.removeItem("xtj_user"); initUI(); loadFeed(); }
 
-    // 点赞功能
-    async function toggleLike(btn, postId) {
-      if (!currentUser) return alert("请先登录");
-      const isLiked = btn.classList.contains("liked");
-      const statsText = btn.closest('.post').querySelector('.post-stats-text');
-      
-      btn.classList.remove("liked", "heart-beat");
-      void btn.offsetWidth;
-      if (!isLiked) {
-        btn.classList.add("liked", "heart-beat");
-        createHeartParticles(btn);
-        btn.addEventListener("animationend", () => btn.classList.remove("heart-beat"), { once: true });
-      }
-      // 文字改变也不会发生跳动，因为设定了 min-width 和 Flex 排版
-      btn.textContent = isLiked ? "点赞" : "已点赞";
-
+    // 动态加载
+    async function loadFeed() {
+      // 优化加载体验：不显示全屏Loading，直接更新内容
       try {
-        isLiked ? await sb.from("likes").delete().match({ post_id: postId, actor_key: deviceId })
-               : await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
-        let num = parseInt(statsText.textContent.match(/点赞 (\d+)/)[1]);
-        statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num-1 : num+1}`);
+        const { data: posts } = await sb.from("posts").select("*").order("created_at", { ascending: false });
+        const { data: likes } = await sb.from("likes").select("*");
+        const { data: comms } = await sb.from("comments").select("*").order("created_at");
+        renderFeed(posts || [], likes || [], comms || []);
       } catch (e) { console.error(e); }
     }
 
-    // 爱心粒子动画
-    function createHeartParticles(btn) {
-      const rect = btn.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      const emojis = ["❤️","💕","💗","✨","💖"];
-      for (let i = 0; i < 8; i++) {
-        const heart = document.createElement('div');
-        heart.className = 'heart-particle';
-        heart.textContent = emojis[Math.floor(Math.random() * emojis.length)];
-        const angle = (Math.PI * 2 * i / 8) + (Math.random() - 0.5) * 0.6;
-        const dist  = 50 + Math.random() * 55;
-        heart.style.left = cx + 'px';
-        heart.style.top  = cy + 'px';
-        heart.style.setProperty('--tx25', Math.cos(angle) * dist * 0.35 + 'px');
-        heart.style.setProperty('--ty25', Math.sin(angle) * dist * 0.35 - 12 + 'px');
-        heart.style.setProperty('--tx',   Math.cos(angle) * dist + 'px');
-        heart.style.setProperty('--ty',   Math.sin(angle) * dist - 55 + 'px');
-        heart.style.animationDelay = (Math.random() * 0.12) + 's';
-        document.body.appendChild(heart);
-        setTimeout(() => heart.remove(), 1000);
-      }
+    function renderFeed(posts, likes, comms) {
+      const feed = document.getElementById("feed");
+      feed.innerHTML = posts.map(p => {
+        const pLikes = likes.filter(l => l.post_id === p.id);
+        const pComms = comms.filter(c => c.post_id === p.id);
+        const isLiked = pLikes.some(l => l.actor_key === deviceId);
+        
+        // 修复1：只要是当前设备的 ID 或管理员，即可看到删除按钮
+        const canDelete = (p.actor_key === deviceId) || (currentUser === ADMIN_NAME);
+
+        return `
+          <div class="post glass visible">
+            <div class="post-header">
+              <div class="avatar ${p.user_name===ADMIN_NAME?'admin':''}">${p.user_name[0].toUpperCase()}</div>
+              <div class="user-info">
+                <span class="user-name">${p.user_name}${p.user_name===ADMIN_NAME?'<span class="admin-tag">ADMIN</span>':''}</span>
+              </div>
+            </div>
+            <div class="content">${p.content}</div>
+            ${p.media_url ? `<div class="media"><img src="${p.media_url}"></div>` : ''}
+            <div class="post-stats-text">点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
+            <div class="actions">
+              <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">
+                ${isLiked ? '已点赞' : '点赞'}
+              </button>
+              <button class="action-btn" onclick="openComment('${p.id}')">评论</button>
+              ${canDelete ? `<button class="action-btn del" onclick="reqDelete('${p.id}')">删除</button>` : ''}
+            </div>
+            ${pComms.length ? `<div class="comments">${pComms.map(c => `
+              <div class="comment-item">
+                <span><b>${c.user_name}:</b> ${c.content}</span>
+                ${(c.actor_key===deviceId || currentUser===ADMIN_NAME) ? `<button class="comment-del-btn" onclick="doDelComm('${c.id}')">×</button>` : ''}
+              </div>
+            `).join('')}</div>` : ''}
+          </div>
+        `;
+      }).join('');
     }
 
-    // 评论功能
-    let activePostId = null;
-    function openComment(postId) { 
-      if (!currentUser) return alert("请先登录"); 
-      activePostId = postId; 
-      document.getElementById("commInp").value = ""; 
+    // 交互逻辑
+    async function toggleLike(btn, pid) {
+      if(!currentUser) return alert("请先登录");
+      const isLiked = btn.classList.contains("liked");
+      btn.classList.toggle("liked");
+      btn.textContent = isLiked ? "点赞" : "已点赞"; // 此时宽度不会动
+
+      if(isLiked) {
+        await sb.from("likes").delete().match({ post_id: pid, actor_key: deviceId });
+      } else {
+        await sb.from("likes").insert([{ post_id: pid, user_name: currentUser, actor_key: deviceId }]);
+      }
+      loadFeed();
+    }
+
+    let activePid = null;
+    function openComment(pid) { 
+      if(!currentUser) return alert("请先登录");
+      activePid = pid; 
       document.getElementById("commentModal").classList.add("active"); 
     }
     document.getElementById("commBtn").onclick = async () => {
       const content = document.getElementById("commInp").value.trim();
-      if (!content) return; 
-      document.getElementById("commBtn").textContent = "提交中...";
-      try {
-        await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
-        closeModal("commentModal"); 
-        loadFeed(true);
-      } catch (e) {
-        alert("评论发布失败");
-        console.error(e);
-      } finally {
-        document.getElementById("commBtn").textContent = "发布评论";
-      }
+      if(!content) return;
+      await sb.from("comments").insert([{ post_id: activePid, user_name: currentUser, content, actor_key: deviceId }]);
+      closeModal('commentModal'); loadFeed();
     };
 
-    // ==============================================
-    // 修复后的：评论删除功能（不再闪屏）
-    // ==============================================
-    function openDeleteComment(commentId) {
-      delCommentId = commentId;
-      document.getElementById("delCommentModal").classList.add("active");
-    }
-
-    async function deleteCommentWithFallback(commentId) {
-      try {
-        const { error } = await sb
-          .from('comments')
-          .delete()
-          .eq('id', commentId);
-
-        if (error) throw error;
-        return { success: true };
-      } catch (e) {
-        console.error("删除失败：", e);
-        throw new Error("删除失败：" + e.message);
-      }
-    }
-
-    document.getElementById("delCommentBtn").onclick = async () => {
-      if (!delCommentId) return;
-      const btn = document.getElementById("delCommentBtn");
-      btn.disabled = true;
-      btn.textContent = "删除中...";
-
-      try {
-        await deleteCommentWithFallback(delCommentId);
-        closeModal("delCommentModal");
-        // FIX: 移除 window.location.reload(); 防止全页闪烁，改为静默重拉数据
-        await loadFeed(true);
-      } catch(e) {
-        alert(e?.message || "删除失败，请重试");
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "确认删除";
-      }
-    };
-
-    // 帖子删除功能
-    function openDelete(postId, ownerKey) { 
-      delPostId = postId; 
-      delOwnerKey = ownerKey; 
-      document.getElementById("delModal").classList.add("active"); 
+    function reqDelete(pid) {
+      activePid = pid;
+      document.getElementById("delModal").classList.add("active");
     }
     document.getElementById("delBtn").onclick = async () => {
-      try {
-        const key = isAdmin() ? delOwnerKey : deviceId;
-        await sb.rpc("delete_post_with_actor", { p_post_id: delPostId, p_actor_key: key });
-        closeModal("delModal"); 
-        loadFeed(true);
-      } catch (e) {
-        alert("删除帖子失败");
-        console.error(e);
-      }
+      // 这里的 delete_post_with_actor RPC 必须允许 deviceId 操作
+      await sb.rpc("delete_post_with_actor", { p_post_id: activePid, p_actor_key: (currentUser === ADMIN_NAME ? 'xxz_master_key' : deviceId) });
+      closeModal('delModal'); loadFeed();
     };
+
+    async function doDelComm(cid) {
+      await sb.from("comments").delete().eq("id", cid);
+      loadFeed();
+    }
+
+    async function doPublish() {
+      if(!currentUser) return alert("请登录");
+      const content = document.getElementById("postInp").value.trim();
+      const file = document.getElementById("fileInp").files[0];
+      if(!content && !file) return;
+      
+      document.getElementById("pubBtn").disabled = true;
+      let media_url = "";
+      if(file) {
+        const path = `${Date.now()}_${file.name}`;
+        await sb.storage.from("uploads").upload(path, file);
+        media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
+      }
+      await sb.from("posts").insert([{ user_name: currentUser, content, media_url, actor_key: deviceId }]);
+      document.getElementById("postInp").value = "";
+      document.getElementById("pubBtn").disabled = false;
+      loadFeed();
+    }
 
     function closeModal(id) { document.getElementById(id).classList.remove("active"); }
 
-    // 浏览量统计（异步防抖）
-    function trackView(postId) {
-      const key = `xtj_v_${postId}`;
-      if (!localStorage.getItem(key) && !viewTracked.has(postId)) {
-        viewTracked.add(postId);
-        localStorage.setItem(key, "1");
-        setTimeout(async () => {
-          try {
-            await sb.rpc("increment_post_views", { p_post_id: postId });
-          } catch (e) {
-            console.error("统计浏览量失败：", e);
-          }
-        }, 1000);
-      }
-    }
+    // 初始化
+    initRain();
+    initUI();
+    loadFeed();
 
-    // 加载Feed（带缓存优化）
-    async function loadFeed(forceRefresh = false) {
-      const now = Date.now();
-      if (!forceRefresh && feedCache.data && (now - feedCache.timestamp) < CACHE_DURATION) {
-        renderFeed(feedCache.data);
-        return;
-      }
-
-      const feed = document.getElementById("feed");
-      // 静默刷新时不显示加载状态以防闪烁
-      if (!forceRefresh) feed.innerHTML = `<div class="loading">加载中...</div>`;
-
-      try {
-        const [postRes, commRes, likeRes] = await Promise.all([
-          sb.from("posts").select("*").order("created_at", { ascending: false }),
-          sb.from("comments").select("*").order("created_at"),
-          sb.from("likes").select("*")
-        ]);
-
-        const data = {
-          posts: postRes.data || [],
-          comments: commRes.data || [],
-          likes: likeRes.data || []
-        };
-
-        feedCache = { data, timestamp: now };
-        renderFeed(data);
-      } catch (e) {
-        if (!forceRefresh) feed.innerHTML = `<div class="loading">加载失败，刷新重试</div>`;
-        console.error("加载Feed失败：", e);
-      }
-    }
-
-    // 渲染Feed
-    function renderFeed({ posts, comments, likes }) {
-      document.getElementById("sPosts").textContent = posts.length;
-      document.getElementById("sViews").textContent = posts.reduce((s,p)=>s+(p.views||0),0);
-      document.getElementById("sLikes").textContent = likes.length;
-
-      const feed = document.getElementById("feed");
-      feed.innerHTML = posts.length ? posts.map(p=>{
-        const pLikes = likes.filter(l=>l.post_id===p.id);
-        const pComms = comments.filter(c=>c.post_id===p.id);
-        const isLiked = pLikes.some(l=>l.actor_key===deviceId);
-        const canDelPost = p.actor_key===deviceId || isAdmin();
-        trackView(p.id);
-        return `
-          <div class="post glass" data-post-id="${p.id}">
-            <div class="post-header">
-              <div class="avatar ${p.user_name===ADMIN_NAME?'admin':''}">${p.user_name[0].toUpperCase()}</div>
-              <div class="user-info">
-                <span class="user-name">${p.user_name} ${p.user_name===ADMIN_NAME?'<span class="admin-tag">ADMIN</span>':''}</span>
-                <span class="post-time">${new Date(p.created_at).toLocaleString()}</span>
-              </div>
-            </div>
-            <div class="content">${p.content}</div>
-            ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${p.media_url}" controls preload="none">`:`<img src="${p.media_url}" loading="lazy">`}</div>`:''}
-            <div class="post-stats-text">浏览 ${p.views||0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
-            <div class="actions">
-              <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">${isLiked?'已点赞':'点赞'}</button>
-              <button class="action-btn" onclick="openComment('${p.id}')">评论</button>
-              ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${p.id}', '${p.actor_key}')">删除</button>`:''}
-            </div>
-            ${pComms.length?`
-              <div class="comments">
-                ${pComms.map(c=>`
-                  <div class="comment-item" data-comment-id="${c.id}" data-post-id="${p.id}">
-                    <div><b>${c.user_name}:</b>${c.content}</div>
-                    ${(c.actor_key===deviceId || isAdmin())?`<button type="button" class="comment-del-btn" onclick="openDeleteComment('${c.id}')">×</button>`:''}
-                  </div>
-                `).join('')}
-              </div>
-            `:''}
-          </div>
-        `}).join('') : `<div class="loading">快来发布第一条动态吧~</div>`;
-      
-      initPostScrollAnimation();
-    }
-
-    // 滚动动画初始化
-    function initPostScrollAnimation() {
-      document.querySelectorAll('.post').forEach(p=>{
-        if (!p.classList.contains('visible')) observer.observe(p);
-      });
-    }
-
-    // 页面初始化
-    document.addEventListener('DOMContentLoaded', async () => {
-      initUI();
-      initRainAnimation(); // 启动雨滴玻璃背景
-      setTimeout(() => loadFeed(), 0);
-    });
-
-    // 实时数据同步
-    sb.channel('updates')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => loadFeed(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => loadFeed(true))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, () => loadFeed(true))
-      .subscribe();
+    // 订阅更新
+    sb.channel('any').on('postgres_changes', {event:'*', schema:'public'}, () => loadFeed()).subscribe();
   </script>
 </body>
 </html>
