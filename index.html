@@ -3,20 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>xtj - 极速雨境版</title>
+  <title>xtj - 完整修复版</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
-      /* 浅绿色主题 */
-      --bg-color: #e8f5e9;
-      --primary: #059669;
+      /* 1. 背景色修复为浅绿玻璃感 */
+      --bg-color: #eef7f2;
+      --glass-bg: rgba(255, 255, 255, 0.25);
+      --glass-border: rgba(255, 255, 255, 0.5);
+      --glass-shadow: 0 18px 50px rgba(5, 150, 105, 0.1);
+      --glass-blur: blur(24px);
+      
+      --primary: #059669; /* 森林绿 */
       --admin-color: #ff9f0a;
       --like-color: #ff3b60;
+      
       --text-main: #1d1d24;
       --text-muted: #6b6c7a;
+      
+      --radius-sm: 16px;
       --radius-md: 24px;
-      /* PPT过度曲线 */
-      --trans-ppt: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+      --radius-lg: 32px;
+      
+      --trans-smooth: all 0.4s cubic-bezier(0.25, 1, 0.3, 1);
+      --trans-spring: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     }
 
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -26,141 +36,138 @@
       min-height: 100vh; overflow-x: hidden;
     }
 
-    /* 1. 动态雨滴背景层 */
-    #bg-container { position: fixed; inset: 0; z-index: -1; background: #e8f5e9; overflow: hidden; }
-    #rainCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-    .glass-mask { 
-      position: absolute; inset: 0; 
-      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
-      background: rgba(255, 255, 255, 0.15); 
-    }
+    /* 动态雨滴背景 */
+    #rain-container { position: fixed; inset: 0; z-index: -1; }
+    #rainCanvas { width: 100%; height: 100%; }
 
     .glass {
-      background: rgba(255, 255, 255, 0.4);
-      backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
-      border: 1px solid rgba(255, 255, 255, 0.5);
-      box-shadow: 0 8px 32px rgba(5, 150, 105, 0.08);
+      background: var(--glass-bg);
+      backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--glass-shadow);
     }
 
+    /* 头部导航 */
     nav {
       position: sticky; top: 0; z-index: 100; padding: 12px 24px;
       display: flex; justify-content: space-between; align-items: center;
-      background: rgba(255, 255, 255, 0.3); backdrop-filter: blur(10px);
-      border-bottom: 1px solid rgba(255,255,255,0.2);
+      background: rgba(255, 255, 255, 0.4); backdrop-filter: blur(10px);
     }
-    h1 { margin: 0; font-size: 22px; font-weight: 800; background: linear-gradient(135deg, #059669, #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    h1 { margin: 0; font-size: 24px; font-weight: 800; background: linear-gradient(135deg, var(--primary), #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
     .nav-auth { display: flex; gap: 8px; }
     .nav-input {
-      background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.8);
-      padding: 6px 14px; border-radius: 99px; outline: none; width: 120px; font-size: 13px;
+      background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.8);
+      padding: 8px 16px; border-radius: 99px; outline: none; width: 120px; font-size: 13px;
+      transition: var(--trans-smooth);
     }
+    .nav-input:focus { width: 150px; background: #fff; }
     
     .btn {
-      cursor: pointer; border: none; font-weight: 600; padding: 6px 16px; border-radius: 99px;
-      font-size: 13px; transition: 0.3s; display: inline-flex; align-items: center; justify-content: center;
+      cursor: pointer; border: none; font-weight: 700; padding: 8px 20px; border-radius: 99px;
+      font-size: 13px; transition: var(--trans-spring);
     }
-    .btn-primary { background: var(--primary); color: white; box-shadow: 0 4px 12px rgba(5, 150, 105, 0.2); }
+    .btn:active { transform: scale(0.92); }
+    .btn-primary { background: var(--primary); color: white; }
 
-    .wrap { max-width: 640px; margin: 24px auto; padding: 0 16px; position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; }
+    .wrap { max-width: 600px; margin: 24px auto; padding: 0 16px; position: relative; z-index: 1; display: flex; flex-direction: column; gap: 24px; }
 
-    /* 发布框 */
-    .publish-box { padding: 20px; border-radius: var(--radius-md); }
+    /* 发布区域 */
+    .publish-box { padding: 24px; border-radius: var(--radius-lg); }
     .publish-box textarea {
-      width: 100%; min-height: 80px; border: none; background: transparent; resize: none; font-size: 16px; outline: none;
+      width: 100%; min-height: 100px; border: none; background: transparent; resize: none; font-size: 16px; outline: none; margin-bottom: 12px;
     }
 
-    /* 统计卡片 */
-    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-    .stat-card { padding: 16px; border-radius: 16px; text-align: center; }
-    .stat-card b { display: block; font-size: 20px; color: var(--primary); }
-    .stat-card span { font-size: 12px; color: var(--text-muted); }
+    /* 统计卡片布局 */
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .stat-card { padding: 20px; border-radius: var(--radius-md); text-align: center; }
+    .stat-card b { display: block; font-size: 22px; color: var(--primary); margin-bottom: 4px; }
+    .stat-card span { font-size: 12px; color: var(--text-muted); font-weight: 600; }
 
-    /* 帖子列表 */
+    /* 帖子卡片 */
     .feed { display: flex; flex-direction: column; gap: 20px; }
     .post { 
-      padding: 24px; border-radius: var(--radius-md); 
-      opacity: 0; transform: translateY(20px); 
-      transition: var(--trans-ppt); /* PPT平滑过度 */
+      padding: 24px; border-radius: var(--radius-lg); 
+      opacity: 0; transform: translateY(30px); transition: var(--trans-smooth);
     }
     .post.visible { opacity: 1; transform: translateY(0); }
 
     .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-    .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--primary); color: white; font-weight: bold; }
+    .avatar { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--primary); color: white; font-weight: bold; font-size: 18px; }
     .avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); }
-    .user-name { font-weight: 700; font-size: 15px; }
+    
+    .user-info .name { font-weight: 800; font-size: 15px; }
+    .user-info .time { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
-    .content { font-size: 15px; line-height: 1.6; margin-bottom: 16px; }
-    .media img { width: 100%; border-radius: 16px; margin-bottom: 16px; }
+    .content { font-size: 16px; line-height: 1.6; color: #333; margin-bottom: 16px; word-break: break-all; }
+    .media img { width: 100%; border-radius: var(--radius-md); margin-bottom: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }
 
-    .post-stats-text { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+    .post-stats-text { font-size: 12px; color: var(--text-muted); margin-bottom: 16px; font-weight: 500; }
 
-    /* 修复：点赞按钮固定宽度对齐 */
-    .actions { display: flex; gap: 8px; align-items: center; }
+    /* 2. 修复点赞对齐问题 */
+    .actions { display: flex; gap: 10px; align-items: center; }
     .action-btn { 
-      background: rgba(255,255,255,0.6); 
-      border: 1px solid rgba(255,255,255,0.5); 
-      padding: 7px 0; border-radius: 99px; font-size: 13px; color: var(--text-muted); 
-      width: 90px; /* 固定宽度防止抖动 */
+      background: rgba(255,255,255,0.5); 
+      border: 1px solid rgba(255,255,255,0.4); 
+      padding: 8px 0; border-radius: 99px; font-size: 13px; color: var(--text-muted); 
+      min-width: 88px; /* 固定宽度 */
       display: inline-flex; justify-content: center; align-items: center;
-      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
-      font-weight: 600; cursor: pointer;
+      transition: var(--trans-spring); font-weight: 700; cursor: pointer;
     }
-    .action-btn.liked { color: var(--like-color); background: rgba(255, 59, 96, 0.1); border-color: rgba(255, 59, 96, 0.2); }
-    .action-btn.del { width: auto; padding: 7px 12px; margin-left: auto; color: #ff3b60; background: transparent; border: none; }
+    .action-btn.liked { color: var(--like-color); background: rgba(255, 59, 96, 0.08); border-color: rgba(255, 59, 96, 0.2); }
+    .action-btn.del { min-width: auto; padding: 8px 16px; margin-left: auto; color: #ff3b60; border: none; background: transparent; }
 
     /* 评论区 */
-    .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05); display: grid; gap: 8px; }
+    .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.04); display: grid; gap: 10px; }
     .comment-item { 
-      padding: 10px 14px; background: rgba(255,255,255,0.3); border-radius: 12px; font-size: 13px;
+      padding: 12px 16px; background: rgba(255,255,255,0.3); border-radius: 14px; font-size: 14px;
       display: flex; justify-content: space-between; align-items: center;
     }
-    .comment-del-btn { background: transparent; border: none; color: #ff3b60; cursor: pointer; padding: 2px 8px; font-size: 16px; opacity: 0.5; }
+    .comment-del-btn { background: transparent; border: none; color: #ff3b60; cursor: pointer; font-size: 18px; opacity: 0.3; }
 
-    /* PPT级平滑弹窗 */
+    /* 弹窗设计 */
     .modal-overlay {
-      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.15); 
-      backdrop-filter: blur(10px); display: flex; align-items: center; justify-content: center; z-index: 200;
-      opacity: 0; pointer-events: none; transition: opacity 0.4s ease;
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.1); 
+      backdrop-filter: blur(15px); display: flex; align-items: center; justify-content: center; z-index: 200;
+      opacity: 0; pointer-events: none; transition: var(--trans-smooth);
     }
     .modal-overlay.active { opacity: 1; pointer-events: all; }
     .modal-box {
-      width: 85%; max-width: 400px; padding: 24px; border-radius: 30px;
-      transform: translateY(40px) scale(0.95); opacity: 0;
-      transition: var(--trans-ppt);
+      width: 90%; max-width: 400px; padding: 32px; border-radius: var(--radius-lg);
+      transform: translateY(40px) scale(0.9); opacity: 0;
+      transition: var(--trans-spring);
     }
     .modal-overlay.active .modal-box { transform: translateY(0) scale(1); opacity: 1; }
 
-    .loading-info { text-align: center; padding: 20px; color: var(--text-muted); font-size: 13px; }
+    .loading { text-align: center; padding: 40px; color: var(--text-muted); font-weight: 600; }
   </style>
 </head>
 <body>
 
-  <div id="bg-container">
+  <div id="rain-container">
     <canvas id="rainCanvas"></canvas>
-    <div class="glass-mask"></div>
   </div>
 
   <nav>
     <h1>xtj</h1>
     <div class="nav-auth">
       <div id="unauthUI">
-        <input id="nickInp" class="nav-input" placeholder="昵称登录" />
+        <input id="nickInp" class="nav-input" placeholder="输入昵称..." />
         <button class="btn btn-primary" onclick="doLogin()">登录</button>
       </div>
-      <div id="authUI" style="display: none;">
-        <span id="myName" style="font-weight:700; margin-right:8px;"></span>
-        <button class="btn" onclick="doLogout()">退出</button>
+      <div id="authUI" style="display: none; align-items: center;">
+        <span id="myName" style="font-weight:800; margin-right:12px; font-size:14px;"></span>
+        <button class="btn" style="background:rgba(0,0,0,0.05)" onclick="doLogout()">退出</button>
       </div>
     </div>
   </nav>
 
   <div class="wrap">
     <div class="publish-box glass">
-      <textarea id="postInp" placeholder="分享今天的雨景心情..."></textarea>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px;">
-        <input type="file" id="fileInp" accept="image/*" style="font-size:12px; width:160px;" />
-        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布</button>
+      <textarea id="postInp" placeholder="此刻的心情，像雨后的草地一样清爽..."></textarea>
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <input type="file" id="fileInp" accept="image/*" style="font-size:12px; opacity:0.6;" />
+        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
       </div>
     </div>
 
@@ -171,27 +178,27 @@
     </div>
 
     <div id="feed" class="feed">
-      <div class="loading-info">正在加载数据...</div>
+      <div class="loading">同步雨境动态...</div>
     </div>
   </div>
 
   <div class="modal-overlay" id="commentModal">
     <div class="modal-box glass">
-      <h3 style="margin:0 0 16px 0">发表评论</h3>
-      <textarea id="commInp" style="width:100%; min-height:100px; border:none; background:transparent; outline:none; font-size:16px;" placeholder="写点什么..."></textarea>
-      <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:16px;">
+      <h3 style="margin:0 0 20px 0">发表评论</h3>
+      <textarea id="commInp" style="width:100%; min-height:120px; border:none; background:transparent; outline:none; font-size:16px;" placeholder="我也想说两句..."></textarea>
+      <div style="display:flex; justify-content:flex-end; gap:12px; margin-top:20px;">
         <button class="btn" onclick="closeModal('commentModal')">取消</button>
-        <button class="btn btn-primary" id="commBtn">发布评论</button>
+        <button class="btn btn-primary" id="commBtn">发送评论</button>
       </div>
     </div>
   </div>
 
   <div class="modal-overlay" id="delModal">
     <div class="modal-box glass" style="text-align:center">
-      <h3>确认删除该动态？</h3>
-      <p style="color:var(--text-muted)">此操作不可撤销</p>
-      <div style="display:flex; gap:12px; margin-top:24px;">
-        <button class="btn" style="flex:1" onclick="closeModal('delModal')">取消</button>
+      <h3 style="margin-bottom:8px">确认删除？</h3>
+      <p style="color:var(--text-muted); font-size:14px;">删除后数据将无法找回哦</p>
+      <div style="display:flex; gap:12px; margin-top:32px;">
+        <button class="btn" style="flex:1" onclick="closeModal('delModal')">算了</button>
         <button class="btn btn-primary" style="flex:1; background:#ff3b60" id="delBtn">确认删除</button>
       </div>
     </div>
@@ -207,7 +214,7 @@
     const deviceId = localStorage.getItem("xtj_device_id") || crypto.randomUUID();
     localStorage.setItem("xtj_device_id", deviceId);
 
-    // 1. 雨滴渲染引擎 (修复：现在会有明显的雨滴流动效果)
+    // 1. 下雨动画引擎
     function initRain() {
       const canvas = document.getElementById('rainCanvas');
       const ctx = canvas.getContext('2d');
@@ -220,12 +227,10 @@
       window.addEventListener('resize', resize);
       resize();
 
-      for(let i=0; i<100; i++) {
-        drops.push({ x: Math.random()*w, y: Math.random()*h, l: Math.random()*20+10, v: Math.random()*12+8 });
-      }
+      for(let i=0; i<80; i++) drops.push({ x: Math.random()*w, y: Math.random()*h, l: Math.random()*25+10, v: Math.random()*15+5 });
 
       function draw() {
-        ctx.clearRect(0,0,w,h);
+        ctx.clearRect(0, 0, w, h);
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.lineWidth = 1.5;
         ctx.lineCap = 'round';
@@ -242,31 +247,33 @@
       draw();
     }
 
-    // 2. 极速加载：使用本地缓存
-    function getCache() { return JSON.parse(localStorage.getItem('feed_cache') || 'null'); }
-    function setCache(data) { localStorage.setItem('feed_cache', JSON.stringify(data)); }
+    // 2. 缓存管理：瞬时加载优化
+    function setCache(data) { localStorage.setItem('xtj_cache', JSON.stringify(data)); }
+    function getCache() { return JSON.parse(localStorage.getItem('xtj_cache') || 'null'); }
 
+    // 加载数据
     async function loadFeed(isSilent = false) {
       if(!isSilent && !getCache()) {
-        document.getElementById("feed").innerHTML = `<div class="loading-info">正在同步雨境数据...</div>`;
+        document.getElementById("feed").innerHTML = `<div class="loading">正在连接雨境...</div>`;
       }
-      
+
       try {
-        const [postsRes, likesRes, commsRes] = await Promise.all([
+        const [pRes, lRes, cRes] = await Promise.all([
           sb.from("posts").select("*").order("created_at", { ascending: false }),
           sb.from("likes").select("*"),
           sb.from("comments").select("*").order("created_at")
         ]);
 
-        const data = { posts: postsRes.data, likes: likesRes.data, comms: commsRes.data };
-        setCache(data); // 存入缓存
+        const data = { posts: pRes.data, likes: lRes.data, comms: cRes.data };
+        setCache(data);
         renderFeed(data);
-      } catch (e) { console.error("加载失败", e); }
+      } catch (e) { console.error(e); }
     }
 
+    // 渲染 Feed
     function renderFeed({ posts, likes, comms }) {
       document.getElementById("sPosts").textContent = posts.length;
-      document.getElementById("sViews").textContent = posts.reduce((s,p)=>s+(p.views||0), 0);
+      document.getElementById("sViews").textContent = posts.reduce((s, p) => s + (p.views || 0), 0);
       document.getElementById("sLikes").textContent = likes.length;
 
       const feed = document.getElementById("feed");
@@ -275,40 +282,52 @@
         const pComms = comms.filter(c => c.post_id === p.id);
         const isLiked = pLikes.some(l => l.actor_key === deviceId);
         
-        // 修复：只要是本人(deviceId匹配)或者是管理员，即可删除
+        // 修复 1：删除权限校验
         const canDelete = (p.actor_key === deviceId) || (currentUser === ADMIN_NAME);
 
         return `
-          <div class="post glass visible">
+          <div class="post glass">
             <div class="post-header">
               <div class="avatar ${p.user_name===ADMIN_NAME?'admin':''}">${p.user_name[0].toUpperCase()}</div>
-              <div>
-                <div class="user-name">${p.user_name}${p.user_name===ADMIN_NAME?'<span style="font-size:10px; background:var(--admin-color); color:white; padding:1px 4px; border-radius:4px; margin-left:4px">ADMIN</span>':''}</div>
-                <div style="font-size:11px; color:var(--text-muted)">${new Date(p.created_at).toLocaleString()}</div>
+              <div class="user-info">
+                <div class="name">${p.user_name}${p.user_name===ADMIN_NAME?'<span style="font-size:10px; background:var(--admin-color); color:white; padding:1px 4px; border-radius:4px; margin-left:6px">ADMIN</span>':''}</div>
+                <div class="time">${new Date(p.created_at).toLocaleString()}</div>
               </div>
             </div>
             <div class="content">${p.content}</div>
-            ${p.media_url ? `<div class="media"><img src="${p.media_url}" loading="lazy"></div>` : ''}
+            ${p.media_url ? `<div class="media"><img src="${p.media_url}" loading="lazy" onload="this.parentElement.style.opacity=1"></div>` : ''}
             <div class="post-stats-text">浏览 ${p.views||0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
             <div class="actions">
               <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">${isLiked?'已点赞':'点赞'}</button>
               <button class="action-btn" onclick="openComment('${p.id}')">评论</button>
               ${canDelete ? `<button class="action-btn del" onclick="reqDelete('${p.id}')">删除</button>` : ''}
             </div>
-            ${pComms.length ? `<div class="comments">${pComms.map(c => `
-              <div class="comment-item">
-                <span><b>${c.user_name}:</b> ${c.content}</span>
-                ${(c.actor_key===deviceId || currentUser===ADMIN_NAME) ? `<button class="comment-del-btn" onclick="doDelComm('${c.id}')">×</button>` : ''}
-              </div>
-            `).join('')}</div>` : ''}
+            ${pComms.length ? `<div class="comments">
+              ${pComms.map(c => `
+                <div class="comment-item">
+                  <span><b>${c.user_name}:</b> ${c.content}</span>
+                  ${(c.actor_key===deviceId || currentUser===ADMIN_NAME) ? `<button class="comment-del-btn" onclick="doDelComm('${c.id}')">×</button>` : ''}
+                </div>
+              `).join('')}
+            </div>` : ''}
           </div>
         `;
       }).join('');
+
+      initScrollObserver();
     }
 
-    // 点赞逻辑
+    // 滚动观察器（保留原版平滑入场）
+    function initScrollObserver() {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(e => { if(e.isIntersecting) e.target.classList.add('visible'); });
+      }, { threshold: 0.1 });
+      document.querySelectorAll('.post').forEach(p => observer.observe(p));
+    }
+
+    // 点赞切换（修复对齐）
     async function toggleLike(btn, pid) {
-      if(!currentUser) return alert("请先登录");
+      if(!currentUser) return alert("请登录");
       const isLiked = btn.classList.contains("liked");
       btn.classList.toggle("liked");
       btn.textContent = isLiked ? "点赞" : "已点赞";
@@ -321,14 +340,9 @@
       loadFeed(true);
     }
 
-    // 评论逻辑
+    // 弹窗与删除逻辑
     let activePid = null;
-    function openComment(pid) { 
-      if(!currentUser) return alert("请先登录");
-      activePid = pid; 
-      document.getElementById("commInp").value = "";
-      document.getElementById("commentModal").classList.add("active"); 
-    }
+    function openComment(pid) { if(!currentUser) return alert("请登录"); activePid = pid; document.getElementById("commInp").value=""; document.getElementById("commentModal").classList.add("active"); }
     document.getElementById("commBtn").onclick = async () => {
       const content = document.getElementById("commInp").value.trim();
       if(!content) return;
@@ -336,32 +350,23 @@
       closeModal('commentModal'); loadFeed(true);
     };
 
-    // 删除逻辑
-    function reqDelete(pid) {
-      activePid = pid;
-      document.getElementById("delModal").classList.add("active");
-    }
+    function reqDelete(pid) { activePid = pid; document.getElementById("delModal").classList.add("active"); }
     document.getElementById("delBtn").onclick = async () => {
-      // 使用发帖时的身份校验删除
       await sb.from("posts").delete().eq("id", activePid);
       closeModal('delModal'); loadFeed(true);
     };
 
-    async function doDelComm(cid) {
-      if(!confirm("确定删除评论？")) return;
-      await sb.from("comments").delete().eq("id", cid);
-      loadFeed(true);
-    }
+    async function doDelComm(cid) { if(confirm("确定删除评论吗？")) { await sb.from("comments").delete().eq("id", cid); loadFeed(true); } }
 
     // 发布逻辑
     async function doPublish() {
-      if(!currentUser) return alert("请先登录");
+      if(!currentUser) return alert("请登录");
       const content = document.getElementById("postInp").value.trim();
       const file = document.getElementById("fileInp").files[0];
       if(!content && !file) return;
 
       const btn = document.getElementById("pubBtn");
-      btn.disabled = true; btn.textContent = "发布中...";
+      btn.disabled = true; btn.textContent = "发送中...";
       
       let media_url = "";
       if(file) {
@@ -373,11 +378,10 @@
       await sb.from("posts").insert([{ user_name: currentUser, content, media_url, actor_key: deviceId }]);
       document.getElementById("postInp").value = "";
       document.getElementById("fileInp").value = "";
-      btn.disabled = false; btn.textContent = "发布";
+      btn.disabled = false; btn.textContent = "发布动态";
       loadFeed(true);
     }
 
-    // 登录
     function initUI() {
       const isLogged = !!currentUser;
       document.getElementById("unauthUI").style.display = isLogged ? "none" : "flex";
@@ -389,20 +393,19 @@
       if(!n) return; currentUser = n; localStorage.setItem("xtj_user", n); initUI(); loadFeed(true);
     }
     function doLogout() { currentUser = ""; localStorage.removeItem("xtj_user"); initUI(); loadFeed(true); }
-
     function closeModal(id) { document.getElementById(id).classList.remove("active"); }
 
-    // 初始化执行
+    // 启动
     initRain();
     initUI();
     
-    // 极速渲染逻辑：优先渲染缓存
+    // 瞬时加载：先读缓存
     const cache = getCache();
     if(cache) renderFeed(cache);
     loadFeed(!!cache);
 
-    // 实时同步
-    sb.channel('db-changes').on('postgres_changes', {event:'*', schema:'public'}, () => loadFeed(true)).subscribe();
+    // 实时更新
+    sb.channel('global').on('postgres_changes', {event:'*', schema:'public'}, () => loadFeed(true)).subscribe();
   </script>
 </body>
 </html>
