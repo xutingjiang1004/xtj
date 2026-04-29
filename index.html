@@ -911,18 +911,10 @@
                 btn.disabled = true;
                 btn.textContent = "删除中...";
                 try {
-                    console.log("准备删除评论ID:", delCommentId);
-                    const { data: found } = await sb.from('comments').select('id').eq('id', delCommentId);
-                    console.log("查到此评论?", found);
-                    if (!found || found.length === 0) {
-                        showToast("评论不存在或已被删除");
-                        closeModal("delCommentModal");
-                        delCommentId = null;
-                        await loadFeed(true);
-                        return;
-                    }
-                    const { error } = await sb.from('comments').delete().eq('id', delCommentId);
-                    console.log("删除结果 error:", error);
+                    const { error } = await sb.rpc("delete_comment_with_actor", {
+                        p_comment_id: delCommentId,
+                        p_actor_key: isAdmin() ? 'admin_override' : deviceId
+                    });
                     if (error) {
                         showToast("删除失败: " + error.message);
                     } else {
