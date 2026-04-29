@@ -40,7 +40,6 @@
             isolation: isolate;
         }
 
-        /* 雨天玻璃背景（浅绿渐变 + 动态雨滴） */
         .rain-bg-container {
             position: fixed;
             inset: 0;
@@ -71,7 +70,42 @@
             pointer-events: none;
         }
 
-        /* ========== UI 样式（无改动） ========== */
+        .toast-container {
+            position: fixed;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            pointer-events: none;
+            width: auto;
+            max-width: 90vw;
+        }
+        .toast {
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 12px 28px;
+            border-radius: 99px;
+            font-size: 14px;
+            font-weight: 500;
+            animation: toastPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+            pointer-events: auto;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+            white-space: nowrap;
+        }
+        @keyframes toastPop {
+            0% { transform: scale(0.5) translateY(-20px); opacity: 0; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        @keyframes toastFade {
+            0% { transform: scale(1) translateY(0); opacity: 1; }
+            100% { transform: scale(0.8) translateY(-30px); opacity: 0; }
+        }
+
         .glass {
             background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.2) 100%);
             border: 1px solid rgba(255, 255, 255, 0.5);
@@ -92,6 +126,8 @@
             background: rgba(255, 255, 255, 0.35);
             backdrop-filter: blur(12px);
             -webkit-backdrop-filter: blur(12px);
+            flex-wrap: wrap;
+            gap: 8px;
         }
 
         h1 {
@@ -103,14 +139,14 @@
             -webkit-text-fill-color: transparent;
         }
 
-        .nav-auth { display: flex; align-items: center; gap: 8px; }
+        .nav-auth { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
         .nav-input {
             background: rgba(255, 255, 255, 0.7);
             border: 1px solid rgba(255, 255, 255, 0.8);
             padding: 6px 14px;
             border-radius: 99px;
             outline: none;
-            width: 120px;
+            width: 100px;
             font-size: 13px;
             transition: var(--trans-smooth);
         }
@@ -127,12 +163,19 @@
             align-items: center;
             justify-content: center;
         }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
         .btn-primary {
             background: linear-gradient(135deg, var(--primary), #10b981);
             color: white;
             box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
         }
         .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
+        .btn-ghost {
+            background: rgba(255,255,255,0.6);
+            color: var(--text-main);
+            border: 1px solid rgba(255,255,255,0.8);
+        }
+        .btn-ghost:hover { background: rgba(255,255,255,0.9); transform: translateY(-2px); }
         .user-pill {
             display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px;
             background: rgba(255, 255, 255, 0.8);
@@ -207,24 +250,31 @@
         .action-btn:hover { background: rgba(255,255,255,1); transform: translateY(-2px); }
 
         @keyframes likePulse {
-            0% { box-shadow: 0 0 0px rgba(255, 59, 96, 0.4); }
-            50% { box-shadow: 0 0 12px 4px rgba(255, 59, 96, 0.2); }
-            100% { box-shadow: 0 0 12px rgba(255, 59, 96, 0.15); }
+            0% { transform: scale(1); box-shadow: 0 0 0px rgba(255, 59, 96, 0.4); }
+            25% { transform: scale(1.35); box-shadow: 0 0 18px 6px rgba(255, 59, 96, 0.3); }
+            50% { transform: scale(0.85); box-shadow: 0 0 12px 4px rgba(255, 59, 96, 0.2); }
+            75% { transform: scale(1.1); box-shadow: 0 0 16px 4px rgba(255, 59, 96, 0.2); }
+            100% { transform: scale(1); box-shadow: 0 0 12px rgba(255, 59, 96, 0.15); }
         }
         .action-btn.liked {
             background: rgba(255, 59, 96, 0.15); color: var(--like-color);
-            border-color: rgba(255, 59, 96, 0.3); box-shadow: 0 0 12px rgba(255,59,96,0.15);
-            animation: likePulse 0.45s ease;
+            border-color: rgba(255, 59, 96, 0.3);
+            animation: likePulse 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
 
         .heart-particle {
-            position: fixed; font-size: 20px; pointer-events: none;
-            animation: heartFly 0.9s ease-out forwards; z-index: 9999;
+            position: fixed;
+            font-size: 22px;
+            pointer-events: none;
+            animation: heartFly 1.2s ease-out forwards;
+            z-index: 9999;
+            text-shadow: 0 0 12px rgba(255, 59, 96, 0.6);
         }
         @keyframes heartFly {
-            0%   { transform: translate(0,0) scale(0) rotate(0deg); opacity:1; }
-            25%  { transform: translate(var(--tx25), var(--ty25)) scale(1.4) rotate(-15deg); opacity:1; }
-            100% { transform: translate(var(--tx), var(--ty)) scale(0.2) rotate(20deg); opacity:0; }
+            0%   { transform: translate(0,0) scale(0) rotate(0deg); opacity: 1; }
+            25%  { transform: translate(var(--tx25), var(--ty25)) scale(1.6) rotate(-20deg); opacity: 1; }
+            60%  { transform: translate(var(--tx60), var(--ty60)) scale(0.8) rotate(10deg); opacity: 0.7; }
+            100% { transform: translate(var(--tx), var(--ty)) scale(0) rotate(30deg); opacity: 0; }
         }
 
         .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: auto; }
@@ -240,10 +290,11 @@
         }
         .comment-del-btn {
             background: transparent; border: none; color: rgba(255,59,96,0.5);
-            cursor: pointer; font-size: 12px; padding: 2px 4px; border-radius: 4px;
-            transition: var(--trans-smooth);
+            cursor: pointer; font-size: 16px; padding: 4px 8px; border-radius: 50%;
+            transition: var(--trans-spring);
+            line-height: 1;
         }
-        .comment-del-btn:hover { background: rgba(255,59,96,0.1); color: #ff3b60; }
+        .comment-del-btn:hover { background: rgba(255,59,96,0.15); color: #ff3b60; transform: scale(1.25); }
 
         .modal-overlay {
             position: fixed; inset: 0; background: rgba(0,0,0,0.15);
@@ -260,6 +311,25 @@
         .modal-overlay.active .modal-box { transform: translateY(0) scale(1); opacity: 1; }
 
         .loading { text-align: center; padding: 40px; color: var(--text-muted); }
+
+        .nav-mode-tip {
+            font-size: 11px;
+            color: var(--text-muted);
+            padding: 2px 8px;
+            border-radius: 99px;
+            background: rgba(255,255,255,0.4);
+            cursor: pointer;
+            transition: var(--trans-smooth);
+            user-select: none;
+        }
+        .nav-mode-tip:hover { background: rgba(255,255,255,0.7); }
+
+        @media (max-width: 480px) {
+            .toast { white-space: normal; text-align: center; padding: 10px 18px; font-size: 13px; }
+            nav { padding: 10px 12px; }
+            .nav-input { width: 80px; font-size: 12px; padding: 5px 10px; }
+            .btn { font-size: 12px; padding: 5px 12px; }
+        }
     </style>
 </head>
 <body>
@@ -268,18 +338,23 @@
         <div class="rain-glass-layer"></div>
     </div>
 
+    <div class="toast-container" id="toastContainer"></div>
+
     <nav style="position:relative; z-index:3;">
         <h1>xtj</h1>
         <div class="nav-auth">
-            <div id="unauthUI" style="display: flex; gap: 8px;">
-                <input id="nickInp" class="nav-input" placeholder="输入昵称登录" />
-                <button class="btn btn-primary" onclick="doLogin()">登录</button>
+            <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
+                <input id="nickInp" class="nav-input" placeholder="昵称" autocomplete="off" />
+                <input id="pwInp" class="nav-input" type="password" placeholder="密码" />
+                <button class="btn btn-primary" id="loginBtn">登录</button>
+                <button class="btn btn-ghost" id="registerBtn">注册</button>
+                <span class="nav-mode-tip" id="modeTip">当前：登录模式</span>
             </div>
             <div id="authUI" style="display: none;">
                 <div class="user-pill">
                     <span class="avatar" id="myAvatar" style="width:24px; height:24px; font-size:12px;">?</span>
                     <span id="myName"></span>
-                    <button onclick="doLogout()" style="background:none; border:none; cursor:pointer; color:var(--text-muted);">&times;</button>
+                    <button onclick="doLogout()" style="background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:18px; line-height:1;">&times;</button>
                 </div>
             </div>
         </div>
@@ -307,10 +382,10 @@
 
     <div class="modal-overlay" id="commentModal">
         <div class="modal-box glass">
-            <h3>发表评论</h3>
+            <h3 style="margin-top:0;">发表评论</h3>
             <textarea id="commInp" placeholder="写下你的想法..." style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top:16px;">
-                <button class="btn" style="background: rgba(255,255,255,0.7);" onclick="closeModal('commentModal')">取消</button>
+                <button class="btn btn-ghost" onclick="closeModal('commentModal')">取消</button>
                 <button class="btn btn-primary" id="commBtn">发布评论</button>
             </div>
         </div>
@@ -318,10 +393,10 @@
 
     <div class="modal-overlay" id="delModal">
         <div class="modal-box glass" style="text-align: center;">
-            <h3>确认删除帖子？</h3>
-            <p style="color: var(--text-muted);">删除后无法恢复</p>
-            <div style="display: flex; gap: 10px; margin-top:20px;">
-                <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);" onclick="closeModal('delModal')">取消</button>
+            <h3 style="margin-top:0;">确认删除帖子？</h3>
+            <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢复</p>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delModal')">取消</button>
                 <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
             </div>
         </div>
@@ -329,10 +404,10 @@
 
     <div class="modal-overlay" id="delCommentModal">
         <div class="modal-box glass" style="text-align: center;">
-            <h3>确认删除评论？</h3>
-            <p style="color: var(--text-muted);">删除后无法恢复</p>
-            <div style="display: flex; gap: 10px; margin-top:20px;">
-                <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);" onclick="closeModal('delCommentModal')">取消</button>
+            <h3 style="margin-top:0;">确认删除评论？</h3>
+            <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢复</p>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delCommentModal')">取消</button>
                 <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delCommentBtn">确认删除</button>
             </div>
         </div>
@@ -345,11 +420,13 @@
             const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
             const ADMIN_NAME = "xxz";
-            const ADMIN_PW = "xxz123";
 
             let currentUser = localStorage.getItem("xtj_user") || "";
-            const deviceId = localStorage.getItem("xtj_device_id") || crypto.randomUUID();
-            localStorage.setItem("xtj_device_id", deviceId);
+            let deviceId = localStorage.getItem("xtj_device_id");
+            if (!deviceId) {
+                deviceId = crypto.randomUUID();
+                localStorage.setItem("xtj_device_id", deviceId);
+            }
 
             let delPostId = null, delOwnerKey = null;
             let delCommentId = null;
@@ -360,18 +437,196 @@
 
             function isAdmin() { return currentUser === ADMIN_NAME; }
 
-            window.doLogin = function () {
+            function showToast(message) {
+                const container = document.getElementById('toastContainer');
+                const toast = document.createElement('div');
+                toast.className = 'toast';
+                toast.textContent = message;
+                container.appendChild(toast);
+                setTimeout(() => {
+                    toast.style.animation = 'toastFade 0.3s ease-out forwards';
+                    setTimeout(() => toast.remove(), 300);
+                }, 2500);
+            }
+            window.showToast = showToast;
+
+            // ===================== 密码哈希 =====================
+            async function hashPassword(password) {
+                const encoder = new TextEncoder();
+                const data = encoder.encode(password);
+                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+
+            // ===================== 登录 / 注册 / 登出 =====================
+
+            let isRegisterMode = false;
+
+            function updateModeTip() {
+                const tip = document.getElementById('modeTip');
+                if (tip) tip.textContent = isRegisterMode ? '当前：注册模式' : '当前：登录模式';
+                const loginBtn = document.getElementById('loginBtn');
+                const registerBtn = document.getElementById('registerBtn');
+                if (loginBtn) loginBtn.textContent = isRegisterMode ? '注册' : '登录';
+                if (registerBtn) registerBtn.textContent = isRegisterMode ? '登录' : '注册';
+            }
+
+            document.getElementById('modeTip').addEventListener('click', function () {
+                isRegisterMode = !isRegisterMode;
+                updateModeTip();
+            });
+
+            document.getElementById('registerBtn').addEventListener('click', function () {
+                isRegisterMode = !isRegisterMode;
+                updateModeTip();
+                if (isRegisterMode) {
+                    document.getElementById('loginBtn').textContent = '注册';
+                    document.getElementById('registerBtn').textContent = '登录';
+                } else {
+                    document.getElementById('loginBtn').textContent = '登录';
+                    document.getElementById('registerBtn').textContent = '注册';
+                }
+            });
+
+            document.getElementById('loginBtn').addEventListener('click', async function () {
+                if (isRegisterMode) {
+                    await doRegister();
+                } else {
+                    await doLogin();
+                }
+            });
+
+            // 回车键触发登录/注册
+            document.getElementById('pwInp').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    document.getElementById('loginBtn').click();
+                }
+            });
+            document.getElementById('nickInp').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    document.getElementById('pwInp').focus();
+                }
+            });
+
+            async function doLogin() {
                 const name = document.getElementById("nickInp").value.trim();
-                if (!name) return;
-                if (name === ADMIN_NAME && prompt("管理员密钥：") !== ADMIN_PW) return alert("密钥错误");
-                currentUser = name;
-                localStorage.setItem("xtj_user", currentUser);
-                initUI();
-                initialLoad(true);
-            };
+                const pw = document.getElementById("pwInp").value;
+                if (!name) { showToast("请输入昵称"); return; }
+                if (!pw) { showToast("请输入密码"); return; }
+
+                const btn = document.getElementById("loginBtn");
+                btn.disabled = true;
+                btn.textContent = "验证中...";
+
+                try {
+                    // 管理员特殊处理（也存数据库，但保留硬编码兜底）
+                    if (name === ADMIN_NAME) {
+                        const { data: adminUser } = await sb.from("users").select("password_hash").eq("nickname", ADMIN_NAME).maybeSingle();
+                        if (adminUser) {
+                            const inputHash = await hashPassword(pw);
+                            if (inputHash !== adminUser.password_hash) {
+                                showToast("密码错误");
+                                btn.disabled = false; btn.textContent = "登录";
+                                return;
+                            }
+                        } else {
+                            // 如果数据库没有管理员记录，用硬编码密码
+                            if (pw !== "xxz123") {
+                                showToast("密码错误");
+                                btn.disabled = false; btn.textContent = "登录";
+                                return;
+                            }
+                        }
+                    } else {
+                        // 普通用户：从数据库验证
+                        const { data: user, error } = await sb.from("users").select("password_hash").eq("nickname", name).maybeSingle();
+                        if (error || !user) {
+                            showToast("账号不存在，请先注册");
+                            btn.disabled = false; btn.textContent = "登录";
+                            return;
+                        }
+                        const inputHash = await hashPassword(pw);
+                        if (inputHash !== user.password_hash) {
+                            showToast("密码错误");
+                            btn.disabled = false; btn.textContent = "登录";
+                            return;
+                        }
+                    }
+
+                    currentUser = name;
+                    localStorage.setItem("xtj_user", currentUser);
+                    showToast("登录成功，欢迎回来 " + name);
+                    initUI();
+                    initialLoad(true);
+                } catch (e) {
+                    console.error(e);
+                    showToast("登录失败，请重试");
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = isRegisterMode ? "注册" : "登录";
+                }
+            }
+
+            async function doRegister() {
+                const name = document.getElementById("nickInp").value.trim();
+                const pw = document.getElementById("pwInp").value;
+                if (!name) { showToast("请输入昵称"); return; }
+                if (!pw) { showToast("请输入密码"); return; }
+                if (pw.length < 3) { showToast("密码至少3位"); return; }
+                if (name.length < 1) { showToast("昵称不能为空"); return; }
+
+                const btn = document.getElementById("loginBtn");
+                btn.disabled = true;
+                btn.textContent = "注册中...";
+
+                try {
+                    // 检查昵称是否已被注册
+                    const { data: existing } = await sb.from("users").select("id").eq("nickname", name).maybeSingle();
+                    if (existing) {
+                        showToast("昵称 '" + name + "' 已被注册，请换一个");
+                        btn.disabled = false; btn.textContent = "注册";
+                        return;
+                    }
+
+                    const pwHash = await hashPassword(pw);
+                    const { error } = await sb.from("users").insert([
+                        { nickname: name, password_hash: pwHash }
+                    ]);
+                    if (error) {
+                        if (error.code === '23505') {
+                            showToast("昵称已被注册，请换一个");
+                        } else {
+                            showToast("注册失败：" + error.message);
+                        }
+                        btn.disabled = false; btn.textContent = "注册";
+                        return;
+                    }
+
+                    currentUser = name;
+                    localStorage.setItem("xtj_user", currentUser);
+                    showToast("注册成功，欢迎 " + name);
+                    isRegisterMode = false;
+                    updateModeTip();
+                    initUI();
+                    initialLoad(true);
+                } catch (e) {
+                    console.error(e);
+                    showToast("注册失败，请重试");
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = isRegisterMode ? "注册" : "登录";
+                }
+            }
+
             window.doLogout = function () {
                 currentUser = "";
                 localStorage.removeItem("xtj_user");
+                document.getElementById("nickInp").value = "";
+                document.getElementById("pwInp").value = "";
+                isRegisterMode = false;
+                updateModeTip();
+                showToast("已退出登录");
                 initUI();
                 initialLoad(true);
             };
@@ -392,7 +647,7 @@
                 }
             }
 
-            // ========== 雨滴动画 ==========
+            // ===================== 雨滴动画 =====================
             function initRainAnimation() {
                 const canvas = document.getElementById('rainCanvas');
                 if (!canvas) return;
@@ -408,11 +663,12 @@
                 for (let i = 0; i < 40; i++) slideDrops.push({ x: Math.random()*w, y: Math.random()*h, speed: Math.random()*1.2+0.3, trail: Math.random()*18+8, opacity: Math.random()*0.4+0.2 });
                 for (let i = 0; i < 200; i++) staticDrops.push({ x: Math.random()*w, y: Math.random()*h, r: Math.random()*2.2+0.8, o: Math.random()*0.5+0.25 });
 
+                let animId = null;
                 function draw() {
                     ctx.clearRect(0,0,w,h);
-                    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+                    ctx.strokeStyle = 'rgba(200,230,220,0.7)';
                     ctx.lineCap = 'round';
-                    ctx.lineWidth = 1.2;
+                    ctx.lineWidth = 1.5;
                     ctx.beginPath();
                     for (let p of drops) {
                         ctx.moveTo(p.x, p.y);
@@ -424,35 +680,36 @@
 
                     for (let sd of slideDrops) {
                         ctx.beginPath();
-                        ctx.strokeStyle = `rgba(255,255,255,${sd.opacity})`;
-                        ctx.lineWidth = 2.5;
-                        ctx.lineCap = 'round';
+                        ctx.arc(sd.x, sd.y, 2.5, 0, Math.PI*2);
+                        ctx.fillStyle = 'rgba(200,230,220,0.5)';
+                        ctx.fill();
+                        ctx.beginPath();
                         ctx.moveTo(sd.x, sd.y);
-                        ctx.lineTo(sd.x, sd.y-sd.trail);
+                        ctx.lineTo(sd.x, sd.y + sd.trail);
+                        ctx.strokeStyle = 'rgba(200,230,220,0.2)';
+                        ctx.lineWidth = 1.5;
                         ctx.stroke();
-                        ctx.fillStyle = `rgba(255,255,255,${sd.opacity+0.2})`;
-                        ctx.beginPath(); ctx.arc(sd.x, sd.y, 2, 0, Math.PI*2); ctx.fill();
                         sd.y += sd.speed;
-                        if (sd.y-sd.trail > h) { sd.y = -sd.trail; sd.x = Math.random()*w; }
+                        if (sd.y > h + 20) { sd.y = -20; sd.x = Math.random()*w; }
                     }
 
-                    for (let sd of staticDrops) {
-                        ctx.fillStyle = `rgba(255,255,255,${sd.o})`;
-                        ctx.beginPath(); ctx.arc(sd.x, sd.y, sd.r, 0, Math.PI*2); ctx.fill();
-                        ctx.fillStyle = `rgba(255,255,255,${sd.o*1.3})`;
-                        ctx.beginPath(); ctx.arc(sd.x-sd.r*0.3, sd.y-sd.r*0.3, sd.r*0.25, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = 'rgba(200,230,220,0.35)';
+                    for (let s of staticDrops) {
+                        ctx.beginPath();
+                        ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+                        ctx.fill();
                     }
-                    requestAnimationFrame(draw);
+                    animId = requestAnimationFrame(draw);
                 }
                 draw();
             }
 
-            // ========== 发布 ==========
+            // ===================== 发布动态 =====================
             window.doPublish = async function () {
-                if (!currentUser) return alert("请先登录");
+                if (!currentUser) { showToast("请先登录"); return; }
                 const content = document.getElementById("postInp").value.trim();
                 const file = document.getElementById("fileInp").files[0];
-                if (!content && !file) return alert("请输入内容");
+                if (!content && !file) { showToast("请输入内容"); return; }
                 const btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中...";
                 try {
                     let media_url = "", media_type = "";
@@ -465,89 +722,141 @@
                     await sb.from("posts").insert([{ user_name: currentUser, content, media_url, media_type, actor_key: deviceId }]);
                     document.getElementById("postInp").value = "";
                     document.getElementById("fileInp").value = "";
+                    showToast("发布成功！");
                     loadFeed(true);
-                } catch (e) { alert("发布失败"); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
+                } catch (e) { showToast("发布失败"); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
             };
 
-            // ========== 点赞 ==========
+            // ===================== 点赞 =====================
             window.toggleLike = async function (btn, postId) {
-                if (!currentUser) return alert("请先登录");
+                if (!currentUser) { showToast("请先登录"); return; }
                 const isLiked = btn.classList.contains("liked");
                 const statsText = btn.closest('.post').querySelector('.post-stats-text');
-                btn.classList.remove("liked"); void btn.offsetWidth;
-                if (!isLiked) { btn.classList.add("liked"); createHeartParticles(btn); }
+
+                btn.classList.remove("liked");
+                void btn.offsetWidth;
+                if (!isLiked) {
+                    btn.classList.add("liked");
+                    createHeartParticles(btn);
+                }
                 btn.textContent = isLiked ? "点赞" : "已点赞";
+
                 try {
-                    if (isLiked) await sb.from("likes").delete().eq("post_id", postId).eq("actor_key", deviceId);
-                    else await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
-                    const num = parseInt(statsText.textContent.match(/点赞 (\d+)/)[1]);
-                    statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num-1 : num+1}`);
+                    if (isLiked) {
+                        await sb.from("likes").delete().eq("post_id", postId).eq("actor_key", deviceId);
+                    } else {
+                        await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
+                    }
+                    const match = statsText.textContent.match(/点赞 (\d+)/);
+                    if (match) {
+                        const num = parseInt(match[1]);
+                        statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num-1 : num+1}`);
+                    }
                 } catch (e) { console.error(e); }
             };
 
             function createHeartParticles(btn) {
                 const rect = btn.getBoundingClientRect();
-                const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
-                const emojis = ["❤️","💕","💗","✨","💖"];
-                for (let i=0; i<8; i++) {
-                    const heart = document.createElement('div'); heart.className = 'heart-particle';
+                const cx = rect.left + rect.width/2;
+                const cy = rect.top + rect.height/2;
+                const emojis = ["❤️","💕","💗","✨","💖","💓"];
+                for (let i=0; i<10; i++) {
+                    const heart = document.createElement('div');
+                    heart.className = 'heart-particle';
                     heart.textContent = emojis[Math.floor(Math.random()*emojis.length)];
-                    const angle = (Math.PI*2*i/8) + (Math.random()-0.5)*0.6;
-                    const dist = 50 + Math.random()*55;
-                    heart.style.left = cx+'px'; heart.style.top = cy+'px';
-                    heart.style.setProperty('--tx25', Math.cos(angle)*dist*0.35+'px');
-                    heart.style.setProperty('--ty25', Math.sin(angle)*dist*0.35-12+'px');
-                    heart.style.setProperty('--tx', Math.cos(angle)*dist+'px');
-                    heart.style.setProperty('--ty', Math.sin(angle)*dist-55+'px');
-                    heart.style.animationDelay = (Math.random()*0.12)+'s';
+                    const angle = (Math.PI*2*i/10) + (Math.random()-0.5)*0.5;
+                    const dist1 = 40 + Math.random()*30;
+                    const dist2 = 80 + Math.random()*60;
+                    const dist3 = 120 + Math.random()*80;
+                    heart.style.left = cx+'px';
+                    heart.style.top = cy+'px';
+                    heart.style.setProperty('--tx25', Math.cos(angle)*dist1+'px');
+                    heart.style.setProperty('--ty25', Math.sin(angle)*dist1-20+'px');
+                    heart.style.setProperty('--tx60', Math.cos(angle)*dist2+'px');
+                    heart.style.setProperty('--ty60', Math.sin(angle)*dist2-50+'px');
+                    heart.style.setProperty('--tx', Math.cos(angle)*dist3+'px');
+                    heart.style.setProperty('--ty', Math.sin(angle)*dist3-100+'px');
+                    heart.style.animationDelay = (Math.random()*0.15)+'s';
                     document.body.appendChild(heart);
-                    setTimeout(() => heart.remove(), 1000);
+                    setTimeout(() => heart.remove(), 1400);
                 }
             }
 
-            // ========== 评论 ==========
+            // ===================== 评论 =====================
             window.openComment = function (postId) {
-                if (!currentUser) return alert("请先登录");
+                if (!currentUser) { showToast("请先登录"); return; }
                 activePostId = postId;
                 document.getElementById("commInp").value = "";
                 document.getElementById("commentModal").classList.add("active");
+                setTimeout(() => document.getElementById("commInp").focus(), 100);
             };
             document.getElementById("commBtn").onclick = async () => {
                 const content = document.getElementById("commInp").value.trim();
-                if (!content) return;
-                document.getElementById("commBtn").textContent = "提交中...";
+                if (!content) { showToast("请输入评论内容"); return; }
+                const btn = document.getElementById("commBtn");
+                btn.textContent = "提交中...";
+                btn.disabled = true;
                 try {
                     await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
                     closeModal("commentModal");
+                    showToast("评论成功！");
                     loadFeed(true);
-                } catch (e) { alert("评论发布失败"); console.error(e); }
-                finally { document.getElementById("commBtn").textContent = "发布评论"; }
+                } catch (e) {
+                    showToast("评论失败");
+                    console.error(e);
+                } finally {
+                    btn.textContent = "发布评论";
+                    btn.disabled = false;
+                }
             };
 
-            // ========== 删除评论（修复） ==========
+            // ===================== 评论删除（修复：改用 RPC，与帖子删除逻辑一致） =====================
             window.openDeleteComment = function (commentId) {
                 delCommentId = commentId;
                 document.getElementById("delCommentModal").classList.add("active");
             };
             document.getElementById("delCommentBtn").onclick = async () => {
                 if (!delCommentId) return;
-                const btn = document.getElementById("delCommentBtn"); btn.disabled = true; btn.textContent = "删除中...";
+                const btn = document.getElementById("delCommentBtn");
+                btn.disabled = true;
+                btn.textContent = "删除中...";
                 try {
-                    let query = sb.from('comments').delete().eq('id', delCommentId);
-                    // 管理员可以删除任意评论，普通用户只能删除自己的
-                    if (!isAdmin()) query = query.eq('actor_key', deviceId);
-                    const { error } = await query;
-                    if (error) throw error;
+                    // 方式一：先尝试通过 RPC 删除（与帖子删除逻辑一致）
+                    const { error: rpcError } = await sb.rpc("delete_comment_with_actor", {
+                        p_comment_id: delCommentId,
+                        p_actor_key: deviceId
+                    });
+
+                    if (rpcError) {
+                        // 方式二：如果 RPC 不存在或失败，降级为直接删除
+                        console.warn("RPC删除失败，尝试直接删除:", rpcError.message);
+                        let query = sb.from('comments').delete().eq('id', delCommentId);
+                        if (!isAdmin()) {
+                            query = query.eq('actor_key', deviceId);
+                        }
+                        const { error: delError } = await query;
+                        if (delError) {
+                            showToast("删除失败：" + delError.message);
+                            btn.disabled = false;
+                            btn.textContent = "确认删除";
+                            return;
+                        }
+                    }
+
                     closeModal("delCommentModal");
+                    showToast("评论已删除");
+                    delCommentId = null;
                     await loadFeed(true);
                 } catch (e) {
-                    alert("删除失败：" + (e?.message || "请重试"));
+                    showToast("删除失败，请重试");
+                    console.error(e);
                 } finally {
-                    btn.disabled = false; btn.textContent = "确认删除";
+                    btn.disabled = false;
+                    btn.textContent = "确认删除";
                 }
             };
 
-            // ========== 删除帖子（已恢复 RPC 调用，确保可用） ==========
+            // ===================== 删除帖子 =====================
             window.openDelete = function (postId, ownerKey) {
                 delPostId = postId;
                 delOwnerKey = ownerKey;
@@ -555,27 +864,35 @@
             };
             document.getElementById("delBtn").onclick = async () => {
                 if (!delPostId) return;
-                const btn = document.getElementById("delBtn"); btn.disabled = true; btn.textContent = "删除中...";
+                const btn = document.getElementById("delBtn");
+                btn.disabled = true;
+                btn.textContent = "删除中...";
                 try {
-                    // 使用数据库函数删除，绕过 RLS 限制
                     const key = isAdmin() ? delOwnerKey : deviceId;
                     const { error } = await sb.rpc("delete_post_with_actor", {
                         p_post_id: delPostId,
                         p_actor_key: key
                     });
-                    if (error) throw error;
+                    if (error) {
+                        showToast("删除失败：" + error.message);
+                        return;
+                    }
                     closeModal("delModal");
+                    showToast("帖子已删除");
+                    delPostId = null;
                     await loadFeed(true);
                 } catch (e) {
-                    alert("删除帖子失败：" + (e?.message || "请重试"));
+                    showToast("删除帖子失败");
+                    console.error(e);
                 } finally {
-                    btn.disabled = false; btn.textContent = "确认删除";
+                    btn.disabled = false;
+                    btn.textContent = "确认删除";
                 }
             };
 
             window.closeModal = function (id) { document.getElementById(id).classList.remove("active"); };
 
-            // ========== 浏览量统计 ==========
+            // ===================== 浏览量统计 =====================
             function trackView(postId) {
                 const key = `xtj_v_${postId}`;
                 if (!localStorage.getItem(key) && !viewTracked.has(postId)) {
@@ -585,7 +902,7 @@
                 }
             }
 
-            // ========== 加载动态 ==========
+            // ===================== 加载动态 =====================
             async function loadFeed(forceRefresh = false) {
                 const now = Date.now();
                 if (!forceRefresh) {
