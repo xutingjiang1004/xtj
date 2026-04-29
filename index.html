@@ -911,30 +911,25 @@
                 btn.disabled = true;
                 btn.textContent = "删除中...";
                 try {
-                    const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
-                    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
-                    const url = SUPABASE_URL + "/rest/v1/comments?id=eq." + delCommentId;
-                    const res = await fetch(url, {
-                        method: "DELETE",
-                        headers: {
-                            "apikey": SUPABASE_ANON_KEY,
-                            "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-                            "Prefer": "return=representation"
-                        }
-                    });
-                    if (res.ok) {
-                        const deleted = await res.json();
-                        if (deleted && deleted.length > 0) {
-                            closeModal("delCommentModal");
-                            showToast("评论已删除");
-                            delCommentId = null;
-                            await loadFeed(true);
-                        } else {
-                            showToast("没有权限删除该评论");
-                        }
+                    console.log("准备删除评论ID:", delCommentId);
+                    const { data: found } = await sb.from('comments').select('id').eq('id', delCommentId);
+                    console.log("查到此评论?", found);
+                    if (!found || found.length === 0) {
+                        showToast("评论不存在或已被删除");
+                        closeModal("delCommentModal");
+                        delCommentId = null;
+                        await loadFeed(true);
+                        return;
+                    }
+                    const { error } = await sb.from('comments').delete().eq('id', delCommentId);
+                    console.log("删除结果 error:", error);
+                    if (error) {
+                        showToast("删除失败: " + error.message);
                     } else {
-                        const errText = await res.text();
-                        showToast("删除失败：" + errText.substring(0, 60));
+                        closeModal("delCommentModal");
+                        showToast("评论已删除");
+                        delCommentId = null;
+                        await loadFeed(true);
                     }
                 } catch (e) {
                     showToast("删除失败，请重试");
