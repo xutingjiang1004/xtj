@@ -530,19 +530,19 @@
       document.getElementById("delCommentModal").classList.add("active");
     }
 
-    // 评论删除逻辑，和帖子删除完全一致，原生API直连Supabase，不用任何函数
+    // 评论删除逻辑，和帖子删除100%一致，变量名和你原有代码完全对齐
 async function deleteCommentWithFallback(commentId) {
   try {
-    // 直接删除，和帖子删除逻辑一模一样
-    const { error } = await supabase
+    // 直接用sb.from，和你帖子删除的原生API写法完全一样
+    const { error } = await sb
       .from('comments')
       .delete()
       .eq('id', commentId);
 
     if (error) throw new Error(`删除失败：${error.message}`);
 
-    // 验证是否真的删除成功
-    const { data: verifyData } = await supabase
+    // 验证是否真的从数据库删除
+    const { data: verifyData } = await sb
       .from('comments')
       .select('id')
       .eq('id', commentId);
