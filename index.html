@@ -530,27 +530,33 @@
       document.getElementById("delCommentModal").classList.add("active");
     }
 
-    async function deleteCommentWithFallback(commentId) {
-      const actorKey = deviceId;
-      try {
-        const { data, error } = await sb.rpc("delete_comment_with_actor", {
-          p_comment_id: commentId,
-          p_actor_key: actorKey
-        });
+    // 评论删除逻辑，和帖子删除完全一致，原生API直连Supabase，不用任何函数
+async function deleteCommentWithFallback(commentId) {
+  try {
+    // 直接删除，和帖子删除逻辑一模一样
+    const { error } = await supabase
+      .from('comments')
+      .delete()
+      .eq('id', commentId);
 
-        if (error) throw new Error(`删除失败：${error.message}`);
-        if (!data) throw new Error("权限不足，无法删除");
+    if (error) throw new Error(`删除失败：${error.message}`);
 
-        const verify = await sb.from("comments").select("id").eq("id", commentId);
-        if (verify.error) throw new Error(`验证失败：${verify.error.message}`);
-        if (verify.data.length > 0) throw new Error("评论未从数据库删除，请检查RLS/函数权限");
-
-        return { success: true };
-      } catch (e) {
-        console.error("删除评论异常：", e);
-        throw e;
-      }
+    // 验证是否真的删除成功
+    const { data: verifyData } = await supabase
+      .from('comments')
+      .select('id')
+      .eq('id', commentId);
+    
+    if (verifyData && verifyData.length > 0) {
+      throw new Error("评论未删除，请检查Supabase的RLS权限");
     }
+
+    return { success: true };
+  } catch (e) {
+    console.error("删除评论异常：", e);
+    throw e;
+  }
+}
 
     document.getElementById("delCommentBtn").onclick = async () => {
       if (!delCommentId) return;
