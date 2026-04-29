@@ -26,19 +26,12 @@
             --trans-ppt: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
-        html {
-            scroll-behavior: smooth;
-            scroll-padding: 20px;
-        }
-        * {
-            box-sizing: border-box;
-            -webkit-tap-highlight-color: transparent;
-        }
+        html { scroll-behavior: smooth; scroll-padding: 20px; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
         body {
             margin: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC",
-                sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
             color: var(--text-main);
             min-height: 100vh;
             overflow-x: hidden;
@@ -47,18 +40,16 @@
             isolation: isolate;
         }
 
-        /* ========== 雨天玻璃背景（纯浅色渐变，无图片） ========== */
+        /* ========== 雨天玻璃背景（浅绿色渐变 + 动态雨滴） ========== */
         .rain-bg-container {
             position: fixed;
             inset: 0;
             z-index: -999;
             overflow: hidden;
             pointer-events: none;
-            /* 浅绿色渐变，替代图片 */
             background: linear-gradient(135deg, #dcedc8 0%, #a5d6a7 50%, #81c784 100%);
         }
 
-        /* 动态雨滴 Canvas（保留） */
         #rainCanvas {
             position: absolute;
             top: 0;
@@ -70,7 +61,6 @@
             pointer-events: none;
         }
 
-        /* 玻璃反光与雨滴覆盖层（保留） */
         .rain-glass-layer {
             position: absolute;
             inset: 0;
@@ -113,11 +103,7 @@
             -webkit-text-fill-color: transparent;
         }
 
-        .nav-auth {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
+        .nav-auth { display: flex; align-items: center; gap: 8px; }
         .nav-input {
             background: rgba(255, 255, 255, 0.7);
             border: 1px solid rgba(255, 255, 255, 0.8);
@@ -128,10 +114,7 @@
             font-size: 13px;
             transition: var(--trans-smooth);
         }
-        .nav-input:focus {
-            background: rgba(255, 255, 255, 0.95);
-            border-color: var(--primary);
-        }
+        .nav-input:focus { background: rgba(255, 255, 255, 0.95); border-color: var(--primary); }
         .btn {
             cursor: pointer;
             border: none;
@@ -149,353 +132,142 @@
             color: white;
             box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
         }
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35);
-        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
         .user-pill {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 4px 12px 4px 4px;
+            display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px;
             background: rgba(255, 255, 255, 0.8);
             border: 1px solid rgba(255, 255, 255, 0.9);
-            border-radius: 99px;
-            font-size: 13px;
-            font-weight: 600;
+            border-radius: 99px; font-size: 13px; font-weight: 600;
         }
+
         .wrap {
-            position: relative;
-            z-index: 2;
-            max-width: 640px;
-            margin: 24px auto 80px;
-            padding: 0 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 24px;
+            position: relative; z-index: 2; max-width: 640px; margin: 24px auto 80px; padding: 0 16px;
+            display: flex; flex-direction: column; gap: 24px;
         }
-        .publish-box {
-            position: relative;
-            z-index: 1;
-            padding: 20px;
-            border-radius: var(--radius-md);
-            transition: var(--trans-smooth);
-        }
-        .publish-box:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--glass-shadow);
-        }
+
+        .publish-box { position: relative; z-index: 1; padding: 20px; border-radius: var(--radius-md); transition: var(--trans-smooth); }
+        .publish-box:hover { transform: translateY(-2px); box-shadow: var(--glass-shadow); }
         .publish-box textarea {
-            width: 100%;
-            min-height: 80px;
-            border: none;
-            background: transparent;
-            resize: none;
-            font-size: 16px;
-            color: var(--text-main);
-            outline: none;
+            width: 100%; min-height: 80px; border: none; background: transparent; resize: none;
+            font-size: 16px; color: var(--text-main); outline: none;
         }
-        .publish-footer {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 12px;
-            border-top: 1px solid rgba(0, 0, 0, 0.05);
-        }
-        input[type="file"] {
-            font-size: 12px;
-            color: var(--text-muted);
-        }
+        .publish-footer { display: flex; justify-content: space-between; align-items: center; padding-top: 12px; border-top: 1px solid rgba(0,0,0,0.05); }
+
+        input[type="file"] { font-size: 12px; color: var(--text-muted); }
         input[type="file"]::file-selector-button {
-            background: rgba(255, 255, 255, 0.7);
-            border: 1px solid rgba(255, 255, 255, 0.8);
-            padding: 4px 12px;
-            border-radius: 99px;
-            cursor: pointer;
-            transition: 0.3s;
+            background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.8);
+            padding: 4px 12px; border-radius: 99px; cursor: pointer; transition: 0.3s;
         }
-        .stats {
-            position: relative;
-            z-index: 1;
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
-        }
-        .stat-card {
-            padding: 16px;
-            border-radius: var(--radius-sm);
-            text-align: center;
-            transition: var(--trans-spring);
-        }
-        .stat-card:hover {
-            transform: translateY(-4px) scale(1.02);
-            box-shadow: 0 8px 24px rgba(5, 150, 105, 0.15);
-        }
-        .stat-card b {
-            display: block;
-            font-size: 22px;
-            color: var(--primary);
-            font-weight: 800;
-        }
-        .stat-card span {
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-        .feed {
-            position: relative;
-            z-index: 1;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
+
+        .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); }
+        .stat-card:hover { transform: translateY(-4px) scale(1.02); box-shadow: 0 8px 24px rgba(5, 150, 105, 0.15); }
+        .stat-card b { display: block; font-size: 22px; color: var(--primary); font-weight: 800; }
+        .stat-card span { font-size: 12px; color: var(--text-muted); }
+
+        .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; }
         .post {
-            padding: 24px;
-            border-radius: var(--radius-md);
-            opacity: 0;
-            transform: translateY(30px) scale(0.95);
-            transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1),
-                transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+            padding: 24px; border-radius: var(--radius-md);
+            opacity: 0; transform: translateY(30px) scale(0.95);
+            transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
-        .post.visible {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-        }
-        .post:hover {
-            box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12);
-            transform: translateY(-2px);
-        }
-        .post-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 16px;
-        }
+        .post.visible { opacity: 1; transform: translateY(0) scale(1); }
+        .post:hover { box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12); transform: translateY(-2px); }
+
+        .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
         .avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: linear-gradient(135deg, #059669, #34d399);
-            color: white;
-            font-weight: bold;
-            font-size: 16px;
+            width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #059669, #34d399); color: white; font-weight: bold; font-size: 16px;
             transition: var(--trans-spring);
         }
-        .avatar.admin {
-            background: linear-gradient(135deg, #ff9f0a, #ff3b60);
-            box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3);
+        .avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3); }
+        .avatar:hover { transform: scale(1.1); }
+        .user-info { display: flex; flex-direction: column; }
+        .user-name { font-weight: 700; font-size: 15px; }
+        .admin-tag { font-size: 10px; background: var(--admin-color); color: white; padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
+        .post-time { font-size: 12px; color: var(--text-muted); }
+
+        .content { font-size: 15px; line-height: 1.6; margin-bottom: 16px; white-space: pre-wrap; }
+        .media { width: 100%; border-radius: 16px; overflow: hidden; margin-bottom: 16px; background: rgba(0,0,0,0.02); }
+        .media img, .media video {
+            width: 100%; max-height: 400px; object-fit: contain; display: block;
+            pointer-events: none; transform: none !important;
         }
-        .avatar:hover {
-            transform: scale(1.1);
-        }
-        .user-info {
-            display: flex;
-            flex-direction: column;
-        }
-        .user-name {
-            font-weight: 700;
-            font-size: 15px;
-        }
-        .admin-tag {
-            font-size: 10px;
-            background: var(--admin-color);
-            color: white;
-            padding: 2px 6px;
-            border-radius: 4px;
-            margin-left: 4px;
-        }
-        .post-time {
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-        .content {
-            font-size: 15px;
-            line-height: 1.6;
-            margin-bottom: 16px;
-            white-space: pre-wrap;
-        }
-        .media {
-            width: 100%;
-            border-radius: 16px;
-            overflow: hidden;
-            margin-bottom: 16px;
-            background: rgba(0, 0, 0, 0.02);
-        }
-        .media img,
-        .media video {
-            width: 100%;
-            max-height: 400px;
-            object-fit: contain;
-            display: block;
-            pointer-events: none;
-            transform: none !important;
-        }
-        .post-stats-text {
-            font-size: 12px;
-            color: var(--text-muted);
-            margin-bottom: 12px;
-        }
-        .actions {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            position: relative;
-        }
+
+        .post-stats-text { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
+
+        .actions { display: flex; gap: 8px; flex-wrap: wrap; position: relative; }
         .action-btn {
-            background: rgba(255, 255, 255, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.8);
-            padding: 6px 16px;
-            border-radius: 99px;
-            font-size: 13px;
-            color: var(--text-muted);
-            cursor: pointer;
-            transition: var(--trans-spring);
-            font-weight: 600;
-            position: relative;
-            overflow: visible !important;
-            min-width: 86px;
-            display: inline-flex;
-            justify-content: center;
-            align-items: center;
-            box-sizing: border-box;
+            background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.8);
+            padding: 6px 16px; border-radius: 99px; font-size: 13px; color: var(--text-muted);
+            cursor: pointer; transition: var(--trans-spring); font-weight: 600;
+            position: relative; overflow: visible !important;
+            min-width: 86px; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
         }
-        .action-btn:hover {
-            background: rgba(255, 255, 255, 1);
-            transform: translateY(-2px);
-        }
+        .action-btn:hover { background: rgba(255,255,255,1); transform: translateY(-2px); }
+
         @keyframes likePulse {
-            0% {
-                box-shadow: 0 0 0px rgba(255, 59, 96, 0.4);
-            }
-            50% {
-                box-shadow: 0 0 12px 4px rgba(255, 59, 96, 0.2);
-            }
-            100% {
-                box-shadow: 0 0 12px rgba(255, 59, 96, 0.15);
-            }
+            0% { box-shadow: 0 0 0px rgba(255, 59, 96, 0.4); }
+            50% { box-shadow: 0 0 12px 4px rgba(255, 59, 96, 0.2); }
+            100% { box-shadow: 0 0 12px rgba(255, 59, 96, 0.15); }
         }
         .action-btn.liked {
-            background: rgba(255, 59, 96, 0.15);
-            color: var(--like-color);
-            border-color: rgba(255, 59, 96, 0.3);
-            box-shadow: 0 0 12px rgba(255, 59, 96, 0.15);
+            background: rgba(255, 59, 96, 0.15); color: var(--like-color);
+            border-color: rgba(255, 59, 96, 0.3); box-shadow: 0 0 12px rgba(255,59,96,0.15);
             animation: likePulse 0.45s ease;
         }
+
         .heart-particle {
-            position: fixed;
-            font-size: 20px;
-            pointer-events: none;
-            animation: heartFly 0.9s ease-out forwards;
-            z-index: 9999;
+            position: fixed; font-size: 20px; pointer-events: none;
+            animation: heartFly 0.9s ease-out forwards; z-index: 9999;
         }
         @keyframes heartFly {
-            0% {
-                transform: translate(0, 0) scale(0) rotate(0deg);
-                opacity: 1;
-            }
-            25% {
-                transform: translate(var(--tx25), var(--ty25)) scale(1.4) rotate(-15deg);
-                opacity: 1;
-            }
-            100% {
-                transform: translate(var(--tx), var(--ty)) scale(0.2) rotate(20deg);
-                opacity: 0;
-            }
+            0%   { transform: translate(0,0) scale(0) rotate(0deg); opacity:1; }
+            25%  { transform: translate(var(--tx25), var(--ty25)) scale(1.4) rotate(-15deg); opacity:1; }
+            100% { transform: translate(var(--tx), var(--ty)) scale(0.2) rotate(20deg); opacity:0; }
         }
-        .action-btn.del {
-            background: transparent;
-            border-color: transparent;
-            color: #ff3b60;
-            margin-left: auto;
-        }
-        .action-btn.del:hover {
-            background: rgba(255, 59, 96, 0.1);
-        }
-        .comments {
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid rgba(0, 0, 0, 0.05);
-            display: grid;
-            gap: 8px;
-        }
+
+        .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: auto; }
+        .action-btn.del:hover { background: rgba(255,59,96,0.1); }
+
+        .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05); display: grid; gap: 8px; }
         .comment-item {
-            padding: 10px 14px;
-            background: rgba(255, 255, 255, 0.4);
-            border-radius: 12px;
-            font-size: 13px;
-            line-height: 1.5;
-            border: 1px solid rgba(255, 255, 255, 0.6);
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 8px;
-            backdrop-filter: blur(14px) saturate(160%);
-            -webkit-backdrop-filter: blur(14px) saturate(160%);
+            padding: 10px 14px; background: rgba(255,255,255,0.4); border-radius: 12px;
+            font-size: 13px; line-height: 1.5; border: 1px solid rgba(255,255,255,0.6);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
+            display: flex; justify-content: space-between; align-items: center; gap: 8px;
+            backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
         }
         .comment-del-btn {
-            background: transparent;
-            border: none;
-            color: rgba(255, 59, 96, 0.5);
-            cursor: pointer;
-            font-size: 12px;
-            padding: 2px 4px;
-            border-radius: 4px;
+            background: transparent; border: none; color: rgba(255,59,96,0.5);
+            cursor: pointer; font-size: 12px; padding: 2px 4px; border-radius: 4px;
             transition: var(--trans-smooth);
         }
-        .comment-del-btn:hover {
-            background: rgba(255, 59, 96, 0.1);
-            color: #ff3b60;
-        }
+        .comment-del-btn:hover { background: rgba(255,59,96,0.1); color: #ff3b60; }
+
         .modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.15);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 100;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1),
-                backdrop-filter 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            position: fixed; inset: 0; background: rgba(0,0,0,0.15);
+            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            display: flex; align-items: center; justify-content: center; z-index: 100;
+            opacity: 0; pointer-events: none;
+            transition: opacity 0.5s cubic-bezier(0.16,1,0.3,1), backdrop-filter 0.5s cubic-bezier(0.16,1,0.3,1);
         }
-        .modal-overlay.active {
-            opacity: 1;
-            pointer-events: all;
-        }
+        .modal-overlay.active { opacity: 1; pointer-events: all; }
         .modal-box {
-            width: 90%;
-            max-width: 400px;
-            padding: 24px;
-            border-radius: var(--radius-lg);
-            transform: translateY(35px) scale(0.96);
-            opacity: 0;
-            transition: var(--trans-ppt);
+            width: 90%; max-width: 400px; padding: 24px; border-radius: var(--radius-lg);
+            transform: translateY(35px) scale(0.96); opacity: 0; transition: var(--trans-ppt);
         }
-        .modal-overlay.active .modal-box {
-            transform: translateY(0) scale(1);
-            opacity: 1;
-        }
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: var(--text-muted);
-        }
+        .modal-overlay.active .modal-box { transform: translateY(0) scale(1); opacity: 1; }
+
+        .loading { text-align: center; padding: 40px; color: var(--text-muted); }
     </style>
 </head>
 <body>
-    <!-- 雨天玻璃背景（已移除图片，使用浅绿色渐变） -->
     <div class="rain-bg-container">
         <canvas id="rainCanvas"></canvas>
         <div class="rain-glass-layer"></div>
     </div>
 
-    <!-- 页面原有内容（未改动） -->
     <nav style="position:relative; z-index:3;">
         <h1>xtj</h1>
         <div class="nav-auth">
@@ -507,8 +279,7 @@
                 <div class="user-pill">
                     <span class="avatar" id="myAvatar" style="width:24px; height:24px; font-size:12px;">?</span>
                     <span id="myName"></span>
-                    <button onclick="doLogout()"
-                        style="background:none; border:none; cursor:pointer; color:var(--text-muted);">&times;</button>
+                    <button onclick="doLogout()" style="background:none; border:none; cursor:pointer; color:var(--text-muted);">&times;</button>
                 </div>
             </div>
         </div>
@@ -537,11 +308,9 @@
     <div class="modal-overlay" id="commentModal">
         <div class="modal-box glass">
             <h3>发表评论</h3>
-            <textarea id="commInp" class="modal-textarea" placeholder="写下你的想法..."
-                style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
+            <textarea id="commInp" placeholder="写下你的想法..." style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top:16px;">
-                <button class="btn" style="background: rgba(255,255,255,0.7);"
-                    onclick="closeModal('commentModal')">取消</button>
+                <button class="btn" style="background: rgba(255,255,255,0.7);" onclick="closeModal('commentModal')">取消</button>
                 <button class="btn btn-primary" id="commBtn">发布评论</button>
             </div>
         </div>
@@ -552,11 +321,8 @@
             <h3>确认删除帖子？</h3>
             <p style="color: var(--text-muted);">删除后无法恢复</p>
             <div style="display: flex; gap: 10px; margin-top:20px;">
-                <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);"
-                    onclick="closeModal('delModal')">取消</button>
-                <button class="btn btn-primary"
-                    style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);"
-                    id="delBtn">确认删除</button>
+                <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);" onclick="closeModal('delModal')">取消</button>
+                <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
             </div>
         </div>
     </div>
@@ -566,11 +332,8 @@
             <h3>确认删除评论？</h3>
             <p style="color: var(--text-muted);">删除后无法恢复</p>
             <div style="display: flex; gap: 10px; margin-top:20px;">
-                <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);"
-                    onclick="closeModal('delCommentModal')">取消</button>
-                <button class="btn btn-primary"
-                    style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);"
-                    id="delCommentBtn">确认删除</button>
+                <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);" onclick="closeModal('delCommentModal')">取消</button>
+                <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delCommentBtn">确认删除</button>
             </div>
         </div>
     </div>
@@ -578,8 +341,7 @@
     <script>
         (function () {
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
-            const SUPABASE_ANON_KEY =
-                "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
+            const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
             const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
             const ADMIN_NAME = "xxz";
@@ -589,17 +351,14 @@
             const deviceId = localStorage.getItem("xtj_device_id") || crypto.randomUUID();
             localStorage.setItem("xtj_device_id", deviceId);
 
-            let delPostId = null,
-                delOwnerKey = null;
+            let delPostId = null, delOwnerKey = null;
             let delCommentId = null;
             let activePostId = null;
             const viewTracked = new Set();
             const CACHE_KEY = "xtj_feed_cache";
             const CACHE_DURATION = 2 * 60 * 1000;
 
-            function isAdmin() {
-                return currentUser === ADMIN_NAME;
-            }
+            function isAdmin() { return currentUser === ADMIN_NAME; }
 
             window.doLogin = function () {
                 const name = document.getElementById("nickInp").value.trim();
@@ -633,190 +392,126 @@
                 }
             }
 
+            // ========== 雨滴动画 ==========
             function initRainAnimation() {
                 const canvas = document.getElementById('rainCanvas');
                 if (!canvas) return;
                 const ctx = canvas.getContext('2d');
                 let w, h;
-                let drops = [];
-                let slideDrops = [];
-                let staticDrops = [];
+                let drops = [], slideDrops = [], staticDrops = [];
 
-                function resize() {
-                    w = canvas.width = window.innerWidth;
-                    h = canvas.height = window.innerHeight;
-                }
+                function resize() { w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight; }
                 window.addEventListener('resize', resize);
                 resize();
 
-                for (let i = 0; i < 150; i++) {
-                    drops.push({
-                        x: Math.random() * w,
-                        y: Math.random() * h,
-                        len: Math.random() * 15 + 10,
-                        xs: -1.5 + Math.random() * 2,
-                        ys: Math.random() * 14 + 10
-                    });
-                }
-                for (let i = 0; i < 40; i++) {
-                    slideDrops.push({
-                        x: Math.random() * w,
-                        y: Math.random() * h,
-                        speed: Math.random() * 1.2 + 0.3,
-                        trail: Math.random() * 18 + 8,
-                        opacity: Math.random() * 0.4 + 0.2
-                    });
-                }
-                for (let i = 0; i < 200; i++) {
-                    staticDrops.push({
-                        x: Math.random() * w,
-                        y: Math.random() * h,
-                        r: Math.random() * 2.2 + 0.8,
-                        o: Math.random() * 0.5 + 0.25
-                    });
-                }
+                for (let i = 0; i < 150; i++) drops.push({ x: Math.random()*w, y: Math.random()*h, len: Math.random()*15+10, xs: -1.5+Math.random()*2, ys: Math.random()*14+10 });
+                for (let i = 0; i < 40; i++) slideDrops.push({ x: Math.random()*w, y: Math.random()*h, speed: Math.random()*1.2+0.3, trail: Math.random()*18+8, opacity: Math.random()*0.4+0.2 });
+                for (let i = 0; i < 200; i++) staticDrops.push({ x: Math.random()*w, y: Math.random()*h, r: Math.random()*2.2+0.8, o: Math.random()*0.5+0.25 });
 
                 function draw() {
-                    ctx.clearRect(0, 0, w, h);
-                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+                    ctx.clearRect(0,0,w,h);
+                    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
                     ctx.lineCap = 'round';
                     ctx.lineWidth = 1.2;
                     ctx.beginPath();
                     for (let p of drops) {
                         ctx.moveTo(p.x, p.y);
-                        ctx.lineTo(p.x + p.xs, p.y + p.ys);
-                        p.x += p.xs;
-                        p.y += p.ys;
-                        if (p.y > h || p.x > w || p.x < 0) {
-                            p.x = Math.random() * w;
-                            p.y = -20;
-                        }
+                        ctx.lineTo(p.x+p.xs, p.y+p.ys);
+                        p.x += p.xs; p.y += p.ys;
+                        if (p.y>h || p.x>w || p.x<0) { p.x = Math.random()*w; p.y = -20; }
                     }
                     ctx.stroke();
 
                     for (let sd of slideDrops) {
                         ctx.beginPath();
-                        ctx.strokeStyle = `rgba(255, 255, 255, ${sd.opacity})`;
+                        ctx.strokeStyle = `rgba(255,255,255,${sd.opacity})`;
                         ctx.lineWidth = 2.5;
                         ctx.lineCap = 'round';
                         ctx.moveTo(sd.x, sd.y);
-                        ctx.lineTo(sd.x, sd.y - sd.trail);
+                        ctx.lineTo(sd.x, sd.y-sd.trail);
                         ctx.stroke();
-                        ctx.fillStyle = `rgba(255, 255, 255, ${sd.opacity + 0.2})`;
-                        ctx.beginPath();
-                        ctx.arc(sd.x, sd.y, 2, 0, Math.PI * 2);
-                        ctx.fill();
+                        ctx.fillStyle = `rgba(255,255,255,${sd.opacity+0.2})`;
+                        ctx.beginPath(); ctx.arc(sd.x, sd.y, 2, 0, Math.PI*2); ctx.fill();
                         sd.y += sd.speed;
-                        if (sd.y - sd.trail > h) {
-                            sd.y = -sd.trail;
-                            sd.x = Math.random() * w;
-                        }
+                        if (sd.y-sd.trail > h) { sd.y = -sd.trail; sd.x = Math.random()*w; }
                     }
 
                     for (let sd of staticDrops) {
-                        ctx.fillStyle = `rgba(255, 255, 255, ${sd.o})`;
-                        ctx.beginPath();
-                        ctx.arc(sd.x, sd.y, sd.r, 0, Math.PI * 2);
-                        ctx.fill();
-                        ctx.fillStyle = `rgba(255, 255, 255, ${sd.o * 1.3})`;
-                        ctx.beginPath();
-                        ctx.arc(sd.x - sd.r * 0.3, sd.y - sd.r * 0.3, sd.r * 0.25, 0, Math.PI * 2);
-                        ctx.fill();
+                        ctx.fillStyle = `rgba(255,255,255,${sd.o})`;
+                        ctx.beginPath(); ctx.arc(sd.x, sd.y, sd.r, 0, Math.PI*2); ctx.fill();
+                        ctx.fillStyle = `rgba(255,255,255,${sd.o*1.3})`;
+                        ctx.beginPath(); ctx.arc(sd.x-sd.r*0.3, sd.y-sd.r*0.3, sd.r*0.25, 0, Math.PI*2); ctx.fill();
                     }
                     requestAnimationFrame(draw);
                 }
                 draw();
             }
 
+            // ========== 发布 ==========
             window.doPublish = async function () {
                 if (!currentUser) return alert("请先登录");
                 const content = document.getElementById("postInp").value.trim();
                 const file = document.getElementById("fileInp").files[0];
                 if (!content && !file) return alert("请输入内容");
-                const btn = document.getElementById("pubBtn");
-                btn.disabled = true;
-                btn.textContent = "发布中...";
+                const btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中...";
                 try {
-                    let media_url = "",
-                        media_type = "";
+                    let media_url = "", media_type = "";
                     if (file) {
                         const path = `${Date.now()}_${file.name}`;
                         await sb.storage.from("uploads").upload(path, file);
                         media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
                         media_type = file.type.startsWith("image") ? "image" : "video";
                     }
-                    await sb.from("posts").insert([{
-                        user_name: currentUser,
-                        content,
-                        media_url,
-                        media_type,
-                        actor_key: deviceId
-                    }]);
+                    await sb.from("posts").insert([{ user_name: currentUser, content, media_url, media_type, actor_key: deviceId }]);
                     document.getElementById("postInp").value = "";
                     document.getElementById("fileInp").value = "";
                     loadFeed(true);
-                } catch (e) {
-                    alert("发布失败");
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = "发布动态";
-                }
+                } catch (e) { alert("发布失败"); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
             };
 
+            // ========== 点赞 ==========
             window.toggleLike = async function (btn, postId) {
                 if (!currentUser) return alert("请先登录");
                 const isLiked = btn.classList.contains("liked");
                 const statsText = btn.closest('.post').querySelector('.post-stats-text');
-                btn.classList.remove("liked");
-                void btn.offsetWidth;
-                if (!isLiked) {
-                    btn.classList.add("liked");
-                    createHeartParticles(btn);
-                }
+                btn.classList.remove("liked"); void btn.offsetWidth;
+                if (!isLiked) { btn.classList.add("liked"); createHeartParticles(btn); }
                 btn.textContent = isLiked ? "点赞" : "已点赞";
                 try {
-                    if (isLiked) {
-                        await sb.from("likes").delete().match({ post_id: postId, actor_key: deviceId });
-                    } else {
-                        await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
-                    }
-                    let num = parseInt(statsText.textContent.match(/点赞 (\d+)/)[1]);
-                    statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num - 1 : num + 1}`);
-                } catch (e) {
-                    console.error(e);
-                }
+                    if (isLiked) await sb.from("likes").delete().eq("post_id", postId).eq("actor_key", deviceId);
+                    else await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
+                    const num = parseInt(statsText.textContent.match(/点赞 (\d+)/)[1]);
+                    statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num-1 : num+1}`);
+                } catch (e) { console.error(e); }
             };
 
             function createHeartParticles(btn) {
                 const rect = btn.getBoundingClientRect();
-                const cx = rect.left + rect.width / 2;
-                const cy = rect.top + rect.height / 2;
-                const emojis = ["❤️", "💕", "💗", "✨", "💖"];
-                for (let i = 0; i < 8; i++) {
-                    const heart = document.createElement('div');
-                    heart.className = 'heart-particle';
-                    heart.textContent = emojis[Math.floor(Math.random() * emojis.length)];
-                    const angle = (Math.PI * 2 * i / 8) + (Math.random() - 0.5) * 0.6;
-                    const dist = 50 + Math.random() * 55;
-                    heart.style.left = cx + 'px';
-                    heart.style.top = cy + 'px';
-                    heart.style.setProperty('--tx25', Math.cos(angle) * dist * 0.35 + 'px');
-                    heart.style.setProperty('--ty25', Math.sin(angle) * dist * 0.35 - 12 + 'px');
-                    heart.style.setProperty('--tx', Math.cos(angle) * dist + 'px');
-                    heart.style.setProperty('--ty', Math.sin(angle) * dist - 55 + 'px');
-                    heart.style.animationDelay = (Math.random() * 0.12) + 's';
+                const cx = rect.left + rect.width/2, cy = rect.top + rect.height/2;
+                const emojis = ["❤️","💕","💗","✨","💖"];
+                for (let i=0; i<8; i++) {
+                    const heart = document.createElement('div'); heart.className = 'heart-particle';
+                    heart.textContent = emojis[Math.floor(Math.random()*emojis.length)];
+                    const angle = (Math.PI*2*i/8) + (Math.random()-0.5)*0.6;
+                    const dist = 50 + Math.random()*55;
+                    heart.style.left = cx+'px'; heart.style.top = cy+'px';
+                    heart.style.setProperty('--tx25', Math.cos(angle)*dist*0.35+'px');
+                    heart.style.setProperty('--ty25', Math.sin(angle)*dist*0.35-12+'px');
+                    heart.style.setProperty('--tx', Math.cos(angle)*dist+'px');
+                    heart.style.setProperty('--ty', Math.sin(angle)*dist-55+'px');
+                    heart.style.animationDelay = (Math.random()*0.12)+'s';
                     document.body.appendChild(heart);
                     setTimeout(() => heart.remove(), 1000);
                 }
             }
 
+            // ========== 评论 ==========
             window.openComment = function (postId) {
                 if (!currentUser) return alert("请先登录");
                 activePostId = postId;
                 document.getElementById("commInp").value = "";
                 document.getElementById("commentModal").classList.add("active");
             };
-
             document.getElementById("commBtn").onclick = async () => {
                 const content = document.getElementById("commInp").value.trim();
                 if (!content) return;
@@ -825,83 +520,71 @@
                     await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
                     closeModal("commentModal");
                     loadFeed(true);
-                } catch (e) {
-                    alert("评论发布失败");
-                    console.error(e);
-                } finally {
-                    document.getElementById("commBtn").textContent = "发布评论";
-                }
+                } catch (e) { alert("评论发布失败"); console.error(e); }
+                finally { document.getElementById("commBtn").textContent = "发布评论"; }
             };
 
+            // ========== 删除评论（已修复） ==========
             window.openDeleteComment = function (commentId) {
                 delCommentId = commentId;
                 document.getElementById("delCommentModal").classList.add("active");
             };
-
             document.getElementById("delCommentBtn").onclick = async () => {
                 if (!delCommentId) return;
-                const btn = document.getElementById("delCommentBtn");
-                btn.disabled = true;
-                btn.textContent = "删除中...";
+                const btn = document.getElementById("delCommentBtn"); btn.disabled = true; btn.textContent = "删除中...";
                 try {
-                    await sb.from('comments').delete().eq('id', delCommentId);
+                    let query = sb.from('comments').delete().eq('id', delCommentId);
+                    // 普通用户只能删除自己的评论
+                    if (!isAdmin()) query = query.eq('actor_key', deviceId);
+                    const { error, count } = await query;
+                    if (error) throw error;
+                    if (count === 0) throw new Error("没有找到可删除的评论");
                     closeModal("delCommentModal");
                     await loadFeed(true);
                 } catch (e) {
                     alert(e?.message || "删除失败，请重试");
                 } finally {
-                    btn.disabled = false;
-                    btn.textContent = "确认删除";
+                    btn.disabled = false; btn.textContent = "确认删除";
                 }
             };
 
+            // ========== 删除帖子（已修复） ==========
             window.openDelete = function (postId, ownerKey) {
                 delPostId = postId;
                 delOwnerKey = ownerKey;
                 document.getElementById("delModal").classList.add("active");
             };
-
             document.getElementById("delBtn").onclick = async () => {
                 if (!delPostId) return;
-                const btn = document.getElementById("delBtn");
-                btn.disabled = true;
-                btn.textContent = "删除中...";
+                const btn = document.getElementById("delBtn"); btn.disabled = true; btn.textContent = "删除中...";
                 try {
-                    if (isAdmin()) {
-                        await sb.from('posts').delete().eq('id', delPostId);
-                    } else {
-                        await sb.from('posts').delete().match({ id: delPostId, actor_key: deviceId });
-                    }
+                    let query = sb.from('posts').delete().eq('id', delPostId);
+                    if (!isAdmin()) query = query.eq('actor_key', deviceId);
+                    const { error, count } = await query;
+                    if (error) throw error;
+                    if (count === 0) throw new Error("没有找到可删除的帖子");
                     closeModal("delModal");
                     await loadFeed(true);
                 } catch (e) {
-                    alert("删除帖子失败");
-                    console.error(e);
+                    alert(e?.message || "删除帖子失败");
                 } finally {
-                    btn.disabled = false;
-                    btn.textContent = "确认删除";
+                    btn.disabled = false; btn.textContent = "确认删除";
                 }
             };
 
-            window.closeModal = function (id) {
-                document.getElementById(id).classList.remove("active");
-            };
+            window.closeModal = function (id) { document.getElementById(id).classList.remove("active"); };
 
+            // ========== 浏览量统计 ==========
             function trackView(postId) {
                 const key = `xtj_v_${postId}`;
                 if (!localStorage.getItem(key) && !viewTracked.has(postId)) {
                     viewTracked.add(postId);
                     localStorage.setItem(key, "1");
-                    setTimeout(async () => {
-                        try {
-                            await sb.rpc("increment_post_views", { p_post_id: postId });
-                        } catch (e) {
-                            console.error("统计浏览量失败：", e);
-                        }
-                    }, 1000);
+                    setTimeout(async () => { try { await sb.rpc("increment_post_views", { p_post_id: postId }); } catch(e){ console.error(e); } }, 1000);
                 }
             }
 
+            // ========== 加载动态 ==========
             async function loadFeed(forceRefresh = false) {
                 const now = Date.now();
                 if (!forceRefresh) {
@@ -909,48 +592,39 @@
                     if (cached) {
                         try {
                             const parsed = JSON.parse(cached);
-                            if (parsed && parsed.data && (now - parsed.timestamp < CACHE_DURATION)) {
-                                renderFeed(parsed.data);
-                                return;
+                            if (parsed?.data && now - parsed.timestamp < CACHE_DURATION) {
+                                renderFeed(parsed.data); return;
                             }
-                        } catch (e) { }
+                        } catch(e){}
                     }
                 }
-
                 const feed = document.getElementById("feed");
                 if (!forceRefresh) feed.innerHTML = `<div class="loading">加载中...</div>`;
-
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
                     ]);
-
-                    const data = {
-                        posts: postRes.data || [],
-                        comments: commRes.data || [],
-                        likes: likeRes.data || []
-                    };
-
+                    const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
                     localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: now }));
                     renderFeed(data);
-                } catch (e) {
+                } catch(e) {
                     if (!forceRefresh) feed.innerHTML = `<div class="loading">加载失败，刷新重试</div>`;
-                    console.error("加载Feed失败：", e);
+                    console.error(e);
                 }
             }
 
             function renderFeed({ posts, comments, likes }) {
                 document.getElementById("sPosts").textContent = posts.length;
-                document.getElementById("sViews").textContent = posts.reduce((s, p) => s + (p.views || 0), 0);
+                document.getElementById("sViews").textContent = posts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length;
 
                 const feed = document.getElementById("feed");
                 feed.innerHTML = posts.length ? posts.map(p => {
-                    const pLikes = likes.filter(l => l.post_id === p.id);
-                    const pComms = comments.filter(c => c.post_id === p.id);
-                    const isLiked = pLikes.some(l => l.actor_key === deviceId);
+                    const pLikes = likes.filter(l=>l.post_id===p.id);
+                    const pComms = comments.filter(c=>c.post_id===p.id);
+                    const isLiked = pLikes.some(l=>l.actor_key===deviceId);
                     const canDelPost = p.actor_key === deviceId || isAdmin();
                     trackView(p.id);
                     return `
@@ -973,7 +647,7 @@
                   ${pComms.length?`
                   <div class="comments">
                     ${pComms.map(c=>`
-                    <div class="comment-item" data-comment-id="${c.id}" data-post-id="${p.id}">
+                    <div class="comment-item" data-comment-id="${c.id}">
                       <div><b>${c.user_name}:</b>${c.content}</div>
                       ${(c.actor_key===deviceId || isAdmin())?`<button type="button" class="comment-del-btn" onclick="openDeleteComment('${c.id}')">×</button>`:''}
                     </div>
@@ -989,16 +663,9 @@
 
             function initPostScrollAnimation() {
                 const observer = new IntersectionObserver(e => {
-                    e.forEach(i => {
-                        if (i.isIntersecting) {
-                            i.target.classList.add('visible');
-                            observer.unobserve(i.target);
-                        }
-                    });
+                    e.forEach(i => { if(i.isIntersecting){ i.target.classList.add('visible'); observer.unobserve(i.target); } });
                 }, { threshold: 0.1 });
-                document.querySelectorAll('.post').forEach(p => {
-                    if (!p.classList.contains('visible')) observer.observe(p);
-                });
+                document.querySelectorAll('.post').forEach(p => { if(!p.classList.contains('visible')) observer.observe(p); });
             }
 
             async function initialLoad(skipCache = false) {
@@ -1007,28 +674,20 @@
                     if (cached) {
                         try {
                             const parsed = JSON.parse(cached);
-                            if (parsed && parsed.data && (Date.now() - parsed.timestamp < CACHE_DURATION)) {
-                                renderFeed(parsed.data);
-                                loadFeed(true);
-                                return;
-                            }
-                        } catch (e) { }
+                            if (parsed?.data && Date.now()-parsed.timestamp < CACHE_DURATION) { renderFeed(parsed.data); loadFeed(true); return; }
+                        } catch(e){}
                     }
                 }
                 await loadFeed(false);
             }
 
             sb.channel('updates')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, () => loadFeed(true))
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, () => loadFeed(true))
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'likes' }, () => loadFeed(true))
+                .on('postgres_changes', { event:'*', schema:'public', table:'posts' }, () => loadFeed(true))
+                .on('postgres_changes', { event:'*', schema:'public', table:'comments' }, () => loadFeed(true))
+                .on('postgres_changes', { event:'*', schema:'public', table:'likes' }, () => loadFeed(true))
                 .subscribe();
 
-            window.addEventListener('DOMContentLoaded', () => {
-                initUI();
-                initRainAnimation();
-                initialLoad();
-            });
+            window.addEventListener('DOMContentLoaded', () => { initUI(); initRainAnimation(); initialLoad(); });
         })();
     </script>
 </body>
