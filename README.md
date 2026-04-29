@@ -1,4 +1,4 @@
-# 液态玻璃朋友圈（Vercel + Supabase，可选 Render API）
+# 液态玻璃（Vercel + Supabase，可选 Render API）
 
 ## 你现在点不动登录/评论的核心原因
 1. 前端使用了 `sb_publishable_...`，但 `supabase-js` 浏览器初始化应使用 anon JWT key。  
