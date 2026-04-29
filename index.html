@@ -911,9 +911,9 @@
                 btn.disabled = true;
                 btn.textContent = "删除中...";
                 try {
-                    const { error } = await sb.rpc("delete_comment_with_actor", {
-                        p_comment_id: delCommentId,
-                        p_actor_key: isAdmin() ? 'admin_override' : deviceId
+                    const { error } = await sb.rpc("del_com", {
+                        cid: delCommentId,
+                        ak: isAdmin() ? 'admin' : deviceId
                     });
                     if (error) {
                         showToast("删除失败: " + error.message);
