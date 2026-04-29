@@ -520,7 +520,7 @@
     };
 
     // ==============================================
-    // 评论删除功能，和帖子删除100%对齐
+    // 评论删除功能（极简版，和帖子删除逻辑完全一致）
     // ==============================================
     function openDeleteComment(commentId) {
       delCommentId = commentId;
@@ -529,28 +529,17 @@
 
     async function deleteCommentWithFallback(commentId) {
       try {
-        // 和帖子删除完全一致的原生API写法
+        // 和帖子删除完全一致的核心代码，没有任何多余逻辑
         const { error } = await sb
           .from('comments')
           .delete()
           .eq('id', commentId);
 
-        if (error) throw new Error(`删除失败：${error.message}`);
-
-        // 验证删除结果
-        const { data: verifyData } = await sb
-          .from('comments')
-          .select('id')
-          .eq('id', commentId);
-        
-        if (verifyData && verifyData.length > 0) {
-          throw new Error("数据库删除未执行，请刷新页面重试");
-        }
-
+        if (error) throw error;
         return { success: true };
       } catch (e) {
-        console.error("删除评论异常：", e);
-        throw e;
+        console.error("删除失败：", e);
+        throw new Error("删除失败：" + e.message);
       }
     }
 
@@ -561,32 +550,10 @@
       btn.textContent = "删除中...";
 
       try {
-        const el = document.querySelector(`[data-comment-id="${delCommentId}"]`);
-        const postId = el?.dataset?.postId || null;
-
         await deleteCommentWithFallback(delCommentId);
-
-        if (el) {
-          el.style.transition = "all 0.25s ease";
-          el.style.opacity = "0";
-          el.style.transform = "scale(0.95)";
-          setTimeout(() => el.remove(), 220);
-        }
-
-        if (postId) {
-          const post = document.querySelector(`[data-post-id="${postId}"]`);
-          const stat = post?.querySelector(".post-stats-text");
-          if (stat) {
-            const m = stat.innerHTML.match(/评论\s*(\d+)/);
-            if (m) {
-              const next = Math.max(0, Number(m[1]) - 1);
-              stat.innerHTML = stat.innerHTML.replace(/评论\s*(\d+)/, `评论 ${next}`);
-            }
-          }
-        }
-
         closeModal("delCommentModal");
-        delCommentId = null;
+        // 删除成功直接刷新页面，和帖子删除效果完全一致
+        window.location.reload();
       } catch(e) {
         alert(e?.message || "删除失败，请重试");
       } finally {
