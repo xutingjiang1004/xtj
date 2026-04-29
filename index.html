@@ -7,13 +7,14 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     :root {
-      --bg-color: #f0f5ff;
-      --glass-bg: rgba(255, 255, 255, 0.18);
+      /* 升级为浅绿色主题 */
+      --bg-color: #e8f5e9;
+      --glass-bg: rgba(255, 255, 255, 0.25);
       --glass-border: rgba(255, 255, 255, 0.58);
-      --glass-shadow: 0 18px 50px rgba(31, 38, 135, 0.12);
+      --glass-shadow: 0 18px 50px rgba(5, 150, 105, 0.08);
       --glass-blur: blur(24px);
       
-      --primary: #7c5cff;
+      --primary: #059669; /* 翡翠绿 */
       --admin-color: #ff9f0a;
       --like-color: #ff3b60;
       
@@ -26,6 +27,7 @@
       
       --trans-smooth: all 0.4s cubic-bezier(0.25, 1, 0.3, 1);
       --trans-spring: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      --trans-ppt: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     html { scroll-behavior: smooth; scroll-padding: 20px; }
@@ -43,74 +45,35 @@
       -webkit-font-smoothing: antialiased;
       position: relative;
       isolation: isolate;
-      background:
-        radial-gradient(circle at top left, rgba(124, 92, 255, 0.14), transparent 24%),
-        radial-gradient(circle at top right, rgba(60, 180, 255, 0.12), transparent 22%),
-        radial-gradient(circle at bottom left, rgba(78, 210, 174, 0.10), transparent 25%),
-        linear-gradient(180deg, #f7f9ff 0%, #eef4ff 48%, #f5f7ff 100%);
     }
 
-    .liquid-bg {
+    /* 动态下雨与玻璃背景层 */
+    .rain-bg-container {
       position: fixed;
       inset: 0;
       z-index: 0;
+      background: linear-gradient(135deg, #dcedc8 0%, #a5d6a7 50%, #81c784 100%);
       overflow: hidden;
       pointer-events: none;
-      background:
-        radial-gradient(circle at top left, rgba(124, 92, 255, 0.18), transparent 28%),
-        radial-gradient(circle at top right, rgba(60, 180, 255, 0.16), transparent 26%),
-        radial-gradient(circle at bottom left, rgba(78, 210, 174, 0.14), transparent 28%),
-        linear-gradient(135deg, #f7f9ff 0%, #eef4ff 45%, #f8f4ff 100%);
-      filter: saturate(1.08);
     }
-    .liquid-blob {
+    #rainCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .rain-glass-layer {
       position: absolute;
-      border-radius: 50%;
-      filter: blur(42px) saturate(180%);
-      opacity: 0.72;
-      will-change: transform, border-radius;
-      mix-blend-mode: screen;
-      transform: translate3d(0, 0, 0);
+      inset: 0;
+      z-index: 1;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      background: rgba(255, 255, 255, 0.2);
     }
-    .blob-1 { 
-      top: -10%; left: -8%; width: 38vw; height: 38vw; 
-      background: radial-gradient(circle at 40% 40%, rgba(124, 92, 255, 0.72) 0%, rgba(100, 60, 255, 0.30) 56%, transparent 100%);
-      animation: floatBlob1 16s ease-in-out infinite;
-    }
-    .blob-2 { 
-      bottom: -16%; right: -10%; width: 42vw; height: 42vw; 
-      background: radial-gradient(circle at 60% 60%, rgba(60, 180, 255, 0.70) 0%, rgba(30, 140, 255, 0.26) 58%, transparent 100%);
-      animation: floatBlob2 20s ease-in-out infinite;
-    }
-    .blob-3 { 
-      top: 24%; left: 30%; width: 30vw; height: 30vw; 
-      background: radial-gradient(circle at 50% 50%, rgba(78, 210, 174, 0.56) 0%, rgba(50, 180, 150, 0.22) 58%, transparent 100%);
-      animation: floatBlob3 14s ease-in-out infinite;
-    }
-    @keyframes floatBlob1 {
-      0%   { transform: translate(0, 0) scale(1); border-radius: 50%; }
-      25%  { transform: translate(5vw, 8vh) scale(1.08); border-radius: 44% 56% 55% 45% / 48% 52% 48% 52%; }
-      50%  { transform: translate(10vw, -4vh) scale(1.02); border-radius: 55% 45% 40% 60% / 55% 45% 55% 45%; }
-      75%  { transform: translate(-3vw, 6vh) scale(1.06); border-radius: 38% 62% 50% 50% / 60% 40% 60% 40%; }
-      100% { transform: translate(0, 0) scale(1); border-radius: 50%; }
-    }
-    @keyframes floatBlob2 {
-      0%   { transform: translate(0, 0) scale(1); border-radius: 50%; }
-      30%  { transform: translate(-6vw, -5vh) scale(1.06); border-radius: 60% 40% 45% 55% / 42% 58% 42% 58%; }
-      60%  { transform: translate(-2vw, -9vh) scale(1.1); border-radius: 45% 55% 60% 40% / 55% 45% 55% 45%; }
-      85%  { transform: translate(-8vw, -3vh) scale(0.98); border-radius: 55% 45% 40% 60%; }
-      100% { transform: translate(0, 0) scale(1); border-radius: 50%; }
-    }
-    @keyframes floatBlob3 {
-      0%   { transform: translate(0, 0) scale(1) rotate(0deg); border-radius: 50%; }
-      33%  { transform: translate(-5vw, 4vh) scale(1.08) rotate(100deg); border-radius: 50% 40% 55% 45%; }
-      66%  { transform: translate(4vw, -6vh) scale(0.94) rotate(220deg); border-radius: 45% 55% 40% 60%; }
-      100% { transform: translate(0, 0) scale(1) rotate(360deg); border-radius: 50%; }
-    }
+
     .glass {
-      background: linear-gradient(135deg, rgba(255, 255, 255, 0.32) 0%, rgba(255, 255, 255, 0.18) 100%);
-      border: 1px solid rgba(255, 255, 255, 0.42);
-      box-shadow: 0 10px 34px rgba(31, 38, 135, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.2) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      box-shadow: 0 10px 34px rgba(5, 150, 105, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.65);
       backdrop-filter: blur(18px) saturate(165%);
       -webkit-backdrop-filter: blur(18px) saturate(165%);
     }
@@ -118,37 +81,37 @@
       position: sticky; top: 0; z-index: 50; padding: 12px 24px;
       display: flex; justify-content: space-between; align-items: center;
       border-bottom: 1px solid rgba(255,255,255,0.4);
-      background: rgba(255, 255, 255, 0.25);
+      background: rgba(255, 255, 255, 0.35);
       backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
     }
 
-    h1 { margin: 0; font-size: 22px; font-weight: 800; background: linear-gradient(135deg, #7c5cff, #3cb4ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    h1 { margin: 0; font-size: 22px; font-weight: 800; background: linear-gradient(135deg, #059669, #34d399); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 
     .nav-auth { display: flex; align-items: center; gap: 8px; }
     .nav-input {
-      background: rgba(255,255,255,0.6);
-      border: 1px solid rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.7);
+      border: 1px solid rgba(255,255,255,0.8);
       padding: 6px 14px; border-radius: 99px; outline: none; width: 120px; font-size: 13px; transition: var(--trans-smooth);
     }
-    .nav-input:focus { background: rgba(255,255,255,0.9); border-color: var(--primary); }
+    .nav-input:focus { background: rgba(255,255,255,0.95); border-color: var(--primary); }
     
     .btn {
       cursor: pointer; border: none; font-weight: 600; padding: 6px 16px; border-radius: 99px;
       font-size: 13px; transition: var(--trans-spring); display: inline-flex; align-items: center; justify-content: center;
     }
-    .btn-primary { background: linear-gradient(135deg, var(--primary), #5eb4ff); color: white; box-shadow: 0 4px 12px rgba(124, 92, 255, 0.2); }
-    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(124, 92, 255, 0.3); }
+    .btn-primary { background: linear-gradient(135deg, var(--primary), #10b981); color: white; box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25); }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
 
     .user-pill {
       display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px;
-      background: rgba(255,255,255,0.7);
+      background: rgba(255,255,255,0.8);
       border: 1px solid rgba(255,255,255,0.9); border-radius: 99px; font-size: 13px; font-weight: 600;
     }
 
     .wrap { position: relative; z-index: 1; max-width: 640px; margin: 24px auto 80px; padding: 0 16px; display: flex; flex-direction: column; gap: 24px; }
 
     .publish-box { position: relative; z-index: 1; padding: 20px; border-radius: var(--radius-md); transition: var(--trans-smooth); }
-    .publish-box:hover { transform: translateY(-2px); }
+    .publish-box:hover { transform: translateY(-2px); box-shadow: var(--glass-shadow); }
     .publish-box textarea {
       width: 100%; min-height: 80px; border: none; background: transparent; resize: none; font-size: 16px; color: var(--text-main); outline: none;
     }
@@ -156,14 +119,14 @@
 
     input[type="file"] { font-size: 12px; color: var(--text-muted); }
     input[type="file"]::file-selector-button {
-      background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.7); padding: 4px 12px; border-radius: 99px; cursor: pointer; transition: 0.3s;
+      background: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.8); padding: 4px 12px; border-radius: 99px; cursor: pointer; transition: 0.3s;
     }
 
     .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
     .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); }
     .stat-card:hover {
       transform: translateY(-4px) scale(1.02);
-      box-shadow: 0 8px 24px rgba(124, 92, 255, 0.15);
+      box-shadow: 0 8px 24px rgba(5, 150, 105, 0.15);
     }
     .stat-card b { display: block; font-size: 22px; color: var(--primary); font-weight: 800; }
     .stat-card span { font-size: 12px; color: var(--text-muted); }
@@ -180,12 +143,12 @@
       transform: translateY(0) scale(1);
     }
     .post:hover { 
-      box-shadow: 0 12px 40px rgba(31, 38, 135, 0.12); 
+      box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12); 
       transform: translateY(-2px);
     }
 
     .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-    .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #7c5cff, #3cb4ff); color: white; font-weight: bold; font-size: 16px; transition: var(--trans-spring); }
+    .avatar { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #059669, #34d399); color: white; font-weight: bold; font-size: 16px; transition: var(--trans-spring); }
     .avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3); }
     .avatar:hover { transform: scale(1.1); }
     
@@ -204,26 +167,33 @@
     .post-stats-text { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
 
     .actions { display: flex; gap: 8px; flex-wrap: wrap; position: relative; }
+    
+    /* 优化按钮：锁定最小宽度和布局，防止文本改变导致闪动 */
     .action-btn { 
-      background: rgba(255,255,255,0.5); 
-      border: 1px solid rgba(255,255,255,0.7); 
+      background: rgba(255,255,255,0.6); 
+      border: 1px solid rgba(255,255,255,0.8); 
       padding: 6px 16px; border-radius: 99px; font-size: 13px; color: var(--text-muted); cursor: pointer; 
       transition: var(--trans-spring);
       font-weight: 600;
       position: relative;
       overflow: visible !important;
+      min-width: 86px; /* 锁定宽度 */
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      box-sizing: border-box;
     }
     .action-btn:hover { 
-      background: rgba(255,255,255,0.9); 
+      background: rgba(255,255,255,1); 
       transform: translateY(-2px);
     }
     
     @keyframes heartBeat { 
       0%   { transform: scale(1); }
-      15%  { transform: scale(1.38); }
-      35%  { transform: scale(0.86); }
-      55%  { transform: scale(1.18); }
-      75%  { transform: scale(0.96); }
+      15%  { transform: scale(1.25); }
+      35%  { transform: scale(0.9); }
+      55%  { transform: scale(1.15); }
+      75%  { transform: scale(0.95); }
       100% { transform: scale(1); }
     }
     .action-btn.liked { 
@@ -233,7 +203,7 @@
       box-shadow: 0 0 12px rgba(255,59,96,0.15);
     }
     .heart-beat {
-      animation: heartBeat 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards !important;
+      animation: heartBeat 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards !important;
     }
 
     .heart-particle {
@@ -254,10 +224,10 @@
 
     .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05); display: grid; gap: 8px; }
     .comment-item { 
-      padding: 10px 14px; background: rgba(255,255,255,0.32); 
+      padding: 10px 14px; background: rgba(255,255,255,0.4); 
       border-radius: 12px; font-size: 13px; line-height: 1.5; 
-      border: 1px solid rgba(255,255,255,0.58);
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+      border: 1px solid rgba(255,255,255,0.6);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
       display: flex; justify-content: space-between; align-items: center;
       gap: 8px;
       backdrop-filter: blur(14px) saturate(160%);
@@ -278,27 +248,35 @@
       color: #ff3b60;
     }
 
+    /* 优化后的 PPT 级模态框动画 */
     .modal-overlay {
-      position: fixed; inset: 0; background: rgba(255,255,255,0.2); backdrop-filter: blur(12px);
+      position: fixed; inset: 0; 
+      background: rgba(0, 0, 0, 0.15); 
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
       display: flex; align-items: center; justify-content: center; z-index: 100;
       opacity: 0; pointer-events: none;
-      transition: opacity 0.3s ease;
+      transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), backdrop-filter 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .modal-overlay.active { opacity: 1; pointer-events: all; }
+    
     .modal-box {
       width: 90%; max-width: 400px; padding: 24px; border-radius: var(--radius-lg);
-      transform: scale(0.9) translateY(20px); transition: var(--trans-spring);
+      transform: translateY(35px) scale(0.96); 
+      opacity: 0;
+      transition: var(--trans-ppt);
     }
-    .modal-overlay.active .modal-box { transform: scale(1) translateY(0); }
+    .modal-overlay.active .modal-box { 
+      transform: translateY(0) scale(1); 
+      opacity: 1;
+    }
 
     .loading { text-align: center; padding: 40px; color: var(--text-muted); }
   </style>
 </head>
 <body>
-  <div class="liquid-bg">
-    <div class="liquid-blob blob-1"></div>
-    <div class="liquid-blob blob-2"></div>
-    <div class="liquid-blob blob-3"></div>
+  <div class="rain-bg-container">
+    <canvas id="rainCanvas"></canvas>
+    <div class="rain-glass-layer"></div>
   </div>
 
   <nav style="position:relative; z-index:2;">
@@ -343,7 +321,7 @@
       <h3>发表评论</h3>
       <textarea id="commInp" class="modal-textarea" placeholder="写下你的想法..." style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
       <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top:16px;">
-        <button class="btn" style="background: rgba(255,255,255,0.5);" onclick="closeModal('commentModal')">取消</button>
+        <button class="btn" style="background: rgba(255,255,255,0.7);" onclick="closeModal('commentModal')">取消</button>
         <button class="btn btn-primary" id="commBtn">发布评论</button>
       </div>
     </div>
@@ -354,8 +332,8 @@
       <h3>确认删除帖子？</h3>
       <p style="color: var(--text-muted);">删除后无法恢复</p>
       <div style="display: flex; gap: 10px; margin-top:20px;">
-        <button class="btn" style="flex:1;" onclick="closeModal('delModal')">取消</button>
-        <button class="btn btn-primary" style="flex:1; background:#ff3b60;" id="delBtn">确认删除</button>
+        <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);" onclick="closeModal('delModal')">取消</button>
+        <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
       </div>
     </div>
   </div>
@@ -365,14 +343,14 @@
       <h3>确认删除评论？</h3>
       <p style="color: var(--text-muted);">删除后无法恢复</p>
       <div style="display: flex; gap: 10px; margin-top:20px;">
-        <button class="btn" style="flex:1;" onclick="closeModal('delCommentModal')">取消</button>
-        <button class="btn btn-primary" style="flex:1; background:#ff3b60;" id="delCommentBtn">确认删除</button>
+        <button class="btn" style="flex:1; background: rgba(255,255,255,0.7);" onclick="closeModal('delCommentModal')">取消</button>
+        <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delCommentBtn">确认删除</button>
       </div>
     </div>
   </div>
 
   <script>
-    // Supabase配置，和你原有项目完全匹配
+    // Supabase配置
     const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
     const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -427,6 +405,77 @@
       }
     }
 
+    // 初始化动态背景（雨滴与玻璃效果）
+    function initRainAnimation() {
+      const canvas = document.getElementById('rainCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      let w, h;
+      let drops = [];
+      let staticDrops = [];
+
+      function resize() {
+        w = canvas.width = window.innerWidth;
+        h = canvas.height = window.innerHeight;
+      }
+      window.addEventListener('resize', resize);
+      resize();
+
+      // 动态下落的雨滴
+      for (let i = 0; i < 60; i++) {
+        drops.push({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          len: Math.random() * 15 + 10,
+          xs: -1.5 + Math.random() * 2, // 微风侧向吹
+          ys: Math.random() * 12 + 12
+        });
+      }
+      // 附着在玻璃上的静态雨滴
+      for (let i = 0; i < 90; i++) {
+        staticDrops.push({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          r: Math.random() * 2.5 + 0.5,
+          o: Math.random() * 0.35 + 0.1
+        });
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, w, h);
+        
+        // 绘制下落的雨
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.lineCap = 'round';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        for (let i = 0; i < drops.length; i++) {
+          let p = drops[i];
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x + p.xs, p.y + p.ys);
+          p.x += p.xs;
+          p.y += p.ys;
+          if (p.y > h || p.x > w || p.x < 0) {
+            p.x = Math.random() * w;
+            p.y = -20;
+          }
+        }
+        ctx.stroke();
+
+        // 绘制玻璃上的水珠
+        for (let i = 0; i < staticDrops.length; i++) {
+          let sd = staticDrops[i];
+          ctx.fillStyle = `rgba(255, 255, 255, ${sd.o})`;
+          ctx.beginPath();
+          ctx.arc(sd.x, sd.y, sd.r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        requestAnimationFrame(draw);
+      }
+      draw();
+    }
+
     // 发布帖子
     async function doPublish() {
       if (!currentUser) return alert("请先登录");
@@ -461,6 +510,7 @@
         createHeartParticles(btn);
         btn.addEventListener("animationend", () => btn.classList.remove("heart-beat"), { once: true });
       }
+      // 文字改变也不会发生跳动，因为设定了 min-width 和 Flex 排版
       btn.textContent = isLiked ? "点赞" : "已点赞";
 
       try {
@@ -520,7 +570,7 @@
     };
 
     // ==============================================
-    // 评论删除功能（极简版，和帖子删除逻辑完全一致）
+    // 修复后的：评论删除功能（不再闪屏）
     // ==============================================
     function openDeleteComment(commentId) {
       delCommentId = commentId;
@@ -529,7 +579,6 @@
 
     async function deleteCommentWithFallback(commentId) {
       try {
-        // 和帖子删除完全一致的核心代码，没有任何多余逻辑
         const { error } = await sb
           .from('comments')
           .delete()
@@ -552,8 +601,8 @@
       try {
         await deleteCommentWithFallback(delCommentId);
         closeModal("delCommentModal");
-        // 删除成功直接刷新页面，和帖子删除效果完全一致
-        window.location.reload();
+        // FIX: 移除 window.location.reload(); 防止全页闪烁，改为静默重拉数据
+        await loadFeed(true);
       } catch(e) {
         alert(e?.message || "删除失败，请重试");
       } finally {
@@ -607,7 +656,8 @@
       }
 
       const feed = document.getElementById("feed");
-      feed.innerHTML = `<div class="loading">加载中...</div>`;
+      // 静默刷新时不显示加载状态以防闪烁
+      if (!forceRefresh) feed.innerHTML = `<div class="loading">加载中...</div>`;
 
       try {
         const [postRes, commRes, likeRes] = await Promise.all([
@@ -625,7 +675,7 @@
         feedCache = { data, timestamp: now };
         renderFeed(data);
       } catch (e) {
-        feed.innerHTML = `<div class="loading">加载失败，刷新重试</div>`;
+        if (!forceRefresh) feed.innerHTML = `<div class="loading">加载失败，刷新重试</div>`;
         console.error("加载Feed失败：", e);
       }
     }
@@ -686,6 +736,7 @@
     // 页面初始化
     document.addEventListener('DOMContentLoaded', async () => {
       initUI();
+      initRainAnimation(); // 启动雨滴玻璃背景
       setTimeout(() => loadFeed(), 0);
     });
 
