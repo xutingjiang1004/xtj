@@ -40,7 +40,7 @@
             isolation: isolate;
         }
 
-        /* ========== 雨天玻璃背景（浅绿色渐变 + 动态雨滴） ========== */
+        /* 雨天玻璃背景（浅绿渐变 + 动态雨滴） */
         .rain-bg-container {
             position: fixed;
             inset: 0;
@@ -71,7 +71,7 @@
             pointer-events: none;
         }
 
-        /* ========== 原有样式（未改动） ========== */
+        /* ========== UI 样式（无改动） ========== */
         .glass {
             background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.2) 100%);
             border: 1px solid rgba(255, 255, 255, 0.5);
@@ -524,7 +524,7 @@
                 finally { document.getElementById("commBtn").textContent = "发布评论"; }
             };
 
-            // ========== 删除评论（已修复） ==========
+            // ========== 删除评论（修复） ==========
             window.openDeleteComment = function (commentId) {
                 delCommentId = commentId;
                 document.getElementById("delCommentModal").classList.add("active");
@@ -534,21 +534,20 @@
                 const btn = document.getElementById("delCommentBtn"); btn.disabled = true; btn.textContent = "删除中...";
                 try {
                     let query = sb.from('comments').delete().eq('id', delCommentId);
-                    // 普通用户只能删除自己的评论
+                    // 管理员可以删除任意评论，普通用户只能删除自己的
                     if (!isAdmin()) query = query.eq('actor_key', deviceId);
-                    const { error, count } = await query;
+                    const { error } = await query;
                     if (error) throw error;
-                    if (count === 0) throw new Error("没有找到可删除的评论");
                     closeModal("delCommentModal");
                     await loadFeed(true);
                 } catch (e) {
-                    alert(e?.message || "删除失败，请重试");
+                    alert("删除失败：" + (e?.message || "请重试"));
                 } finally {
                     btn.disabled = false; btn.textContent = "确认删除";
                 }
             };
 
-            // ========== 删除帖子（已修复） ==========
+            // ========== 删除帖子（已恢复 RPC 调用，确保可用） ==========
             window.openDelete = function (postId, ownerKey) {
                 delPostId = postId;
                 delOwnerKey = ownerKey;
@@ -558,15 +557,17 @@
                 if (!delPostId) return;
                 const btn = document.getElementById("delBtn"); btn.disabled = true; btn.textContent = "删除中...";
                 try {
-                    let query = sb.from('posts').delete().eq('id', delPostId);
-                    if (!isAdmin()) query = query.eq('actor_key', deviceId);
-                    const { error, count } = await query;
+                    // 使用数据库函数删除，绕过 RLS 限制
+                    const key = isAdmin() ? delOwnerKey : deviceId;
+                    const { error } = await sb.rpc("delete_post_with_actor", {
+                        p_post_id: delPostId,
+                        p_actor_key: key
+                    });
                     if (error) throw error;
-                    if (count === 0) throw new Error("没有找到可删除的帖子");
                     closeModal("delModal");
                     await loadFeed(true);
                 } catch (e) {
-                    alert(e?.message || "删除帖子失败");
+                    alert("删除帖子失败：" + (e?.message || "请重试"));
                 } finally {
                     btn.disabled = false; btn.textContent = "确认删除";
                 }
