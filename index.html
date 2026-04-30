@@ -916,6 +916,27 @@
         .back-to-stats-btn:hover {
             background: rgba(255,255,255,0.35);
         }
+
+        .stat-two-col { display: flex; gap: 20px; }
+        .stat-two-col .stat-col { flex: 1; min-width: 0; }
+        .stat-two-col .stat-section-title { padding-top: 0; }
+
+        .post-detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding-bottom: 12px;
+            margin-bottom: 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .post-detail-header .pdh-left { flex:1; min-width:0; }
+        .post-detail-header .pdh-name { font-weight:700; font-size:15px; }
+        .post-detail-header .pdh-time { font-size:11px; color:var(--text-muted); margin-top:2px; }
+        .post-detail-content { font-size:15px; line-height:1.7; margin-bottom:12px; white-space:pre-wrap; word-break:break-word; }
+        .post-detail-media { margin-bottom:14px; }
+        .post-detail-media img { border-radius:12px; max-height:300px; cursor:pointer; }
+        .post-detail-media video { border-radius:12px; max-height:300px; width:100%; }
+        .post-detail-stats { font-size:12px; color:var(--text-muted); margin-bottom:14px; }
     </style>
 </head>
 <body>
@@ -1050,6 +1071,19 @@
                 <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="stat-detail-body" id="statModalBody">
+                加载中...
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== 帖子详情二次弹窗 ========== -->
+    <div class="modal-overlay" id="postDetailModal" onclick="if(event.target===this)closeModal('postDetailModal')">
+        <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
+            <div class="stat-detail-header">
+                <h3 id="postDetailTitle">帖子详情</h3>
+                <button class="btn btn-ghost" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
+            </div>
+            <div class="stat-detail-body" id="postDetailBody">
                 加载中...
             </div>
         </div>
@@ -1320,7 +1354,7 @@
                         media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
                         media_type = file.type.startsWith("image") ? "image" : "video";
                     }
-                    await sb.from("posts").insert([{ user_name: currentUser, content, media_url, media_type, actor_key: deviceId }]);
+                    await sb.from("posts").insert([{ user_name: currentUser, content, media_url, media_type, actor_key: currentUser }]);
                     document.getElementById("postInp").value = "";
                     document.getElementById("fileInp").value = "";
                     showToast("发布成功！");
@@ -1423,7 +1457,7 @@
                 btn.disabled = true;
                 btn.textContent = "删除中...";
                 try {
-                    const key = isAdmin() ? delOwnerKey : deviceId;
+                    const key = isAdmin() ? delOwnerKey : currentUser;
                     const { error } = await sb.rpc("delete_post_with_actor", {
                         p_post_id: delPostId,
                         p_actor_key: key
@@ -1727,7 +1761,7 @@
                     const pLikes = likes.filter(l=>l.post_id===p.id);
                     const pComms = comments.filter(c=>c.post_id===p.id);
                     const isLiked = pLikes.some(l=>l.actor_key===deviceId);
-                    const canDelPost = p.actor_key === deviceId || isAdmin();
+                    const canDelPost = p.actor_key === currentUser || isAdmin();
                     trackView(p.id);
                     return `
                 <div class="post glass" data-post-id="${p.id}">
@@ -1835,6 +1869,74 @@
                 }, 350);
             };
 
+            window.openPostDetail = async function(postId) {
+                document.getElementById('postDetailTitle').textContent = '帖子详情';
+                document.getElementById('postDetailBody').innerHTML = '<div class="loading">加载中...</div>';
+                document.getElementById('postDetailModal').classList.add('active');
+
+                try {
+                    const [postRes, commRes, likeRes] = await Promise.all([
+                        sb.from("posts").select("*").eq("id", postId).maybeSingle(),
+                        sb.from("comments").select("*").eq("post_id", postId).order("created_at"),
+                        sb.from("likes").select("*").eq("post_id", postId).order("created_at", {ascending: false})
+                    ]);
+
+                    const post = postRes.data;
+                    if (!post) {
+                        document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">帖子不存在或已被删除</div>';
+                        return;
+                    }
+                    const likes = likeRes.data || [];
+                    const comments = commRes.data || [];
+                    renderPostDetail(post, likes, comments);
+                } catch(e) {
+                    document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
+                    console.error(e);
+                }
+            };
+
+            function renderPostDetail(post, likes, comments) {
+                const body = document.getElementById('postDetailBody');
+                const vc = (post.views||0) + 1;
+
+                body.innerHTML = `
+                    <div class="post-detail-header">
+                        <div class="pdh-left">
+                            <div class="pdh-name">${post.user_name}</div>
+                            <div class="pdh-time">${new Date(post.created_at).toLocaleString()}</div>
+                        </div>
+                    </div>
+                    ${post.content ? `<div class="post-detail-content">${post.content}</div>` : ''}
+                    ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${post.media_url}" controls preload="none"></video>`:`<img src="${post.media_url}" onclick="openImageViewer('${post.media_url}')" loading="lazy" />`}</div>` : ''}
+                    <div class="post-detail-stats">浏览 ${vc} · 点赞 ${likes.length} · 评论 ${comments.length}</div>
+                    <div class="stat-two-col">
+                        <div class="stat-col">
+                            <div class="stat-section-title">❤️ 点赞用户（${likes.length}）</div>
+                            ${likes.length ? likes.map(l => `
+                                <div class="stat-like-item">
+                                    <div class="sli-info">
+                                        <div class="sli-user">${l.user_name}</div>
+                                    </div>
+                                    <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
+                                </div>
+                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
+                        </div>
+                        <div class="stat-col">
+                            <div class="stat-section-title">💬 评论列表（${comments.length}）</div>
+                            ${comments.length ? comments.map(c => `
+                                <div class="stat-comment-item">
+                                    <div class="sci-info">
+                                        <div class="sci-user">${c.user_name}</div>
+                                        <div class="sci-target">${c.content}</div>
+                                    </div>
+                                    <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
+                                </div>
+                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无评论</div>'}
+                        </div>
+                    </div>
+                `;
+            }
+
             // 格式化帖子内容摘要（用于展示）
             function formatPostSummary(p) {
                 const text = p.content || '';
@@ -1851,14 +1953,14 @@
             // 生成帖子条目的HTML（可点击跳转）
             function renderPostItemHTML(p) {
                 const fmt = formatPostSummary(p);
-                const onclick = `scrollToPost('${p.id}')`;
+                const onclick = `openPostDetail('${p.id}')`;
                 return `
                     <div class="stat-post-item">
-                        <span class="spi-content" onclick="${onclick}" title="点击跳转到该帖子">
+                        <span class="spi-content" onclick="${onclick}" title="点击查看帖子详情">
                             ${fmt.display}
                             ${fmt.tag}
                         </span>
-                        ${fmt.thumbUrl ? `<img class="spi-thumb" src="${fmt.thumbUrl}" onclick="${onclick}" title="点击跳转到该帖子" />` : ''}
+                        ${fmt.thumbUrl ? `<img class="spi-thumb" src="${fmt.thumbUrl}" onclick="${onclick}" title="点击查看帖子详情" />` : ''}
                         <span class="spi-time">${new Date(p.created_at).toLocaleString()}</span>
                     </div>
                 `;
@@ -1946,53 +2048,59 @@
             function renderLikeStats() {
                 const body = document.getElementById('statModalBody');
 
-                // 为每个点赞找到对应的帖子内容
                 const postMap = {};
                 statAllPosts.forEach(p => { postMap[p.id] = p; });
 
-                let html = '';
-
-                // ===== 点赞记录 =====
-                html += '<div class="stat-section-title">❤️ 点赞记录</div>';
-                if (statAllLikes.length) {
-                    html += statAllLikes.slice(0, 100).map(l => {
-                        const post = postMap[l.post_id];
-                        const postContent = post ? (post.content || '(图片/视频)') : '(已删除)';
-                        return `
+                function buildLikesCol() {
+                    let h = '<div class="stat-section-title">❤️ 点赞记录</div>';
+                    if (statAllLikes.length) {
+                        h += statAllLikes.slice(0, 200).map(l => {
+                            const post = postMap[l.post_id];
+                            const postContent = post ? (post.content ? post.content.slice(0, 20) + '...' : '(图片/视频)') : '(已删除)';
+                            return `
                         <div class="stat-like-item">
                             <div class="sli-info">
                                 <div class="sli-user">${l.user_name}</div>
-                                <div class="sli-target">点赞了帖子：${postContent}</div>
+                                <div class="sli-target">点赞了：${postContent}</div>
                             </div>
                             <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                         </div>
                     `;
-                    }).join('');
-                } else {
-                    html += '<div class="stat-empty" style="padding:12px 0;">暂无点赞记录</div>';
+                        }).join('');
+                    } else {
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无点赞记录</div>';
+                    }
+                    return h;
                 }
 
-                // ===== 评论记录 =====
-                html += '<div class="stat-section-title">💬 评论记录</div>';
-                if (statAllComments.length) {
-                    html += statAllComments.slice(0, 100).map(c => {
-                        const post = postMap[c.post_id];
-                        const postContent = post ? (post.content || '(图片/视频)') : '(已删除)';
-                        return `
+                function buildCommentsCol() {
+                    let h = '<div class="stat-section-title">💬 评论记录</div>';
+                    if (statAllComments.length) {
+                        h += statAllComments.slice(0, 200).map(c => {
+                            const post = postMap[c.post_id];
+                            const postContent = post ? (post.content ? post.content.slice(0, 20) + '...' : '(图片/视频)') : '(已删除)';
+                            return `
                         <div class="stat-comment-item">
                             <div class="sci-info">
                                 <div class="sci-user">${c.user_name}</div>
-                                <div class="sci-target">评论了帖子「${postContent}」：${c.content}</div>
+                                <div class="sci-target">评论了「${postContent}」：${c.content}</div>
                             </div>
                             <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                         </div>
                     `;
-                    }).join('');
-                } else {
-                    html += '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
+                        }).join('');
+                    } else {
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
+                    }
+                    return h;
                 }
 
-                body.innerHTML = html;
+                body.innerHTML = `
+                    <div class="stat-two-col">
+                        <div class="stat-col">${buildLikesCol()}</div>
+                        <div class="stat-col">${buildCommentsCol()}</div>
+                    </div>
+                `;
             }
 
             // ===================== 聊天系统 =====================
