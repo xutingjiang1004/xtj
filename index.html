@@ -2158,43 +2158,43 @@
                 loadChatList();
             };
 
-            async function callRPC(name, args) {
-                const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
-                    method: 'POST',
-                    headers: {
-                        'apikey': SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify(args)
-                });
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    if (res.status === 404) throw new Error(`RPC ${name} not found - 请在 SQL Editor 中创建该函数`);
-                    throw new Error(err.message || `HTTP ${res.status}`);
-                }
-                const text = await res.text();
-                return text ? JSON.parse(text) : null;
-            }
-
             async function loadChatList() {
                 const el = document.getElementById('chatList');
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
-                    const convs = await callRPC('msg_convs', { me: currentUser }) || [];
-                    if (!convs.length) {
+                    const { data: allMsgs, error } = await sb.from("messages")
+                        .select("sender_name, receiver_name, content, created_at, read")
+                        .or(`sender_name.eq.${currentUser},receiver_name.eq.${currentUser}`)
+                        .order("created_at", { ascending: false })
+                        .limit(1000);
+
+                    if (error) throw error;
+                    if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">点击帖子头像即可开始聊天</div></div>';
                         updateUnreadBadge();
                         return;
                     }
-                    convs.sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
-                    const unreadData = await callRPC('msg_unread_senders', { receiver: currentUser }) || [];
-                    const unreadMap = {};
-                    unreadData.forEach(u => { unreadMap[u.sender_name] = u.cnt; });
-                    el.innerHTML = convs.map(c => {
-                        const unread = unreadMap[c.other_user] || 0;
-                        return `<div class="chat-list-item" onclick="openChat('${c.other_user.replace(/'/g, "\\'")}')">
+
+                    const convMap = {};
+                    allMsgs.forEach(m => {
+                        const other = m.sender_name === currentUser ? m.receiver_name : m.sender_name;
+                        if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
+                            convMap[other] = {
+                                other_user: other,
+                                last_message: m.content,
+                                last_time: m.created_at,
+                                unread: 0
+                            };
+                        }
+                        if (m.receiver_name === currentUser && !m.read) {
+                            convMap[other].unread = (convMap[other].unread || 0) + 1;
+                        }
+                    });
+
+                    const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
+
+                    el.innerHTML = convs.map(c => `
+                        <div class="chat-list-item" onclick="openChat('${c.other_user.replace(/'/g, "\\'")}')">
                             <div class="cli-avatar">${c.other_user[0].toUpperCase()}</div>
                             <div class="cli-info">
                                 <div class="cli-name">${c.other_user}</div>
@@ -2202,14 +2202,14 @@
                             </div>
                             <div class="cli-right">
                                 <span class="cli-time">${formatMsgTime(c.last_time)}</span>
-                                ${unread?`<span class="cli-badge">${unread}</span>`:''}
+                                ${c.unread ? `<span class="cli-badge">${c.unread > 99 ? '99+' : c.unread}</span>` : ''}
                             </div>
-                        </div>`;
-                    }).join('');
+                        </div>
+                    `).join('');
                     updateUnreadBadge();
                 } catch(e) {
                     console.error('loadChatList', e);
-                    el.innerHTML = `<div class="chat-empty"><div class="ce-icon">⚠️</div><div>${e.message}</div></div>`;
+                    el.innerHTML = `<div class="chat-empty"><div class="ce-icon">⚠️</div><div>${e.message || '加载失败'}</div></div>`;
                 }
             }
 
@@ -2217,12 +2217,18 @@
                 const el = document.getElementById('chatMessages');
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
-                    const msgs = await callRPC('msg_list', { me: currentUser, other_user: userName }) || [];
+                    const { data: msgs, error } = await sb.from("messages")
+                        .select("*")
+                        .or(`and(sender_name.eq.${currentUser},receiver_name.eq.${userName}),and(sender_name.eq.${userName},receiver_name.eq.${currentUser})`)
+                        .order("created_at")
+                        .limit(500);
+
+                    if (error) throw error;
                     markMessagesRead(userName);
-                    renderMessages(msgs);
+                    renderMessages(msgs || []);
                 } catch(e) {
                     console.error('loadChatMessages', e);
-                    el.innerHTML = `<div class="chat-empty"><div class="ce-icon">⚠️</div><div>${e.message}</div></div>`;
+                    el.innerHTML = `<div class="chat-empty"><div class="ce-icon">⚠️</div><div>${e.message || '加载失败'}</div></div>`;
                 }
             }
 
@@ -2246,11 +2252,13 @@
                 chatSending = true;
                 inp.value = '';
                 try {
-                    const result = await callRPC('msg_send', {
-                        sender: currentUser,
-                        receiver: chatActiveUser,
-                        content
-                    });
+                    const { error } = await sb.from("messages").insert([{
+                        sender_name: currentUser,
+                        receiver_name: chatActiveUser,
+                        content,
+                        read: false
+                    }]);
+                    if (error) throw error;
                     const el = document.getElementById('chatMessages');
                     const empty = el.querySelector('.chat-empty');
                     if (empty) el.innerHTML = '';
@@ -2267,7 +2275,12 @@
 
             async function markMessagesRead(senderName) {
                 try {
-                    await callRPC('msg_read', { sender: senderName, receiver: currentUser });
+                    const { error } = await sb.from("messages")
+                        .update({ read: true })
+                        .eq("sender_name", senderName)
+                        .eq("receiver_name", currentUser)
+                        .eq("read", false);
+                    if (error) console.error('markMessagesRead', error);
                     updateUnreadBadge();
                 } catch(e) {}
             }
@@ -2293,10 +2306,14 @@
 
             async function updateUnreadBadge() {
                 try {
-                    const cnt = await callRPC('msg_unread', { receiver: currentUser }) || 0;
+                    const { count, error } = await sb.from("messages")
+                        .select("*", { count: "exact", head: true })
+                        .eq("receiver_name", currentUser)
+                        .eq("read", false);
+                    if (error) return;
                     const badge = document.getElementById('navChatBadge');
-                    if (cnt > 0) {
-                        badge.textContent = cnt > 99 ? '99+' : cnt;
+                    if (count > 0) {
+                        badge.textContent = count > 99 ? '99+' : count;
                         badge.classList.add('show');
                     } else {
                         badge.classList.remove('show');
