@@ -49,25 +49,6 @@
             background: linear-gradient(135deg, #f5f5f7 0%, #e8e8ed 50%, #dddde3 100%);
         }
 
-        .rain-bg-container::before {
-            content: '';
-            position: absolute;
-            inset: -50%;
-            background: radial-gradient(circle at 20% 50%, rgba(5, 150, 105, 0.08) 0%, transparent 50%),
-                        radial-gradient(circle at 80% 20%, rgba(52, 211, 153, 0.06) 0%, transparent 45%),
-                        radial-gradient(circle at 40% 80%, rgba(255, 159, 10, 0.05) 0%, transparent 50%),
-                        radial-gradient(circle at 70% 70%, rgba(255, 59, 96, 0.04) 0%, transparent 40%);
-            animation: liquidFlow 30s ease-in-out infinite;
-            filter: blur(80px);
-        }
-
-        @keyframes liquidFlow {
-            0%, 100% { transform: translate(0, 0) rotate(0deg); }
-            25% { transform: translate(2%, 1.5%) rotate(3deg); }
-            50% { transform: translate(-1.5%, 3%) rotate(-2deg); }
-            75% { transform: translate(2.5%, -2%) rotate(2.5deg); }
-        }
-
         #rainCanvas {
             position: absolute;
             top: 0;
@@ -126,28 +107,11 @@
         }
 
         .glass {
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.35) 0%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.25) 100%);
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            box-shadow: 0 12px 40px rgba(5, 150, 105, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.7), inset 0 -2px 20px rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(24px) saturate(180%);
-            -webkit-backdrop-filter: blur(24px) saturate(180%);
-            position: relative;
-            overflow: hidden;
-        }
-
-        .glass::before {
-            content: '';
-            position: absolute;
-            inset: -2px;
-            background: linear-gradient(45deg, transparent 40%, rgba(255, 255, 255, 0.12) 50%, transparent 60%);
-            transform: translateX(-100%);
-            animation: glassShine 12s ease-in-out infinite;
-            pointer-events: none;
-        }
-
-        @keyframes glassShine {
-            0% { transform: translateX(-100%); }
-            30%, 100% { transform: translateX(200%); }
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.2) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            box-shadow: 0 10px 34px rgba(5, 150, 105, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+            backdrop-filter: blur(18px) saturate(165%);
+            -webkit-backdrop-filter: blur(18px) saturate(165%);
         }
 
         nav {
@@ -227,11 +191,11 @@
         .publish-box {
             position: relative; z-index: 1; padding: 24px; border-radius: var(--radius-md);
             transition: var(--trans-smooth);
-            background: linear-gradient(145deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.25) 100%);
-            border: 1px solid rgba(255,255,255,0.35);
-            backdrop-filter: blur(28px) saturate(190%);
-            -webkit-backdrop-filter: blur(28px) saturate(190%);
-            box-shadow: 0 14px 45px rgba(5, 150, 105, 0.1), inset 0 1px 0 rgba(255,255,255,0.7), inset 0 -2px 25px rgba(255,255,255,0.08);
+            background: linear-gradient(135deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.12) 100%);
+            border: 1px solid rgba(255,255,255,0.4);
+            backdrop-filter: blur(22px) saturate(175%);
+            -webkit-backdrop-filter: blur(22px) saturate(175%);
+            box-shadow: 0 10px 34px rgba(5, 150, 105, 0.06), inset 0 1px 0 rgba(255,255,255,0.6);
         }
         .publish-box::before {
             content: ''; position: absolute; inset: -1px; border-radius: inherit;
@@ -240,7 +204,7 @@
         }
         .publish-box:hover {
             transform: translateY(-2px);
-            box-shadow: 0 16px 48px rgba(5, 150, 105, 0.12), inset 0 1px 0 rgba(255,255,255,0.7);
+            box-shadow: 0 16px 48px rgba(5, 150, 105, 0.1), inset 0 1px 0 rgba(255,255,255,0.7);
             border-color: rgba(255,255,255,0.55);
         }
         .publish-box:focus-within {
@@ -382,8 +346,8 @@
             backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
         }
         .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.18);
-            backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+            position: fixed; inset: 0; background: rgba(0,0,0,0.15);
+            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
             display: flex; align-items: center; justify-content: center; z-index: 100;
             opacity: 0; pointer-events: none;
             transition: opacity 0.5s cubic-bezier(0.16,1,0.3,1), backdrop-filter 0.5s cubic-bezier(0.16,1,0.3,1);
@@ -413,7 +377,7 @@
             box-sizing: border-box;
         }
         .auth-form .af-input:focus {
-            background: rgba(255,255,255,0.95);
+            background: rgba(255,255,255,0.85);
             border-color: var(--primary);
             box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15);
         }
@@ -530,31 +494,17 @@
         .chat-overlay.active { opacity: 1; pointer-events: all; }
         .chat-panel {
             width: 100%; max-width: 480px; height: 82vh; max-height: 720px;
-            background: linear-gradient(145deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.25) 100%);
-            backdrop-filter: blur(36px) saturate(200%);
-            -webkit-backdrop-filter: blur(36px) saturate(200%);
+            background: linear-gradient(145deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.08) 100%);
+            backdrop-filter: blur(32px) saturate(180%);
+            -webkit-backdrop-filter: blur(32px) saturate(180%);
             border-radius: 28px 28px 0 0;
-            border: 1px solid rgba(255,255,255,0.35);
+            border: 1px solid rgba(255,255,255,0.25);
             border-bottom: none;
-            box-shadow: 0 -14px 45px rgba(5,150,105,0.1), inset 0 1px 0 rgba(255,255,255,0.7), inset 0 -2px 25px rgba(255,255,255,0.08);
+            box-shadow: 0 -12px 50px rgba(0,0,0,0.06);
             display: flex; flex-direction: column;
             transform: translateY(50px);
             transition: transform 0.45s cubic-bezier(0.16,1,0.3,1);
             overflow: hidden;
-            position: relative;
-        }
-        .chat-panel::before {
-            content: '';
-            position: absolute;
-            inset: -2px;
-            background: linear-gradient(45deg, transparent 45%, rgba(255, 255, 255, 0.12) 50%, transparent 55%);
-            transform: translateX(-100%);
-            animation: chatShine 15s ease-in-out infinite;
-            pointer-events: none;
-        }
-        @keyframes chatShine {
-            0% { transform: translateX(-100%); }
-            35%, 100% { transform: translateX(200%); }
         }
         .chat-overlay.active .chat-panel { transform: translateY(0); }
         .chat-header {
@@ -662,13 +612,13 @@
         .chat-input-area input {
             flex: 1; padding: 12px 18px; border-radius: 99px;
             border: 1px solid rgba(255,255,255,0.15);
-            background: rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.15);
             backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
             font-size: 15px; outline: none; color: var(--text-main);
             transition: all 0.3s; min-width: 0;
         }
         .chat-input-area input:focus {
-            background: rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.25);
             border-color: rgba(5,150,105,0.25);
         }
         .chat-input-area input::placeholder { color: var(--text-muted); }
