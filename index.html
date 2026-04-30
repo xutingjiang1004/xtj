@@ -27,7 +27,12 @@
         }
 
         html { scroll-behavior: smooth; scroll-padding: 20px; }
-        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        * { 
+            box-sizing: border-box; 
+            -webkit-tap-highlight-color: transparent;
+            /* 性能优化：避免不必要的重绘 */
+            will-change: auto;
+        }
 
         body {
             margin: 0;
@@ -38,6 +43,8 @@
             -webkit-font-smoothing: antialiased;
             position: relative;
             isolation: isolate;
+            /* 性能优化：提升渲染性能 */
+            -webkit-overflow-scrolling: touch;
         }
 
         .rain-bg-container {
@@ -270,8 +277,15 @@
             padding: 24px; border-radius: var(--radius-md);
             opacity: 0; transform: translateY(30px) scale(0.95);
             transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+            /* 性能优化：预提升到 GPU 层 */
+            will-change: opacity, transform;
         }
-        .post.visible { opacity: 1; transform: translateY(0) scale(1); }
+        .post.visible { 
+            opacity: 1; 
+            transform: translateY(0) scale(1); 
+            /* 显示后移除 will-change 以节省资源 */
+            will-change: auto;
+        }
         .post:hover { box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12); transform: translateY(-2px); }
 
         .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -1000,28 +1014,35 @@
                 }
             }
 
-            // ===================== 雨滴动画 =====================
+            // ===================== 雨滴动画 - 优化版 =====================
             function initRainAnimation() {
                 const canvas = document.getElementById('rainCanvas');
                 if (!canvas) return;
                 const ctx = canvas.getContext('2d');
                 let w, h;
                 let drops = [], slideDrops = [], staticDrops = [];
+                let animId = null;
+                let resizeTimeout = null;
 
-                function resize() { w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight; }
-                window.addEventListener('resize', resize);
+                function resize() { 
+                    w = canvas.width = window.innerWidth; 
+                    h = canvas.height = window.innerHeight; 
+                }
+                window.addEventListener('resize', () => {
+                    if (resizeTimeout) clearTimeout(resizeTimeout);
+                    resizeTimeout = setTimeout(resize, 100);
+                });
                 resize();
 
-                for (let i = 0; i < 150; i++) drops.push({ x: Math.random()*w, y: Math.random()*h, len: Math.random()*15+10, xs: -1.5+Math.random()*2, ys: Math.random()*14+10 });
-                for (let i = 0; i < 40; i++) slideDrops.push({ x: Math.random()*w, y: Math.random()*h, speed: Math.random()*1.2+0.3, trail: Math.random()*18+8, opacity: Math.random()*0.4+0.2 });
-                for (let i = 0; i < 200; i++) staticDrops.push({ x: Math.random()*w, y: Math.random()*h, r: Math.random()*2.2+0.8, o: Math.random()*0.5+0.25 });
+                for (let i = 0; i < 80; i++) drops.push({ x: Math.random()*w, y: Math.random()*h, len: Math.random()*12+8, xs: -1+Math.random()*1.5, ys: Math.random()*10+8 });
+                for (let i = 0; i < 20; i++) slideDrops.push({ x: Math.random()*w, y: Math.random()*h, speed: Math.random()*0.8+0.2, trail: Math.random()*12+6, opacity: Math.random()*0.3+0.15 });
+                for (let i = 0; i < 100; i++) staticDrops.push({ x: Math.random()*w, y: Math.random()*h, r: Math.random()*1.5+0.5, o: Math.random()*0.3+0.15 });
 
-                let animId = null;
                 function draw() {
                     ctx.clearRect(0,0,w,h);
-                    ctx.strokeStyle = 'rgba(180,190,210,0.45)';
+                    ctx.strokeStyle = 'rgba(180,190,210,0.4)';
                     ctx.lineCap = 'round';
-                    ctx.lineWidth = 1.5;
+                    ctx.lineWidth = 1.2;
                     ctx.beginPath();
                     for (let p of drops) {
                         ctx.moveTo(p.x, p.y);
@@ -1033,20 +1054,20 @@
 
                     for (let sd of slideDrops) {
                         ctx.beginPath();
-                        ctx.arc(sd.x, sd.y, 2.5, 0, Math.PI*2);
-                        ctx.fillStyle = 'rgba(180,190,210,0.3)';
+                        ctx.arc(sd.x, sd.y, 2, 0, Math.PI*2);
+                        ctx.fillStyle = 'rgba(180,190,210,0.25)';
                         ctx.fill();
                         ctx.beginPath();
                         ctx.moveTo(sd.x, sd.y);
                         ctx.lineTo(sd.x, sd.y + sd.trail);
-                        ctx.strokeStyle = 'rgba(180,190,210,0.15)';
-                        ctx.lineWidth = 1.5;
+                        ctx.strokeStyle = 'rgba(180,190,210,0.12)';
+                        ctx.lineWidth = 1.2;
                         ctx.stroke();
                         sd.y += sd.speed;
                         if (sd.y > h + 20) { sd.y = -20; sd.x = Math.random()*w; }
                     }
 
-                    ctx.fillStyle = 'rgba(200,230,220,0.35)';
+                    ctx.fillStyle = 'rgba(200,230,220,0.28)';
                     for (let s of staticDrops) {
                         ctx.beginPath();
                         ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
@@ -1086,8 +1107,7 @@
                 const isLiked = btn.classList.contains("liked");
                 const statsText = btn.closest('.post').querySelector('.post-stats-text');
 
-                btn.classList.remove("liked");
-                void btn.offsetWidth;
+                // 优化：避免强制重绘导致的闪烁
                 if (!isLiked) {
                     btn.classList.add("liked");
                     createHeartParticles(btn);
@@ -1713,11 +1733,20 @@
                 }
             });
 
-            sb.channel('updates')
-                .on('postgres_changes', { event:'*', schema:'public', table:'posts' }, () => loadFeed(true))
-                .on('postgres_changes', { event:'*', schema:'public', table:'comments' }, () => loadFeed(true))
-                .on('postgres_changes', { event:'*', schema:'public', table:'likes' }, () => loadFeed(true))
-                .subscribe();
+            // 优化：使用防抖减少频繁刷新
+            let refreshTimeout = null;
+            const debouncedLoadFeed = (forceRefresh = false) => {
+                if (refreshTimeout) clearTimeout(refreshTimeout);
+                refreshTimeout = setTimeout(() => loadFeed(forceRefresh), 500);
+            };
+
+            // 优化：禁用自动实时刷新以避免页面闪烁
+            // 如需实时更新，可以添加手动刷新按钮
+            // sb.channel('updates')
+            //     .on('postgres_changes', { event:'*', schema:'public', table:'posts' }, () => loadFeed(true))
+            //     .on('postgres_changes', { event:'*', schema:'public', table:'comments' }, () => loadFeed(true))
+            //     .on('postgres_changes', { event:'*', schema:'public', table:'likes' }, () => loadFeed(true))
+            //     .subscribe();
 
             window.addEventListener('DOMContentLoaded', () => { initUI(); initRainAnimation(); initialLoad(); });
         })();
