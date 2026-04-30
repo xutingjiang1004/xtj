@@ -1562,11 +1562,14 @@
                 const el = document.getElementById('chatList');
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
+                    const headers = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` };
                     const [sentRes, recvRes] = await Promise.all([
-                        sb.from('messages').select('*').eq('sender_name', currentUser).order('created_at', { ascending: false }),
-                        sb.from('messages').select('*').eq('receiver_name', currentUser).order('created_at', { ascending: false })
+                        fetch(`${SUPABASE_URL}/rest/v1/messages?sender_name=eq.${encodeURIComponent(currentUser)}&order=created_at.desc`, { headers }),
+                        fetch(`${SUPABASE_URL}/rest/v1/messages?receiver_name=eq.${encodeURIComponent(currentUser)}&order=created_at.desc`, { headers })
                     ]);
-                    const all = [...(sentRes.data||[]), ...(recvRes.data||[])];
+                    const sentData = sentRes.ok ? await sentRes.json() : [];
+                    const recvData = recvRes.ok ? await recvRes.json() : [];
+                    const all = [...sentData, ...recvData];
                     if (!all.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">点击帖子头像即可开始聊天</div></div>';
                         updateUnreadBadge();
@@ -1580,15 +1583,13 @@
                         }
                     });
                     const sorted = [...conv.entries()].sort((a, b) => new Date(b[1].created_at) - new Date(a[1].created_at));
-                    const { count: unreadTotal } = await sb.from('messages')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('receiver_name', currentUser).eq('read', false);
+                    const unreadRes = await fetch(
+                        `${SUPABASE_URL}/rest/v1/messages?receiver_name=eq.${encodeURIComponent(currentUser)}&read=eq.false&select=sender_name`,
+                        { headers }
+                    );
+                    const unreadRows = unreadRes.ok ? await unreadRes.json() : [];
                     const unreadMap = {};
-                    if (unreadTotal > 0) {
-                        const { data: unreadRows } = await sb.from('messages')
-                            .select('sender_name').eq('receiver_name', currentUser).eq('read', false);
-                        if (unreadRows) unreadRows.forEach(u => { unreadMap[u.sender_name] = (unreadMap[u.sender_name]||0) + 1; });
-                    }
+                    unreadRows.forEach(u => { unreadMap[u.sender_name] = (unreadMap[u.sender_name]||0) + 1; });
                     el.innerHTML = sorted.map(([other, last]) => {
                         const unread = unreadMap[other] || 0;
                         return `<div class="chat-list-item" onclick="openChat('${other.replace(/'/g, "\\'")}')">
@@ -1614,12 +1615,14 @@
                 const el = document.getElementById('chatMessages');
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
+                    const headers = { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` };
                     const [sentRes, recvRes] = await Promise.all([
-                        sb.from('messages').select('*').eq('sender_name', currentUser).eq('receiver_name', userName).order('created_at', { ascending: true }),
-                        sb.from('messages').select('*').eq('sender_name', userName).eq('receiver_name', currentUser).order('created_at', { ascending: true })
+                        fetch(`${SUPABASE_URL}/rest/v1/messages?sender_name=eq.${encodeURIComponent(currentUser)}&receiver_name=eq.${encodeURIComponent(userName)}&order=created_at.asc`, { headers }),
+                        fetch(`${SUPABASE_URL}/rest/v1/messages?sender_name=eq.${encodeURIComponent(userName)}&receiver_name=eq.${encodeURIComponent(currentUser)}&order=created_at.asc`, { headers })
                     ]);
-                    const all = [...(sentRes.data||[]), ...(recvRes.data||[])]
-                        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                    const sentData = sentRes.ok ? await sentRes.json() : [];
+                    const recvData = recvRes.ok ? await recvRes.json() : [];
+                    const all = [...sentData, ...recvData].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
                     markMessagesRead(userName);
                     renderMessages(all);
                 } catch(e) {
@@ -1654,10 +1657,20 @@
                         content,
                         read: false
                     };
-                    console.log('[CHAT] Insert payload:', payload);
-                    const { data, error } = await sb.from('messages').insert(payload).select();
-                    console.log('[CHAT] Insert result:', { data, error });
-                    if (error) throw error;
+                    const res = await fetch(`${SUPABASE_URL}/rest/v1/messages`, {
+                        method: 'POST',
+                        headers: {
+                            'apikey': SUPABASE_ANON_KEY,
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=minimal'
+                        },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err.message || `HTTP ${res.status}`);
+                    }
                     const el = document.getElementById('chatMessages');
                     const empty = el.querySelector('.chat-empty');
                     if (empty) el.innerHTML = '';
@@ -1674,8 +1687,16 @@
 
             async function markMessagesRead(senderName) {
                 try {
-                    await sb.from('messages').update({ read: true })
-                        .eq('sender_name', senderName).eq('receiver_name', currentUser).eq('read', false);
+                    await fetch(`${SUPABASE_URL}/rest/v1/messages?sender_name=eq.${encodeURIComponent(senderName)}&receiver_name=eq.${encodeURIComponent(currentUser)}&read=eq.false`, {
+                        method: 'PATCH',
+                        headers: {
+                            'apikey': SUPABASE_ANON_KEY,
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=minimal'
+                        },
+                        body: JSON.stringify({ read: true })
+                    });
                     updateUnreadBadge();
                 } catch(e) {}
             }
@@ -1701,12 +1722,14 @@
 
             async function updateUnreadBadge() {
                 try {
-                    const { count } = await sb.from('messages')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('receiver_name', currentUser).eq('read', false);
+                    const res = await fetch(
+                        `${SUPABASE_URL}/rest/v1/messages?receiver_name=eq.${encodeURIComponent(currentUser)}&read=eq.false&select=*`,
+                        { headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` } }
+                    );
+                    const data = res.ok ? await res.json() : [];
                     const badge = document.getElementById('navChatBadge');
-                    if (count && count > 0) {
-                        badge.textContent = count > 99 ? '99+' : count;
+                    if (data.length > 0) {
+                        badge.textContent = data.length > 99 ? '99+' : data.length;
                         badge.classList.add('show');
                     } else {
                         badge.classList.remove('show');
