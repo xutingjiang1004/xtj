@@ -475,9 +475,9 @@
             width: 100%; height: 100%;
             will-change: transform;
             transform: scale(0.92);
-            transition: transform 0.35s cubic-bezier(0.16,1,0.3,1);
+            transition: transform 0.2s cubic-bezier(0.16,1,0.3,1);
             -webkit-transform: scale(0.92);
-            -webkit-transition: -webkit-transform 0.35s cubic-bezier(0.16,1,0.3,1);
+            -webkit-transition: -webkit-transform 0.2s cubic-bezier(0.16,1,0.3,1);
         }
         .img-viewer.active .iv-wrapper { transform: scale(1); -webkit-transform: scale(1); }
         .img-viewer .iv-wrapper.instant {
@@ -640,6 +640,14 @@
             color: var(--text-main);
             border-bottom-left-radius: 6px;
         }
+        .chat-msg .msg-img {
+            display: block; max-width: 200px; max-height: 260px;
+            border-radius: 10px; cursor: pointer;
+            object-fit: cover;
+            transition: transform 0.2s;
+        }
+        .chat-msg .msg-img:hover { transform: scale(1.02); }
+        .chat-msg .msg-text { word-break: break-word; }
         .chat-msg .msg-time {
             font-size: 10px; opacity: 0.55; margin-top: 5px; display: block;
             text-align: right;
@@ -674,6 +682,14 @@
         }
         .chat-input-area .send-btn:hover { transform: scale(1.06); box-shadow: 0 4px 14px rgba(5,150,105,0.3); }
         .chat-input-area .send-btn:disabled { opacity: 0.4; transform: none !important; }
+        .chat-input-area .chat-img-btn {
+            width: 40px; height: 40px; border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.15); cursor: pointer; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: rgba(255,255,255,0.1); font-size: 18px;
+            transition: all 0.3s; line-height: 1;
+        }
+        .chat-input-area .chat-img-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.06); }
         .chat-empty {
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             flex: 1; color: var(--text-muted); font-size: 14px; gap: 8px; padding: 40px;
@@ -1094,8 +1110,10 @@
                 <div id="chatMessages" class="chat-messages"></div>
                 <div class="chat-input-area">
                     <input id="chatInput" placeholder="输入消息..." maxlength="500" />
+                    <button class="chat-img-btn" id="chatImgBtn" title="发送图片">📷</button>
                     <button class="send-btn" id="chatSendBtn">➤</button>
                 </div>
+                <input type="file" id="chatFileInp" accept="image/*" style="display:none" />
             </div>
         </div>
     </div>
@@ -1536,6 +1554,7 @@
             let ivLastDist = 0;
             let ivPanStartX = 0, ivPanStartY = 0;
             let ivStartTx = 0, ivStartTy = 0;
+            let ivStartScale = 1;
             let ivLastTapTime = 0;
             let ivDoubleTapTimer = null;
             let ivHintTimer = null;
@@ -1586,7 +1605,7 @@
                 const viewer = document.getElementById('imgViewer');
                 const wrapper = document.getElementById('ivWrapper');
                 wrapper.classList.remove('instant');
-                ivResetZoom(false);
+                ivResetZoom(true);
                 viewer.classList.remove('active');
                 document.body.style.overflow = '';
             };
@@ -1618,6 +1637,7 @@
                     ivLastDist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
                     ivStartTx = ivZoomState.tx;
                     ivStartTy = ivZoomState.ty;
+                    ivStartScale = ivZoomState.scale;
                     ivWrapperEl.classList.add('instant');
                 } else if (e.touches.length === 1) {
                     const now = Date.now();
@@ -1627,13 +1647,10 @@
                         if (ivZoomState.scale > 1.5) {
                             ivResetZoom(false);
                         } else {
-                            ivWrapperEl.classList.add('instant');
                             ivZoomState.scale = 2.5;
                             ivZoomState.tx = 0;
                             ivZoomState.ty = 0;
                             ivApplyTransform();
-                            void ivWrapperEl.offsetWidth;
-                            ivWrapperEl.classList.remove('instant');
                             ivShowHint();
                         }
                         return;
@@ -1643,11 +1660,11 @@
 
                     if (ivZoomState.scale > 1) {
                         ivIsPanning = true;
-                        ivWrapperEl.classList.add('instant');
                         ivPanStartX = e.touches[0].clientX;
                         ivPanStartY = e.touches[0].clientY;
                         ivStartTx = ivZoomState.tx;
                         ivStartTy = ivZoomState.ty;
+                        ivWrapperEl.classList.add('instant');
                     }
                 }
             }, { passive: false });
@@ -1657,16 +1674,14 @@
                     e.preventDefault();
                     const t = e.touches;
                     const dist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-                    const newScale = Math.max(1, Math.min(6, ivZoomState.scale * (dist / ivLastDist)));
+                    const totalRatio = dist / ivLastDist;
+                    const newScale = Math.max(1, Math.min(6, ivStartScale * totalRatio));
                     const cx = (t[0].clientX + t[1].clientX) / 2;
                     const cy = (t[0].clientY + t[1].clientY) / 2;
-                    const ratio = newScale / ivZoomState.scale;
-                    ivZoomState.tx = cx - ratio * (cx - ivStartTx);
-                    ivZoomState.ty = cy - ratio * (cy - ivStartTy);
+                    const zoomRatio = ivStartScale > 0 ? newScale / ivStartScale : 1;
+                    ivZoomState.tx = cx - zoomRatio * (cx - ivStartTx);
+                    ivZoomState.ty = cy - zoomRatio * (cy - ivStartTy);
                     ivZoomState.scale = newScale;
-                    ivLastDist = dist;
-                    ivStartTx = ivZoomState.tx;
-                    ivStartTy = ivZoomState.ty;
                     ivApplyTransform();
                     ivShowHint();
                 } else if (ivIsPanning && e.touches.length === 1) {
@@ -1684,6 +1699,7 @@
                 if (ivIsZooming) {
                     ivIsZooming = false;
                     if (ivZoomState.scale <= 1) {
+                        ivWrapperEl.classList.remove('instant');
                         ivResetZoom(false);
                     } else {
                         setTimeout(() => ivWrapperEl.classList.remove('instant'), 50);
@@ -1691,15 +1707,16 @@
                 }
                 if (ivIsPanning) {
                     ivIsPanning = false;
-                    setTimeout(() => ivWrapperEl.classList.remove('instant'), 50);
+                    ivWrapperEl.classList.remove('instant');
                 }
             });
 
             ivViewerEl.addEventListener('wheel', function (e) {
                 if (!ivViewerEl.classList.contains('active')) return;
                 e.preventDefault();
-                const delta = -e.deltaY * 0.001;
+                const delta = -e.deltaY * 0.002;
                 const newScale = Math.max(1, Math.min(6, ivZoomState.scale * (1 + delta)));
+                if (newScale === ivZoomState.scale) return;
                 const rect = ivViewerEl.getBoundingClientRect();
                 const cx = e.clientX - rect.left;
                 const cy = e.clientY - rect.top;
@@ -1707,13 +1724,11 @@
                 ivZoomState.tx = cx - ratio * (cx - ivZoomState.tx);
                 ivZoomState.ty = cy - ratio * (cy - ivZoomState.ty);
                 ivZoomState.scale = newScale;
-                ivWrapperEl.classList.add('instant');
                 ivApplyTransform();
                 ivShowHint();
                 if (ivZoomState.scale <= 1) {
-                    setTimeout(() => ivResetZoom(false), 10);
+                    ivResetZoom(true);
                 }
-                setTimeout(() => ivWrapperEl.classList.remove('instant'), 100);
             }, { passive: false });
 
             // ===================== 浏览量统计 =====================
@@ -2161,6 +2176,12 @@
             let chatMsgsDirty = '';
             let chatMsgsUser = null;
 
+            function escapeHtml(str) {
+                const d = document.createElement('div');
+                d.textContent = str;
+                return d.innerHTML;
+            }
+
             function formatMsgTime(dateStr) {
                 const d = new Date(dateStr);
                 const now = new Date();
@@ -2324,7 +2345,15 @@
                 el.innerHTML = msgs.map(m => {
                     const sent = m.user_name === currentUser;
                     const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
-                    return `<div class="chat-msg ${sent?'sent':'received'}">${m.content}${readStatus}<span class="msg-time">${formatMsgTime(m.created_at)}</span></div>`;
+                    let body = '';
+                    if (m.actor_key && m.actor_key.startsWith('__dm_img__')) {
+                        const imgUrl = m.actor_key.replace('__dm_img__', '');
+                        body = `<img class="msg-img" src="${imgUrl}" onclick="openImageViewer('${imgUrl}')" loading="lazy" />`;
+                        if (m.content) body += `<div class="msg-text">${escapeHtml(m.content)}</div>`;
+                    } else {
+                        body = `<span class="msg-text">${escapeHtml(m.content || '')}</span>`;
+                    }
+                    return `<div class="chat-msg ${sent?'sent':'received'}">${body}${readStatus}<span class="msg-time">${formatMsgTime(m.created_at)}</span></div>`;
                 }).join('');
                 requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
             }
@@ -2332,18 +2361,29 @@
             async function sendChatMessage() {
                 const inp = document.getElementById('chatInput');
                 const content = inp.value.trim();
-                if (!content || !chatActiveUser || chatSending) return;
+                const fileInput = document.getElementById('chatFileInp');
+                const file = fileInput.files[0];
+                if ((!content && !file) || !chatActiveUser || chatSending) return;
                 chatSending = true;
                 inp.value = '';
                 try {
+                    let actorKey = DM_MARKER;
+                    let msgContent = content;
+                    if (file) {
+                        const path = `chat/${Date.now()}_${file.name}`;
+                        await sb.storage.from("uploads").upload(path, file);
+                        const url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
+                        actorKey = `__dm_img__${url}`;
+                    }
                     const { error } = await sb.from("posts").insert([{
                         user_name: currentUser,
-                        content,
+                        content: msgContent,
                         media_type: DM_MARKER,
                         media_url: chatActiveUser,
-                        actor_key: DM_MARKER
+                        actor_key: actorKey
                     }]);
                     if (error) throw error;
+                    fileInput.value = '';
                     await loadChatMessages(chatActiveUser, false);
                 } catch(e) {
                     console.error('[CHAT] send error:', e);
@@ -2461,6 +2501,12 @@
                     e.preventDefault();
                     sendChatMessage();
                 }
+            });
+            document.getElementById('chatImgBtn').addEventListener('click', function() {
+                document.getElementById('chatFileInp').click();
+            });
+            document.getElementById('chatFileInp').addEventListener('change', function() {
+                if (this.files && this.files[0]) sendChatMessage();
             });
 
             let refreshTimeout = null;
