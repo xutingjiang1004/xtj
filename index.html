@@ -1558,28 +1558,47 @@
                 setTimeout(() => ivWrapperEl.classList.remove('instant'), 100);
             }, { passive: false });
 
-            // ===================== 浏览量统计（已增强：记录浏览用户） =====================
+            // ===================== 浏览量统计 =====================
+            // 全局帖子信息缓存，用于浏览记录
+            const postInfoCache = {};
+            const VIEW_HISTORY_KEY = 'xtj_view_history';
+
+            function getViewHistory() {
+                try {
+                    return JSON.parse(localStorage.getItem(VIEW_HISTORY_KEY) || '[]');
+                } catch(e) { return []; }
+            }
+
+            function saveViewHistory(entry) {
+                const history = getViewHistory();
+                // 避免重复记录（同一用户同一帖子只记录一次）
+                const exists = history.some(h => h.post_id === entry.post_id && h.user_name === entry.user_name);
+                if (!exists) {
+                    history.unshift(entry);
+                    // 只保留最近500条
+                    if (history.length > 500) history.length = 500;
+                    localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
+                }
+            }
+
             function trackView(postId) {
                 const key = `xtj_v_${postId}`;
                 if (!localStorage.getItem(key) && !viewTracked.has(postId)) {
                     viewTracked.add(postId);
                     localStorage.setItem(key, "1");
+                    // 记录浏览详情到 localStorage
+                    if (currentUser && postInfoCache[postId]) {
+                        saveViewHistory({
+                            user_name: currentUser,
+                            post_id: postId,
+                            post_content: postInfoCache[postId].content || '(图片/视频)',
+                            post_author: postInfoCache[postId].user_name || '未知',
+                            viewed_at: new Date().toISOString()
+                        });
+                    }
                     setTimeout(async () => { 
                         try { 
                             await sb.rpc("increment_post_views", { p_post_id: postId }); 
-                            // 同时记录浏览详情（用户+时间）
-                            if (currentUser) {
-                                try {
-                                    await sb.from("views").insert([{
-                                        post_id: postId,
-                                        user_name: currentUser,
-                                        actor_key: deviceId
-                                    }]);
-                                } catch (e2) {
-                                    // views 表可能不存在，忽略错误
-                                    console.warn("views表未创建，浏览详情未记录", e2);
-                                }
-                            }
                         } catch(e){ console.error(e); } 
                     }, 1000);
                 }
@@ -1621,6 +1640,11 @@
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length;
+
+                // 填充帖子信息缓存，供浏览记录使用
+                visiblePosts.forEach(p => {
+                    postInfoCache[p.id] = { content: p.content, user_name: p.user_name };
+                });
 
                 const feed = document.getElementById("feed");
                 feed.innerHTML = visiblePosts.length ? visiblePosts.map(p => {
@@ -1711,7 +1735,7 @@
                     if (type === 'posts') {
                         renderPostStats();
                     } else if (type === 'views') {
-                        await renderViewStats();
+                        renderViewStats();
                     } else if (type === 'likes') {
                         renderLikeStats();
                     }
@@ -1781,48 +1805,32 @@
                 `;
             };
 
-            // 渲染总浏览统计
-            async function renderViewStats() {
+            // 渲染总浏览统计（从 localStorage 读取浏览历史）
+            function renderViewStats() {
                 const body = document.getElementById('statModalBody');
-                try {
-                    // 尝试从 views 表获取浏览记录
-                    const { data: viewData, error } = await sb.from("views")
-                        .select("*, posts!inner(content, user_name)")
-                        .order("created_at", { ascending: false })
-                        .limit(100);
-                    
-                    if (error || !viewData || !viewData.length) {
-                        // 如果没有 views 表或没有数据，显示提示
-                        body.innerHTML = `
-                            <div class="stat-empty">
-                                <div style="font-size:16px; margin-bottom:8px;">📊 浏览记录</div>
-                                <div style="font-size:13px;">暂无浏览详情数据</div>
-                                <div style="font-size:12px; margin-top:12px; opacity:0.7;">提示：需要在 Supabase SQL Editor 中创建 views 表才能记录浏览详情</div>
-                                <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
-                            </div>
-                        `;
-                        return;
-                    }
-
-                    body.innerHTML = viewData.map(v => `
-                        <div class="stat-view-item">
-                            <div class="svi-info">
-                                <div class="svi-user">${v.user_name}</div>
-                                <div class="svi-target">浏览了帖子：${v.posts?.content || '(图片/视频)'}</div>
-                            </div>
-                            <span class="svi-time">${new Date(v.created_at).toLocaleString()}</span>
-                        </div>
-                    `).join('') || '<div class="stat-empty">暂无浏览记录</div>';
-                } catch(e) {
-                    console.warn('views表可能不存在', e);
+                const history = getViewHistory();
+                
+                if (!history.length) {
                     body.innerHTML = `
                         <div class="stat-empty">
                             <div style="font-size:16px; margin-bottom:8px;">📊 浏览记录</div>
-                            <div style="font-size:13px;">需要创建 views 数据表</div>
-                            <div style="font-size:12px; margin-top:12px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
+                            <div style="font-size:13px;">暂无浏览详情数据</div>
+                            <div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>
+                            <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
                         </div>
                     `;
+                    return;
                 }
+
+                body.innerHTML = history.map(v => `
+                    <div class="stat-view-item">
+                        <div class="svi-info">
+                            <div class="svi-user">${v.user_name}</div>
+                            <div class="svi-target">浏览了 <b>${v.post_author}</b> 的帖子：${v.post_content}</div>
+                        </div>
+                        <span class="svi-time">${new Date(v.viewed_at).toLocaleString()}</span>
+                    </div>
+                `).join('');
             }
 
             // 渲染总点赞统计
