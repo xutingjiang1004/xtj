@@ -785,12 +785,88 @@
             overflow: hidden;
             text-overflow: ellipsis;
             color: var(--text-main);
+            cursor: pointer;
+            transition: var(--trans-smooth);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .stat-post-item .spi-content:hover {
+            color: var(--primary);
+        }
+        .stat-post-item .spi-img-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-size: 10px;
+            color: var(--primary);
+            background: rgba(5,150,105,0.08);
+            padding: 2px 6px;
+            border-radius: 4px;
+            flex-shrink: 0;
+            white-space: nowrap;
         }
         .stat-post-item .spi-time {
             flex-shrink: 0;
             font-size: 11px;
             color: var(--text-muted);
             margin-left: 10px;
+        }
+        .stat-post-item .spi-thumb {
+            width: 36px;
+            height: 36px;
+            border-radius: 6px;
+            object-fit: cover;
+            flex-shrink: 0;
+            margin-left: 6px;
+            cursor: pointer;
+            transition: var(--trans-smooth);
+        }
+        .stat-post-item .spi-thumb:hover {
+            transform: scale(1.1);
+        }
+        .stat-comment-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding: 10px 0;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .stat-comment-item:last-child {
+            border-bottom: none;
+        }
+        .stat-comment-item .sci-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .stat-comment-item .sci-user {
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        .stat-comment-item .sci-target {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-top: 2px;
+        }
+        .stat-comment-item .sci-time {
+            flex-shrink: 0;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-left: 10px;
+        }
+        .stat-section-title {
+            font-weight: 700;
+            font-size: 14px;
+            padding: 12px 0 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.12);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .stat-section-title:first-child {
+            padding-top: 0;
         }
         .stat-like-item, .stat-view-item {
             display: flex;
@@ -880,7 +956,7 @@
         <div class="stats">
             <div class="stat-card glass" onclick="openStatDetail('posts')" title="点击查看详情"><b id="sPosts">0</b><span>总动态</span></div>
             <div class="stat-card glass" onclick="openStatDetail('views')" title="点击查看详情"><b id="sViews">0</b><span>总浏览</span></div>
-            <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>总点赞</span></div>
+            <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>点赞和评论</span></div>
         </div>
 
         <div id="feed" class="feed">
@@ -1639,7 +1715,7 @@
                 const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER);
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
-                document.getElementById("sLikes").textContent = likes.length;
+                document.getElementById("sLikes").textContent = likes.length + comments.length;
 
                 // 填充帖子信息缓存，供浏览记录使用
                 visiblePosts.forEach(p => {
@@ -1716,7 +1792,7 @@
             // 打开统计详情模态框
             window.openStatDetail = async function(type) {
                 statCurrentType = type;
-                const titles = { posts: '总动态 - 按用户分组', views: '总浏览 - 浏览记录', likes: '总点赞 - 点赞记录' };
+                const titles = { posts: '总动态 - 按用户分组', views: '总浏览 - 浏览记录', likes: '点赞和评论 - 记录' };
                 document.getElementById('statModalTitle').textContent = titles[type] || '统计详情';
                 document.getElementById('statModalBody').innerHTML = '<div class="loading">加载中...</div>';
                 document.getElementById('statModal').classList.add('active');
@@ -1745,6 +1821,49 @@
                 }
             };
 
+            // 滚动到指定帖子并高亮
+            window.scrollToPost = function(postId) {
+                closeModal('statModal');
+                setTimeout(() => {
+                    const post = document.querySelector(`.post[data-post-id="${postId}"]`);
+                    if (post) {
+                        post.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        post.style.boxShadow = '0 0 0 3px var(--primary)';
+                        post.style.transition = 'box-shadow 0.3s';
+                        setTimeout(() => { post.style.boxShadow = ''; }, 2000);
+                    }
+                }, 350);
+            };
+
+            // 格式化帖子内容摘要（用于展示）
+            function formatPostSummary(p) {
+                const text = p.content || '';
+                const hasImg = p.media_url && p.media_type === 'image';
+                const hasVid = p.media_url && p.media_type === 'video';
+                let tag = '';
+                if (hasImg) tag = '<span class="spi-img-tag">🖼 图片</span>';
+                if (hasVid) tag = '<span class="spi-img-tag">🎬 视频</span>';
+                const summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
+                const display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
+                return { display, tag, hasImg, hasVid, thumbUrl: hasImg ? p.media_url : null };
+            }
+
+            // 生成帖子条目的HTML（可点击跳转）
+            function renderPostItemHTML(p) {
+                const fmt = formatPostSummary(p);
+                const onclick = `scrollToPost('${p.id}')`;
+                return `
+                    <div class="stat-post-item">
+                        <span class="spi-content" onclick="${onclick}" title="点击跳转到该帖子">
+                            ${fmt.display}
+                            ${fmt.tag}
+                        </span>
+                        ${fmt.thumbUrl ? `<img class="spi-thumb" src="${fmt.thumbUrl}" onclick="${onclick}" title="点击跳转到该帖子" />` : ''}
+                        <span class="spi-time">${new Date(p.created_at).toLocaleString()}</span>
+                    </div>
+                `;
+            }
+
             // 渲染总动态统计（按用户分组）
             function renderPostStats() {
                 const body = document.getElementById('statModalBody');
@@ -1771,12 +1890,7 @@
                             <span class="suh-count">${posts.length} 条</span>
                         </div>
                         <div class="stat-user-posts">
-                            ${posts.slice(0, 3).map(p => `
-                                <div class="stat-post-item">
-                                    <span class="spi-content">${p.content || '(图片/视频)'}</span>
-                                    <span class="spi-time">${new Date(p.created_at).toLocaleString()}</span>
-                                </div>
-                            `).join('')}
+                            ${posts.slice(0, 3).map(p => renderPostItemHTML(p)).join('')}
                             ${posts.length > 3 ? `
                                 <div style="text-align:center; padding:8px 0;">
                                     <button class="stat-view-btn" onclick="loadUserAllPosts('${name.replace(/'/g, "\\'")}')">查看全部 ${posts.length} 条</button>
@@ -1796,12 +1910,7 @@
                     <div style="font-weight:700; font-size:15px; margin-bottom:12px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.1);">
                         ${userName} 的全部帖子（共 ${userPosts.length} 条）
                     </div>
-                    ${userPosts.map(p => `
-                        <div class="stat-post-item">
-                            <span class="spi-content">${p.content || '(图片/视频)'}</span>
-                            <span class="spi-time">${new Date(p.created_at).toLocaleString()}</span>
-                        </div>
-                    `).join('')}
+                    ${userPosts.map(p => renderPostItemHTML(p)).join('')}
                 `;
             };
 
@@ -1833,22 +1942,23 @@
                 `).join('');
             }
 
-            // 渲染总点赞统计
+            // 渲染点赞和评论统计
             function renderLikeStats() {
                 const body = document.getElementById('statModalBody');
-                if (!statAllLikes.length) {
-                    body.innerHTML = '<div class="stat-empty">暂无点赞记录</div>';
-                    return;
-                }
 
                 // 为每个点赞找到对应的帖子内容
                 const postMap = {};
                 statAllPosts.forEach(p => { postMap[p.id] = p; });
 
-                body.innerHTML = statAllLikes.slice(0, 100).map(l => {
-                    const post = postMap[l.post_id];
-                    const postContent = post ? (post.content || '(图片/视频)') : '(已删除)';
-                    return `
+                let html = '';
+
+                // ===== 点赞记录 =====
+                html += '<div class="stat-section-title">❤️ 点赞记录</div>';
+                if (statAllLikes.length) {
+                    html += statAllLikes.slice(0, 100).map(l => {
+                        const post = postMap[l.post_id];
+                        const postContent = post ? (post.content || '(图片/视频)') : '(已删除)';
+                        return `
                         <div class="stat-like-item">
                             <div class="sli-info">
                                 <div class="sli-user">${l.user_name}</div>
@@ -1857,7 +1967,32 @@
                             <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                         </div>
                     `;
-                }).join('') || '<div class="stat-empty">暂无点赞记录</div>';
+                    }).join('');
+                } else {
+                    html += '<div class="stat-empty" style="padding:12px 0;">暂无点赞记录</div>';
+                }
+
+                // ===== 评论记录 =====
+                html += '<div class="stat-section-title">💬 评论记录</div>';
+                if (statAllComments.length) {
+                    html += statAllComments.slice(0, 100).map(c => {
+                        const post = postMap[c.post_id];
+                        const postContent = post ? (post.content || '(图片/视频)') : '(已删除)';
+                        return `
+                        <div class="stat-comment-item">
+                            <div class="sci-info">
+                                <div class="sci-user">${c.user_name}</div>
+                                <div class="sci-target">评论了帖子「${postContent}」：${c.content}</div>
+                            </div>
+                            <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
+                        </div>
+                    `;
+                    }).join('');
+                } else {
+                    html += '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
+                }
+
+                body.innerHTML = html;
             }
 
             // ===================== 聊天系统 =====================
