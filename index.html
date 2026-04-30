@@ -1323,6 +1323,7 @@
                 document.getElementById("loginPwInp").value = "";
                 document.getElementById("regNickInp").value = "";
                 document.getElementById("regPwInp").value = "";
+                if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; }
                 showToast("已退出登录");
                 initUI();
                 initialLoad(true);
@@ -1340,6 +1341,8 @@
                     const avatar = document.getElementById("myAvatar");
                     avatar.textContent = currentUser[0].toUpperCase();
                     avatar.className = "avatar";
+                    subscribeToMessages();
+                    updateUnreadBadge();
                 } else {
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
@@ -2186,7 +2189,6 @@
 
             window.closeChat = function() {
                 document.getElementById('chatOverlay').classList.remove('active');
-                if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; }
             };
 
             window.openChat = function(userName) {
