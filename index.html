@@ -26,6 +26,151 @@
             --trans-ppt: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
+        [data-theme="dark"] {
+            --text-main: #e4e4ec;
+            --text-muted: #9e9eb0;
+        }
+
+        /* ========== 黑暗模式覆盖 ========== */
+        [data-theme="dark"] .rain-bg-container {
+            background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #16213e 100%);
+        }
+        [data-theme="dark"] .rain-glass-layer {
+            background: rgba(0,0,0,0.3);
+        }
+        [data-theme="dark"] nav {
+            background: rgba(15,15,26,0.8);
+            border-bottom-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .glass {
+            background: linear-gradient(135deg, rgba(30,30,50,0.55) 0%, rgba(25,25,45,0.3) 100%);
+            border-color: rgba(255,255,255,0.08);
+            box-shadow: 0 10px 34px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        [data-theme="dark"] .publish-box {
+            background: linear-gradient(135deg, rgba(30,30,50,0.5) 0%, rgba(25,25,45,0.25) 100%);
+            border-color: rgba(255,255,255,0.08);
+            box-shadow: 0 10px 34px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        [data-theme="dark"] .publish-box textarea { color: var(--text-main); }
+        [data-theme="dark"] .publish-box textarea::placeholder { color: rgba(158, 158, 176, 0.5); }
+        [data-theme="dark"] .publish-footer { border-top-color: rgba(255,255,255,0.08); }
+        [data-theme="dark"] .publish-footer::after { background: linear-gradient(90deg, rgba(5,150,105,0.15), transparent); }
+        [data-theme="dark"] .file-label {
+            background: rgba(255,255,255,0.06);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-muted);
+        }
+        [data-theme="dark"] .file-label:hover {
+            background: rgba(255,255,255,0.12);
+            border-color: rgba(255,255,255,0.15);
+        }
+        [data-theme="dark"] .post {
+            background: linear-gradient(135deg, rgba(30,30,50,0.45) 0%, rgba(25,25,45,0.2) 100%);
+            border-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .post-stats-text { color: var(--text-muted); }
+        [data-theme="dark"] .action-btn {
+            background: rgba(40,40,60,0.4);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-muted);
+        }
+        [data-theme="dark"] .action-btn:hover { background: rgba(50,50,70,0.6); }
+        [data-theme="dark"] .action-btn.liked {
+            background: rgba(255,59,96,0.2);
+            border-color: rgba(255,59,96,0.3);
+        }
+        [data-theme="dark"] .comment-item {
+            background: rgba(35,35,55,0.4);
+            border-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .comment-item:hover {
+            background: rgba(40,40,60,0.5);
+        }
+        [data-theme="dark"] .comments { border-top-color: rgba(255,255,255,0.06); }
+        [data-theme="dark"] .stat-card { color: var(--text-main); }
+        [data-theme="dark"] .chat-entry-bar {
+            background: linear-gradient(135deg, rgba(30,30,50,0.45) 0%, rgba(25,25,45,0.2) 100%);
+            border-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .modal-box {
+            background: linear-gradient(135deg, rgba(25,25,45,0.85) 0%, rgba(20,20,40,0.7) 100%);
+            border-color: rgba(255,255,255,0.08);
+        }
+        [data-theme="dark"] .modal-overlay { background: rgba(0,0,0,0.5); }
+        [data-theme="dark"] .auth-form .af-input {
+            background: rgba(35,35,55,0.5);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .auth-form .af-input:focus {
+            background: rgba(40,40,60,0.6);
+            border-color: var(--primary);
+        }
+        [data-theme="dark"] .user-pill {
+            background: rgba(30,30,50,0.5);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .nav-chat-btn {
+            background: rgba(30,30,50,0.5);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .nav-chat-btn:hover { background: rgba(40,40,60,0.6); }
+        [data-theme="dark"] .nav-input {
+            background: rgba(30,30,50,0.5);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .nav-input:focus { background: rgba(40,40,60,0.6); }
+        [data-theme="dark"] .btn-ghost {
+            background: rgba(30,30,50,0.4);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .btn-ghost:hover { background: rgba(40,40,60,0.6); }
+        [data-theme="dark"] .chat-panel {
+            background: linear-gradient(145deg, rgba(20,20,40,0.55) 0%, rgba(15,15,30,0.4) 100%);
+            border-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .chat-header { background: rgba(255,255,255,0.03); }
+        [data-theme="dark"] .chat-header .chat-close-btn { color: var(--text-muted); }
+        [data-theme="dark"] .chat-msg.received {
+            background: rgba(35,35,55,0.5);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .chat-input-area { background: rgba(255,255,255,0.03); }
+        [data-theme="dark"] .chat-input-area input {
+            background: rgba(35,35,55,0.5);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .chat-input-area input:focus {
+            background: rgba(40,40,60,0.6);
+            border-color: rgba(5,150,105,0.3);
+        }
+        [data-theme="dark"] .chat-input-area input::placeholder { color: var(--text-muted); }
+        [data-theme="dark"] .chat-input-area .chat-img-btn {
+            background: rgba(35,35,55,0.4);
+            border-color: rgba(255,255,255,0.08);
+        }
+        [data-theme="dark"] .chat-input-area .chat-img-btn:hover { background: rgba(40,40,60,0.6); }
+        [data-theme="dark"] .chat-list-item:hover { background: rgba(255,255,255,0.04); }
+        [data-theme="dark"] .chat-list-item:active { background: rgba(255,255,255,0.08); }
+        [data-theme="dark"] .chat-list-item { border-bottom-color: rgba(255,255,255,0.02); }
+        [data-theme="dark"] .chat-header .back-btn { color: var(--text-main); }
+        [data-theme="dark"] .stat-detail-header {
+            background: rgba(255,255,255,0.03);
+            border-bottom-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .stat-section-title { color: var(--text-main); }
+        [data-theme="dark"] .ceb-label { color: var(--text-main); }
+        [data-theme="dark"] .post-time { color: var(--text-muted); }
+        [data-theme="dark"] .loading { color: var(--text-muted); }
+        [data-theme="dark"] .post-detail-stats { color: var(--text-muted); }
+
         html { scroll-behavior: smooth; scroll-padding: 20px; }
         * { 
             box-sizing: border-box; 
@@ -661,6 +806,12 @@
             transition: transform 0.2s;
         }
         .chat-msg .msg-img:hover { transform: scale(1.02); }
+        .chat-msg video.msg-img {
+            cursor: default;
+            object-fit: contain;
+            background: #000;
+        }
+        .chat-msg video.msg-img:hover { transform: none; }
         .chat-msg .msg-text { word-break: break-word; }
         .chat-msg .msg-time {
             font-size: 10px; opacity: 0.55; margin-top: 5px; display: block;
@@ -732,6 +883,22 @@
             padding: 0 5px; box-shadow: 0 2px 6px rgba(255,59,96,0.3);
         }
         .nav-chat-badge.show { display: flex; }
+
+        .theme-toggle-btn {
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.3);
+            width: 34px; height: 34px; border-radius: 50%;
+            cursor: pointer; font-size: 17px; line-height: 1;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.3s; flex-shrink: 0;
+            padding: 0; margin: 0;
+        }
+        .theme-toggle-btn:hover { transform: scale(1.1); background: rgba(255,255,255,0.35); }
+        [data-theme="dark"] .theme-toggle-btn {
+            background: rgba(30,30,50,0.5);
+            border-color: rgba(255,255,255,0.08);
+        }
+        [data-theme="dark"] .theme-toggle-btn:hover { background: rgba(40,40,60,0.6); }
         @media (max-width: 480px) {
             .chat-panel { height: 88vh; max-height: none; border-radius: 20px 20px 0 0; }
             .chat-msg { max-width: 88%; font-size: 14px; }
@@ -1009,6 +1176,7 @@
 
     <nav style="position:relative; z-index:3;">
         <h1>xtj</h1>
+        <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
         <div class="nav-auth">
             <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
                 <button class="btn btn-primary" onclick="openAuthModal('login')">登录</button>
@@ -1127,7 +1295,7 @@
                     <button class="chat-img-btn" id="chatImgBtn" title="发送图片">📷</button>
                     <button class="send-btn" id="chatSendBtn">➤</button>
                 </div>
-                <input type="file" id="chatFileInp" accept="image/*" style="display:none" />
+                <input type="file" id="chatFileInp" accept="image/*,video/*" style="display:none" />
             </div>
         </div>
     </div>
@@ -2323,7 +2491,7 @@
                 const el = document.getElementById('chatMessages');
                 try {
                     const { data: msgs, error } = await sb.from("posts")
-                        .select("id, user_name, media_url, content, created_at, views")
+                        .select("id, user_name, media_url, content, created_at, views, actor_key")
                         .eq("media_type", DM_MARKER)
                         .or(`and(user_name.eq.${currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${currentUser})`)
                         .order("created_at")
@@ -2365,6 +2533,10 @@
                         const imgUrl = m.actor_key.replace('__dm_img__', '');
                         body = `<img class="msg-img" src="${imgUrl}" onclick="openImageViewer('${imgUrl}')" loading="lazy" />`;
                         if (m.content) body += `<div class="msg-text">${escapeHtml(m.content)}</div>`;
+                    } else if (m.actor_key && m.actor_key.startsWith('__dm_vid__')) {
+                        const vidUrl = m.actor_key.replace('__dm_vid__', '');
+                        body = `<video class="msg-img" src="${vidUrl}" controls preload="metadata" onclick="event.stopPropagation();" style="cursor:default;"></video>`;
+                        if (m.content) body += `<div class="msg-text">${escapeHtml(m.content)}</div>`;
                     } else {
                         body = `<span class="msg-text">${escapeHtml(m.content || '')}</span>`;
                     }
@@ -2392,7 +2564,8 @@
                         const path = `chat/${Date.now()}_${file.name}`;
                         await sb.storage.from("uploads").upload(path, file);
                         const url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
-                        actorKey = `__dm_img__${url}`;
+                        const isVideo = file.type.startsWith('video/');
+                        actorKey = isVideo ? `__dm_vid__${url}` : `__dm_img__${url}`;
                     }
                     const { error } = await sb.from("posts").insert([{
                         user_name: currentUser,
@@ -2535,6 +2708,36 @@
             };
 
             window.addEventListener('DOMContentLoaded', () => { initUI(); initRainAnimation(); initialLoad(); });
+
+            // ========== 主题切换 ==========
+            const htmlEl = document.documentElement;
+            const themeBtn = document.getElementById('themeToggle');
+            function applyTheme(isDark) {
+                if (isDark) {
+                    htmlEl.setAttribute('data-theme', 'dark');
+                    if (themeBtn) themeBtn.textContent = '☀️';
+                    localStorage.setItem('xtj-theme', 'dark');
+                } else {
+                    htmlEl.removeAttribute('data-theme');
+                    if (themeBtn) themeBtn.textContent = '🌙';
+                    localStorage.setItem('xtj-theme', 'light');
+                }
+            }
+            if (themeBtn) {
+                themeBtn.addEventListener('click', function() {
+                    const isDark = htmlEl.getAttribute('data-theme') === 'dark';
+                    applyTheme(!isDark);
+                });
+            }
+            // 初始化主题：优先 localStorage，其次系统偏好
+            const savedTheme = localStorage.getItem('xtj-theme');
+            if (savedTheme === 'dark') {
+                applyTheme(true);
+            } else if (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                applyTheme(true);
+            } else {
+                applyTheme(false);
+            }
         })();
     </script>
 </body>
