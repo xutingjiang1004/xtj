@@ -208,9 +208,9 @@
             pointer-events: none; z-index: -1;
         }
         .publish-box:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 16px 48px rgba(5, 150, 105, 0.1), inset 0 1px 0 rgba(255,255,255,0.7);
-            border-color: rgba(255,255,255,0.55);
+            transform: translateY(-4px);
+            box-shadow: 0 20px 56px rgba(5, 150, 105, 0.14), 0 6px 20px rgba(5, 150, 105, 0.08), inset 0 1px 0 rgba(255,255,255,0.7);
+            border-color: rgba(255,255,255,0.6);
         }
         .publish-box:focus-within {
             border-color: rgba(5, 150, 105, 0.15);
@@ -256,8 +256,8 @@
         }
 
         .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 4px; }
-        .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); cursor: pointer; }
-        .stat-card:hover { transform: translateY(-4px) scale(1.02); box-shadow: 0 8px 24px rgba(5, 150, 105, 0.15); }
+        .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); cursor: pointer; box-shadow: 0 4px 16px rgba(5, 150, 105, 0.06); }
+        .stat-card:hover { transform: translateY(-6px) scale(1.03); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.18), 0 4px 12px rgba(5, 150, 105, 0.1); }
         .stat-card b { display: block; font-size: 22px; color: var(--primary); font-weight: 800; }
         .stat-card span { font-size: 12px; color: var(--text-muted); }
 
@@ -269,7 +269,7 @@
             transition: var(--trans-spring);
             overflow: hidden;
         }
-        .chat-entry-bar:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(5, 150, 105, 0.18); }
+        .chat-entry-bar:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.2), 0 4px 12px rgba(5, 150, 105, 0.1); }
         .chat-entry-bar:active { transform: scale(0.98); }
         .ceb-icon {
             font-size: 26px; flex-shrink: 0;
@@ -308,15 +308,16 @@
         .post {
             padding: 24px; border-radius: var(--radius-md);
             opacity: 0; transform: translateY(30px) scale(0.95);
-            transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s cubic-bezier(0.25, 1, 0.3, 1);
             will-change: opacity, transform;
+            box-shadow: 0 4px 20px rgba(5, 150, 105, 0.05);
         }
         .post.visible { 
             opacity: 1; 
             transform: translateY(0) scale(1); 
             will-change: auto;
         }
-        .post:hover { box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12); transform: translateY(-2px); }
+        .post:hover { box-shadow: 0 16px 48px rgba(5, 150, 105, 0.14), 0 4px 16px rgba(5, 150, 105, 0.08); transform: translateY(-4px); }
 
         .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
         .avatar {
@@ -346,8 +347,9 @@
             cursor: pointer; transition: var(--trans-spring); font-weight: 600;
             position: relative; overflow: visible !important;
             min-width: 86px; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
         }
-        .action-btn:hover { background: rgba(255,255,255,1); transform: translateY(-2px); }
+        .action-btn:hover { background: rgba(255,255,255,1); transform: translateY(-3px); box-shadow: 0 4px 16px rgba(0,0,0,0.08); }
 
         @keyframes likePulse {
             0% { transform: scale(1); box-shadow: 0 0 0px rgba(255, 59, 96, 0.4); }
@@ -387,6 +389,12 @@
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.8);
             display: flex; justify-content: space-between; align-items: center; gap: 8px;
             backdrop-filter: blur(14px) saturate(160%); -webkit-backdrop-filter: blur(14px) saturate(160%);
+            transition: var(--trans-smooth);
+        }
+        .comment-item:hover {
+            transform: translateX(4px);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 4px 16px rgba(5, 150, 105, 0.08);
+            background: rgba(255,255,255,0.5);
         }
         .modal-overlay {
             position: fixed; inset: 0; background: rgba(0,0,0,0.15);
@@ -528,8 +536,9 @@
         /* ========== 聊天系统 ========== */
         .chat-overlay {
             position: fixed; inset: 0; z-index: 900;
-            background: rgba(0,0,0,0.12);
-            backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+            background: rgba(0,0,0,0.35);
+            backdrop-filter: blur(12px) saturate(150%);
+            -webkit-backdrop-filter: blur(12px) saturate(150%);
             display: flex; align-items: flex-end; justify-content: center;
             opacity: 0; pointer-events: none;
             transition: opacity 0.4s cubic-bezier(0.16,1,0.3,1);
@@ -537,13 +546,13 @@
         .chat-overlay.active { opacity: 1; pointer-events: all; }
         .chat-panel {
             width: 100%; max-width: 480px; height: 82vh; max-height: 720px;
-            background: linear-gradient(145deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.08) 100%);
-            backdrop-filter: blur(32px) saturate(180%);
-            -webkit-backdrop-filter: blur(32px) saturate(180%);
+            background: linear-gradient(145deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.25) 100%);
+            backdrop-filter: blur(40px) saturate(200%);
+            -webkit-backdrop-filter: blur(40px) saturate(200%);
             border-radius: 28px 28px 0 0;
-            border: 1px solid rgba(255,255,255,0.25);
+            border: 1px solid rgba(255,255,255,0.35);
             border-bottom: none;
-            box-shadow: 0 -12px 50px rgba(0,0,0,0.06);
+            box-shadow: 0 -12px 50px rgba(0,0,0,0.12);
             display: flex; flex-direction: column;
             transform: translateY(50px);
             transition: transform 0.45s cubic-bezier(0.16,1,0.3,1);
@@ -581,11 +590,11 @@
         .chat-list-item {
             display: flex; align-items: center; gap: 14px;
             padding: 12px 20px; cursor: pointer;
-            transition: all 0.2s; position: relative;
+            transition: all 0.25s cubic-bezier(0.25, 1, 0.3, 1); position: relative;
             border-bottom: 1px solid rgba(255,255,255,0.04);
         }
-        .chat-list-item:hover { background: rgba(255,255,255,0.08); }
-        .chat-list-item:active { background: rgba(255,255,255,0.12); }
+        .chat-list-item:hover { background: rgba(255,255,255,0.12); transform: translateX(4px); }
+        .chat-list-item:active { background: rgba(255,255,255,0.18); transform: translateX(2px); }
         .chat-list-item .cli-avatar {
             width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
@@ -627,6 +636,11 @@
             0% { transform: translateY(12px) scale(0.92); opacity: 0; }
             100% { transform: translateY(0) scale(1); opacity: 1; }
         }
+        .chat-msg.no-anim {
+            animation: none;
+            opacity: 1;
+            transform: none;
+        }
         .chat-msg.sent {
             align-self: flex-end;
             background: linear-gradient(135deg, #059669, #10b981);
@@ -635,8 +649,8 @@
         }
         .chat-msg.received {
             align-self: flex-start;
-            background: rgba(255,255,255,0.3);
-            border: 1px solid rgba(255,255,255,0.25);
+            background: rgba(255,255,255,0.55);
+            border: 1px solid rgba(255,255,255,0.35);
             color: var(--text-main);
             border-bottom-left-radius: 6px;
         }
@@ -654,22 +668,22 @@
         }
         .chat-input-area {
             padding: 12px 16px 16px;
-            border-top: 1px solid rgba(255,255,255,0.08);
+            border-top: 1px solid rgba(255,255,255,0.15);
             display: flex; gap: 10px; align-items: center;
             flex-shrink: 0;
-            background: rgba(255,255,255,0.03);
+            background: rgba(255,255,255,0.1);
         }
         .chat-input-area input {
             flex: 1; padding: 12px 18px; border-radius: 99px;
-            border: 1px solid rgba(255,255,255,0.15);
-            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.25);
+            background: rgba(255,255,255,0.25);
             backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
             font-size: 15px; outline: none; color: var(--text-main);
             transition: all 0.3s; min-width: 0;
         }
         .chat-input-area input:focus {
-            background: rgba(255,255,255,0.25);
-            border-color: rgba(5,150,105,0.25);
+            background: rgba(255,255,255,0.35);
+            border-color: rgba(5,150,105,0.35);
         }
         .chat-input-area input::placeholder { color: var(--text-muted); }
         .chat-input-area .send-btn {
@@ -1440,7 +1454,7 @@
                     btn.classList.add("liked");
                     createHeartParticles(btn);
                 }
-                btn.textContent = isLiked ? "点赞" : "已点赞";
+                btn.textContent = isLiked ? "点赞" : "❤️";
 
                 try {
                     if (isLiked) {
@@ -1839,7 +1853,7 @@
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${p.media_url}" controls preload="none">`:`<img src="${p.media_url}" loading="lazy" onclick="openImageViewer('${p.media_url}')">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">${isLiked?'已点赞':'点赞'}</button>
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${p.id}')">评论</button>
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${p.id}', '${p.actor_key}')">删除</button>`:''}
                   </div>
@@ -2216,7 +2230,7 @@
                 if (!currentUser) { showToast('请先登录'); return; }
                 if (userName === currentUser) { openChatList(); return; }
                 chatActiveUser = userName;
-                document.getElementById('chatMessages').innerHTML = '';
+                document.getElementById('chatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中...</div></div>';
                 document.body.style.overflow = 'hidden';
                 document.getElementById('chatListView').classList.add('hidden');
                 document.getElementById('chatDetailView').classList.remove('hidden');
@@ -2342,6 +2356,7 @@
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>';
                     return;
                 }
+                const isBulk = msgs.length > 2;
                 el.innerHTML = msgs.map(m => {
                     const sent = m.user_name === currentUser;
                     const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
@@ -2353,9 +2368,13 @@
                     } else {
                         body = `<span class="msg-text">${escapeHtml(m.content || '')}</span>`;
                     }
-                    return `<div class="chat-msg ${sent?'sent':'received'}">${body}${readStatus}<span class="msg-time">${formatMsgTime(m.created_at)}</span></div>`;
+                    return `<div class="chat-msg ${sent?'sent':'received'}${isBulk?' no-anim':''}">${body}${readStatus}<span class="msg-time">${formatMsgTime(m.created_at)}</span></div>`;
                 }).join('');
-                requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+                if (isBulk) {
+                    el.scrollTop = el.scrollHeight;
+                } else {
+                    requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+                }
             }
 
             async function sendChatMessage() {
