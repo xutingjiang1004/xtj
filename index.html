@@ -1984,12 +1984,13 @@
                         media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
                         media_type = file.type.startsWith("image") ? "image" : "video";
                     }
-                    await sb.from("posts").insert([{ user_name: currentUser, content, media_url, media_type, actor_key: currentUser }]);
+                    var { error: insertErr } = await sb.from("posts").insert([{ user_name: currentUser, content, media_url, media_type, actor_key: deviceId }]);
+                    if (insertErr) { showToast("发布失败: " + (insertErr.message || "未知错误")); btn.disabled = false; btn.textContent = "发布动态"; return; }
                     document.getElementById("postInp").value = "";
                     document.getElementById("fileInp").value = "";
                     showToast("发布成功！");
                     loadFeed(true);
-                } catch (e) { showToast("发布失败"); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
+                } catch (e) { showToast("发布失败: " + (e.message || "网络错误")); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
             };
 
             // ===================== 点赞 =====================
@@ -2087,7 +2088,7 @@
                 btn.disabled = true;
                 btn.textContent = "删除中...";
                 try {
-                    const key = isAdmin() ? delOwnerKey : currentUser;
+                    const key = isAdmin() ? delOwnerKey : deviceId;
                     const { error } = await sb.rpc("delete_post_with_actor", {
                         p_post_id: delPostId,
                         p_actor_key: key
@@ -2367,11 +2368,16 @@
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
                     ]);
+                    if (postRes.error || commRes.error || likeRes.error) {
+                        const errMsg = (postRes.error || commRes.error || likeRes.error).message || '数据加载失败';
+                        feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败: ${errMsg}</div>`;
+                        return;
+                    }
                     const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
                     localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: now }));
                     renderFeed(data);
                 } catch(e) {
-                    if (!forceRefresh) feed.innerHTML = `<div class="loading">加载失败，刷新重试</div>`;
+                    feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，刷新重试</div>`;
                     console.error(e);
                 }
             }
@@ -2392,7 +2398,7 @@
                     const pLikes = likes.filter(l=>l.post_id===p.id);
                     const pComms = comments.filter(c=>c.post_id===p.id);
                     const isLiked = pLikes.some(l=>l.actor_key===deviceId);
-                    const canDelPost = p.actor_key === currentUser || isAdmin();
+                    const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
                     trackView(p.id);
                     return `
                 <div class="post glass" data-post-id="${p.id}">
