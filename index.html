@@ -30,7 +30,6 @@
         * { 
             box-sizing: border-box; 
             -webkit-tap-highlight-color: transparent;
-            /* 性能优化：避免不必要的重绘 */
             will-change: auto;
         }
 
@@ -43,7 +42,6 @@
             -webkit-font-smoothing: antialiased;
             position: relative;
             isolation: isolate;
-            /* 性能优化：提升渲染性能 */
             -webkit-overflow-scrolling: touch;
         }
 
@@ -267,7 +265,7 @@
         }
 
         .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-        .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); }
+        .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); cursor: pointer; }
         .stat-card:hover { transform: translateY(-4px) scale(1.02); box-shadow: 0 8px 24px rgba(5, 150, 105, 0.15); }
         .stat-card b { display: block; font-size: 22px; color: var(--primary); font-weight: 800; }
         .stat-card span { font-size: 12px; color: var(--text-muted); }
@@ -277,13 +275,11 @@
             padding: 24px; border-radius: var(--radius-md);
             opacity: 0; transform: translateY(30px) scale(0.95);
             transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
-            /* 性能优化：预提升到 GPU 层 */
             will-change: opacity, transform;
         }
         .post.visible { 
             opacity: 1; 
             transform: translateY(0) scale(1); 
-            /* 显示后移除 will-change 以节省资源 */
             will-change: auto;
         }
         .post:hover { box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12); transform: translateY(-2px); }
@@ -298,7 +294,6 @@
         .avatar:hover { transform: scale(1.1); }
         .user-info { display: flex; flex-direction: column; }
         .user-name { font-weight: 700; font-size: 15px; }
-        .admin-tag { font-size: 10px; background: var(--admin-color); color: white; padding: 2px 6px; border-radius: 4px; margin-left: 4px; }
         .post-time { font-size: 12px; color: var(--text-muted); }
 
         .content { font-size: 15px; line-height: 1.6; margin-bottom: 16px; white-space: pre-wrap; }
@@ -563,7 +558,6 @@
             background: linear-gradient(135deg, #059669, #34d399);
             color: white; font-weight: bold; font-size: 18px;
         }
-        .chat-list-item .cli-avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); }
         .chat-list-item .cli-info { flex: 1; min-width: 0; }
         .chat-list-item .cli-name { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 6px; }
         .chat-list-item .cli-preview {
@@ -678,6 +672,174 @@
             .chat-panel { height: 88vh; max-height: none; border-radius: 20px 20px 0 0; }
             .chat-msg { max-width: 88%; font-size: 14px; }
         }
+
+        /* ========== 数据统计详情 - 新增样式 ========== */
+        .stat-detail-modal {
+            max-width: 500px;
+            padding: 0;
+            overflow: hidden;
+        }
+        .stat-detail-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.06);
+        }
+        .stat-detail-header h3 {
+            margin: 0;
+            font-size: 17px;
+            font-weight: 700;
+        }
+        .stat-detail-body {
+            padding: 16px 24px 24px;
+            max-height: 60vh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .stat-detail-body .stat-empty {
+            text-align: center;
+            padding: 32px 0;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+        .stat-user-group {
+            margin-bottom: 12px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.25);
+            border: 1px solid rgba(255,255,255,0.2);
+            overflow: hidden;
+        }
+        .stat-user-group:last-child {
+            margin-bottom: 0;
+        }
+        .stat-user-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: rgba(255,255,255,0.15);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .stat-user-header .suh-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .stat-user-header .suh-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #059669, #34d399);
+            color: white;
+            font-weight: bold;
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+        .stat-user-header .suh-name {
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .stat-user-header .suh-count {
+            font-size: 13px;
+            color: var(--primary);
+            font-weight: 700;
+        }
+        .stat-view-btn {
+            font-size: 12px;
+            padding: 4px 12px;
+            border-radius: 99px;
+            border: 1px solid rgba(5,150,105,0.3);
+            background: rgba(5,150,105,0.08);
+            color: var(--primary);
+            cursor: pointer;
+            font-weight: 600;
+            transition: var(--trans-smooth);
+        }
+        .stat-view-btn:hover {
+            background: rgba(5,150,105,0.18);
+            transform: scale(1.05);
+        }
+        .stat-user-posts {
+            padding: 8px 16px;
+        }
+        .stat-post-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .stat-post-item:last-child {
+            border-bottom: none;
+        }
+        .stat-post-item .spi-content {
+            flex: 1;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: var(--text-main);
+        }
+        .stat-post-item .spi-time {
+            flex-shrink: 0;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-left: 10px;
+        }
+        .stat-like-item, .stat-view-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            font-size: 13px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .stat-like-item:last-child, .stat-view-item:last-child {
+            border-bottom: none;
+        }
+        .stat-like-item .sli-info, .stat-view-item .svi-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .stat-like-item .sli-user, .stat-view-item .svi-user {
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        .stat-like-item .sli-target, .stat-view-item .svi-target {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .stat-like-item .sli-time, .stat-view-item .svi-time {
+            flex-shrink: 0;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-left: 10px;
+        }
+        .back-to-stats-btn {
+            font-size: 12px;
+            padding: 4px 12px;
+            border-radius: 99px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.2);
+            color: var(--text-muted);
+            cursor: pointer;
+            font-weight: 500;
+            transition: var(--trans-smooth);
+            margin-bottom: 12px;
+        }
+        .back-to-stats-btn:hover {
+            background: rgba(255,255,255,0.35);
+        }
     </style>
 </head>
 <body>
@@ -716,9 +878,9 @@
         </div>
 
         <div class="stats">
-            <div class="stat-card glass"><b id="sPosts">0</b><span>总动态</span></div>
-            <div class="stat-card glass"><b id="sViews">0</b><span>总浏览</span></div>
-            <div class="stat-card glass"><b id="sLikes">0</b><span>总点赞</span></div>
+            <div class="stat-card glass" onclick="openStatDetail('posts')" title="点击查看详情"><b id="sPosts">0</b><span>总动态</span></div>
+            <div class="stat-card glass" onclick="openStatDetail('views')" title="点击查看详情"><b id="sViews">0</b><span>总浏览</span></div>
+            <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>总点赞</span></div>
         </div>
 
         <div id="feed" class="feed">
@@ -804,6 +966,19 @@
         </div>
     </div>
 
+    <!-- ========== 数据统计详情模态框 ========== -->
+    <div class="modal-overlay" id="statModal" onclick="if(event.target===this)closeModal('statModal')">
+        <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
+            <div class="stat-detail-header">
+                <h3 id="statModalTitle">统计详情</h3>
+                <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">✕</button>
+            </div>
+            <div class="stat-detail-body" id="statModalBody">
+                加载中...
+            </div>
+        </div>
+    </div>
+
     <script>
         (function () {
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
@@ -850,8 +1025,6 @@
             }
 
             // ===================== 登录 / 注册 / 登出 =====================
-            // 用 posts 表存储用户账号（media_type='__auth__' 标记为账号记录）
-
             const AUTH_MARKER = '__auth__';
 
             async function findAuthRecord(nickname) {
@@ -863,7 +1036,6 @@
                 return data;
             }
 
-            // ========== 模态框控制 ==========
             window.openAuthModal = function (mode) {
                 const id = mode === 'login' ? 'loginModal' : 'registerModal';
                 document.getElementById(id).classList.add('active');
@@ -873,7 +1045,6 @@
                 }, 200);
             };
 
-            // ========== 登录提交 ==========
             document.getElementById('loginSubmitBtn').addEventListener('click', doLogin);
             document.getElementById('loginPwInp').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') doLogin();
@@ -929,7 +1100,6 @@
                 }
             }
 
-            // ========== 注册提交 ==========
             document.getElementById('registerSubmitBtn').addEventListener('click', doRegister);
             document.getElementById('regPwInp').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') doRegister();
@@ -1007,14 +1177,13 @@
                     document.getElementById("myName").textContent = currentUser;
                     const avatar = document.getElementById("myAvatar");
                     avatar.textContent = currentUser[0].toUpperCase();
-                    avatar.className = isAdmin() ? "avatar admin" : "avatar";
+                    avatar.className = "avatar";
                 } else {
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
                 }
             }
 
-            // ===================== 雨滴动画 - 轻量版 =====================
             function initRainAnimation() {
                 const canvas = document.getElementById('rainCanvas');
                 if (!canvas) return;
@@ -1034,7 +1203,6 @@
                 });
                 resize();
 
-                // 大幅减少雨滴数量以提升性能
                 for (let i = 0; i < 40; i++) drops.push({ 
                     x: Math.random()*w, 
                     y: Math.random()*h, 
@@ -1090,7 +1258,6 @@
                 const isLiked = btn.classList.contains("liked");
                 const statsText = btn.closest('.post').querySelector('.post-stats-text');
 
-                // 修复：取消点赞时移除类名，点赞时添加类名和动画
                 if (isLiked) {
                     btn.classList.remove("liked");
                 } else {
@@ -1204,7 +1371,7 @@
 
             window.closeModal = function (id) { document.getElementById(id).classList.remove("active"); };
 
-            // ===================== 图片查看器 - 高性能缩放 =====================
+            // ===================== 图片查看器 =====================
             const ivZoomState = { scale: 1, tx: 0, ty: 0 };
             let ivIsZooming = false;
             let ivIsPanning = false;
@@ -1270,7 +1437,6 @@
                 if (e.key === 'Escape') closeImageViewer();
             });
 
-            // ========== 触摸/交互事件 ==========
             const ivViewerEl = document.getElementById('imgViewer');
             const ivWrapperEl = document.getElementById('ivWrapper');
 
@@ -1287,7 +1453,6 @@
 
             ivViewerEl.addEventListener('touchstart', function (e) {
                 if (e.target.closest('.iv-close')) return;
-
                 if (e.touches.length === 2) {
                     e.preventDefault();
                     ivIsZooming = true;
@@ -1335,18 +1500,15 @@
                     const t = e.touches;
                     const dist = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
                     const newScale = Math.max(1, Math.min(6, ivZoomState.scale * (dist / ivLastDist)));
-
                     const cx = (t[0].clientX + t[1].clientX) / 2;
                     const cy = (t[0].clientY + t[1].clientY) / 2;
                     const ratio = newScale / ivZoomState.scale;
-
                     ivZoomState.tx = cx - ratio * (cx - ivStartTx);
                     ivZoomState.ty = cy - ratio * (cy - ivStartTy);
                     ivZoomState.scale = newScale;
                     ivLastDist = dist;
                     ivStartTx = ivZoomState.tx;
                     ivStartTy = ivZoomState.ty;
-
                     ivApplyTransform();
                     ivShowHint();
                 } else if (ivIsPanning && e.touches.length === 1) {
@@ -1378,36 +1540,48 @@
             ivViewerEl.addEventListener('wheel', function (e) {
                 if (!ivViewerEl.classList.contains('active')) return;
                 e.preventDefault();
-
                 const delta = -e.deltaY * 0.001;
                 const newScale = Math.max(1, Math.min(6, ivZoomState.scale * (1 + delta)));
-
                 const rect = ivViewerEl.getBoundingClientRect();
                 const cx = e.clientX - rect.left;
                 const cy = e.clientY - rect.top;
                 const ratio = newScale / ivZoomState.scale;
-
                 ivZoomState.tx = cx - ratio * (cx - ivZoomState.tx);
                 ivZoomState.ty = cy - ratio * (cy - ivZoomState.ty);
                 ivZoomState.scale = newScale;
-
                 ivWrapperEl.classList.add('instant');
                 ivApplyTransform();
                 ivShowHint();
-
                 if (ivZoomState.scale <= 1) {
                     setTimeout(() => ivResetZoom(false), 10);
                 }
                 setTimeout(() => ivWrapperEl.classList.remove('instant'), 100);
             }, { passive: false });
 
-            // ===================== 浏览量统计 =====================
+            // ===================== 浏览量统计（已增强：记录浏览用户） =====================
             function trackView(postId) {
                 const key = `xtj_v_${postId}`;
                 if (!localStorage.getItem(key) && !viewTracked.has(postId)) {
                     viewTracked.add(postId);
                     localStorage.setItem(key, "1");
-                    setTimeout(async () => { try { await sb.rpc("increment_post_views", { p_post_id: postId }); } catch(e){ console.error(e); } }, 1000);
+                    setTimeout(async () => { 
+                        try { 
+                            await sb.rpc("increment_post_views", { p_post_id: postId }); 
+                            // 同时记录浏览详情（用户+时间）
+                            if (currentUser) {
+                                try {
+                                    await sb.from("views").insert([{
+                                        post_id: postId,
+                                        user_name: currentUser,
+                                        actor_key: deviceId
+                                    }]);
+                                } catch (e2) {
+                                    // views 表可能不存在，忽略错误
+                                    console.warn("views表未创建，浏览详情未记录", e2);
+                                }
+                            }
+                        } catch(e){ console.error(e); } 
+                    }, 1000);
                 }
             }
 
@@ -1458,9 +1632,9 @@
                     return `
                 <div class="post glass" data-post-id="${p.id}">
                   <div class="post-header">
-                    <div class="avatar ${p.user_name===ADMIN_NAME?'admin':''} clickable" onclick="openChat('${p.user_name.replace(/'/g, "\\'")}')">${p.user_name[0].toUpperCase()}</div>
+                    <div class="avatar clickable" onclick="openChat('${p.user_name.replace(/'/g, "\\'")}')">${p.user_name[0].toUpperCase()}</div>
                     <div class="user-info">
-                      <span class="user-name">${p.user_name} ${p.user_name===ADMIN_NAME?'<span class="admin-tag">ADMIN</span>':''}</span>
+                      <span class="user-name">${p.user_name}</span>
                       <span class="post-time">${new Date(p.created_at).toLocaleString()}</span>
                     </div>
                   </div>
@@ -1506,6 +1680,176 @@
                     }
                 }
                 await loadFeed(false);
+            }
+
+            // ===================== 数据统计详情功能 =====================
+            // 存储当前的统计视图状态
+            let statCurrentType = null;
+            let statAllPosts = [];
+            let statAllComments = [];
+            let statAllLikes = [];
+
+            // 打开统计详情模态框
+            window.openStatDetail = async function(type) {
+                statCurrentType = type;
+                const titles = { posts: '总动态 - 按用户分组', views: '总浏览 - 浏览记录', likes: '总点赞 - 点赞记录' };
+                document.getElementById('statModalTitle').textContent = titles[type] || '统计详情';
+                document.getElementById('statModalBody').innerHTML = '<div class="loading">加载中...</div>';
+                document.getElementById('statModal').classList.add('active');
+
+                try {
+                    // 加载原始数据
+                    const [postRes, commRes, likeRes] = await Promise.all([
+                        sb.from("posts").select("*").order("created_at", { ascending: false }),
+                        sb.from("comments").select("*").order("created_at"),
+                        sb.from("likes").select("*").order("created_at", { ascending: false })
+                    ]);
+                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER);
+                    statAllComments = commRes.data || [];
+                    statAllLikes = likeRes.data || [];
+
+                    if (type === 'posts') {
+                        renderPostStats();
+                    } else if (type === 'views') {
+                        await renderViewStats();
+                    } else if (type === 'likes') {
+                        renderLikeStats();
+                    }
+                } catch(e) {
+                    document.getElementById('statModalBody').innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
+                    console.error('stat error', e);
+                }
+            };
+
+            // 渲染总动态统计（按用户分组）
+            function renderPostStats() {
+                const body = document.getElementById('statModalBody');
+                // 按 user_name 分组统计
+                const userMap = {};
+                statAllPosts.forEach(p => {
+                    if (!userMap[p.user_name]) userMap[p.user_name] = [];
+                    userMap[p.user_name].push(p);
+                });
+                const entries = Object.entries(userMap).sort((a, b) => b[1].length - a[1].length);
+                
+                if (!entries.length) {
+                    body.innerHTML = '<div class="stat-empty">暂无动态数据</div>';
+                    return;
+                }
+
+                body.innerHTML = entries.map(([name, posts]) => `
+                    <div class="stat-user-group">
+                        <div class="stat-user-header">
+                            <div class="suh-left">
+                                <div class="suh-avatar">${name[0].toUpperCase()}</div>
+                                <span class="suh-name">${name}</span>
+                            </div>
+                            <span class="suh-count">${posts.length} 条</span>
+                        </div>
+                        <div class="stat-user-posts">
+                            ${posts.slice(0, 3).map(p => `
+                                <div class="stat-post-item">
+                                    <span class="spi-content">${p.content || '(图片/视频)'}</span>
+                                    <span class="spi-time">${new Date(p.created_at).toLocaleString()}</span>
+                                </div>
+                            `).join('')}
+                            ${posts.length > 3 ? `
+                                <div style="text-align:center; padding:8px 0;">
+                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${name.replace(/'/g, "\\'")}')">查看全部 ${posts.length} 条</button>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            // 查看指定用户的所有帖子
+            window.loadUserAllPosts = function(userName) {
+                const body = document.getElementById('statModalBody');
+                const userPosts = statAllPosts.filter(p => p.user_name === userName);
+                body.innerHTML = `
+                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">← 返回总动态</button>
+                    <div style="font-weight:700; font-size:15px; margin-bottom:12px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.1);">
+                        ${userName} 的全部帖子（共 ${userPosts.length} 条）
+                    </div>
+                    ${userPosts.map(p => `
+                        <div class="stat-post-item">
+                            <span class="spi-content">${p.content || '(图片/视频)'}</span>
+                            <span class="spi-time">${new Date(p.created_at).toLocaleString()}</span>
+                        </div>
+                    `).join('')}
+                `;
+            };
+
+            // 渲染总浏览统计
+            async function renderViewStats() {
+                const body = document.getElementById('statModalBody');
+                try {
+                    // 尝试从 views 表获取浏览记录
+                    const { data: viewData, error } = await sb.from("views")
+                        .select("*, posts!inner(content, user_name)")
+                        .order("created_at", { ascending: false })
+                        .limit(100);
+                    
+                    if (error || !viewData || !viewData.length) {
+                        // 如果没有 views 表或没有数据，显示提示
+                        body.innerHTML = `
+                            <div class="stat-empty">
+                                <div style="font-size:16px; margin-bottom:8px;">📊 浏览记录</div>
+                                <div style="font-size:13px;">暂无浏览详情数据</div>
+                                <div style="font-size:12px; margin-top:12px; opacity:0.7;">提示：需要在 Supabase SQL Editor 中创建 views 表才能记录浏览详情</div>
+                                <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    body.innerHTML = viewData.map(v => `
+                        <div class="stat-view-item">
+                            <div class="svi-info">
+                                <div class="svi-user">${v.user_name}</div>
+                                <div class="svi-target">浏览了帖子：${v.posts?.content || '(图片/视频)'}</div>
+                            </div>
+                            <span class="svi-time">${new Date(v.created_at).toLocaleString()}</span>
+                        </div>
+                    `).join('') || '<div class="stat-empty">暂无浏览记录</div>';
+                } catch(e) {
+                    console.warn('views表可能不存在', e);
+                    body.innerHTML = `
+                        <div class="stat-empty">
+                            <div style="font-size:16px; margin-bottom:8px;">📊 浏览记录</div>
+                            <div style="font-size:13px;">需要创建 views 数据表</div>
+                            <div style="font-size:12px; margin-top:12px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
+                        </div>
+                    `;
+                }
+            }
+
+            // 渲染总点赞统计
+            function renderLikeStats() {
+                const body = document.getElementById('statModalBody');
+                if (!statAllLikes.length) {
+                    body.innerHTML = '<div class="stat-empty">暂无点赞记录</div>';
+                    return;
+                }
+
+                // 为每个点赞找到对应的帖子内容
+                const postMap = {};
+                statAllPosts.forEach(p => { postMap[p.id] = p; });
+
+                body.innerHTML = statAllLikes.slice(0, 100).map(l => {
+                    const post = postMap[l.post_id];
+                    const postContent = post ? (post.content || '(图片/视频)') : '(已删除)';
+                    return `
+                        <div class="stat-like-item">
+                            <div class="sli-info">
+                                <div class="sli-user">${l.user_name}</div>
+                                <div class="sli-target">点赞了帖子：${postContent}</div>
+                            </div>
+                            <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
+                        </div>
+                    `;
+                }).join('') || '<div class="stat-empty">暂无点赞记录</div>';
             }
 
             // ===================== 聊天系统 =====================
@@ -1600,7 +1944,7 @@
                     el.innerHTML = convs.map(c => {
                         const unread = unreadMap[c.other_user] || 0;
                         return `<div class="chat-list-item" onclick="openChat('${c.other_user.replace(/'/g, "\\'")}')">
-                            <div class="cli-avatar ${c.other_user===ADMIN_NAME?'admin':''}">${c.other_user[0].toUpperCase()}</div>
+                            <div class="cli-avatar">${c.other_user[0].toUpperCase()}</div>
                             <div class="cli-info">
                                 <div class="cli-name">${c.other_user}</div>
                                 <div class="cli-preview">${c.last_message}</div>
@@ -1709,7 +2053,6 @@
                 } catch(e) {}
             }
 
-            // Chat event listeners
             document.getElementById('chatSendBtn').addEventListener('click', sendChatMessage);
             document.getElementById('chatInput').addEventListener('keydown', function(e) {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -1718,20 +2061,11 @@
                 }
             });
 
-            // 优化：使用防抖减少频繁刷新
             let refreshTimeout = null;
             const debouncedLoadFeed = (forceRefresh = false) => {
                 if (refreshTimeout) clearTimeout(refreshTimeout);
                 refreshTimeout = setTimeout(() => loadFeed(forceRefresh), 500);
             };
-
-            // 优化：禁用自动实时刷新以避免页面闪烁
-            // 如需实时更新，可以添加手动刷新按钮
-            // sb.channel('updates')
-            //     .on('postgres_changes', { event:'*', schema:'public', table:'posts' }, () => loadFeed(true))
-            //     .on('postgres_changes', { event:'*', schema:'public', table:'comments' }, () => loadFeed(true))
-            //     .on('postgres_changes', { event:'*', schema:'public', table:'likes' }, () => loadFeed(true))
-            //     .subscribe();
 
             window.addEventListener('DOMContentLoaded', () => { initUI(); initRainAnimation(); initialLoad(); });
         })();
