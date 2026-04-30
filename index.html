@@ -2163,6 +2163,9 @@
             let chatActiveUser = null;
             let chatRealtime = null;
             let chatSending = false;
+            let chatMsgsBusy = false;
+            let chatMsgsDirty = '';
+            let chatMsgsUser = null;
 
             function formatMsgTime(dateStr) {
                 const d = new Date(dateStr);
@@ -2275,9 +2278,16 @@
                 return t && new Date(msg.created_at) <= new Date(t);
             }
 
-            async function loadChatMessages(userName) {
+            async function loadChatMessages(userName, showLoading = true) {
+                if (chatMsgsBusy && chatMsgsUser === userName) {
+                    chatMsgsDirty = userName;
+                    return;
+                }
+                chatMsgsBusy = true;
+                chatMsgsUser = userName;
+                chatMsgsDirty = '';
                 const el = document.getElementById('chatMessages');
-                el.innerHTML = '<div class="chat-loading">加载中...</div>';
+                if (showLoading) el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
                     const { data: msgs, error } = await sb.from("posts")
                         .select("id, user_name, media_url, content, created_at, views")
@@ -2298,6 +2308,12 @@
                 } catch(e) {
                     console.error('loadChatMessages', e);
                     el.innerHTML = `<div class="chat-empty"><div class="ce-icon">⚠️</div><div>${e.message || '加载失败'}</div></div>`;
+                } finally {
+                    chatMsgsBusy = false;
+                    if (chatMsgsDirty === userName) {
+                        chatMsgsDirty = '';
+                        loadChatMessages(userName, false);
+                    }
                 }
             }
 
@@ -2330,11 +2346,7 @@
                         actor_key: DM_MARKER
                     }]);
                     if (error) throw error;
-                    const el = document.getElementById('chatMessages');
-                    const empty = el.querySelector('.chat-empty');
-                    if (empty) el.innerHTML = '';
-                    el.innerHTML += `<div class="chat-msg sent">${content.replace(/</g,'&lt;')}<span class="msg-time">${formatMsgTime(new Date().toISOString())}</span></div>`;
-                    requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+                    await loadChatMessages(chatActiveUser, false);
                 } catch(e) {
                     console.error('[CHAT] send error:', e);
                     showToast('发送失败: ' + (e?.message || e));
@@ -2353,20 +2365,26 @@
             function subscribeToMessages() {
                 if (chatRealtime) { sb.removeChannel(chatRealtime); }
                 chatRealtime = sb.channel('chat-dms')
-                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts', filter: `media_type=eq.${DM_MARKER}` }, payload => {
+                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, payload => {
                         const m = payload.new;
-                        if (m.user_name === currentUser || m.media_url === currentUser) {
-                            if (!chatActiveUser) {
-                                loadChatList();
-                            } else if ((m.user_name === chatActiveUser && m.media_url === currentUser) ||
-                                       (m.user_name === currentUser && m.media_url === chatActiveUser)) {
-                                loadChatMessages(chatActiveUser);
-                            } else if (m.user_name !== currentUser) {
-                                updateUnreadBadge();
-                            }
+                        if (m.media_type !== DM_MARKER) return;
+                        if (!currentUser) return;
+                        if (m.media_url !== currentUser) return;
+                        if (m.user_name === currentUser) return;
+                        if (chatActiveUser === m.user_name) {
+                            loadChatMessages(m.user_name, false);
+                        } else if (!chatActiveUser) {
+                            loadChatList();
+                        } else {
+                            updateUnreadBadge();
                         }
                     })
-                    .subscribe();
+                    .subscribe((status, err) => {
+                        if (err) { console.error('[CHAT-REALTIME]', err); }
+                        else if (status === 'SUBSCRIBED') { console.log('[CHAT-REALTIME] 已连接'); }
+                        else if (status === 'CHANNEL_ERROR') { console.error('[CHAT-REALTIME] 通道错误'); }
+                        else if (status === 'TIMED_OUT') { console.error('[CHAT-REALTIME] 连接超时'); }
+                    });
             }
 
             async function updateUnreadBadge() {
