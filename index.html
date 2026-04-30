@@ -53,19 +53,19 @@
             content: '';
             position: absolute;
             inset: -50%;
-            background: radial-gradient(circle at 20% 50%, rgba(5, 150, 105, 0.15) 0%, transparent 50%),
-                        radial-gradient(circle at 80% 20%, rgba(52, 211, 153, 0.12) 0%, transparent 45%),
-                        radial-gradient(circle at 40% 80%, rgba(255, 159, 10, 0.1) 0%, transparent 50%),
-                        radial-gradient(circle at 70% 70%, rgba(255, 59, 96, 0.08) 0%, transparent 40%);
-            animation: liquidFlow 15s ease-in-out infinite;
-            filter: blur(60px);
+            background: radial-gradient(circle at 20% 50%, rgba(5, 150, 105, 0.08) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(52, 211, 153, 0.06) 0%, transparent 45%),
+                        radial-gradient(circle at 40% 80%, rgba(255, 159, 10, 0.05) 0%, transparent 50%),
+                        radial-gradient(circle at 70% 70%, rgba(255, 59, 96, 0.04) 0%, transparent 40%);
+            animation: liquidFlow 30s ease-in-out infinite;
+            filter: blur(80px);
         }
 
         @keyframes liquidFlow {
             0%, 100% { transform: translate(0, 0) rotate(0deg); }
-            25% { transform: translate(3%, 2%) rotate(5deg); }
-            50% { transform: translate(-2%, 4%) rotate(-3deg); }
-            75% { transform: translate(4%, -3%) rotate(4deg); }
+            25% { transform: translate(2%, 1.5%) rotate(3deg); }
+            50% { transform: translate(-1.5%, 3%) rotate(-2deg); }
+            75% { transform: translate(2.5%, -2%) rotate(2.5deg); }
         }
 
         #rainCanvas {
@@ -139,15 +139,15 @@
             content: '';
             position: absolute;
             inset: -2px;
-            background: linear-gradient(45deg, transparent 30%, rgba(255, 255, 255, 0.3) 50%, transparent 70%);
+            background: linear-gradient(45deg, transparent 40%, rgba(255, 255, 255, 0.12) 50%, transparent 60%);
             transform: translateX(-100%);
-            animation: glassShine 6s ease-in-out infinite;
+            animation: glassShine 12s ease-in-out infinite;
             pointer-events: none;
         }
 
         @keyframes glassShine {
             0% { transform: translateX(-100%); }
-            20%, 100% { transform: translateX(200%); }
+            30%, 100% { transform: translateX(200%); }
         }
 
         nav {
@@ -550,15 +550,15 @@
             content: '';
             position: absolute;
             inset: -2px;
-            background: linear-gradient(45deg, transparent 30%, rgba(255, 255, 255, 0.25) 50%, transparent 70%);
+            background: linear-gradient(45deg, transparent 45%, rgba(255, 255, 255, 0.1) 50%, transparent 55%);
             transform: translateX(-100%);
-            animation: chatShine 8s ease-in-out infinite;
+            animation: chatShine 15s ease-in-out infinite;
             pointer-events: none;
         }
 
         @keyframes chatShine {
             0% { transform: translateX(-100%); }
-            25%, 100% { transform: translateX(200%); }
+            35%, 100% { transform: translateX(200%); }
         }
         .chat-overlay.active .chat-panel { transform: translateY(0); }
         .chat-header {
