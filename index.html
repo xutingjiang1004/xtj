@@ -1250,85 +1250,139 @@
         .post-detail-media video { border-radius:12px; max-height:300px; width:100%; }
         .post-detail-stats { font-size:12px; color:var(--text-muted); margin-bottom:14px; }
 
-        /* ========== AI 助手 ========== */
-        .ai-nav-btn {
-            display: flex; align-items: center; gap: 4px;
-            padding: 6px 14px; border-radius: 99px;
-            border: 1px solid rgba(59,130,246,0.25);
-            background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(99,102,241,0.06));
-            color: #3b82f6; font-size: 13px; font-weight: 600; cursor: pointer;
-            transition: all 0.3s; white-space: nowrap;
-            font-family: inherit;
+        /* ========== App容器 / Dock / 面板 ========== */
+        .app-container {
+            display: flex; flex-direction: column;
+            height: 100vh; height: 100dvh;
+            overflow: hidden;
+            max-width: 640px; margin: 0 auto;
         }
-        .ai-nav-btn:hover {
-            background: linear-gradient(135deg, rgba(59,130,246,0.15), rgba(99,102,241,0.12));
-            border-color: rgba(59,130,246,0.45);
-            transform: scale(1.04);
+        .dock-panels { flex: 1; overflow: hidden; position: relative; }
+        .dock-panel {
+            position: absolute; inset: 0;
+            overflow-y: auto; overflow-x: hidden;
+            -webkit-overflow-scrolling: touch;
+            opacity: 0; pointer-events: none;
+            transform: translateY(12px);
+            transition: opacity 0.35s cubic-bezier(0.16,1,0.3,1), transform 0.35s cubic-bezier(0.16,1,0.3,1);
+            padding: 16px;
         }
-        .ai-nav-btn:active { transform: scale(0.96); }
-        [data-theme="dark"] .ai-nav-btn {
-            background: linear-gradient(135deg, rgba(59,130,246,0.12), rgba(99,102,241,0.08));
-            border-color: rgba(59,130,246,0.2);
-            color: #60a5fa;
+        .dock-panel.active {
+            opacity: 1; pointer-events: all;
+            transform: translateY(0);
         }
-        [data-theme="dark"] .ai-nav-btn:hover {
-            background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.14));
-            border-color: rgba(59,130,246,0.4);
+        .dock-bar {
+            flex-shrink: 0;
+            display: flex; justify-content: center; align-items: center;
+            gap: 6px; padding: 8px 16px 12px;
+            background: linear-gradient(180deg,
+                rgba(255,255,255,0) 0%,
+                rgba(255,255,255,0.3) 8%,
+                rgba(255,255,255,0.5) 30%,
+                rgba(255,255,255,0.55) 100%);
+            backdrop-filter: blur(30px) saturate(180%);
+            -webkit-backdrop-filter: blur(30px) saturate(180%);
+            border-top: 1px solid rgba(255,255,255,0.35);
+            box-shadow: 0 -4px 24px rgba(0,0,0,0.04);
+            position: relative;
+            z-index: 100;
+        }
+        .dock-bar::before {
+            content: ''; position: absolute; top: -12px; left: 0; right: 0; height: 24px;
+            background: linear-gradient(180deg, transparent, rgba(255,255,255,0.15));
+            pointer-events: none;
+        }
+        .dock-tab {
+            flex: 1; max-width: 100px;
+            display: flex; flex-direction: column; align-items: center; gap: 2px;
+            padding: 8px 12px; border-radius: 16px;
+            border: none; background: transparent;
+            cursor: pointer; font-family: inherit;
+            transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
+            color: var(--text-muted); font-size: 10px;
+            position: relative;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .dock-tab .dt-icon {
+            font-size: 24px; line-height: 1;
+            transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
+            position: relative; z-index: 1;
+        }
+        .dock-tab .dt-label {
+            font-weight: 500; letter-spacing: 0.3px;
+            transition: all 0.3s;
+        }
+        .dock-tab.active {
+            color: #059669;
+            transform: translateY(-4px);
+        }
+        .dock-tab.active .dt-icon {
+            filter: drop-shadow(0 4px 8px rgba(5,150,105,0.25));
+        }
+        .dock-tab.active .dt-label { font-weight: 700; }
+        .dock-tab:active { transform: scale(0.9); }
+        .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
+        .dock-tab::after {
+            content: ''; position: absolute; top: 4px; left: 20%; right: 20%; bottom: 50%;
+            background: rgba(5,150,105,0.1);
+            border-radius: 50%;
+            opacity: 0; transform: scale(0.3);
+            transition: all 0.4s cubic-bezier(0.16,1,0.3,1);
+            pointer-events: none;
+        }
+        .dock-tab.active::after {
+            opacity: 1; transform: scale(1);
+        }
+        /* Dock 液态指示器 */
+        .dock-indicator {
+            position: absolute; top: -3px; left: 0;
+            height: 3px; border-radius: 0 0 3px 3px;
+            background: linear-gradient(90deg, #059669, #34d399);
+            transition: left 0.4s cubic-bezier(0.16,1,0.3,1), width 0.4s cubic-bezier(0.16,1,0.3,1);
+            box-shadow: 0 0 8px rgba(5,150,105,0.4);
         }
 
-        .ai-chat-container {
-            position: fixed; bottom: 92px; right: 24px; z-index: 920;
-            width: 360px; max-height: 520px;
-            background: rgba(255,255,255,0.92);
-            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-            border-radius: 20px;
-            border: 1px solid rgba(255,255,255,0.4);
-            box-shadow: 0 16px 48px rgba(0,0,0,0.15), 0 4px 16px rgba(0,0,0,0.08);
-            display: flex; flex-direction: column;
-            opacity: 0; transform: translateY(16px) scale(0.94);
-            pointer-events: none;
-            transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
-            overflow: hidden;
+        /* Dock面板: 聊天 (复用聊天样式，去掉overlay固定定位) */
+        .dock-chat-container {
+            display: flex; flex-direction: column; height: 100%;
         }
-        .ai-chat-container.active {
-            opacity: 1; transform: translateY(0) scale(1);
-            pointer-events: all;
-        }
-        .ai-chat-header {
-            padding: 12px 16px;
+        .dock-chat-container .chat-header {
+            padding: 12px 0; margin-bottom: 8px;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+            background: transparent; flex-shrink: 0;
             display: flex; align-items: center; gap: 8px;
-            border-bottom: 1px solid rgba(0,0,0,0.08);
-            flex-shrink: 0;
         }
-        .ai-chat-header .ai-title {
-            font-weight: 700; font-size: 15px; color: var(--text-main);
-            flex: 1;
+        .dock-chat-container .chat-view { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        .dock-chat-container .chat-view.hidden { display: none; }
+        .dock-chat-container .chat-list-item { border-bottom-color: rgba(0,0,0,0.04); }
+
+        /* Dock面板: AI (内嵌风格，与聊天统一) */
+        .dock-ai-container {
+            display: flex; flex-direction: column; height: 100%;
         }
-        .ai-model-select {
-            padding: 5px 8px; border-radius: 8px;
-            border: 1px solid rgba(0,0,0,0.12);
-            background: rgba(0,0,0,0.04);
-            font-size: 11px; color: var(--text-main);
-            outline: none; cursor: pointer;
+        .dock-ai-container .ai-chat-header {
+            padding: 12px 0; margin-bottom: 8px;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+            flex-shrink: 0; display: flex; align-items: center; gap: 8px;
         }
-        .ai-close-btn {
-            width: 28px; height: 28px; border-radius: 50%;
-            border: none; background: rgba(0,0,0,0.06);
-            color: var(--text-muted); font-size: 14px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            transition: all 0.2s;
+        .dock-ai-container .ai-chat-header .ai-title {
+            font-weight: 700; font-size: 16px; color: var(--text-main); flex: 1;
         }
-        .ai-close-btn:hover { background: rgba(255,59,96,0.15); color: #ff3b60; }
-        .ai-chat-body {
-            flex: 1; overflow-y: auto; padding: 12px 14px;
+        .dock-ai-container .ai-chat-body {
+            flex: 1; overflow-y: auto; padding: 6px 0;
             display: flex; flex-direction: column; gap: 10px;
-            min-height: 200px; max-height: 360px;
+            min-height: 0;
             -webkit-overflow-scrolling: touch;
         }
+        .dock-ai-container .ai-chat-footer {
+            padding: 10px 0; border-top: 1px solid rgba(0,0,0,0.06);
+            display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0;
+        }
+
+        /* AI气泡样式保持 */
         .ai-welcome {
             text-align: center; color: var(--text-muted);
-            font-size: 13px; padding: 30px 20px;
-            line-height: 1.6;
+            font-size: 13px; padding: 30px 20px; line-height: 1.6;
         }
         .ai-welcome .ai-welcome-icon { font-size: 36px; margin-bottom: 8px; display: block; }
         .ai-msg {
@@ -1336,69 +1390,49 @@
             max-width: 92%;
         }
         .ai-msg.assistant { align-self: flex-start; }
-        .ai-msg.user {
-            align-self: flex-end;
-            flex-direction: row-reverse;
-            max-width: 88%;
-        }
+        .ai-msg.user { align-self: flex-end; flex-direction: row-reverse; max-width: 88%; }
         @keyframes aiMsgIn {
             from { opacity: 0; transform: translateY(8px); }
             to { opacity: 1; transform: translateY(0); }
         }
         .ai-avatar {
-            width: 30px; height: 30px; border-radius: 50%;
-            flex-shrink: 0;
+            width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
-            font-size: 14px;
+            font-size: 14px; font-weight: 700;
         }
         .ai-msg.assistant .ai-avatar {
-            background: linear-gradient(135deg, #3b82f6, #6366f1);
-            color: white;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white;
         }
         .ai-msg.user .ai-avatar {
-            background: linear-gradient(135deg, #059669, #34d399);
-            color: white;
+            background: linear-gradient(135deg, #059669, #34d399); color: white;
         }
         .ai-bubble {
             padding: 10px 14px; border-radius: 16px;
             font-size: 14px; line-height: 1.55;
-            word-break: break-word; white-space: pre-wrap;
-            position: relative;
+            word-break: break-word; white-space: pre-wrap; position: relative;
         }
         .ai-msg.assistant .ai-bubble {
-            background: rgba(0,0,0,0.04);
-            border-radius: 4px 16px 16px 16px;
-            color: var(--text-main);
+            background: rgba(0,0,0,0.04); border-radius: 4px 16px 16px 16px; color: var(--text-main);
         }
         .ai-msg.user .ai-bubble {
-            background: linear-gradient(135deg, #3b82f6, #6366f1);
-            border-radius: 16px 4px 16px 16px;
-            color: white;
+            background: linear-gradient(135deg, #059669, #10b981);
+            border-radius: 16px 4px 16px 16px; color: white;
         }
         .ai-bubble .ai-streaming-cursor {
             display: inline-block; width: 6px; height: 14px;
             background: var(--text-main); margin-left: 2px;
-            border-radius: 2px;
-            animation: aiCursor 0.8s infinite;
-            vertical-align: middle;
+            border-radius: 2px; animation: aiCursor 0.8s infinite; vertical-align: middle;
         }
-        @keyframes aiCursor {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0; }
-        }
+        @keyframes aiCursor { 0%,100%{opacity:1} 50%{opacity:0} }
         .ai-reasoning-toggle {
             display: inline-flex; align-items: center; gap: 4px;
             font-size: 11px; color: #6366f1; cursor: pointer;
             padding: 4px 8px; border-radius: 6px;
-            background: rgba(99,102,241,0.08);
-            border: none; margin-bottom: 6px;
+            background: rgba(99,102,241,0.08); border: none; margin-bottom: 6px;
             transition: all 0.2s;
         }
         .ai-reasoning-toggle:hover { background: rgba(99,102,241,0.15); }
-        .ai-reasoning-toggle .ar-arrow {
-            display: inline-block; transition: transform 0.2s;
-            font-size: 9px;
-        }
+        .ai-reasoning-toggle .ar-arrow { display: inline-block; transition: transform 0.2s; font-size: 9px; }
         .ai-reasoning-toggle.expanded .ar-arrow { transform: rotate(180deg); }
         .ai-reasoning-content {
             font-size: 12px; color: var(--text-muted);
@@ -1406,13 +1440,7 @@
             border-left: 2px solid rgba(99,102,241,0.3);
             padding: 8px 12px; margin-bottom: 6px;
             border-radius: 4px 8px 8px 4px;
-            line-height: 1.5; white-space: pre-wrap;
-            word-break: break-word;
-        }
-        .ai-chat-footer {
-            padding: 10px 14px; border-top: 1px solid rgba(0,0,0,0.08);
-            display: flex; gap: 8px; align-items: flex-end;
-            flex-shrink: 0;
+            line-height: 1.5; white-space: pre-wrap; word-break: break-word;
         }
         .ai-chat-footer textarea {
             flex: 1; padding: 10px 14px; border-radius: 14px;
@@ -1424,24 +1452,21 @@
             transition: all 0.3s;
         }
         .ai-chat-footer textarea:focus {
-            border-color: rgba(59,130,246,0.4);
-            background: rgba(59,130,246,0.04);
+            border-color: rgba(5,150,105,0.4);
+            background: rgba(5,150,105,0.04);
         }
         .ai-chat-footer textarea::placeholder { color: var(--text-muted); }
         .ai-send-btn {
             width: 38px; height: 38px; border-radius: 50%;
             border: none; cursor: pointer; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
-            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            background: linear-gradient(135deg, #059669, #10b981);
             color: white; font-size: 16px;
             transition: all 0.3s;
-            box-shadow: 0 2px 10px rgba(59,130,246,0.3);
+            box-shadow: 0 2px 10px rgba(5,150,105,0.3);
         }
-        .ai-send-btn:hover { transform: scale(1.06); box-shadow: 0 4px 16px rgba(59,130,246,0.4); }
-        .ai-send-btn:disabled {
-            opacity: 0.4; transform: none !important;
-            box-shadow: none; cursor: not-allowed;
-        }
+        .ai-send-btn:hover { transform: scale(1.06); box-shadow: 0 4px 16px rgba(5,150,105,0.4); }
+        .ai-send-btn:disabled { opacity: 0.4; transform: none !important; box-shadow: none; cursor: not-allowed; }
         .ai-thinking {
             display: inline-flex; align-items: center; gap: 6px;
             font-size: 12px; color: #6366f1; padding: 8px 0;
@@ -1449,59 +1474,49 @@
         .ai-thinking-dots { display: inline-flex; gap: 3px; }
         .ai-thinking-dots span {
             width: 5px; height: 5px; border-radius: 50%;
-            background: #6366f1;
-            animation: aiDot 1.2s infinite;
+            background: #6366f1; animation: aiDot 1.2s infinite;
         }
         .ai-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
         .ai-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
         @keyframes aiDot {
-            0%, 80%, 100% { opacity: 0.3; transform: scale(0.7); }
-            40% { opacity: 1; transform: scale(1); }
-        }
-        .ai-chat-body .ai-scroll-anchor {
-            height: 1px; flex-shrink: 0;
+            0%,80%,100%{opacity:0.3;transform:scale(0.7)} 40%{opacity:1;transform:scale(1)}
         }
 
-        /* 暗色模式 AI */
-        [data-theme="dark"] .ai-chat-container {
-            background: rgba(22,22,36,0.94);
-            border-color: rgba(255,255,255,0.08);
-            box-shadow: 0 16px 48px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.3);
-        }
-        [data-theme="dark"] .ai-chat-header {
-            border-bottom-color: rgba(255,255,255,0.06);
-        }
-        [data-theme="dark"] .ai-model-select {
-            background: rgba(255,255,255,0.06);
-            border-color: rgba(255,255,255,0.1);
-            color: var(--text-main);
-        }
-        [data-theme="dark"] .ai-close-btn {
-            background: rgba(255,255,255,0.06);
-        }
-        [data-theme="dark"] .ai-msg.assistant .ai-bubble {
-            background: rgba(255,255,255,0.06);
-            color: var(--text-main);
-        }
-        [data-theme="dark"] .ai-chat-footer {
+        /* 暗色模式 Dock + AI */
+        [data-theme="dark"] .dock-bar {
+            background: linear-gradient(180deg,
+                rgba(0,0,0,0) 0%,
+                rgba(15,15,26,0.4) 8%,
+                rgba(15,15,26,0.6) 30%,
+                rgba(15,15,26,0.7) 100%);
             border-top-color: rgba(255,255,255,0.06);
+            box-shadow: 0 -4px 24px rgba(0,0,0,0.2);
+        }
+        [data-theme="dark"] .dock-bar::before {
+            background: linear-gradient(180deg, transparent, rgba(0,0,0,0.2));
+        }
+        [data-theme="dark"] .dock-tab { color: #9e9eb0; }
+        [data-theme="dark"] .dock-tab.active { color: #34d399; }
+        [data-theme="dark"] .dock-tab::after { background: rgba(52,211,153,0.12); }
+        [data-theme="dark"] .dock-indicator { background: linear-gradient(90deg, #059669, #34d399); box-shadow: 0 0 10px rgba(52,211,153,0.5); }
+        [data-theme="dark"] .dock-chat-container .chat-header { border-bottom-color: rgba(255,255,255,0.06); }
+        [data-theme="dark"] .dock-chat-container .chat-list-item { border-bottom-color: rgba(255,255,255,0.03); }
+        [data-theme="dark"] .dock-ai-container .ai-chat-header { border-bottom-color: rgba(255,255,255,0.06); }
+        [data-theme="dark"] .dock-ai-container .ai-chat-footer { border-top-color: rgba(255,255,255,0.06); }
+        [data-theme="dark"] .ai-msg.assistant .ai-bubble {
+            background: rgba(255,255,255,0.06); color: var(--text-main);
         }
         [data-theme="dark"] .ai-chat-footer textarea {
-            background: rgba(255,255,255,0.04);
-            border-color: rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08);
             color: var(--text-main);
         }
         [data-theme="dark"] .ai-chat-footer textarea:focus {
-            border-color: rgba(59,130,246,0.4);
-            background: rgba(59,130,246,0.08);
+            border-color: rgba(5,150,105,0.4); background: rgba(5,150,105,0.08);
         }
         [data-theme="dark"] .ai-reasoning-content {
-            background: rgba(99,102,241,0.08);
-            border-left-color: rgba(99,102,241,0.4);
+            background: rgba(99,102,241,0.08); border-left-color: rgba(99,102,241,0.4);
         }
-        [data-theme="dark"] .ai-bubble .ai-streaming-cursor {
-            background: var(--text-main);
-        }
+        [data-theme="dark"] .ai-bubble .ai-streaming-cursor { background: var(--text-main); }
     </style>
 </head>
 <body>
@@ -1512,19 +1527,19 @@
 
     <div class="toast-container" id="toastContainer"></div>
 
+    <div class="app-container">
     <nav style="position:relative; z-index:3;">
         <div style="display:flex; align-items:center; gap:8px;">
             <h1>xtj</h1>
             <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
         </div>
-        <button class="ai-nav-btn" id="aiNavBtn" onclick="toggleAIChat()" title="DeepSeek AI">🧠 DeepSeek</button>
         <div class="nav-auth">
             <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
                 <button class="btn btn-primary" onclick="openAuthModal('login')">登录</button>
                 <button class="btn btn-ghost" onclick="openAuthModal('register')">注册</button>
             </div>
             <div id="authUI" style="display: none;">
-                <button class="nav-chat-btn" onclick="openChatList()" title="消息">💬<span class="nav-chat-badge" id="navChatBadge">0</span></button>
+                <button class="nav-chat-btn" onclick="switchDockTab('chat')" title="消息">💬<span class="nav-chat-badge" id="navChatBadge">0</span></button>
                 <div class="user-pill">
                     <span class="avatar" id="myAvatar" style="width:24px; height:24px; font-size:12px;">?</span>
                     <span id="myName"></span>
@@ -1534,33 +1549,98 @@
         </div>
     </nav>
 
-    <div class="wrap" style="position:relative; z-index:2;">
-        <div class="publish-box glass">
-            <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
-            <div class="publish-footer">
-                <label for="fileInp" class="file-label">📷 选取照片或视频</label>
-                <input type="file" id="fileInp" accept="image/*,video/*" style="display:none" />
-                <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
+    <div class="dock-panels" id="dockPanels">
+        <div class="dock-panel active" id="panelPosts">
+            <div class="wrap" style="position:relative; z-index:2; margin:0; padding:16px 0; max-width:100%;">
+                <div class="publish-box glass">
+                    <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
+                    <div class="publish-footer">
+                        <label for="fileInp" class="file-label">📷 选取照片或视频</label>
+                        <input type="file" id="fileInp" accept="image/*,video/*" style="display:none" />
+                        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
+                    </div>
+                </div>
+
+                <div class="stats">
+                    <div class="stat-card glass" onclick="openStatDetail('posts')" title="点击查看详情"><b id="sPosts">0</b><span>总动态</span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('views')" title="点击查看详情"><b id="sViews">0</b><span>总浏览</span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>点赞和评论</span></div>
+                </div>
+
+                <div id="feed" class="feed">
+                    <div class="loading">内容加载中...</div>
+                </div>
             </div>
         </div>
 
-        <div class="stats">
-            <div class="stat-card glass" onclick="openStatDetail('posts')" title="点击查看详情"><b id="sPosts">0</b><span>总动态</span></div>
-            <div class="stat-card glass" onclick="openStatDetail('views')" title="点击查看详情"><b id="sViews">0</b><span>总浏览</span></div>
-            <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>点赞和评论</span></div>
+        <div class="dock-panel" id="panelChat">
+            <div class="dock-chat-container" id="dockChatContainer">
+                <div class="chat-header">
+                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">‹</button>
+                    <h3 id="dockChatTitle">消息</h3>
+                </div>
+                <div id="dockChatListView" class="chat-view">
+                    <div id="dockChatList" class="chat-list"></div>
+                </div>
+                <div id="dockChatDetailView" class="chat-view hidden">
+                    <div id="dockChatMessages" class="chat-messages"></div>
+                    <div class="chat-input-area">
+                        <div class="chat-input-row">
+                            <div class="chat-input-wrap">
+                                <input id="dockChatInput" placeholder="输入消息..." maxlength="500" />
+                                <div id="dockChatFilePreview" class="chat-file-preview hidden">
+                                    <div class="cfp-thumb" id="dockCfpThumb">
+                                        <button class="cfp-x" id="dockCfpRemove" title="移除">✕</button>
+                                    </div>
+                                    <span class="cfp-name" id="dockCfpName"></span>
+                                </div>
+                            </div>
+                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送图片">📷</button>
+                            <button class="send-btn" id="dockChatSendBtn">➤</button>
+                        </div>
+                    </div>
+                    <input type="file" id="dockChatFileInp" accept="image/*,video/*" style="display:none" />
+                </div>
+            </div>
         </div>
 
-        <div class="chat-entry-bar glass" id="chatEntryBar" onclick="openChatList()" style="display:none;">
-            <span class="ceb-icon">💬</span>
-            <span class="ceb-label">聊天</span>
-            <span class="ceb-notify" id="cebNotify" style="display:none;"></span>
-        </div>
-
-        <div id="feed" class="feed">
-            <div class="loading">内容加载中...</div>
+        <div class="dock-panel" id="panelAI">
+            <div class="dock-ai-container" id="dockAIContainer">
+                <div class="ai-chat-header">
+                    <span class="ai-title">DeepSeek AI</span>
+                </div>
+                <div class="ai-chat-body" id="dockAIBody">
+                    <div class="ai-welcome" id="dockAIWelcome">
+                        <span class="ai-welcome-icon">🧠</span>
+                        你好！我是 DeepSeek AI 助手<br>直接输入问题开始对话
+                    </div>
+                </div>
+                <div class="ai-chat-footer">
+                    <textarea id="dockAIInput" placeholder="输入你的问题..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();dockSendAI();}"></textarea>
+                    <button class="ai-send-btn" id="dockAISendBtn" title="发送" onclick="dockSendAI()">➤</button>
+                </div>
+            </div>
         </div>
     </div>
 
+    <div class="dock-bar" id="dockBar">
+        <div class="dock-indicator" id="dockIndicator"></div>
+        <button class="dock-tab active" data-tab="posts">
+            <span class="dt-icon">📝</span>
+            <span class="dt-label">帖子</span>
+        </button>
+        <button class="dock-tab" data-tab="chat">
+            <span class="dt-icon">💬</span>
+            <span class="dt-label">聊天</span>
+        </button>
+        <button class="dock-tab" data-tab="ai">
+            <span class="dt-icon">🧠</span>
+            <span class="dt-label">AI</span>
+        </button>
+    </div>
+    </div>
+
+    <!-- ========== 模态框(保留) ========== -->
     <div class="modal-overlay" id="commentModal">
         <div class="modal-box glass">
             <h3 style="margin-top:0;">发表评论</h3>
@@ -1583,7 +1663,6 @@
         </div>
     </div>
 
-    <!-- ========== 登录模态框 ========== -->
     <div class="modal-overlay" id="loginModal" onclick="if(event.target===this)closeModal('loginModal')">
         <div class="modal-box glass" style="padding: 32px;" onclick="event.stopPropagation()">
             <div class="auth-form">
@@ -1596,7 +1675,6 @@
         </div>
     </div>
 
-    <!-- ========== 注册模态框 ========== -->
     <div class="modal-overlay" id="registerModal" onclick="if(event.target===this)closeModal('registerModal')">
         <div class="modal-box glass" style="padding: 32px;" onclick="event.stopPropagation()">
             <div class="auth-form">
@@ -1609,7 +1687,6 @@
         </div>
     </div>
 
-    <!-- ========== 图片查看器 ========== -->
     <div class="img-viewer" id="imgViewer">
         <button class="iv-close" onclick="closeImageViewer()">&times;</button>
         <div class="iv-wrapper" id="ivWrapper">
@@ -1618,40 +1695,6 @@
         <div class="iv-zoom-hint" id="ivZoomHint">捏合双指可缩放</div>
     </div>
 
-    <!-- ========== 聊天系统 ========== -->
-    <div class="chat-overlay" id="chatOverlay" onclick="if(event.target===this)closeChat()">
-        <div class="chat-panel" id="chatPanel">
-            <div class="chat-header">
-                <button class="back-btn" id="chatBackBtn" onclick="chatGoBack()">‹</button>
-                <h3 id="chatTitle">消息</h3>
-                <button class="chat-close-btn" onclick="closeChat()">✕</button>
-            </div>
-            <div id="chatListView" class="chat-view">
-                <div id="chatList" class="chat-list"></div>
-            </div>
-            <div id="chatDetailView" class="chat-view hidden">
-                <div id="chatMessages" class="chat-messages"></div>
-                <div class="chat-input-area">
-                    <div class="chat-input-row">
-                        <div class="chat-input-wrap">
-                            <input id="chatInput" placeholder="输入消息..." maxlength="500" />
-                            <div id="chatFilePreview" class="chat-file-preview hidden">
-                                <div class="cfp-thumb" id="cfpThumb">
-                                    <button class="cfp-x" id="cfpRemove" title="移除">✕</button>
-                                </div>
-                                <span class="cfp-name" id="cfpName"></span>
-                            </div>
-                        </div>
-                        <button class="chat-img-btn" id="chatImgBtn" title="发送图片">📷</button>
-                        <button class="send-btn" id="chatSendBtn">➤</button>
-                    </div>
-                </div>
-                <input type="file" id="chatFileInp" accept="image/*,video/*" style="display:none" />
-            </div>
-        </div>
-    </div>
-
-    <!-- ========== 数据统计详情模态框 ========== -->
     <div class="modal-overlay" id="statModal" onclick="if(event.target===this)closeModal('statModal')">
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
@@ -1664,7 +1707,6 @@
         </div>
     </div>
 
-    <!-- ========== 帖子详情二次弹窗 ========== -->
     <div class="modal-overlay" id="postDetailModal" onclick="if(event.target===this)closeModal('postDetailModal')">
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
@@ -1674,24 +1716,6 @@
             <div class="stat-detail-body" id="postDetailBody">
                 加载中...
             </div>
-        </div>
-    </div>
-
-    <!-- ========== AI 助手 ========== -->
-    <div class="ai-chat-container" id="aiChatContainer">
-        <div class="ai-chat-header">
-            <span class="ai-title">DeepSeek AI</span>
-            <button class="ai-close-btn" onclick="toggleAIChat()">✕</button>
-        </div>
-        <div class="ai-chat-body" id="aiChatBody">
-            <div class="ai-welcome" id="aiWelcome">
-                <span class="ai-welcome-icon">🤖</span>
-                你好！我是 DeepSeek AI 助手<br>选择模型后开始对话吧
-            </div>
-        </div>
-        <div class="ai-chat-footer">
-            <textarea id="aiInput" placeholder="输入你的问题..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAIMessage();}"></textarea>
-            <button class="ai-send-btn" id="aiSendBtn" title="发送" onclick="sendAIMessage()">➤</button>
         </div>
     </div>
 
@@ -3075,61 +3099,6 @@
                 } catch(e) {}
             }
 
-            document.getElementById('chatSendBtn').addEventListener('click', sendChatMessage);
-            document.getElementById('chatInput').addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    sendChatMessage();
-                }
-            });
-            document.getElementById('chatImgBtn').addEventListener('click', function() {
-                document.getElementById('chatFileInp').click();
-            });
-            document.getElementById('chatFileInp').addEventListener('change', function() {
-                if (this.files && this.files[0]) {
-                    showChatFilePreview(this.files[0]);
-                }
-            });
-            document.getElementById('cfpRemove').addEventListener('click', function() {
-                clearChatFilePreview();
-            });
-
-            let _chatPreviewUrl = null;
-
-            function showChatFilePreview(file) {
-                const preview = document.getElementById('chatFilePreview');
-                const input = document.getElementById('chatInput');
-                const thumb = document.getElementById('cfpThumb');
-                const name = document.getElementById('cfpName');
-                const isVideo = file.type.startsWith('video/');
-                if (_chatPreviewUrl) { URL.revokeObjectURL(_chatPreviewUrl); _chatPreviewUrl = null; }
-                const xBtn = thumb.querySelector('.cfp-x');
-                thumb.innerHTML = '';
-                if (isVideo) {
-                    thumb.innerHTML = '<span class="cfp-video-icon">🎬</span>';
-                } else {
-                    const img = document.createElement('img');
-                    _chatPreviewUrl = URL.createObjectURL(file);
-                    img.src = _chatPreviewUrl;
-                    thumb.appendChild(img);
-                }
-                if (xBtn) thumb.appendChild(xBtn);
-                name.textContent = file.name;
-                input.classList.add('hidden');
-                preview.classList.remove('hidden');
-            }
-
-            function clearChatFilePreview() {
-                const preview = document.getElementById('chatFilePreview');
-                const input = document.getElementById('chatInput');
-                const fileInput = document.getElementById('chatFileInp');
-                if (_chatPreviewUrl) { URL.revokeObjectURL(_chatPreviewUrl); _chatPreviewUrl = null; }
-                preview.classList.add('hidden');
-                input.classList.remove('hidden');
-                fileInput.value = '';
-                input.focus();
-            }
-
             let refreshTimeout = null;
             const debouncedLoadFeed = (forceRefresh = false) => {
                 if (refreshTimeout) clearTimeout(refreshTimeout);
@@ -3138,46 +3107,318 @@
 
             // ========== iOS 键盘适配 ==========
             if (window.visualViewport) {
-                let _vLockScrollTop = 0;
                 window.visualViewport.addEventListener('resize', function() {
-                    const overlay = document.getElementById('chatOverlay');
-                    const aiContainer = document.getElementById('aiChatContainer');
-                    const diff = window.innerHeight - window.visualViewport.height;
+                    var panels = document.getElementById('dockPanels');
+                    if (!panels) return;
+                    var diff = window.innerHeight - window.visualViewport.height;
                     if (diff > 60) {
-                        if (!document.body.style.position) {
-                            _vLockScrollTop = window.scrollY;
-                            document.body.style.position = 'fixed';
-                            document.body.style.top = '-' + _vLockScrollTop + 'px';
-                            document.body.style.width = '100%';
-                        }
-                        if (overlay.classList.contains('active')) {
-                            overlay.style.setProperty('height', window.visualViewport.height + 'px', 'important');
-                            const panel = document.getElementById('chatPanel');
-                            panel.style.setProperty('max-height', 'none', 'important');
-                            panel.style.setProperty('height', (window.visualViewport.height - 16) + 'px', 'important');
-                            panel.style.setProperty('border-radius', '24px 24px 0 0', 'important');
-                        }
-                        if (aiContainer.classList.contains('active')) {
-                            aiContainer.style.setProperty('bottom', (diff + 8) + 'px', 'important');
-                            aiContainer.style.setProperty('max-height', (window.visualViewport.height - 32) + 'px', 'important');
-                        }
+                        panels.style.paddingBottom = diff + 'px';
                     } else {
-                        if (document.body.style.position === 'fixed') {
-                            document.body.style.position = '';
-                            document.body.style.top = '';
-                            document.body.style.width = '';
-                            window.scrollTo(0, _vLockScrollTop);
-                            _vLockScrollTop = 0;
-                        }
-                        overlay.style.height = '';
-                        const panel = document.getElementById('chatPanel');
-                        if (panel) { panel.style.maxHeight = ''; panel.style.height = ''; panel.style.borderRadius = ''; }
-                        if (aiContainer) { aiContainer.style.bottom = ''; aiContainer.style.maxHeight = ''; }
+                        panels.style.paddingBottom = '';
                     }
                 });
             }
 
-            window.addEventListener('DOMContentLoaded', () => { initUI(); initRainAnimation(); initialLoad(); });
+            // ========== Dock 切换 ==========
+            let currentDockTab = 'posts';
+            window.switchDockTab = function(tab) {
+                if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
+                if (tab === currentDockTab) return;
+                currentDockTab = tab;
+                document.querySelectorAll('.dock-panel').forEach(p => p.classList.remove('active'));
+                document.querySelectorAll('.dock-tab').forEach(t => t.classList.remove('active'));
+                const panel = document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1));
+                if (panel) panel.classList.add('active');
+                const tabBtn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
+                if (tabBtn) {
+                    tabBtn.classList.add('active');
+                    updateDockIndicator(tabBtn);
+                }
+                if (tab === 'chat') { loadDockChatList(); startDMPolling(30000); }
+                if (tab === 'ai') { scrollDockAIBottom(); }
+            };
+
+            function updateDockIndicator(activeBtn) {
+                const bar = document.getElementById('dockBar');
+                const indicator = document.getElementById('dockIndicator');
+                if (!bar || !indicator || !activeBtn) return;
+                const barRect = bar.getBoundingClientRect();
+                const btnRect = activeBtn.getBoundingClientRect();
+                indicator.style.left = (btnRect.left - barRect.left) + 'px';
+                indicator.style.width = btnRect.width + 'px';
+            }
+
+            document.querySelectorAll('.dock-tab').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    switchDockTab(this.dataset.tab);
+                });
+            });
+
+            window.addEventListener('resize', function() {
+                const activeBtn = document.querySelector('.dock-tab.active');
+                if (activeBtn) updateDockIndicator(activeBtn);
+            });
+
+            // ========== Dock 聊天 ==========
+            let dockChatActiveUser = null;
+            let dockChatSending = false;
+            let dockChatMsgsBusy = false;
+            let dockChatMsgsDirty = '';
+            let dockChatMsgsUser = null;
+            let _dockPreviewUrl = null;
+
+            function dockChatGoBack() {
+                dockChatActiveUser = null;
+                document.getElementById('dockChatDetailView').classList.add('hidden');
+                document.getElementById('dockChatListView').classList.remove('hidden');
+                document.getElementById('dockChatBackBtn').style.display = 'none';
+                document.getElementById('dockChatTitle').textContent = '消息';
+                loadDockChatList();
+                startDMPolling(30000);
+            }
+
+            window.openChatList = function() { switchDockTab('chat'); };
+            window.closeChat = function() { switchDockTab('posts'); };
+
+            window.openChat = function(userName) {
+                if (!currentUser) { showToast('请先登录'); return; }
+                if (userName === currentUser) { switchDockTab('chat'); return; }
+                dockChatActiveUser = userName;
+                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中...</div></div>';
+                document.getElementById('dockChatListView').classList.add('hidden');
+                document.getElementById('dockChatDetailView').classList.remove('hidden');
+                document.getElementById('dockChatBackBtn').style.display = 'flex';
+                document.getElementById('dockChatTitle').textContent = userName;
+                switchDockTab('chat');
+                loadDockChatMessages(userName);
+                startDMPolling(7000);
+            };
+
+            async function loadDockChatList() {
+                const el = document.getElementById('dockChatList');
+                if (!el) return;
+                try {
+                    const { data: allMsgs, error } = await sb.from("posts")
+                        .select("id, user_name, media_url, content, created_at")
+                        .eq("media_type", DM_MARKER)
+                        .or(`user_name.eq.${currentUser},media_url.eq.${currentUser}`)
+                        .order("created_at", { ascending: false })
+                        .limit(1000);
+                    if (error) throw error;
+                    if (!allMsgs || !allMsgs.length) {
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像开始聊天</div></div>';
+                        updateUnreadBadge();
+                        return;
+                    }
+                    const convMap = {};
+                    allMsgs.forEach(m => {
+                        const other = m.user_name === currentUser ? m.media_url : m.user_name;
+                        if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
+                            convMap[other] = { other_user: other, last_message: m.content, last_time: m.created_at, unread: 0 };
+                        }
+                        if (m.media_url === currentUser && !isMsgReadByMe(m)) {
+                            convMap[other].unread = Math.min((convMap[other].unread || 0) + 1, 99);
+                        }
+                    });
+                    const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
+                    el.innerHTML = convs.map(c => `
+                        <div class="chat-list-item" onclick="openChat('${c.other_user.replace(/'/g, "\\'")}')">
+                            <div class="cli-avatar">${c.other_user[0].toUpperCase()}</div>
+                            <div class="cli-info"><div class="cli-name">${c.other_user}</div><div class="cli-preview">${c.last_message}</div></div>
+                            <div class="cli-right"><span class="cli-time">${formatMsgTime(c.last_time)}</span>${c.unread ? '<span class="cli-badge">' + (c.unread > 99 ? '99+' : c.unread) + '</span>' : ''}</div>
+                        </div>`).join('');
+                    updateUnreadBadge();
+                } catch(e) {
+                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">⚠️</div><div>' + (e.message || '加载失败') + '</div></div>';
+                }
+            }
+
+            async function loadDockChatMessages(userName) {
+                if (dockChatMsgsBusy && dockChatMsgsUser === userName) { dockChatMsgsDirty = userName; return; }
+                dockChatMsgsBusy = true; dockChatMsgsUser = userName; dockChatMsgsDirty = '';
+                const el = document.getElementById('dockChatMessages');
+                try {
+                    const { data: msgs, error } = await sb.from("posts").select("id, user_name, media_url, content, created_at, views, actor_key")
+                        .eq("media_type", DM_MARKER)
+                        .or(`and(user_name.eq.${currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${currentUser})`)
+                        .order("created_at").limit(500);
+                    if (error) throw error;
+                    const toMark = (msgs || []).filter(m => m.user_name === userName && m.media_url === currentUser && (m.views || 0) === 0);
+                    for (const m of toMark) { try { await sb.rpc("increment_post_views", { p_post_id: m.id }); m.views = 1; } catch(e) {} }
+                    markMessagesRead(userName);
+                    renderDockMessages(msgs || []);
+                } catch(e) {
+                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">⚠️</div><div>' + (e.message || '加载失败') + '</div></div>';
+                } finally {
+                    dockChatMsgsBusy = false;
+                    if (dockChatMsgsDirty === userName) { dockChatMsgsDirty = ''; loadDockChatMessages(userName); }
+                }
+            }
+
+            function renderDockMessages(msgs) {
+                const el = document.getElementById('dockChatMessages');
+                if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>'; return; }
+                const isBulk = msgs.length > 2;
+                el.innerHTML = msgs.map(m => {
+                    const sent = m.user_name === currentUser;
+                    const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
+                    let body = '';
+                    if (m.actor_key && m.actor_key.startsWith('__dm_img__')) {
+                        body = '<img class="msg-img" src="' + getMediaUrl('__dm_img__', m.actor_key.replace('__dm_img__', '')) + '" onclick="openImageViewer(this.src)" loading="lazy" />';
+                        if (m.content) body += '<div class="msg-text">' + escapeHtml(m.content) + '</div>';
+                    } else if (m.actor_key && m.actor_key.startsWith('__dm_vid__')) {
+                        body = '<video class="msg-img" src="' + getMediaUrl('__dm_vid__', m.actor_key.replace('__dm_vid__', '')) + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
+                        if (m.content) body += '<div class="msg-text">' + escapeHtml(m.content) + '</div>';
+                    } else { body = '<span class="msg-text">' + escapeHtml(m.content || '') + '</span>'; }
+                    return '<div class="chat-msg ' + (sent ? 'sent' : 'received') + (isBulk ? ' no-anim' : '') + '">' + body + readStatus + '<span class="msg-time">' + formatMsgTime(m.created_at) + '</span></div>';
+                }).join('');
+                if (isBulk) { el.scrollTop = el.scrollHeight; } else { requestAnimationFrame(function() { el.scrollTop = el.scrollHeight; }); }
+            }
+
+            async function sendDockChatMessage() {
+                const inp = document.getElementById('dockChatInput');
+                const content = inp.value.trim();
+                const fileInput = document.getElementById('dockChatFileInp');
+                const file = fileInput.files[0];
+                if ((!content && !file) || !dockChatActiveUser || dockChatSending) return;
+                dockChatSending = true; inp.value = '';
+                try {
+                    let actorKey = DM_MARKER;
+                    if (file) {
+                        const path = 'chat/' + Date.now() + '_' + file.name;
+                        await sb.storage.from("uploads").upload(path, file);
+                        actorKey = file.type.startsWith('video/') ? '__dm_vid__' + path : '__dm_img__' + path;
+                    }
+                    const { error } = await sb.from("posts").insert([{ user_name: currentUser, content: content, media_type: DM_MARKER, media_url: dockChatActiveUser, actor_key: actorKey }]);
+                    if (error) throw error;
+                    clearDockChatFilePreview();
+                    await loadDockChatMessages(dockChatActiveUser);
+                    const msgs = document.getElementById('dockChatMessages');
+                    if (msgs) {
+                        msgs.scrollTop = msgs.scrollHeight;
+                        const lastMsg = msgs.lastElementChild;
+                        if (lastMsg && lastMsg.classList.contains('chat-msg')) { lastMsg.classList.add('sent-anim'); requestAnimationFrame(function() { msgs.scrollTop = msgs.scrollHeight; }); }
+                    }
+                } catch(e) { showToast('发送失败: ' + (e?.message || e)); inp.value = content; }
+                finally { dockChatSending = false; }
+            }
+
+            function showDockChatFilePreview(file) {
+                const preview = document.getElementById('dockChatFilePreview'), input = document.getElementById('dockChatInput');
+                const thumb = document.getElementById('dockCfpThumb'), name = document.getElementById('dockCfpName');
+                if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
+                const xBtn = thumb.querySelector('.cfp-x'); thumb.innerHTML = '';
+                if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">🎬</span>'; }
+                else { const img = document.createElement('img'); _dockPreviewUrl = URL.createObjectURL(file); img.src = _dockPreviewUrl; thumb.appendChild(img); }
+                if (xBtn) thumb.appendChild(xBtn);
+                name.textContent = file.name; input.classList.add('hidden'); preview.classList.remove('hidden');
+            }
+
+            function clearDockChatFilePreview() {
+                const preview = document.getElementById('dockChatFilePreview'), input = document.getElementById('dockChatInput');
+                const fileInput = document.getElementById('dockChatFileInp');
+                if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
+                preview.classList.add('hidden'); input.classList.remove('hidden'); fileInput.value = ''; input.focus();
+            }
+
+            document.getElementById('dockChatSendBtn').addEventListener('click', sendDockChatMessage);
+            document.getElementById('dockChatInput').addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDockChatMessage(); } });
+            document.getElementById('dockChatImgBtn').addEventListener('click', function() { document.getElementById('dockChatFileInp').click(); });
+            document.getElementById('dockChatFileInp').addEventListener('change', function() { if (this.files.length) showDockChatFilePreview(this.files[0]); });
+            document.getElementById('dockCfpRemove').addEventListener('click', clearDockChatFilePreview);
+
+            // ========== Dock AI ==========
+            let dockAIMessages = [];
+            let dockAIStreaming = false;
+            let dockAIAbort = null;
+
+            function scrollDockAIBottom() {
+                const body = document.getElementById('dockAIBody');
+                if (body) requestAnimationFrame(function() { body.scrollTop = body.scrollHeight; });
+            }
+
+            window.dockSendAI = async function() {
+                if (dockAIStreaming) return;
+                const inp = document.getElementById('dockAIInput');
+                const userText = inp.value.trim();
+                if (!userText) return;
+                inp.value = ''; inp.style.height = 'auto';
+                const body = document.getElementById('dockAIBody');
+                const welcome = document.getElementById('dockAIWelcome');
+                if (welcome) welcome.remove();
+                body.insertAdjacentHTML('beforeend', '<div class="ai-msg user"><div class="ai-avatar">👤</div><div class="ai-bubble">' + escapeHtml(userText) + '</div></div>');
+                dockAIMessages.push({ role: 'user', content: userText });
+                body.insertAdjacentHTML('beforeend', '<div class="ai-msg assistant"><div class="ai-avatar">AI</div><div class="ai-bubble" id="dockAIStreamBubble"><div class="ai-thinking"><span>思考中</span><div class="ai-thinking-dots"><span></span><span></span><span></span></div></div></div></div>');
+                scrollDockAIBottom();
+                const bubble = document.getElementById('dockAIStreamBubble');
+                const sendBtn = document.getElementById('dockAISendBtn');
+                const inputEl = document.getElementById('dockAIInput');
+                sendBtn.disabled = true; inputEl.disabled = true; dockAIStreaming = true;
+                const controller = new AbortController(); dockAIAbort = controller;
+                let fullContent = '', fullReasoning = '', reasoningBuilt = false, reasoningToggle = null, reasoningContent = null;
+                try {
+                    const response = await fetch('https://api.deepseek.com/chat/completions', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer sk-5e9a977f5f8149b6a24c8353c0eaa300' },
+                        body: JSON.stringify({ model: 'deepseek-v4-flash', messages: dockAIMessages, stream: true }),
+                        signal: controller.signal
+                    });
+                    if (!response.ok) { const errText = await response.text(); throw new Error(errText || ('HTTP ' + response.status)); }
+                    const reader = response.body.getReader(); const decoder = new TextDecoder();
+                    while (true) {
+                        const { done, value } = await reader.read(); if (done) break;
+                        const chunk = decoder.decode(value, { stream: true }); const lines = chunk.split('\n');
+                        for (const line of lines) {
+                            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                                try {
+                                    const data = JSON.parse(line.slice(6));
+                                    const content = data.choices[0]?.delta?.content || '';
+                                    const reasoning = data.choices[0]?.delta?.reasoning_content || '';
+                                    if (reasoning) {
+                                        fullReasoning += reasoning;
+                                        if (!reasoningBuilt && fullReasoning.length > 10) {
+                                            reasoningBuilt = true;
+                                            const toggle = document.createElement('button'); toggle.className = 'ai-reasoning-toggle'; toggle.innerHTML = '🧠 思考过程 <span class="ar-arrow">▾</span>';
+                                            const rc = document.createElement('div'); rc.className = 'ai-reasoning-content'; rc.style.display = 'none'; rc.textContent = fullReasoning;
+                                            toggle.addEventListener('click', function() { const s = rc.style.display === 'none'; rc.style.display = s ? 'block' : 'none'; toggle.classList.toggle('expanded', s); });
+                                            reasoningToggle = toggle; reasoningContent = rc;
+                                            bubble.insertBefore(rc, bubble.firstChild); bubble.insertBefore(toggle, rc);
+                                        }
+                                        if (reasoningContent) reasoningContent.textContent = fullReasoning;
+                                    }
+                                    if (content) {
+                                        if (fullContent === '') { const t = bubble.querySelector('.ai-thinking'); if (t) t.remove(); }
+                                        fullContent += content;
+                                        const cursor = bubble.querySelector('.ai-streaming-cursor'); if (cursor) cursor.remove();
+                                        bubble.appendChild(document.createTextNode(content));
+                                        const span = document.createElement('span'); span.className = 'ai-streaming-cursor'; bubble.appendChild(span);
+                                        scrollDockAIBottom();
+                                    }
+                                } catch(e) {}
+                            }
+                        }
+                    }
+                } catch(e) {
+                    if (e.name === 'AbortError') { if (fullContent) fullContent += ' [已中断]'; }
+                    else { fullContent = '请求失败: ' + (e.message || '未知错误'); }
+                } finally {
+                    dockAIStreaming = false; dockAIAbort = null; sendBtn.disabled = false; inputEl.disabled = false; inputEl.focus();
+                    const cursor = bubble.querySelector('.ai-streaming-cursor'); if (cursor) cursor.remove();
+                    if (fullContent === '' && fullReasoning === '') { const t = bubble.querySelector('.ai-thinking'); if (t) t.remove(); bubble.textContent = '未收到回复，请重试'; }
+                    else if (fullContent === '') { const t = bubble.querySelector('.ai-thinking'); if (t) t.remove(); bubble.textContent = fullReasoning || '(无文本回复)'; }
+                    if (fullContent) dockAIMessages.push({ role: 'assistant', content: fullContent.trim() });
+                    scrollDockAIBottom();
+                }
+            };
+
+            document.getElementById('dockAIInput').addEventListener('input', function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 80) + 'px'; });
+
+            window.addEventListener('DOMContentLoaded', function() {
+                initUI(); initRainAnimation(); initialLoad();
+                setTimeout(function() {
+                    const activeBtn = document.querySelector('.dock-tab.active');
+                    if (activeBtn) updateDockIndicator(activeBtn);
+                }, 300);
+            });
 
             // ========== 主题切换 ==========
             const htmlEl = document.documentElement;
@@ -3213,205 +3454,8 @@
 
     <script>
         (function() {
-            const DS_API_KEY = 'sk-5e9a977f5f8149b6a24c8353c0eaa300';
-            const DS_API_URL = 'https://api.deepseek.com/chat/completions';
-            let currentModel = 'deepseek-v4-flash';
-            let messages = [];
-            let isStreaming = false;
-            let aiStreamAbort = null;
-
-            const containerEl = document.getElementById('aiChatContainer');
-            const bodyEl = document.getElementById('aiChatBody');
-            const inputEl = document.getElementById('aiInput');
-            const sendBtn = document.getElementById('aiSendBtn');
-            const welcomeEl = document.getElementById('aiWelcome');
-
-            function scrollToBottom() {
-                requestAnimationFrame(() => {
-                    bodyEl.scrollTop = bodyEl.scrollHeight;
-                });
-            }
-
-            window.toggleAIChat = function() {
-                const isActive = containerEl.classList.contains('active');
-                if (isActive) {
-                    containerEl.classList.remove('active');
-                    if (isStreaming && aiStreamAbort) {
-                        aiStreamAbort.abort();
-                        isStreaming = false;
-                    }
-                } else {
-                    containerEl.classList.add('active');
-                    setTimeout(function() { inputEl.focus(); }, 400);
-                    scrollToBottom();
-                }
-            };
-
-            function escapeHTML(str) {
-                const div = document.createElement('div');
-                div.textContent = str;
-                return div.innerHTML;
-            }
-
-            function appendUserBubble(text) {
-                if (welcomeEl) welcomeEl.remove();
-                const div = document.createElement('div');
-                div.className = 'ai-msg user';
-                div.innerHTML = '<div class="ai-avatar">👤</div><div class="ai-bubble">' + escapeHTML(text) + '</div>';
-                bodyEl.appendChild(div);
-                scrollToBottom();
-            }
-
-            function createAIBubble() {
-                if (welcomeEl) welcomeEl.remove();
-                const div = document.createElement('div');
-                div.className = 'ai-msg assistant';
-                div.innerHTML = '<div class="ai-avatar">🤖</div><div class="ai-bubble"><div class="ai-thinking"><span>思考中</span><div class="ai-thinking-dots"><span></span><span></span><span></span></div></div></div>';
-                bodyEl.appendChild(div);
-                scrollToBottom();
-                return div.querySelector('.ai-bubble');
-            }
-
-            function removeThinking(bubble) {
-                const thinking = bubble.querySelector('.ai-thinking');
-                if (thinking) thinking.remove();
-            }
-
-            function buildReasoning(reasoningText) {
-                const id = 'ai-reason-' + Date.now();
-                const toggle = document.createElement('button');
-                toggle.className = 'ai-reasoning-toggle';
-                toggle.innerHTML = '🧠 思考过程 <span class="ar-arrow">▾</span>';
-                const content = document.createElement('div');
-                content.className = 'ai-reasoning-content';
-                content.style.display = 'none';
-                content.textContent = reasoningText;
-                toggle.addEventListener('click', function() {
-                    const show = content.style.display === 'none';
-                    content.style.display = show ? 'block' : 'none';
-                    toggle.classList.toggle('expanded', show);
-                });
-                return { toggle, content };
-            }
-
-            window.sendAIMessage = async function() {
-                if (isStreaming) return;
-                const userText = inputEl.value.trim();
-                if (!userText) return;
-
-                inputEl.value = '';
-                inputEl.style.height = 'auto';
-
-                appendUserBubble(userText);
-                messages.push({ role: 'user', content: userText });
-
-                const bubble = createAIBubble();
-                sendBtn.disabled = true;
-                inputEl.disabled = true;
-                isStreaming = true;
-
-                const controller = new AbortController();
-                aiStreamAbort = controller;
-
-                let fullContent = '';
-                let fullReasoning = '';
-                let reasoningBuilt = false;
-                let reasoningToggle = null;
-                let reasoningContent = null;
-
-                try {
-                    const response = await fetch(DS_API_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_API_KEY },
-                        body: JSON.stringify({ model: currentModel, messages: messages, stream: true }),
-                        signal: controller.signal
-                    });
-
-                    if (!response.ok) {
-                        const errText = await response.text();
-                        throw new Error(errText || ('HTTP ' + response.status));
-                    }
-
-                    const reader = response.body.getReader();
-                    const decoder = new TextDecoder();
-
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-                        const chunk = decoder.decode(value, { stream: true });
-                        const lines = chunk.split('\n');
-                        for (const line of lines) {
-                            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-                                try {
-                                    const data = JSON.parse(line.slice(6));
-                                    const content = data.choices[0]?.delta?.content || '';
-                                    const reasoning = data.choices[0]?.delta?.reasoning_content || '';
-
-                                    if (reasoning) {
-                                        fullReasoning += reasoning;
-                                        if (!reasoningBuilt && fullReasoning.length > 10) {
-                                            reasoningBuilt = true;
-                                            const parts = buildReasoning(fullReasoning);
-                                            reasoningToggle = parts.toggle;
-                                            reasoningContent = parts.content;
-                                            bubble.insertBefore(reasoningContent, bubble.firstChild);
-                                            bubble.insertBefore(reasoningToggle, reasoningContent);
-                                        }
-                                        if (reasoningContent) {
-                                            reasoningContent.textContent = fullReasoning;
-                                        }
-                                    }
-
-                                    if (content) {
-                                        if (fullContent === '') removeThinking(bubble);
-                                        fullContent += content;
-                                        const cursor = bubble.querySelector('.ai-streaming-cursor');
-                                        if (cursor) cursor.remove();
-
-                                        const textNode = document.createTextNode(content);
-                                        const span = document.createElement('span');
-                                        span.className = 'ai-streaming-cursor';
-                                        bubble.appendChild(textNode);
-                                        bubble.appendChild(span);
-                                        scrollToBottom();
-                                    }
-                                } catch(e) {}
-                            }
-                        }
-                    }
-                } catch(e) {
-                    if (e.name === 'AbortError') {
-                        if (fullContent) fullContent += ' [已中断]';
-                    } else {
-                        fullContent = '请求失败: ' + (e.message || '未知错误');
-                    }
-                } finally {
-                    isStreaming = false;
-                    aiStreamAbort = null;
-                    sendBtn.disabled = false;
-                    inputEl.disabled = false;
-                    inputEl.focus();
-                    const cursor = bubble.querySelector('.ai-streaming-cursor');
-                    if (cursor) cursor.remove();
-                    if (fullContent === '' && fullReasoning === '') {
-                        removeThinking(bubble);
-                        bubble.textContent = '未收到回复，请重试';
-                    } else if (fullContent === '') {
-                        removeThinking(bubble);
-                        bubble.textContent = fullReasoning || '(无文本回复)';
-                    }
-                    if (fullContent) {
-                        messages.push({ role: 'assistant', content: fullContent.trim() });
-                    }
-                    scrollToBottom();
-                }
-            };
-
-            inputEl.addEventListener('input', function() {
-                this.style.height = 'auto';
-                this.style.height = Math.min(this.scrollHeight, 80) + 'px';
-            });
-
+            window.toggleAIChat = function() { switchDockTab('ai'); };
+            window.sendAIMessage = function() { dockSendAI(); };
         })();
     </script>
 </body>
