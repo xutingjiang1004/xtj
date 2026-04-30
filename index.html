@@ -1175,8 +1175,10 @@
     <div class="toast-container" id="toastContainer"></div>
 
     <nav style="position:relative; z-index:3;">
-        <h1>xtj</h1>
-        <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
+        <div style="display:flex; align-items:center; gap:8px;">
+            <h1>xtj</h1>
+            <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
+        </div>
         <div class="nav-auth">
             <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
                 <button class="btn btn-primary" onclick="openAuthModal('login')">登录</button>
@@ -2518,6 +2520,11 @@
                 }
             }
 
+            function getMediaUrl(prefix, val) {
+                if (val.startsWith('http')) return val;
+                return sb.storage.from("uploads").getPublicUrl(val).data.publicUrl;
+            }
+
             function renderMessages(msgs) {
                 const el = document.getElementById('chatMessages');
                 if (!msgs.length) {
@@ -2530,11 +2537,11 @@
                     const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
                     let body = '';
                     if (m.actor_key && m.actor_key.startsWith('__dm_img__')) {
-                        const imgUrl = m.actor_key.replace('__dm_img__', '');
+                        const imgUrl = getMediaUrl('__dm_img__', m.actor_key.replace('__dm_img__', ''));
                         body = `<img class="msg-img" src="${imgUrl}" onclick="openImageViewer('${imgUrl}')" loading="lazy" />`;
                         if (m.content) body += `<div class="msg-text">${escapeHtml(m.content)}</div>`;
                     } else if (m.actor_key && m.actor_key.startsWith('__dm_vid__')) {
-                        const vidUrl = m.actor_key.replace('__dm_vid__', '');
+                        const vidUrl = getMediaUrl('__dm_vid__', m.actor_key.replace('__dm_vid__', ''));
                         body = `<video class="msg-img" src="${vidUrl}" controls preload="metadata" onclick="event.stopPropagation();" style="cursor:default;"></video>`;
                         if (m.content) body += `<div class="msg-text">${escapeHtml(m.content)}</div>`;
                     } else {
@@ -2563,9 +2570,8 @@
                     if (file) {
                         const path = `chat/${Date.now()}_${file.name}`;
                         await sb.storage.from("uploads").upload(path, file);
-                        const url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
                         const isVideo = file.type.startsWith('video/');
-                        actorKey = isVideo ? `__dm_vid__${url}` : `__dm_img__${url}`;
+                        actorKey = isVideo ? `__dm_vid__${path}` : `__dm_img__${path}`;
                     }
                     const { error } = await sb.from("posts").insert([{
                         user_name: currentUser,
