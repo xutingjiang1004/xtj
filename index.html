@@ -1332,15 +1332,6 @@
         .dock-tab.active::after {
             opacity: 1; transform: scale(1);
         }
-        /* Dock 液态指示器 */
-        .dock-indicator {
-            position: absolute; top: -3px; left: 0;
-            height: 3px; border-radius: 0 0 3px 3px;
-            background: linear-gradient(90deg, #059669, #34d399);
-            transition: left 0.4s cubic-bezier(0.16,1,0.3,1), width 0.4s cubic-bezier(0.16,1,0.3,1);
-            box-shadow: 0 0 8px rgba(5,150,105,0.4);
-        }
-
         /* Dock面板: 聊天 (复用聊天样式，去掉overlay固定定位) */
         .dock-chat-container {
             display: flex; flex-direction: column; height: 100%;
@@ -1603,7 +1594,7 @@
             </div>
         </div>
 
-        <div class="dock-panel" id="panelAI">
+        <div class="dock-panel" id="panelAi">
             <div class="dock-ai-container" id="dockAIContainer">
                 <div class="ai-chat-header">
                     <span class="ai-title">DeepSeek AI</span>
@@ -1623,7 +1614,6 @@
     </div>
 
     <div class="dock-bar" id="dockBar">
-        <div class="dock-indicator" id="dockIndicator"></div>
         <button class="dock-tab active" data-tab="posts">
             <span class="dt-icon">📝</span>
             <span class="dt-label">帖子</span>
@@ -2936,6 +2926,7 @@
                 loadDockChatList();
                 startDMPolling(30000);
             }
+            window.dockChatGoBack = dockChatGoBack;
 
             window.openChatList = function() { switchDockTab('chat'); };
             window.closeChat = function() { switchDockTab('posts'); };
