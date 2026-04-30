@@ -2162,36 +2162,13 @@
                 const el = document.getElementById('chatList');
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
-                    const { data: allMsgs, error } = await sb.from("messages")
-                        .select("sender_name, receiver_name, content, created_at, read")
-                        .or(`sender_name.eq.${currentUser},receiver_name.eq.${currentUser}`)
-                        .order("created_at", { ascending: false })
-                        .limit(1000);
-
+                    const { data: convs, error } = await sb.rpc('msg_convs', { p_me: currentUser });
                     if (error) throw error;
-                    if (!allMsgs || !allMsgs.length) {
+                    if (!convs || !convs.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">点击帖子头像即可开始聊天</div></div>';
                         updateUnreadBadge();
                         return;
                     }
-
-                    const convMap = {};
-                    allMsgs.forEach(m => {
-                        const other = m.sender_name === currentUser ? m.receiver_name : m.sender_name;
-                        if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
-                            convMap[other] = {
-                                other_user: other,
-                                last_message: m.content,
-                                last_time: m.created_at,
-                                unread: 0
-                            };
-                        }
-                        if (m.receiver_name === currentUser && !m.read) {
-                            convMap[other].unread = (convMap[other].unread || 0) + 1;
-                        }
-                    });
-
-                    const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
 
                     el.innerHTML = convs.map(c => `
                         <div class="chat-list-item" onclick="openChat('${c.other_user.replace(/'/g, "\\'")}')">
@@ -2217,12 +2194,7 @@
                 const el = document.getElementById('chatMessages');
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
-                    const { data: msgs, error } = await sb.from("messages")
-                        .select("*")
-                        .or(`and(sender_name.eq.${currentUser},receiver_name.eq.${userName}),and(sender_name.eq.${userName},receiver_name.eq.${currentUser})`)
-                        .order("created_at")
-                        .limit(500);
-
+                    const { data: msgs, error } = await sb.rpc('msg_get', { p_me: currentUser, p_other: userName });
                     if (error) throw error;
                     markMessagesRead(userName);
                     renderMessages(msgs || []);
@@ -2252,12 +2224,11 @@
                 chatSending = true;
                 inp.value = '';
                 try {
-                    const { error } = await sb.from("messages").insert([{
-                        sender_name: currentUser,
-                        receiver_name: chatActiveUser,
-                        content,
-                        read: false
-                    }]);
+                    const { error } = await sb.rpc('msg_send', {
+                        p_sender: currentUser,
+                        p_receiver: chatActiveUser,
+                        p_content: content
+                    });
                     if (error) throw error;
                     const el = document.getElementById('chatMessages');
                     const empty = el.querySelector('.chat-empty');
@@ -2275,11 +2246,10 @@
 
             async function markMessagesRead(senderName) {
                 try {
-                    const { error } = await sb.from("messages")
-                        .update({ read: true })
-                        .eq("sender_name", senderName)
-                        .eq("receiver_name", currentUser)
-                        .eq("read", false);
+                    const { error } = await sb.rpc('msg_mark_read', {
+                        p_sender: senderName,
+                        p_receiver: currentUser
+                    });
                     if (error) console.error('markMessagesRead', error);
                     updateUnreadBadge();
                 } catch(e) {}
@@ -2306,14 +2276,12 @@
 
             async function updateUnreadBadge() {
                 try {
-                    const { count, error } = await sb.from("messages")
-                        .select("*", { count: "exact", head: true })
-                        .eq("receiver_name", currentUser)
-                        .eq("read", false);
+                    const { data, error } = await sb.rpc('msg_unread_count', { p_receiver: currentUser });
                     if (error) return;
+                    const cnt = data || 0;
                     const badge = document.getElementById('navChatBadge');
-                    if (count > 0) {
-                        badge.textContent = count > 99 ? '99+' : count;
+                    if (cnt > 0) {
+                        badge.textContent = cnt > 99 ? '99+' : cnt;
                         badge.classList.add('show');
                     } else {
                         badge.classList.remove('show');
