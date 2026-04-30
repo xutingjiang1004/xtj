@@ -1648,13 +1648,15 @@
                 chatSending = true;
                 inp.value = '';
                 try {
-                    const { error } = await sb.from('messages').insert({
+                    const payload = {
                         sender_name: currentUser,
                         receiver_name: chatActiveUser,
                         content,
-                        created_at: new Date().toISOString(),
                         read: false
-                    });
+                    };
+                    console.log('[CHAT] Insert payload:', payload);
+                    const { data, error } = await sb.from('messages').insert(payload).select();
+                    console.log('[CHAT] Insert result:', { data, error });
                     if (error) throw error;
                     const el = document.getElementById('chatMessages');
                     const empty = el.querySelector('.chat-empty');
@@ -1662,8 +1664,8 @@
                     el.innerHTML += `<div class="chat-msg sent">${content.replace(/</g,'&lt;')}<span class="msg-time">${formatMsgTime(new Date().toISOString())}</span></div>`;
                     requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
                 } catch(e) {
-                    console.error('sendChatMessage', e);
-                    showToast('发送失败');
+                    console.error('[CHAT] sendChatMessage error:', e);
+                    showToast('发送失败: ' + (e?.message || e));
                     inp.value = content;
                 } finally {
                     chatSending = false;
