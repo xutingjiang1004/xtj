@@ -151,28 +151,27 @@
             color: var(--text-main);
         }
         [data-theme="dark"] .chat-input-area { background: rgba(255,255,255,0.03); }
-        [data-theme="dark"] .chat-input-area input {
+        [data-theme="dark"] .chat-input-wrap {
             background: rgba(35,35,55,0.5);
             border-color: rgba(255,255,255,0.08);
-            color: var(--text-main);
         }
-        [data-theme="dark"] .chat-input-area input:focus {
+        [data-theme="dark"] .chat-input-wrap:focus-within {
             background: rgba(40,40,60,0.6);
             border-color: rgba(5,150,105,0.3);
         }
-        [data-theme="dark"] .chat-input-area input::placeholder { color: var(--text-muted); }
-        [data-theme="dark"] .chat-input-area .chat-img-btn {
+        [data-theme="dark"] .chat-input-wrap input { color: var(--text-main); }
+        [data-theme="dark"] .chat-input-wrap input::placeholder { color: var(--text-muted); }
+        [data-theme="dark"] .chat-img-btn {
             background: rgba(35,35,55,0.4);
             border-color: rgba(255,255,255,0.08);
         }
-        [data-theme="dark"] .chat-input-area .chat-img-btn:hover { background: rgba(40,40,60,0.6); }
+        [data-theme="dark"] .chat-img-btn:hover { background: rgba(40,40,60,0.6); }
         [data-theme="dark"] .chat-file-preview {
-            background: rgba(35,35,55,0.4);
-            border-color: rgba(255,255,255,0.06);
+            background: transparent;
         }
         [data-theme="dark"] .cfp-name { color: var(--text-muted); }
-        [data-theme="dark"] .cfp-remove { background: rgba(40,40,60,0.5); color: var(--text-muted); }
-        [data-theme="dark"] .cfp-remove:hover { background: rgba(255,59,96,0.25); color: #ff3b60; }
+        [data-theme="dark"] .cfp-x { background: rgba(0,0,0,0.7); color: rgba(255,255,255,0.8); }
+        [data-theme="dark"] .cfp-x:hover { background: #ff3b60; }
         [data-theme="dark"] .chat-list-item:hover { background: rgba(255,255,255,0.04); }
         [data-theme="dark"] .chat-list-item:active { background: rgba(255,255,255,0.08); }
         [data-theme="dark"] .chat-list-item { border-bottom-color: rgba(255,255,255,0.02); }
@@ -712,6 +711,7 @@
             display: flex; align-items: flex-end; justify-content: center;
             opacity: 0; pointer-events: none;
             transition: opacity 0.4s cubic-bezier(0.16,1,0.3,1);
+            overscroll-behavior: none;
         }
         .chat-overlay.active { opacity: 1; pointer-events: all; }
         .chat-panel {
@@ -845,24 +845,74 @@
         .chat-input-area {
             padding: 12px 16px 16px;
             border-top: 1px solid rgba(255,255,255,0.15);
-            display: flex; gap: 10px; align-items: center;
             flex-shrink: 0;
             background: rgba(255,255,255,0.1);
         }
-        .chat-input-area input {
-            flex: 1; padding: 12px 18px; border-radius: 99px;
+        .chat-input-row {
+            display: flex; gap: 10px; align-items: flex-end;
+            width: 100%;
+        }
+        .chat-input-wrap {
+            flex: 1; min-width: 0;
+            display: flex; align-items: center;
+            border-radius: 99px;
             border: 1px solid rgba(255,255,255,0.25);
             background: rgba(255,255,255,0.25);
             backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-            font-size: 15px; outline: none; color: var(--text-main);
-            transition: all 0.3s; min-width: 0;
+            transition: all 0.3s;
+            min-height: 44px;
         }
-        .chat-input-area input:focus {
+        .chat-input-wrap:focus-within {
             background: rgba(255,255,255,0.35);
             border-color: rgba(5,150,105,0.35);
         }
-        .chat-input-area input::placeholder { color: var(--text-muted); }
-        .chat-input-area .send-btn {
+        .chat-input-wrap input {
+            flex: 1; padding: 12px 18px; border: none; background: transparent;
+            font-size: 15px; outline: none; color: var(--text-main);
+            min-width: 0;
+        }
+        .chat-input-wrap input::placeholder { color: var(--text-muted); }
+        .chat-input-wrap input.hidden { display: none; }
+        .chat-file-preview {
+            flex: 1; display: flex; align-items: center; gap: 8px;
+            padding: 6px 8px 6px 6px;
+            min-width: 0;
+            animation: cfpSlideIn 0.2s cubic-bezier(0.16,1,0.3,1);
+        }
+        .chat-file-preview.hidden { display: none; }
+        .cfp-thumb {
+            width: 32px; height: 32px; border-radius: 8px; overflow: visible;
+            flex-shrink: 0; background: rgba(0,0,0,0.3);
+            display: flex; align-items: center; justify-content: center;
+            position: relative;
+        }
+        .cfp-thumb img {
+            width: 100%; height: 100%; object-fit: cover;
+            border-radius: 8px;
+        }
+        .cfp-thumb .cfp-video-icon {
+            font-size: 16px; color: rgba(255,255,255,0.6);
+        }
+        .cfp-x {
+            position: absolute; top: -7px; right: -7px;
+            width: 18px; height: 18px; border-radius: 50%;
+            border: none; background: rgba(0,0,0,0.65);
+            color: white; font-size: 10px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0; line-height: 1;
+            transition: all 0.2s;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+        }
+        .cfp-x:hover { background: #ff3b60; transform: scale(1.15); }
+        .cfp-name {
+            flex: 1; font-size: 12px; color: var(--text-muted);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        @keyframes cfpSlideIn {
+            from { opacity: 0; transform: scale(0.85); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .send-btn {
             width: 44px; height: 44px; border-radius: 50%;
             border: none; cursor: pointer; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
@@ -870,56 +920,16 @@
             color: white; font-size: 18px;
             transition: all 0.3s;
         }
-        .chat-input-area .send-btn:hover { transform: scale(1.06); box-shadow: 0 4px 14px rgba(5,150,105,0.3); }
-        .chat-input-area .send-btn:disabled { opacity: 0.4; transform: none !important; }
-        .chat-input-area .chat-img-btn {
+        .send-btn:hover { transform: scale(1.06); box-shadow: 0 4px 14px rgba(5,150,105,0.3); }
+        .send-btn:disabled { opacity: 0.4; transform: none !important; }
+        .chat-img-btn {
             width: 40px; height: 40px; border-radius: 50%;
             border: 1px solid rgba(255,255,255,0.15); cursor: pointer; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
             background: rgba(255,255,255,0.1); font-size: 18px;
             transition: all 0.3s; line-height: 1;
         }
-        .chat-input-area .chat-img-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.06); }
-        .chat-input-row {
-            display: flex; gap: 10px; align-items: center;
-            width: 100%;
-        }
-        .chat-file-preview {
-            display: flex; align-items: center; gap: 10px;
-            padding: 8px 12px; margin-top: 8px;
-            background: rgba(255,255,255,0.08);
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.1);
-            animation: cfpSlideIn 0.25s cubic-bezier(0.16,1,0.3,1);
-        }
-        .chat-file-preview.hidden { display: none; }
-        .cfp-thumb {
-            width: 36px; height: 36px; border-radius: 8px; overflow: hidden;
-            flex-shrink: 0; background: rgba(0,0,0,0.2);
-            display: flex; align-items: center; justify-content: center;
-        }
-        .cfp-thumb img, .cfp-thumb video {
-            width: 100%; height: 100%; object-fit: cover;
-        }
-        .cfp-thumb .cfp-video-icon {
-            font-size: 16px; color: rgba(255,255,255,0.6);
-        }
-        .cfp-name {
-            flex: 1; font-size: 12px; color: var(--text-muted);
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        }
-        .cfp-remove {
-            width: 24px; height: 24px; border-radius: 50%;
-            border: none; background: rgba(255,255,255,0.1);
-            color: var(--text-muted); font-size: 12px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center;
-            flex-shrink: 0; transition: all 0.2s; line-height: 1;
-        }
-        .cfp-remove:hover { background: rgba(255,59,96,0.3); color: #ff3b60; transform: scale(1.1); }
-        @keyframes cfpSlideIn {
-            from { opacity: 0; transform: translateY(-8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        .chat-img-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.06); }
         /* iMessage 风格发送动画 */
         @keyframes msgSend {
             0%   { opacity: 0; transform: scale(0.4) translateX(40px); }
@@ -1239,6 +1249,251 @@
         .post-detail-media img { border-radius:12px; max-height:300px; cursor:pointer; }
         .post-detail-media video { border-radius:12px; max-height:300px; width:100%; }
         .post-detail-stats { font-size:12px; color:var(--text-muted); margin-bottom:14px; }
+
+        /* ========== AI 助手 ========== */
+        .ai-fab {
+            position: fixed; bottom: 24px; right: 24px; z-index: 910;
+            width: 52px; height: 52px; border-radius: 50%;
+            border: none; cursor: pointer;
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            color: white; font-size: 22px;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 20px rgba(59,130,246,0.4), 0 2px 8px rgba(0,0,0,0.1);
+            transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
+        }
+        .ai-fab:hover {
+            transform: scale(1.08);
+            box-shadow: 0 8px 30px rgba(59,130,246,0.5), 0 2px 12px rgba(0,0,0,0.15);
+        }
+        .ai-fab:active { transform: scale(0.95); }
+        .ai-fab.hidden { display: none; }
+
+        .ai-chat-container {
+            position: fixed; bottom: 92px; right: 24px; z-index: 920;
+            width: 360px; max-height: 520px;
+            background: rgba(255,255,255,0.92);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.4);
+            box-shadow: 0 16px 48px rgba(0,0,0,0.15), 0 4px 16px rgba(0,0,0,0.08);
+            display: flex; flex-direction: column;
+            opacity: 0; transform: translateY(16px) scale(0.94);
+            pointer-events: none;
+            transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
+            overflow: hidden;
+        }
+        .ai-chat-container.active {
+            opacity: 1; transform: translateY(0) scale(1);
+            pointer-events: all;
+        }
+        .ai-chat-header {
+            padding: 12px 16px;
+            display: flex; align-items: center; gap: 8px;
+            border-bottom: 1px solid rgba(0,0,0,0.08);
+            flex-shrink: 0;
+        }
+        .ai-chat-header .ai-title {
+            font-weight: 700; font-size: 15px; color: var(--text-main);
+            flex: 1;
+        }
+        .ai-model-select {
+            padding: 5px 8px; border-radius: 8px;
+            border: 1px solid rgba(0,0,0,0.12);
+            background: rgba(0,0,0,0.04);
+            font-size: 11px; color: var(--text-main);
+            outline: none; cursor: pointer;
+        }
+        .ai-close-btn {
+            width: 28px; height: 28px; border-radius: 50%;
+            border: none; background: rgba(0,0,0,0.06);
+            color: var(--text-muted); font-size: 14px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+        }
+        .ai-close-btn:hover { background: rgba(255,59,96,0.15); color: #ff3b60; }
+        .ai-chat-body {
+            flex: 1; overflow-y: auto; padding: 12px 14px;
+            display: flex; flex-direction: column; gap: 10px;
+            min-height: 200px; max-height: 360px;
+            -webkit-overflow-scrolling: touch;
+        }
+        .ai-welcome {
+            text-align: center; color: var(--text-muted);
+            font-size: 13px; padding: 30px 20px;
+            line-height: 1.6;
+        }
+        .ai-welcome .ai-welcome-icon { font-size: 36px; margin-bottom: 8px; display: block; }
+        .ai-msg {
+            display: flex; gap: 8px; animation: aiMsgIn 0.3s cubic-bezier(0.16,1,0.3,1);
+            max-width: 92%;
+        }
+        .ai-msg.assistant { align-self: flex-start; }
+        .ai-msg.user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+            max-width: 88%;
+        }
+        @keyframes aiMsgIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .ai-avatar {
+            width: 30px; height: 30px; border-radius: 50%;
+            flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px;
+        }
+        .ai-msg.assistant .ai-avatar {
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            color: white;
+        }
+        .ai-msg.user .ai-avatar {
+            background: linear-gradient(135deg, #059669, #34d399);
+            color: white;
+        }
+        .ai-bubble {
+            padding: 10px 14px; border-radius: 16px;
+            font-size: 14px; line-height: 1.55;
+            word-break: break-word; white-space: pre-wrap;
+            position: relative;
+        }
+        .ai-msg.assistant .ai-bubble {
+            background: rgba(0,0,0,0.04);
+            border-radius: 4px 16px 16px 16px;
+            color: var(--text-main);
+        }
+        .ai-msg.user .ai-bubble {
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            border-radius: 16px 4px 16px 16px;
+            color: white;
+        }
+        .ai-bubble .ai-streaming-cursor {
+            display: inline-block; width: 6px; height: 14px;
+            background: var(--text-main); margin-left: 2px;
+            border-radius: 2px;
+            animation: aiCursor 0.8s infinite;
+            vertical-align: middle;
+        }
+        @keyframes aiCursor {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        .ai-reasoning-toggle {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 11px; color: #6366f1; cursor: pointer;
+            padding: 4px 8px; border-radius: 6px;
+            background: rgba(99,102,241,0.08);
+            border: none; margin-bottom: 6px;
+            transition: all 0.2s;
+        }
+        .ai-reasoning-toggle:hover { background: rgba(99,102,241,0.15); }
+        .ai-reasoning-toggle .ar-arrow {
+            display: inline-block; transition: transform 0.2s;
+            font-size: 9px;
+        }
+        .ai-reasoning-toggle.expanded .ar-arrow { transform: rotate(180deg); }
+        .ai-reasoning-content {
+            font-size: 12px; color: var(--text-muted);
+            background: rgba(99,102,241,0.06);
+            border-left: 2px solid rgba(99,102,241,0.3);
+            padding: 8px 12px; margin-bottom: 6px;
+            border-radius: 4px 8px 8px 4px;
+            line-height: 1.5; white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .ai-chat-footer {
+            padding: 10px 14px; border-top: 1px solid rgba(0,0,0,0.08);
+            display: flex; gap: 8px; align-items: flex-end;
+            flex-shrink: 0;
+        }
+        .ai-chat-footer textarea {
+            flex: 1; padding: 10px 14px; border-radius: 14px;
+            border: 1px solid rgba(0,0,0,0.12);
+            background: rgba(0,0,0,0.03);
+            font-size: 14px; outline: none; color: var(--text-main);
+            resize: none; font-family: inherit;
+            line-height: 1.4; max-height: 80px; min-height: 20px;
+            transition: all 0.3s;
+        }
+        .ai-chat-footer textarea:focus {
+            border-color: rgba(59,130,246,0.4);
+            background: rgba(59,130,246,0.04);
+        }
+        .ai-chat-footer textarea::placeholder { color: var(--text-muted); }
+        .ai-send-btn {
+            width: 38px; height: 38px; border-radius: 50%;
+            border: none; cursor: pointer; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            color: white; font-size: 16px;
+            transition: all 0.3s;
+            box-shadow: 0 2px 10px rgba(59,130,246,0.3);
+        }
+        .ai-send-btn:hover { transform: scale(1.06); box-shadow: 0 4px 16px rgba(59,130,246,0.4); }
+        .ai-send-btn:disabled {
+            opacity: 0.4; transform: none !important;
+            box-shadow: none; cursor: not-allowed;
+        }
+        .ai-thinking {
+            display: inline-flex; align-items: center; gap: 6px;
+            font-size: 12px; color: #6366f1; padding: 8px 0;
+        }
+        .ai-thinking-dots { display: inline-flex; gap: 3px; }
+        .ai-thinking-dots span {
+            width: 5px; height: 5px; border-radius: 50%;
+            background: #6366f1;
+            animation: aiDot 1.2s infinite;
+        }
+        .ai-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .ai-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes aiDot {
+            0%, 80%, 100% { opacity: 0.3; transform: scale(0.7); }
+            40% { opacity: 1; transform: scale(1); }
+        }
+        .ai-chat-body .ai-scroll-anchor {
+            height: 1px; flex-shrink: 0;
+        }
+
+        /* 暗色模式 AI */
+        [data-theme="dark"] .ai-chat-container {
+            background: rgba(22,22,36,0.94);
+            border-color: rgba(255,255,255,0.08);
+            box-shadow: 0 16px 48px rgba(0,0,0,0.5), 0 4px 16px rgba(0,0,0,0.3);
+        }
+        [data-theme="dark"] .ai-chat-header {
+            border-bottom-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .ai-model-select {
+            background: rgba(255,255,255,0.06);
+            border-color: rgba(255,255,255,0.1);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .ai-close-btn {
+            background: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .ai-msg.assistant .ai-bubble {
+            background: rgba(255,255,255,0.06);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .ai-chat-footer {
+            border-top-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .ai-chat-footer textarea {
+            background: rgba(255,255,255,0.04);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .ai-chat-footer textarea:focus {
+            border-color: rgba(59,130,246,0.4);
+            background: rgba(59,130,246,0.08);
+        }
+        [data-theme="dark"] .ai-reasoning-content {
+            background: rgba(99,102,241,0.08);
+            border-left-color: rgba(99,102,241,0.4);
+        }
+        [data-theme="dark"] .ai-bubble .ai-streaming-cursor {
+            background: var(--text-main);
+        }
     </style>
 </head>
 <body>
@@ -1369,14 +1624,17 @@
                 <div id="chatMessages" class="chat-messages"></div>
                 <div class="chat-input-area">
                     <div class="chat-input-row">
-                        <input id="chatInput" placeholder="输入消息..." maxlength="500" />
+                        <div class="chat-input-wrap">
+                            <input id="chatInput" placeholder="输入消息..." maxlength="500" />
+                            <div id="chatFilePreview" class="chat-file-preview hidden">
+                                <div class="cfp-thumb" id="cfpThumb">
+                                    <button class="cfp-x" id="cfpRemove" title="移除">✕</button>
+                                </div>
+                                <span class="cfp-name" id="cfpName"></span>
+                            </div>
+                        </div>
                         <button class="chat-img-btn" id="chatImgBtn" title="发送图片">📷</button>
                         <button class="send-btn" id="chatSendBtn">➤</button>
-                    </div>
-                    <div id="chatFilePreview" class="chat-file-preview hidden">
-                        <div class="cfp-thumb" id="cfpThumb"></div>
-                        <span class="cfp-name" id="cfpName"></span>
-                        <button class="cfp-remove" id="cfpRemove" title="移除">✕</button>
                     </div>
                 </div>
                 <input type="file" id="chatFileInp" accept="image/*,video/*" style="display:none" />
@@ -1407,6 +1665,29 @@
             <div class="stat-detail-body" id="postDetailBody">
                 加载中...
             </div>
+        </div>
+    </div>
+
+    <!-- ========== AI 助手 ========== -->
+    <button class="ai-fab" id="aiFab" title="AI助手" onclick="toggleAIChat()">🤖</button>
+    <div class="ai-chat-container" id="aiChatContainer">
+        <div class="ai-chat-header">
+            <span class="ai-title">AI 助手</span>
+            <select class="ai-model-select" id="aiModelSelect">
+                <option value="deepseek-v4-flash">V4 Flash</option>
+                <option value="deepseek-v4-pro">V4 Pro</option>
+            </select>
+            <button class="ai-close-btn" onclick="toggleAIChat()">✕</button>
+        </div>
+        <div class="ai-chat-body" id="aiChatBody">
+            <div class="ai-welcome" id="aiWelcome">
+                <span class="ai-welcome-icon">🤖</span>
+                你好！我是 DeepSeek AI 助手<br>选择模型后开始对话吧
+            </div>
+        </div>
+        <div class="ai-chat-footer">
+            <textarea id="aiInput" placeholder="输入你的问题..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendAIMessage();}"></textarea>
+            <button class="ai-send-btn" id="aiSendBtn" title="发送" onclick="sendAIMessage()">➤</button>
         </div>
     </div>
 
@@ -2671,9 +2952,13 @@
                     await loadChatMessages(chatActiveUser, false);
                     const msgs = document.getElementById('chatMessages');
                     if (msgs) {
+                        msgs.scrollTop = msgs.scrollHeight;
                         const lastMsg = msgs.lastElementChild;
                         if (lastMsg && lastMsg.classList.contains('chat-msg')) {
                             lastMsg.classList.add('sent-anim');
+                            requestAnimationFrame(() => {
+                                msgs.scrollTop = msgs.scrollHeight;
+                            });
                         }
                     }
                 } catch(e) {
@@ -2809,10 +3094,12 @@
 
             function showChatFilePreview(file) {
                 const preview = document.getElementById('chatFilePreview');
+                const input = document.getElementById('chatInput');
                 const thumb = document.getElementById('cfpThumb');
                 const name = document.getElementById('cfpName');
                 const isVideo = file.type.startsWith('video/');
                 if (_chatPreviewUrl) { URL.revokeObjectURL(_chatPreviewUrl); _chatPreviewUrl = null; }
+                const xBtn = thumb.querySelector('.cfp-x');
                 thumb.innerHTML = '';
                 if (isVideo) {
                     thumb.innerHTML = '<span class="cfp-video-icon">🎬</span>';
@@ -2822,18 +3109,21 @@
                     img.src = _chatPreviewUrl;
                     thumb.appendChild(img);
                 }
+                if (xBtn) thumb.appendChild(xBtn);
                 name.textContent = file.name;
+                input.classList.add('hidden');
                 preview.classList.remove('hidden');
             }
 
             function clearChatFilePreview() {
                 const preview = document.getElementById('chatFilePreview');
-                const thumb = document.getElementById('cfpThumb');
+                const input = document.getElementById('chatInput');
                 const fileInput = document.getElementById('chatFileInp');
                 if (_chatPreviewUrl) { URL.revokeObjectURL(_chatPreviewUrl); _chatPreviewUrl = null; }
-                thumb.innerHTML = '';
-                fileInput.value = '';
                 preview.classList.add('hidden');
+                input.classList.remove('hidden');
+                fileInput.value = '';
+                input.focus();
             }
 
             let refreshTimeout = null;
@@ -2841,6 +3131,28 @@
                 if (refreshTimeout) clearTimeout(refreshTimeout);
                 refreshTimeout = setTimeout(() => loadFeed(forceRefresh), 500);
             };
+
+            // ========== iOS 键盘适配 ==========
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', function() {
+                    const overlay = document.getElementById('chatOverlay');
+                    if (!overlay.classList.contains('active')) return;
+                    const diff = window.innerHeight - window.visualViewport.height;
+                    if (diff > 80) {
+                        overlay.style.setProperty('height', window.visualViewport.height + 'px', 'important');
+                        const panel = document.getElementById('chatPanel');
+                        panel.style.setProperty('max-height', 'none', 'important');
+                        panel.style.setProperty('height', (window.visualViewport.height - 16) + 'px', 'important');
+                        panel.style.setProperty('border-radius', '24px 24px 0 0', 'important');
+                    } else {
+                        overlay.style.height = '';
+                        const panel = document.getElementById('chatPanel');
+                        panel.style.maxHeight = '';
+                        panel.style.height = '';
+                        panel.style.borderRadius = '';
+                    }
+                });
+            }
 
             window.addEventListener('DOMContentLoaded', () => { initUI(); initRainAnimation(); initialLoad(); });
 
@@ -2873,6 +3185,237 @@
             } else {
                 applyTheme(false);
             }
+        })();
+    </script>
+
+    <script>
+        (function() {
+            const DS_API_KEY = 'sk-5e9a977f5f8149b6a24c8353c0eaa300';
+            const DS_API_URL = 'https://api.deepseek.com/chat/completions';
+            let currentModel = 'deepseek-v4-flash';
+            let messages = [];
+            let isStreaming = false;
+            let aiStreamAbort = null;
+
+            const fabEl = document.getElementById('aiFab');
+            const containerEl = document.getElementById('aiChatContainer');
+            const bodyEl = document.getElementById('aiChatBody');
+            const inputEl = document.getElementById('aiInput');
+            const sendBtn = document.getElementById('aiSendBtn');
+            const modelSelect = document.getElementById('aiModelSelect');
+            const welcomeEl = document.getElementById('aiWelcome');
+
+            function scrollToBottom() {
+                requestAnimationFrame(() => {
+                    bodyEl.scrollTop = bodyEl.scrollHeight;
+                });
+            }
+
+            modelSelect.addEventListener('change', function() {
+                currentModel = this.value;
+                if (messages.length > 1) {
+                    showAIToast('已切换模型，新对话将使用 ' + this.selectedOptions[0].text);
+                }
+            });
+
+            window.toggleAIChat = function() {
+                const isActive = containerEl.classList.contains('active');
+                if (isActive) {
+                    containerEl.classList.remove('active');
+                    fabEl.classList.remove('hidden');
+                    if (isStreaming && aiStreamAbort) {
+                        aiStreamAbort.abort();
+                        isStreaming = false;
+                    }
+                } else {
+                    containerEl.classList.add('active');
+                    fabEl.classList.add('hidden');
+                    setTimeout(function() { inputEl.focus(); }, 400);
+                    scrollToBottom();
+                }
+            };
+
+            function showAIToast(msg) {
+                const t = document.createElement('div');
+                t.textContent = msg;
+                t.style.cssText = 'position:fixed;bottom:100px;right:40px;z-index:999;background:rgba(0,0,0,0.8);color:white;padding:8px 16px;border-radius:8px;font-size:13px;animation:aiToastIn 2s forwards;pointer-events:none;';
+                document.body.appendChild(t);
+                setTimeout(function() { t.remove(); }, 2200);
+            }
+
+            function getTime() {
+                const d = new Date();
+                return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+            }
+
+            function escapeHTML(str) {
+                const div = document.createElement('div');
+                div.textContent = str;
+                return div.innerHTML;
+            }
+
+            function appendUserBubble(text) {
+                if (welcomeEl) welcomeEl.remove();
+                const div = document.createElement('div');
+                div.className = 'ai-msg user';
+                div.innerHTML = '<div class="ai-avatar">👤</div><div class="ai-bubble">' + escapeHTML(text) + '</div>';
+                bodyEl.appendChild(div);
+                scrollToBottom();
+            }
+
+            function createAIBubble() {
+                if (welcomeEl) welcomeEl.remove();
+                const div = document.createElement('div');
+                div.className = 'ai-msg assistant';
+                div.innerHTML = '<div class="ai-avatar">🤖</div><div class="ai-bubble" id="aiStreamBubble"><div class="ai-thinking"><span>思考中</span><div class="ai-thinking-dots"><span></span><span></span><span></span></div></div></div>';
+                bodyEl.appendChild(div);
+                scrollToBottom();
+                return document.getElementById('aiStreamBubble');
+            }
+
+            function removeThinking(bubble) {
+                const thinking = bubble.querySelector('.ai-thinking');
+                if (thinking) thinking.remove();
+            }
+
+            function buildReasoning(reasoningText) {
+                const id = 'ai-reason-' + Date.now();
+                const toggle = document.createElement('button');
+                toggle.className = 'ai-reasoning-toggle';
+                toggle.innerHTML = '🧠 思考过程 <span class="ar-arrow">▾</span>';
+                const content = document.createElement('div');
+                content.className = 'ai-reasoning-content';
+                content.style.display = 'none';
+                content.textContent = reasoningText;
+                toggle.addEventListener('click', function() {
+                    const show = content.style.display === 'none';
+                    content.style.display = show ? 'block' : 'none';
+                    toggle.classList.toggle('expanded', show);
+                });
+                return { toggle, content };
+            }
+
+            window.sendAIMessage = async function() {
+                if (isStreaming) return;
+                const userText = inputEl.value.trim();
+                if (!userText) return;
+
+                inputEl.value = '';
+                inputEl.style.height = 'auto';
+
+                appendUserBubble(userText);
+                messages.push({ role: 'user', content: userText });
+
+                const bubble = createAIBubble();
+                sendBtn.disabled = true;
+                inputEl.disabled = true;
+                isStreaming = true;
+
+                const controller = new AbortController();
+                aiStreamAbort = controller;
+
+                let fullContent = '';
+                let fullReasoning = '';
+                let reasoningBuilt = false;
+                let reasoningToggle = null;
+                let reasoningContent = null;
+
+                try {
+                    const response = await fetch(DS_API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DS_API_KEY },
+                        body: JSON.stringify({ model: currentModel, messages: messages, stream: true }),
+                        signal: controller.signal
+                    });
+
+                    if (!response.ok) {
+                        const errText = await response.text();
+                        throw new Error(errText || ('HTTP ' + response.status));
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        const chunk = decoder.decode(value, { stream: true });
+                        const lines = chunk.split('\n');
+                        for (const line of lines) {
+                            if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+                                try {
+                                    const data = JSON.parse(line.slice(6));
+                                    const content = data.choices[0]?.delta?.content || '';
+                                    const reasoning = data.choices[0]?.delta?.reasoning_content || '';
+
+                                    if (reasoning) {
+                                        fullReasoning += reasoning;
+                                        if (!reasoningBuilt && fullReasoning.length > 10) {
+                                            reasoningBuilt = true;
+                                            const parts = buildReasoning(fullReasoning);
+                                            reasoningToggle = parts.toggle;
+                                            reasoningContent = parts.content;
+                                            bubble.insertBefore(reasoningContent, bubble.firstChild);
+                                            bubble.insertBefore(reasoningToggle, reasoningContent);
+                                        }
+                                        if (reasoningContent) {
+                                            reasoningContent.textContent = fullReasoning;
+                                        }
+                                    }
+
+                                    if (content) {
+                                        if (fullContent === '') removeThinking(bubble);
+                                        fullContent += content;
+                                        const cursor = bubble.querySelector('.ai-streaming-cursor');
+                                        if (cursor) cursor.remove();
+
+                                        const textNode = document.createTextNode(content);
+                                        const span = document.createElement('span');
+                                        span.className = 'ai-streaming-cursor';
+                                        bubble.appendChild(textNode);
+                                        bubble.appendChild(span);
+                                        scrollToBottom();
+                                    }
+                                } catch(e) {}
+                            }
+                        }
+                    }
+                } catch(e) {
+                    if (e.name === 'AbortError') {
+                        if (fullContent) fullContent += ' [已中断]';
+                    } else {
+                        fullContent = '请求失败: ' + (e.message || '未知错误');
+                    }
+                } finally {
+                    isStreaming = false;
+                    aiStreamAbort = null;
+                    sendBtn.disabled = false;
+                    inputEl.disabled = false;
+                    inputEl.focus();
+                    const cursor = bubble.querySelector('.ai-streaming-cursor');
+                    if (cursor) cursor.remove();
+                    if (fullContent === '' && fullReasoning === '') {
+                        removeThinking(bubble);
+                        bubble.textContent = '未收到回复，请重试';
+                    } else if (fullContent === '') {
+                        removeThinking(bubble);
+                        bubble.textContent = fullReasoning || '(无文本回复)';
+                    }
+                    if (fullContent) {
+                        messages.push({ role: 'assistant', content: fullContent.trim() });
+                    }
+                    scrollToBottom();
+                }
+            };
+
+            inputEl.addEventListener('input', function() {
+                this.style.height = 'auto';
+                this.style.height = Math.min(this.scrollHeight, 80) + 'px';
+            });
+
+            const styleEl = document.createElement('style');
+            styleEl.textContent = '@keyframes aiToastIn{0%,70%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-12px)}}';
+            document.head.appendChild(styleEl);
         })();
     </script>
 </body>
