@@ -1582,14 +1582,14 @@
                 const el = document.getElementById('chatList');
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
-                    const convs = await callRPC('chat_get_conversations', { me: currentUser }) || [];
+                    const convs = await callRPC('msg_convs', { me: currentUser }) || [];
                     if (!convs.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">点击帖子头像即可开始聊天</div></div>';
                         updateUnreadBadge();
                         return;
                     }
                     convs.sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
-                    const unreadData = await callRPC('chat_get_unread_senders', { receiver: currentUser }) || [];
+                    const unreadData = await callRPC('msg_unread_senders', { receiver: currentUser }) || [];
                     const unreadMap = {};
                     unreadData.forEach(u => { unreadMap[u.sender_name] = u.cnt; });
                     el.innerHTML = convs.map(c => {
@@ -1617,7 +1617,7 @@
                 const el = document.getElementById('chatMessages');
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
-                    const msgs = await callRPC('chat_get_messages', { me: currentUser, other_user: userName }) || [];
+                    const msgs = await callRPC('msg_list', { me: currentUser, other_user: userName }) || [];
                     markMessagesRead(userName);
                     renderMessages(msgs);
                 } catch(e) {
@@ -1646,7 +1646,7 @@
                 chatSending = true;
                 inp.value = '';
                 try {
-                    const result = await callRPC('chat_send_message', {
+                    const result = await callRPC('msg_send', {
                         sender: currentUser,
                         receiver: chatActiveUser,
                         content
@@ -1667,7 +1667,7 @@
 
             async function markMessagesRead(senderName) {
                 try {
-                    await callRPC('chat_mark_read', { sender: senderName, receiver: currentUser });
+                    await callRPC('msg_read', { sender: senderName, receiver: currentUser });
                     updateUnreadBadge();
                 } catch(e) {}
             }
@@ -1693,7 +1693,7 @@
 
             async function updateUnreadBadge() {
                 try {
-                    const cnt = await callRPC('chat_unread_count', { receiver: currentUser }) || 0;
+                    const cnt = await callRPC('msg_unread', { receiver: currentUser }) || 0;
                     const badge = document.getElementById('navChatBadge');
                     if (cnt > 0) {
                         badge.textContent = cnt > 99 ? '99+' : cnt;
