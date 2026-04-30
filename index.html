@@ -1136,6 +1136,7 @@
 
             // ===================== 登录 / 注册 / 登出 =====================
             const AUTH_MARKER = '__auth__';
+            const DM_MARKER = '__dm__';
 
             async function findAuthRecord(nickname) {
                 const { data } = await sb.from("posts")
@@ -1746,7 +1747,7 @@
             }
 
             function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER);
+                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length + comments.length;
@@ -1838,7 +1839,7 @@
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER);
+                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
 
@@ -2162,13 +2163,37 @@
                 const el = document.getElementById('chatList');
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
-                    const { data: convs, error } = await sb.rpc('msg_convs', { p_me: currentUser });
+                    const { data: allMsgs, error } = await sb.from("posts")
+                        .select("id, user_name, media_url, content, created_at")
+                        .eq("media_type", DM_MARKER)
+                        .or(`user_name.eq.${currentUser},media_url.eq.${currentUser}`)
+                        .order("created_at", { ascending: false })
+                        .limit(1000);
+
                     if (error) throw error;
-                    if (!convs || !convs.length) {
+                    if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">点击帖子头像即可开始聊天</div></div>';
                         updateUnreadBadge();
                         return;
                     }
+
+                    const convMap = {};
+                    allMsgs.forEach(m => {
+                        const other = m.user_name === currentUser ? m.media_url : m.user_name;
+                        if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
+                            convMap[other] = {
+                                other_user: other,
+                                last_message: m.content,
+                                last_time: m.created_at,
+                                unread: 0
+                            };
+                        }
+                        if (m.media_url === currentUser && !isMsgReadByMe(m)) {
+                            convMap[other].unread = (convMap[other].unread || 0) + 1;
+                        }
+                    });
+
+                    const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
 
                     el.innerHTML = convs.map(c => `
                         <div class="chat-list-item" onclick="openChat('${c.other_user.replace(/'/g, "\\'")}')">
@@ -2190,11 +2215,23 @@
                 }
             }
 
+            function isMsgReadByMe(msg) {
+                const key = `xtj_dmread_${currentUser}_${msg.user_name}`;
+                const t = localStorage.getItem(key);
+                return t && new Date(msg.created_at) <= new Date(t);
+            }
+
             async function loadChatMessages(userName) {
                 const el = document.getElementById('chatMessages');
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
-                    const { data: msgs, error } = await sb.rpc('msg_get', { p_me: currentUser, p_other: userName });
+                    const { data: msgs, error } = await sb.from("posts")
+                        .select("id, user_name, media_url, content, created_at")
+                        .eq("media_type", DM_MARKER)
+                        .or(`and(user_name.eq.${currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${currentUser})`)
+                        .order("created_at")
+                        .limit(500);
+
                     if (error) throw error;
                     markMessagesRead(userName);
                     renderMessages(msgs || []);
@@ -2211,7 +2248,7 @@
                     return;
                 }
                 el.innerHTML = msgs.map(m => {
-                    const sent = m.sender_name === currentUser;
+                    const sent = m.user_name === currentUser;
                     return `<div class="chat-msg ${sent?'sent':'received'}">${m.content}<span class="msg-time">${formatMsgTime(m.created_at)}</span></div>`;
                 }).join('');
                 requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
@@ -2224,11 +2261,13 @@
                 chatSending = true;
                 inp.value = '';
                 try {
-                    const { error } = await sb.rpc('msg_send', {
-                        p_sender: currentUser,
-                        p_receiver: chatActiveUser,
-                        p_content: content
-                    });
+                    const { error } = await sb.from("posts").insert([{
+                        user_name: currentUser,
+                        content,
+                        media_type: DM_MARKER,
+                        media_url: chatActiveUser,
+                        actor_key: DM_MARKER
+                    }]);
                     if (error) throw error;
                     const el = document.getElementById('chatMessages');
                     const empty = el.querySelector('.chat-empty');
@@ -2244,29 +2283,24 @@
                 }
             }
 
-            async function markMessagesRead(senderName) {
-                try {
-                    const { error } = await sb.rpc('msg_mark_read', {
-                        p_sender: senderName,
-                        p_receiver: currentUser
-                    });
-                    if (error) console.error('markMessagesRead', error);
-                    updateUnreadBadge();
-                } catch(e) {}
+            function markMessagesRead(senderName) {
+                const key = `xtj_dmread_${currentUser}_${senderName}`;
+                localStorage.setItem(key, new Date().toISOString());
+                updateUnreadBadge();
             }
 
             function subscribeToMessages() {
                 if (chatRealtime) { sb.removeChannel(chatRealtime); }
-                chatRealtime = sb.channel('chat-messages')
-                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, payload => {
+                chatRealtime = sb.channel('chat-dms')
+                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts', filter: `media_type=eq.${DM_MARKER}` }, payload => {
                         const m = payload.new;
-                        if (m.sender_name === currentUser || m.receiver_name === currentUser) {
+                        if (m.user_name === currentUser || m.media_url === currentUser) {
                             if (!chatActiveUser) {
                                 loadChatList();
-                            } else if ((m.sender_name === chatActiveUser && m.receiver_name === currentUser) ||
-                                       (m.sender_name === currentUser && m.receiver_name === chatActiveUser)) {
+                            } else if ((m.user_name === chatActiveUser && m.media_url === currentUser) ||
+                                       (m.user_name === currentUser && m.media_url === chatActiveUser)) {
                                 loadChatMessages(chatActiveUser);
-                            } else if (m.sender_name !== currentUser) {
+                            } else if (m.user_name !== currentUser) {
                                 updateUnreadBadge();
                             }
                         }
@@ -2276,9 +2310,18 @@
 
             async function updateUnreadBadge() {
                 try {
-                    const { data, error } = await sb.rpc('msg_unread_count', { p_receiver: currentUser });
+                    const { data, error } = await sb.from("posts")
+                        .select("id, user_name, created_at")
+                        .eq("media_type", DM_MARKER)
+                        .eq("media_url", currentUser)
+                        .order("created_at", { ascending: false })
+                        .limit(200);
+
                     if (error) return;
-                    const cnt = data || 0;
+                    let cnt = 0;
+                    (data || []).forEach(m => {
+                        if (!isMsgReadByMe(m)) cnt++;
+                    });
                     const badge = document.getElementById('navChatBadge');
                     if (cnt > 0) {
                         badge.textContent = cnt > 99 ? '99+' : cnt;
