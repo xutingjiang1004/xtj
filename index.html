@@ -1014,13 +1014,13 @@
                 }
             }
 
-            // ===================== 雨滴动画 - 优化版 =====================
+            // ===================== 雨滴动画 - 轻量版 =====================
             function initRainAnimation() {
                 const canvas = document.getElementById('rainCanvas');
                 if (!canvas) return;
                 const ctx = canvas.getContext('2d');
                 let w, h;
-                let drops = [], slideDrops = [], staticDrops = [];
+                let drops = [];
                 let animId = null;
                 let resizeTimeout = null;
 
@@ -1034,15 +1034,20 @@
                 });
                 resize();
 
-                for (let i = 0; i < 80; i++) drops.push({ x: Math.random()*w, y: Math.random()*h, len: Math.random()*12+8, xs: -1+Math.random()*1.5, ys: Math.random()*10+8 });
-                for (let i = 0; i < 20; i++) slideDrops.push({ x: Math.random()*w, y: Math.random()*h, speed: Math.random()*0.8+0.2, trail: Math.random()*12+6, opacity: Math.random()*0.3+0.15 });
-                for (let i = 0; i < 100; i++) staticDrops.push({ x: Math.random()*w, y: Math.random()*h, r: Math.random()*1.5+0.5, o: Math.random()*0.3+0.15 });
+                // 大幅减少雨滴数量以提升性能
+                for (let i = 0; i < 40; i++) drops.push({ 
+                    x: Math.random()*w, 
+                    y: Math.random()*h, 
+                    len: Math.random()*8+6, 
+                    xs: -0.5+Math.random()*1, 
+                    ys: Math.random()*6+4 
+                });
 
                 function draw() {
                     ctx.clearRect(0,0,w,h);
-                    ctx.strokeStyle = 'rgba(180,190,210,0.4)';
+                    ctx.strokeStyle = 'rgba(180,190,210,0.3)';
                     ctx.lineCap = 'round';
-                    ctx.lineWidth = 1.2;
+                    ctx.lineWidth = 0.8;
                     ctx.beginPath();
                     for (let p of drops) {
                         ctx.moveTo(p.x, p.y);
@@ -1051,28 +1056,6 @@
                         if (p.y>h || p.x>w || p.x<0) { p.x = Math.random()*w; p.y = -20; }
                     }
                     ctx.stroke();
-
-                    for (let sd of slideDrops) {
-                        ctx.beginPath();
-                        ctx.arc(sd.x, sd.y, 2, 0, Math.PI*2);
-                        ctx.fillStyle = 'rgba(180,190,210,0.25)';
-                        ctx.fill();
-                        ctx.beginPath();
-                        ctx.moveTo(sd.x, sd.y);
-                        ctx.lineTo(sd.x, sd.y + sd.trail);
-                        ctx.strokeStyle = 'rgba(180,190,210,0.12)';
-                        ctx.lineWidth = 1.2;
-                        ctx.stroke();
-                        sd.y += sd.speed;
-                        if (sd.y > h + 20) { sd.y = -20; sd.x = Math.random()*w; }
-                    }
-
-                    ctx.fillStyle = 'rgba(200,230,220,0.28)';
-                    for (let s of staticDrops) {
-                        ctx.beginPath();
-                        ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
-                        ctx.fill();
-                    }
                     animId = requestAnimationFrame(draw);
                 }
                 draw();
@@ -1107,8 +1090,10 @@
                 const isLiked = btn.classList.contains("liked");
                 const statsText = btn.closest('.post').querySelector('.post-stats-text');
 
-                // 优化：避免强制重绘导致的闪烁
-                if (!isLiked) {
+                // 修复：取消点赞时移除类名，点赞时添加类名和动画
+                if (isLiked) {
+                    btn.classList.remove("liked");
+                } else {
                     btn.classList.add("liked");
                     createHeartParticles(btn);
                 }
