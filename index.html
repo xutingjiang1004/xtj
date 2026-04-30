@@ -52,6 +52,15 @@
             border-color: rgba(255,255,255,0.08);
             box-shadow: 0 10px 34px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.04);
         }
+        [data-theme="dark"] .publish-box::before { display: none; }
+        [data-theme="dark"] .publish-box:hover {
+            box-shadow: 0 20px 56px rgba(0,0,0,0.4), 0 6px 20px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.06);
+            border-color: rgba(255,255,255,0.12);
+        }
+        [data-theme="dark"] .publish-box:focus-within {
+            border-color: rgba(5,150,105,0.25);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.35), 0 0 0 3px rgba(5,150,105,0.1), inset 0 1px 0 rgba(255,255,255,0.05);
+        }
         [data-theme="dark"] .publish-box textarea { color: var(--text-main); }
         [data-theme="dark"] .publish-box textarea::placeholder { color: rgba(158, 158, 176, 0.5); }
         [data-theme="dark"] .publish-footer { border-top-color: rgba(255,255,255,0.08); }
@@ -97,7 +106,7 @@
             background: linear-gradient(135deg, rgba(25,25,45,0.85) 0%, rgba(20,20,40,0.7) 100%);
             border-color: rgba(255,255,255,0.08);
         }
-        [data-theme="dark"] .modal-overlay { background: rgba(0,0,0,0.5); }
+        [data-theme="dark"] .modal-overlay { background: rgba(0,0,0,0.75); }
         [data-theme="dark"] .auth-form .af-input {
             background: rgba(35,35,55,0.5);
             border-color: rgba(255,255,255,0.08);
@@ -157,6 +166,13 @@
             border-color: rgba(255,255,255,0.08);
         }
         [data-theme="dark"] .chat-input-area .chat-img-btn:hover { background: rgba(40,40,60,0.6); }
+        [data-theme="dark"] .chat-file-preview {
+            background: rgba(35,35,55,0.4);
+            border-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .cfp-name { color: var(--text-muted); }
+        [data-theme="dark"] .cfp-remove { background: rgba(40,40,60,0.5); color: var(--text-muted); }
+        [data-theme="dark"] .cfp-remove:hover { background: rgba(255,59,96,0.25); color: #ff3b60; }
         [data-theme="dark"] .chat-list-item:hover { background: rgba(255,255,255,0.04); }
         [data-theme="dark"] .chat-list-item:active { background: rgba(255,255,255,0.08); }
         [data-theme="dark"] .chat-list-item { border-bottom-color: rgba(255,255,255,0.02); }
@@ -626,13 +642,8 @@
         .img-viewer .iv-wrapper {
             display: flex; align-items: center; justify-content: center;
             width: 100%; height: 100%;
-            will-change: transform;
-            transform: scale(0.92);
-            transition: transform 0.2s cubic-bezier(0.16,1,0.3,1);
-            -webkit-transform: scale(0.92);
-            -webkit-transition: -webkit-transform 0.2s cubic-bezier(0.16,1,0.3,1);
+            will-change: opacity;
         }
-        .img-viewer.active .iv-wrapper { transform: scale(1); -webkit-transform: scale(1); }
         .img-viewer .iv-wrapper.instant {
             transition: none !important;
             -webkit-transition: none !important;
@@ -647,6 +658,20 @@
             -webkit-touch-callout: none;
             touch-action: none;
             pointer-events: none;
+            transform-origin: 0 0;
+            transition: transform 0.2s cubic-bezier(0.16,1,0.3,1);
+            -webkit-transition: -webkit-transform 0.2s cubic-bezier(0.16,1,0.3,1);
+            will-change: transform;
+        }
+        .img-viewer img.instant {
+            transition: none !important;
+            -webkit-transition: none !important;
+        }
+        .img-viewer .iv-wrapper.open-anim img {
+            transform: scale(0.92);
+        }
+        .img-viewer.active .iv-wrapper.open-anim img {
+            transform: scale(1);
         }
         .img-viewer .iv-close {
             position: fixed; top: 20px; right: 24px;
@@ -855,6 +880,56 @@
             transition: all 0.3s; line-height: 1;
         }
         .chat-input-area .chat-img-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.06); }
+        .chat-input-row {
+            display: flex; gap: 10px; align-items: center;
+            width: 100%;
+        }
+        .chat-file-preview {
+            display: flex; align-items: center; gap: 10px;
+            padding: 8px 12px; margin-top: 8px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            animation: cfpSlideIn 0.25s cubic-bezier(0.16,1,0.3,1);
+        }
+        .chat-file-preview.hidden { display: none; }
+        .cfp-thumb {
+            width: 36px; height: 36px; border-radius: 8px; overflow: hidden;
+            flex-shrink: 0; background: rgba(0,0,0,0.2);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .cfp-thumb img, .cfp-thumb video {
+            width: 100%; height: 100%; object-fit: cover;
+        }
+        .cfp-thumb .cfp-video-icon {
+            font-size: 16px; color: rgba(255,255,255,0.6);
+        }
+        .cfp-name {
+            flex: 1; font-size: 12px; color: var(--text-muted);
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .cfp-remove {
+            width: 24px; height: 24px; border-radius: 50%;
+            border: none; background: rgba(255,255,255,0.1);
+            color: var(--text-muted); font-size: 12px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; transition: all 0.2s; line-height: 1;
+        }
+        .cfp-remove:hover { background: rgba(255,59,96,0.3); color: #ff3b60; transform: scale(1.1); }
+        @keyframes cfpSlideIn {
+            from { opacity: 0; transform: translateY(-8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* iMessage 风格发送动画 */
+        @keyframes msgSend {
+            0%   { opacity: 0; transform: scale(0.4) translateX(40px); }
+            40%  { opacity: 1; transform: scale(1.08) translateX(-4px); }
+            70%  { transform: scale(0.96) translateX(2px); }
+            100% { opacity: 1; transform: scale(1) translateX(0); }
+        }
+        .chat-msg.sent-anim {
+            animation: msgSend 0.45s cubic-bezier(0.16,1,0.3,1) forwards;
+        }
         .chat-empty {
             display: flex; flex-direction: column; align-items: center; justify-content: center;
             flex: 1; color: var(--text-muted); font-size: 14px; gap: 8px; padding: 40px;
@@ -1293,9 +1368,16 @@
             <div id="chatDetailView" class="chat-view hidden">
                 <div id="chatMessages" class="chat-messages"></div>
                 <div class="chat-input-area">
-                    <input id="chatInput" placeholder="输入消息..." maxlength="500" />
-                    <button class="chat-img-btn" id="chatImgBtn" title="发送图片">📷</button>
-                    <button class="send-btn" id="chatSendBtn">➤</button>
+                    <div class="chat-input-row">
+                        <input id="chatInput" placeholder="输入消息..." maxlength="500" />
+                        <button class="chat-img-btn" id="chatImgBtn" title="发送图片">📷</button>
+                        <button class="send-btn" id="chatSendBtn">➤</button>
+                    </div>
+                    <div id="chatFilePreview" class="chat-file-preview hidden">
+                        <div class="cfp-thumb" id="cfpThumb"></div>
+                        <span class="cfp-name" id="cfpName"></span>
+                        <button class="cfp-remove" id="cfpRemove" title="移除">✕</button>
+                    </div>
                 </div>
                 <input type="file" id="chatFileInp" accept="image/*,video/*" style="display:none" />
             </div>
@@ -1745,27 +1827,27 @@
             let ivTouchEndTime = 0;
 
             function ivApplyTransform() {
-                const w = document.getElementById('ivWrapper');
+                const img = document.getElementById('ivImg');
                 const v = ivZoomState;
                 const t = `translate3d(${v.tx}px, ${v.ty}px, 0) scale(${v.scale})`;
-                w.style.transform = t;
-                w.style.webkitTransform = t;
+                img.style.transform = t;
+                img.style.webkitTransform = t;
             }
 
             function ivResetZoom(instant = false) {
-                const w = document.getElementById('ivWrapper');
+                const img = document.getElementById('ivImg');
                 ivZoomState.scale = 1;
                 ivZoomState.tx = 0;
                 ivZoomState.ty = 0;
                 if (instant) {
-                    w.classList.add('instant');
-                    w.style.transform = '';
-                    w.style.webkitTransform = '';
-                    void w.offsetWidth;
-                    w.classList.remove('instant');
+                    img.classList.add('instant');
+                    img.style.transform = '';
+                    img.style.webkitTransform = '';
+                    void img.offsetWidth;
+                    img.classList.remove('instant');
                 } else {
-                    w.style.transform = '';
-                    w.style.webkitTransform = '';
+                    img.style.transform = '';
+                    img.style.webkitTransform = '';
                 }
             }
 
@@ -1779,8 +1861,13 @@
             window.openImageViewer = function (src) {
                 const viewer = document.getElementById('imgViewer');
                 const img = document.getElementById('ivImg');
+                const wrapper = document.getElementById('ivWrapper');
                 ivResetZoom(true);
                 img.src = src;
+                wrapper.classList.add('open-anim');
+                img.classList.add('instant');
+                void img.offsetWidth;
+                img.classList.remove('instant');
                 viewer.classList.add('active');
                 document.body.style.overflow = 'hidden';
             };
@@ -1788,8 +1875,8 @@
             window.closeImageViewer = function () {
                 const viewer = document.getElementById('imgViewer');
                 const wrapper = document.getElementById('ivWrapper');
-                wrapper.classList.remove('instant');
                 ivResetZoom(true);
+                wrapper.classList.remove('open-anim');
                 viewer.classList.remove('active');
                 document.body.style.overflow = '';
             };
@@ -1799,11 +1886,11 @@
             });
 
             const ivViewerEl = document.getElementById('imgViewer');
-            const ivWrapperEl = document.getElementById('ivWrapper');
+            const ivImgEl = document.getElementById('ivImg');
 
             ivViewerEl.addEventListener('click', function (e) {
                 if (Date.now() - ivTouchEndTime < 120) return;
-                if (e.target === ivViewerEl || e.target === ivWrapperEl) {
+                if (e.target === ivViewerEl || e.target === document.getElementById('ivWrapper')) {
                     closeImageViewer();
                 }
             });
@@ -1822,7 +1909,7 @@
                     ivStartTx = ivZoomState.tx;
                     ivStartTy = ivZoomState.ty;
                     ivStartScale = ivZoomState.scale;
-                    ivWrapperEl.classList.add('instant');
+                    ivImgEl.classList.add('instant');
                 } else if (e.touches.length === 1) {
                     const now = Date.now();
                     if (now - ivLastTapTime < 320) {
@@ -1848,7 +1935,7 @@
                         ivPanStartY = e.touches[0].clientY;
                         ivStartTx = ivZoomState.tx;
                         ivStartTy = ivZoomState.ty;
-                        ivWrapperEl.classList.add('instant');
+                        ivImgEl.classList.add('instant');
                     }
                 }
             }, { passive: false });
@@ -1883,15 +1970,15 @@
                 if (ivIsZooming) {
                     ivIsZooming = false;
                     if (ivZoomState.scale <= 1) {
-                        ivWrapperEl.classList.remove('instant');
+                        ivImgEl.classList.remove('instant');
                         ivResetZoom(false);
                     } else {
-                        setTimeout(() => ivWrapperEl.classList.remove('instant'), 50);
+                        setTimeout(() => ivImgEl.classList.remove('instant'), 50);
                     }
                 }
                 if (ivIsPanning) {
                     ivIsPanning = false;
-                    ivWrapperEl.classList.remove('instant');
+                    ivImgEl.classList.remove('instant');
                 }
             });
 
@@ -1901,9 +1988,8 @@
                 const delta = -e.deltaY * 0.002;
                 const newScale = Math.max(1, Math.min(6, ivZoomState.scale * (1 + delta)));
                 if (newScale === ivZoomState.scale) return;
-                const rect = ivViewerEl.getBoundingClientRect();
-                const cx = e.clientX - rect.left;
-                const cy = e.clientY - rect.top;
+                const cx = e.clientX;
+                const cy = e.clientY;
                 const ratio = newScale / ivZoomState.scale;
                 ivZoomState.tx = cx - ratio * (cx - ivZoomState.tx);
                 ivZoomState.ty = cy - ratio * (cy - ivZoomState.ty);
@@ -2581,8 +2667,15 @@
                         actor_key: actorKey
                     }]);
                     if (error) throw error;
-                    fileInput.value = '';
+                    clearChatFilePreview();
                     await loadChatMessages(chatActiveUser, false);
+                    const msgs = document.getElementById('chatMessages');
+                    if (msgs) {
+                        const lastMsg = msgs.lastElementChild;
+                        if (lastMsg && lastMsg.classList.contains('chat-msg')) {
+                            lastMsg.classList.add('sent-anim');
+                        }
+                    }
                 } catch(e) {
                     console.error('[CHAT] send error:', e);
                     showToast('发送失败: ' + (e?.message || e));
@@ -2704,8 +2797,44 @@
                 document.getElementById('chatFileInp').click();
             });
             document.getElementById('chatFileInp').addEventListener('change', function() {
-                if (this.files && this.files[0]) sendChatMessage();
+                if (this.files && this.files[0]) {
+                    showChatFilePreview(this.files[0]);
+                }
             });
+            document.getElementById('cfpRemove').addEventListener('click', function() {
+                clearChatFilePreview();
+            });
+
+            let _chatPreviewUrl = null;
+
+            function showChatFilePreview(file) {
+                const preview = document.getElementById('chatFilePreview');
+                const thumb = document.getElementById('cfpThumb');
+                const name = document.getElementById('cfpName');
+                const isVideo = file.type.startsWith('video/');
+                if (_chatPreviewUrl) { URL.revokeObjectURL(_chatPreviewUrl); _chatPreviewUrl = null; }
+                thumb.innerHTML = '';
+                if (isVideo) {
+                    thumb.innerHTML = '<span class="cfp-video-icon">🎬</span>';
+                } else {
+                    const img = document.createElement('img');
+                    _chatPreviewUrl = URL.createObjectURL(file);
+                    img.src = _chatPreviewUrl;
+                    thumb.appendChild(img);
+                }
+                name.textContent = file.name;
+                preview.classList.remove('hidden');
+            }
+
+            function clearChatFilePreview() {
+                const preview = document.getElementById('chatFilePreview');
+                const thumb = document.getElementById('cfpThumb');
+                const fileInput = document.getElementById('chatFileInp');
+                if (_chatPreviewUrl) { URL.revokeObjectURL(_chatPreviewUrl); _chatPreviewUrl = null; }
+                thumb.innerHTML = '';
+                fileInput.value = '';
+                preview.classList.add('hidden');
+            }
 
             let refreshTimeout = null;
             const debouncedLoadFeed = (forceRefresh = false) => {
