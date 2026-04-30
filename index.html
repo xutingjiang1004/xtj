@@ -1092,7 +1092,7 @@
     </div>
 
     <!-- ========== 聊天系统 ========== -->
-    <div class="chat-overlay" id="chatOverlay">
+    <div class="chat-overlay" id="chatOverlay" onclick="if(event.target===this)closeChat()">
         <div class="chat-panel" id="chatPanel">
             <div class="chat-header">
                 <button class="back-btn" id="chatBackBtn" onclick="chatGoBack()">‹</button>
@@ -1170,7 +1170,7 @@
                 setTimeout(() => {
                     toast.style.animation = 'toastFade 0.3s ease-out forwards';
                     setTimeout(() => toast.remove(), 300);
-                }, 2500);
+                }, 1000);
             }
             window.showToast = showToast;
 
@@ -1324,6 +1324,8 @@
                 document.getElementById("regNickInp").value = "";
                 document.getElementById("regPwInp").value = "";
                 if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; }
+                stopDMPolling();
+                document.body.style.overflow = '';
                 showToast("已退出登录");
                 initUI();
                 initialLoad(true);
@@ -1342,11 +1344,13 @@
                     avatar.textContent = currentUser[0].toUpperCase();
                     avatar.className = "avatar";
                     subscribeToMessages();
+                    startDMPolling();
                     updateUnreadBadge();
                 } else {
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
                     ceBar.style.display = "none";
+                    stopDMPolling();
                 }
             }
 
@@ -2162,6 +2166,7 @@
             // ===================== 聊天系统 =====================
             let chatActiveUser = null;
             let chatRealtime = null;
+            let dmpollTimer = null;
             let chatSending = false;
             let chatMsgsBusy = false;
             let chatMsgsDirty = '';
@@ -2181,30 +2186,31 @@
             window.openChatList = function() {
                 if (!currentUser) { showToast('请先登录'); return; }
                 chatActiveUser = null;
+                document.body.style.overflow = 'hidden';
                 document.getElementById('chatDetailView').classList.add('hidden');
                 document.getElementById('chatListView').classList.remove('hidden');
                 document.getElementById('chatBackBtn').style.display = 'none';
                 document.getElementById('chatTitle').textContent = '消息';
                 document.getElementById('chatOverlay').classList.add('active');
                 loadChatList();
-                subscribeToMessages();
             };
 
             window.closeChat = function() {
                 document.getElementById('chatOverlay').classList.remove('active');
+                document.body.style.overflow = '';
             };
 
             window.openChat = function(userName) {
                 if (!currentUser) { showToast('请先登录'); return; }
                 if (userName === currentUser) { openChatList(); return; }
                 chatActiveUser = userName;
+                document.body.style.overflow = 'hidden';
                 document.getElementById('chatListView').classList.add('hidden');
                 document.getElementById('chatDetailView').classList.remove('hidden');
                 document.getElementById('chatBackBtn').style.display = 'flex';
                 document.getElementById('chatTitle').textContent = userName;
                 document.getElementById('chatOverlay').classList.add('active');
                 loadChatMessages(userName);
-                subscribeToMessages();
             };
 
             window.chatGoBack = function() {
@@ -2385,6 +2391,23 @@
                         else if (status === 'CHANNEL_ERROR') { console.error('[CHAT-REALTIME] 通道错误'); }
                         else if (status === 'TIMED_OUT') { console.error('[CHAT-REALTIME] 连接超时'); }
                     });
+            }
+
+            function startDMPolling() {
+                if (dmpollTimer) return;
+                dmpollTimer = setInterval(async () => {
+                    if (!currentUser) return;
+                    try {
+                        if (chatActiveUser) {
+                            await loadChatMessages(chatActiveUser, false);
+                        }
+                        await updateUnreadBadge();
+                    } catch(e) {}
+                }, 2500);
+            }
+
+            function stopDMPolling() {
+                if (dmpollTimer) { clearInterval(dmpollTimer); dmpollTimer = null; }
             }
 
             async function updateUnreadBadge() {
