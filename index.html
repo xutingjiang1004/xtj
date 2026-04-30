@@ -1251,22 +1251,30 @@
         .post-detail-stats { font-size:12px; color:var(--text-muted); margin-bottom:14px; }
 
         /* ========== AI 助手 ========== */
-        .ai-fab {
-            position: fixed; bottom: 24px; right: 24px; z-index: 910;
-            width: 52px; height: 52px; border-radius: 50%;
-            border: none; cursor: pointer;
-            background: linear-gradient(135deg, #3b82f6, #6366f1);
-            color: white; font-size: 22px;
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 4px 20px rgba(59,130,246,0.4), 0 2px 8px rgba(0,0,0,0.1);
-            transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
+        .ai-nav-btn {
+            display: flex; align-items: center; gap: 4px;
+            padding: 6px 14px; border-radius: 99px;
+            border: 1px solid rgba(59,130,246,0.25);
+            background: linear-gradient(135deg, rgba(59,130,246,0.08), rgba(99,102,241,0.06));
+            color: #3b82f6; font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: all 0.3s; white-space: nowrap;
+            font-family: inherit;
         }
-        .ai-fab:hover {
-            transform: scale(1.08);
-            box-shadow: 0 8px 30px rgba(59,130,246,0.5), 0 2px 12px rgba(0,0,0,0.15);
+        .ai-nav-btn:hover {
+            background: linear-gradient(135deg, rgba(59,130,246,0.15), rgba(99,102,241,0.12));
+            border-color: rgba(59,130,246,0.45);
+            transform: scale(1.04);
         }
-        .ai-fab:active { transform: scale(0.95); }
-        .ai-fab.hidden { display: none; }
+        .ai-nav-btn:active { transform: scale(0.96); }
+        [data-theme="dark"] .ai-nav-btn {
+            background: linear-gradient(135deg, rgba(59,130,246,0.12), rgba(99,102,241,0.08));
+            border-color: rgba(59,130,246,0.2);
+            color: #60a5fa;
+        }
+        [data-theme="dark"] .ai-nav-btn:hover {
+            background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(99,102,241,0.14));
+            border-color: rgba(59,130,246,0.4);
+        }
 
         .ai-chat-container {
             position: fixed; bottom: 92px; right: 24px; z-index: 920;
@@ -1509,6 +1517,7 @@
             <h1>xtj</h1>
             <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
         </div>
+        <button class="ai-nav-btn" id="aiNavBtn" onclick="toggleAIChat()" title="DeepSeek AI">🧠 DeepSeek</button>
         <div class="nav-auth">
             <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
                 <button class="btn btn-primary" onclick="openAuthModal('login')">登录</button>
@@ -1669,14 +1678,9 @@
     </div>
 
     <!-- ========== AI 助手 ========== -->
-    <button class="ai-fab" id="aiFab" title="AI助手" onclick="toggleAIChat()">🤖</button>
     <div class="ai-chat-container" id="aiChatContainer">
         <div class="ai-chat-header">
-            <span class="ai-title">AI 助手</span>
-            <select class="ai-model-select" id="aiModelSelect">
-                <option value="deepseek-v4-flash">V4 Flash</option>
-                <option value="deepseek-v4-pro">V4 Pro</option>
-            </select>
+            <span class="ai-title">DeepSeek AI</span>
             <button class="ai-close-btn" onclick="toggleAIChat()">✕</button>
         </div>
         <div class="ai-chat-body" id="aiChatBody">
@@ -3134,22 +3138,41 @@
 
             // ========== iOS 键盘适配 ==========
             if (window.visualViewport) {
+                let _vLockScrollTop = 0;
                 window.visualViewport.addEventListener('resize', function() {
                     const overlay = document.getElementById('chatOverlay');
-                    if (!overlay.classList.contains('active')) return;
+                    const aiContainer = document.getElementById('aiChatContainer');
                     const diff = window.innerHeight - window.visualViewport.height;
-                    if (diff > 80) {
-                        overlay.style.setProperty('height', window.visualViewport.height + 'px', 'important');
-                        const panel = document.getElementById('chatPanel');
-                        panel.style.setProperty('max-height', 'none', 'important');
-                        panel.style.setProperty('height', (window.visualViewport.height - 16) + 'px', 'important');
-                        panel.style.setProperty('border-radius', '24px 24px 0 0', 'important');
+                    if (diff > 60) {
+                        if (!document.body.style.position) {
+                            _vLockScrollTop = window.scrollY;
+                            document.body.style.position = 'fixed';
+                            document.body.style.top = '-' + _vLockScrollTop + 'px';
+                            document.body.style.width = '100%';
+                        }
+                        if (overlay.classList.contains('active')) {
+                            overlay.style.setProperty('height', window.visualViewport.height + 'px', 'important');
+                            const panel = document.getElementById('chatPanel');
+                            panel.style.setProperty('max-height', 'none', 'important');
+                            panel.style.setProperty('height', (window.visualViewport.height - 16) + 'px', 'important');
+                            panel.style.setProperty('border-radius', '24px 24px 0 0', 'important');
+                        }
+                        if (aiContainer.classList.contains('active')) {
+                            aiContainer.style.setProperty('bottom', (diff + 8) + 'px', 'important');
+                            aiContainer.style.setProperty('max-height', (window.visualViewport.height - 32) + 'px', 'important');
+                        }
                     } else {
+                        if (document.body.style.position === 'fixed') {
+                            document.body.style.position = '';
+                            document.body.style.top = '';
+                            document.body.style.width = '';
+                            window.scrollTo(0, _vLockScrollTop);
+                            _vLockScrollTop = 0;
+                        }
                         overlay.style.height = '';
                         const panel = document.getElementById('chatPanel');
-                        panel.style.maxHeight = '';
-                        panel.style.height = '';
-                        panel.style.borderRadius = '';
+                        if (panel) { panel.style.maxHeight = ''; panel.style.height = ''; panel.style.borderRadius = ''; }
+                        if (aiContainer) { aiContainer.style.bottom = ''; aiContainer.style.maxHeight = ''; }
                     }
                 });
             }
@@ -3197,12 +3220,10 @@
             let isStreaming = false;
             let aiStreamAbort = null;
 
-            const fabEl = document.getElementById('aiFab');
             const containerEl = document.getElementById('aiChatContainer');
             const bodyEl = document.getElementById('aiChatBody');
             const inputEl = document.getElementById('aiInput');
             const sendBtn = document.getElementById('aiSendBtn');
-            const modelSelect = document.getElementById('aiModelSelect');
             const welcomeEl = document.getElementById('aiWelcome');
 
             function scrollToBottom() {
@@ -3211,42 +3232,20 @@
                 });
             }
 
-            modelSelect.addEventListener('change', function() {
-                currentModel = this.value;
-                if (messages.length > 1) {
-                    showAIToast('已切换模型，新对话将使用 ' + this.selectedOptions[0].text);
-                }
-            });
-
             window.toggleAIChat = function() {
                 const isActive = containerEl.classList.contains('active');
                 if (isActive) {
                     containerEl.classList.remove('active');
-                    fabEl.classList.remove('hidden');
                     if (isStreaming && aiStreamAbort) {
                         aiStreamAbort.abort();
                         isStreaming = false;
                     }
                 } else {
                     containerEl.classList.add('active');
-                    fabEl.classList.add('hidden');
                     setTimeout(function() { inputEl.focus(); }, 400);
                     scrollToBottom();
                 }
             };
-
-            function showAIToast(msg) {
-                const t = document.createElement('div');
-                t.textContent = msg;
-                t.style.cssText = 'position:fixed;bottom:100px;right:40px;z-index:999;background:rgba(0,0,0,0.8);color:white;padding:8px 16px;border-radius:8px;font-size:13px;animation:aiToastIn 2s forwards;pointer-events:none;';
-                document.body.appendChild(t);
-                setTimeout(function() { t.remove(); }, 2200);
-            }
-
-            function getTime() {
-                const d = new Date();
-                return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
-            }
 
             function escapeHTML(str) {
                 const div = document.createElement('div');
@@ -3267,10 +3266,10 @@
                 if (welcomeEl) welcomeEl.remove();
                 const div = document.createElement('div');
                 div.className = 'ai-msg assistant';
-                div.innerHTML = '<div class="ai-avatar">🤖</div><div class="ai-bubble" id="aiStreamBubble"><div class="ai-thinking"><span>思考中</span><div class="ai-thinking-dots"><span></span><span></span><span></span></div></div></div>';
+                div.innerHTML = '<div class="ai-avatar">🤖</div><div class="ai-bubble"><div class="ai-thinking"><span>思考中</span><div class="ai-thinking-dots"><span></span><span></span><span></span></div></div></div>';
                 bodyEl.appendChild(div);
                 scrollToBottom();
-                return document.getElementById('aiStreamBubble');
+                return div.querySelector('.ai-bubble');
             }
 
             function removeThinking(bubble) {
@@ -3413,9 +3412,6 @@
                 this.style.height = Math.min(this.scrollHeight, 80) + 'px';
             });
 
-            const styleEl = document.createElement('style');
-            styleEl.textContent = '@keyframes aiToastIn{0%,70%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-12px)}}';
-            document.head.appendChild(styleEl);
         })();
     </script>
 </body>
