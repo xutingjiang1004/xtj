@@ -235,29 +235,20 @@
             background: linear-gradient(90deg, rgba(5,150,105,0.2), transparent);
             pointer-events: none;
         }
-        .publish-footer input[type="file"] {
+        .file-label {
+            display: inline-block;
             font-size: 12px; color: var(--text-muted);
             background: rgba(255,255,255,0.2);
             padding: 4px 10px; border-radius: 99px;
             border: 1px solid rgba(255,255,255,0.15);
             backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
             transition: var(--trans-smooth);
-            max-width: 140px;
+            cursor: pointer;
+            line-height: 1.6;
         }
-        .publish-footer input[type="file"]:hover {
+        .file-label:hover {
             background: rgba(255,255,255,0.35);
             border-color: rgba(255,255,255,0.3);
-        }
-        .publish-footer input[type="file"]::file-selector-button {
-            background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.5);
-            padding: 4px 12px; border-radius: 99px; cursor: pointer;
-            transition: all 0.3s ease;
-            font-size: 11px;
-            margin-right: 6px;
-        }
-        .publish-footer input[type="file"]::file-selector-button:hover {
-            background: rgba(255,255,255,0.85);
-            transform: scale(1.04);
         }
         .publish-footer .btn-primary {
             padding: 8px 22px; font-size: 14px;
@@ -870,8 +861,7 @@
         }
         .stat-comment-item {
             display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
+            flex-direction: column;
             padding: 10px 0;
             font-size: 13px;
             border-bottom: 1px solid rgba(255,255,255,0.06);
@@ -893,10 +883,9 @@
             margin-top: 2px;
         }
         .stat-comment-item .sci-time {
-            flex-shrink: 0;
             font-size: 11px;
             color: var(--text-muted);
-            margin-left: 10px;
+            margin-top: 4px;
         }
         .stat-section-title {
             font-weight: 700;
@@ -913,8 +902,7 @@
         }
         .stat-like-item, .stat-view-item {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
+            flex-direction: column;
             padding: 10px 0;
             font-size: 13px;
             border-bottom: 1px solid rgba(255,255,255,0.06);
@@ -939,10 +927,9 @@
             text-overflow: ellipsis;
         }
         .stat-like-item .sli-time, .stat-view-item .svi-time {
-            flex-shrink: 0;
             font-size: 11px;
             color: var(--text-muted);
-            margin-left: 10px;
+            margin-top: 4px;
         }
         .back-to-stats-btn {
             font-size: 12px;
@@ -1012,7 +999,8 @@
         <div class="publish-box glass">
             <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
             <div class="publish-footer">
-                <input type="file" id="fileInp" accept="image/*,video/*" />
+                <label for="fileInp" class="file-label">📷 选取照片或视频</label>
+                <input type="file" id="fileInp" accept="image/*,video/*" style="display:none" />
                 <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
             </div>
         </div>
@@ -2207,6 +2195,7 @@
                 if (!currentUser) { showToast('请先登录'); return; }
                 if (userName === currentUser) { openChatList(); return; }
                 chatActiveUser = userName;
+                document.getElementById('chatMessages').innerHTML = '';
                 document.body.style.overflow = 'hidden';
                 document.getElementById('chatListView').classList.add('hidden');
                 document.getElementById('chatDetailView').classList.remove('hidden');
