@@ -264,11 +264,54 @@
             backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
         }
 
-        .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+        .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
         .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); cursor: pointer; }
         .stat-card:hover { transform: translateY(-4px) scale(1.02); box-shadow: 0 8px 24px rgba(5, 150, 105, 0.15); }
         .stat-card b { display: block; font-size: 22px; color: var(--primary); font-weight: 800; }
         .stat-card span { font-size: 12px; color: var(--text-muted); }
+
+        .chat-entry-bar {
+            position: relative; z-index: 1;
+            display: flex; align-items: center; gap: 12px;
+            padding: 16px 20px; border-radius: var(--radius-sm);
+            margin-bottom: 16px; cursor: pointer;
+            transition: var(--trans-spring);
+            overflow: hidden;
+        }
+        .chat-entry-bar:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(5, 150, 105, 0.18); }
+        .chat-entry-bar:active { transform: scale(0.98); }
+        .ceb-icon {
+            font-size: 26px; flex-shrink: 0;
+            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .chat-entry-bar:hover .ceb-icon { transform: scale(1.15) rotate(-5deg); }
+        .ceb-label { font-size: 15px; font-weight: 600; color: var(--text-main); }
+        .ceb-notify {
+            margin-left: auto; font-size: 13px; color: var(--primary);
+            font-weight: 500; white-space: nowrap;
+            animation: cebPulse 2s ease-in-out infinite;
+            max-width: 60%; overflow: hidden; text-overflow: ellipsis;
+        }
+        .chat-entry-bar.has-unread .ceb-icon { animation: cebShake 0.6s ease-in-out; }
+        @keyframes cebPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        @keyframes cebShake {
+            0%, 100% { transform: rotate(0); }
+            15% { transform: rotate(-8deg); }
+            30% { transform: rotate(8deg); }
+            45% { transform: rotate(-6deg); }
+            60% { transform: rotate(6deg); }
+            75% { transform: rotate(-3deg); }
+        }
+
+        .msg-read-status {
+            font-size: 10px; opacity: 0.6; margin-left: 6px;
+            display: inline-block; vertical-align: middle;
+        }
+        .chat-msg.sent .msg-read-status { color: rgba(255,255,255,0.7); }
+        .chat-msg.received .msg-read-status { color: var(--text-muted); }
 
         .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; }
         .post {
@@ -980,6 +1023,12 @@
             <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>点赞和评论</span></div>
         </div>
 
+        <div class="chat-entry-bar glass" id="chatEntryBar" onclick="openChatList()" style="display:none;">
+            <span class="ceb-icon">💬</span>
+            <span class="ceb-label">聊天</span>
+            <span class="ceb-notify" id="cebNotify" style="display:none;"></span>
+        </div>
+
         <div id="feed" class="feed">
             <div class="loading">内容加载中...</div>
         </div>
@@ -1282,9 +1331,11 @@
             function initUI() {
                 const unauthUI = document.getElementById("unauthUI");
                 const authUI = document.getElementById("authUI");
+                const ceBar = document.getElementById("chatEntryBar");
                 if (currentUser) {
                     unauthUI.style.display = "none";
                     authUI.style.display = "flex";
+                    ceBar.style.display = "flex";
                     document.getElementById("myName").textContent = currentUser;
                     const avatar = document.getElementById("myAvatar");
                     avatar.textContent = currentUser[0].toUpperCase();
@@ -1292,6 +1343,7 @@
                 } else {
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
+                    ceBar.style.display = "none";
                 }
             }
 
@@ -2226,13 +2278,19 @@
                 el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
                     const { data: msgs, error } = await sb.from("posts")
-                        .select("id, user_name, media_url, content, created_at")
+                        .select("id, user_name, media_url, content, created_at, views")
                         .eq("media_type", DM_MARKER)
                         .or(`and(user_name.eq.${currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${currentUser})`)
                         .order("created_at")
                         .limit(500);
 
                     if (error) throw error;
+
+                    const toMark = (msgs || []).filter(m => m.user_name === userName && m.media_url === currentUser && (m.views || 0) === 0);
+                    for (const m of toMark) {
+                        try { await sb.rpc("increment_post_views", { p_post_id: m.id }); m.views = 1; } catch(e) {}
+                    }
+
                     markMessagesRead(userName);
                     renderMessages(msgs || []);
                 } catch(e) {
@@ -2249,7 +2307,8 @@
                 }
                 el.innerHTML = msgs.map(m => {
                     const sent = m.user_name === currentUser;
-                    return `<div class="chat-msg ${sent?'sent':'received'}">${m.content}<span class="msg-time">${formatMsgTime(m.created_at)}</span></div>`;
+                    const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
+                    return `<div class="chat-msg ${sent?'sent':'received'}">${m.content}${readStatus}<span class="msg-time">${formatMsgTime(m.created_at)}</span></div>`;
                 }).join('');
                 requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
             }
@@ -2319,8 +2378,12 @@
 
                     if (error) return;
                     let cnt = 0;
+                    const senders = {};
                     (data || []).forEach(m => {
-                        if (!isMsgReadByMe(m)) cnt++;
+                        if (!isMsgReadByMe(m)) {
+                            cnt++;
+                            senders[m.user_name] = (senders[m.user_name] || 0) + 1;
+                        }
                     });
                     const badge = document.getElementById('navChatBadge');
                     if (cnt > 0) {
@@ -2328,6 +2391,23 @@
                         badge.classList.add('show');
                     } else {
                         badge.classList.remove('show');
+                    }
+
+                    const ceBar = document.getElementById('chatEntryBar');
+                    const notify = document.getElementById('cebNotify');
+                    if (cnt > 0) {
+                        ceBar.classList.add('has-unread');
+                        const snames = Object.entries(senders).sort((a,b) => b[1]-a[1]);
+                        const top = snames[0];
+                        let text = `${top[0]}给你发来了${top[1]}条信息`;
+                        if (snames.length > 1) text += `等`;
+                        notify.textContent = text;
+                        notify.style.display = '';
+                        setTimeout(() => ceBar.classList.remove('has-unread'), 700);
+                    } else {
+                        ceBar.classList.remove('has-unread');
+                        notify.textContent = '';
+                        notify.style.display = 'none';
                     }
                 } catch(e) {}
             }
