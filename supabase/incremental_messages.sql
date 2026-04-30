@@ -31,28 +31,32 @@ create index if not exists idx_messages_unread
 -- 5) 启用 RLS（Row Level Security）
 alter table public.messages enable row level security;
 
--- 6) 允许任何人读取消息（两种私密但依赖前端过滤）
-create policy if not exists messages_select_all on public.messages
+-- 6) 策略：允许任何人读取消息
+drop policy if exists messages_select_all on public.messages;
+create policy messages_select_all on public.messages
   for select using (true);
 
--- 7) 允许已登录用户发送消息
-create policy if not exists messages_insert_all on public.messages
+-- 7) 策略：允许已登录用户发送消息
+drop policy if exists messages_insert_all on public.messages;
+create policy messages_insert_all on public.messages
   for insert with check (
     length(sender_name) between 2 and 40
     and length(receiver_name) between 2 and 40
     and length(content) between 1 and 1000
   );
 
--- 8) 允许接收者标记消息已读
-create policy if not exists messages_update_read on public.messages
+-- 8) 策略：允许接收者标记消息已读
+drop policy if exists messages_update_read on public.messages;
+create policy messages_update_read on public.messages
   for update using (true)
   with check (read = true);
 
--- 9) 重要！将表加入 Realtime 发布，否则前端订阅不到新消息
+-- 9) 将 messages 表加入 Realtime 发布
 begin;
   drop publication if exists supabase_realtime;
   create publication supabase_realtime;
 commit;
+
 alter publication supabase_realtime add table public.messages;
 alter publication supabase_realtime add table public.posts;
 alter publication supabase_realtime add table public.likes;
