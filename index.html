@@ -218,7 +218,7 @@
         }
         .publish-box textarea {
             width: 100%; min-height: 80px; border: none; background: transparent; resize: none;
-            font-size: 16px; color: var(--text-main); outline: none;
+            font-size: 16px; font-family: inherit; color: var(--text-main); outline: none;
             transition: var(--trans-smooth);
         }
         .publish-box textarea::placeholder { color: rgba(107, 108, 122, 0.6); }
@@ -264,7 +264,7 @@
             backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
         }
 
-        .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
+        .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 4px; }
         .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); cursor: pointer; }
         .stat-card:hover { transform: translateY(-4px) scale(1.02); box-shadow: 0 8px 24px rgba(5, 150, 105, 0.15); }
         .stat-card b { display: block; font-size: 22px; color: var(--primary); font-weight: 800; }
@@ -2229,7 +2229,6 @@
 
             async function loadChatList() {
                 const el = document.getElementById('chatList');
-                el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
                     const { data: allMsgs, error } = await sb.from("posts")
                         .select("id, user_name, media_url, content, created_at")
@@ -2298,7 +2297,6 @@
                 chatMsgsUser = userName;
                 chatMsgsDirty = '';
                 const el = document.getElementById('chatMessages');
-                if (showLoading) el.innerHTML = '<div class="chat-loading">加载中...</div>';
                 try {
                     const { data: msgs, error } = await sb.from("posts")
                         .select("id, user_name, media_url, content, created_at, views")
