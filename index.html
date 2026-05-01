@@ -1599,14 +1599,14 @@
             100% { transform: scale(0); opacity: 0; }
         }
         .dock-tab.anim-ai .dt-svg {
-            animation: iconAIClick 1.6s ease forwards;
+            animation: iconAIClick 1.8s ease forwards;
             transform-origin: center;
         }
         @keyframes iconAIClick {
             0%   { transform: scale(1); opacity: 1; }
-            10%  { transform: scale(0); opacity: 0; }
-            85%  { transform: scale(0); opacity: 0; }
-            94%  { transform: scale(1.1); opacity: 1; }
+            10%  { transform: scale(0.95); opacity: 0; }
+            85%  { transform: scale(0.95); opacity: 0; }
+            92%  { transform: scale(1.02); opacity: 1; }
             100% { transform: scale(1); opacity: 1; }
         }
 
@@ -1644,13 +1644,13 @@
             100% { stroke-dashoffset: var(--path-len, 120); }
         }
 
-        /* ---- Button 2: 聊天 - Real Bubble Animation (2s) ---- */
+        /* ---- Button 2: 聊天 - Real Bubble Animation (2.5s) ---- */
         .dock-tab.anim-chat .anim-layer {
             color: var(--text-main);
-            animation: chatContainer 2s ease forwards;
+            animation: chatContainer 2.5s ease forwards;
         }
         @keyframes chatContainer {
-            0%, 88% { opacity: 1; }
+            0%, 92% { opacity: 1; }
             100% { opacity: 0; }
         }
 
@@ -1668,7 +1668,7 @@
         .dock-tab.anim-chat .al-dot-1,
         .dock-tab.anim-chat .al-dot-2,
         .dock-tab.anim-chat .al-dot-3 {
-            animation: dotTypeMerge 1.2s ease forwards;
+            animation: dotTypeMerge 1.5s ease forwards;
         }
         .dock-tab.anim-chat .al-dot-1 { animation-delay: 0.1s; }
         .dock-tab.anim-chat .al-dot-2 { animation-delay: 0.2s; }
@@ -1682,52 +1682,88 @@
             100% { opacity: 0; }
         }
 
-        /* Main bubble: filled, inflates like a real bubble */
-        .dock-tab.anim-chat .al-main-bubble {
-            animation: bubbleInflateNew 2s ease forwards;
+        /* Bubble 1 (Big): Main message bubble - inflates like a real bubble */
+        .dock-tab.anim-chat .al-bubble-1 {
+            animation: bubble1Inflate 2.5s ease forwards;
         }
-        @keyframes bubbleInflateNew {
-            0%, 30%  { transform: scale(0); opacity: 0; }
-            38%      { transform: scale(0.4); opacity: 0.6; }
-            48%      { transform: scale(1.12); opacity: 1; }
-            55%      { transform: scale(0.94); opacity: 1; }
-            62%      { transform: scale(1.04); opacity: 1; }
-            68%      { transform: scale(0.98); opacity: 1; }
-            74%      { transform: scale(1); opacity: 1; }
-            76%      { transform: scale(1) translateX(0.8px); opacity: 1; }
-            78%      { transform: scale(1) translateX(-0.6px); opacity: 1; }
-            80%      { transform: scale(1) translateX(0); opacity: 1; }
-            88%      { transform: scale(1); opacity: 1; }
-            100%     { transform: scale(0.85); opacity: 0; }
+        @keyframes bubble1Inflate {
+            0%, 8%  { transform: scale(0); opacity: 0; }
+            12%     { transform: scale(0.3); opacity: 0.5; }
+            18%     { transform: scale(1.1); opacity: 1; }
+            24%     { transform: scale(0.94); opacity: 1; }
+            28%     { transform: scale(1.03); opacity: 1; }
+            32%     { transform: scale(0.98); opacity: 1; }
+            36%     { transform: scale(1); opacity: 1; }
+            38%     { transform: scale(1) translateX(0.8px); opacity: 1; }
+            40%     { transform: scale(1) translateX(-0.5px); opacity: 1; }
+            42%     { transform: scale(1) translateX(0); opacity: 1; }
+            70%     { transform: scale(1); opacity: 1; }
+            80%     { transform: scale(1.05) translateY(-2px); opacity: 0.8; }
+            90%     { transform: scale(1) translateY(-5px); opacity: 0.4; }
+            100%    { transform: scale(0.9) translateY(-8px); opacity: 0; }
         }
 
-        /* Sub bubble: filled, pops in from side */
-        .dock-tab.anim-chat .al-sub-bubble {
-            animation: subBubblePopNew 2s ease forwards;
+        /* Bubble 2 (Medium): Second message bubble */
+        .dock-tab.anim-chat .al-bubble-2 {
+            animation: bubble2Inflate 2.5s ease forwards;
         }
-        @keyframes subBubblePopNew {
-            0%, 65%  { transform: scale(0); opacity: 0; }
-            74%      { transform: scale(1.15); opacity: 1; }
-            80%      { transform: scale(0.92); opacity: 1; }
-            86%      { transform: scale(1); opacity: 1; }
-            92%      { transform: scale(0.95) translate(4px, -3px); opacity: 0.7; }
-            100%     { transform: scale(0.7) translate(6px, -5px); opacity: 0; }
+        @keyframes bubble2Inflate {
+            0%, 28% { transform: scale(0); opacity: 0; }
+            34%     { transform: scale(0.5); opacity: 0.6; }
+            40%     { transform: scale(1.08); opacity: 1; }
+            46%     { transform: scale(0.95); opacity: 1; }
+            52%     { transform: scale(1); opacity: 1; }
+            72%     { transform: scale(1); opacity: 1; }
+            82%     { transform: scale(1.03) translateY(-2px); opacity: 0.7; }
+            92%     { transform: scale(0.95) translateY(-5px); opacity: 0.3; }
+            100%    { transform: scale(0.85) translateY(-7px); opacity: 0; }
+        }
+
+        /* Bubble 3 (Small): Third message bubble */
+        .dock-tab.anim-chat .al-bubble-3 {
+            animation: bubble3Inflate 2.5s ease forwards;
+        }
+        @keyframes bubble3Inflate {
+            0%, 42% { transform: scale(0); opacity: 0; }
+            48%     { transform: scale(0.4); opacity: 0.5; }
+            54%     { transform: scale(1.1); opacity: 1; }
+            60%     { transform: scale(0.92); opacity: 1; }
+            66%     { transform: scale(1); opacity: 1; }
+            74%     { transform: scale(1); opacity: 1; }
+            84%     { transform: scale(1.02) translateY(-1px); opacity: 0.6; }
+            94%     { transform: scale(0.9) translateY(-4px); opacity: 0.2; }
+            100%    { transform: scale(0.8) translateY(-6px); opacity: 0; }
+        }
+
+        /* Bubble 4 (Tiny): Fourth small bubble */
+        .dock-tab.anim-chat .al-bubble-4 {
+            animation: bubble4Inflate 2.5s ease forwards;
+        }
+        @keyframes bubble4Inflate {
+            0%, 55% { transform: scale(0); opacity: 0; }
+            62%     { transform: scale(0.5); opacity: 0.6; }
+            68%     { transform: scale(1.05); opacity: 1; }
+            74%     { transform: scale(0.95); opacity: 1; }
+            78%     { transform: scale(1); opacity: 1; }
+            88%     { transform: scale(1) translateY(-2px); opacity: 0.5; }
+            96%     { transform: scale(0.9) translateY(-4px); opacity: 0.15; }
+            100%    { transform: scale(0.8) translateY(-5px); opacity: 0; }
         }
 
         /* ---- Button 3: AI - Flower Petals Scatter & Return (1.8s) ---- */
         .dock-tab.anim-ai .anim-layer {
             opacity: 1;
         }
-        /* 原始花朵图标淡出 */
+        /* 原始花朵图标淡出淡入 - 平滑过渡 */
         .dock-tab.anim-ai .dt-svg {
             animation: flowerIconFadeOut 1.8s ease forwards;
             transform-origin: center;
         }
         @keyframes flowerIconFadeOut {
             0%   { opacity: 1; transform: scale(1); }
-            8%   { opacity: 0; transform: scale(0.9); }
-            75%  { opacity: 0; transform: scale(0.9); }
-            88%  { opacity: 1; transform: scale(1.08); }
+            10%  { opacity: 0; transform: scale(0.98); }
+            85%  { opacity: 0; transform: scale(0.98); }
+            92%  { opacity: 1; transform: scale(1.02); }
             100% { opacity: 1; transform: scale(1); }
         }
         /* CSS层花朵中心的闪光 */
@@ -1886,14 +1922,19 @@
                 </defs>
                 <path class="al-path" d="M 8,32 Q 22,12 38,28 T 70,18" fill="none" stroke="url(#g-stroke)" stroke-width="3" stroke-linecap="round"/>
                 <g class="al-pen">
-                    <!-- 蜡笔身体 -->
-                    <rect x="1" y="3" width="5" height="14" rx="1.5" fill="#F59E0B" stroke="#D97706" stroke-width="0.8"/>
-                    <!-- 蜡笔标签条纹 -->
-                    <rect x="1" y="8" width="5" height="3" rx="0.5" fill="#FBBF24" opacity="0.6"/>
-                    <!-- 蜡笔笔尖 -->
-                    <path d="M1.5,17 L3.5,22 L5.5,17 Z" fill="#F59E0B" stroke="#D97706" stroke-width="0.6"/>
-                    <!-- 笔尖尖端颜色 -->
-                    <path d="M2.5,19 L3.5,22 L4.5,19 Z" fill="#FF6B6B"/>
+                    <!-- 倾斜长蜡笔 - 整体rotate(-15deg)倾斜，模拟钢笔起始角度 -->
+                    <g transform="rotate(-15)">
+                        <!-- 蜡笔身体 - 更长的矩形 -->
+                        <rect x="-2.5" y="0" width="7" height="24" rx="2" fill="#F59E0B" stroke="#D97706" stroke-width="1"/>
+                        <!-- 蜡笔标签条纹 -->
+                        <rect x="-2.5" y="10" width="7" height="5" rx="1" fill="#FBBF24" opacity="0.6"/>
+                        <!-- 蜡笔金属包边 -->
+                        <rect x="-2.5" y="22" width="7" height="3" rx="0.5" fill="#9CA3AF" stroke="#6B7280" stroke-width="0.5"/>
+                        <!-- 蜡笔笔尖 - 三角形 -->
+                        <path d="M-2.5,25 L1,32 L4.5,25 Z" fill="#F59E0B" stroke="#D97706" stroke-width="0.8"/>
+                        <!-- 笔尖尖端颜色 -->
+                        <path d="M0,28 L1,32 L2,28 Z" fill="#FF6B6B"/>
+                    </g>
                 </g>
             </svg>
         </button>
@@ -1910,20 +1951,33 @@
                     <circle class="al-dot-1" cx="-9" cy="-2" r="2.8" fill="currentColor" opacity="0"/>
                     <circle class="al-dot-2" cx="0" cy="-2" r="2.8" fill="currentColor" opacity="0"/>
                     <circle class="al-dot-3" cx="9" cy="-2" r="2.8" fill="currentColor" opacity="0"/>
-                    <!-- 主气泡：填充的圆角矩形+尾巴 -->
-                    <g class="al-main-bubble" opacity="0">
-                        <path d="M-16,-14 Q-16,-18 -12,-18 L12,-18 Q16,-18 16,-14 L16,6 Q16,10 12,10 L2,10 L-2,16 L-4,10 L-12,10 Q-16,10 -16,6 Z" 
+                    <!-- Bubble 1 (Big): Main message bubble -->
+                    <g class="al-bubble-1" opacity="0" transform="translate(-14, -12)">
+                        <path d="M0,0 Q0,-12 14,-12 L28,-12 Q32,-12 32,-8 L32,6 Q32,10 28,10 L18,10 L14,16 L10,10 L0,10 Q-4,10 -4,6 L-4,-8 Q-4,-12 0,0 Z" 
                               fill="rgba(74,108,247,0.15)" stroke="rgba(74,108,247,0.4)" stroke-width="1.2"/>
-                        <!-- 气泡内的小横线代表消息 -->
-                        <line x1="-9" y1="-8" x2="9" y2="-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
-                        <line x1="-9" y1="-2" x2="5" y2="-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
-                        <line x1="-9" y1="4" x2="7" y2="4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.25"/>
+                        <line x1="4" y1="-4" x2="24" y2="-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+                        <line x1="4" y1="2" x2="18" y2="2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
+                        <line x1="4" y1="8" x2="20" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.25"/>
                     </g>
-                </g>
-                <!-- 副气泡：小的填充气泡 -->
-                <g class="al-sub-bubble" opacity="0" transform="translate(58, 14)">
-                    <path d="M-8,-8 Q-8,-12 -4,-12 L4,-12 Q8,-12 8,-8 L8,2 Q8,6 4,6 L1,6 L-1,10 L-2,6 L-4,6 Q-8,6 -8,2 Z" 
-                          fill="rgba(74,108,247,0.12)" stroke="rgba(74,108,247,0.3)" stroke-width="1"/>
+                    <!-- Bubble 2 (Medium): Second message bubble -->
+                    <g class="al-bubble-2" opacity="0" transform="translate(20, -18)">
+                        <path d="M0,0 Q0,-10 10,-10 L20,-10 Q24,-10 24,-6 L24,4 Q24,8 20,8 L12,8 L9,13 L6,8 L0,8 Q-4,8 -4,4 L-4,-6 Q-4,-10 0,0 Z" 
+                              fill="rgba(74,108,247,0.12)" stroke="rgba(74,108,247,0.3)" stroke-width="1"/>
+                        <line x1="2" y1="-3" x2="16" y2="-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.35"/>
+                        <line x1="2" y1="2" x2="12" y2="2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.25"/>
+                    </g>
+                    <!-- Bubble 3 (Small): Third message bubble -->
+                    <g class="al-bubble-3" opacity="0" transform="translate(-8, -22)">
+                        <path d="M0,0 Q0,-7 7,-7 L14,-7 Q17,-7 17,-4 L17,3 Q17,6 14,6 L8,6 L5,10 L2,6 L0,6 Q-4,6 -4,3 L-4,-4 Q-4,-7 0,0 Z" 
+                              fill="rgba(74,108,247,0.1)" stroke="rgba(74,108,247,0.25)" stroke-width="1"/>
+                        <line x1="1" y1="-1" x2="11" y2="-1" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
+                        <line x1="1" y1="3" x2="8" y2="3" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.2"/>
+                    </g>
+                    <!-- Bubble 4 (Tiny): Fourth small bubble -->
+                    <g class="al-bubble-4" opacity="0" transform="translate(30, -8)">
+                        <path d="M0,0 Q0,-5 5,-5 L10,-5 Q13,-5 13,-2 L13,2 Q13,5 10,5 L6,5 L4,8 L2,5 L0,5 Q-3,5 -3,2 L-3,-2 Q-3,-5 0,0 Z" 
+                              fill="rgba(74,108,247,0.08)" stroke="rgba(74,108,247,0.2)" stroke-width="0.8"/>
+                    </g>
                 </g>
             </svg>
         </button>
@@ -3324,7 +3378,7 @@
             // Track which buttons currently have animation playing
             var animatingTabs = {};
             // Animation durations by tab (in ms, matching CSS)
-            var animDurations = { posts: 1500, chat: 2000, ai: 1800 };
+            var animDurations = { posts: 1500, chat: 2500, ai: 1800 };
 
             function triggerTabAnimation(el, tab) {
                 var cls = animClassMap[tab];
@@ -3349,49 +3403,80 @@
                 var petalGroups = btn.querySelectorAll('.al-petal-g');
                 if (!petalGroups.length) return;
                 
-                var rect = btn.getBoundingClientRect();
-                var cx = rect.left + rect.width / 2;
-                var cy = rect.top + rect.height / 2;
+                // 获取anim-layer的视口位置（花朵SVG在anim-layer中）
+                var animLayer = btn.querySelector('.anim-layer');
+                if (!animLayer) return;
+                var animRect = animLayer.getBoundingClientRect();
+                
+                // 花朵在anim-layer中的SVG坐标是translate(40, 30)
+                // 每片花瓣在花朵坐标系中的位置是：rotate(angle) -> ellipse cx=0 cy=-12
+                // 花瓣是一个ellipse，rx=7, ry=13，所以花瓣中心在花朵中心上方约12px处
+                var flowerCenterX = 40; // SVG中的花朵中心X
+                var flowerCenterY = 30; // SVG中的花朵中心Y
+                var petalOffsetY = 12;  // 花瓣中心到花朵中心的偏移
+                var petalRx = 7;        // 花瓣椭圆X半径
+                var petalRy = 13;      // 花瓣椭圆Y半径
+                
+                // SVG坐标到页面坐标的缩放比例
+                var svgScaleX = animRect.width / 80;  // viewBox="0 0 80 60"
+                var svgScaleY = animRect.height / 60;
+                
+                // 计算花朵中心在页面上的位置
+                var flowerPageX = animRect.left + flowerCenterX * svgScaleX;
+                var flowerPageY = animRect.top + flowerCenterY * svgScaleY;
+                
                 var container = document.getElementById('dockBar') || document.body;
                 
                 var colors = ['#F472B6','#EC4899','#F9A8D4','#A78BFA','#C084FC','#FDA4AF'];
                 var keyframeCSS = '';
                 var prefix = 'pf-' + Date.now() + '-';
                 
-                // 为每片花瓣创建飞出再飞回的动画
                 // 花瓣原始角度：0, 60, 120, 180, 240, 300
                 var baseAngles = [0, 60, 120, 180, 240, 300];
                 
                 for (var i = 0; i < petalGroups.length && i < 6; i++) {
                     var baseAngle = baseAngles[i];
-                    // 飞散方向 = 花瓣所在角度方向（花瓣从哪个方向就往哪个方向飞）
-                    var flyAngle = baseAngle - 90; // SVG中花瓣的旋转角度对应的方向需要调整
-                    var rad = flyAngle * Math.PI / 180;
+                    var rad = baseAngle * Math.PI / 180;
                     
-                    // 飞散距离
-                    var dist = 20 + Math.random() * 15;
-                    var flyX = Math.cos(rad) * dist;
-                    var flyY = Math.sin(rad) * dist;
+                    // 计算每片花瓣在花朵上的实际位置
+                    // 花瓣在花朵坐标系中：先旋转baseAngle，然后ellipse在(0, -12)处
+                    // 旋转后的花瓣中心位置
+                    var petalLocalX = Math.sin(rad) * petalOffsetY;
+                    var petalLocalY = -Math.cos(rad) * petalOffsetY;
+                    
+                    // 转换为页面坐标
+                    var petalPageX = flowerPageX + petalLocalX * svgScaleX;
+                    var petalPageY = flowerPageY + petalLocalY * svgScaleY;
+                    
+                    // 飞散方向 = 花瓣所在角度方向向外
+                    var flyAngle = baseAngle;
+                    var flyRad = flyAngle * Math.PI / 180;
+                    
+                    // 飞散距离（向外飞）
+                    var dist = 18 + Math.random() * 12;
+                    var flyX = Math.cos(flyRad) * dist;
+                    var flyY = Math.sin(flyRad) * dist;
                     
                     // 花瓣自身旋转
-                    var selfRot = (Math.random() > 0.5 ? 1 : -1) * (40 + Math.random() * 60);
+                    var selfRot = (Math.random() > 0.5 ? 1 : -1) * (30 + Math.random() * 50);
                     
                     var color = colors[i % colors.length];
                     var kfName = prefix + i;
                     
                     // 关键帧：从原位 → 飞出 → 停留 → 飞回原位
+                    // transform的translate是相对于花瓣起始位置的偏移
                     keyframeCSS += '@keyframes ' + kfName + ' {'
                         + '0%{transform:translate(0px,0px) rotate(0deg) scale(1);opacity:1}'
-                        + '6%{transform:translate(0px,0px) rotate(0deg) scale(0.6);opacity:0.8}'  // 先缩小准备
-                        + '10%{transform:translate(0px,0px) rotate(0deg) scale(1);opacity:1}'     // 弹出
+                        + '8%{transform:translate(0px,0px) rotate(0deg) scale(0.5);opacity:0.7}'  // 先缩小准备
+                        + '12%{transform:translate(0px,0px) rotate(0deg) scale(1.05);opacity:1}'   // 弹出
                         + '35%{transform:translate(' + flyX.toFixed(1) + 'px,' + flyY.toFixed(1) + 'px) rotate(' + selfRot.toFixed(1) + 'deg) scale(1);opacity:0.9}'  // 飞到最远
-                        + '50%{transform:translate(' + (flyX*0.95).toFixed(1) + 'px,' + (flyY*0.95).toFixed(1) + 'px) rotate(' + (selfRot*0.9).toFixed(1) + 'deg) scale(0.95);opacity:0.85}' // 短暂停留
+                        + '50%{transform:translate(' + (flyX*0.9).toFixed(1) + 'px,' + (flyY*0.9).toFixed(1) + 'px) rotate(' + (selfRot*0.8).toFixed(1) + 'deg) scale(0.95);opacity:0.85}' // 短暂停留
                         + '80%{transform:translate(0px,0px) rotate(0deg) scale(1);opacity:1}'     // 飞回原位
-                        + '88%{transform:translate(0px,0px) rotate(0deg) scale(1.1);opacity:1}'   // 回弹
-                        + '100%{transform:translate(0px,0px) rotate(0deg) scale(1);opacity:1}'    // 稳定
+                        + '88%{transform:translate(0px,0px) rotate(0deg) scale(1.08);opacity:1}'    // 回弹
+                        + '100%{transform:translate(0px,0px) rotate(0deg) scale(1);opacity:1}'      // 稳定
                         + '}\n';
                     
-                    // 创建花瓣SVG元素（用fixed定位覆盖在原始花瓣上方）
+                    // 创建花瓣SVG元素，定位到花瓣的实际位置
                     var svgW = 14, svgH = 20;
                     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
                     svg.setAttribute('class', 'dynamic-petal');
@@ -3399,35 +3484,36 @@
                     svg.setAttribute('width', svgW);
                     svg.setAttribute('height', svgH);
                     svg.style.position = 'fixed';
-                    svg.style.left = (cx - svgW / 2) + 'px';
-                    svg.style.top = (cy - svgH / 2) + 'px';
+                    // 定位到花瓣在页面上的实际位置（中心对齐）
+                    svg.style.left = (petalPageX - svgW / 2) + 'px';
+                    svg.style.top = (petalPageY - svgH / 2) + 'px';
                     svg.style.pointerEvents = 'none';
                     svg.style.zIndex = '9999';
                     svg.style.willChange = 'transform, opacity';
                     svg.style.animation = kfName + ' 1.5s cubic-bezier(.25,.46,.45,.94) forwards';
-                    // 先旋转到花瓣原始角度，使花瓣朝向正确
+                    // 旋转到花瓣原始角度，使花瓣朝向正确
                     svg.style.transform = 'rotate(' + baseAngle + 'deg)';
                     svg.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color + '" opacity="0.9"/>';
                     container.appendChild(svg);
                 }
                 
-                // 额外2-3片随机小花瓣（不飞回，纯装饰）
+                // 额外2-3片随机小花瓣（不飞回，从花朵中心散开装饰）
                 var extraCount = 2 + Math.floor(Math.random() * 2);
                 for (var j = 0; j < extraCount; j++) {
                     var angle = Math.random() * 360;
                     var rad2 = angle * Math.PI / 180;
-                    var dist2 = 25 + Math.random() * 20;
+                    var dist2 = 20 + Math.random() * 15;
                     var x2 = Math.cos(rad2) * dist2;
                     var y2 = Math.sin(rad2) * dist2;
-                    var rot2 = (Math.random() > 0.5 ? 1 : -1) * (120 + Math.random() * 240);
+                    var rot2 = (Math.random() > 0.5 ? 1 : -1) * (100 + Math.random() * 200);
                     var color2 = colors[Math.floor(Math.random() * colors.length)];
                     var kfName2 = prefix + 'e' + j;
                     
                     keyframeCSS += '@keyframes ' + kfName2 + ' {'
                         + '0%{transform:translate(0px,0px) rotate(0deg) scale(0);opacity:0}'
-                        + '12%{transform:translate(0px,0px) rotate(20deg) scale(1);opacity:0.7}'
-                        + '50%{transform:translate(' + x2.toFixed(1) + 'px,' + y2.toFixed(1) + 'px) rotate(' + rot2.toFixed(1) + 'deg) scale(0.8);opacity:0.5}'
-                        + '100%{transform:translate(' + (x2*1.1).toFixed(1) + 'px,' + (y2*1.15).toFixed(1) + 'px) rotate(' + (rot2*1.2).toFixed(1) + 'deg) scale(0.3);opacity:0}'
+                        + '15%{transform:translate(0px,0px) rotate(15deg) scale(1);opacity:0.6}'
+                        + '50%{transform:translate(' + x2.toFixed(1) + 'px,' + y2.toFixed(1) + 'px) rotate(' + rot2.toFixed(1) + 'deg) scale(0.7);opacity:0.4}'
+                        + '100%{transform:translate(' + (x2*1.15).toFixed(1) + 'px,' + (y2*1.15).toFixed(1) + 'px) rotate(' + (rot2*1.3).toFixed(1) + 'deg) scale(0.2);opacity:0}'
                         + '}\n';
                     
                     var svgW2 = 8, svgH2 = 12;
@@ -3437,13 +3523,14 @@
                     svg2.setAttribute('width', svgW2);
                     svg2.setAttribute('height', svgH2);
                     svg2.style.position = 'fixed';
-                    svg2.style.left = (cx - svgW2 / 2) + 'px';
-                    svg2.style.top = (cy - svgH2 / 2) + 'px';
+                    // 从花朵中心位置开始
+                    svg2.style.left = (flowerPageX - svgW2 / 2) + 'px';
+                    svg2.style.top = (flowerPageY - svgH2 / 2) + 'px';
                     svg2.style.pointerEvents = 'none';
                     svg2.style.zIndex = '9999';
                     svg2.style.willChange = 'transform, opacity';
-                    svg2.style.animation = kfName2 + ' 1.2s cubic-bezier(.25,.46,.45,.94) forwards';
-                    svg2.style.animationDelay = '0.06s';
+                    svg2.style.animation = kfName2 + ' 1.3s cubic-bezier(.25,.46,.45,.94) forwards';
+                    svg2.style.animationDelay = '0.08s';
                     svg2.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color2 + '" opacity="0.8"/>';
                     container.appendChild(svg2);
                 }
