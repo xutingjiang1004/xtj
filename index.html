@@ -1595,13 +1595,15 @@
             100% { transform: scale(0); opacity: 0; }
         }
         .dock-tab.anim-ai .dt-svg {
-            animation: iconAIClick 0.3s ease forwards;
+            animation: iconAIClick 1.6s ease forwards;
             transform-origin: center;
         }
         @keyframes iconAIClick {
             0%   { transform: scale(1); opacity: 1; }
-            25%  { transform: scale(1); opacity: 1; }
-            100% { transform: scale(0.8); opacity: 0; }
+            8%   { transform: scale(0.85); opacity: 0; }
+            88%  { transform: scale(0.85); opacity: 0; }
+            95%  { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
         }
 
         /* ---- Button 1: 帖子 - Pen Drawing (1.5s) ---- */
@@ -1686,60 +1688,52 @@
             100%    { opacity: 0; transform: scale(0); }
         }
 
-        /* ---- Button 3: AI - Flower Bloom + Dynamic Petal Burst (1.6s) ---- */
+        /* ---- Button 3: AI - Flower Petals Burst & Return (1.6s) ---- */
         .dock-tab.anim-ai .anim-layer {
             color: var(--text-main);
             animation: aiContainer 1.6s ease forwards;
         }
         @keyframes aiContainer {
-            0%, 88% { opacity: 1; }
+            0%, 92% { opacity: 1; }
             100% { opacity: 0; }
         }
-        /* Phase 1: Flower fades out + scales down */
-        .dock-tab.anim-ai .al-flower {
-            animation: aiFlowerFade 1.6s ease forwards;
-        }
-        @keyframes aiFlowerFade {
-            0%   { opacity: 1; transform: scale(1); }
-            18%  { opacity: 0; transform: scale(0.85); }
-            75%  { opacity: 0; transform: scale(0.85); }
-            82%  { opacity: 1; transform: scale(0.8); }
-            90%  { opacity: 1; transform: scale(1.05); }
-            100% { opacity: 1; transform: scale(1); }
-        }
-        /* White flash at center when flower opens */
+        /* White flash before burst */
         .dock-tab.anim-ai .al-flash {
             animation: flowerFlash 1.6s ease forwards;
         }
         @keyframes flowerFlash {
             0%   { opacity: 0; transform: scale(0.3); }
-            6%   { opacity: 0.8; transform: scale(1); }
-            15%  { opacity: 0; transform: scale(1.4); }
+            5%   { opacity: 0.8; transform: scale(1); }
+            14%  { opacity: 0; transform: scale(1.4); }
             100% { opacity: 0; }
         }
-        /* Phase 4: Petals open sequentially */
+        /* 6 flower petals: burst outward then fly back */
         .dock-tab.anim-ai .al-petal-g {
-            animation: petalOpen 1.6s ease forwards;
+            animation: petalBurstReturn 1.6s cubic-bezier(.4,.0,.2,1) forwards;
         }
-        @keyframes petalOpen {
-            0%, 78% { transform: scaleY(0); opacity: 0; }
-            86%     { transform: scaleY(1); opacity: 1; }
-            100%    { transform: scaleY(1); opacity: 1; }
+        @keyframes petalBurstReturn {
+            0%   { transform: translate(0, 0); opacity: 1; }
+            12%  { transform: translate(var(--bx,0), var(--by,-33px)); opacity: 0.85; }
+            50%  { transform: translate(var(--bx,0), var(--by,-33px)); opacity: 0.85; }
+            88%  { transform: translate(0, 0); opacity: 1; }
+            100% { transform: translate(0, 0); opacity: 1; }
         }
-        .dock-tab.anim-ai .al-petal-g-0 { animation-delay: 0s; }
-        .dock-tab.anim-ai .al-petal-g-1 { animation-delay: 0.05s; }
-        .dock-tab.anim-ai .al-petal-g-2 { animation-delay: 0.1s; }
-        .dock-tab.anim-ai .al-petal-g-3 { animation-delay: 0.15s; }
-        .dock-tab.anim-ai .al-petal-g-4 { animation-delay: 0.2s; }
-        .dock-tab.anim-ai .al-petal-g-5 { animation-delay: 0.25s; }
-        /* Phase 4: Center pops in with bounce */
+        .dock-tab.anim-ai .al-petal-g-0 { --bx: 0px;   --by: -33px; }
+        .dock-tab.anim-ai .al-petal-g-1 { --bx: 29px;  --by: -17px; }
+        .dock-tab.anim-ai .al-petal-g-2 { --bx: 29px;  --by: 17px;  }
+        .dock-tab.anim-ai .al-petal-g-3 { --bx: 0px;   --by: 33px;  }
+        .dock-tab.anim-ai .al-petal-g-4 { --bx: -29px; --by: 17px;  }
+        .dock-tab.anim-ai .al-petal-g-5 { --bx: -29px; --by: -17px; }
+        /* Center: shrinks when petals burst, pops back when they return */
         .dock-tab.anim-ai .al-flower-center {
             animation: centerPop 1.6s ease forwards;
         }
         @keyframes centerPop {
-            0%, 80% { transform: scale(0); opacity: 0; }
-            87%     { transform: scale(1.3); opacity: 1; }
-            93%     { transform: scale(0.9); opacity: 1; }
+            0%, 12% { transform: scale(1); opacity: 1; }
+            18%     { transform: scale(0); opacity: 0; }
+            80%     { transform: scale(0); opacity: 0; }
+            88%     { transform: scale(1.3); opacity: 1; }
+            94%     { transform: scale(0.9); opacity: 1; }
             100%    { transform: scale(1); opacity: 1; }
         }
     </style>
@@ -3322,33 +3316,32 @@
                 var cy = rect.top + rect.height / 2;
                 var container = document.getElementById('dockBar') || document.body;
 
-                var petalCount = 12 + Math.floor(Math.random() * 4);
+                var petalCount = 7 + Math.floor(Math.random() * 4);
                 var keyframeCSS = '';
                 var prefix = 'pf-' + Date.now() + '-';
 
-                var colors = ['#F472B6','#EC4899','#FB923C','#FBBF24','#A78BFA','#C084FC','#FCD34D','#F9A8D4','#FDA4AF','#E879F9','#D8B4FE','#FDBA74','#FCA5A5','#F0ABFC','#FDE68A'];
+                var colors = ['#F472B6','#EC4899','#FBBF24','#A78BFA','#C084FC','#F9A8D4','#FDA4AF','#E879F9','#FDE68A','#FCA5A5'];
 
-                var svgW = 14, svgH = 21;
+                var svgW = 10, svgH = 15;
 
                 for (var i = 0; i < petalCount; i++) {
-                    var angle = (360 / petalCount) * i + (Math.random() - 0.5) * 30;
-                    var dist = 20 + Math.random() * 20;
-                    var rot = 180 + Math.random() * 360;
+                    var angle = (360 / petalCount) * i + (Math.random() - 0.5) * 20;
+                    var dist = 18 + Math.random() * 18;
+                    var rot = 120 + Math.random() * 360;
                     var rotDir = Math.random() > 0.5 ? 1 : -1;
                     var finalRot = rot * rotDir;
                     var color = colors[i % colors.length];
-                    var gravity = 8 + Math.random() * 12;
 
                     var rad = angle * Math.PI / 180;
                     var x = Math.cos(rad) * dist;
-                    var y = Math.sin(rad) * dist + gravity;
+                    var y = Math.sin(rad) * dist;
 
                     var kfName = prefix + i;
                     keyframeCSS += '@keyframes ' + kfName + ' {'
                         + '0%{transform:translate(0,0) rotate(0deg) scale(0);opacity:0}'
-                        + '12%{transform:translate(0,0) rotate(30deg) scale(1);opacity:0.9}'
-                        + '60%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(1);opacity:0.8}'
-                        + '100%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.5);opacity:0}'
+                        + '18%{transform:translate(0,0) rotate(25deg) scale(1);opacity:0.85}'
+                        + '55%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.85);opacity:0.6}'
+                        + '100%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.4);opacity:0}'
                         + '}\n';
 
                     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -3362,8 +3355,8 @@
                     svg.style.pointerEvents = 'none';
                     svg.style.zIndex = '9999';
                     svg.style.willChange = 'transform, opacity';
-                    svg.style.animation = kfName + ' 1.2s cubic-bezier(.4,.0,.2,1) forwards';
-                    svg.style.animationDelay = '0.18s';
+                    svg.style.animation = kfName + ' 0.85s cubic-bezier(.4,.0,.2,1) forwards';
+                    svg.style.animationDelay = '0.08s';
                     svg.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color + '" opacity="0.9"/>';
                     container.appendChild(svg);
                 }
@@ -3378,7 +3371,7 @@
                     document.querySelectorAll('.dynamic-petal').forEach(function(el) { el.remove(); });
                     var st = document.getElementById(styleTag.id);
                     if (st) st.remove();
-                }, 1600);
+                }, 1100);
             }
 
             document.querySelectorAll('.dock-tab').forEach(btn => {
