@@ -353,25 +353,23 @@
         .publish-box {
             position: relative; z-index: 1; padding: 24px; border-radius: var(--radius-md);
             transition: var(--trans-smooth);
-            background: linear-gradient(135deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 100%);
-            border: 1px solid rgba(255,255,255,0.35);
-            backdrop-filter: blur(22px) saturate(175%);
-            -webkit-backdrop-filter: blur(22px) saturate(175%);
-            box-shadow: 0 8px 28px rgba(0,0,0,0.03), inset 0 0.5px 0 rgba(255,255,255,0.5);
+            background: rgba(255,255,255,0.95);
+            border: 1px solid rgba(255,255,255,0.8);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.08);
         }
         .publish-box::before {
             content: ''; position: absolute; inset: -1px; border-radius: inherit;
-            background: linear-gradient(135deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0) 50%, rgba(5,150,105,0.05) 100%);
+            background: linear-gradient(135deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 50%, rgba(5,150,105,0.08) 100%);
             pointer-events: none; z-index: -1;
         }
         .publish-box:hover {
             transform: translateY(-4px);
-            box-shadow: 0 20px 56px rgba(5, 150, 105, 0.14), 0 6px 20px rgba(5, 150, 105, 0.08), inset 0 1px 0 rgba(255,255,255,0.7);
-            border-color: rgba(255,255,255,0.6);
+            box-shadow: 0 20px 56px rgba(5, 150, 105, 0.15), 0 6px 20px rgba(5, 150, 105, 0.1);
+            border-color: rgba(255,255,255,1);
         }
         .publish-box:focus-within {
-            border-color: rgba(5, 150, 105, 0.15);
-            box-shadow: 0 12px 40px rgba(5, 150, 105, 0.08), 0 0 0 3px rgba(5, 150, 105, 0.06), inset 0 1px 0 rgba(255,255,255,0.7);
+            border-color: rgba(5, 150, 105, 0.4);
+            box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12), 0 0 0 3px rgba(5, 150, 105, 0.1);
         }
         .publish-box textarea {
             width: 100%; min-height: 80px; border: none; background: transparent; resize: none;
@@ -467,18 +465,16 @@
             opacity: 0; transform: translateY(30px) scale(0.95);
             transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s cubic-bezier(0.25, 1, 0.3, 1);
             will-change: opacity, transform;
-            background: rgba(255,255,255,0.11);
-            border: 1px solid rgba(255,255,255,0.55);
-            backdrop-filter: blur(20px) saturate(170%);
-            -webkit-backdrop-filter: blur(20px) saturate(170%);
-            box-shadow: 0 8px 32px rgba(0,0,0,0.02), inset 0 0.5px 0 rgba(255,255,255,0.7);
+            background: rgba(255,255,255,0.92);
+            border: 1px solid rgba(255,255,255,0.7);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.06);
         }
         .post.visible { 
             opacity: 1; 
             transform: translateY(0) scale(1); 
             will-change: auto;
         }
-        .post:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04), inset 0 0.5px 0 rgba(255,255,255,0.9); transform: translateY(-4px); }
+        .post:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.06); transform: translateY(-4px); }
 
         .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
         .avatar {
@@ -543,30 +539,31 @@
         .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: auto; }
         .action-btn.del:hover { background: rgba(255,59,96,0.06); }
 
-        .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.05); display: grid; gap: 8px; }
+        .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.06); display: grid; gap: 8px; }
         .comment-item {
-            padding: 10px 14px; background: rgba(255,255,255,0.09); border-radius: 12px;
-            font-size: 13px; line-height: 1.5; border: 1px solid rgba(255,255,255,0.4);
-            box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.6);
+            padding: 10px 14px; background: rgba(255,255,255,0.88); border-radius: 12px;
+            font-size: 13px; line-height: 1.5; border: 1px solid rgba(255,255,255,0.6);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
             display: flex; justify-content: space-between; align-items: center; gap: 8px;
-            backdrop-filter: blur(16px) saturate(160%); -webkit-backdrop-filter: blur(16px) saturate(160%);
             transition: var(--trans-smooth);
         }
         .comment-item:hover {
             transform: translateX(4px);
-            box-shadow: inset 0 0.5px 0 rgba(255,255,255,0.6), 0 4px 16px rgba(0,0,0,0.03);
-            background: rgba(255,255,255,0.16);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+            background: rgba(255,255,255,1);
         }
         .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.15);
-            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            position: fixed; inset: 0; background: rgba(0,0,0,0.4);
             display: flex; align-items: center; justify-content: center; z-index: 100;
             opacity: 0; pointer-events: none;
-            transition: opacity 0.5s cubic-bezier(0.16,1,0.3,1), backdrop-filter 0.5s cubic-bezier(0.16,1,0.3,1);
+            transition: opacity 0.5s cubic-bezier(0.16,1,0.3,1);
         }
         .modal-overlay.active { opacity: 1; pointer-events: all; }
         .modal-box {
             width: 90%; max-width: 400px; padding: 24px; border-radius: var(--radius-lg);
+            background: rgba(255,255,255,0.98);
+            border: 1px solid rgba(255,255,255,0.8);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
             transform: translateY(35px) scale(0.96); opacity: 0; transition: var(--trans-ppt);
         }
         .modal-overlay.active .modal-box { transform: translateY(0) scale(1); opacity: 1; }
@@ -578,10 +575,8 @@
             width: 100%;
             padding: 14px 18px;
             border-radius: 14px;
-            border: 1px solid rgba(255,255,255,0.4);
-            background: rgba(255,255,255,0.4);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(0,0,0,0.12);
+            background: rgba(255,255,255,0.95);
             font-size: 15px;
             color: var(--text-main);
             outline: none;
@@ -589,7 +584,7 @@
             box-sizing: border-box;
         }
         .auth-form .af-input:focus {
-            background: rgba(255,255,255,0.7);
+            background: rgba(255,255,255,1);
             border-color: var(--primary);
             box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.15);
         }
@@ -628,8 +623,7 @@
 
         .img-viewer {
             position: fixed; inset: 0; z-index: 1000;
-            background: rgba(0,0,0,0.92);
-            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            background: rgba(0,0,0,0.95);
             display: flex; align-items: center; justify-content: center;
             opacity: 0; pointer-events: none;
             transition: opacity 0.3s cubic-bezier(0.16,1,0.3,1);
@@ -706,9 +700,7 @@
         /* ========== 聊天系统 ========== */
         .chat-overlay {
             position: fixed; inset: 0; z-index: 900;
-            background: rgba(0,0,0,0.35);
-            backdrop-filter: blur(12px) saturate(150%);
-            -webkit-backdrop-filter: blur(12px) saturate(150%);
+            background: rgba(0,0,0,0.5);
             display: flex; align-items: flex-end; justify-content: center;
             opacity: 0; pointer-events: none;
             transition: opacity 0.4s cubic-bezier(0.16,1,0.3,1);
@@ -717,13 +709,11 @@
         .chat-overlay.active { opacity: 1; pointer-events: all; }
         .chat-panel {
             width: 100%; max-width: 480px; height: 82vh; max-height: 720px;
-            background: linear-gradient(145deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.12) 100%);
-            backdrop-filter: blur(40px) saturate(200%);
-            -webkit-backdrop-filter: blur(40px) saturate(200%);
+            background: rgba(255,255,255,0.98);
             border-radius: 28px 28px 0 0;
-            border: 1px solid rgba(255,255,255,0.3);
+            border: 1px solid rgba(255,255,255,0.9);
             border-bottom: none;
-            box-shadow: 0 -8px 40px rgba(0,0,0,0.08);
+            box-shadow: 0 -8px 40px rgba(0,0,0,0.15);
             display: flex; flex-direction: column;
             transform: translateY(50px);
             transition: transform 0.45s cubic-bezier(0.16,1,0.3,1);
@@ -733,12 +723,12 @@
         .chat-header {
             padding: 16px 20px;
             display: flex; align-items: center; gap: 10px;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
+            border-bottom: 1px solid rgba(0,0,0,0.06);
             flex-shrink: 0;
-            background: rgba(255,255,255,0.03);
+            background: rgba(255,255,255,0.5);
         }
         .chat-header .back-btn {
-            background: rgba(255,255,255,0.2); border: none;
+            background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.1);
             width: 34px; height: 34px; border-radius: 50%;
             font-size: 20px; cursor: pointer; color: var(--text-main);
             display: flex; align-items: center; justify-content: center;
@@ -817,10 +807,8 @@
         }
         .chat-msg.received {
             align-self: flex-start;
-            background: rgba(255,255,255,0.12);
-            border: 1px solid rgba(255,255,255,0.4);
-            backdrop-filter: blur(24px) saturate(170%);
-            -webkit-backdrop-filter: blur(24px) saturate(170%);
+            background: rgba(255,255,255,0.95);
+            border: 1px solid rgba(0,0,0,0.08);
             color: var(--text-main);
             border-bottom-left-radius: 6px;
         }
@@ -844,9 +832,9 @@
         }
         .chat-input-area {
             padding: 12px 16px 16px;
-            border-top: 1px solid rgba(255,255,255,0.1);
+            border-top: 1px solid rgba(0,0,0,0.06);
             flex-shrink: 0;
-            background: rgba(255,255,255,0.06);
+            background: rgba(255,255,255,0.9);
         }
         .chat-input-row {
             display: flex; gap: 10px; align-items: flex-end;
@@ -856,15 +844,15 @@
             flex: 1; min-width: 0;
             display: flex; align-items: center;
             border-radius: 99px;
-            border: 1px solid rgba(255,255,255,0.2);
-            background: rgba(255,255,255,0.18);
-            backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+            border: 1px solid rgba(0,0,0,0.1);
+            background: rgba(255,255,255,0.95);
             transition: all 0.3s;
             min-height: 44px;
         }
         .chat-input-wrap:focus-within {
-            background: rgba(255,255,255,0.28);
+            background: rgba(255,255,255,1);
             border-color: rgba(5,150,105,0.3);
+            box-shadow: 0 0 0 3px rgba(5,150,105,0.1);
         }
         .chat-input-wrap input {
             flex: 1; padding: 12px 18px; border: none; background: transparent;
@@ -882,7 +870,7 @@
         .chat-file-preview.hidden { display: none; }
         .cfp-thumb {
             width: 32px; height: 32px; border-radius: 8px; overflow: visible;
-            flex-shrink: 0; background: rgba(0,0,0,0.3);
+            flex-shrink: 0; background: rgba(0,0,0,0.15);
             display: flex; align-items: center; justify-content: center;
             position: relative;
         }
@@ -891,7 +879,7 @@
             border-radius: 8px;
         }
         .cfp-thumb .cfp-video-icon {
-            font-size: 16px; color: rgba(255,255,255,0.6);
+            font-size: 16px; color: rgba(255,255,255,0.8);
         }
         .cfp-x {
             position: absolute; top: -7px; right: -7px;
@@ -1305,6 +1293,8 @@
         }
         .dock-tab.active .dt-label { font-weight: 700; }
         .dock-tab:active { transform: scale(0.9); }
+        .dock-tab:focus { outline: none; box-shadow: none; }
+        .dock-tab:focus-visible { outline: none; box-shadow: none; }
         .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
         .dock-tab .dt-icon { transition: none; }
         /* Dock面板: 聊天 (复用聊天样式，去掉overlay固定定位) */
@@ -1324,6 +1314,7 @@
         /* Dock面板: AI (内嵌风格，与聊天统一) */
         .dock-ai-container {
             display: flex; flex-direction: column; height: 100%;
+            background: rgba(255,255,255,0.5);
         }
         .dock-ai-container .ai-chat-header {
             padding: 12px 0; margin-bottom: 8px;
@@ -1336,7 +1327,7 @@
         }
         .ai-mode-toggle {
             display: inline-flex; align-items: center; gap: 6px;
-            background: rgba(0,0,0,0.05); border: 1px solid rgba(0,0,0,0.08);
+            background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.1);
             border-radius: 99px; padding: 3px 10px 3px 4px;
             cursor: pointer; transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             font-size: 11px; flex-shrink: 0; user-select: none;
@@ -1380,6 +1371,7 @@
         .dock-ai-container .ai-chat-footer {
             padding: 10px 0; border-top: 1px solid rgba(0,0,0,0.06);
             display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0;
+            background: rgba(255,255,255,0.7);
         }
 
         /* AI气泡样式保持 */
@@ -1387,8 +1379,14 @@
             text-align: center; color: var(--text-muted);
             font-size: 13px; padding: 30px 20px; line-height: 1.6;
             overflow: visible;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
         }
-        .ai-welcome .ai-welcome-icon { font-size: 36px; margin-bottom: 8px; display: inline-block; line-height: 1; overflow: visible; }
+        .ai-welcome .ai-welcome-icon { 
+            font-size: 48px; margin-bottom: 12px; display: block; line-height: 1; 
+            overflow: visible; position: relative; z-index: 10;
+        }
+        .ai-welcome .ai-welcome-icon svg { overflow: visible; }
+        .ai-welcome .ai-welcome-icon svg * { overflow: visible; }
         .ai-msg {
             display: flex; gap: 8px; animation: aiMsgIn 0.3s cubic-bezier(0.16,1,0.3,1);
             max-width: 92%;
@@ -1416,7 +1414,8 @@
             word-break: break-word; white-space: pre-wrap; position: relative;
         }
         .ai-msg.assistant .ai-bubble {
-            background: rgba(0,0,0,0.02); border-radius: 4px 16px 16px 16px; color: var(--text-main);
+            background: rgba(255,255,255,0.95); border-radius: 4px 16px 16px 16px; color: var(--text-main);
+            border: 1px solid rgba(0,0,0,0.06);
         }
         .ai-msg.user .ai-bubble {
             background: linear-gradient(135deg, #059669, #10b981);
@@ -1432,24 +1431,24 @@
             display: inline-flex; align-items: center; gap: 4px;
             font-size: 11px; color: #6366f1; cursor: pointer;
             padding: 4px 8px; border-radius: 6px;
-            background: rgba(99,102,241,0.08); border: none; margin-bottom: 6px;
+            background: rgba(99,102,241,0.12); border: none; margin-bottom: 6px;
             transition: all 0.2s;
         }
-        .ai-reasoning-toggle:hover { background: rgba(99,102,241,0.15); }
+        .ai-reasoning-toggle:hover { background: rgba(99,102,241,0.2); }
         .ai-reasoning-toggle .ar-arrow { display: inline-block; transition: transform 0.2s; font-size: 9px; }
         .ai-reasoning-toggle.expanded .ar-arrow { transform: rotate(180deg); }
         .ai-reasoning-content {
             font-size: 12px; color: var(--text-muted);
-            background: rgba(99,102,241,0.04);
-            border-left: 2px solid rgba(99,102,241,0.2);
+            background: rgba(99,102,241,0.08);
+            border-left: 2px solid rgba(99,102,241,0.25);
             padding: 8px 12px; margin-bottom: 6px;
             border-radius: 4px 8px 8px 4px;
             line-height: 1.5; white-space: pre-wrap; word-break: break-word;
         }
         .ai-chat-footer textarea {
             flex: 1; padding: 10px 14px; border-radius: 14px;
-            border: 1px solid rgba(0,0,0,0.08);
-            background: rgba(0,0,0,0.02);
+            border: 1px solid rgba(0,0,0,0.1);
+            background: rgba(255,255,255,0.95);
             font-size: 14px; outline: none; color: var(--text-main);
             resize: none; font-family: inherit;
             line-height: 1.4; max-height: 80px; min-height: 20px;
@@ -1497,22 +1496,10 @@
         [data-theme="dark"] .dock-indicator { background: linear-gradient(90deg, #059669, #34d399); box-shadow: 0 0 10px rgba(52,211,153,0.5); }
         [data-theme="dark"] .dock-chat-container .chat-header { border-bottom-color: rgba(255,255,255,0.06); }
         [data-theme="dark"] .dock-chat-container .chat-list-item { border-bottom-color: rgba(255,255,255,0.03); }
+        [data-theme="dark"] .dock-ai-container { background: rgba(20, 20, 35, 0.5); }
         [data-theme="dark"] .dock-ai-container .ai-chat-header { border-bottom-color: rgba(255,255,255,0.06); }
-        [data-theme="dark"] .dock-ai-container .ai-chat-footer { border-top-color: rgba(255,255,255,0.06); }
-        [data-theme="dark"] .ai-msg.assistant .ai-bubble {
-            background: rgba(255,255,255,0.04); color: var(--text-main);
-        }
-        [data-theme="dark"] .ai-chat-footer textarea {
-            background: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.06);
-            color: var(--text-main);
-        }
-        [data-theme="dark"] .ai-chat-footer textarea:focus {
-            border-color: rgba(5,150,105,0.3); background: rgba(5,150,105,0.04);
-        }
-        [data-theme="dark"] .ai-reasoning-content {
-            background: rgba(99,102,241,0.05); border-left-color: rgba(99,102,241,0.25);
-        }
-        [data-theme="dark"] .ai-mode-toggle { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.08); }
+        [data-theme="dark"] .dock-ai-container .ai-chat-footer { border-top-color: rgba(255,255,255,0.06); background: rgba(20, 20, 35, 0.5); }
+        [data-theme="dark"] .ai-mode-toggle { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.12); }
         [data-theme="dark"] .ai-mode-toggle:hover { background: rgba(255,255,255,0.1); }
         [data-theme="dark"] .ai-mode-toggle .amt-knob { box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
         [data-theme="dark"] .ai-mode-toggle:not(.quick) .amt-label:first-child { color: #818cf8; }
@@ -1860,164 +1847,114 @@
             99%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
-        /* 切换按钮花朵图标飞散动画 - 6片花瓣 */
-        .amt-flower-icon.amt-flower-anim svg,
-        .ai-reasoning-toggle .reasoning-flower-icon svg {
-            overflow: visible;
+        /* 花朵飞散动画 - scatterPetal keyframes (fixed覆盖层用) */
+        @keyframes scatterPetal0 {
+            0% { transform: translate(0,0); opacity: 0; }
+            5% { transform: translate(0,0); opacity: 0.8; }
+            9% { transform: translate(0,0); opacity: 1; }
+            30% { transform: translate(0, -18px) rotate(-15deg); opacity: 0.9; }
+            42% { transform: translate(0, -16px) rotate(-12deg); opacity: 0.6; }
+            58% { transform: translate(0, -3px) rotate(-2deg); opacity: 0.7; }
+            68% { transform: translate(0, -1px) rotate(0deg); opacity: 0.5; }
+            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
-        .amt-flower-icon.amt-flower-anim .al-petal-g,
-        .ai-reasoning-toggle .reasoning-flower-icon .al-petal-g {
-            transform-origin: 12px 12px;
+        @keyframes scatterPetal1 {
+            0% { transform: translate(0,0); opacity: 0; }
+            5% { transform: translate(0,0); opacity: 0.8; }
+            9% { transform: translate(0,0); opacity: 1; }
+            30% { transform: translate(16px, -9px) rotate(20deg); opacity: 0.9; }
+            42% { transform: translate(14px, -8px) rotate(16deg); opacity: 0.6; }
+            58% { transform: translate(3px, -1px) rotate(3deg); opacity: 0.7; }
+            68% { transform: translate(1px, 0px) rotate(1deg); opacity: 0.5; }
+            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
-        .amt-flower-icon.amt-flower-anim .al-petal-g:nth-child(1),
-        .ai-reasoning-toggle .reasoning-flower-icon .al-petal-g:nth-child(1) { animation: amtPetalFly0 1.4s ease forwards; }
-        .amt-flower-icon.amt-flower-anim .al-petal-g:nth-child(2),
-        .ai-reasoning-toggle .reasoning-flower-icon .al-petal-g:nth-child(2) { animation: amtPetalFly1 1.4s ease forwards; }
-        .amt-flower-icon.amt-flower-anim .al-petal-g:nth-child(3),
-        .ai-reasoning-toggle .reasoning-flower-icon .al-petal-g:nth-child(3) { animation: amtPetalFly2 1.4s ease forwards; }
-        .amt-flower-icon.amt-flower-anim .al-petal-g:nth-child(4),
-        .ai-reasoning-toggle .reasoning-flower-icon .al-petal-g:nth-child(4) { animation: amtPetalFly3 1.4s ease forwards; }
-        .amt-flower-icon.amt-flower-anim .al-petal-g:nth-child(5),
-        .ai-reasoning-toggle .reasoning-flower-icon .al-petal-g:nth-child(5) { animation: amtPetalFly4 1.4s ease forwards; }
-        .amt-flower-icon.amt-flower-anim .al-petal-g:nth-child(6),
-        .ai-reasoning-toggle .reasoning-flower-icon .al-petal-g:nth-child(6) { animation: amtPetalFly5 1.4s ease forwards; }
-        @keyframes amtPetalFly0 {
-            0%   { transform: translate(0,0); opacity: 0; }
-            5%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(0, -12px) rotate(-15deg); opacity: 0.9; }
-            50%  { transform: translate(0, -10px) rotate(-10deg); opacity: 0.6; }
-            70%  { transform: translate(0, -2px) rotate(-2deg); opacity: 0.3; }
-            80%  { transform: translate(0, 0); opacity: 0.1; }
-            85%  { transform: translate(0, 0); opacity: 0; }
-            100% { transform: translate(0, 0); opacity: 0; }
+        @keyframes scatterPetal2 {
+            0% { transform: translate(0,0); opacity: 0; }
+            5% { transform: translate(0,0); opacity: 0.8; }
+            9% { transform: translate(0,0); opacity: 1; }
+            30% { transform: translate(16px, 9px) rotate(-25deg); opacity: 0.9; }
+            42% { transform: translate(14px, 8px) rotate(-20deg); opacity: 0.6; }
+            58% { transform: translate(3px, 1px) rotate(-3deg); opacity: 0.7; }
+            68% { transform: translate(1px, 0px) rotate(-1deg); opacity: 0.5; }
+            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
-        @keyframes amtPetalFly1 {
-            0%   { transform: translate(0,0); opacity: 0; }
-            5%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(10px, -6px) rotate(20deg); opacity: 0.9; }
-            50%  { transform: translate(8px, -5px) rotate(15deg); opacity: 0.6; }
-            70%  { transform: translate(2px, -1px) rotate(3deg); opacity: 0.3; }
-            80%  { transform: translate(0, 0); opacity: 0.1; }
-            85%  { transform: translate(0, 0); opacity: 0; }
-            100% { transform: translate(0, 0); opacity: 0; }
+        @keyframes scatterPetal3 {
+            0% { transform: translate(0,0); opacity: 0; }
+            5% { transform: translate(0,0); opacity: 0.8; }
+            9% { transform: translate(0,0); opacity: 1; }
+            30% { transform: translate(0, 18px) rotate(18deg); opacity: 0.9; }
+            42% { transform: translate(0, 16px) rotate(14deg); opacity: 0.6; }
+            58% { transform: translate(0, 3px) rotate(2deg); opacity: 0.7; }
+            68% { transform: translate(0, 1px) rotate(1deg); opacity: 0.5; }
+            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
-        @keyframes amtPetalFly2 {
-            0%   { transform: translate(0,0); opacity: 0; }
-            5%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(10px, 6px) rotate(-20deg); opacity: 0.9; }
-            50%  { transform: translate(8px, 5px) rotate(-15deg); opacity: 0.6; }
-            70%  { transform: translate(2px, 1px) rotate(-3deg); opacity: 0.3; }
-            80%  { transform: translate(0, 0); opacity: 0.1; }
-            85%  { transform: translate(0, 0); opacity: 0; }
-            100% { transform: translate(0, 0); opacity: 0; }
+        @keyframes scatterPetal4 {
+            0% { transform: translate(0,0); opacity: 0; }
+            5% { transform: translate(0,0); opacity: 0.8; }
+            9% { transform: translate(0,0); opacity: 1; }
+            30% { transform: translate(-16px, 9px) rotate(-22deg); opacity: 0.9; }
+            42% { transform: translate(-14px, 8px) rotate(-18deg); opacity: 0.6; }
+            58% { transform: translate(-3px, 1px) rotate(-3deg); opacity: 0.7; }
+            68% { transform: translate(-1px, 0px) rotate(-1deg); opacity: 0.5; }
+            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
-        @keyframes amtPetalFly3 {
-            0%   { transform: translate(0,0); opacity: 0; }
-            5%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(0, 12px) rotate(15deg); opacity: 0.9; }
-            50%  { transform: translate(0, 10px) rotate(10deg); opacity: 0.6; }
-            70%  { transform: translate(0, 2px) rotate(2deg); opacity: 0.3; }
-            80%  { transform: translate(0, 0); opacity: 0.1; }
-            85%  { transform: translate(0, 0); opacity: 0; }
-            100% { transform: translate(0, 0); opacity: 0; }
+        @keyframes scatterPetal5 {
+            0% { transform: translate(0,0); opacity: 0; }
+            5% { transform: translate(0,0); opacity: 0.8; }
+            9% { transform: translate(0,0); opacity: 1; }
+            30% { transform: translate(-16px, -9px) rotate(28deg); opacity: 0.9; }
+            42% { transform: translate(-14px, -8px) rotate(22deg); opacity: 0.6; }
+            58% { transform: translate(-3px, -1px) rotate(3deg); opacity: 0.7; }
+            68% { transform: translate(-1px, 0px) rotate(1deg); opacity: 0.5; }
+            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
-        @keyframes amtPetalFly4 {
-            0%   { transform: translate(0,0); opacity: 0; }
-            5%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(-10px, 6px) rotate(-20deg); opacity: 0.9; }
-            50%  { transform: translate(-8px, 5px) rotate(-15deg); opacity: 0.6; }
-            70%  { transform: translate(-2px, 1px) rotate(-3deg); opacity: 0.3; }
-            80%  { transform: translate(0, 0); opacity: 0.1; }
-            85%  { transform: translate(0, 0); opacity: 0; }
-            100% { transform: translate(0, 0); opacity: 0; }
+        @keyframes scatterCenter {
+            0%, 9% { opacity: 1; transform: scale(1); }
+            35% { opacity: 1; transform: scale(1); }
+            60% { opacity: 0.5; transform: scale(0.5); }
+            80% { opacity: 0; transform: scale(0.3); }
+            100% { opacity: 0; transform: scale(0); }
         }
-        @keyframes amtPetalFly5 {
-            0%   { transform: translate(0,0); opacity: 0; }
-            5%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(-10px, -6px) rotate(20deg); opacity: 0.9; }
-            50%  { transform: translate(-8px, -5px) rotate(15deg); opacity: 0.6; }
-            70%  { transform: translate(-2px, -1px) rotate(3deg); opacity: 0.3; }
-            80%  { transform: translate(0, 0); opacity: 0.1; }
-            85%  { transform: translate(0, 0); opacity: 0; }
-            100% { transform: translate(0, 0); opacity: 0; }
+        /* 闪电劈下动画 */
+        @keyframes lightningDraw {
+            0% { stroke-dashoffset: 150; }
+            100% { stroke-dashoffset: 0; }
         }
-        /* 思考过程按钮花朵动画 */
-        .ai-reasoning-toggle.reasoning-anim {
-            animation: reasoningFlowerPop 0.3s ease forwards;
+        @keyframes lightningFade {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
         }
-        @keyframes reasoningFlowerPop {
-            0%   { transform: scale(0.8); opacity: 0; }
-            60%  { transform: scale(1.1); opacity: 1; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-        .ai-reasoning-toggle.reasoning-anim .reasoning-flower-icon {
-            animation: reasoningFlowerScatter 1.2s ease forwards;
-        }
-        @keyframes reasoningFlowerScatter {
-            0%   { opacity: 1; }
-            5%   { opacity: 1; }
-            40%  { opacity: 1; }
-            60%  { opacity: 0.8; }
-            80%  { opacity: 0.4; }
-            100% { opacity: 1; }
-        }
-        /* 快速模式闪电劈下动画 - 预闪→主劈→余光三段效果 */
-        .amt-lightning-anim {
-            display: inline-block;
-            animation: lightningStrike 0.5s cubic-bezier(0.25, 1, 0.3, 1) forwards;
-        }
-        @keyframes lightningStrike {
-            0%   { transform: translate(0, 0) scale(1); opacity: 0; filter: brightness(1); }
-            /* 预闪：快速闪一下微弱光 */
-            5%   { transform: translate(0, -8px) scale(1.1); opacity: 0.3; filter: brightness(1.5); }
-            10%  { transform: translate(0, -12px) scale(1.2); opacity: 0.6; filter: brightness(2); }
-            15%  { transform: translate(-2px, -10px) scale(1.1); opacity: 0.4; filter: brightness(1.2); }
-            /* 主劈：从上方快速劈下+强光+轻微抖动 */
-            20%  { transform: translate(2px, -6px) scale(1.3); opacity: 1; filter: brightness(2.5); }
-            25%  { transform: translate(-3px, -3px) scale(1.25); opacity: 1; filter: brightness(2); }
-            30%  { transform: translate(3px, -1px) scale(1.2); opacity: 1; filter: brightness(1.8); }
-            35%  { transform: translate(-2px, 0) scale(1.15); opacity: 1; filter: brightness(1.5); }
-            40%  { transform: translate(1px, 0) scale(1.1); opacity: 1; filter: brightness(1.3); }
-            45%  { transform: translate(-1px, 0) scale(1.08); opacity: 1; filter: brightness(1.2); }
-            50%  { transform: translate(0, 0) scale(1.05); opacity: 1; filter: brightness(1.1); }
-            /* 余光：渐渐消退+最后微闪 */
-            60%  { transform: translate(0, 0) scale(1); opacity: 0.9; filter: brightness(1); }
-            70%  { transform: translate(0, 0) scale(1); opacity: 0.7; filter: brightness(0.9); }
-            80%  { transform: translate(0, 0) scale(1); opacity: 0.5; filter: brightness(0.8); }
-            88%  { transform: translate(0, 0) scale(1); opacity: 0.3; filter: brightness(0.7); }
-            /* 最后微闪 */
-            92%  { transform: translate(0, 0) scale(1.05); opacity: 0.6; filter: brightness(1.2); }
-            96%  { transform: translate(0, 0) scale(1); opacity: 0.4; filter: brightness(0.9); }
-            100% { transform: translate(0, 0) scale(1); opacity: 1; filter: brightness(1); }
-        }
-        /* 欢迎页闪电动画 - 预闪→主劈→余光三段效果 */
-        .ai-welcome-lightning-anim {
-            display: inline-block;
-            animation: welcomeLightningStrike 0.6s cubic-bezier(0.25, 1, 0.3, 1) forwards;
-        }
-        @keyframes welcomeLightningStrike {
-            0%   { transform: translate(0, 0) scale(1); opacity: 0; filter: brightness(1); }
-            /* 预闪：快速闪一下微弱光 */
-            5%   { transform: translate(0, -12px) scale(1.15); opacity: 0.4; filter: brightness(1.5); }
-            10%  { transform: translate(0, -18px) scale(1.3); opacity: 0.7; filter: brightness(2.2); }
-            15%  { transform: translate(-3px, -15px) scale(1.2); opacity: 0.5; filter: brightness(1.3); }
-            /* 主劈：从上方快速劈下+强光+轻微抖动 */
-            20%  { transform: translate(4px, -8px) scale(1.4); opacity: 1; filter: brightness(2.8); }
-            25%  { transform: translate(-4px, -4px) scale(1.35); opacity: 1; filter: brightness(2.3); }
-            30%  { transform: translate(4px, -2px) scale(1.3); opacity: 1; filter: brightness(2); }
-            35%  { transform: translate(-3px, 0) scale(1.25); opacity: 1; filter: brightness(1.7); }
-            40%  { transform: translate(2px, 0) scale(1.2); opacity: 1; filter: brightness(1.5); }
-            45%  { transform: translate(-1px, 0) scale(1.15); opacity: 1; filter: brightness(1.3); }
-            50%  { transform: translate(0, 0) scale(1.1); opacity: 1; filter: brightness(1.2); }
-            /* 余光：渐渐消退+最后微闪 */
-            60%  { transform: translate(0, 0) scale(1); opacity: 0.85; filter: brightness(1); }
-            70%  { transform: translate(0, 0) scale(1); opacity: 0.65; filter: brightness(0.85); }
-            80%  { transform: translate(0, 0) scale(1); opacity: 0.4; filter: brightness(0.7); }
-            88%  { transform: translate(0, 0) scale(1); opacity: 0.2; filter: brightness(0.6); }
-            /* 最后微闪 */
-            92%  { transform: translate(0, 0) scale(1.08); opacity: 0.5; filter: brightness(1.1); }
-            96%  { transform: translate(0, 0) scale(1); opacity: 0.3; filter: brightness(0.85); }
-            100% { transform: translate(0, 0) scale(1); opacity: 1; filter: brightness(1); }
+        @keyframes lightningFlash {
+            0% { opacity: 0; }
+            10% { opacity: 0.5; }
+            20% { opacity: 0; }
+            30% { opacity: 0.3; }
+            40% { opacity: 0; }
+            100% { opacity: 0; }
         }
 
         /* ========== 磨砂玻璃效果增强 ========== */
@@ -2035,157 +1972,127 @@
 
         /* 发布框 */
         .publish-box {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.9);
         }
         [data-theme="dark"] .publish-box {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(30, 30, 40, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* 帖子卡片 */
         .post {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.7);
         }
         [data-theme="dark"] .post {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(30, 30, 40, 0.92);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* 评论区 */
         .comment-item {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.6);
         }
         [data-theme="dark"] .comment-item {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(30, 30, 40, 0.88);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* 模态框 */
         .modal-box {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid rgba(255, 255, 255, 0.9);
         }
         [data-theme="dark"] .modal-box {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(30, 30, 40, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* 聊天面板 */
         .chat-panel {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.98);
+            border: 1px solid rgba(255, 255, 255, 0.9);
         }
         [data-theme="dark"] .chat-panel {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(30, 30, 40, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* 好友聊天气泡 - 发送方 */
         .chat-msg.sent {
-            background: rgba(5, 150, 105, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: linear-gradient(135deg, #059669, #10b981);
         }
         [data-theme="dark"] .chat-msg.sent {
-            background: rgba(5, 150, 105, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: linear-gradient(135deg, #047857, #059669);
         }
 
         /* 好友聊天气泡 - 接收方 */
         .chat-msg.received {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid rgba(0, 0, 0, 0.08);
         }
         [data-theme="dark"] .chat-msg.received {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(30, 30, 40, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* AI气泡 - 助手 */
         .ai-msg.assistant .ai-bubble {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid rgba(0, 0, 0, 0.06);
         }
         [data-theme="dark"] .ai-msg.assistant .ai-bubble {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(30, 30, 40, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* AI气泡 - 用户 */
         .ai-msg.user .ai-bubble {
-            background: rgba(5, 150, 105, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: linear-gradient(135deg, #059669, #10b981);
         }
         [data-theme="dark"] .ai-msg.user .ai-bubble {
-            background: rgba(5, 150, 105, 0.15);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: linear-gradient(135deg, #047857, #059669);
         }
 
         /* AI思考过程 */
         .ai-reasoning-content {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(99, 102, 241, 0.2);
         }
         [data-theme="dark"] .ai-reasoning-content {
-            background: rgba(255, 255, 255, 0.06);
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(30, 30, 40, 0.88);
+            border: 1px solid rgba(99, 102, 241, 0.3);
         }
 
         /* 通用glass类 */
         .glass {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.7);
         }
         [data-theme="dark"] .glass {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(30, 30, 40, 0.92);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* 统计详情用户组 */
         .stat-user-group {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(255, 255, 255, 0.6);
         }
         [data-theme="dark"] .stat-user-group {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(30, 30, 40, 0.88);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         /* 聊天入口条 */
         .chat-entry-bar {
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.8);
         }
         [data-theme="dark"] .chat-entry-bar {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(30, 30, 40, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
@@ -2196,8 +2103,6 @@
         .stat-detail-body .feed .post,
         [class*="stat"] .feed .post {
             background: transparent !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
             border: none !important;
             box-shadow: none !important;
         }
@@ -3777,19 +3682,22 @@
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
                 const now = Date.now();
                 if (tab === currentDockTab) {
-                    if (now - (lastTabTapTime[tab] || 0) < 300) {
-                        const panel = document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1));
-                        if (panel) {
-                            requestAnimationFrame(() => {
-                                panel.scrollTo({ top: 0, behavior: 'smooth' });
-                            });
-                            if (tab === 'chat' && dockChatActiveUser) {
-                                scrollDockChatBottom();
-                            }
-                            if (tab === 'ai') {
-                                scrollDockAIBottom();
-                            }
+                    // 已经在当前tab，单击执行返回操作
+                    if (tab === 'posts') {
+                        // 帖子页：回到顶部
+                        const panel = document.getElementById('panelPosts');
+                        if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
+                    } else if (tab === 'chat') {
+                        // 聊天页：如果在对话中，返回聊天列表；否则回到顶部
+                        if (dockChatActiveUser) {
+                            dockChatGoBack();
+                        } else {
+                            const panel = document.getElementById('panelChat');
+                            if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         }
+                    } else if (tab === 'ai') {
+                        // AI页：回到顶部
+                        scrollDockAIBottom();
                     }
                     return;
                 }
@@ -3921,8 +3829,16 @@
                 }
             }
 
+            // 聊天消息本地缓存，二次打开秒出
+            var _chatCache = {};
+
             async function loadDockChatMessages(userName, forceScroll) {
                 if (dockChatMsgsBusy && dockChatMsgsUser === userName) { dockChatMsgsDirty = userName; return; }
+                // 有缓存先立即显示
+                var cacheKey = currentUser + '_' + userName;
+                if (_chatCache[cacheKey] && !forceScroll) {
+                    renderDockMessages(_chatCache[cacheKey], true);
+                }
                 dockChatMsgsBusy = true; dockChatMsgsUser = userName; dockChatMsgsDirty = '';
                 const el = document.getElementById('dockChatMessages');
                 try {
@@ -3931,12 +3847,16 @@
                         .or(`and(user_name.eq.${currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${currentUser})`)
                         .order("created_at").limit(500);
                     if (error) throw error;
+                    // 缓存消息
+                    _chatCache[cacheKey] = msgs || [];
                     const toMark = (msgs || []).filter(m => m.user_name === userName && m.media_url === currentUser && (m.views || 0) === 0);
                     for (const m of toMark) { try { await sb.rpc("increment_post_views", { p_post_id: m.id }); m.views = 1; } catch(e) {} }
                     markMessagesRead(userName);
                     renderDockMessages(msgs || [], forceScroll);
                 } catch(e) {
-                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">⚠️</div><div>' + (e.message || '加载失败') + '</div></div>';
+                    if (!_chatCache[cacheKey]) {
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">⚠️</div><div>' + (e.message || '加载失败') + '</div></div>';
+                    }
                 } finally {
                     dockChatMsgsBusy = false;
                     if (dockChatMsgsDirty === userName) { dockChatMsgsDirty = ''; loadDockChatMessages(userName); }
@@ -3950,6 +3870,12 @@
                 var isNearBottom = !el.scrollHeight || (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
                 var shouldAutoScroll = forceScroll || isNearBottom;
                 const isBulk = msgs.length > 2;
+                // 先隐藏容器，渲染完直接到底再显示，避免从顶部滑下来的闪烁
+                var wasHidden = false;
+                if (shouldAutoScroll && isBulk) {
+                    el.style.visibility = 'hidden';
+                    wasHidden = true;
+                }
                 el.innerHTML = msgs.map(m => {
                     const sent = m.user_name === currentUser;
                     const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
@@ -3964,7 +3890,11 @@
                     return '<div class="chat-msg ' + (sent ? 'sent' : 'received') + (isBulk ? ' no-anim' : '') + '">' + body + readStatus + '<span class="msg-time">' + formatMsgTime(m.created_at) + '</span></div>';
                 }).join('');
                 if (shouldAutoScroll) {
-                    if (isBulk) { el.scrollTop = el.scrollHeight; } else { requestAnimationFrame(function() { el.scrollTop = el.scrollHeight; }); }
+                    el.scrollTop = el.scrollHeight;
+                }
+                // 渲染完毕，显示容器
+                if (wasHidden) {
+                    el.style.visibility = '';
                 }
             }
 
@@ -4042,70 +3972,21 @@
                 const btn = document.getElementById('dockAIModeBtn');
                 if (dockAIThinkMode) { btn.classList.remove('quick'); }
                 else { btn.classList.add('quick'); }
-                // 切换到思考模式时：只播花朵动画，闪电不动不播
+                
                 if (dockAIThinkMode) {
-                    var amtFlowerSvg = btn.querySelector('.amt-flower-icon');
-                    if (amtFlowerSvg) {
-                        amtFlowerSvg.classList.remove('amt-flower-anim');
-                        void amtFlowerSvg.offsetWidth; // force reflow
-                        amtFlowerSvg.classList.add('amt-flower-anim');
-                        setTimeout(function() {
-                            amtFlowerSvg.classList.remove('amt-flower-anim');
-                        }, 1400);
-                    }
-                    // 欢迎页花朵动画
-                    setTimeout(function() {
-                        var welcomeFlower = document.querySelector('#dockAIWelcome .amt-flower-icon');
-                        if (welcomeFlower) {
-                            welcomeFlower.classList.remove('amt-flower-anim');
-                            void welcomeFlower.offsetWidth; // force reflow
-                            welcomeFlower.classList.add('amt-flower-anim');
-                            setTimeout(function() {
-                                welcomeFlower.classList.remove('amt-flower-anim');
-                            }, 1400);
-                        }
-                    }, 50);
+                    // 切换到思考模式：花朵飞散动画
+                    var flowerEl = btn.querySelector('.amt-flower-icon');
+                    if (flowerEl) playFlowerScatterAt(flowerEl, 60);
+                    var welcomeFlower = document.querySelector('.ai-welcome .ai-welcome-icon .amt-flower-icon');
+                    if (welcomeFlower) playFlowerScatterAt(welcomeFlower, 90);
+                } else {
+                    // 切换到快速模式：闪电劈下动画
+                    var flowerEl2 = btn.querySelector('.amt-flower-icon');
+                    if (flowerEl2) playLightningStrikeAt(flowerEl2, 80);
+                    var welcomeFlower2 = document.querySelector('.ai-welcome .ai-welcome-icon .amt-flower-icon');
+                    if (welcomeFlower2) playLightningStrikeAt(welcomeFlower2, 100);
                 }
-                // 切换到快速模式时：只播闪电动画，花朵不动不播
-                if (!dockAIThinkMode) {
-                    var amtLightning = btn.querySelector('.amt-label-quick');
-                    if (amtLightning) {
-                        var lightningSpan = amtLightning.querySelector('.lightning-icon');
-                        if (!lightningSpan) {
-                            // 给⚡包裹span以便添加动画
-                            amtLightning.innerHTML = '<span class="lightning-icon">⚡</span>' + amtLightning.textContent.replace('⚡', '');
-                        }
-                        var lightningEl = amtLightning.querySelector('.lightning-icon');
-                        if (lightningEl) {
-                            lightningEl.classList.remove('amt-lightning-anim');
-                            void lightningEl.offsetWidth; // force reflow
-                            lightningEl.classList.add('amt-lightning-anim');
-                            setTimeout(function() {
-                                lightningEl.classList.remove('amt-lightning-anim');
-                            }, 500);
-                        }
-                    }
-                    // 欢迎页闪电动画
-                    setTimeout(function() {
-                        var welcomeIcon = document.querySelector('#dockAIWelcome .ai-welcome-icon');
-                        if (welcomeIcon && welcomeIcon.textContent.includes('⚡')) {
-                            var lightningEl = welcomeIcon.querySelector('.ai-welcome-lightning');
-                            if (!lightningEl) {
-                                // 给⚡包裹span以便添加动画
-                                welcomeIcon.innerHTML = '<span class="ai-welcome-lightning">⚡</span>' + welcomeIcon.innerHTML.replace('⚡', '');
-                            }
-                            lightningEl = welcomeIcon.querySelector('.ai-welcome-lightning');
-                            if (lightningEl) {
-                                lightningEl.classList.remove('ai-welcome-lightning-anim');
-                                void lightningEl.offsetWidth; // force reflow
-                                lightningEl.classList.add('ai-welcome-lightning-anim');
-                                setTimeout(function() {
-                                    lightningEl.classList.remove('ai-welcome-lightning-anim');
-                                }, 600);
-                            }
-                        }
-                    }, 50);
-                }
+                
                 updateAIWelcome();
             }
             window.toggleAIMode = toggleAIMode;
@@ -4114,9 +3995,9 @@
                 const welcome = document.getElementById('dockAIWelcome');
                 if (!welcome) return;
                 if (dockAIThinkMode) {
-                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="36" height="36" fill="none"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg></span>你好！我是 DeepSeek AI 助手<br>思考模式 — 深度推理，展示思考过程';
+                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="48" height="48" fill="none"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg></span>你好！我是 DeepSeek AI 助手<br>思考模式 — 深度推理，展示思考过程';
                 } else {
-                    welcome.innerHTML = '<span class="ai-welcome-icon">⚡</span>你好！我是 DeepSeek AI 助手<br>快速模式 — 极速响应，跳过思考过程';
+                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="48" height="48" fill="none"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg></span>你好！我是 DeepSeek AI 助手<br>快速模式 — 极速响应，跳过思考过程';
                 }
             }
             window.updateAIWelcome = updateAIWelcome;
@@ -4270,6 +4151,112 @@
                 calcPathLengths();
             }
         })();
+    </script>
+
+    <!-- AI页面动画函数 - fixed覆盖层，不受容器overflow限制 -->
+    <script>
+        // 通用：在指定元素位置播放花朵飞散动画（fixed覆盖层，不受容器overflow限制）
+        function playFlowerScatterAt(el, size) {
+            if (!el) return;
+            var rect = el.getBoundingClientRect();
+            var cx = rect.left + rect.width / 2;
+            var cy = rect.top + rect.height / 2;
+            var svgSize = size || 90;
+            var half = svgSize / 2;
+            var ns = 'http://www.w3.org/2000/svg';
+            
+            var svg = document.createElementNS(ns, 'svg');
+            svg.setAttribute('width', svgSize);
+            svg.setAttribute('height', svgSize);
+            svg.setAttribute('viewBox', '0 0 ' + svgSize + ' ' + svgSize);
+            svg.style.cssText = 'position:fixed; left:' + (cx - half) + 'px; top:' + (cy - half) + 'px; z-index:99999; pointer-events:none; overflow:visible;';
+            
+            var g = document.createElementNS(ns, 'g');
+            g.setAttribute('transform', 'translate(' + half + ',' + half + ')');
+            
+            var rotations = [0, 60, 120, 180, 240, 300];
+            rotations.forEach(function(rot, i) {
+                var pg = document.createElementNS(ns, 'g');
+                pg.classList.add('scatter-petal');
+                pg.style.animation = 'scatterPetal' + i + ' 1.4s ease forwards';
+                var ig = document.createElementNS(ns, 'g');
+                ig.setAttribute('transform', 'rotate(' + rot + ')');
+                var e = document.createElementNS(ns, 'ellipse');
+                e.setAttribute('cx', '0'); e.setAttribute('cy', '-9');
+                e.setAttribute('rx', '3.2'); e.setAttribute('ry', '9');
+                e.setAttribute('fill', '#F472B6'); e.setAttribute('stroke', '#EC4899'); e.setAttribute('stroke-width', '1');
+                ig.appendChild(e); pg.appendChild(ig); g.appendChild(pg);
+            });
+            
+            var cc = document.createElementNS(ns, 'circle');
+            cc.setAttribute('cx', '0'); cc.setAttribute('cy', '0'); cc.setAttribute('r', '3');
+            cc.setAttribute('fill', '#FBBF24'); cc.setAttribute('stroke', '#D97706'); cc.setAttribute('stroke-width', '1');
+            cc.style.animation = 'scatterCenter 1.4s ease forwards';
+            g.appendChild(cc);
+            
+            svg.appendChild(g); document.body.appendChild(svg);
+            setTimeout(function() { if (svg.parentNode) svg.remove(); }, 1600);
+        }
+
+        // 通用：在指定元素位置播放闪电劈下动画（fixed覆盖层）
+        function playLightningStrikeAt(el, size) {
+            if (!el) return;
+            var rect = el.getBoundingClientRect();
+            var cx = rect.left + rect.width / 2;
+            var cy = rect.top + rect.height / 2;
+            var h = size || 100;
+            var w = h * 0.6;
+            var ns = 'http://www.w3.org/2000/svg';
+            
+            var svg = document.createElementNS(ns, 'svg');
+            svg.setAttribute('width', w);
+            svg.setAttribute('height', h);
+            svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+            svg.style.cssText = 'position:fixed; left:' + (cx - w/2) + 'px; top:' + (cy - h/2) + 'px; z-index:99999; pointer-events:none; overflow:visible;';
+            
+            // 闪电路径：锯齿形从上到下
+            var midX = w / 2;
+            var path = document.createElementNS(ns, 'path');
+            // 生成锯齿形闪电路径
+            var d = 'M' + midX + ',0 ';
+            var segments = 6;
+            var segH = h / segments;
+            for (var i = 1; i <= segments; i++) {
+                var offsetX = (i % 2 === 1 ? 1 : -1) * (3 + Math.random() * 4);
+                d += 'L' + (midX + offsetX) + ',' + (i * segH) + ' ';
+            }
+            path.setAttribute('d', d);
+            path.setAttribute('fill', 'none');
+            path.setAttribute('stroke', '#FFD700');
+            path.setAttribute('stroke-width', '2.5');
+            path.setAttribute('stroke-linecap', 'round');
+            path.setAttribute('stroke-linejoin', 'round');
+            path.classList.add('lightning-bolt');
+            path.style.strokeDasharray = h * 1.5;
+            path.style.strokeDashoffset = h * 1.5;
+            path.style.animation = 'lightningDraw 0.3s ease forwards, lightningFade 0.5s ease 0.3s forwards';
+            
+            // 外发光
+            var glow = path.cloneNode(true);
+            glow.setAttribute('stroke', '#FFF');
+            glow.setAttribute('stroke-width', '5');
+            glow.setAttribute('opacity', '0.6');
+            glow.style.filter = 'blur(3px)';
+            glow.style.animation = 'lightningDraw 0.3s ease forwards, lightningFade 0.4s ease 0.25s forwards';
+            
+            // 闪光背景
+            var flash = document.createElementNS(ns, 'rect');
+            flash.setAttribute('x', '0'); flash.setAttribute('y', '0');
+            flash.setAttribute('width', w); flash.setAttribute('height', h);
+            flash.setAttribute('fill', 'white'); flash.setAttribute('opacity', '0');
+            flash.style.animation = 'lightningFlash 0.5s ease forwards';
+            
+            svg.appendChild(flash);
+            svg.appendChild(glow);
+            svg.appendChild(path);
+            document.body.appendChild(svg);
+            setTimeout(function() { if (svg.parentNode) svg.remove(); }, 1000);
+        }
     </script>
 </body>
 </html>
