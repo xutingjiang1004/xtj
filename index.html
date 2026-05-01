@@ -336,13 +336,13 @@
             color: white;
             box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
         }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
+        .btn-primary:hover { transform: translateY(-4px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
         .btn-ghost {
             background: rgba(255,255,255,0.5);
             color: var(--text-main);
             border: 1px solid rgba(255,255,255,0.7);
         }
-        .btn-ghost:hover { background: rgba(255,255,255,0.8); transform: translateY(-2px); }
+        .btn-ghost:hover { background: rgba(255,255,255,0.8); transform: translateY(-4px); }
         .user-pill {
             display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px;
             background: rgba(255, 255, 255, 0.7);
@@ -483,7 +483,7 @@
             transform: translateY(0) scale(1); 
             will-change: auto;
         }
-        .post:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04), inset 0 0.5px 0 rgba(255,255,255,0.9); transform: translateY(-2px); }
+        .post:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04), inset 0 0.5px 0 rgba(255,255,255,0.9); transform: translateY(-4px); }
 
         .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
         .avatar {
@@ -938,7 +938,7 @@
         /* iMessage 风格发送动画 */
         @keyframes msgSend {
             0%   { opacity: 0; transform: scale(0.6) translateY(16px); }
-            55%  { opacity: 1; transform: scale(1.04) translateY(-2px); }
+            55%  { opacity: 1; transform: scale(1.04) translateY(-4px); }
             75%  { transform: scale(0.98) translateY(1px); }
             100% { opacity: 1; transform: scale(1) translateY(0); }
         }
@@ -1604,9 +1604,9 @@
         }
         @keyframes iconAIClick {
             0%   { transform: scale(1); opacity: 1; }
-            8%   { transform: scale(0.85); opacity: 0; }
-            90%  { transform: scale(0.85); opacity: 0; }
-            96%  { transform: scale(1); opacity: 1; }
+            10%  { transform: scale(0); opacity: 0; }
+            85%  { transform: scale(0); opacity: 0; }
+            94%  { transform: scale(1.1); opacity: 1; }
             100% { transform: scale(1); opacity: 1; }
         }
 
@@ -1672,7 +1672,7 @@
         .dock-tab.anim-chat .al-dot-3 { animation-delay: 0.32s; }
         @keyframes dotType {
             0%   { transform: translateY(6px); opacity: 0; }
-            20%  { transform: translateY(-2px); opacity: 1; }
+            20%  { transform: translateY(-4px); opacity: 1; }
             40%  { transform: translateY(0); opacity: 1; }
             75%  { opacity: 0.6; }
             100% { transform: translateY(-4px); opacity: 0; }
@@ -1687,7 +1687,8 @@
             55%      { transform: scale(1.15); opacity: 1; }
             62%      { transform: scale(0.92); opacity: 1; }
             68%      { transform: scale(1.05); opacity: 1; }
-            75%      { transform: scale(0.98); opacity: 1; }
+            75%      { transform: scale(0.98) translateX(1px); opacity: 1; }
+            78%      { transform: scale(0.99) translateX(-1px); opacity: 1; }
             82%      { transform: scale(1); opacity: 1; }
             100%     { transform: scale(0.9); opacity: 0; }
         }
@@ -1700,7 +1701,7 @@
             78%     { transform: scale(1.2); opacity: 1; }
             84%     { transform: scale(0.9); opacity: 1; }
             90%     { transform: scale(1); opacity: 1; }
-            100%    { transform: scale(0.8) translate(4px, -4px); opacity: 0; }
+            100%    { transform: scale(0.8) translate(6px, -6px); opacity: 0; }
         }
 
         /* ---- Button 3: AI - Flower Petals Burst & Return (1.6s) ---- */
@@ -1709,7 +1710,10 @@
             animation: aiContainer 1.6s ease forwards;
         }
         @keyframes aiContainer {
-            0%, 94% { opacity: 1; }
+            0%, 10% { opacity: 1; }
+            12%, 85% { opacity: 1; }
+            88%, 92% { opacity: 0; }
+            94% { opacity: 1; }
             100% { opacity: 0; }
         }
         /* White flash before burst */
@@ -1722,33 +1726,27 @@
             14%  { opacity: 0; transform: scale(1.4); }
             100% { opacity: 0; }
         }
-        /* 6 petals: burst outward then fly back */
+        /* Petals: scale down and fade out (JS handles petal burst separately) */
         .dock-tab.anim-ai .al-petal-g {
-            animation: petalBurstReturn 1.6s ease forwards;
+            animation: petalFade 1.6s ease forwards;
         }
-        @keyframes petalBurstReturn {
-            0%   { transform: translate(0, 0); opacity: 1; }
-            12%  { transform: translate(var(--bx,0), var(--by,-33px)); opacity: 0.85; }
-            50%  { transform: translate(var(--bx,0), var(--by,-33px)); opacity: 0.85; }
-            88%  { transform: translate(0, 0); opacity: 1; }
-            100% { transform: translate(0, 0); opacity: 1; }
+        @keyframes petalFade {
+            0%, 8% { transform: scale(1); opacity: 1; }
+            12% { transform: scale(0); opacity: 0; }
+            85% { transform: scale(0); opacity: 0; }
+            92% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
         }
-        .dock-tab.anim-ai .al-petal-g-0 { --bx: 0px;   --by: -33px; }
-        .dock-tab.anim-ai .al-petal-g-1 { --bx: 29px;  --by: -17px; }
-        .dock-tab.anim-ai .al-petal-g-2 { --bx: 29px;  --by: 17px;  }
-        .dock-tab.anim-ai .al-petal-g-3 { --bx: 0px;   --by: 33px;  }
-        .dock-tab.anim-ai .al-petal-g-4 { --bx: -29px; --by: 17px;  }
-        .dock-tab.anim-ai .al-petal-g-5 { --bx: -29px; --by: -17px; }
         /* Center: shrinks when petals burst, pops back when they return */
         .dock-tab.anim-ai .al-flower-center {
             animation: centerPop 1.6s ease forwards;
         }
         @keyframes centerPop {
-            0%, 12% { transform: scale(1); opacity: 1; }
-            18%     { transform: scale(0); opacity: 0; }
-            82%     { transform: scale(0); opacity: 0; }
+            0%, 8% { transform: scale(1); opacity: 1; }
+            12%     { transform: scale(0); opacity: 0; }
+            85%     { transform: scale(0); opacity: 0; }
             90%     { transform: scale(1.3); opacity: 1; }
-            95%     { transform: scale(0.9); opacity: 1; }
+            96%     { transform: scale(0.9); opacity: 1; }
             100%    { transform: scale(1); opacity: 1; }
         }
     </style>
@@ -1896,13 +1894,13 @@
             <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
                 <circle class="al-ripple" cx="40" cy="28" r="2" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0"/>
                 <g class="al-chat-main" transform="translate(40, 28)">
-                    <circle class="al-dot-1" cx="-7" cy="-2" r="2" fill="currentColor" opacity="0"/>
-                    <circle class="al-dot-2" cx="0" cy="-2" r="2" fill="currentColor" opacity="0"/>
-                    <circle class="al-dot-3" cx="7" cy="-2" r="2" fill="currentColor" opacity="0"/>
-                    <circle class="al-main-bubble" cx="0" cy="0" r="10" fill="none" stroke="currentColor" stroke-width="2" opacity="0" transform="scale(0)"/>
+                    <circle class="al-dot-1" cx="-9" cy="-2" r="2.8" fill="currentColor" opacity="0"/>
+                    <circle class="al-dot-2" cx="0" cy="-2" r="2.8" fill="currentColor" opacity="0"/>
+                    <circle class="al-dot-3" cx="9" cy="-2" r="2.8" fill="currentColor" opacity="0"/>
+                    <circle class="al-main-bubble" cx="0" cy="0" r="14" fill="none" stroke="currentColor" stroke-width="1.8" opacity="0" transform="scale(0)"/>
                 </g>
                 <g class="al-sub-bubble" transform="translate(56, 16)">
-                    <circle cx="0" cy="0" r="6" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0" transform="scale(0)"/>
+                    <circle cx="0" cy="0" r="9" fill="none" stroke="currentColor" stroke-width="1.3" opacity="0" transform="scale(0)"/>
                 </g>
             </svg>
         </button>
@@ -1929,12 +1927,12 @@
                     </radialGradient>
                 </defs>
                 <g class="al-flower" transform="translate(40, 30)">
-                    <g class="al-petal-g al-petal-g-0"><g transform="rotate(0)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g al-petal-g-1"><g transform="rotate(60)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g al-petal-g-2"><g transform="rotate(120)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g al-petal-g-3"><g transform="rotate(180)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g al-petal-g-4"><g transform="rotate(240)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g al-petal-g-5"><g transform="rotate(300)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
                     <circle class="al-flower-center" cx="0" cy="0" r="5" fill="#FBBF24" stroke="#D97706" stroke-width="1"/>
                     <circle class="al-flash" cx="0" cy="0" r="22" fill="url(#flower-flash)" opacity="0"/>
                 </g>
@@ -3329,62 +3327,64 @@
                 var cy = rect.top + rect.height / 2;
                 var container = document.getElementById('dockBar') || document.body;
 
-                var petalCount = 7 + Math.floor(Math.random() * 4);
+                var petalCount = 5 + Math.floor(Math.random() * 3);
                 var keyframeCSS = '';
                 var prefix = 'pf-' + Date.now() + '-';
 
                 var colors = ['#F472B6','#EC4899','#FBBF24','#A78BFA','#C084FC','#F9A8D4','#FDA4AF','#E879F9','#FDE68A','#FCA5A5'];
 
-                var svgW = 10, svgH = 15;
+                var svgW = 14, svgH = 20;
 
-                for (var i = 0; i < petalCount; i++) {
-                    var angle = (360 / petalCount) * i + (Math.random() - 0.5) * 20;
-                    var dist = 18 + Math.random() * 18;
-                    var rot = 120 + Math.random() * 360;
-                    var rotDir = Math.random() > 0.5 ? 1 : -1;
-                    var finalRot = rot * rotDir;
-                    var color = colors[i % colors.length];
+                requestAnimationFrame(function() {
+                    for (var i = 0; i < petalCount; i++) {
+                        var angle = (360 / petalCount) * i + (Math.random() - 0.5) * 20;
+                        var dist = 22 + Math.random() * 22;
+                        var rot = 120 + Math.random() * 360;
+                        var rotDir = Math.random() > 0.5 ? 1 : -1;
+                        var finalRot = rot * rotDir;
+                        var color = colors[i % colors.length];
 
-                    var rad = angle * Math.PI / 180;
-                    var x = Math.cos(rad) * dist;
-                    var y = Math.sin(rad) * dist;
+                        var rad = angle * Math.PI / 180;
+                        var x = Math.cos(rad) * dist;
+                        var y = Math.sin(rad) * dist;
 
-                    var kfName = prefix + i;
-                    keyframeCSS += '@keyframes ' + kfName + ' {'
-                        + '0%{transform:translate(0,0) rotate(0deg) scale(0);opacity:0}'
-                        + '18%{transform:translate(0,0) rotate(25deg) scale(1);opacity:0.85}'
-                        + '55%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.85);opacity:0.6}'
-                        + '100%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.4);opacity:0}'
-                        + '}\n';
+                        var kfName = prefix + i;
+                        keyframeCSS += '@keyframes ' + kfName + ' {'
+                            + '0%{transform:translate(0,0) rotate(0deg) scale(0);opacity:0}'
+                            + '18%{transform:translate(0,0) rotate(25deg) scale(1);opacity:0.85}'
+                            + '55%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.85);opacity:0.6}'
+                            + '100%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.4);opacity:0}'
+                            + '}\n';
 
-                    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                    svg.setAttribute('class', 'dynamic-petal');
-                    svg.setAttribute('viewBox', '0 0 20 30');
-                    svg.setAttribute('width', svgW);
-                    svg.setAttribute('height', svgH);
-                    svg.style.position = 'fixed';
-                    svg.style.left = (cx - svgW / 2) + 'px';
-                    svg.style.top = (cy - svgH / 2) + 'px';
-                    svg.style.pointerEvents = 'none';
-                    svg.style.zIndex = '9999';
-                    svg.style.willChange = 'transform, opacity';
-                    svg.style.animation = kfName + ' 0.85s cubic-bezier(.4,.0,.2,1) forwards';
-                    svg.style.animationDelay = '0.08s';
-                    svg.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color + '" opacity="0.9"/>';
-                    container.appendChild(svg);
-                }
+                        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                        svg.setAttribute('class', 'dynamic-petal');
+                        svg.setAttribute('viewBox', '0 0 20 30');
+                        svg.setAttribute('width', svgW);
+                        svg.setAttribute('height', svgH);
+                        svg.style.position = 'fixed';
+                        svg.style.left = (cx - svgW / 2) + 'px';
+                        svg.style.top = (cy - svgH / 2) + 'px';
+                        svg.style.pointerEvents = 'none';
+                        svg.style.zIndex = '9999';
+                        svg.style.willChange = 'transform, opacity';
+                        svg.style.animation = kfName + ' 1s cubic-bezier(.25,.46,.45,.94) forwards';
+                        svg.style.animationDelay = '0.08s';
+                        svg.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color + '" opacity="0.9"/>';
+                        container.appendChild(svg);
+                    }
 
-                var styleTag = document.createElement('style');
-                styleTag.id = 'petal-styles-' + Date.now();
-                styleTag.textContent = keyframeCSS;
-                document.head.appendChild(styleTag);
+                    var styleTag = document.createElement('style');
+                    styleTag.id = 'petal-styles-' + Date.now();
+                    styleTag.textContent = keyframeCSS;
+                    document.head.appendChild(styleTag);
+                });
 
                 // Cleanup petals and injected styles after animation completes
                 setTimeout(function() {
                     document.querySelectorAll('.dynamic-petal').forEach(function(el) { el.remove(); });
-                    var st = document.getElementById(styleTag.id);
-                    if (st) st.remove();
-                }, 1100);
+                    var styleEl = document.querySelector('style[id^="petal-styles-"]');
+                    if (styleEl) styleEl.remove();
+                }, 1300);
             }
 
             document.querySelectorAll('.dock-tab').forEach(btn => {
