@@ -1623,12 +1623,13 @@
             animation: penLiftMove 1.5s ease forwards;
         }
         @keyframes penLiftMove {
-            0%   { transform: rotate(0deg) translate(0, 0); }
-            5%   { transform: rotate(-15deg) translate(0, -3px); }
-            12%  { transform: rotate(-15deg) translate(0, -3px); }
-            70%  { transform: rotate(5deg) translate(35px, 2px); }
-            82%  { transform: rotate(5deg) translate(35px, 2px); }
-            100% { transform: rotate(0deg) translate(0, 0); }
+            0%   { transform: rotate(0deg) translate(0, 0); opacity: 0; }
+            6%   { transform: rotate(-15deg) translate(0, -3px); opacity: 1; }
+            12%  { transform: rotate(-15deg) translate(0, -3px); opacity: 1; }
+            70%  { transform: rotate(5deg) translate(30px, 2px); opacity: 1; }
+            82%  { transform: rotate(5deg) translate(30px, 2px); opacity: 1; }
+            94%  { transform: rotate(-3deg) translate(8px, 1px); opacity: 0.6; }
+            100% { transform: rotate(0deg) translate(5px, 0); opacity: 0; }
         }
         .dock-tab.anim-post .al-path {
             stroke-dasharray: var(--path-len, 120);
@@ -1643,111 +1644,117 @@
             100% { stroke-dashoffset: var(--path-len, 120); }
         }
 
-        /* ---- Button 2: 聊天 - Natural Bubble Animation (2s) ---- */
+        /* ---- Button 2: 聊天 - Real Bubble Animation (2s) ---- */
         .dock-tab.anim-chat .anim-layer {
             color: var(--text-main);
             animation: chatContainer 2s ease forwards;
         }
         @keyframes chatContainer {
-            0%, 85% { opacity: 1; }
+            0%, 88% { opacity: 1; }
             100% { opacity: 0; }
         }
+
         /* Ripple wave at start */
         .dock-tab.anim-chat .al-ripple {
             animation: rippleWave 0.5s ease-out forwards;
         }
         @keyframes rippleWave {
-            0%   { opacity: 0.6; r: 2; stroke-width: 2; }
-            60%  { opacity: 0.3; r: 16; stroke-width: 1; }
-            100% { opacity: 0; r: 22; stroke-width: 0.5; }
+            0%   { opacity: 0.5; r: 2; stroke-width: 2; }
+            60%  { opacity: 0.2; r: 18; stroke-width: 1; }
+            100% { opacity: 0; r: 24; stroke-width: 0.5; }
         }
-        /* Typing dots: appear with wave, then dissolve into bubble */
+
+        /* Typing dots: bounce then merge into bubble */
         .dock-tab.anim-chat .al-dot-1,
         .dock-tab.anim-chat .al-dot-2,
         .dock-tab.anim-chat .al-dot-3 {
-            animation: dotType 0.9s ease forwards;
+            animation: dotTypeMerge 1.2s ease forwards;
         }
-        .dock-tab.anim-chat .al-dot-1 { animation-delay: 0.12s; }
-        .dock-tab.anim-chat .al-dot-2 { animation-delay: 0.22s; }
-        .dock-tab.anim-chat .al-dot-3 { animation-delay: 0.32s; }
-        @keyframes dotType {
-            0%   { transform: translateY(6px); opacity: 0; }
-            20%  { transform: translateY(-4px); opacity: 1; }
-            40%  { transform: translateY(0); opacity: 1; }
-            75%  { opacity: 0.6; }
-            100% { transform: translateY(-4px); opacity: 0; }
-        }
-        /* Main bubble: inflate like blowing a real bubble */
-        .dock-tab.anim-chat .al-main-bubble {
-            animation: bubbleInflate 2s ease forwards;
-        }
-        @keyframes bubbleInflate {
-            0%, 32%  { transform: scale(0); opacity: 0; }
-            42%      { transform: scale(0.3); opacity: 0.5; }
-            55%      { transform: scale(1.15); opacity: 1; }
-            62%      { transform: scale(0.92); opacity: 1; }
-            68%      { transform: scale(1.05); opacity: 1; }
-            75%      { transform: scale(0.98) translateX(1px); opacity: 1; }
-            78%      { transform: scale(0.99) translateX(-1px); opacity: 1; }
-            82%      { transform: scale(1); opacity: 1; }
-            100%     { transform: scale(0.9); opacity: 0; }
-        }
-        /* Sub bubble: pops in from the side, then fades */
-        .dock-tab.anim-chat .al-sub-bubble {
-            animation: subBubblePop 2s ease forwards;
-        }
-        @keyframes subBubblePop {
-            0%, 68% { transform: scale(0); opacity: 0; }
-            78%     { transform: scale(1.2); opacity: 1; }
-            84%     { transform: scale(0.9); opacity: 1; }
-            90%     { transform: scale(1); opacity: 1; }
-            100%    { transform: scale(0.8) translate(6px, -6px); opacity: 0; }
+        .dock-tab.anim-chat .al-dot-1 { animation-delay: 0.1s; }
+        .dock-tab.anim-chat .al-dot-2 { animation-delay: 0.2s; }
+        .dock-tab.anim-chat .al-dot-3 { animation-delay: 0.3s; }
+        @keyframes dotTypeMerge {
+            0%   { transform: translateY(5px); opacity: 0; }
+            15%  { transform: translateY(-4px); opacity: 1; }
+            30%  { transform: translateY(0); opacity: 1; }
+            50%  { opacity: 0.8; }
+            65%  { transform: translateY(-2px); opacity: 0; }
+            100% { opacity: 0; }
         }
 
-        /* ---- Button 3: AI - Flower Petals Burst & Return (1.6s) ---- */
+        /* Main bubble: filled, inflates like a real bubble */
+        .dock-tab.anim-chat .al-main-bubble {
+            animation: bubbleInflateNew 2s ease forwards;
+        }
+        @keyframes bubbleInflateNew {
+            0%, 30%  { transform: scale(0); opacity: 0; }
+            38%      { transform: scale(0.4); opacity: 0.6; }
+            48%      { transform: scale(1.12); opacity: 1; }
+            55%      { transform: scale(0.94); opacity: 1; }
+            62%      { transform: scale(1.04); opacity: 1; }
+            68%      { transform: scale(0.98); opacity: 1; }
+            74%      { transform: scale(1); opacity: 1; }
+            76%      { transform: scale(1) translateX(0.8px); opacity: 1; }
+            78%      { transform: scale(1) translateX(-0.6px); opacity: 1; }
+            80%      { transform: scale(1) translateX(0); opacity: 1; }
+            88%      { transform: scale(1); opacity: 1; }
+            100%     { transform: scale(0.85); opacity: 0; }
+        }
+
+        /* Sub bubble: filled, pops in from side */
+        .dock-tab.anim-chat .al-sub-bubble {
+            animation: subBubblePopNew 2s ease forwards;
+        }
+        @keyframes subBubblePopNew {
+            0%, 65%  { transform: scale(0); opacity: 0; }
+            74%      { transform: scale(1.15); opacity: 1; }
+            80%      { transform: scale(0.92); opacity: 1; }
+            86%      { transform: scale(1); opacity: 1; }
+            92%      { transform: scale(0.95) translate(4px, -3px); opacity: 0.7; }
+            100%     { transform: scale(0.7) translate(6px, -5px); opacity: 0; }
+        }
+
+        /* ---- Button 3: AI - Flower Petals Scatter & Return (1.8s) ---- */
         .dock-tab.anim-ai .anim-layer {
-            color: var(--text-main);
-            animation: aiContainer 1.6s ease forwards;
+            opacity: 1;
         }
-        @keyframes aiContainer {
-            0%, 10% { opacity: 1; }
-            12%, 85% { opacity: 1; }
-            88%, 92% { opacity: 0; }
-            94% { opacity: 1; }
-            100% { opacity: 0; }
+        /* 原始花朵图标淡出 */
+        .dock-tab.anim-ai .dt-svg {
+            animation: flowerIconFadeOut 1.8s ease forwards;
+            transform-origin: center;
         }
-        /* White flash before burst */
+        @keyframes flowerIconFadeOut {
+            0%   { opacity: 1; transform: scale(1); }
+            8%   { opacity: 0; transform: scale(0.9); }
+            75%  { opacity: 0; transform: scale(0.9); }
+            88%  { opacity: 1; transform: scale(1.08); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        /* CSS层花朵中心的闪光 */
         .dock-tab.anim-ai .al-flash {
-            animation: flowerFlash 1.6s ease forwards;
+            animation: flowerFlashNew 1.8s ease forwards;
         }
-        @keyframes flowerFlash {
+        @keyframes flowerFlashNew {
             0%   { opacity: 0; transform: scale(0.3); }
-            5%   { opacity: 0.8; transform: scale(1); }
-            14%  { opacity: 0; transform: scale(1.4); }
+            5%   { opacity: 0.7; transform: scale(0.8); }
+            12%  { opacity: 0; transform: scale(1.2); }
             100% { opacity: 0; }
         }
-        /* Petals: scale down and fade out (JS handles petal burst separately) */
+        /* CSS层花瓣不需要独立动画了，由JS控制 */
         .dock-tab.anim-ai .al-petal-g {
-            animation: petalFade 1.6s ease forwards;
+            /* 不设置animation，花瓣显示隐藏由JS控制 */
         }
-        @keyframes petalFade {
-            0%, 8% { transform: scale(1); opacity: 1; }
-            12% { transform: scale(0); opacity: 0; }
-            85% { transform: scale(0); opacity: 0; }
-            92% { transform: scale(1); opacity: 1; }
-            100% { transform: scale(1); opacity: 1; }
-        }
-        /* Center: shrinks when petals burst, pops back when they return */
+        /* 花朵中心 */
         .dock-tab.anim-ai .al-flower-center {
-            animation: centerPop 1.6s ease forwards;
+            animation: centerPopNew 1.8s ease forwards;
         }
-        @keyframes centerPop {
-            0%, 8% { transform: scale(1); opacity: 1; }
-            12%     { transform: scale(0); opacity: 0; }
-            85%     { transform: scale(0); opacity: 0; }
-            90%     { transform: scale(1.3); opacity: 1; }
-            96%     { transform: scale(0.9); opacity: 1; }
-            100%    { transform: scale(1); opacity: 1; }
+        @keyframes centerPopNew {
+            0%, 8%   { transform: scale(1); opacity: 1; }
+            14%      { transform: scale(0); opacity: 0; }
+            78%      { transform: scale(0); opacity: 0; }
+            88%      { transform: scale(1.2); opacity: 1; }
+            94%      { transform: scale(0.9); opacity: 1; }
+            100%     { transform: scale(1); opacity: 1; }
         }
     </style>
 </head>
@@ -1879,8 +1886,14 @@
                 </defs>
                 <path class="al-path" d="M 8,32 Q 22,12 38,28 T 70,18" fill="none" stroke="url(#g-stroke)" stroke-width="3" stroke-linecap="round"/>
                 <g class="al-pen">
-                    <path d="M -3,8 L 0,15 L 3,8 Z" fill="currentColor"/>
-                    <line x1="0" y1="15" x2="14" y2="0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <!-- 蜡笔身体 -->
+                    <rect x="1" y="3" width="5" height="14" rx="1.5" fill="#F59E0B" stroke="#D97706" stroke-width="0.8"/>
+                    <!-- 蜡笔标签条纹 -->
+                    <rect x="1" y="8" width="5" height="3" rx="0.5" fill="#FBBF24" opacity="0.6"/>
+                    <!-- 蜡笔笔尖 -->
+                    <path d="M1.5,17 L3.5,22 L5.5,17 Z" fill="#F59E0B" stroke="#D97706" stroke-width="0.6"/>
+                    <!-- 笔尖尖端颜色 -->
+                    <path d="M2.5,19 L3.5,22 L4.5,19 Z" fill="#FF6B6B"/>
                 </g>
             </svg>
         </button>
@@ -1897,10 +1910,20 @@
                     <circle class="al-dot-1" cx="-9" cy="-2" r="2.8" fill="currentColor" opacity="0"/>
                     <circle class="al-dot-2" cx="0" cy="-2" r="2.8" fill="currentColor" opacity="0"/>
                     <circle class="al-dot-3" cx="9" cy="-2" r="2.8" fill="currentColor" opacity="0"/>
-                    <circle class="al-main-bubble" cx="0" cy="0" r="14" fill="none" stroke="currentColor" stroke-width="1.8" opacity="0" transform="scale(0)"/>
+                    <!-- 主气泡：填充的圆角矩形+尾巴 -->
+                    <g class="al-main-bubble" opacity="0">
+                        <path d="M-16,-14 Q-16,-18 -12,-18 L12,-18 Q16,-18 16,-14 L16,6 Q16,10 12,10 L2,10 L-2,16 L-4,10 L-12,10 Q-16,10 -16,6 Z" 
+                              fill="rgba(74,108,247,0.15)" stroke="rgba(74,108,247,0.4)" stroke-width="1.2"/>
+                        <!-- 气泡内的小横线代表消息 -->
+                        <line x1="-9" y1="-8" x2="9" y2="-8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+                        <line x1="-9" y1="-2" x2="5" y2="-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
+                        <line x1="-9" y1="4" x2="7" y2="4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.25"/>
+                    </g>
                 </g>
-                <g class="al-sub-bubble" transform="translate(56, 16)">
-                    <circle cx="0" cy="0" r="9" fill="none" stroke="currentColor" stroke-width="1.3" opacity="0" transform="scale(0)"/>
+                <!-- 副气泡：小的填充气泡 -->
+                <g class="al-sub-bubble" opacity="0" transform="translate(58, 14)">
+                    <path d="M-8,-8 Q-8,-12 -4,-12 L4,-12 Q8,-12 8,-8 L8,2 Q8,6 4,6 L1,6 L-1,10 L-2,6 L-4,6 Q-8,6 -8,2 Z" 
+                          fill="rgba(74,108,247,0.12)" stroke="rgba(74,108,247,0.3)" stroke-width="1"/>
                 </g>
             </svg>
         </button>
@@ -3301,7 +3324,7 @@
             // Track which buttons currently have animation playing
             var animatingTabs = {};
             // Animation durations by tab (in ms, matching CSS)
-            var animDurations = { posts: 1500, chat: 2000, ai: 1600 };
+            var animDurations = { posts: 1500, chat: 2000, ai: 1800 };
 
             function triggerTabAnimation(el, tab) {
                 var cls = animClassMap[tab];
@@ -3322,69 +3345,120 @@
 
             // Dynamic flower petal burst for AI button
             function triggerFlowerPetals(btn) {
+                // 获取按钮中6片花瓣的原始位置和角度
+                var petalGroups = btn.querySelectorAll('.al-petal-g');
+                if (!petalGroups.length) return;
+                
                 var rect = btn.getBoundingClientRect();
                 var cx = rect.left + rect.width / 2;
                 var cy = rect.top + rect.height / 2;
                 var container = document.getElementById('dockBar') || document.body;
-
-                var petalCount = 5 + Math.floor(Math.random() * 3);
+                
+                var colors = ['#F472B6','#EC4899','#F9A8D4','#A78BFA','#C084FC','#FDA4AF'];
                 var keyframeCSS = '';
                 var prefix = 'pf-' + Date.now() + '-';
-
-                var colors = ['#F472B6','#EC4899','#FBBF24','#A78BFA','#C084FC','#F9A8D4','#FDA4AF','#E879F9','#FDE68A','#FCA5A5'];
-
-                var svgW = 14, svgH = 20;
-
-                requestAnimationFrame(function() {
-                    for (var i = 0; i < petalCount; i++) {
-                        var angle = (360 / petalCount) * i + (Math.random() - 0.5) * 20;
-                        var dist = 22 + Math.random() * 22;
-                        var rot = 120 + Math.random() * 360;
-                        var rotDir = Math.random() > 0.5 ? 1 : -1;
-                        var finalRot = rot * rotDir;
-                        var color = colors[i % colors.length];
-
-                        var rad = angle * Math.PI / 180;
-                        var x = Math.cos(rad) * dist;
-                        var y = Math.sin(rad) * dist;
-
-                        var kfName = prefix + i;
-                        keyframeCSS += '@keyframes ' + kfName + ' {'
-                            + '0%{transform:translate(0,0) rotate(0deg) scale(0);opacity:0}'
-                            + '18%{transform:translate(0,0) rotate(25deg) scale(1);opacity:0.85}'
-                            + '55%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.85);opacity:0.6}'
-                            + '100%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.4);opacity:0}'
-                            + '}\n';
-
-                        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                        svg.setAttribute('class', 'dynamic-petal');
-                        svg.setAttribute('viewBox', '0 0 20 30');
-                        svg.setAttribute('width', svgW);
-                        svg.setAttribute('height', svgH);
-                        svg.style.position = 'fixed';
-                        svg.style.left = (cx - svgW / 2) + 'px';
-                        svg.style.top = (cy - svgH / 2) + 'px';
-                        svg.style.pointerEvents = 'none';
-                        svg.style.zIndex = '9999';
-                        svg.style.willChange = 'transform, opacity';
-                        svg.style.animation = kfName + ' 1s cubic-bezier(.25,.46,.45,.94) forwards';
-                        svg.style.animationDelay = '0.08s';
-                        svg.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color + '" opacity="0.9"/>';
-                        container.appendChild(svg);
-                    }
-
-                    var styleTag = document.createElement('style');
-                    styleTag.id = 'petal-styles-' + Date.now();
-                    styleTag.textContent = keyframeCSS;
-                    document.head.appendChild(styleTag);
-                });
-
-                // Cleanup petals and injected styles after animation completes
+                
+                // 为每片花瓣创建飞出再飞回的动画
+                // 花瓣原始角度：0, 60, 120, 180, 240, 300
+                var baseAngles = [0, 60, 120, 180, 240, 300];
+                
+                for (var i = 0; i < petalGroups.length && i < 6; i++) {
+                    var baseAngle = baseAngles[i];
+                    // 飞散方向 = 花瓣所在角度方向（花瓣从哪个方向就往哪个方向飞）
+                    var flyAngle = baseAngle - 90; // SVG中花瓣的旋转角度对应的方向需要调整
+                    var rad = flyAngle * Math.PI / 180;
+                    
+                    // 飞散距离
+                    var dist = 20 + Math.random() * 15;
+                    var flyX = Math.cos(rad) * dist;
+                    var flyY = Math.sin(rad) * dist;
+                    
+                    // 花瓣自身旋转
+                    var selfRot = (Math.random() > 0.5 ? 1 : -1) * (40 + Math.random() * 60);
+                    
+                    var color = colors[i % colors.length];
+                    var kfName = prefix + i;
+                    
+                    // 关键帧：从原位 → 飞出 → 停留 → 飞回原位
+                    keyframeCSS += '@keyframes ' + kfName + ' {'
+                        + '0%{transform:translate(0px,0px) rotate(0deg) scale(1);opacity:1}'
+                        + '6%{transform:translate(0px,0px) rotate(0deg) scale(0.6);opacity:0.8}'  // 先缩小准备
+                        + '10%{transform:translate(0px,0px) rotate(0deg) scale(1);opacity:1}'     // 弹出
+                        + '35%{transform:translate(' + flyX.toFixed(1) + 'px,' + flyY.toFixed(1) + 'px) rotate(' + selfRot.toFixed(1) + 'deg) scale(1);opacity:0.9}'  // 飞到最远
+                        + '50%{transform:translate(' + (flyX*0.95).toFixed(1) + 'px,' + (flyY*0.95).toFixed(1) + 'px) rotate(' + (selfRot*0.9).toFixed(1) + 'deg) scale(0.95);opacity:0.85}' // 短暂停留
+                        + '80%{transform:translate(0px,0px) rotate(0deg) scale(1);opacity:1}'     // 飞回原位
+                        + '88%{transform:translate(0px,0px) rotate(0deg) scale(1.1);opacity:1}'   // 回弹
+                        + '100%{transform:translate(0px,0px) rotate(0deg) scale(1);opacity:1}'    // 稳定
+                        + '}\n';
+                    
+                    // 创建花瓣SVG元素（用fixed定位覆盖在原始花瓣上方）
+                    var svgW = 14, svgH = 20;
+                    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    svg.setAttribute('class', 'dynamic-petal');
+                    svg.setAttribute('viewBox', '0 0 20 30');
+                    svg.setAttribute('width', svgW);
+                    svg.setAttribute('height', svgH);
+                    svg.style.position = 'fixed';
+                    svg.style.left = (cx - svgW / 2) + 'px';
+                    svg.style.top = (cy - svgH / 2) + 'px';
+                    svg.style.pointerEvents = 'none';
+                    svg.style.zIndex = '9999';
+                    svg.style.willChange = 'transform, opacity';
+                    svg.style.animation = kfName + ' 1.5s cubic-bezier(.25,.46,.45,.94) forwards';
+                    // 先旋转到花瓣原始角度，使花瓣朝向正确
+                    svg.style.transform = 'rotate(' + baseAngle + 'deg)';
+                    svg.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color + '" opacity="0.9"/>';
+                    container.appendChild(svg);
+                }
+                
+                // 额外2-3片随机小花瓣（不飞回，纯装饰）
+                var extraCount = 2 + Math.floor(Math.random() * 2);
+                for (var j = 0; j < extraCount; j++) {
+                    var angle = Math.random() * 360;
+                    var rad2 = angle * Math.PI / 180;
+                    var dist2 = 25 + Math.random() * 20;
+                    var x2 = Math.cos(rad2) * dist2;
+                    var y2 = Math.sin(rad2) * dist2;
+                    var rot2 = (Math.random() > 0.5 ? 1 : -1) * (120 + Math.random() * 240);
+                    var color2 = colors[Math.floor(Math.random() * colors.length)];
+                    var kfName2 = prefix + 'e' + j;
+                    
+                    keyframeCSS += '@keyframes ' + kfName2 + ' {'
+                        + '0%{transform:translate(0px,0px) rotate(0deg) scale(0);opacity:0}'
+                        + '12%{transform:translate(0px,0px) rotate(20deg) scale(1);opacity:0.7}'
+                        + '50%{transform:translate(' + x2.toFixed(1) + 'px,' + y2.toFixed(1) + 'px) rotate(' + rot2.toFixed(1) + 'deg) scale(0.8);opacity:0.5}'
+                        + '100%{transform:translate(' + (x2*1.1).toFixed(1) + 'px,' + (y2*1.15).toFixed(1) + 'px) rotate(' + (rot2*1.2).toFixed(1) + 'deg) scale(0.3);opacity:0}'
+                        + '}\n';
+                    
+                    var svgW2 = 8, svgH2 = 12;
+                    var svg2 = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    svg2.setAttribute('class', 'dynamic-petal');
+                    svg2.setAttribute('viewBox', '0 0 20 30');
+                    svg2.setAttribute('width', svgW2);
+                    svg2.setAttribute('height', svgH2);
+                    svg2.style.position = 'fixed';
+                    svg2.style.left = (cx - svgW2 / 2) + 'px';
+                    svg2.style.top = (cy - svgH2 / 2) + 'px';
+                    svg2.style.pointerEvents = 'none';
+                    svg2.style.zIndex = '9999';
+                    svg2.style.willChange = 'transform, opacity';
+                    svg2.style.animation = kfName2 + ' 1.2s cubic-bezier(.25,.46,.45,.94) forwards';
+                    svg2.style.animationDelay = '0.06s';
+                    svg2.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color2 + '" opacity="0.8"/>';
+                    container.appendChild(svg2);
+                }
+                
+                var styleTag = document.createElement('style');
+                styleTag.id = 'petal-styles-' + Date.now();
+                styleTag.textContent = keyframeCSS;
+                document.head.appendChild(styleTag);
+                
+                // Cleanup
                 setTimeout(function() {
                     document.querySelectorAll('.dynamic-petal').forEach(function(el) { el.remove(); });
-                    var styleEl = document.querySelector('style[id^="petal-styles-"]');
-                    if (styleEl) styleEl.remove();
-                }, 1300);
+                    var st = document.getElementById(styleTag.id);
+                    if (st) st.remove();
+                }, 1700);
             }
 
             document.querySelectorAll('.dock-tab').forEach(btn => {
