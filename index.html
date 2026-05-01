@@ -1596,10 +1596,11 @@
         }
         .dock-tab.anim-ai .dt-svg {
             animation: iconAIClick 0.3s ease forwards;
+            transform-origin: center;
         }
         @keyframes iconAIClick {
             0%   { transform: scale(1); opacity: 1; }
-            30%  { transform: scale(1); opacity: 1; }
+            25%  { transform: scale(1); opacity: 1; }
             100% { transform: scale(0.8); opacity: 0; }
         }
 
@@ -1685,51 +1686,61 @@
             100%    { opacity: 0; transform: scale(0); }
         }
 
-        /* ---- Button 3: AI - Flower Bloom + Petal Burst (2s) ---- */
+        /* ---- Button 3: AI - Flower Bloom + Dynamic Petal Burst (1.6s) ---- */
         .dock-tab.anim-ai .anim-layer {
             color: var(--text-main);
-            animation: aiContainer 2s ease forwards;
+            animation: aiContainer 1.6s ease forwards;
         }
         @keyframes aiContainer {
-            0%, 90% { opacity: 1; }
+            0%, 88% { opacity: 1; }
             100% { opacity: 0; }
         }
-        /* Flower petals burst outward */
+        /* Phase 1: Flower fades out + scales down */
+        .dock-tab.anim-ai .al-flower {
+            animation: aiFlowerFade 1.6s ease forwards;
+        }
+        @keyframes aiFlowerFade {
+            0%   { opacity: 1; transform: scale(1); }
+            18%  { opacity: 0; transform: scale(0.85); }
+            75%  { opacity: 0; transform: scale(0.85); }
+            82%  { opacity: 1; transform: scale(0.8); }
+            90%  { opacity: 1; transform: scale(1.05); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+        /* White flash at center when flower opens */
+        .dock-tab.anim-ai .al-flash {
+            animation: flowerFlash 1.6s ease forwards;
+        }
+        @keyframes flowerFlash {
+            0%   { opacity: 0; transform: scale(0.3); }
+            6%   { opacity: 0.8; transform: scale(1); }
+            15%  { opacity: 0; transform: scale(1.4); }
+            100% { opacity: 0; }
+        }
+        /* Phase 4: Petals open sequentially */
         .dock-tab.anim-ai .al-petal-g {
-            animation: petalBurst 2s ease forwards;
+            animation: petalOpen 1.6s ease forwards;
         }
-        @keyframes petalBurst {
-            0%   { transform: translate(0, 0) scale(1); opacity: 1; }
-            8%   { transform: translate(0, 0) scale(1); opacity: 1; }
-            50%  { transform: translate(var(--bx,30px), var(--by,-30px)) scale(0.3); opacity: 0.7; }
-            75%  { transform: translate(var(--bx,30px), var(--by,-30px)) scale(0.1); opacity: 0; }
-            90%  { transform: translate(0, 0) scale(1); opacity: 0; }
-            100% { transform: translate(0, 0) scale(1); opacity: 0; }
+        @keyframes petalOpen {
+            0%, 78% { transform: scaleY(0); opacity: 0; }
+            86%     { transform: scaleY(1); opacity: 1; }
+            100%    { transform: scaleY(1); opacity: 1; }
         }
-        .dock-tab.anim-ai .al-petal-g-0 { --bx: 0px; --by: -40px; }
-        .dock-tab.anim-ai .al-petal-g-1 { --bx: 35px; --by: -20px; }
-        .dock-tab.anim-ai .al-petal-g-2 { --bx: 35px; --by: 20px; }
-        .dock-tab.anim-ai .al-petal-g-3 { --bx: 0px; --by: 40px; }
-        .dock-tab.anim-ai .al-petal-g-4 { --bx: -35px; --by: 20px; }
-        .dock-tab.anim-ai .al-petal-g-5 { --bx: -35px; --by: -20px; }
-        /* Petal burst delays */
-        .dock-tab.anim-ai .al-petal-g-1 { animation-delay: 0.08s; }
-        .dock-tab.anim-ai .al-petal-g-2 { animation-delay: 0.16s; }
-        .dock-tab.anim-ai .al-petal-g-3 { animation-delay: 0.04s; }
-        .dock-tab.anim-ai .al-petal-g-4 { animation-delay: 0.12s; }
-        .dock-tab.anim-ai .al-petal-g-5 { animation-delay: 0.2s; }
-        /* Flower center glow */
+        .dock-tab.anim-ai .al-petal-g-0 { animation-delay: 0s; }
+        .dock-tab.anim-ai .al-petal-g-1 { animation-delay: 0.05s; }
+        .dock-tab.anim-ai .al-petal-g-2 { animation-delay: 0.1s; }
+        .dock-tab.anim-ai .al-petal-g-3 { animation-delay: 0.15s; }
+        .dock-tab.anim-ai .al-petal-g-4 { animation-delay: 0.2s; }
+        .dock-tab.anim-ai .al-petal-g-5 { animation-delay: 0.25s; }
+        /* Phase 4: Center pops in with bounce */
         .dock-tab.anim-ai .al-flower-center {
-            animation: centerGlow 2s ease forwards;
+            animation: centerPop 1.6s ease forwards;
         }
-        @keyframes centerGlow {
-            0%   { opacity: 0; transform: scale(0); }
-            10%  { opacity: 1; transform: scale(1); }
-            35%  { opacity: 1; transform: scale(1.8); }
-            55%  { opacity: 0.5; transform: scale(0.5); }
-            75%  { opacity: 0; transform: scale(0); }
-            90%  { opacity: 0; transform: scale(0); }
-            100% { opacity: 0; transform: scale(0); }
+        @keyframes centerPop {
+            0%, 80% { transform: scale(0); opacity: 0; }
+            87%     { transform: scale(1.3); opacity: 1; }
+            93%     { transform: scale(0.9); opacity: 1; }
+            100%    { transform: scale(1); opacity: 1; }
         }
     </style>
 </head>
@@ -1890,20 +1901,35 @@
         </button>
         <button class="dock-tab" data-tab="ai">
             <span class="dt-icon">
-                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 2a3 3 0 0 0-2 5.2A4.5 4.5 0 0 0 5.2 10a3 3 0 0 0 1.8 5.5 4.5 4.5 0 0 0 2 3.3A3 3 0 0 0 12 22a3 3 0 0 0 3-3.2 4.5 4.5 0 0 0 2-3.3A3 3 0 0 0 18.8 10 4.5 4.5 0 0 0 14 7.2 3 3 0 0 0 12 2z"/>
+                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none">
+                    <g transform="translate(12,12)">
+                        <ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1" transform="rotate(0)"/>
+                        <ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1" transform="rotate(60)"/>
+                        <ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1" transform="rotate(120)"/>
+                        <ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1" transform="rotate(180)"/>
+                        <ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1" transform="rotate(240)"/>
+                        <ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1" transform="rotate(300)"/>
+                        <circle cx="0" cy="0" r="3" fill="#FBBF24" stroke="#D97706" stroke-width="1"/>
+                    </g>
                 </svg>
             </span>
             <span class="dt-label">AI</span>
             <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60">
+                <defs>
+                    <radialGradient id="flower-flash" cx="50%" cy="50%" r="50%">
+                        <stop offset="0%" stop-color="white" stop-opacity="0.9"/>
+                        <stop offset="100%" stop-color="white" stop-opacity="0"/>
+                    </radialGradient>
+                </defs>
                 <g class="al-flower" transform="translate(40, 30)">
-                    <g class="al-petal-g al-petal-g-0"><g transform="rotate(0)"><path d="M 0,0 Q 6,-12 0,-24 Q -6,-12 0,0" fill="#F472B6"/></g></g>
-                    <g class="al-petal-g al-petal-g-1"><g transform="rotate(60)"><path d="M 0,0 Q 6,-12 0,-24 Q -6,-12 0,0" fill="#FB923C"/></g></g>
-                    <g class="al-petal-g al-petal-g-2"><g transform="rotate(120)"><path d="M 0,0 Q 6,-12 0,-24 Q -6,-12 0,0" fill="#FBBF24"/></g></g>
-                    <g class="al-petal-g al-petal-g-3"><g transform="rotate(180)"><path d="M 0,0 Q 6,-12 0,-24 Q -6,-12 0,0" fill="#34D399"/></g></g>
-                    <g class="al-petal-g al-petal-g-4"><g transform="rotate(240)"><path d="M 0,0 Q 6,-12 0,-24 Q -6,-12 0,0" fill="#60A5FA"/></g></g>
-                    <g class="al-petal-g al-petal-g-5"><g transform="rotate(300)"><path d="M 0,0 Q 6,-12 0,-24 Q -6,-12 0,0" fill="#A78BFA"/></g></g>
-                    <circle class="al-flower-center" cx="0" cy="0" r="4" fill="#FBBF24" opacity="0"/>
+                    <g class="al-petal-g al-petal-g-0"><g transform="rotate(0)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g al-petal-g-1"><g transform="rotate(60)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g al-petal-g-2"><g transform="rotate(120)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g al-petal-g-3"><g transform="rotate(180)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g al-petal-g-4"><g transform="rotate(240)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g al-petal-g-5"><g transform="rotate(300)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <circle class="al-flower-center" cx="0" cy="0" r="5" fill="#FBBF24" stroke="#D97706" stroke-width="1"/>
+                    <circle class="al-flash" cx="0" cy="0" r="22" fill="url(#flower-flash)" opacity="0"/>
                 </g>
             </svg>
         </button>
@@ -3270,7 +3296,7 @@
             // Track which buttons currently have animation playing
             var animatingTabs = {};
             // Animation durations by tab (in ms, matching CSS)
-            var animDurations = { posts: 1500, chat: 2000, ai: 2000 };
+            var animDurations = { posts: 1500, chat: 2000, ai: 1600 };
 
             function triggerTabAnimation(el, tab) {
                 var cls = animClassMap[tab];
@@ -3278,11 +3304,76 @@
                 if (animatingTabs[tab]) return;
                 animatingTabs[tab] = true;
                 el.classList.add(cls);
+                // Trigger dynamic petal burst for AI
+                if (tab === 'ai') {
+                    triggerFlowerPetals(el);
+                }
                 // Clean up after animation duration + small buffer
                 setTimeout(function() {
                     el.classList.remove(cls);
                     animatingTabs[tab] = false;
                 }, animDurations[tab] + 50);
+            }
+
+            // Dynamic flower petal burst for AI button
+            function triggerFlowerPetals(btn) {
+                var rect = btn.getBoundingClientRect();
+                var cx = rect.left + rect.width / 2;
+                var cy = rect.top + rect.height / 2;
+                var container = document.getElementById('dockBar') || document.body;
+
+                var petalCount = 12 + Math.floor(Math.random() * 4);
+                var petals = [];
+                var keyframeCSS = '';
+                var prefix = 'pf-' + Date.now() + '-';
+
+                var colors = ['#F472B6','#EC4899','#FB923C','#FBBF24','#A78BFA','#C084FC','#FCD34D','#F9A8D4','#FDA4AF','#E879F9','#D8B4FE','#FDBA74','#FCA5A5','#F0ABFC','#FDE68A'];
+
+                for (var i = 0; i < petalCount; i++) {
+                    var angle = (360 / petalCount) * i + (Math.random() - 0.5) * 30;
+                    var dist = 40 + Math.random() * 40;
+                    var rot = 180 + Math.random() * 360;
+                    var rotDir = Math.random() > 0.5 ? 1 : -1;
+                    var finalRot = rot * rotDir;
+                    var color = colors[i % colors.length];
+                    var gravity = 10 + Math.random() * 15;
+
+                    var rad = angle * Math.PI / 180;
+                    var x = Math.cos(rad) * dist;
+                    var y = Math.sin(rad) * dist + gravity;
+
+                    var kfName = prefix + i;
+                    keyframeCSS += '@keyframes ' + kfName + ' { 0%{transform:translate(0,0) rotate(0deg);opacity:0.9} 60%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg);opacity:0.8} 100%{transform:translate(' + (x * 1.1).toFixed(1) + 'px,' + (y * 1.2).toFixed(1) + 'px) rotate(' + (finalRot * 1.3).toFixed(1) + 'deg);opacity:0} }\n';
+
+                    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    svg.setAttribute('class', 'dynamic-petal');
+                    svg.setAttribute('viewBox', '0 0 20 30');
+                    svg.setAttribute('width', '14');
+                    svg.setAttribute('height', '21');
+                    svg.style.position = 'fixed';
+                    svg.style.left = (cx - 7) + 'px';
+                    svg.style.top = (cy - 10) + 'px';
+                    svg.style.pointerEvents = 'none';
+                    svg.style.zIndex = '9999';
+                    svg.style.willChange = 'transform, opacity';
+                    svg.style.animation = kfName + ' 1.1s cubic-bezier(.4,.0,.2,1) forwards';
+                    svg.style.animationDelay = '0.2s';
+                    svg.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color + '" opacity="0.9"/>';
+                    container.appendChild(svg);
+                    petals.push(svg);
+                }
+
+                var styleTag = document.createElement('style');
+                styleTag.id = 'petal-styles-' + Date.now();
+                styleTag.textContent = keyframeCSS;
+                document.head.appendChild(styleTag);
+
+                // Cleanup petals and injected styles after animation completes
+                setTimeout(function() {
+                    document.querySelectorAll('.dynamic-petal').forEach(function(el) { el.remove(); });
+                    var st = document.getElementById(styleTag.id);
+                    if (st) st.remove();
+                }, 1600);
             }
 
             document.querySelectorAll('.dock-tab').forEach(btn => {
