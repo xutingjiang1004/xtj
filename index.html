@@ -1329,6 +1329,7 @@
             padding: 12px 0; margin-bottom: 8px;
             border-bottom: 1px solid rgba(0,0,0,0.06);
             flex-shrink: 0; display: flex; align-items: center; gap: 8px;
+            overflow: visible;
         }
         .dock-ai-container .ai-chat-header .ai-title {
             font-weight: 700; font-size: 16px; color: var(--text-main); flex: 1;
@@ -1385,6 +1386,7 @@
         .ai-welcome {
             text-align: center; color: var(--text-muted);
             font-size: 13px; padding: 30px 20px; line-height: 1.6;
+            overflow: visible;
         }
         .ai-welcome .ai-welcome-icon { font-size: 36px; margin-bottom: 8px; display: inline-block; line-height: 1; overflow: visible; }
         .ai-msg {
@@ -1729,10 +1731,12 @@
             0%   { opacity: 1; }
             4%   { opacity: 0; }
             55%  { opacity: 0; }
-            62%  { opacity: 0.2; }
-            70%  { opacity: 0.4; }
-            80%  { opacity: 0.7; }
-            90%  { opacity: 0.9; }
+            62%  { opacity: 0.1; }
+            70%  { opacity: 0.15; }
+            78%  { opacity: 0.3; }
+            88%  { opacity: 0.5; }
+            95%  { opacity: 0.7; }
+            99%  { opacity: 0.9; }
             100% { opacity: 1; }
         }
         /* CSS层花朵中心的闪光 */
@@ -1768,11 +1772,12 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(0, -18px) rotate(-15deg); opacity: 0.9; }
             42%  { transform: translate(0, -16px) rotate(-12deg); opacity: 0.7; }
-            58%  { transform: translate(0, -3px) rotate(-2deg); opacity: 0.6; }
-            68%  { transform: translate(0, -1px) rotate(-1deg); opacity: 0.4; }
-            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(0, -3px) rotate(-2deg); opacity: 0.7; }
+            68%  { transform: translate(0, -1px) rotate(-1deg); opacity: 0.5; }
+            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95%  { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣1：右上飞 translate(13, -7) */
@@ -1783,11 +1788,12 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(16px, -9px) rotate(20deg); opacity: 0.9; }
             42%  { transform: translate(14px, -8px) rotate(16deg); opacity: 0.7; }
-            58%  { transform: translate(3px, -1px) rotate(3deg); opacity: 0.6; }
-            68%  { transform: translate(1px, 0) rotate(1deg); opacity: 0.4; }
-            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(3px, -1px) rotate(3deg); opacity: 0.7; }
+            68%  { transform: translate(1px, 0) rotate(1deg); opacity: 0.5; }
+            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95%  { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣2：右下飞 translate(13, 7) */
@@ -1798,11 +1804,12 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(16px, 9px) rotate(-25deg); opacity: 0.9; }
             42%  { transform: translate(14px, 8px) rotate(-20deg); opacity: 0.7; }
-            58%  { transform: translate(3px, 1px) rotate(-3deg); opacity: 0.6; }
-            68%  { transform: translate(1px, 0) rotate(-1deg); opacity: 0.4; }
-            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(3px, 1px) rotate(-3deg); opacity: 0.7; }
+            68%  { transform: translate(1px, 0) rotate(-1deg); opacity: 0.5; }
+            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95%  { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣3：向下飞 translate(0, 15) */
@@ -1813,11 +1820,12 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(0, 18px) rotate(18deg); opacity: 0.9; }
             42%  { transform: translate(0, 16px) rotate(14deg); opacity: 0.7; }
-            58%  { transform: translate(0, 3px) rotate(2deg); opacity: 0.6; }
-            68%  { transform: translate(0, 1px) rotate(1deg); opacity: 0.4; }
-            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(0, 3px) rotate(2deg); opacity: 0.7; }
+            68%  { transform: translate(0, 1px) rotate(1deg); opacity: 0.5; }
+            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95%  { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣4：左下飞 translate(-13, 7) */
@@ -1828,11 +1836,12 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(-16px, 9px) rotate(-22deg); opacity: 0.9; }
             42%  { transform: translate(-14px, 8px) rotate(-18deg); opacity: 0.7; }
-            58%  { transform: translate(-3px, 1px) rotate(-3deg); opacity: 0.6; }
-            68%  { transform: translate(-1px, 0) rotate(-1deg); opacity: 0.4; }
-            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(-3px, 1px) rotate(-3deg); opacity: 0.7; }
+            68%  { transform: translate(-1px, 0) rotate(-1deg); opacity: 0.5; }
+            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95%  { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣5：左上飞 translate(-13, -7) */
@@ -1843,11 +1852,12 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(-16px, -9px) rotate(28deg); opacity: 0.9; }
             42%  { transform: translate(-14px, -8px) rotate(22deg); opacity: 0.7; }
-            58%  { transform: translate(-3px, -1px) rotate(3deg); opacity: 0.6; }
-            68%  { transform: translate(-1px, 0) rotate(1deg); opacity: 0.4; }
-            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(-3px, -1px) rotate(3deg); opacity: 0.7; }
+            68%  { transform: translate(-1px, 0) rotate(1deg); opacity: 0.5; }
+            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
+            95%  { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
+            99%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 切换按钮花朵图标飞散动画 - 6片花瓣 */
@@ -1951,31 +1961,63 @@
             80%  { opacity: 0.4; }
             100% { opacity: 1; }
         }
-        /* 快速模式闪电劈下动画 */
+        /* 快速模式闪电劈下动画 - 预闪→主劈→余光三段效果 */
         .amt-lightning-anim {
             display: inline-block;
             animation: lightningStrike 0.5s cubic-bezier(0.25, 1, 0.3, 1) forwards;
         }
         @keyframes lightningStrike {
-            0%   { transform: translateY(-12px) scale(1.3); opacity: 0; filter: brightness(2); }
-            15%  { transform: translateY(-8px) scale(1.2); opacity: 1; filter: brightness(1.8); }
-            30%  { transform: translateY(-4px) scale(1.1); opacity: 1; filter: brightness(1.4); }
-            50%  { transform: translateY(-1px) scale(1.05); opacity: 1; filter: brightness(1.2); }
-            70%  { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); }
-            100% { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); }
+            0%   { transform: translate(0, 0) scale(1); opacity: 0; filter: brightness(1); }
+            /* 预闪：快速闪一下微弱光 */
+            5%   { transform: translate(0, -8px) scale(1.1); opacity: 0.3; filter: brightness(1.5); }
+            10%  { transform: translate(0, -12px) scale(1.2); opacity: 0.6; filter: brightness(2); }
+            15%  { transform: translate(-2px, -10px) scale(1.1); opacity: 0.4; filter: brightness(1.2); }
+            /* 主劈：从上方快速劈下+强光+轻微抖动 */
+            20%  { transform: translate(2px, -6px) scale(1.3); opacity: 1; filter: brightness(2.5); }
+            25%  { transform: translate(-3px, -3px) scale(1.25); opacity: 1; filter: brightness(2); }
+            30%  { transform: translate(3px, -1px) scale(1.2); opacity: 1; filter: brightness(1.8); }
+            35%  { transform: translate(-2px, 0) scale(1.15); opacity: 1; filter: brightness(1.5); }
+            40%  { transform: translate(1px, 0) scale(1.1); opacity: 1; filter: brightness(1.3); }
+            45%  { transform: translate(-1px, 0) scale(1.08); opacity: 1; filter: brightness(1.2); }
+            50%  { transform: translate(0, 0) scale(1.05); opacity: 1; filter: brightness(1.1); }
+            /* 余光：渐渐消退+最后微闪 */
+            60%  { transform: translate(0, 0) scale(1); opacity: 0.9; filter: brightness(1); }
+            70%  { transform: translate(0, 0) scale(1); opacity: 0.7; filter: brightness(0.9); }
+            80%  { transform: translate(0, 0) scale(1); opacity: 0.5; filter: brightness(0.8); }
+            88%  { transform: translate(0, 0) scale(1); opacity: 0.3; filter: brightness(0.7); }
+            /* 最后微闪 */
+            92%  { transform: translate(0, 0) scale(1.05); opacity: 0.6; filter: brightness(1.2); }
+            96%  { transform: translate(0, 0) scale(1); opacity: 0.4; filter: brightness(0.9); }
+            100% { transform: translate(0, 0) scale(1); opacity: 1; filter: brightness(1); }
         }
-        /* 欢迎页闪电动画 */
+        /* 欢迎页闪电动画 - 预闪→主劈→余光三段效果 */
         .ai-welcome-lightning-anim {
             display: inline-block;
             animation: welcomeLightningStrike 0.6s cubic-bezier(0.25, 1, 0.3, 1) forwards;
         }
         @keyframes welcomeLightningStrike {
-            0%   { transform: translateY(-18px) scale(1.4); opacity: 0; filter: brightness(2.5); }
-            15%  { transform: translateY(-12px) scale(1.3); opacity: 1; filter: brightness(2); }
-            30%  { transform: translateY(-6px) scale(1.15); opacity: 1; filter: brightness(1.5); }
-            50%  { transform: translateY(-2px) scale(1.08); opacity: 1; filter: brightness(1.2); }
-            70%  { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); }
-            100% { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); }
+            0%   { transform: translate(0, 0) scale(1); opacity: 0; filter: brightness(1); }
+            /* 预闪：快速闪一下微弱光 */
+            5%   { transform: translate(0, -12px) scale(1.15); opacity: 0.4; filter: brightness(1.5); }
+            10%  { transform: translate(0, -18px) scale(1.3); opacity: 0.7; filter: brightness(2.2); }
+            15%  { transform: translate(-3px, -15px) scale(1.2); opacity: 0.5; filter: brightness(1.3); }
+            /* 主劈：从上方快速劈下+强光+轻微抖动 */
+            20%  { transform: translate(4px, -8px) scale(1.4); opacity: 1; filter: brightness(2.8); }
+            25%  { transform: translate(-4px, -4px) scale(1.35); opacity: 1; filter: brightness(2.3); }
+            30%  { transform: translate(4px, -2px) scale(1.3); opacity: 1; filter: brightness(2); }
+            35%  { transform: translate(-3px, 0) scale(1.25); opacity: 1; filter: brightness(1.7); }
+            40%  { transform: translate(2px, 0) scale(1.2); opacity: 1; filter: brightness(1.5); }
+            45%  { transform: translate(-1px, 0) scale(1.15); opacity: 1; filter: brightness(1.3); }
+            50%  { transform: translate(0, 0) scale(1.1); opacity: 1; filter: brightness(1.2); }
+            /* 余光：渐渐消退+最后微闪 */
+            60%  { transform: translate(0, 0) scale(1); opacity: 0.85; filter: brightness(1); }
+            70%  { transform: translate(0, 0) scale(1); opacity: 0.65; filter: brightness(0.85); }
+            80%  { transform: translate(0, 0) scale(1); opacity: 0.4; filter: brightness(0.7); }
+            88%  { transform: translate(0, 0) scale(1); opacity: 0.2; filter: brightness(0.6); }
+            /* 最后微闪 */
+            92%  { transform: translate(0, 0) scale(1.08); opacity: 0.5; filter: brightness(1.1); }
+            96%  { transform: translate(0, 0) scale(1); opacity: 0.3; filter: brightness(0.85); }
+            100% { transform: translate(0, 0) scale(1); opacity: 1; filter: brightness(1); }
         }
 
         /* ========== 磨砂玻璃效果增强 ========== */
@@ -2145,6 +2187,25 @@
         [data-theme="dark"] .chat-entry-bar {
             background: rgba(255, 255, 255, 0.06);
             border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* ========== 统计详情弹窗内的帖子卡片去除磨砂 ========== */
+        /* stat模态框内的.feed容器中的帖子卡片不应用磨砂效果 */
+        .modal-box .feed .post,
+        .stat-modal-content .feed .post,
+        .stat-detail-body .feed .post,
+        [class*="stat"] .feed .post {
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+        [data-theme="dark"] .modal-box .feed .post,
+        [data-theme="dark"] .stat-modal-content .feed .post,
+        [data-theme="dark"] .stat-detail-body .feed .post,
+        [data-theme="dark"] [class*="stat"] .feed .post {
+            background: transparent !important;
         }
     </style>
 </head>
@@ -3860,7 +3921,7 @@
                 }
             }
 
-            async function loadDockChatMessages(userName) {
+            async function loadDockChatMessages(userName, forceScroll) {
                 if (dockChatMsgsBusy && dockChatMsgsUser === userName) { dockChatMsgsDirty = userName; return; }
                 dockChatMsgsBusy = true; dockChatMsgsUser = userName; dockChatMsgsDirty = '';
                 const el = document.getElementById('dockChatMessages');
@@ -3873,7 +3934,7 @@
                     const toMark = (msgs || []).filter(m => m.user_name === userName && m.media_url === currentUser && (m.views || 0) === 0);
                     for (const m of toMark) { try { await sb.rpc("increment_post_views", { p_post_id: m.id }); m.views = 1; } catch(e) {} }
                     markMessagesRead(userName);
-                    renderDockMessages(msgs || []);
+                    renderDockMessages(msgs || [], forceScroll);
                 } catch(e) {
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">⚠️</div><div>' + (e.message || '加载失败') + '</div></div>';
                 } finally {
@@ -3882,9 +3943,12 @@
                 }
             }
 
-            function renderDockMessages(msgs) {
+            function renderDockMessages(msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
                 if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>'; return; }
+                // 检测用户是否在查看历史记录（离底部超过100px视为在看历史）
+                var isNearBottom = !el.scrollHeight || (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
+                var shouldAutoScroll = forceScroll || isNearBottom;
                 const isBulk = msgs.length > 2;
                 el.innerHTML = msgs.map(m => {
                     const sent = m.user_name === currentUser;
@@ -3899,7 +3963,9 @@
                     } else { body = '<span class="msg-text">' + escapeHtml(m.content || '') + '</span>'; }
                     return '<div class="chat-msg ' + (sent ? 'sent' : 'received') + (isBulk ? ' no-anim' : '') + '">' + body + readStatus + '<span class="msg-time">' + formatMsgTime(m.created_at) + '</span></div>';
                 }).join('');
-                if (isBulk) { el.scrollTop = el.scrollHeight; } else { requestAnimationFrame(function() { el.scrollTop = el.scrollHeight; }); }
+                if (shouldAutoScroll) {
+                    if (isBulk) { el.scrollTop = el.scrollHeight; } else { requestAnimationFrame(function() { el.scrollTop = el.scrollHeight; }); }
+                }
             }
 
             function scrollDockChatBottom() {
@@ -3924,7 +3990,7 @@
                     const { error } = await sb.from("posts").insert([{ user_name: currentUser, content: content, media_type: DM_MARKER, media_url: dockChatActiveUser, actor_key: actorKey }]);
                     if (error) throw error;
                     clearDockChatFilePreview();
-                    await loadDockChatMessages(dockChatActiveUser);
+                    await loadDockChatMessages(dockChatActiveUser, true);
                     const msgs = document.getElementById('dockChatMessages');
                     if (msgs) {
                         msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
@@ -3976,17 +4042,31 @@
                 const btn = document.getElementById('dockAIModeBtn');
                 if (dockAIThinkMode) { btn.classList.remove('quick'); }
                 else { btn.classList.add('quick'); }
-                // 触发花朵图标动画（思考模式）
-                var amtFlowerSvg = btn.querySelector('.amt-flower-icon');
-                if (amtFlowerSvg) {
-                    amtFlowerSvg.classList.remove('amt-flower-anim');
-                    void amtFlowerSvg.offsetWidth; // force reflow
-                    amtFlowerSvg.classList.add('amt-flower-anim');
-                    setTimeout(function() {
+                // 切换到思考模式时：只播花朵动画，闪电不动不播
+                if (dockAIThinkMode) {
+                    var amtFlowerSvg = btn.querySelector('.amt-flower-icon');
+                    if (amtFlowerSvg) {
                         amtFlowerSvg.classList.remove('amt-flower-anim');
-                    }, 1400);
+                        void amtFlowerSvg.offsetWidth; // force reflow
+                        amtFlowerSvg.classList.add('amt-flower-anim');
+                        setTimeout(function() {
+                            amtFlowerSvg.classList.remove('amt-flower-anim');
+                        }, 1400);
+                    }
+                    // 欢迎页花朵动画
+                    setTimeout(function() {
+                        var welcomeFlower = document.querySelector('#dockAIWelcome .amt-flower-icon');
+                        if (welcomeFlower) {
+                            welcomeFlower.classList.remove('amt-flower-anim');
+                            void welcomeFlower.offsetWidth; // force reflow
+                            welcomeFlower.classList.add('amt-flower-anim');
+                            setTimeout(function() {
+                                welcomeFlower.classList.remove('amt-flower-anim');
+                            }, 1400);
+                        }
+                    }, 50);
                 }
-                // 触发闪电劈下动画（快速模式）
+                // 切换到快速模式时：只播闪电动画，花朵不动不播
                 if (!dockAIThinkMode) {
                     var amtLightning = btn.querySelector('.amt-label-quick');
                     if (amtLightning) {
@@ -4005,24 +4085,7 @@
                             }, 500);
                         }
                     }
-                }
-                updateAIWelcome();
-                // 触发欢迎页花朵动画（思考模式）
-                if (dockAIThinkMode) {
-                    setTimeout(function() {
-                        var welcomeFlower = document.querySelector('#dockAIWelcome .amt-flower-icon');
-                        if (welcomeFlower) {
-                            welcomeFlower.classList.remove('amt-flower-anim');
-                            void welcomeFlower.offsetWidth; // force reflow
-                            welcomeFlower.classList.add('amt-flower-anim');
-                            setTimeout(function() {
-                                welcomeFlower.classList.remove('amt-flower-anim');
-                            }, 1400);
-                        }
-                    }, 50);
-                }
-                // 触发欢迎页闪电动画（快速模式）
-                if (!dockAIThinkMode) {
+                    // 欢迎页闪电动画
                     setTimeout(function() {
                         var welcomeIcon = document.querySelector('#dockAIWelcome .ai-welcome-icon');
                         if (welcomeIcon && welcomeIcon.textContent.includes('⚡')) {
@@ -4043,6 +4106,7 @@
                         }
                     }, 50);
                 }
+                updateAIWelcome();
             }
             window.toggleAIMode = toggleAIMode;
 
