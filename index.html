@@ -1339,7 +1339,7 @@
             border-radius: 99px; padding: 3px 10px 3px 4px;
             cursor: pointer; transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             font-size: 11px; flex-shrink: 0; user-select: none;
-            position: relative;
+            position: relative; overflow: visible;
         }
         .ai-mode-toggle:hover { background: rgba(0,0,0,0.08); }
         .ai-mode-toggle .amt-label {
@@ -1386,7 +1386,7 @@
             text-align: center; color: var(--text-muted);
             font-size: 13px; padding: 30px 20px; line-height: 1.6;
         }
-        .ai-welcome .ai-welcome-icon { font-size: 36px; margin-bottom: 8px; display: inline-block; line-height: 1; }
+        .ai-welcome .ai-welcome-icon { font-size: 36px; margin-bottom: 8px; display: inline-block; line-height: 1; overflow: visible; }
         .ai-msg {
             display: flex; gap: 8px; animation: aiMsgIn 0.3s cubic-bezier(0.16,1,0.3,1);
             max-width: 92%;
@@ -1768,10 +1768,11 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(0, -18px) rotate(-15deg); opacity: 0.9; }
             42%  { transform: translate(0, -16px) rotate(-12deg); opacity: 0.7; }
-            58%  { transform: translate(0, -3px) rotate(-2deg); opacity: 0.5; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(0, -3px) rotate(-2deg); opacity: 0.6; }
+            68%  { transform: translate(0, -1px) rotate(-1deg); opacity: 0.4; }
+            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
+            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣1：右上飞 translate(13, -7) */
@@ -1782,10 +1783,11 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(16px, -9px) rotate(20deg); opacity: 0.9; }
             42%  { transform: translate(14px, -8px) rotate(16deg); opacity: 0.7; }
-            58%  { transform: translate(3px, -1px) rotate(3deg); opacity: 0.5; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(3px, -1px) rotate(3deg); opacity: 0.6; }
+            68%  { transform: translate(1px, 0) rotate(1deg); opacity: 0.4; }
+            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
+            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣2：右下飞 translate(13, 7) */
@@ -1796,10 +1798,11 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(16px, 9px) rotate(-25deg); opacity: 0.9; }
             42%  { transform: translate(14px, 8px) rotate(-20deg); opacity: 0.7; }
-            58%  { transform: translate(3px, 1px) rotate(-3deg); opacity: 0.5; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(3px, 1px) rotate(-3deg); opacity: 0.6; }
+            68%  { transform: translate(1px, 0) rotate(-1deg); opacity: 0.4; }
+            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
+            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣3：向下飞 translate(0, 15) */
@@ -1810,10 +1813,11 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(0, 18px) rotate(18deg); opacity: 0.9; }
             42%  { transform: translate(0, 16px) rotate(14deg); opacity: 0.7; }
-            58%  { transform: translate(0, 3px) rotate(2deg); opacity: 0.5; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(0, 3px) rotate(2deg); opacity: 0.6; }
+            68%  { transform: translate(0, 1px) rotate(1deg); opacity: 0.4; }
+            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
+            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣4：左下飞 translate(-13, 7) */
@@ -1824,10 +1828,11 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(-16px, 9px) rotate(-22deg); opacity: 0.9; }
             42%  { transform: translate(-14px, 8px) rotate(-18deg); opacity: 0.7; }
-            58%  { transform: translate(-3px, 1px) rotate(-3deg); opacity: 0.5; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(-3px, 1px) rotate(-3deg); opacity: 0.6; }
+            68%  { transform: translate(-1px, 0) rotate(-1deg); opacity: 0.4; }
+            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
+            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣5：左上飞 translate(-13, -7) */
@@ -1838,10 +1843,11 @@
             9%   { transform: translate(0,0); opacity: 1; }
             30%  { transform: translate(-16px, -9px) rotate(28deg); opacity: 0.9; }
             42%  { transform: translate(-14px, -8px) rotate(22deg); opacity: 0.7; }
-            58%  { transform: translate(-3px, -1px) rotate(3deg); opacity: 0.5; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
-            78%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            58%  { transform: translate(-3px, -1px) rotate(3deg); opacity: 0.6; }
+            68%  { transform: translate(-1px, 0) rotate(1deg); opacity: 0.4; }
+            75%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
+            82%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            88%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 切换按钮花朵图标飞散动画 - 6片花瓣 */
@@ -1945,6 +1951,201 @@
             80%  { opacity: 0.4; }
             100% { opacity: 1; }
         }
+        /* 快速模式闪电劈下动画 */
+        .amt-lightning-anim {
+            display: inline-block;
+            animation: lightningStrike 0.5s cubic-bezier(0.25, 1, 0.3, 1) forwards;
+        }
+        @keyframes lightningStrike {
+            0%   { transform: translateY(-12px) scale(1.3); opacity: 0; filter: brightness(2); }
+            15%  { transform: translateY(-8px) scale(1.2); opacity: 1; filter: brightness(1.8); }
+            30%  { transform: translateY(-4px) scale(1.1); opacity: 1; filter: brightness(1.4); }
+            50%  { transform: translateY(-1px) scale(1.05); opacity: 1; filter: brightness(1.2); }
+            70%  { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); }
+            100% { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); }
+        }
+        /* 欢迎页闪电动画 */
+        .ai-welcome-lightning-anim {
+            display: inline-block;
+            animation: welcomeLightningStrike 0.6s cubic-bezier(0.25, 1, 0.3, 1) forwards;
+        }
+        @keyframes welcomeLightningStrike {
+            0%   { transform: translateY(-18px) scale(1.4); opacity: 0; filter: brightness(2.5); }
+            15%  { transform: translateY(-12px) scale(1.3); opacity: 1; filter: brightness(2); }
+            30%  { transform: translateY(-6px) scale(1.15); opacity: 1; filter: brightness(1.5); }
+            50%  { transform: translateY(-2px) scale(1.08); opacity: 1; filter: brightness(1.2); }
+            70%  { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); }
+            100% { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); }
+        }
+
+        /* ========== 磨砂玻璃效果增强 ========== */
+        /* 导航栏 */
+        nav {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] nav {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 发布框 */
+        .publish-box {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .publish-box {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 帖子卡片 */
+        .post {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .post {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 评论区 */
+        .comment-item {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .comment-item {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 模态框 */
+        .modal-box {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .modal-box {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 聊天面板 */
+        .chat-panel {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .chat-panel {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 好友聊天气泡 - 发送方 */
+        .chat-msg.sent {
+            background: rgba(5, 150, 105, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .chat-msg.sent {
+            background: rgba(5, 150, 105, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 好友聊天气泡 - 接收方 */
+        .chat-msg.received {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .chat-msg.received {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* AI气泡 - 助手 */
+        .ai-msg.assistant .ai-bubble {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .ai-msg.assistant .ai-bubble {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* AI气泡 - 用户 */
+        .ai-msg.user .ai-bubble {
+            background: rgba(5, 150, 105, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .ai-msg.user .ai-bubble {
+            background: rgba(5, 150, 105, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* AI思考过程 */
+        .ai-reasoning-content {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .ai-reasoning-content {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 通用glass类 */
+        .glass {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .glass {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 统计详情用户组 */
+        .stat-user-group {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .stat-user-group {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* 聊天入口条 */
+        .chat-entry-bar {
+            background: rgba(255, 255, 255, 0.25);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        [data-theme="dark"] .chat-entry-bar {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
     </style>
 </head>
 <body>
@@ -2039,12 +2240,12 @@
                         <span class="amt-label">
                             <svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="14" height="14" fill="none" style="vertical-align:middle;">
                                 <g class="al-petals" transform="translate(12,12)">
-                                    <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
-                                    <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
-                                    <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
-                                    <g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
-                                    <g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
-                                    <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
                                     <circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/>
                                 </g>
                             </svg>
@@ -2059,12 +2260,12 @@
                         <span class="ai-welcome-icon">
                             <svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="36" height="36" fill="none">
                                 <g class="al-petals" transform="translate(12,12)">
-                                    <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
-                                    <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
-                                    <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
-                                    <g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
-                                    <g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
-                                    <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
+                                    <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g>
                                     <circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/>
                                 </g>
                             </svg>
@@ -2156,12 +2357,12 @@
             <span class="dt-icon">
                 <svg class="dt-svg" viewBox="-1 -1 26 26" width="28" height="28" fill="none">
                     <g transform="translate(12,12)">
-                        <ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(0)"/>
-                        <ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(60)"/>
-                        <ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(120)"/>
-                        <ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(180)"/>
-                        <ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(240)"/>
-                        <ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(300)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(0)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(60)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(120)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(180)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(240)"/>
+                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(300)"/>
                         <circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1"/>
                     </g>
                 </svg>
@@ -2174,12 +2375,12 @@
                     </radialGradient>
                 </defs>
                 <g class="al-flower" transform="translate(45, 35)">
-                    <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-8" rx="2.8" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-8" rx="2.8" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-8" rx="2.8" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-8" rx="2.8" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-8" rx="2.8" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-8" rx="2.8" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
                     <circle class="al-flower-center" cx="0" cy="0" r="2.5" fill="#FBBF24" stroke="#D97706" stroke-width="1"/>
                     <circle class="al-flash" cx="0" cy="0" r="10" fill="url(#flower-flash)" opacity="0"/>
                 </g>
@@ -3775,7 +3976,7 @@
                 const btn = document.getElementById('dockAIModeBtn');
                 if (dockAIThinkMode) { btn.classList.remove('quick'); }
                 else { btn.classList.add('quick'); }
-                // 触发花朵图标动画
+                // 触发花朵图标动画（思考模式）
                 var amtFlowerSvg = btn.querySelector('.amt-flower-icon');
                 if (amtFlowerSvg) {
                     amtFlowerSvg.classList.remove('amt-flower-anim');
@@ -3785,7 +3986,63 @@
                         amtFlowerSvg.classList.remove('amt-flower-anim');
                     }, 1400);
                 }
+                // 触发闪电劈下动画（快速模式）
+                if (!dockAIThinkMode) {
+                    var amtLightning = btn.querySelector('.amt-label-quick');
+                    if (amtLightning) {
+                        var lightningSpan = amtLightning.querySelector('.lightning-icon');
+                        if (!lightningSpan) {
+                            // 给⚡包裹span以便添加动画
+                            amtLightning.innerHTML = '<span class="lightning-icon">⚡</span>' + amtLightning.textContent.replace('⚡', '');
+                        }
+                        var lightningEl = amtLightning.querySelector('.lightning-icon');
+                        if (lightningEl) {
+                            lightningEl.classList.remove('amt-lightning-anim');
+                            void lightningEl.offsetWidth; // force reflow
+                            lightningEl.classList.add('amt-lightning-anim');
+                            setTimeout(function() {
+                                lightningEl.classList.remove('amt-lightning-anim');
+                            }, 500);
+                        }
+                    }
+                }
                 updateAIWelcome();
+                // 触发欢迎页花朵动画（思考模式）
+                if (dockAIThinkMode) {
+                    setTimeout(function() {
+                        var welcomeFlower = document.querySelector('#dockAIWelcome .amt-flower-icon');
+                        if (welcomeFlower) {
+                            welcomeFlower.classList.remove('amt-flower-anim');
+                            void welcomeFlower.offsetWidth; // force reflow
+                            welcomeFlower.classList.add('amt-flower-anim');
+                            setTimeout(function() {
+                                welcomeFlower.classList.remove('amt-flower-anim');
+                            }, 1400);
+                        }
+                    }, 50);
+                }
+                // 触发欢迎页闪电动画（快速模式）
+                if (!dockAIThinkMode) {
+                    setTimeout(function() {
+                        var welcomeIcon = document.querySelector('#dockAIWelcome .ai-welcome-icon');
+                        if (welcomeIcon && welcomeIcon.textContent.includes('⚡')) {
+                            var lightningEl = welcomeIcon.querySelector('.ai-welcome-lightning');
+                            if (!lightningEl) {
+                                // 给⚡包裹span以便添加动画
+                                welcomeIcon.innerHTML = '<span class="ai-welcome-lightning">⚡</span>' + welcomeIcon.innerHTML.replace('⚡', '');
+                            }
+                            lightningEl = welcomeIcon.querySelector('.ai-welcome-lightning');
+                            if (lightningEl) {
+                                lightningEl.classList.remove('ai-welcome-lightning-anim');
+                                void lightningEl.offsetWidth; // force reflow
+                                lightningEl.classList.add('ai-welcome-lightning-anim');
+                                setTimeout(function() {
+                                    lightningEl.classList.remove('ai-welcome-lightning-anim');
+                                }, 600);
+                            }
+                        }
+                    }, 50);
+                }
             }
             window.toggleAIMode = toggleAIMode;
 
@@ -3793,7 +4050,7 @@
                 const welcome = document.getElementById('dockAIWelcome');
                 if (!welcome) return;
                 if (dockAIThinkMode) {
-                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="36" height="36" fill="none"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg></span>你好！我是 DeepSeek AI 助手<br>思考模式 — 深度推理，展示思考过程';
+                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="36" height="36" fill="none"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg></span>你好！我是 DeepSeek AI 助手<br>思考模式 — 深度推理，展示思考过程';
                 } else {
                     welcome.innerHTML = '<span class="ai-welcome-icon">⚡</span>你好！我是 DeepSeek AI 助手<br>快速模式 — 极速响应，跳过思考过程';
                 }
@@ -3847,7 +4104,7 @@
                                         fullReasoning += reasoning;
                                         if (!reasoningBuilt && fullReasoning.length > 10) {
                                             reasoningBuilt = true;
-                                            const flowerSvg = '<svg class="reasoning-flower-icon" viewBox="-1 -1 26 26" width="14" height="14" fill="none" style="vertical-align:middle;"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="2.8" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg>';
+                                            const flowerSvg = '<svg class="reasoning-flower-icon" viewBox="-1 -1 26 26" width="14" height="14" fill="none" style="vertical-align:middle;"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg>';
                                             const toggle = document.createElement('button'); toggle.className = 'ai-reasoning-toggle reasoning-anim'; toggle.innerHTML = flowerSvg + ' 思考过程 <span class="ar-arrow">▾</span>';
                                             const rc = document.createElement('div'); rc.className = 'ai-reasoning-content'; rc.style.display = 'none'; rc.textContent = fullReasoning;
                                             toggle.addEventListener('click', function() { const s = rc.style.display === 'none'; rc.style.display = s ? 'block' : 'none'; toggle.classList.toggle('expanded', s); });
