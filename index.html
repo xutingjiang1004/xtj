@@ -1325,53 +1325,7 @@
         .dock-tab.active .dt-label { font-weight: 700; }
         .dock-tab:active { transform: scale(0.9); }
         .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
-        .dock-tab .dt-icon { transition: none; }
-        .dock-tab.dock-tap-active .dt-icon { animation-duration: 0.62s; animation-timing-function: ease-out; animation-fill-mode: forwards; }
-        .dock-tab[data-tab="posts"].dock-tap-active .dt-icon { animation-name: dockPenWrite; }
-        .dock-tab[data-tab="chat"].dock-tap-active .dt-icon { animation-name: dockBubblePop; }
-        .dock-tab[data-tab="ai"].dock-tap-active .dt-icon { animation-name: dockBrainGlow; }
-        @keyframes dockPenWrite {
-            0%   { transform: rotate(0deg) translate(0,0); }
-            6%   { transform: rotate(-15deg) translate(2px,-1px); }
-            12%  { transform: rotate(-22deg) translate(6px,2px); }
-            18%  { transform: rotate(-8deg) translate(9px,3px); }
-            24%  { transform: rotate(8deg) translate(5px,-1px); }
-            30%  { transform: rotate(18deg) translate(0px,1px); }
-            36%  { transform: rotate(25deg) translate(-4px,3px); }
-            42%  { transform: rotate(10deg) translate(-1px,1px); }
-            48%  { transform: rotate(-5deg) translate(3px,-1px); }
-            54%  { transform: rotate(-15deg) translate(7px,2px); }
-            60%  { transform: rotate(0deg) translate(10px,1px); }
-            68%  { transform: rotate(12deg) translate(5px,-2px); }
-            76%  { transform: rotate(5deg) translate(2px,-1px); }
-            84%  { transform: rotate(-3deg) translate(0px,0px); }
-            92%  { transform: rotate(0deg) translate(0px,0px); }
-            100% { transform: rotate(0deg) translate(0,0); }
-        }
-        @keyframes dockBubblePop {
-            0%   { transform: scale(1,1); }
-            12%  { transform: scale(1.08,0.88); }
-            22%  { transform: scale(0.88,1.22); }
-            32%  { transform: scale(1.28,0.92); }
-            40%  { transform: scale(0.94,1.08); }
-            48%  { transform: scale(1.08,0.97); }
-            56%  { transform: scale(0.98,1.02); }
-            68%  { transform: scale(1.02,0.99); }
-            84%  { transform: scale(1,1); }
-            100% { transform: scale(1,1); }
-        }
-        @keyframes dockBrainGlow {
-            0%   { transform: scale(1);   filter: drop-shadow(0 0 0 transparent) brightness(1); }
-            10%  { transform: scale(1.06); filter: drop-shadow(0 0 3px rgba(99,102,241,0.3)) brightness(1.05); }
-            22%  { transform: scale(1.16); filter: drop-shadow(0 0 8px rgba(99,102,241,0.6)) brightness(1.15); }
-            32%  { transform: scale(1.08); filter: drop-shadow(0 0 5px rgba(99,102,241,0.35)) brightness(1.08); }
-            42%  { transform: scale(1.0);  filter: drop-shadow(0 0 0 transparent) brightness(1); }
-            54%  { transform: scale(1.04); filter: drop-shadow(0 0 4px rgba(99,102,241,0.2)) brightness(1.03); }
-            66%  { transform: scale(1.12); filter: drop-shadow(0 0 10px rgba(99,102,241,0.5)) brightness(1.12); }
-            76%  { transform: scale(1.05); filter: drop-shadow(0 0 4px rgba(99,102,241,0.25)) brightness(1.05); }
-            88%  { transform: scale(1.0);  filter: drop-shadow(0 0 0 transparent) brightness(1); }
-            100% { transform: scale(1);    filter: drop-shadow(0 0 0 transparent) brightness(1); }
-        }
+        .dock-tab .dt-icon { transition: opacity 0.2s, transform 0.2s; }
         /* Dock面板: 聊天 (复用聊天样式，去掉overlay固定定位) */
         .dock-chat-container {
             display: flex; flex-direction: column; height: 100%;
@@ -1581,9 +1535,285 @@
         [data-theme="dark"] .ai-mode-toggle:not(.quick) .amt-label:first-child { color: #818cf8; }
         [data-theme="dark"] .ai-mode-toggle.quick .amt-label-quick { color: #34d399; }
         [data-theme="dark"] .ai-bubble .ai-streaming-cursor { background: var(--text-main); }
+
+        /* ========== 导航按钮点击动画 ========== */
+
+        .dock-tab .anim-layer {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            opacity: 0;
+            pointer-events: none;
+            z-index: 2;
+            will-change: opacity;
+        }
+
+        .dock-tab.anim-post, .dock-tab.anim-chat, .dock-tab.anim-ai {
+            pointer-events: none;
+        }
+
+        /* ===== 按钮一：帖子（刷子画画） ===== */
+        .dock-tab.anim-post .dt-icon {
+            animation: animPostIconHide 1.5s ease forwards;
+        }
+        @keyframes animPostIconHide {
+            0% { opacity: 1; transform: scale(1); }
+            8% { opacity: 0; transform: scale(0.5); }
+            80% { opacity: 0; transform: scale(0.5); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        .dock-tab.anim-post .anim-post-layer { opacity: 1; }
+
+        .dock-tab.anim-post .ap-pen {
+            animation: animPostPenMove 1.5s cubic-bezier(0.25, 1, 0.3, 1) forwards;
+            transform-origin: 18px 24px;
+            will-change: transform;
+        }
+        @keyframes animPostPenMove {
+            0% { transform: rotate(0deg) translate(0, 0); }
+            7% { transform: rotate(-15deg) translate(-2px, -3px); }
+            13% { transform: rotate(-15deg) translate(-2px, -3px); }
+            60% { transform: rotate(3deg) translate(20px, 6px); }
+            72% { transform: rotate(3deg) translate(20px, 6px); }
+            100% { transform: rotate(0deg) translate(0, 0); }
+        }
+
+        .dock-tab.anim-post .ap-stroke {
+            animation: animPostStrokeDraw 1.5s ease-in-out forwards;
+            will-change: stroke-dashoffset, opacity;
+        }
+        @keyframes animPostStrokeDraw {
+            0% { stroke-dashoffset: var(--d); opacity: 0; }
+            10% { stroke-dashoffset: var(--d); opacity: 0; }
+            13% { stroke-dashoffset: var(--d); opacity: 1; }
+            60% { stroke-dashoffset: 0; opacity: 1; }
+            80% { stroke-dashoffset: 0; opacity: 1; }
+            100% { stroke-dashoffset: 0; opacity: 0; }
+        }
+
+        /* ===== 按钮二：聊天（输入中…消息弹出） ===== */
+        .dock-tab.anim-chat .dt-icon {
+            animation: animChatIconHide 2s ease forwards;
+        }
+        @keyframes animChatIconHide {
+            0% { opacity: 1; transform: scale(1); }
+            10% { opacity: 0; transform: scale(0); }
+            78% { opacity: 0; transform: scale(0); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        .dock-tab.anim-chat .anim-chat-layer { opacity: 1; }
+
+        .dock-tab.anim-chat .ac-dot1 { animation: animChatDotBounce 0.45s ease-in-out 0s 3 forwards; }
+        .dock-tab.anim-chat .ac-dot2 { animation: animChatDotBounce 0.45s ease-in-out 0.15s 3 forwards; }
+        .dock-tab.anim-chat .ac-dot3 { animation: animChatDotBounce 0.45s ease-in-out 0.3s 3 forwards; }
+        @keyframes animChatDotBounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+
+        .dock-tab.anim-chat .ac-dots {
+            animation: animChatDotsOut 2s ease forwards;
+        }
+        @keyframes animChatDotsOut {
+            0% { opacity: 1; }
+            65% { opacity: 1; }
+            72% { opacity: 0; }
+            100% { opacity: 0; }
+        }
+
+        .dock-tab.anim-chat .ac-bubble-wrap {
+            animation: animChatBubbleExpand 2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            transform-origin: 20px 18px;
+            will-change: transform, opacity;
+        }
+        @keyframes animChatBubbleExpand {
+            0% { transform: scale(0); opacity: 0; }
+            50% { transform: scale(0); opacity: 0; }
+            60% { transform: scale(1.15); opacity: 1; }
+            68% { transform: scale(0.95); opacity: 1; }
+            75% { transform: scale(1); opacity: 1; }
+            82% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(0.7); opacity: 0; }
+        }
+
+        .dock-tab.anim-chat .ac-msgline {
+            animation: animChatMsgDraw 2s ease-in-out forwards;
+            will-change: stroke-dashoffset, opacity;
+        }
+        @keyframes animChatMsgDraw {
+            0% { stroke-dashoffset: var(--d); }
+            60% { stroke-dashoffset: var(--d); }
+            72% { stroke-dashoffset: 0; }
+            82% { stroke-dashoffset: 0; opacity: 1; }
+            100% { stroke-dashoffset: 0; opacity: 0; }
+        }
+
+        .dock-tab.anim-chat .ac-sub {
+            animation: animChatSubPop 2s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            transform-origin: 38px 28px;
+            will-change: transform, opacity;
+        }
+        @keyframes animChatSubPop {
+            0% { transform: scale(0); opacity: 0; }
+            65% { transform: scale(0); opacity: 0; }
+            72% { transform: scale(1.1); opacity: 1; }
+            78% { transform: scale(1); opacity: 1; }
+            85% { transform: scale(1); opacity: 0; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+
+        /* ===== 按钮三：AI（大脑通电激活，神经脉冲） ===== */
+        .dock-tab.anim-ai .dt-icon {
+            animation: animAIIconHide 1.8s ease forwards;
+        }
+        @keyframes animAIIconHide {
+            0% { opacity: 1; transform: scale(1); }
+            8% { opacity: 0; transform: scale(0.6); }
+            85% { opacity: 0; transform: scale(0.6); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        .dock-tab.anim-ai .anim-ai-layer { opacity: 1; }
+
+        .dock-tab.anim-ai .ab-brain {
+            animation: animAIShake 1.8s ease forwards, animAIGlow 1.8s ease forwards;
+            will-change: transform, filter;
+        }
+        @keyframes animAIShake {
+            0% { transform: translateX(0); }
+            3% { transform: translateX(-2px); }
+            6% { transform: translateX(2px); }
+            9% { transform: translateX(-2px); }
+            12% { transform: translateX(2px); }
+            15% { transform: translateX(0); }
+            100% { transform: translateX(0); }
+        }
+        @keyframes animAIGlow {
+            0% { filter: none; }
+            12% { filter: url(#brainGlowF) drop-shadow(0 0 1px #7C3AED); }
+            35% { filter: url(#brainGlowF) drop-shadow(0 0 4px #7C3AED) drop-shadow(0 0 8px #7C3AED); }
+            65% { filter: url(#brainGlowF) drop-shadow(0 0 5px #7C3AED) drop-shadow(0 0 12px #7C3AED); }
+            80% { filter: url(#brainGlowF) drop-shadow(0 0 1px #7C3AED); }
+            100% { filter: none; }
+        }
+
+        .dock-tab.anim-ai .ab-pulse {
+            will-change: stroke-dashoffset, opacity;
+        }
+        .dock-tab.anim-ai .ab-pulse1 { animation: animAIPulse 1.8s ease-in-out forwards; }
+        .dock-tab.anim-ai .ab-pulse2 { animation: animAIPulse 1.8s ease-in-out 0.1s forwards; }
+        .dock-tab.anim-ai .ab-pulse3 { animation: animAIPulse 1.8s ease-in-out 0.2s forwards; }
+        .dock-tab.anim-ai .ab-pulse4 { animation: animAIPulse 1.8s ease-in-out 0.3s forwards; }
+        @keyframes animAIPulse {
+            0% { stroke-dashoffset: var(--d); opacity: 0; }
+            15% { stroke-dashoffset: var(--d); opacity: 1; }
+            50% { stroke-dashoffset: 0; opacity: 1; }
+            65% { stroke-dashoffset: 0; opacity: 1; }
+            80% { stroke-dashoffset: 0; opacity: 0; }
+            100% { stroke-dashoffset: 0; opacity: 0; }
+        }
+
+        .dock-tab.anim-ai .ab-flash {
+            will-change: r, opacity;
+        }
+        .dock-tab.anim-ai .ab-flash1 { animation: animAIFlash 1.8s ease-out forwards; }
+        .dock-tab.anim-ai .ab-flash2 { animation: animAIFlash 1.8s ease-out 0.1s forwards; }
+        .dock-tab.anim-ai .ab-flash3 { animation: animAIFlash 1.8s ease-out 0.2s forwards; }
+        .dock-tab.anim-ai .ab-flash4 { animation: animAIFlash 1.8s ease-out 0.3s forwards; }
+        @keyframes animAIFlash {
+            0% { r: 0; opacity: 0; }
+            45% { r: 0; opacity: 0; }
+            48% { r: 2.8; opacity: 1; }
+            55% { r: 2.8; opacity: 1; }
+            60% { r: 0; opacity: 0; }
+            100% { r: 0; opacity: 0; }
+        }
+
+        .dock-tab.anim-ai .ab-whiteflash {
+            animation: animAIWhiteFlash 1.8s ease forwards;
+        }
+        @keyframes animAIWhiteFlash {
+            0% { opacity: 0; }
+            60% { opacity: 0; }
+            65% { opacity: 0.35; }
+            72% { opacity: 0; }
+            100% { opacity: 0; }
+        }
+
+        /* ========== 液态水滴导航指示器 ========== */
+        .liquid-droplet {
+            position: absolute;
+            top: 0; left: 0;
+            width: 56px; height: 56px;
+            z-index: 101;
+            pointer-events: none;
+            will-change: transform, clip-path;
+        }
+        .liquid-glass {
+            width: 56px; height: 56px;
+            background: rgba(255,255,255,0.25);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            clip-path: path("M28 4 C14 4, 4 18, 4 30 C4 40, 16 48, 28 50 C40 48, 52 40, 52 30 C52 18, 42 4, 28 4 Z");
+            will-change: clip-path;
+        }
+        .liquid-svg {
+            position: absolute; top: 0; left: 0;
+            width: 56px; height: 56px;
+            pointer-events: none;
+        }
+        .liquid-outline {
+            fill: none;
+            stroke: rgba(255,255,255,0.4);
+            stroke-width: 1.5;
+            will-change: d;
+        }
+        .liquid-highlight {
+            will-change: d;
+        }
+        .liquid-ripple {
+            will-change: rx, ry, opacity;
+        }
+        .liquid-icon {
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -55%);
+            font-size: 18px; line-height: 1;
+            pointer-events: none;
+            will-change: transform;
+            z-index: 2;
+            transition: none;
+        }
+        .liquid-icon.pop {
+            animation: liquidIconPop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        @keyframes liquidIconPop {
+            0% { transform: translate(-50%, -55%) scale(0.5); }
+            60% { transform: translate(-50%, -55%) scale(1.2); }
+            100% { transform: translate(-50%, -55%) scale(1); }
+        }
+        @keyframes liquidBounceIn {
+            0% { transform: scaleY(0.85); }
+            40% { transform: scaleY(1.1); }
+            70% { transform: scaleY(0.95); }
+            100% { transform: scaleY(1); }
+        }
+        .liquid-droplet.bounce {
+            animation: liquidBounceIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
     </style>
 </head>
 <body>
+    <svg style="position:absolute;width:0;height:0;" aria-hidden="true">
+        <defs>
+            <filter id="brainGlowF">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="blur"/>
+                <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+            </filter>
+        </defs>
+    </svg>
     <div class="rain-bg-container">
         <canvas id="rainCanvas"></canvas>
         <div class="rain-glass-layer"></div>
@@ -1696,14 +1926,56 @@
         <button class="dock-tab active" data-tab="posts">
             <span class="dt-icon">📝</span>
             <span class="dt-label">帖子</span>
+            <svg class="anim-layer anim-post-layer" viewBox="0 0 48 40" width="34" height="28">
+                <defs>
+                    <linearGradient id="postPaintGrad" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stop-color="#FF6B6B"/>
+                        <stop offset="50%" stop-color="#4ECDC4"/>
+                        <stop offset="100%" stop-color="#FFE66D"/>
+                    </linearGradient>
+                </defs>
+                <g class="ap-pen">
+                    <line x1="10" y1="28" x2="19" y2="16" stroke="#059669" stroke-width="2.2" stroke-linecap="round"/>
+                    <polygon points="17,18 23,9 20,15" fill="#059669"/>
+                </g>
+                <path class="ap-stroke" d="M21 14 C30 6, 40 12, 45 22" fill="none" stroke="url(#postPaintGrad)" stroke-width="3" stroke-linecap="round"/>
+            </svg>
         </button>
         <button class="dock-tab" data-tab="chat">
             <span class="dt-icon">💬</span>
             <span class="dt-label">聊天</span>
+            <svg class="anim-layer anim-chat-layer" viewBox="0 0 48 48" width="36" height="36">
+                <g class="ac-dots">
+                    <circle class="ac-dot1" cx="16" cy="24" r="2.5" fill="#059669"/>
+                    <circle class="ac-dot2" cx="24" cy="24" r="2.5" fill="#059669"/>
+                    <circle class="ac-dot3" cx="32" cy="24" r="2.5" fill="#059669"/>
+                </g>
+                <g class="ac-bubble-wrap">
+                    <rect class="ac-bubble" x="7" y="9" width="26" height="18" rx="9" ry="9" fill="#059669" opacity="0.12"/>
+                    <polygon class="ac-tail" points="10,27 6,33 14,27" fill="#059669" opacity="0.12"/>
+                    <line class="ac-msgline" x1="14" y1="18" x2="27" y2="18" stroke="#059669" stroke-width="2" stroke-linecap="round"/>
+                </g>
+                <g class="ac-sub">
+                    <rect x="31" y="22" width="14" height="12" rx="6" ry="6" fill="#4ECDC4" opacity="0.18"/>
+                    <line class="ac-subline" x1="34" y1="28" x2="42" y2="28" stroke="#4ECDC4" stroke-width="1.5" stroke-linecap="round"/>
+                </g>
+            </svg>
         </button>
         <button class="dock-tab" data-tab="ai">
             <span class="dt-icon">🧠</span>
             <span class="dt-label">AI</span>
+            <svg class="anim-layer anim-ai-layer" viewBox="0 0 48 48" width="36" height="36">
+                <path class="ab-brain" d="M24 7 C16 7, 8 13, 8 20 C8 24, 9 27, 11 30 L11 37 L14 37 L14 32 C17 34, 21 33, 22 32 L22 37 L26 37 L26 32 C27 33, 31 34, 34 32 L34 37 L37 37 L37 30 C39 27, 40 24, 40 20 C40 13, 32 7, 24 7 Z" fill="none" stroke="#7C3AED" stroke-width="1.4" stroke-linejoin="round"/>
+                <path class="ab-pulse ab-pulse1" d="M24 18 L20 22 L24 24 L18 32" fill="none" stroke="#A78BFA" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+                <path class="ab-pulse ab-pulse2" d="M24 18 L28 22 L24 24 L30 34" fill="none" stroke="#A78BFA" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+                <path class="ab-pulse ab-pulse3" d="M24 20 L24 26 L20 32" fill="none" stroke="#C4B5FD" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+                <path class="ab-pulse ab-pulse4" d="M24 20 L24 26 L28 30" fill="none" stroke="#C4B5FD" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle class="ab-flash ab-flash1" cx="18" cy="32" r="0" fill="#C4B5FD"/>
+                <circle class="ab-flash ab-flash2" cx="30" cy="34" r="0" fill="#C4B5FD"/>
+                <circle class="ab-flash ab-flash3" cx="20" cy="32" r="0" fill="#C4B5FD"/>
+                <circle class="ab-flash ab-flash4" cx="28" cy="30" r="0" fill="#C4B5FD"/>
+                <rect class="ab-whiteflash" x="0" y="0" width="48" height="48" fill="white" opacity="0"/>
+            </svg>
         </button>
     </div>
     </div>
@@ -3063,12 +3335,43 @@
                 if (tab === 'ai') { scrollDockAIBottom(); }
             };
 
-            document.querySelectorAll('.dock-tab').forEach(btn => {
+            (function initDockAnim() {
+                var postStroke = document.querySelector('.ap-stroke');
+                if (postStroke) {
+                    var plen = postStroke.getTotalLength();
+                    postStroke.style.setProperty('--d', plen);
+                    postStroke.setAttribute('stroke-dasharray', plen);
+                    postStroke.setAttribute('stroke-dashoffset', plen);
+                }
+                var chatMsgLine = document.querySelector('.ac-msgline');
+                if (chatMsgLine) {
+                    var mlen = chatMsgLine.getTotalLength();
+                    chatMsgLine.style.setProperty('--d', mlen);
+                    chatMsgLine.setAttribute('stroke-dasharray', mlen);
+                    chatMsgLine.setAttribute('stroke-dashoffset', mlen);
+                }
+                var pulses = document.querySelectorAll('.ab-pulse');
+                pulses.forEach(function(p) {
+                    var pulselen = p.getTotalLength();
+                    p.style.setProperty('--d', pulselen);
+                    p.setAttribute('stroke-dasharray', pulselen);
+                    p.setAttribute('stroke-dashoffset', pulselen);
+                });
+            })();
+
+            document.querySelectorAll('.dock-tab').forEach(function(btn) {
                 btn.addEventListener('click', function() {
-                    if (this.classList.contains('dock-tap-active')) return;
-                    this.classList.add('dock-tap-active');
-                    setTimeout(() => this.classList.remove('dock-tap-active'), 520);
-                    switchDockTab(this.dataset.tab);
+                    var tab = this.dataset.tab;
+                    var animClass = 'anim-' + tab;
+                    if (this.classList.contains(animClass)) return;
+                    this.classList.add(animClass);
+                    switchDockTab(tab);
+                    var self = this;
+                    var icon = this.querySelector('.dt-icon');
+                    icon.addEventListener('animationend', function onEnd() {
+                        icon.removeEventListener('animationend', onEnd);
+                        self.classList.remove(animClass);
+                    });
                 });
             });
             // ========== Dock 聊天 ==========
@@ -3419,6 +3722,411 @@
         (function() {
             window.toggleAIChat = function() { switchDockTab('ai'); };
             window.sendAIMessage = function() { dockSendAI(); };
+        })();
+    </script>
+
+    <!-- ========== 液态水滴导航指示器 ========== -->
+    <script>
+        (function() {
+            var TABS = ['posts', 'chat', 'ai'];
+            var ICONS = ['📝', '💬', '🧠'];
+            var DROP_W = 56, DROP_H = 56;
+            var SPRING_STIFF = 0.28, SPRING_DAMP = 0.18;
+            var SNAP_SPEED = 0.15, SNAP_FRICTION = 0.8;
+            var DRAG_THRESHOLD = 5;
+
+            var currentIdx = 0;
+            var phase = 'idle';
+            var dropletEl, glassEl, svgEl, outlineEl, highlightEl, rippleEl, iconEl;
+            var dockBarEl, appContainerEl;
+            var rafId = null;
+            var breathTime = 0;
+            var tabCenters = [];
+            var minX = 0, maxX = 0;
+            var dropleTop = 0;
+
+            var posX = 0, posY = 0;
+            var velocityX = 0;
+            var deformation = 0;
+            var defVelocity = 0;
+            var pointerId = null;
+            var lastPointerX = 0;
+            var startPointerX = 0;
+            var dragged = false;
+            var rippleStart = 0;
+            var snapTargetX = 0;
+            var snapStartTime = 0;
+
+            function createDroplet() {
+                dockBarEl = document.getElementById('dockBar');
+                appContainerEl = document.querySelector('.app-container');
+                if (!dockBarEl || !appContainerEl) return;
+
+                var container = document.createElement('div');
+                container.className = 'liquid-droplet';
+                container.id = 'liquidDroplet';
+                container.innerHTML =
+                    '<div class="liquid-glass" id="liquidGlass"></div>' +
+                    '<span class="liquid-icon" id="liquidIcon">📝</span>';
+                dockBarEl.parentNode.insertBefore(container, dockBarEl);
+
+                var svgNS = 'http://www.w3.org/2000/svg';
+                var svg = document.createElementNS(svgNS, 'svg');
+                svg.setAttribute('class', 'liquid-svg');
+                svg.setAttribute('viewBox', '0 0 56 56');
+                svg.setAttribute('width', '56');
+                svg.setAttribute('height', '56');
+
+                var defs = document.createElementNS(svgNS, 'defs');
+                var grad = document.createElementNS(svgNS, 'radialGradient');
+                grad.setAttribute('id', 'dropHighlightGrad');
+                grad.setAttribute('cx', '35%'); grad.setAttribute('cy', '28%');
+                grad.setAttribute('r', '55%');
+                var stop1 = document.createElementNS(svgNS, 'stop');
+                stop1.setAttribute('offset', '0%'); stop1.setAttribute('stop-color', 'white'); stop1.setAttribute('stop-opacity', '0.55');
+                var stop2 = document.createElementNS(svgNS, 'stop');
+                stop2.setAttribute('offset', '100%'); stop2.setAttribute('stop-color', 'white'); stop2.setAttribute('stop-opacity', '0');
+                grad.appendChild(stop1); grad.appendChild(stop2);
+                defs.appendChild(grad);
+                svg.appendChild(defs);
+
+                var outline = document.createElementNS(svgNS, 'path');
+                outline.setAttribute('class', 'liquid-outline');
+                svg.appendChild(outline);
+
+                var highlight = document.createElementNS(svgNS, 'path');
+                highlight.setAttribute('class', 'liquid-highlight');
+                highlight.setAttribute('fill', 'url(#dropHighlightGrad)');
+                svg.appendChild(highlight);
+
+                var ripple = document.createElementNS(svgNS, 'ellipse');
+                ripple.setAttribute('class', 'liquid-ripple');
+                ripple.setAttribute('cx', '28'); ripple.setAttribute('cy', '54');
+                ripple.setAttribute('rx', '0'); ripple.setAttribute('ry', '0');
+                ripple.setAttribute('fill', 'none');
+                ripple.setAttribute('stroke', 'rgba(255,255,255,0.4)');
+                ripple.setAttribute('stroke-width', '1.2');
+                svg.appendChild(ripple);
+
+                container.appendChild(svg);
+
+                dropletEl = container;
+                glassEl = container.querySelector('.liquid-glass');
+                svgEl = svg;
+                outlineEl = outline;
+                highlightEl = highlight;
+                rippleEl = ripple;
+                iconEl = container.querySelector('.liquid-icon');
+            }
+
+            function buildPath(cx, cy, stretch, breathP) {
+                var s = stretch;
+                var defS = s * 0.3;
+                var brW = Math.sin(breathP) * 1.5;
+                var brH = Math.cos(breathP * 1.3) * 1.2;
+                var m = cx.toFixed(1);
+                var t = cy.toFixed(1);
+                var leftMidX = (cx - 24 + brW - defS).toFixed(1);
+                var leftLowX = (cx - 14 + brW * 0.7 - defS).toFixed(1);
+                var rightMidX = (cx + 24 + brW + s).toFixed(1);
+                var rightLowX = (cx + 14 + brW * 0.7 + s).toFixed(1);
+                var topY = (t - 26 - brH).toFixed(1);
+                var midY = (t + 4).toFixed(1);
+                var botY = (t + 22 - brH * 1.5).toFixed(1);
+                var lcp1y = (t - 16 - brH * 0.5).toFixed(1);
+                var lcp2y = (t + 6).toFixed(1);
+                var rcp1y = (t - 16 - brH * 0.5).toFixed(1);
+                var rcp2y = (t + 6).toFixed(1);
+                var lcp2x = (cx - 20 - defS * 0.5).toFixed(1);
+                var rcp2x = (cx + 20 + s * 0.5).toFixed(1);
+                var lcp1x = (cx - 14 - defS).toFixed(1);
+                var rcp1x = (cx + 14 + s).toFixed(1);
+                return 'M' + m + ' ' + topY +
+                    ' C' + lcp1x + ' ' + lcp1y + ' ' + lcp2x + ' ' + lcp2y + ' ' + leftMidX + ' ' + midY +
+                    ' C' + leftLowX + ' ' + (Number(midY) + 8).toFixed(1) + ' ' + (Number(m) - 2 + defS * 0.2).toFixed(1) + ' ' + (Number(botY) - 2).toFixed(1) + ' ' + m + ' ' + botY +
+                    ' C' + (Number(m) + 2 - s * 0.2).toFixed(1) + ' ' + (Number(botY) - 2).toFixed(1) + ' ' + rightLowX + ' ' + (Number(midY) + 8).toFixed(1) + ' ' + rightMidX + ' ' + midY +
+                    ' C' + rcp2x + ' ' + rcp2y + ' ' + rcp1x + ' ' + rcp1y + ' ' + m + ' ' + topY +
+                    ' Z';
+            }
+
+            function updateShape(stretch, breathP) {
+                var pathStr = buildPath(28, 28, stretch, breathP);
+                if (outlineEl) outlineEl.setAttribute('d', pathStr);
+                if (highlightEl) highlightEl.setAttribute('d', pathStr);
+                if (glassEl) glassEl.style.clipPath = 'path("' + pathStr.replace(/"/g, '') + '")';
+            }
+
+            function calcTabCenters() {
+                if (!dockBarEl) return;
+                var tabs = dockBarEl.querySelectorAll('.dock-tab');
+                if (tabs.length < 3) return;
+                var barRect = dockBarEl.getBoundingClientRect();
+                var appRect = appContainerEl ? appContainerEl.getBoundingClientRect() : barRect;
+                tabCenters = [];
+                tabs.forEach(function(t) {
+                    var r = t.getBoundingClientRect();
+                    tabCenters.push(r.left + r.width / 2 - appRect.left);
+                });
+                minX = tabCenters[0];
+                maxX = tabCenters[2];
+                var btn0 = tabs[0].getBoundingClientRect();
+                dropleTop = btn0.top - appRect.top - DROP_H + 12;
+            }
+
+            function getIcon(idx) {
+                return ICONS[idx] || '📝';
+            }
+
+            function getAnimClass(tab) {
+                return 'anim-' + tab;
+            }
+
+            function findNearestTab(x) {
+                var best = 0, bestDist = Infinity;
+                for (var i = 0; i < tabCenters.length; i++) {
+                    var d = Math.abs(x - tabCenters[i]);
+                    if (d < bestDist) { bestDist = d; best = i; }
+                }
+                return best;
+            }
+
+            function slideSwitchPanel(oldTab, newTab, direction) {
+                if (oldTab === newTab) return;
+                var panelsContainer = document.getElementById('dockPanels');
+                var oldPanel = document.getElementById('panel' + oldTab.charAt(0).toUpperCase() + oldTab.slice(1));
+                var newPanel = document.getElementById('panel' + newTab.charAt(0).toUpperCase() + newTab.slice(1));
+                if (!panelsContainer || !oldPanel || !newPanel) return;
+                var d = direction;
+                var allPanels = panelsContainer.querySelectorAll('.dock-panel');
+                allPanels.forEach(function(p) { p.style.transition = 'none'; });
+                oldPanel.style.transform = 'translateY(0)';
+                oldPanel.style.opacity = '1';
+                newPanel.style.transform = 'translateX(' + (-d * 80) + '%)';
+                newPanel.style.opacity = '1';
+                newPanel.style.pointerEvents = 'all';
+                newPanel.offsetHeight;
+                oldPanel.style.transition = 'transform 0.35s cubic-bezier(0.16,1,0.3,1), opacity 0.3s ease';
+                oldPanel.style.transform = 'translateX(' + (d * 80) + '%)';
+                oldPanel.style.opacity = '0';
+                newPanel.style.transition = 'transform 0.35s cubic-bezier(0.16,1,0.3,1)';
+                newPanel.style.transform = 'translateY(0)';
+                setTimeout(function() {
+                    allPanels.forEach(function(p) {
+                        p.style.transition = '';
+                        p.style.transform = '';
+                        p.style.opacity = '';
+                        p.style.pointerEvents = '';
+                    });
+                    allPanels.forEach(function(p) { p.classList.remove('active'); });
+                    newPanel.classList.add('active');
+                    if (typeof switchDockTab === 'function') {
+                        switchDockTab(newTab);
+                    }
+                }, 360);
+            }
+
+            function setPos(x) {
+                if (!dropletEl) return;
+                posX = Math.max(minX, Math.min(maxX, x));
+                dropletEl.style.transform = 'translateX(' + (posX - DROP_W / 2) + 'px) translateY(' + dropleTop + 'px)';
+            }
+
+            function startRAF() {
+                if (rafId) return;
+                function loop(ts) {
+                    rafId = requestAnimationFrame(loop);
+                    var dt = Math.min(ts - (loop._lastTs || ts), 50) / 1000;
+                    loop._lastTs = ts;
+                    if (dt <= 0) dt = 0.016;
+
+                    breathTime += dt;
+
+                    if (phase === 'idle') {
+                        var bp = breathTime * Math.PI * 2 / 3;
+                        updateShape(deformation, bp);
+                        if (Math.abs(deformation) > 0.001 || Math.abs(defVelocity) > 0.001) {
+                            defVelocity += -SPRING_STIFF * deformation - SPRING_DAMP * defVelocity;
+                            deformation += defVelocity;
+                        } else {
+                            deformation = 0;
+                            defVelocity = 0;
+                        }
+                    } else if (phase === 'dragging') {
+                        var bpDrag = breathTime * Math.PI * 2 / 1.5;
+                        updateShape(deformation, bpDrag);
+                    } else if (phase === 'snapping') {
+                        var diffX = snapTargetX - posX;
+                        velocityX += diffX * SNAP_SPEED;
+                        velocityX *= SNAP_FRICTION;
+                        posX += velocityX;
+                        setPos(posX);
+                        defVelocity += -SPRING_STIFF * deformation - SPRING_DAMP * defVelocity;
+                        deformation += defVelocity;
+                        var bpSnap = breathTime * Math.PI * 2 / 2;
+                        updateShape(deformation, bpSnap);
+                        if (Math.abs(diffX) < 0.3 && Math.abs(velocityX) < 0.3 && Math.abs(deformation) < 0.2) {
+                            posX = snapTargetX;
+                            setPos(posX);
+                            deformation = 0; defVelocity = 0;
+                            updateShape(0, breathTime * Math.PI * 2 / 3);
+                            phase = 'landing';
+                            rippleStart = performance.now();
+                            if (dropletEl) {
+                                dropletEl.classList.add('bounce');
+                                setTimeout(function() { if (dropletEl) dropletEl.classList.remove('bounce'); }, 420);
+                            }
+                            if (iconEl) {
+                                iconEl.classList.add('pop');
+                                setTimeout(function() { if (iconEl) iconEl.classList.remove('pop'); }, 320);
+                            }
+                        }
+                    } else if (phase === 'landing') {
+                        var elapsed = (ts - rippleStart) / 1000;
+                        var bpLand = breathTime * Math.PI * 2 / 3;
+                        updateShape(0, bpLand);
+                        if (elapsed < 0.7 && rippleEl) {
+                            var rxF = Math.min(elapsed / 0.4, 1) * 18;
+                            var ryF = Math.min(elapsed / 0.5, 1) * 4;
+                            var opF = Math.max(0, 0.5 - elapsed / 0.7 * 0.5);
+                            rippleEl.setAttribute('rx', rxF.toFixed(1));
+                            rippleEl.setAttribute('ry', ryF.toFixed(1));
+                            rippleEl.setAttribute('opacity', opF.toFixed(2));
+                        } else {
+                            if (rippleEl) {
+                                rippleEl.setAttribute('rx', '0');
+                                rippleEl.setAttribute('ry', '0');
+                                rippleEl.setAttribute('opacity', '0');
+                            }
+                            deformation = 0; defVelocity = 0;
+                            updateShape(0, breathTime * Math.PI * 2 / 3);
+                            phase = 'idle';
+                        }
+                    }
+                }
+                loop._lastTs = 0;
+                rafId = requestAnimationFrame(loop);
+            }
+
+            function stopRAF() {
+                if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+            }
+
+            function onPointerDown(e) {
+                if (!dropletEl || !dockBarEl) return;
+                if (phase === 'dragging' || phase === 'snapping' || phase === 'landing') return;
+                var p = e.touches ? e.touches[0] : e;
+                pointerId = e.touches ? e.touches[0].identifier : null;
+                lastPointerX = p.clientX;
+                startPointerX = p.clientX;
+                dragged = false;
+                phase = 'dragging';
+                if (e.cancelable) e.preventDefault();
+            }
+
+            function onPointerMove(e) {
+                if (phase !== 'dragging') return;
+                if (!dropletEl || !dockBarEl) return;
+                if (e.cancelable) e.preventDefault();
+                var p = null;
+                if (e.touches) {
+                    for (var i = 0; i < e.touches.length; i++) {
+                        if (e.touches[i].identifier === pointerId) { p = e.touches[i]; break; }
+                    }
+                } else {
+                    p = e;
+                }
+                if (!p) return;
+                var dx = p.clientX - lastPointerX;
+                velocityX = dx;
+                if (Math.abs(p.clientX - startPointerX) > DRAG_THRESHOLD) dragged = true;
+                deformation = Math.max(-10, Math.min(10, velocityX * 0.08));
+                posX += dx;
+                setPos(posX);
+                lastPointerX = p.clientX;
+            }
+
+            function onPointerUp(e) {
+                if (phase !== 'dragging') return;
+                phase = 'snapping';
+                if (e.cancelable) e.preventDefault();
+                var targetIdx = findNearestTab(posX);
+                snapTargetX = tabCenters[targetIdx];
+                snapStartTime = performance.now();
+                velocityX = 0;
+
+                if (targetIdx !== currentIdx && dragged) {
+                    var oldTab = TABS[currentIdx];
+                    var newTab = TABS[targetIdx];
+                    var dir = targetIdx > currentIdx ? 1 : -1;
+                    currentIdx = targetIdx;
+                    if (iconEl) iconEl.textContent = getIcon(currentIdx);
+                    slideSwitchPanel(oldTab, newTab, dir);
+                } else {
+                    currentIdx = targetIdx;
+                    if (iconEl) iconEl.textContent = getIcon(currentIdx);
+                }
+                pointerId = null;
+            }
+
+            function init() {
+                createDroplet();
+                if (!dropletEl) return;
+                calcTabCenters();
+                posX = tabCenters[0] || 0;
+                setPos(posX);
+                updateShape(0, 0);
+                startRAF();
+
+                dockBarEl.addEventListener('touchstart', onPointerDown, { passive: false });
+                dockBarEl.addEventListener('touchmove', onPointerMove, { passive: false });
+                dockBarEl.addEventListener('touchend', onPointerUp);
+                dockBarEl.addEventListener('touchcancel', onPointerUp);
+
+                dockBarEl.addEventListener('mousedown', onPointerDown);
+                document.addEventListener('mousemove', onPointerMove);
+                document.addEventListener('mouseup', onPointerUp);
+
+                window.addEventListener('resize', function() {
+                    calcTabCenters();
+                    if (phase === 'idle') {
+                        posX = tabCenters[currentIdx] || posX;
+                        setPos(posX);
+                    }
+                    if (phase === 'snapping') {
+                        snapTargetX = tabCenters[currentIdx] || snapTargetX;
+                    }
+                });
+
+                document.querySelectorAll('.dock-tab').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        var idx = TABS.indexOf(this.dataset.tab);
+                        if (idx === -1 || idx === currentIdx) return;
+                        var oldTab = TABS[currentIdx];
+                        currentIdx = idx;
+                        var dir = idx > TABS.indexOf(oldTab) ? 1 : -1;
+                        if (iconEl) iconEl.textContent = getIcon(currentIdx);
+                        posX = tabCenters[idx];
+                        setPos(posX);
+                        phase = 'landing';
+                        rippleStart = performance.now();
+                        if (dropletEl) {
+                            dropletEl.classList.add('bounce');
+                            setTimeout(function() { if (dropletEl) dropletEl.classList.remove('bounce'); }, 420);
+                        }
+                        if (iconEl) {
+                            iconEl.classList.add('pop');
+                            setTimeout(function() { if (iconEl) iconEl.classList.remove('pop'); }, 320);
+                        }
+                        slideSwitchPanel(oldTab, TABS[idx], dir);
+                    });
+                });
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', init);
+            } else {
+                init();
+            }
         })();
     </script>
 </body>
