@@ -1847,90 +1847,66 @@
             99%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
-        /* 花朵飞散动画 - scatterPetal keyframes (fixed覆盖层用) */
+        /* 花朵飞散动画 - scatterPetal keyframes (fixed覆盖层用) - 位移+旋转专用，opacity由scatterPetalColor控制 */
         @keyframes scatterPetal0 {
-            0% { transform: translate(0,0); opacity: 0; }
-            5% { transform: translate(0,0); opacity: 0.8; }
-            9% { transform: translate(0,0); opacity: 1; }
-            30% { transform: translate(0, -18px) rotate(-15deg); opacity: 0.9; }
-            42% { transform: translate(0, -16px) rotate(-12deg); opacity: 0.6; }
-            58% { transform: translate(0, -3px) rotate(-2deg); opacity: 0.7; }
-            68% { transform: translate(0, -1px) rotate(0deg); opacity: 0.5; }
-            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
-            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
-            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
-            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            0% { transform: translate(0,0); }
+            9% { transform: translate(0,0); }
+            30% { transform: translate(0, -18px) rotate(-15deg); }
+            42% { transform: translate(0, -16px) rotate(-12deg); }
+            58% { transform: translate(0, -3px) rotate(-2deg); }
+            68% { transform: translate(0, -1px) rotate(0deg); }
+            78% { transform: translate(0, 0) rotate(0deg); }
+            100% { transform: translate(0, 0) rotate(0deg); }
         }
         @keyframes scatterPetal1 {
-            0% { transform: translate(0,0); opacity: 0; }
-            5% { transform: translate(0,0); opacity: 0.8; }
-            9% { transform: translate(0,0); opacity: 1; }
-            30% { transform: translate(16px, -9px) rotate(20deg); opacity: 0.9; }
-            42% { transform: translate(14px, -8px) rotate(16deg); opacity: 0.6; }
-            58% { transform: translate(3px, -1px) rotate(3deg); opacity: 0.7; }
-            68% { transform: translate(1px, 0px) rotate(1deg); opacity: 0.5; }
-            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
-            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
-            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
-            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            0% { transform: translate(0,0); }
+            9% { transform: translate(0,0); }
+            30% { transform: translate(16px, -9px) rotate(20deg); }
+            42% { transform: translate(14px, -8px) rotate(16deg); }
+            58% { transform: translate(3px, -1px) rotate(3deg); }
+            68% { transform: translate(1px, 0px) rotate(1deg); }
+            78% { transform: translate(0, 0) rotate(0deg); }
+            100% { transform: translate(0, 0) rotate(0deg); }
         }
         @keyframes scatterPetal2 {
-            0% { transform: translate(0,0); opacity: 0; }
-            5% { transform: translate(0,0); opacity: 0.8; }
-            9% { transform: translate(0,0); opacity: 1; }
-            30% { transform: translate(16px, 9px) rotate(-25deg); opacity: 0.9; }
-            42% { transform: translate(14px, 8px) rotate(-20deg); opacity: 0.6; }
-            58% { transform: translate(3px, 1px) rotate(-3deg); opacity: 0.7; }
-            68% { transform: translate(1px, 0px) rotate(-1deg); opacity: 0.5; }
-            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
-            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
-            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
-            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            0% { transform: translate(0,0); }
+            9% { transform: translate(0,0); }
+            30% { transform: translate(16px, 9px) rotate(-25deg); }
+            42% { transform: translate(14px, 8px) rotate(-20deg); }
+            58% { transform: translate(3px, 1px) rotate(-3deg); }
+            68% { transform: translate(1px, 0px) rotate(-1deg); }
+            78% { transform: translate(0, 0) rotate(0deg); }
+            100% { transform: translate(0, 0) rotate(0deg); }
         }
         @keyframes scatterPetal3 {
-            0% { transform: translate(0,0); opacity: 0; }
-            5% { transform: translate(0,0); opacity: 0.8; }
-            9% { transform: translate(0,0); opacity: 1; }
-            30% { transform: translate(0, 18px) rotate(18deg); opacity: 0.9; }
-            42% { transform: translate(0, 16px) rotate(14deg); opacity: 0.6; }
-            58% { transform: translate(0, 3px) rotate(2deg); opacity: 0.7; }
-            68% { transform: translate(0, 1px) rotate(1deg); opacity: 0.5; }
-            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
-            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
-            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
-            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            0% { transform: translate(0,0); }
+            9% { transform: translate(0,0); }
+            30% { transform: translate(0, 18px) rotate(18deg); }
+            42% { transform: translate(0, 16px) rotate(14deg); }
+            58% { transform: translate(0, 3px) rotate(2deg); }
+            68% { transform: translate(0, 1px) rotate(1deg); }
+            78% { transform: translate(0, 0) rotate(0deg); }
+            100% { transform: translate(0, 0) rotate(0deg); }
         }
         @keyframes scatterPetal4 {
-            0% { transform: translate(0,0); opacity: 0; }
-            5% { transform: translate(0,0); opacity: 0.8; }
-            9% { transform: translate(0,0); opacity: 1; }
-            30% { transform: translate(-16px, 9px) rotate(-22deg); opacity: 0.9; }
-            42% { transform: translate(-14px, 8px) rotate(-18deg); opacity: 0.6; }
-            58% { transform: translate(-3px, 1px) rotate(-3deg); opacity: 0.7; }
-            68% { transform: translate(-1px, 0px) rotate(-1deg); opacity: 0.5; }
-            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
-            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
-            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
-            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            0% { transform: translate(0,0); }
+            9% { transform: translate(0,0); }
+            30% { transform: translate(-16px, 9px) rotate(-22deg); }
+            42% { transform: translate(-14px, 8px) rotate(-18deg); }
+            58% { transform: translate(-3px, 1px) rotate(-3deg); }
+            68% { transform: translate(-1px, 0px) rotate(-1deg); }
+            78% { transform: translate(0, 0) rotate(0deg); }
+            100% { transform: translate(0, 0) rotate(0deg); }
         }
         @keyframes scatterPetal5 {
-            0% { transform: translate(0,0); opacity: 0; }
-            5% { transform: translate(0,0); opacity: 0.8; }
-            9% { transform: translate(0,0); opacity: 1; }
-            30% { transform: translate(-16px, -9px) rotate(28deg); opacity: 0.9; }
-            42% { transform: translate(-14px, -8px) rotate(22deg); opacity: 0.6; }
-            58% { transform: translate(-3px, -1px) rotate(3deg); opacity: 0.7; }
-            68% { transform: translate(-1px, 0px) rotate(1deg); opacity: 0.5; }
-            78% { transform: translate(0, 0) rotate(0deg); opacity: 0.3; }
-            88% { transform: translate(0, 0) rotate(0deg); opacity: 0.15; }
-            95% { transform: translate(0, 0) rotate(0deg); opacity: 0.05; }
-            99% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
-            100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            0% { transform: translate(0,0); }
+            9% { transform: translate(0,0); }
+            30% { transform: translate(-16px, -9px) rotate(28deg); }
+            42% { transform: translate(-14px, -8px) rotate(22deg); }
+            58% { transform: translate(-3px, -1px) rotate(3deg); }
+            68% { transform: translate(-1px, 0px) rotate(1deg); }
+            78% { transform: translate(0, 0) rotate(0deg); }
+            100% { transform: translate(0, 0) rotate(0deg); }
         }
         @keyframes scatterCenter {
             0%, 9% { opacity: 1; transform: scale(1); }
@@ -1938,6 +1914,42 @@
             60% { opacity: 0.5; transform: scale(0.5); }
             80% { opacity: 0; transform: scale(0.3); }
             100% { opacity: 0; transform: scale(0); }
+        }
+        /* scatterBaseFade - 底层花朵轮廓淡出淡入（模拟dt-svg淡出淡入） - 节奏提前5% */
+        @keyframes scatterBaseFade {
+            0%   { opacity: 1; }
+            4%   { opacity: 0; }
+            50%  { opacity: 0; }
+            57%  { opacity: 0.2; }
+            65%  { opacity: 0.4; }
+            75%  { opacity: 0.7; }
+            85%  { opacity: 0.9; }
+            99%  { opacity: 1; }
+            100% { opacity: 1; }
+        }
+        /* scatterPetalColor - 花瓣从透明轮廓→上色→褪色回透明 - 100%才完全消失 */
+        @keyframes scatterPetalColor {
+            0%   { fill: none; opacity: 0; }
+            5%   { fill: #F472B6; opacity: 0.8; }
+            9%   { fill: #F472B6; opacity: 1; }
+            30%  { fill: #F472B6; opacity: 0.9; }
+            42%  { fill: #F472B6; opacity: 0.6; }
+            58%  { fill: #F472B6; opacity: 0.7; }
+            68%  { fill: #F472B6; opacity: 0.5; }
+            78%  { fill: rgba(244,114,182,0.3); opacity: 0.3; }
+            88%  { fill: none; opacity: 0.15; }
+            95%  { fill: none; opacity: 0.05; }
+            99%  { fill: none; opacity: 0.02; }
+            100% { fill: none; opacity: 0; }
+        }
+        /* scatterCenterColor - 中心圆上色→消失 */
+        @keyframes scatterCenterColor {
+            0%, 5% { fill: none; opacity: 0; }
+            9% { fill: #FBBF24; opacity: 1; }
+            35% { fill: #FBBF24; opacity: 1; }
+            60% { fill: #FBBF24; opacity: 0.5; transform: scale(0.5); }
+            80% { fill: none; opacity: 0; transform: scale(0.3); }
+            100% { fill: none; opacity: 0; transform: scale(0); }
         }
         /* 闪电劈下动画 */
         @keyframes lightningDraw {
@@ -2112,6 +2124,13 @@
         [data-theme="dark"] [class*="stat"] .feed .post {
             background: transparent !important;
         }
+        /* 隐藏所有滚动条 */
+        .chat-messages::-webkit-scrollbar,
+        .chat-list::-webkit-scrollbar,
+        .dock-panel::-webkit-scrollbar,
+        .ai-chat-body::-webkit-scrollbar,
+        .dock-ai-container .ai-chat-body::-webkit-scrollbar { display: none; }
+        .chat-messages, .chat-list, .dock-panel, .ai-chat-body, .dock-ai-container .ai-chat-body { scrollbar-width: none; }
     </style>
 </head>
 <body>
@@ -3678,10 +3697,10 @@
             // ========== Dock 切换 ==========
             let currentDockTab = 'posts';
             let lastTabTapTime = {};
-            window.switchDockTab = function(tab) {
+            window.switchDockTab = function(tab, skipReturn) {
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
                 const now = Date.now();
-                if (tab === currentDockTab) {
+                if (tab === currentDockTab && !skipReturn) {
                     // 已经在当前tab，单击执行返回操作
                     if (tab === 'posts') {
                         // 帖子页：回到顶部
@@ -3767,14 +3786,14 @@
             }
             window.dockChatGoBack = dockChatGoBack;
 
-            window.openChatList = function() { switchDockTab('chat'); };
+            window.openChatList = function() { switchDockTab('chat', true); };
             window.closeChat = function() { switchDockTab('posts'); };
 
             let restorePostsScroll = null;
 
             window.openChat = function(userName) {
                 if (!currentUser) { showToast('请先登录'); return; }
-                if (userName === currentUser) { switchDockTab('chat'); return; }
+                if (userName === currentUser) { switchDockTab('chat', true); return; }
                 if (currentDockTab === 'posts') {
                     const postsPanel = document.getElementById('panelPosts');
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
@@ -3785,7 +3804,7 @@
                 document.getElementById('dockChatDetailView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'flex';
                 document.getElementById('dockChatTitle').textContent = userName;
-                switchDockTab('chat');
+                switchDockTab('chat', true);
                 loadDockChatMessages(userName);
                 startDMPolling(7000);
             };
@@ -3975,10 +3994,20 @@
                 
                 if (dockAIThinkMode) {
                     // 切换到思考模式：花朵飞散动画
+                    // 原始花朵图标淡出淡入
                     var flowerEl = btn.querySelector('.amt-flower-icon');
-                    if (flowerEl) playFlowerScatterAt(flowerEl, 60);
+                    if (flowerEl) {
+                        flowerEl.style.animation = 'scatterBaseFade 1.6s ease forwards';
+                        setTimeout(function() { flowerEl.style.animation = ''; }, 1700);
+                        playFlowerScatterAt(flowerEl, 60);
+                    }
+                    // 欢迎页花朵也淡出淡入
                     var welcomeFlower = document.querySelector('.ai-welcome .ai-welcome-icon .amt-flower-icon');
-                    if (welcomeFlower) playFlowerScatterAt(welcomeFlower, 90);
+                    if (welcomeFlower) {
+                        welcomeFlower.style.animation = 'scatterBaseFade 1.6s ease forwards';
+                        setTimeout(function() { welcomeFlower.style.animation = ''; }, 1700);
+                        playFlowerScatterAt(welcomeFlower, 90);
+                    }
                 } else {
                     // 切换到快速模式：闪电劈下动画
                     var flowerEl2 = btn.querySelector('.amt-flower-icon');
@@ -3997,7 +4026,7 @@
                 if (dockAIThinkMode) {
                     welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="48" height="48" fill="none"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg></span>你好！我是 DeepSeek AI 助手<br>思考模式 — 深度推理，展示思考过程';
                 } else {
-                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="48" height="48" fill="none"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#FBBF24" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg></span>你好！我是 DeepSeek AI 助手<br>快速模式 — 极速响应，跳过思考过程';
+                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-lightning-icon" viewBox="0 0 24 24" width="48" height="48" fill="none"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="none" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>你好！我是 DeepSeek AI 助手<br>快速模式 — 极速响应，跳过思考过程';
                 }
             }
             window.updateAIWelcome = updateAIWelcome;
@@ -4156,6 +4185,7 @@
     <!-- AI页面动画函数 - fixed覆盖层，不受容器overflow限制 -->
     <script>
         // 通用：在指定元素位置播放花朵飞散动画（fixed覆盖层，不受容器overflow限制）
+        // 完整流程：底层透明轮廓花朵淡出淡入 + 花瓣渐变上色→飞散→飞回→褪色回透明
         function playFlowerScatterAt(el, size) {
             if (!el) return;
             var rect = el.getBoundingClientRect();
@@ -4171,10 +4201,30 @@
             svg.setAttribute('viewBox', '0 0 ' + svgSize + ' ' + svgSize);
             svg.style.cssText = 'position:fixed; left:' + (cx - half) + 'px; top:' + (cy - half) + 'px; z-index:99999; pointer-events:none; overflow:visible;';
             
-            var g = document.createElementNS(ns, 'g');
-            g.setAttribute('transform', 'translate(' + half + ',' + half + ')');
-            
+            // 底层：透明轮廓花朵（模拟dt-svg淡出淡入）
+            var baseG = document.createElementNS(ns, 'g');
+            baseG.setAttribute('transform', 'translate(' + half + ',' + half + ')');
+            baseG.style.animation = 'scatterBaseFade 1.6s ease forwards';
             var rotations = [0, 60, 120, 180, 240, 300];
+            rotations.forEach(function(rot) {
+                var ig = document.createElementNS(ns, 'g');
+                ig.setAttribute('transform', 'rotate(' + rot + ')');
+                var e = document.createElementNS(ns, 'ellipse');
+                e.setAttribute('cx', '0'); e.setAttribute('cy', '-9');
+                e.setAttribute('rx', '3.2'); e.setAttribute('ry', '9');
+                e.setAttribute('fill', 'none'); e.setAttribute('stroke', '#EC4899'); e.setAttribute('stroke-width', '1');
+                ig.appendChild(e); baseG.appendChild(ig);
+            });
+            var baseCircle = document.createElementNS(ns, 'circle');
+            baseCircle.setAttribute('cx', '0'); baseCircle.setAttribute('cy', '0'); baseCircle.setAttribute('r', '3');
+            baseCircle.setAttribute('fill', 'none'); baseCircle.setAttribute('stroke', '#D97706'); baseCircle.setAttribute('stroke-width', '1');
+            baseG.appendChild(baseCircle);
+            svg.appendChild(baseG);
+            
+            // 上层：飞散花瓣（模拟anim-layer，从透明轮廓渐变上色→飞散→飞回→褪色回透明）
+            var flyG = document.createElementNS(ns, 'g');
+            flyG.setAttribute('transform', 'translate(' + half + ',' + half + ')');
+            
             rotations.forEach(function(rot, i) {
                 var pg = document.createElementNS(ns, 'g');
                 pg.classList.add('scatter-petal');
@@ -4184,18 +4234,23 @@
                 var e = document.createElementNS(ns, 'ellipse');
                 e.setAttribute('cx', '0'); e.setAttribute('cy', '-9');
                 e.setAttribute('rx', '3.2'); e.setAttribute('ry', '9');
-                e.setAttribute('fill', '#F472B6'); e.setAttribute('stroke', '#EC4899'); e.setAttribute('stroke-width', '1');
-                ig.appendChild(e); pg.appendChild(ig); g.appendChild(pg);
+                // 初始透明轮廓，动画中渐变上色
+                e.setAttribute('fill', 'none'); e.setAttribute('stroke', '#EC4899'); e.setAttribute('stroke-width', '1');
+                e.classList.add('scatter-petal-ellipse');
+                e.style.animation = 'scatterPetalColor 1.4s ease forwards';
+                ig.appendChild(e); pg.appendChild(ig); flyG.appendChild(pg);
             });
             
-            var cc = document.createElementNS(ns, 'circle');
-            cc.setAttribute('cx', '0'); cc.setAttribute('cy', '0'); cc.setAttribute('r', '3');
-            cc.setAttribute('fill', '#FBBF24'); cc.setAttribute('stroke', '#D97706'); cc.setAttribute('stroke-width', '1');
-            cc.style.animation = 'scatterCenter 1.4s ease forwards';
-            g.appendChild(cc);
+            // 中心圆
+            var flyCenter = document.createElementNS(ns, 'circle');
+            flyCenter.setAttribute('cx', '0'); flyCenter.setAttribute('cy', '0'); flyCenter.setAttribute('r', '3');
+            flyCenter.setAttribute('fill', 'none'); flyCenter.setAttribute('stroke', '#D97706'); flyCenter.setAttribute('stroke-width', '1');
+            flyCenter.style.animation = 'scatterCenterColor 1.4s ease forwards';
+            flyG.appendChild(flyCenter);
             
-            svg.appendChild(g); document.body.appendChild(svg);
-            setTimeout(function() { if (svg.parentNode) svg.remove(); }, 1600);
+            svg.appendChild(flyG);
+            document.body.appendChild(svg);
+            setTimeout(function() { if (svg.parentNode) svg.remove(); }, 1700);
         }
 
         // 通用：在指定元素位置播放闪电劈下动画（fixed覆盖层）
