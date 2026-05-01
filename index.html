@@ -44,7 +44,9 @@
             background: linear-gradient(135deg, #022c22 0%, #064e3b 50%, #0d5e42 100%);
         }
         [data-theme="dark"] .rain-glass-layer {
-            background: rgba(0,0,0,0.3);
+            background: rgba(0,0,0,0.2);
+            backdrop-filter: blur(22px) saturate(110%);
+            -webkit-backdrop-filter: blur(22px) saturate(110%);
         }
         [data-theme="dark"] nav {
             background: transparent;
@@ -236,9 +238,9 @@
             position: absolute;
             inset: 0;
             z-index: 2;
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
-            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(22px) saturate(110%);
+            -webkit-backdrop-filter: blur(22px) saturate(110%);
+            background: rgba(255, 255, 255, 0.08);
             pointer-events: none;
         }
 
@@ -1283,9 +1285,9 @@
         .dock-bar {
             position: absolute; bottom: 0; left: 0; right: 0;
             display: flex; justify-content: center; align-items: center;
-            gap: 3px; padding: 4px 12px 8px;
+            gap: 3px; padding: 4px 12px 10px;
             background: transparent;
-            border-top: 1px solid rgba(255, 255, 255, 0.12);
+            border: none;
             box-shadow: none;
             z-index: 100;
             pointer-events: auto;
@@ -1303,7 +1305,6 @@
         }
         .dock-tab .dt-icon {
             font-size: 20px; line-height: 1;
-            transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
             position: relative; z-index: 1;
         }
         .dock-tab .dt-label {
@@ -1313,9 +1314,10 @@
         .dock-tab.active {
             color: #059669;
             transform: translateY(-4px);
-            background: rgba(255,255,255,0.4);
-            backdrop-filter: blur(12px) saturate(160%);
-            -webkit-backdrop-filter: blur(12px) saturate(160%);
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(6px) saturate(140%);
+            -webkit-backdrop-filter: blur(6px) saturate(140%);
+            border: 1px solid rgba(255,255,255,0.35);
         }
         .dock-tab.active .dt-icon {
             filter: drop-shadow(0 4px 8px rgba(5,150,105,0.25));
@@ -1323,49 +1325,45 @@
         .dock-tab.active .dt-label { font-weight: 700; }
         .dock-tab:active { transform: scale(0.9); }
         .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
-        .dock-tab::after {
-            content: ''; position: absolute; top: 4px; left: 20%; right: 20%; bottom: 50%;
-            background: rgba(5,150,105,0.1);
-            border-radius: 50%;
-            opacity: 0; transform: scale(0.3);
-            transition: all 0.4s cubic-bezier(0.16,1,0.3,1);
-            pointer-events: none;
-        }
-        .dock-tab.active::after {
-            opacity: 1; transform: scale(1);
-        }
         .dock-tab .dt-icon { transition: none; }
-        .dock-tab.dock-tap-active .dt-icon { animation-duration: 0.5s; animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
-        .dock-tab[data-tab="posts"].dock-tap-active .dt-icon { animation-name: dockWriteAnim; }
-        .dock-tab[data-tab="chat"].dock-tap-active .dt-icon { animation-name: dockWiggleAnim; }
-        .dock-tab[data-tab="ai"].dock-tap-active .dt-icon { animation-name: dockPulseAnim; }
-        @keyframes dockWriteAnim {
-            0% { transform: rotate(0) translateY(0); }
-            15% { transform: rotate(-15deg) translateY(2px); }
-            30% { transform: rotate(10deg) translateY(-1px); }
-            45% { transform: rotate(-8deg) translateY(1px); }
-            60% { transform: rotate(5deg) translateY(-0.5px); }
-            75% { transform: rotate(-2deg) translateY(0); }
-            100% { transform: rotate(0) translateY(0); }
+        .dock-tab.dock-tap-active .dt-icon { animation-duration: 0.52s; animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); animation-fill-mode: forwards; }
+        .dock-tab[data-tab="posts"].dock-tap-active .dt-icon { animation-name: dockPenWrite; }
+        .dock-tab[data-tab="chat"].dock-tap-active .dt-icon { animation-name: dockBubblePop; }
+        .dock-tab[data-tab="ai"].dock-tap-active .dt-icon { animation-name: dockBrainGlow; }
+        @keyframes dockPenWrite {
+            0%   { transform: rotate(0deg) translate(0,0); }
+            8%   { transform: rotate(-18deg) translate(3px,1px); }
+            16%  { transform: rotate(-12deg) translate(5px,2px); }
+            24%  { transform: rotate(12deg) translate(-4px,0px); }
+            32%  { transform: rotate(8deg) translate(-2px,1px); }
+            40%  { transform: rotate(-6deg) translate(3px,0px); }
+            48%  { transform: rotate(-4deg) translate(4px,1px); }
+            56%  { transform: rotate(10deg) translate(-5px,0px); }
+            64%  { transform: rotate(-14deg) translate(2px,1px); }
+            72%  { transform: rotate(6deg) translate(-3px,0px); }
+            80%  { transform: rotate(-3deg) translate(1px,0px); }
+            90%  { transform: rotate(1deg) translate(0,0); }
+            100% { transform: rotate(0deg) translate(0,0); }
         }
-        @keyframes dockWiggleAnim {
-            0% { transform: rotate(0) scale(1); }
-            10% { transform: rotate(-12deg) scale(0.9); }
-            20% { transform: rotate(10deg) scale(1.1); }
-            30% { transform: rotate(-8deg) scale(0.95); }
-            40% { transform: rotate(6deg) scale(1.05); }
-            50% { transform: rotate(-4deg) scale(1); }
-            60% { transform: rotate(3deg) scale(0.98); }
-            70% { transform: rotate(-2deg) scale(1.02); }
-            80% { transform: rotate(1deg) scale(1); }
-            100% { transform: rotate(0) scale(1); }
+        @keyframes dockBubblePop {
+            0%   { transform: scale(1) rotate(0deg); }
+            10%  { transform: scale(0.85) rotate(-5deg); }
+            25%  { transform: scale(1.35) rotate(3deg); }
+            35%  { transform: scale(0.95) rotate(-2deg); }
+            48%  { transform: scale(1.18) rotate(1deg); }
+            58%  { transform: scale(0.98) rotate(0deg); }
+            72%  { transform: scale(1.06) rotate(0deg); }
+            88%  { transform: scale(1.0) rotate(0deg); }
+            100% { transform: scale(1) rotate(0deg); }
         }
-        @keyframes dockPulseAnim {
-            0% { transform: scale(1); filter: brightness(1); }
-            25% { transform: scale(1.35); filter: brightness(1.5) drop-shadow(0 0 8px rgba(5,150,105,0.6)); }
-            50% { transform: scale(0.9); filter: brightness(1); }
-            70% { transform: scale(1.15); filter: brightness(1.2); }
-            100% { transform: scale(1); filter: brightness(1); }
+        @keyframes dockBrainGlow {
+            0%   { transform: scale(1); filter: drop-shadow(0 0 0 transparent); }
+            15%  { transform: scale(1.28); filter: drop-shadow(0 0 6px rgba(99,102,241,0.7)); }
+            30%  { transform: scale(0.92); filter: drop-shadow(0 0 2px rgba(99,102,241,0.3)); }
+            45%  { transform: scale(1.14); filter: drop-shadow(0 0 10px rgba(99,102,241,0.5)); }
+            60%  { transform: scale(0.96); filter: drop-shadow(0 0 3px rgba(99,102,241,0.2)); }
+            75%  { transform: scale(1.05); filter: drop-shadow(0 0 4px rgba(99,102,241,0.4)); }
+            100% { transform: scale(1); filter: drop-shadow(0 0 0 transparent); }
         }
         /* Dock面板: 聊天 (复用聊天样式，去掉overlay固定定位) */
         .dock-chat-container {
@@ -1547,12 +1545,11 @@
         /* 暗色模式 Dock + AI */
         [data-theme="dark"] .dock-bar {
             background: transparent;
-            border-top-color: rgba(255,255,255,0.04);
+            border: none;
             box-shadow: none;
         }
         [data-theme="dark"] .dock-tab { color: #9e9eb0; }
-        [data-theme="dark"] .dock-tab.active { color: #34d399; background: rgba(255,255,255,0.08); backdrop-filter: blur(12px) saturate(160%); -webkit-backdrop-filter: blur(12px) saturate(160%); }
-        [data-theme="dark"] .dock-tab::after { background: rgba(52,211,153,0.12); }
+        [data-theme="dark"] .dock-tab.active { color: #34d399; background: rgba(255,255,255,0.06); backdrop-filter: blur(6px) saturate(140%); -webkit-backdrop-filter: blur(6px) saturate(140%); border: 1px solid rgba(255,255,255,0.12); }
         [data-theme="dark"] .dock-indicator { background: linear-gradient(90deg, #059669, #34d399); box-shadow: 0 0 10px rgba(52,211,153,0.5); }
         [data-theme="dark"] .dock-chat-container .chat-header { border-bottom-color: rgba(255,255,255,0.06); }
         [data-theme="dark"] .dock-chat-container .chat-list-item { border-bottom-color: rgba(255,255,255,0.03); }
