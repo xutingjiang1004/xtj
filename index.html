@@ -3328,42 +3328,42 @@
 
                 var colors = ['#F472B6','#EC4899','#FB923C','#FBBF24','#A78BFA','#C084FC','#FCD34D','#F9A8D4','#FDA4AF','#E879F9','#D8B4FE','#FDBA74','#FCA5A5','#F0ABFC','#FDE68A'];
 
+                var svgW = 14, svgH = 21;
+
                 for (var i = 0; i < petalCount; i++) {
                     var angle = (360 / petalCount) * i + (Math.random() - 0.5) * 30;
-                    var dist = 40 + Math.random() * 40;
+                    var dist = 20 + Math.random() * 20;
                     var rot = 180 + Math.random() * 360;
                     var rotDir = Math.random() > 0.5 ? 1 : -1;
                     var finalRot = rot * rotDir;
                     var color = colors[i % colors.length];
-                    var gravity = 10 + Math.random() * 15;
+                    var gravity = 8 + Math.random() * 12;
 
                     var rad = angle * Math.PI / 180;
                     var x = Math.cos(rad) * dist;
                     var y = Math.sin(rad) * dist + gravity;
 
                     var kfName = prefix + i;
-                    var delay = 0.2 + i * 0.025;
                     keyframeCSS += '@keyframes ' + kfName + ' {'
-                        + '0%{transform:translate(-50%,-50%) translate(0,0) rotate(0deg) scale(0);opacity:0}'
-                        + '10%{transform:translate(-50%,-50%) translate(0,0) rotate(30deg) scale(1);opacity:0.9}'
-                        + '60%{transform:translate(-50%,-50%) translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(1);opacity:0.8}'
-                        + '100%{transform:translate(-50%,-50%) translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.4);opacity:0}'
+                        + '0%{transform:translate(0,0) rotate(0deg) scale(0);opacity:0}'
+                        + '12%{transform:translate(0,0) rotate(30deg) scale(1);opacity:0.9}'
+                        + '60%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(1);opacity:0.8}'
+                        + '100%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.5);opacity:0}'
                         + '}\n';
 
                     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
                     svg.setAttribute('class', 'dynamic-petal');
                     svg.setAttribute('viewBox', '0 0 20 30');
-                    svg.setAttribute('width', '14');
-                    svg.setAttribute('height', '21');
+                    svg.setAttribute('width', svgW);
+                    svg.setAttribute('height', svgH);
                     svg.style.position = 'fixed';
-                    svg.style.left = cx + 'px';
-                    svg.style.top = cy + 'px';
+                    svg.style.left = (cx - svgW / 2) + 'px';
+                    svg.style.top = (cy - svgH / 2) + 'px';
                     svg.style.pointerEvents = 'none';
                     svg.style.zIndex = '9999';
                     svg.style.willChange = 'transform, opacity';
-                    svg.style.transformOrigin = 'center center';
                     svg.style.animation = kfName + ' 1.2s cubic-bezier(.4,.0,.2,1) forwards';
-                    svg.style.animationDelay = delay + 's';
+                    svg.style.animationDelay = '0.18s';
                     svg.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color + '" opacity="0.9"/>';
                     container.appendChild(svg);
                 }
