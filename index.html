@@ -2027,6 +2027,7 @@
                         const num = parseInt(match[1]);
                         statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num-1 : num+1}`);
                     }
+                    updateFeedStats();
                 } catch (e) { console.error(e); }
             };
 
@@ -2101,6 +2102,7 @@
                                     <div><b>${currentUser}:</b>${escapeHtml(content)}</div>
                                 </div>`);
                         }
+                        updateFeedStats();
                     } else {
                         loadFeed(true);
                     }
@@ -2365,7 +2367,17 @@
                 if (!localStorage.getItem(key) && !viewTracked.has(postId)) {
                     viewTracked.add(postId);
                     localStorage.setItem(key, "1");
-                    // 记录浏览详情到 localStorage
+                    var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
+                    if (postEl) {
+                        var statsEl = postEl.querySelector('.post-stats-text');
+                        if (statsEl) {
+                            var vm = statsEl.textContent.match(/浏览 (\d+)/);
+                            if (vm) {
+                                var newVal = parseInt(vm[1]) + 1;
+                                statsEl.innerHTML = statsEl.innerHTML.replace(/浏览 \d+/, '浏览 ' + newVal);
+                            }
+                        }
+                    }
                     if (currentUser && postInfoCache[postId]) {
                         saveViewHistory({
                             user_name: currentUser,
@@ -2380,6 +2392,7 @@
                             await sb.rpc("increment_post_views", { p_post_id: postId }); 
                         } catch(e){ console.error(e); } 
                     }, 1000);
+                    updateFeedStats();
                 }
             }
 
@@ -2475,6 +2488,26 @@
                     e.forEach(i => { if(i.isIntersecting){ i.target.classList.add('visible'); observer.unobserve(i.target); } });
                 }, { threshold: 0.1 });
                 document.querySelectorAll('.post').forEach(p => { if(!p.classList.contains('visible')) observer.observe(p); });
+            }
+
+            function updateFeedStats() {
+                var posts = document.querySelectorAll('.post');
+                var totalLikes = 0, totalComments = 0, totalViews = 0;
+                posts.forEach(function(p) {
+                    var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
+                    var vm = text.match(/浏览 (\d+)/);
+                    var lm = text.match(/点赞 (\d+)/);
+                    var cm = text.match(/评论 (\d+)/);
+                    if (vm) totalViews += parseInt(vm[1]);
+                    if (lm) totalLikes += parseInt(lm[1]);
+                    if (cm) totalComments += parseInt(cm[1]);
+                });
+                var sPosts = document.getElementById('sPosts');
+                var sViews = document.getElementById('sViews');
+                var sLikes = document.getElementById('sLikes');
+                if (sPosts) sPosts.textContent = posts.length;
+                if (sViews) sViews.textContent = totalViews;
+                if (sLikes) sLikes.textContent = totalLikes + totalComments;
             }
 
             async function initialLoad(skipCache = false) {
@@ -2952,12 +2985,6 @@
                     switchDockTab(this.dataset.tab);
                 });
             });
-
-            window.addEventListener('resize', function() {
-                const activeBtn = document.querySelector('.dock-tab.active');
-                if (activeBtn) updateDockIndicator(activeBtn);
-            });
-
             // ========== Dock 聊天 ==========
             let dockChatActiveUser = null;
             let dockChatSending = false;
@@ -3207,6 +3234,7 @@
                     else { fullContent = '请求失败: ' + (e.message || '未知错误'); }
                 } finally {
                     dockAIStreaming = false; dockAIAbort = null; sendBtn.disabled = false; inputEl.disabled = false; inputEl.focus();
+                    bubble.removeAttribute('id');
                     const cursor = bubble.querySelector('.ai-streaming-cursor'); if (cursor) cursor.remove();
                     if (fullContent === '' && fullReasoning === '') { const t = bubble.querySelector('.ai-thinking'); if (t) t.remove(); bubble.textContent = '未收到回复，请重试'; }
                     else if (fullContent === '') { const t = bubble.querySelector('.ai-thinking'); if (t) t.remove(); bubble.textContent = fullReasoning || '(无文本回复)'; }
@@ -3219,10 +3247,6 @@
 
             window.addEventListener('DOMContentLoaded', function() {
                 initUI(); initRainAnimation(); initialLoad();
-                setTimeout(function() {
-                    const activeBtn = document.querySelector('.dock-tab.active');
-                    if (activeBtn) updateDockIndicator(activeBtn);
-                }, 300);
             });
 
             // ========== 主题切换 ==========
