@@ -1326,44 +1326,51 @@
         .dock-tab:active { transform: scale(0.9); }
         .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
         .dock-tab .dt-icon { transition: none; }
-        .dock-tab.dock-tap-active .dt-icon { animation-duration: 0.52s; animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); animation-fill-mode: forwards; }
+        .dock-tab.dock-tap-active .dt-icon { animation-duration: 0.62s; animation-timing-function: ease-out; animation-fill-mode: forwards; }
         .dock-tab[data-tab="posts"].dock-tap-active .dt-icon { animation-name: dockPenWrite; }
         .dock-tab[data-tab="chat"].dock-tap-active .dt-icon { animation-name: dockBubblePop; }
         .dock-tab[data-tab="ai"].dock-tap-active .dt-icon { animation-name: dockBrainGlow; }
         @keyframes dockPenWrite {
             0%   { transform: rotate(0deg) translate(0,0); }
-            8%   { transform: rotate(-18deg) translate(3px,1px); }
-            16%  { transform: rotate(-12deg) translate(5px,2px); }
-            24%  { transform: rotate(12deg) translate(-4px,0px); }
-            32%  { transform: rotate(8deg) translate(-2px,1px); }
-            40%  { transform: rotate(-6deg) translate(3px,0px); }
-            48%  { transform: rotate(-4deg) translate(4px,1px); }
-            56%  { transform: rotate(10deg) translate(-5px,0px); }
-            64%  { transform: rotate(-14deg) translate(2px,1px); }
-            72%  { transform: rotate(6deg) translate(-3px,0px); }
-            80%  { transform: rotate(-3deg) translate(1px,0px); }
-            90%  { transform: rotate(1deg) translate(0,0); }
+            6%   { transform: rotate(-15deg) translate(2px,-1px); }
+            12%  { transform: rotate(-22deg) translate(6px,2px); }
+            18%  { transform: rotate(-8deg) translate(9px,3px); }
+            24%  { transform: rotate(8deg) translate(5px,-1px); }
+            30%  { transform: rotate(18deg) translate(0px,1px); }
+            36%  { transform: rotate(25deg) translate(-4px,3px); }
+            42%  { transform: rotate(10deg) translate(-1px,1px); }
+            48%  { transform: rotate(-5deg) translate(3px,-1px); }
+            54%  { transform: rotate(-15deg) translate(7px,2px); }
+            60%  { transform: rotate(0deg) translate(10px,1px); }
+            68%  { transform: rotate(12deg) translate(5px,-2px); }
+            76%  { transform: rotate(5deg) translate(2px,-1px); }
+            84%  { transform: rotate(-3deg) translate(0px,0px); }
+            92%  { transform: rotate(0deg) translate(0px,0px); }
             100% { transform: rotate(0deg) translate(0,0); }
         }
         @keyframes dockBubblePop {
-            0%   { transform: scale(1) rotate(0deg); }
-            10%  { transform: scale(0.85) rotate(-5deg); }
-            25%  { transform: scale(1.35) rotate(3deg); }
-            35%  { transform: scale(0.95) rotate(-2deg); }
-            48%  { transform: scale(1.18) rotate(1deg); }
-            58%  { transform: scale(0.98) rotate(0deg); }
-            72%  { transform: scale(1.06) rotate(0deg); }
-            88%  { transform: scale(1.0) rotate(0deg); }
-            100% { transform: scale(1) rotate(0deg); }
+            0%   { transform: scale(1,1); }
+            12%  { transform: scale(1.08,0.88); }
+            22%  { transform: scale(0.88,1.22); }
+            32%  { transform: scale(1.28,0.92); }
+            40%  { transform: scale(0.94,1.08); }
+            48%  { transform: scale(1.08,0.97); }
+            56%  { transform: scale(0.98,1.02); }
+            68%  { transform: scale(1.02,0.99); }
+            84%  { transform: scale(1,1); }
+            100% { transform: scale(1,1); }
         }
         @keyframes dockBrainGlow {
-            0%   { transform: scale(1); filter: drop-shadow(0 0 0 transparent); }
-            15%  { transform: scale(1.28); filter: drop-shadow(0 0 6px rgba(99,102,241,0.7)); }
-            30%  { transform: scale(0.92); filter: drop-shadow(0 0 2px rgba(99,102,241,0.3)); }
-            45%  { transform: scale(1.14); filter: drop-shadow(0 0 10px rgba(99,102,241,0.5)); }
-            60%  { transform: scale(0.96); filter: drop-shadow(0 0 3px rgba(99,102,241,0.2)); }
-            75%  { transform: scale(1.05); filter: drop-shadow(0 0 4px rgba(99,102,241,0.4)); }
-            100% { transform: scale(1); filter: drop-shadow(0 0 0 transparent); }
+            0%   { transform: scale(1);   filter: drop-shadow(0 0 0 transparent) brightness(1); }
+            10%  { transform: scale(1.06); filter: drop-shadow(0 0 3px rgba(99,102,241,0.3)) brightness(1.05); }
+            22%  { transform: scale(1.16); filter: drop-shadow(0 0 8px rgba(99,102,241,0.6)) brightness(1.15); }
+            32%  { transform: scale(1.08); filter: drop-shadow(0 0 5px rgba(99,102,241,0.35)) brightness(1.08); }
+            42%  { transform: scale(1.0);  filter: drop-shadow(0 0 0 transparent) brightness(1); }
+            54%  { transform: scale(1.04); filter: drop-shadow(0 0 4px rgba(99,102,241,0.2)) brightness(1.03); }
+            66%  { transform: scale(1.12); filter: drop-shadow(0 0 10px rgba(99,102,241,0.5)) brightness(1.12); }
+            76%  { transform: scale(1.05); filter: drop-shadow(0 0 4px rgba(99,102,241,0.25)) brightness(1.05); }
+            88%  { transform: scale(1.0);  filter: drop-shadow(0 0 0 transparent) brightness(1); }
+            100% { transform: scale(1);    filter: drop-shadow(0 0 0 transparent) brightness(1); }
         }
         /* Dock面板: 聊天 (复用聊天样式，去掉overlay固定定位) */
         .dock-chat-container {
@@ -2137,40 +2144,19 @@
                 btn.textContent = "提交中...";
                 btn.disabled = true;
                 try {
-                    const { data: newComm, error } = await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]).select();
+                    const { error } = await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
                     if (error) throw error;
                     closeModal("commentModal");
                     showToast("评论成功！");
-                    const post = document.querySelector(`.post[data-post-id="${activePostId}"]`);
-                    if (post) {
-                        let commentsEl = post.querySelector('.comments');
-                        if (!commentsEl) {
-                            const statsEl = post.querySelector('.post-stats-text');
-                            if (statsEl) {
-                                statsEl.outerHTML = `<div class="post-stats-text">浏览 ${statsEl.textContent.match(/浏览 (\d+)/)[1]} · 点赞 ${statsEl.textContent.match(/点赞 (\d+)/)[1]} · 评论 1</div>`;
-                            }
-                            post.insertAdjacentHTML('beforeend', `
-                            <div class="comments">
-                                <div class="comment-item" data-comment-id="${newComm?.[0]?.id || ''}">
-                                    <div><b>${currentUser}:</b>${escapeHtml(content)}</div>
-                                </div>
-                            </div>`);
-                        } else {
-                            const statsEl = post.querySelector('.post-stats-text');
-                            if (statsEl) {
-                                const curr = parseInt(statsEl.textContent.match(/评论 (\d+)/)[1]);
-                                statsEl.outerHTML = `<div class="post-stats-text">浏览 ${statsEl.textContent.match(/浏览 (\d+)/)[1]} · 点赞 ${statsEl.textContent.match(/点赞 (\d+)/)[1]} · 评论 ${curr + 1}</div>`;
-                            }
-                            commentsEl.insertAdjacentHTML('beforeend', `
-                                <div class="comment-item" data-comment-id="${newComm?.[0]?.id || ''}">
-                                    <div><b>${currentUser}:</b>${escapeHtml(content)}</div>
-                                </div>`);
-                        }
-                        updateFeedStats();
-                        refreshStatModal();
-                    } else {
-                        loadFeed(true);
-                    }
+                    var scrollEl = document.getElementById('panelPosts');
+                    var savedScroll = scrollEl ? scrollEl.scrollTop : 0;
+                    await loadFeed(true);
+                    requestAnimationFrame(function() {
+                        var p = document.getElementById('panelPosts');
+                        if (p && savedScroll > 0) p.scrollTop = savedScroll;
+                        var postEl = document.querySelector('.post[data-post-id="' + activePostId + '"]');
+                        if (postEl) postEl.classList.add('visible');
+                    });
                 } catch (e) {
                     showToast("评论失败: " + (e.message || "未知错误"));
                     console.error(e);
