@@ -3323,7 +3323,6 @@
                 var container = document.getElementById('dockBar') || document.body;
 
                 var petalCount = 12 + Math.floor(Math.random() * 4);
-                var petals = [];
                 var keyframeCSS = '';
                 var prefix = 'pf-' + Date.now() + '-';
 
@@ -3343,7 +3342,13 @@
                     var y = Math.sin(rad) * dist + gravity;
 
                     var kfName = prefix + i;
-                    keyframeCSS += '@keyframes ' + kfName + ' { 0%{transform:translate(0,0) rotate(0deg);opacity:0.9} 60%{transform:translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg);opacity:0.8} 100%{transform:translate(' + (x * 1.1).toFixed(1) + 'px,' + (y * 1.2).toFixed(1) + 'px) rotate(' + (finalRot * 1.3).toFixed(1) + 'deg);opacity:0} }\n';
+                    var delay = 0.2 + i * 0.025;
+                    keyframeCSS += '@keyframes ' + kfName + ' {'
+                        + '0%{transform:translate(-50%,-50%) translate(0,0) rotate(0deg) scale(0);opacity:0}'
+                        + '10%{transform:translate(-50%,-50%) translate(0,0) rotate(30deg) scale(1);opacity:0.9}'
+                        + '60%{transform:translate(-50%,-50%) translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(1);opacity:0.8}'
+                        + '100%{transform:translate(-50%,-50%) translate(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px) rotate(' + finalRot.toFixed(1) + 'deg) scale(0.4);opacity:0}'
+                        + '}\n';
 
                     var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
                     svg.setAttribute('class', 'dynamic-petal');
@@ -3351,16 +3356,16 @@
                     svg.setAttribute('width', '14');
                     svg.setAttribute('height', '21');
                     svg.style.position = 'fixed';
-                    svg.style.left = (cx - 7) + 'px';
-                    svg.style.top = (cy - 10) + 'px';
+                    svg.style.left = cx + 'px';
+                    svg.style.top = cy + 'px';
                     svg.style.pointerEvents = 'none';
                     svg.style.zIndex = '9999';
                     svg.style.willChange = 'transform, opacity';
-                    svg.style.animation = kfName + ' 1.1s cubic-bezier(.4,.0,.2,1) forwards';
-                    svg.style.animationDelay = '0.2s';
+                    svg.style.transformOrigin = 'center center';
+                    svg.style.animation = kfName + ' 1.2s cubic-bezier(.4,.0,.2,1) forwards';
+                    svg.style.animationDelay = delay + 's';
                     svg.innerHTML = '<ellipse cx="10" cy="15" rx="8" ry="14" fill="' + color + '" opacity="0.9"/>';
                     container.appendChild(svg);
-                    petals.push(svg);
                 }
 
                 var styleTag = document.createElement('style');
