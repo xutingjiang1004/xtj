@@ -1326,52 +1326,6 @@
         .dock-tab:active { transform: scale(0.9); }
         .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
         .dock-tab .dt-icon { transition: none; }
-        .dock-tab.dock-tap-active .dt-icon { animation-duration: 0.62s; animation-timing-function: ease-out; animation-fill-mode: forwards; }
-        .dock-tab[data-tab="posts"].dock-tap-active .dt-icon { animation-name: dockPenWrite; }
-        .dock-tab[data-tab="chat"].dock-tap-active .dt-icon { animation-name: dockBubblePop; }
-        .dock-tab[data-tab="ai"].dock-tap-active .dt-icon { animation-name: dockBrainGlow; }
-        @keyframes dockPenWrite {
-            0%   { transform: rotate(0deg) translate(0,0); }
-            6%   { transform: rotate(-15deg) translate(2px,-1px); }
-            12%  { transform: rotate(-22deg) translate(6px,2px); }
-            18%  { transform: rotate(-8deg) translate(9px,3px); }
-            24%  { transform: rotate(8deg) translate(5px,-1px); }
-            30%  { transform: rotate(18deg) translate(0px,1px); }
-            36%  { transform: rotate(25deg) translate(-4px,3px); }
-            42%  { transform: rotate(10deg) translate(-1px,1px); }
-            48%  { transform: rotate(-5deg) translate(3px,-1px); }
-            54%  { transform: rotate(-15deg) translate(7px,2px); }
-            60%  { transform: rotate(0deg) translate(10px,1px); }
-            68%  { transform: rotate(12deg) translate(5px,-2px); }
-            76%  { transform: rotate(5deg) translate(2px,-1px); }
-            84%  { transform: rotate(-3deg) translate(0px,0px); }
-            92%  { transform: rotate(0deg) translate(0px,0px); }
-            100% { transform: rotate(0deg) translate(0,0); }
-        }
-        @keyframes dockBubblePop {
-            0%   { transform: scale(1,1); }
-            12%  { transform: scale(1.08,0.88); }
-            22%  { transform: scale(0.88,1.22); }
-            32%  { transform: scale(1.28,0.92); }
-            40%  { transform: scale(0.94,1.08); }
-            48%  { transform: scale(1.08,0.97); }
-            56%  { transform: scale(0.98,1.02); }
-            68%  { transform: scale(1.02,0.99); }
-            84%  { transform: scale(1,1); }
-            100% { transform: scale(1,1); }
-        }
-        @keyframes dockBrainGlow {
-            0%   { transform: scale(1);   filter: drop-shadow(0 0 0 transparent) brightness(1); }
-            10%  { transform: scale(1.06); filter: drop-shadow(0 0 3px rgba(99,102,241,0.3)) brightness(1.05); }
-            22%  { transform: scale(1.16); filter: drop-shadow(0 0 8px rgba(99,102,241,0.6)) brightness(1.15); }
-            32%  { transform: scale(1.08); filter: drop-shadow(0 0 5px rgba(99,102,241,0.35)) brightness(1.08); }
-            42%  { transform: scale(1.0);  filter: drop-shadow(0 0 0 transparent) brightness(1); }
-            54%  { transform: scale(1.04); filter: drop-shadow(0 0 4px rgba(99,102,241,0.2)) brightness(1.03); }
-            66%  { transform: scale(1.12); filter: drop-shadow(0 0 10px rgba(99,102,241,0.5)) brightness(1.12); }
-            76%  { transform: scale(1.05); filter: drop-shadow(0 0 4px rgba(99,102,241,0.25)) brightness(1.05); }
-            88%  { transform: scale(1.0);  filter: drop-shadow(0 0 0 transparent) brightness(1); }
-            100% { transform: scale(1);    filter: drop-shadow(0 0 0 transparent) brightness(1); }
-        }
         /* Dock面板: 聊天 (复用聊天样式，去掉overlay固定定位) */
         .dock-chat-container {
             display: flex; flex-direction: column; height: 100%;
@@ -1581,6 +1535,252 @@
         [data-theme="dark"] .ai-mode-toggle:not(.quick) .amt-label:first-child { color: #818cf8; }
         [data-theme="dark"] .ai-mode-toggle.quick .amt-label-quick { color: #34d399; }
         [data-theme="dark"] .ai-bubble .ai-streaming-cursor { background: var(--text-main); }
+
+        /* ================================================================
+           Navigation Button Click Animations (SVG + CSS @keyframes)
+           ================================================================ */
+
+        /* ---- Animation Layer Base ---- */
+        .dock-tab .anim-layer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 50px;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 10;
+            will-change: transform, opacity;
+        }
+        .dock-tab .dt-svg {
+            display: block;
+            position: relative;
+            z-index: 1;
+            transition: opacity 0.12s ease;
+        }
+        .dock-tab .dt-icon {
+            position: relative;
+            z-index: 1;
+        }
+        /* Show anim-layer during animation (dt-icon fades via its own animation) */
+        .dock-tab.anim-post .anim-layer,
+        .dock-tab.anim-chat .anim-layer,
+        .dock-tab.anim-ai .anim-layer {
+            opacity: 1;
+        }
+        /* Prevent dt-svg from interfering with anim-layer */
+        .dock-tab.anim-post .dt-icon,
+        .dock-tab.anim-chat .dt-icon,
+        .dock-tab.anim-ai .dt-icon {
+            position: relative;
+            z-index: 1;
+        }
+
+        /* ---- Initial click effects on original icon ---- */
+        .dock-tab.anim-post .dt-svg {
+            animation: iconPostClick 0.3s ease forwards;
+        }
+        @keyframes iconPostClick {
+            0%   { transform: rotate(0deg) translate(0, 0); opacity: 1; }
+            40%  { transform: rotate(-15deg) translate(0, -3px); opacity: 1; }
+            100% { transform: rotate(-15deg) translate(0, -3px); opacity: 0; }
+        }
+        .dock-tab.anim-chat .dt-svg {
+            animation: iconChatClick 0.25s ease forwards;
+        }
+        @keyframes iconChatClick {
+            0%   { transform: scale(1); opacity: 1; }
+            60%  { transform: scale(0.5); opacity: 0.5; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+        .dock-tab.anim-ai .dt-svg {
+            animation: iconAIClick 0.3s ease forwards;
+        }
+        @keyframes iconAIClick {
+            0%   { transform: translateX(0); opacity: 1; }
+            15%  { transform: translateX(-2px); opacity: 1; }
+            30%  { transform: translateX(2px); opacity: 1; }
+            45%  { transform: translateX(-1px); opacity: 1; }
+            60%  { transform: translateX(0); opacity: 0.8; }
+            100% { transform: translateX(0); opacity: 0; }
+        }
+
+        /* ---- Button 1: 帖子 - Pen Drawing (1.5s) ---- */
+        .dock-tab.anim-post .anim-layer {
+            color: var(--text-main);
+            animation: postContainer 1.5s ease forwards;
+        }
+        @keyframes postContainer {
+            0%, 82% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        .dock-tab.anim-post .al-pen {
+            animation: penLiftMove 1.5s ease forwards;
+        }
+        @keyframes penLiftMove {
+            0%   { transform: rotate(0deg) translate(0, 0); }
+            5%   { transform: rotate(-15deg) translate(0, -3px); }
+            12%  { transform: rotate(-15deg) translate(0, -3px); }
+            70%  { transform: rotate(5deg) translate(35px, 2px); }
+            82%  { transform: rotate(5deg) translate(35px, 2px); }
+            100% { transform: rotate(0deg) translate(0, 0); }
+        }
+        .dock-tab.anim-post .al-path {
+            stroke-dasharray: var(--path-len, 120);
+            stroke-dashoffset: var(--path-len, 120);
+            animation: pathDraw 1.5s ease forwards;
+        }
+        @keyframes pathDraw {
+            0%   { stroke-dashoffset: var(--path-len, 120); }
+            10%  { stroke-dashoffset: var(--path-len, 120); }
+            72%  { stroke-dashoffset: 0; }
+            82%  { stroke-dashoffset: 0; }
+            100% { stroke-dashoffset: var(--path-len, 120); }
+        }
+
+        /* ---- Button 2: 聊天 - Typing + Message Bubbles (2s) ---- */
+        .dock-tab.anim-chat .anim-layer {
+            color: var(--text-main);
+            animation: chatContainer 2s ease forwards;
+        }
+        @keyframes chatContainer {
+            0%, 85% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        /* Dots bounce */
+        .dock-tab.anim-chat .al-dot-1,
+        .dock-tab.anim-chat .al-dot-2,
+        .dock-tab.anim-chat .al-dot-3 {
+            opacity: 0;
+            animation: dotBounce 0.45s ease forwards;
+        }
+        .dock-tab.anim-chat .al-dot-1 { animation-delay: 0.2s; }
+        .dock-tab.anim-chat .al-dot-2 { animation-delay: 0.35s; }
+        .dock-tab.anim-chat .al-dot-3 { animation-delay: 0.5s; }
+        @keyframes dotBounce {
+            0%   { transform: translateY(0); opacity: 0; }
+            15%  { transform: translateY(-6px); opacity: 1; }
+            35%  { transform: translateY(0); opacity: 1; }
+            80%  { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        /* Main bubble expands from dots */
+        .dock-tab.anim-chat .al-main-bubble {
+            transform-origin: 0 0;
+            animation: mainBubbleExpand 2s ease forwards;
+        }
+        @keyframes mainBubbleExpand {
+            0%, 40%  { transform: scaleX(0); opacity: 0; }
+            55%      { transform: scaleX(1); opacity: 1; }
+            70%, 85% { transform: scaleX(1.6); opacity: 1; }
+            100%     { transform: scaleX(1); opacity: 0; }
+        }
+        /* Message line draws */
+        .dock-tab.anim-chat .al-msg-line {
+            stroke-dasharray: var(--msg-len, 16);
+            stroke-dashoffset: var(--msg-len, 16);
+            animation: msgLineDraw 2s ease forwards;
+        }
+        @keyframes msgLineDraw {
+            0%, 58% { stroke-dashoffset: var(--msg-len, 16); }
+            72%     { stroke-dashoffset: 0; }
+            85%     { stroke-dashoffset: 0; }
+            100%    { stroke-dashoffset: var(--msg-len, 16); }
+        }
+        /* Sub-bubble pops in */
+        .dock-tab.anim-chat .al-sub-bubble {
+            animation: subBubblePop 2s ease forwards;
+        }
+        @keyframes subBubblePop {
+            0%, 65% { opacity: 0; transform: scale(0); }
+            78%     { opacity: 1; transform: scale(1.1); }
+            85%     { opacity: 1; transform: scale(1); }
+            90%     { opacity: 0; transform: scale(0.9); }
+            100%    { opacity: 0; transform: scale(0); }
+        }
+
+        /* ---- Button 3: AI - Brain Neural Pulse (1.8s) ---- */
+        .dock-tab.anim-ai .anim-layer {
+            color: var(--text-main);
+            animation: aiContainer 1.8s ease forwards;
+        }
+        @keyframes aiContainer {
+            0%, 88% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+        /* Brain vibration on click */
+        .dock-tab.anim-ai .al-brain-glow {
+            animation: brainVibrate 1.8s ease forwards;
+        }
+        @keyframes brainVibrate {
+            0%   { transform: translateX(0); }
+            4%   { transform: translateX(-2px); }
+            8%   { transform: translateX(2px); }
+            12%  { transform: translateX(-1px); }
+            16%  { transform: translateX(1px); }
+            20%  { transform: translateX(0); }
+        }
+        /* Brain glow path */
+        .dock-tab.anim-ai .al-brain-glow path {
+            animation: brainGlowPulse 1.8s ease forwards;
+        }
+        @keyframes brainGlowPulse {
+            0%   { opacity: 0; stroke-width: 3; }
+            15%  { opacity: 0.6; stroke-width: 4; }
+            40%  { opacity: 1; stroke-width: 5; }
+            70%  { opacity: 0.8; stroke-width: 4; }
+            88%  { opacity: 0.3; stroke-width: 3; }
+            100% { opacity: 0; stroke-width: 3; }
+        }
+        /* Neural pulses - stroke dash offset animation */
+        .dock-tab.anim-ai .al-pulse-1 path,
+        .dock-tab.anim-ai .al-pulse-2 path,
+        .dock-tab.anim-ai .al-pulse-3 path,
+        .dock-tab.anim-ai .al-pulse-4 path {
+            stroke-dasharray: var(--pulse-len, 30);
+            stroke-dashoffset: var(--pulse-len, 30);
+            animation: neuralPulse 1.8s ease forwards;
+        }
+        @keyframes neuralPulse {
+            0%   { stroke-dashoffset: var(--pulse-len, 30); opacity: 0; }
+            20%  { stroke-dashoffset: var(--pulse-len, 30); opacity: 0.8; }
+            50%  { stroke-dashoffset: 0; opacity: 1; }
+            70%  { stroke-dashoffset: 0; opacity: 0.6; }
+            88%  { opacity: 0.3; }
+            100% { stroke-dashoffset: var(--pulse-len, 30); opacity: 0; }
+        }
+        .dock-tab.anim-ai .al-pulse-2 path { animation-delay: 0.1s; }
+        .dock-tab.anim-ai .al-pulse-3 path { animation-delay: 0.2s; }
+        .dock-tab.anim-ai .al-pulse-4 path { animation-delay: 0.15s; }
+        /* Synaptic flash circles */
+        .dock-tab.anim-ai .al-flash-1,
+        .dock-tab.anim-ai .al-flash-2,
+        .dock-tab.anim-ai .al-flash-3,
+        .dock-tab.anim-ai .al-flash-4 {
+            animation: synapticFlash 1.8s ease forwards;
+        }
+        @keyframes synapticFlash {
+            0%   { transform: scale(0); opacity: 0; }
+            45%  { transform: scale(0); opacity: 0; }
+            55%  { transform: scale(2); opacity: 1; }
+            70%  { transform: scale(0); opacity: 0; }
+            100% { transform: scale(0); opacity: 0; }
+        }
+        .dock-tab.anim-ai .al-flash-2 { animation-delay: 0.1s; }
+        .dock-tab.anim-ai .al-flash-3 { animation-delay: 0.2s; }
+        .dock-tab.anim-ai .al-flash-4 { animation-delay: 0.15s; }
+        /* Brain white flash */
+        .dock-tab.anim-ai .al-brain-flash {
+            animation: brainWhiteFlash 1.8s ease forwards;
+        }
+        @keyframes brainWhiteFlash {
+            0%   { opacity: 0; }
+            78%  { opacity: 0; }
+            85%  { opacity: 0.5; }
+            92%  { opacity: 0; }
+            100% { opacity: 0; }
+        }
     </style>
 </head>
 <body>
@@ -1694,16 +1894,90 @@
 
     <div class="dock-bar" id="dockBar">
         <button class="dock-tab active" data-tab="posts">
-            <span class="dt-icon">📝</span>
+            <span class="dt-icon">
+                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                    <path d="m15 5 4 4"/>
+                </svg>
+            </span>
             <span class="dt-label">帖子</span>
+            <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60">
+                <defs>
+                    <linearGradient id="g-stroke" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stop-color="#FF6B6B"/>
+                        <stop offset="50%" stop-color="#4ECDC4"/>
+                        <stop offset="100%" stop-color="#FFE66D"/>
+                    </linearGradient>
+                </defs>
+                <path class="al-path" d="M 8,32 Q 22,12 38,28 T 70,18" fill="none" stroke="url(#g-stroke)" stroke-width="3" stroke-linecap="round"/>
+                <g class="al-pen">
+                    <path d="M -3,-10 L 0,-3 L 3,-10 Z" fill="currentColor"/>
+                    <line x1="0" y1="-3" x2="14" y2="-18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </g>
+            </svg>
         </button>
         <button class="dock-tab" data-tab="chat">
-            <span class="dt-icon">💬</span>
+            <span class="dt-icon">
+                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+            </span>
             <span class="dt-label">聊天</span>
+            <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60">
+                <g class="al-chat-main" transform="translate(30, 18)">
+                    <rect class="al-main-bubble" x="-15" y="-10" width="30" height="20" rx="10" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <line class="al-msg-line" x1="-8" y1="0" x2="8" y2="0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    <circle class="al-dot-1" cx="-12" cy="-4" r="2" fill="currentColor"/>
+                    <circle class="al-dot-2" cx="-6" cy="-4" r="2" fill="currentColor"/>
+                    <circle class="al-dot-3" cx="0" cy="-4" r="2" fill="currentColor"/>
+                </g>
+                <g transform="translate(52, 28)">
+                    <g class="al-sub-bubble">
+                        <rect x="-8" y="-5" width="16" height="10" rx="5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                        <line x1="-4" y1="0" x2="4" y2="0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    </g>
+                </g>
+            </svg>
         </button>
         <button class="dock-tab" data-tab="ai">
-            <span class="dt-icon">🧠</span>
+            <span class="dt-icon">
+                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 4.5C10.5 3 8 3 6.5 4.5S5 8 6 9.5c-1.5 1-2 3-1 4.5s2.5 2 4 2c0 2 1.5 4 3 4s3-2 3-4c1.5 0 3-.5 4-2s.5-3.5-1-4.5c1-1.5.5-5-1-6.5S13.5 3 12 4.5Z"/>
+                </svg>
+            </span>
             <span class="dt-label">AI</span>
+            <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60">
+                <defs>
+                    <filter id="brainGlow">
+                        <feGaussianBlur stdDeviation="2" result="blur"/>
+                        <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+                    </filter>
+                    <filter id="neonGlow">
+                        <feGaussianBlur stdDeviation="1.5" result="blur"/>
+                        <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+                    </filter>
+                </defs>
+                <g class="al-brain-glow">
+                    <path d="M 30,30 Q 35,20 40,30 Q 45,20 50,30" fill="none" stroke="#7C3AED" stroke-width="3" stroke-linecap="round" filter="url(#brainGlow)" opacity="0"/>
+                </g>
+                <g class="al-pulse-1">
+                    <path d="M 40,30 L 20,12" fill="none" stroke="#A78BFA" stroke-width="1.5" stroke-linecap="round" filter="url(#neonGlow)"/>
+                    <circle class="al-flash-1" cx="20" cy="12" r="3" fill="#A78BFA" opacity="0"/>
+                </g>
+                <g class="al-pulse-2">
+                    <path d="M 40,30 L 60,12" fill="none" stroke="#A78BFA" stroke-width="1.5" stroke-linecap="round" filter="url(#neonGlow)"/>
+                    <circle class="al-flash-2" cx="60" cy="12" r="3" fill="#A78BFA" opacity="0"/>
+                </g>
+                <g class="al-pulse-3">
+                    <path d="M 40,30 L 20,48" fill="none" stroke="#A78BFA" stroke-width="1.5" stroke-linecap="round" filter="url(#neonGlow)"/>
+                    <circle class="al-flash-3" cx="20" cy="48" r="3" fill="#A78BFA" opacity="0"/>
+                </g>
+                <g class="al-pulse-4">
+                    <path d="M 40,30 L 60,48" fill="none" stroke="#A78BFA" stroke-width="1.5" stroke-linecap="round" filter="url(#neonGlow)"/>
+                    <circle class="al-flash-4" cx="60" cy="48" r="3" fill="#A78BFA" opacity="0"/>
+                </g>
+                <rect class="al-brain-flash" x="20" y="8" width="40" height="44" rx="12" fill="white" opacity="0"/>
+            </svg>
         </button>
     </div>
     </div>
@@ -3063,12 +3337,31 @@
                 if (tab === 'ai') { scrollDockAIBottom(); }
             };
 
+            // Animation class mapping
+            var animClassMap = { posts: 'anim-post', chat: 'anim-chat', ai: 'anim-ai' };
+            // Track which buttons currently have animation playing
+            var animatingTabs = {};
+            // Animation durations by tab (in ms, matching CSS)
+            var animDurations = { posts: 1500, chat: 2000, ai: 1800 };
+
+            function triggerTabAnimation(el, tab) {
+                var cls = animClassMap[tab];
+                if (!cls) return;
+                if (animatingTabs[tab]) return;
+                animatingTabs[tab] = true;
+                el.classList.add(cls);
+                // Clean up after animation duration + small buffer
+                setTimeout(function() {
+                    el.classList.remove(cls);
+                    animatingTabs[tab] = false;
+                }, animDurations[tab] + 50);
+            }
+
             document.querySelectorAll('.dock-tab').forEach(btn => {
                 btn.addEventListener('click', function() {
-                    if (this.classList.contains('dock-tap-active')) return;
-                    this.classList.add('dock-tap-active');
-                    setTimeout(() => this.classList.remove('dock-tap-active'), 520);
-                    switchDockTab(this.dataset.tab);
+                    var tab = this.dataset.tab;
+                    switchDockTab(tab);
+                    triggerTabAnimation(this, tab);
                 });
             });
             // ========== Dock 聊天 ==========
@@ -3419,6 +3712,39 @@
         (function() {
             window.toggleAIChat = function() { switchDockTab('ai'); };
             window.sendAIMessage = function() { dockSendAI(); };
+        })();
+    </script>
+
+    <!-- SVG Animation Path Length Calculator -->
+    <script>
+        (function() {
+            function calcPathLengths() {
+                // Button 1: Post drawing path length
+                var pathEl = document.querySelector('.dock-tab[data-tab="posts"] .al-path');
+                if (pathEl && typeof pathEl.getTotalLength === 'function') {
+                    var len = Math.round(pathEl.getTotalLength());
+                    pathEl.style.setProperty('--path-len', len);
+                }
+                // Button 2: Chat message line length
+                var msgLine = document.querySelector('.dock-tab[data-tab="chat"] .al-msg-line');
+                if (msgLine && typeof msgLine.getTotalLength === 'function') {
+                    var msgLen = Math.round(msgLine.getTotalLength());
+                    msgLine.style.setProperty('--msg-len', msgLen);
+                }
+                // Button 3: AI neural pulse path lengths
+                var pulsePaths = document.querySelectorAll('.dock-tab[data-tab="ai"] .al-pulse-1 path, .dock-tab[data-tab="ai"] .al-pulse-2 path, .dock-tab[data-tab="ai"] .al-pulse-3 path, .dock-tab[data-tab="ai"] .al-pulse-4 path');
+                pulsePaths.forEach(function(p) {
+                    if (typeof p.getTotalLength === 'function') {
+                        var plen = Math.round(p.getTotalLength());
+                        p.style.setProperty('--pulse-len', plen);
+                    }
+                });
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', calcPathLengths);
+            } else {
+                calcPathLengths();
+            }
         })();
     </script>
 </body>
