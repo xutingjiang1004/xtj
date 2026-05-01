@@ -1585,10 +1585,12 @@
         }
         @keyframes iconAIClick {
             0%   { transform: scale(1); opacity: 1; }
-            5%   { transform: scale(0.97); opacity: 0; }
-            70%  { transform: scale(0.97); opacity: 0; }
-            82%  { transform: scale(1); opacity: 0.5; }
-            92%  { transform: scale(1); opacity: 0.9; }
+            4%   { transform: scale(0.97); opacity: 0; }
+            55%  { transform: scale(0.97); opacity: 0; }
+            62%  { transform: scale(1); opacity: 0.3; }
+            70%  { transform: scale(1); opacity: 0.6; }
+            80%  { transform: scale(1); opacity: 0.9; }
+            90%  { transform: scale(1); opacity: 1; }
             100% { transform: scale(1); opacity: 1; }
         }
 
@@ -1712,9 +1714,10 @@
             animation: aiContainerFade 1.4s ease forwards;
         }
         @keyframes aiContainerFade {
-            0%, 65% { opacity: 1; }
-            80% { opacity: 0.5; }
-            90% { opacity: 0.1; }
+            0%, 55% { opacity: 1; }
+            65% { opacity: 0.5; }
+            75% { opacity: 0.1; }
+            80% { opacity: 0; }
             100% { opacity: 0; }
         }
         /* 原始花朵图标淡出淡入 - 透明轮廓风格 */
@@ -1724,10 +1727,12 @@
         }
         @keyframes flowerIconFadeOut {
             0%   { opacity: 1; }
-            5%   { opacity: 0; }
-            70%  { opacity: 0; }
-            82%  { opacity: 0.5; }
-            92%  { opacity: 0.9; }
+            4%   { opacity: 0; }
+            55%  { opacity: 0; }
+            62%  { opacity: 0.3; }
+            70%  { opacity: 0.6; }
+            80%  { opacity: 0.9; }
+            90%  { opacity: 1; }
             100% { opacity: 1; }
         }
         /* CSS层花朵中心的闪光 */
@@ -1759,86 +1764,92 @@
         .dock-tab.anim-ai .al-petal-g:nth-child(1) { animation: petalFly0 1.4s ease forwards; }
         @keyframes petalFly0 {
             0%   { transform: translate(0,0); opacity: 0; }
-            6%   { transform: translate(0,0); opacity: 0.7; }
-            10%  { transform: translate(0,0); opacity: 1; }
-            32%  { transform: translate(0, -18px) rotate(-15deg); opacity: 0.9; }
-            44%  { transform: translate(0, -16px) rotate(-12deg); opacity: 0.7; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 0.8; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(0, -18px) rotate(-15deg); opacity: 0.9; }
+            42%  { transform: translate(0, -16px) rotate(-12deg); opacity: 0.6; }
+            58%  { transform: translate(0, -3px) rotate(-2deg); opacity: 0.3; }
+            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            70%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣1：右上飞 translate(13, -7) */
         .dock-tab.anim-ai .al-petal-g:nth-child(2) { animation: petalFly1 1.4s ease forwards; }
         @keyframes petalFly1 {
             0%   { transform: translate(0,0); opacity: 0; }
-            6%   { transform: translate(0,0); opacity: 0.7; }
-            10%  { transform: translate(0,0); opacity: 1; }
-            32%  { transform: translate(16px, -9px) rotate(20deg); opacity: 0.9; }
-            44%  { transform: translate(14px, -8px) rotate(16deg); opacity: 0.7; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 0.8; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(16px, -9px) rotate(20deg); opacity: 0.9; }
+            42%  { transform: translate(14px, -8px) rotate(16deg); opacity: 0.6; }
+            58%  { transform: translate(3px, -1px) rotate(3deg); opacity: 0.3; }
+            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            70%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣2：右下飞 translate(13, 7) */
         .dock-tab.anim-ai .al-petal-g:nth-child(3) { animation: petalFly2 1.4s ease forwards; }
         @keyframes petalFly2 {
             0%   { transform: translate(0,0); opacity: 0; }
-            6%   { transform: translate(0,0); opacity: 0.7; }
-            10%  { transform: translate(0,0); opacity: 1; }
-            32%  { transform: translate(16px, 9px) rotate(-25deg); opacity: 0.9; }
-            44%  { transform: translate(14px, 8px) rotate(-20deg); opacity: 0.7; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 0.8; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(16px, 9px) rotate(-25deg); opacity: 0.9; }
+            42%  { transform: translate(14px, 8px) rotate(-20deg); opacity: 0.6; }
+            58%  { transform: translate(3px, 1px) rotate(-3deg); opacity: 0.3; }
+            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            70%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣3：向下飞 translate(0, 15) */
         .dock-tab.anim-ai .al-petal-g:nth-child(4) { animation: petalFly3 1.4s ease forwards; }
         @keyframes petalFly3 {
             0%   { transform: translate(0,0); opacity: 0; }
-            6%   { transform: translate(0,0); opacity: 0.7; }
-            10%  { transform: translate(0,0); opacity: 1; }
-            32%  { transform: translate(0, 18px) rotate(18deg); opacity: 0.9; }
-            44%  { transform: translate(0, 16px) rotate(14deg); opacity: 0.7; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 0.8; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(0, 18px) rotate(18deg); opacity: 0.9; }
+            42%  { transform: translate(0, 16px) rotate(14deg); opacity: 0.6; }
+            58%  { transform: translate(0, 3px) rotate(2deg); opacity: 0.3; }
+            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            70%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣4：左下飞 translate(-13, 7) */
         .dock-tab.anim-ai .al-petal-g:nth-child(5) { animation: petalFly4 1.4s ease forwards; }
         @keyframes petalFly4 {
             0%   { transform: translate(0,0); opacity: 0; }
-            6%   { transform: translate(0,0); opacity: 0.7; }
-            10%  { transform: translate(0,0); opacity: 1; }
-            32%  { transform: translate(-16px, 9px) rotate(-22deg); opacity: 0.9; }
-            44%  { transform: translate(-14px, 8px) rotate(-18deg); opacity: 0.7; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 0.8; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(-16px, 9px) rotate(-22deg); opacity: 0.9; }
+            42%  { transform: translate(-14px, 8px) rotate(-18deg); opacity: 0.6; }
+            58%  { transform: translate(-3px, 1px) rotate(-3deg); opacity: 0.3; }
+            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            70%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣5：左上飞 translate(-13, -7) */
         .dock-tab.anim-ai .al-petal-g:nth-child(6) { animation: petalFly5 1.4s ease forwards; }
         @keyframes petalFly5 {
             0%   { transform: translate(0,0); opacity: 0; }
-            6%   { transform: translate(0,0); opacity: 0.7; }
-            10%  { transform: translate(0,0); opacity: 1; }
-            32%  { transform: translate(-16px, -9px) rotate(28deg); opacity: 0.9; }
-            44%  { transform: translate(-14px, -8px) rotate(22deg); opacity: 0.7; }
-            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.2; }
-            72%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 0.8; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(-16px, -9px) rotate(28deg); opacity: 0.9; }
+            42%  { transform: translate(-14px, -8px) rotate(22deg); opacity: 0.6; }
+            58%  { transform: translate(-3px, -1px) rotate(3deg); opacity: 0.3; }
+            65%  { transform: translate(0, 0) rotate(0deg); opacity: 0.1; }
+            70%  { transform: translate(0, 0) rotate(0deg); opacity: 0; }
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
-        /* 切换按钮花朵图标弹跳动画 */
+        /* 切换按钮花朵图标飞散动画 */
         .amt-flower-icon.amt-flower-anim {
-            animation: amtFlowerPop 1.4s ease forwards;
+            animation: amtFlowerScatter 1.4s ease forwards;
         }
-        @keyframes amtFlowerPop {
+        @keyframes amtFlowerScatter {
             0%   { transform: scale(1); opacity: 1; }
-            10%  { transform: scale(0.8); opacity: 0.5; }
-            20%  { transform: scale(1.2); opacity: 1; }
-            30%  { transform: scale(0.9); opacity: 0.8; }
-            40%  { transform: scale(1.1); opacity: 1; }
-            50%  { transform: scale(0.95); opacity: 0.9; }
-            60%  { transform: scale(1.05); opacity: 1; }
+            8%   { transform: scale(0.5); opacity: 0; }
+            12%  { transform: scale(0.3); opacity: 0; }
+            35%  { transform: scale(1.3); opacity: 0.8; }
+            50%  { transform: scale(0.9); opacity: 0.6; }
+            70%  { transform: scale(1.1); opacity: 0.9; }
+            85%  { transform: scale(0.95); opacity: 1; }
             100% { transform: scale(1); opacity: 1; }
         }
     </style>
@@ -1933,8 +1944,8 @@
                     <span class="ai-title">DeepSeek AI</span>
                     <button class="ai-mode-toggle" id="dockAIModeBtn" title="切换思考/快速模式" onclick="toggleAIMode()">
                         <span class="amt-label">
-                            <svg class="amt-flower-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" style="vertical-align:middle;">
-                                <g transform="translate(12,12)">
+                            <svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="14" height="14" fill="none" style="vertical-align:middle;">
+                                <g transform="translate(13,13)">
                                     <ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(0)"/>
                                     <ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(60)"/>
                                     <ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(120)"/>
@@ -1953,8 +1964,8 @@
                 <div class="ai-chat-body" id="dockAIBody">
                     <div class="ai-welcome" id="dockAIWelcome">
                         <span class="ai-welcome-icon">
-                            <svg viewBox="0 0 24 24" width="36" height="36" fill="none">
-                                <g transform="translate(12,12)">
+                            <svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="36" height="36" fill="none">
+                                <g transform="translate(13,13)">
                                     <ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(0)"/>
                                     <ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(60)"/>
                                     <ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(120)"/>
@@ -2050,7 +2061,7 @@
         </button>
         <button class="dock-tab" data-tab="ai">
             <span class="dt-icon">
-                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none">
+                <svg class="dt-svg" viewBox="0 0 24 24" width="28" height="28" fill="none">
                     <g transform="translate(12,12)">
                         <ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(0)"/>
                         <ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(60)"/>
@@ -2062,14 +2073,14 @@
                     </g>
                 </svg>
             </span>
-            <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
+            <svg class="anim-layer" viewBox="0 0 90 70" width="90" height="70" overflow="visible">
                 <defs>
                     <radialGradient id="flower-flash" cx="50%" cy="50%" r="50%">
                         <stop offset="0%" stop-color="white" stop-opacity="0.9"/>
                         <stop offset="100%" stop-color="white" stop-opacity="0"/>
                     </radialGradient>
                 </defs>
-                <g class="al-flower" transform="translate(40, 30)">
+                <g class="al-flower" transform="translate(45, 35)">
                     <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-9" rx="3.5" ry="9" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
                     <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-9" rx="3.5" ry="9" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
                     <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-9" rx="3.5" ry="9" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
@@ -3689,7 +3700,7 @@
                 const welcome = document.getElementById('dockAIWelcome');
                 if (!welcome) return;
                 if (dockAIThinkMode) {
-                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="0 0 24 24" width="36" height="36" fill="none"><g transform="translate(12,12)"><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(0)"/><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(60)"/><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(120)"/><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(180)"/><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(240)"/><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(300)"/><circle cx="0" cy="0" r="3" fill="none" stroke="#D97706" stroke-width="1"/></g></svg></span>你好！我是 DeepSeek AI 助手<br>思考模式 — 深度推理，展示思考过程';
+                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="36" height="36" fill="none"><g transform="translate(13,13)"><ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(0)"/><ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(60)"/><ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(120)"/><ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(180)"/><ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(240)"/><ellipse cx="0" cy="-7" rx="2.5" ry="7" fill="none" stroke="#EC4899" stroke-width="1.2" transform="rotate(300)"/><circle cx="0" cy="0" r="3" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg></span>你好！我是 DeepSeek AI 助手<br>思考模式 — 深度推理，展示思考过程';
                 } else {
                     welcome.innerHTML = '<span class="ai-welcome-icon">⚡</span>你好！我是 DeepSeek AI 助手<br>快速模式 — 极速响应，跳过思考过程';
                 }
