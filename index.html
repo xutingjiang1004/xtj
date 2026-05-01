@@ -2,17 +2,25 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0" />
     <title>xtj</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">
     </script>
     <style>
+        html, body {
+            touch-action: manipulation;
+            overscroll-behavior: none;
+        }
+        * {
+            -webkit-tap-highlight-color: transparent;
+            -webkit-touch-callout: none;
+        }
         :root {
             --bg-color: #e8f5e9;
-            --glass-bg: rgba(255, 255, 255, 0.18);
-            --glass-border: rgba(255, 255, 255, 0.45);
+            --glass-bg: rgba(255, 255, 255, 0.6);
+            --glass-border: rgba(255, 255, 255, 0.55);
             --glass-shadow: 0 18px 50px rgba(5, 150, 105, 0.08);
-            --glass-blur: blur(28px);
+            --glass-blur: blur(32px);
             --primary: #059669;
             --admin-color: #ff9f0a;
             --like-color: #ff3b60;
@@ -21,9 +29,9 @@
             --radius-sm: 16px;
             --radius-md: 24px;
             --radius-lg: 32px;
-            --trans-smooth: all 0.4s cubic-bezier(0.25, 1, 0.3, 1);
-            --trans-spring: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-            --trans-ppt: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            --trans-smooth: all 0.32s cubic-bezier(0.25, 1, 0.3, 1);
+            --trans-spring: all 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            --trans-ppt: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         [data-theme="dark"] {
@@ -1262,9 +1270,10 @@
             overflow-y: auto; overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
             opacity: 0; pointer-events: none;
-            transform: translateY(12px);
-            transition: opacity 0.35s cubic-bezier(0.16,1,0.3,1), transform 0.35s cubic-bezier(0.16,1,0.3,1);
+            transform: translateY(10px);
+            transition: opacity 0.25s ease-out, transform 0.25s ease-out;
             padding: 16px;
+            will-change: opacity, transform;
         }
         .dock-panel.active {
             opacity: 1; pointer-events: all;
@@ -1276,12 +1285,12 @@
             gap: 6px; padding: 8px 16px 12px;
             background: linear-gradient(180deg,
                 rgba(255,255,255,0) 0%,
-                rgba(255,255,255,0.3) 8%,
-                rgba(255,255,255,0.5) 30%,
-                rgba(255,255,255,0.55) 100%);
-            backdrop-filter: blur(30px) saturate(180%);
-            -webkit-backdrop-filter: blur(30px) saturate(180%);
-            border-top: 1px solid rgba(255,255,255,0.35);
+                rgba(255,255,255,0.45) 8%,
+                rgba(255,255,255,0.65) 30%,
+                rgba(255,255,255,0.72) 100%);
+            backdrop-filter: blur(32px) saturate(180%);
+            -webkit-backdrop-filter: blur(32px) saturate(180%);
+            border-top: 1px solid rgba(255,255,255,0.4);
             box-shadow: 0 -4px 24px rgba(0,0,0,0.04);
             position: relative;
             z-index: 100;
@@ -2063,12 +2072,40 @@
                 btn.textContent = "提交中...";
                 btn.disabled = true;
                 try {
-                    await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
+                    const { data: newComm, error } = await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]).select();
+                    if (error) throw error;
                     closeModal("commentModal");
                     showToast("评论成功！");
-                    loadFeed(true);
+                    const post = document.querySelector(`.post[data-post-id="${activePostId}"]`);
+                    if (post) {
+                        let commentsEl = post.querySelector('.comments');
+                        if (!commentsEl) {
+                            const statsEl = post.querySelector('.post-stats-text');
+                            if (statsEl) {
+                                statsEl.outerHTML = `<div class="post-stats-text">浏览 ${statsEl.textContent.match(/浏览 (\d+)/)[1]} · 点赞 ${statsEl.textContent.match(/点赞 (\d+)/)[1]} · 评论 1</div>`;
+                            }
+                            post.insertAdjacentHTML('beforeend', `
+                            <div class="comments">
+                                <div class="comment-item" data-comment-id="${newComm?.[0]?.id || ''}">
+                                    <div><b>${currentUser}:</b>${escapeHtml(content)}</div>
+                                </div>
+                            </div>`);
+                        } else {
+                            const statsEl = post.querySelector('.post-stats-text');
+                            if (statsEl) {
+                                const curr = parseInt(statsEl.textContent.match(/评论 (\d+)/)[1]);
+                                statsEl.outerHTML = `<div class="post-stats-text">浏览 ${statsEl.textContent.match(/浏览 (\d+)/)[1]} · 点赞 ${statsEl.textContent.match(/点赞 (\d+)/)[1]} · 评论 ${curr + 1}</div>`;
+                            }
+                            commentsEl.insertAdjacentHTML('beforeend', `
+                                <div class="comment-item" data-comment-id="${newComm?.[0]?.id || ''}">
+                                    <div><b>${currentUser}:</b>${escapeHtml(content)}</div>
+                                </div>`);
+                        }
+                    } else {
+                        loadFeed(true);
+                    }
                 } catch (e) {
-                    showToast("评论失败");
+                    showToast("评论失败: " + (e.message || "未知错误"));
                     console.error(e);
                 } finally {
                     btn.textContent = "发布评论";
@@ -2877,32 +2914,38 @@
 
             // ========== Dock 切换 ==========
             let currentDockTab = 'posts';
+            let lastTabTapTime = {};
             window.switchDockTab = function(tab) {
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
-                if (tab === currentDockTab) return;
+                const now = Date.now();
+                if (tab === currentDockTab) {
+                    if (now - (lastTabTapTime[tab] || 0) < 300) {
+                        const panel = document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1));
+                        if (panel) {
+                            requestAnimationFrame(() => {
+                                panel.scrollTo({ top: 0, behavior: 'smooth' });
+                            });
+                            if (tab === 'chat' && dockChatActiveUser) {
+                                scrollDockChatBottom();
+                            }
+                            if (tab === 'ai') {
+                                scrollDockAIBottom();
+                            }
+                        }
+                    }
+                    return;
+                }
+                lastTabTapTime[tab] = now;
                 currentDockTab = tab;
                 document.querySelectorAll('.dock-panel').forEach(p => p.classList.remove('active'));
                 document.querySelectorAll('.dock-tab').forEach(t => t.classList.remove('active'));
                 const panel = document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1));
                 if (panel) panel.classList.add('active');
                 const tabBtn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
-                if (tabBtn) {
-                    tabBtn.classList.add('active');
-                    updateDockIndicator(tabBtn);
-                }
+                if (tabBtn) tabBtn.classList.add('active');
                 if (tab === 'chat') { loadDockChatList(); startDMPolling(30000); }
                 if (tab === 'ai') { scrollDockAIBottom(); }
             };
-
-            function updateDockIndicator(activeBtn) {
-                const bar = document.getElementById('dockBar');
-                const indicator = document.getElementById('dockIndicator');
-                if (!bar || !indicator || !activeBtn) return;
-                const barRect = bar.getBoundingClientRect();
-                const btnRect = activeBtn.getBoundingClientRect();
-                indicator.style.left = (btnRect.left - barRect.left) + 'px';
-                indicator.style.width = btnRect.width + 'px';
-            }
 
             document.querySelectorAll('.dock-tab').forEach(btn => {
                 btn.addEventListener('click', function() {
@@ -3030,6 +3073,11 @@
                     return '<div class="chat-msg ' + (sent ? 'sent' : 'received') + (isBulk ? ' no-anim' : '') + '">' + body + readStatus + '<span class="msg-time">' + formatMsgTime(m.created_at) + '</span></div>';
                 }).join('');
                 if (isBulk) { el.scrollTop = el.scrollHeight; } else { requestAnimationFrame(function() { el.scrollTop = el.scrollHeight; }); }
+            }
+
+            function scrollDockChatBottom() {
+                const el = document.getElementById('dockChatMessages');
+                if (el) requestAnimationFrame(function() { el.scrollTop = el.scrollHeight; });
             }
 
             async function sendDockChatMessage() {
