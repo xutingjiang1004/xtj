@@ -1624,10 +1624,10 @@
         }
         @keyframes penLiftMove {
             0%   { transform: rotate(0deg) translate(0, 0); opacity: 0; }
-            6%   { transform: rotate(-15deg) translate(0, -3px); opacity: 1; }
-            12%  { transform: rotate(-15deg) translate(0, -3px); opacity: 1; }
-            70%  { transform: rotate(5deg) translate(30px, 2px); opacity: 1; }
-            82%  { transform: rotate(5deg) translate(30px, 2px); opacity: 1; }
+            6%   { transform: rotate(-25deg) translate(0, -3px); opacity: 1; }
+            12%  { transform: rotate(-25deg) translate(0, -3px); opacity: 1; }
+            70%  { transform: rotate(5deg) translate(55px, 0px); opacity: 1; }
+            82%  { transform: rotate(5deg) translate(55px, 0px); opacity: 1; }
             94%  { transform: rotate(-3deg) translate(8px, 1px); opacity: 0.6; }
             100% { transform: rotate(0deg) translate(5px, 0); opacity: 0; }
         }
@@ -1638,8 +1638,8 @@
         }
         @keyframes pathDraw {
             0%   { stroke-dashoffset: var(--path-len, 120); }
-            10%  { stroke-dashoffset: var(--path-len, 120); }
-            72%  { stroke-dashoffset: 0; }
+            6%   { stroke-dashoffset: var(--path-len, 120); }
+            70%  { stroke-dashoffset: 0; }
             82%  { stroke-dashoffset: 0; }
             100% { stroke-dashoffset: var(--path-len, 120); }
         }
@@ -1687,20 +1687,20 @@
             animation: bubble1Inflate 2.5s ease forwards;
         }
         @keyframes bubble1Inflate {
-            0%, 8%  { transform: scale(0) translate(0, 0); opacity: 0; }
-            12%     { transform: scale(0.3) translate(0, 0); opacity: 0.5; }
-            18%     { transform: scale(1.1) translate(0, 0); opacity: 1; }
-            24%     { transform: scale(0.94) translate(0, 0); opacity: 1; }
-            28%     { transform: scale(1.03) translate(0, 0); opacity: 1; }
-            32%     { transform: scale(0.98) translate(0, 0); opacity: 1; }
-            36%     { transform: scale(1) translate(0, 0); opacity: 1; }
-            38%     { transform: scale(1) translate(0.8px, 0); opacity: 1; }
-            40%     { transform: scale(1) translate(-0.5px, 0); opacity: 1; }
-            42%     { transform: scale(1) translate(0); opacity: 1; }
-            70%     { transform: scale(1) translate(0, 0); opacity: 1; }
-            80%     { transform: scale(1.05) translate(0, -2px); opacity: 0.8; }
-            90%     { transform: scale(1) translate(0, -5px); opacity: 0.4; }
-            100%    { transform: scale(0.9) translate(0, -8px); opacity: 0; }
+            0%, 8%  { transform: translate(8px, 20px) scale(0); opacity: 0; }
+            12%     { transform: translate(8px, 20px) scale(0.3); opacity: 0.5; }
+            18%     { transform: translate(8px, 20px) scale(1.1); opacity: 1; }
+            24%     { transform: translate(8px, 20px) scale(0.94); opacity: 1; }
+            28%     { transform: translate(8px, 20px) scale(1.03); opacity: 1; }
+            32%     { transform: translate(8px, 20px) scale(0.98); opacity: 1; }
+            36%     { transform: translate(8px, 20px) scale(1); opacity: 1; }
+            38%     { transform: translate(8.8px, 20px) scale(1); opacity: 1; }
+            40%     { transform: translate(7.5px, 20px) scale(1); opacity: 1; }
+            42%     { transform: translate(8px, 20px) scale(1); opacity: 1; }
+            70%     { transform: translate(8px, 20px) scale(1); opacity: 1; }
+            80%     { transform: translate(8px, 18px) scale(1.05); opacity: 0.8; }
+            90%     { transform: translate(8px, 14px) scale(1); opacity: 0.4; }
+            100%    { transform: translate(8px, 10px) scale(0.9); opacity: 0; }
         }
 
         /* Bubble 2 (Medium): Second message bubble - 右上方位置 */
@@ -1708,15 +1708,15 @@
             animation: bubble2Inflate 2.5s ease forwards;
         }
         @keyframes bubble2Inflate {
-            0%, 28% { transform: scale(0) translate(0, 0); opacity: 0; }
-            34%     { transform: scale(0.5) translate(0, 0); opacity: 0.6; }
-            40%     { transform: scale(1.08) translate(0, 0); opacity: 1; }
-            46%     { transform: scale(0.95) translate(0, 0); opacity: 1; }
-            52%     { transform: scale(1) translate(0, 0); opacity: 1; }
-            72%     { transform: scale(1) translate(0, 0); opacity: 1; }
-            82%     { transform: scale(1.03) translate(0, -2px); opacity: 0.7; }
-            92%     { transform: scale(0.95) translate(0, -5px); opacity: 0.3; }
-            100%    { transform: scale(0.85) translate(0, -7px); opacity: 0; }
+            0%, 28% { transform: translate(50px, 5px) scale(0); opacity: 0; }
+            34%     { transform: translate(50px, 5px) scale(0.5); opacity: 0.6; }
+            40%     { transform: translate(50px, 5px) scale(1.08); opacity: 1; }
+            46%     { transform: translate(50px, 5px) scale(0.95); opacity: 1; }
+            52%     { transform: translate(50px, 5px) scale(1); opacity: 1; }
+            72%     { transform: translate(50px, 5px) scale(1); opacity: 1; }
+            82%     { transform: translate(52px, 3px) scale(1.03); opacity: 0.7; }
+            92%     { transform: translate(54px, -1px) scale(0.95); opacity: 0.3; }
+            100%    { transform: translate(56px, -3px) scale(0.85); opacity: 0; }
         }
 
         /* Bubble 3 (Small): Third message bubble - 左上方位置 */
@@ -1724,15 +1724,15 @@
             animation: bubble3Inflate 2.5s ease forwards;
         }
         @keyframes bubble3Inflate {
-            0%, 42% { transform: scale(0) translate(0, 0); opacity: 0; }
-            48%     { transform: scale(0.4) translate(0, 0); opacity: 0.5; }
-            54%     { transform: scale(1.1) translate(0, 0); opacity: 1; }
-            60%     { transform: scale(0.92) translate(0, 0); opacity: 1; }
-            66%     { transform: scale(1) translate(0, 0); opacity: 1; }
-            74%     { transform: scale(1) translate(0, 0); opacity: 1; }
-            84%     { transform: scale(1.02) translate(0, -1px); opacity: 0.6; }
-            94%     { transform: scale(0.9) translate(0, -4px); opacity: 0.2; }
-            100%    { transform: scale(0.8) translate(0, -6px); opacity: 0; }
+            0%, 42% { transform: translate(0px, 2px) scale(0); opacity: 0; }
+            48%     { transform: translate(0px, 2px) scale(0.4); opacity: 0.5; }
+            54%     { transform: translate(0px, 2px) scale(1.1); opacity: 1; }
+            60%     { transform: translate(0px, 2px) scale(0.92); opacity: 1; }
+            66%     { transform: translate(0px, 2px) scale(1); opacity: 1; }
+            74%     { transform: translate(0px, 2px) scale(1); opacity: 1; }
+            84%     { transform: translate(-2px, 0px) scale(1.02); opacity: 0.6; }
+            94%     { transform: translate(-4px, -3px) scale(0.9); opacity: 0.2; }
+            100%    { transform: translate(-5px, -5px) scale(0.8); opacity: 0; }
         }
 
         /* Bubble 4 (Tiny): Fourth small bubble - 最右侧位置 */
@@ -1740,35 +1740,40 @@
             animation: bubble4Inflate 2.5s ease forwards;
         }
         @keyframes bubble4Inflate {
-            0%, 55% { transform: scale(0) translate(0, 0); opacity: 0; }
-            62%     { transform: scale(0.5) translate(0, 0); opacity: 0.6; }
-            68%     { transform: scale(1.05) translate(0, 0); opacity: 1; }
-            74%     { transform: scale(0.95) translate(0, 0); opacity: 1; }
-            78%     { transform: scale(1) translate(0, 0); opacity: 1; }
-            88%     { transform: scale(1) translate(0, -2px); opacity: 0.5; }
-            96%     { transform: scale(0.9) translate(0, -4px); opacity: 0.15; }
-            100%    { transform: scale(0.8) translate(0, -5px); opacity: 0; }
+            0%, 55% { transform: translate(68px, 30px) scale(0); opacity: 0; }
+            62%     { transform: translate(68px, 30px) scale(0.5); opacity: 0.6; }
+            68%     { transform: translate(68px, 30px) scale(1.05); opacity: 1; }
+            74%     { transform: translate(68px, 30px) scale(0.95); opacity: 1; }
+            78%     { transform: translate(68px, 30px) scale(1); opacity: 1; }
+            88%     { transform: translate(70px, 28px) scale(1); opacity: 0.5; }
+            96%     { transform: translate(72px, 25px) scale(0.9); opacity: 0.15; }
+            100%    { transform: translate(73px, 23px) scale(0.8); opacity: 0; }
         }
 
-        /* ---- Button 3: AI - Flower Petals Scatter & Return (1.8s) ---- */
+        /* ---- Button 3: AI - Flower Petals Scatter & Return (2s) ---- */
         .dock-tab.anim-ai .anim-layer {
-            opacity: 1;
+            animation: aiContainerFade 2s ease forwards;
+        }
+        @keyframes aiContainerFade {
+            0%, 80% { opacity: 1; }
+            92% { opacity: 1; }
+            100% { opacity: 0; }
         }
         /* 原始花朵图标淡出 - 纯opacity过渡，无scale跳变 */
         .dock-tab.anim-ai .dt-svg {
-            animation: flowerIconFadeOut 1.8s ease forwards;
+            animation: flowerIconFadeOut 2s ease forwards;
             transform-origin: center;
         }
         @keyframes flowerIconFadeOut {
             0%   { opacity: 1; }
-            10%  { opacity: 0; }
-            85%  { opacity: 0; }
-            92%  { opacity: 0.5; }
+            8%   { opacity: 0; }
+            82%  { opacity: 0; }
+            94%  { opacity: 0.6; }
             100% { opacity: 1; }
         }
         /* CSS层花朵中心的闪光 */
         .dock-tab.anim-ai .al-flash {
-            animation: flowerFlashNew 1.8s ease forwards;
+            animation: flowerFlashNew 2s ease forwards;
         }
         @keyframes flowerFlashNew {
             0%   { opacity: 0; transform: scale(0.3); }
@@ -1778,7 +1783,7 @@
         }
         /* 花朵中心消失与重现 */
         .dock-tab.anim-ai .al-flower-center {
-            animation: centerPopNew 1.8s ease forwards;
+            animation: centerPopNew 2s ease forwards;
         }
         @keyframes centerPopNew {
             0%, 8%   { transform: scale(1); opacity: 1; }
@@ -1790,74 +1795,74 @@
         }
         /* 6片花瓣的飞散CSS动画 - 从原位散开再飞回 */
         .dock-tab.anim-ai .al-flower { transform-origin: 40px 30px; }
-        /* 花瓣0：向上飞 translate(0, -25) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(1) { animation: petalFly0 1.8s ease forwards; }
+        /* 花瓣0：向上飞 translate(0, -13) */
+        .dock-tab.anim-ai .al-petal-g:nth-child(1) { animation: petalFly0 2s ease forwards; }
         @keyframes petalFly0 {
             0%   { transform: translate(0,0) scale(1); opacity: 1; }
             8%   { transform: translate(0,0) scale(0.9); opacity: 0.8; }
             12%  { transform: translate(0,0) scale(1.1); opacity: 1; }
-            40%  { transform: translate(0, -25px) rotate(-15deg) scale(1); opacity: 0.85; }
-            55%  { transform: translate(0, -22px) rotate(-12deg) scale(0.95); opacity: 0.8; }
+            40%  { transform: translate(0, -13px) rotate(-15deg) scale(1); opacity: 0.85; }
+            55%  { transform: translate(0, -11px) rotate(-12deg) scale(0.95); opacity: 0.8; }
             82%  { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
             90%  { transform: translate(0, 0) rotate(0deg) scale(1.05); opacity: 1; }
             100% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
         }
-        /* 花瓣1：右上飞 translate(22, -12) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(2) { animation: petalFly1 1.8s ease forwards; }
+        /* 花瓣1：右上飞 translate(11, -6) */
+        .dock-tab.anim-ai .al-petal-g:nth-child(2) { animation: petalFly1 2s ease forwards; }
         @keyframes petalFly1 {
             0%   { transform: translate(0,0) scale(1); opacity: 1; }
             8%   { transform: translate(0,0) scale(0.9); opacity: 0.8; }
             12%  { transform: translate(0,0) scale(1.1); opacity: 1; }
-            40%  { transform: translate(22px, -12px) rotate(20deg) scale(1); opacity: 0.85; }
-            55%  { transform: translate(20px, -11px) rotate(16deg) scale(0.95); opacity: 0.8; }
+            40%  { transform: translate(11px, -6px) rotate(20deg) scale(1); opacity: 0.85; }
+            55%  { transform: translate(10px, -5px) rotate(16deg) scale(0.95); opacity: 0.8; }
             82%  { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
             90%  { transform: translate(0, 0) rotate(0deg) scale(1.05); opacity: 1; }
             100% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
         }
-        /* 花瓣2：右下飞 translate(22, 12) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(3) { animation: petalFly2 1.8s ease forwards; }
+        /* 花瓣2：右下飞 translate(11, 6) */
+        .dock-tab.anim-ai .al-petal-g:nth-child(3) { animation: petalFly2 2s ease forwards; }
         @keyframes petalFly2 {
             0%   { transform: translate(0,0) scale(1); opacity: 1; }
             8%   { transform: translate(0,0) scale(0.9); opacity: 0.8; }
             12%  { transform: translate(0,0) scale(1.1); opacity: 1; }
-            40%  { transform: translate(22px, 12px) rotate(-25deg) scale(1); opacity: 0.85; }
-            55%  { transform: translate(20px, 11px) rotate(-20deg) scale(0.95); opacity: 0.8; }
+            40%  { transform: translate(11px, 6px) rotate(-25deg) scale(1); opacity: 0.85; }
+            55%  { transform: translate(10px, 5px) rotate(-20deg) scale(0.95); opacity: 0.8; }
             82%  { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
             90%  { transform: translate(0, 0) rotate(0deg) scale(1.05); opacity: 1; }
             100% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
         }
-        /* 花瓣3：向下飞 translate(0, 25) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(4) { animation: petalFly3 1.8s ease forwards; }
+        /* 花瓣3：向下飞 translate(0, 13) */
+        .dock-tab.anim-ai .al-petal-g:nth-child(4) { animation: petalFly3 2s ease forwards; }
         @keyframes petalFly3 {
             0%   { transform: translate(0,0) scale(1); opacity: 1; }
             8%   { transform: translate(0,0) scale(0.9); opacity: 0.8; }
             12%  { transform: translate(0,0) scale(1.1); opacity: 1; }
-            40%  { transform: translate(0, 25px) rotate(18deg) scale(1); opacity: 0.85; }
-            55%  { transform: translate(0, 22px) rotate(14deg) scale(0.95); opacity: 0.8; }
+            40%  { transform: translate(0, 13px) rotate(18deg) scale(1); opacity: 0.85; }
+            55%  { transform: translate(0, 11px) rotate(14deg) scale(0.95); opacity: 0.8; }
             82%  { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
             90%  { transform: translate(0, 0) rotate(0deg) scale(1.05); opacity: 1; }
             100% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
         }
-        /* 花瓣4：左下飞 translate(-22, 12) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(5) { animation: petalFly4 1.8s ease forwards; }
+        /* 花瓣4：左下飞 translate(-11, 6) */
+        .dock-tab.anim-ai .al-petal-g:nth-child(5) { animation: petalFly4 2s ease forwards; }
         @keyframes petalFly4 {
             0%   { transform: translate(0,0) scale(1); opacity: 1; }
             8%   { transform: translate(0,0) scale(0.9); opacity: 0.8; }
             12%  { transform: translate(0,0) scale(1.1); opacity: 1; }
-            40%  { transform: translate(-22px, 12px) rotate(-22deg) scale(1); opacity: 0.85; }
-            55%  { transform: translate(-20px, 11px) rotate(-18deg) scale(0.95); opacity: 0.8; }
+            40%  { transform: translate(-11px, 6px) rotate(-22deg) scale(1); opacity: 0.85; }
+            55%  { transform: translate(-10px, 5px) rotate(-18deg) scale(0.95); opacity: 0.8; }
             82%  { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
             90%  { transform: translate(0, 0) rotate(0deg) scale(1.05); opacity: 1; }
             100% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
         }
-        /* 花瓣5：左上飞 translate(-22, -12) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(6) { animation: petalFly5 1.8s ease forwards; }
+        /* 花瓣5：左上飞 translate(-11, -6) */
+        .dock-tab.anim-ai .al-petal-g:nth-child(6) { animation: petalFly5 2s ease forwards; }
         @keyframes petalFly5 {
             0%   { transform: translate(0,0) scale(1); opacity: 1; }
             8%   { transform: translate(0,0) scale(0.9); opacity: 0.8; }
             12%  { transform: translate(0,0) scale(1.1); opacity: 1; }
-            40%  { transform: translate(-22px, -12px) rotate(28deg) scale(1); opacity: 0.85; }
-            55%  { transform: translate(-20px, -11px) rotate(22deg) scale(0.95); opacity: 0.8; }
+            40%  { transform: translate(-11px, -6px) rotate(28deg) scale(1); opacity: 0.85; }
+            55%  { transform: translate(-10px, -5px) rotate(22deg) scale(0.95); opacity: 0.8; }
             82%  { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
             90%  { transform: translate(0, 0) rotate(0deg) scale(1.05); opacity: 1; }
             100% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
@@ -1992,18 +1997,18 @@
                 </defs>
                 <path class="al-path" d="M 8,32 Q 22,12 38,28 T 70,18" fill="none" stroke="url(#g-stroke)" stroke-width="3" stroke-linecap="round"/>
                 <g class="al-pen">
-                    <!-- 修长蜡笔 - rotate(15)使笔尖朝向右下方，跟着路径方向画 -->
-                    <g transform="rotate(15)">
-                        <!-- 蜡笔身体 - 修长矩形 -->
-                        <rect x="-2" y="-4" width="5" height="32" rx="1.5" fill="#F59E0B" stroke="#D97706" stroke-width="0.8"/>
+                    <!-- 修长蜡笔 - rotate(25)使笔尖更倾斜，跟着路径方向画 -->
+                    <g transform="rotate(25)">
+                        <!-- 蜡笔身体 - 缩短1/4，从32减到24 -->
+                        <rect x="-2" y="-4" width="5" height="24" rx="1.5" fill="#F59E0B" stroke="#D97706" stroke-width="0.8"/>
                         <!-- 蜡笔标签条纹 -->
-                        <rect x="-2" y="8" width="5" height="4" rx="1" fill="#FBBF24" opacity="0.5"/>
-                        <!-- 蜡笔金属包边 -->
-                        <rect x="-2" y="26" width="5" height="3" rx="0.5" fill="#9CA3AF" stroke="#6B7280" stroke-width="0.5"/>
-                        <!-- 蜡笔笔尖 - 三角形 -->
-                        <path d="M-2,29 L0.5,38 L3,29 Z" fill="#F59E0B" stroke="#D97706" stroke-width="0.6"/>
+                        <rect x="-2" y="6" width="5" height="4" rx="1" fill="#FBBF24" opacity="0.5"/>
+                        <!-- 蜡笔金属包边 - 位置相应调整 -->
+                        <rect x="-2" y="18" width="5" height="3" rx="0.5" fill="#9CA3AF" stroke="#6B7280" stroke-width="0.5"/>
+                        <!-- 蜡笔笔尖 - 三角形位置调整 -->
+                        <path d="M-2,21 L0.5,28 L3,21 Z" fill="#F59E0B" stroke="#D97706" stroke-width="0.6"/>
                         <!-- 笔尖尖端颜色 -->
-                        <path d="M0,32 L0.5,38 L1,32 Z" fill="#FF6B6B"/>
+                        <path d="M0,24 L0.5,28 L1,24 Z" fill="#FF6B6B"/>
                     </g>
                 </g>
             </svg>
@@ -2074,14 +2079,14 @@
                     </radialGradient>
                 </defs>
                 <g class="al-flower" transform="translate(40, 30)">
-                    <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-12" rx="7" ry="13" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
-                    <circle class="al-flower-center" cx="0" cy="0" r="5" fill="#FBBF24" stroke="#D97706" stroke-width="1"/>
-                    <circle class="al-flash" cx="0" cy="0" r="22" fill="url(#flower-flash)" opacity="0"/>
+                    <g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-7" rx="3.5" ry="7" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
+                    <circle class="al-flower-center" cx="0" cy="0" r="3" fill="#FBBF24" stroke="#D97706" stroke-width="1"/>
+                    <circle class="al-flash" cx="0" cy="0" r="8" fill="url(#flower-flash)" opacity="0"/>
                 </g>
             </svg>
         </button>
@@ -3448,7 +3453,7 @@
             // Track which buttons currently have animation playing
             var animatingTabs = {};
             // Animation durations by tab (in ms, matching CSS)
-            var animDurations = { posts: 1500, chat: 2500, ai: 1800 };
+            var animDurations = { posts: 1500, chat: 2500, ai: 2000 };
 
             function triggerTabAnimation(el, tab) {
                 var cls = animClassMap[tab];
