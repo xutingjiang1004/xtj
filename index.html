@@ -3155,9 +3155,8 @@
             window.deleteComment = async function (commentId, actorKey) {
                 if (!confirm('确定要删除此评论吗？')) return;
                 try {
-                    var cid = parseInt(commentId, 10);
                     var { data, error } = await sb.rpc('delete_comment_v2', {
-                        p_comment_id: cid,
+                        p_comment_id: commentId,
                         p_deleted_by: currentUser
                     });
                     if (error) {
