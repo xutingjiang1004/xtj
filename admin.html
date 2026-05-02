@@ -599,19 +599,19 @@
             async function() {
                 try {
                     var cid = parseInt(id, 10);
-                    var res = await sb.rpc('delete_comment_v2', {
+                    var { data, error } = await sb.rpc('delete_comment_v2', {
                         p_comment_id: cid,
                         p_deleted_by: ADMIN
                     });
-                    if (res.error) {
-                        showToast('删除失败: ' + res.error.message, 'error');
+                    if (error) {
+                        showToast('删除失败: ' + error.message, 'error');
                         return;
                     }
-                    if (res.data && res.data.success) {
+                    if (data === true) {
                         await loadAllData(true);
                         showToast('评论已标记为删除', 'success');
                     } else {
-                        showToast('删除失败: ' + (res.data && res.data.message ? res.data.message : '未知错误'), 'error');
+                        showToast('删除失败: 评论不存在或已被删除', 'error');
                     }
                 } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
             }
