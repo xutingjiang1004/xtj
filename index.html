@@ -2031,6 +2031,319 @@
             70% { transform: translateY(0) scale(1.05); opacity: 0.8; }
             100% { transform: translateY(0) scale(1); opacity: 1; }
         }
+
+        /* ========== 公告系统样式 ========== */
+        .announcement-btn {
+            position: relative;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.4);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--trans-smooth);
+            backdrop-filter: blur(4px);
+        }
+        .announcement-btn:hover {
+            background: rgba(255,255,255,0.35);
+            transform: scale(1.05);
+        }
+        .announcement-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: none;
+            stroke: var(--text-main);
+            stroke-width: 1.8;
+        }
+        .announcement-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            border-radius: 99px;
+            background: linear-gradient(135deg, #ff3b60, #ff6b8b);
+            color: white;
+            font-size: 11px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 2px 8px rgba(255,59,96,0.4);
+            animation: badgePulse 2s ease-in-out infinite;
+        }
+        @keyframes badgePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        /* 公告模态框 */
+        .announcement-modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(4px);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .announcement-modal-overlay.active {
+            display: flex;
+            animation: fadeIn 0.25s ease;
+        }
+        .announcement-modal {
+            background: var(--glass-bg, rgba(255,255,255,0.9));
+            border: 1px solid var(--glass-border, rgba(255,255,255,0.7));
+            border-radius: var(--radius-md);
+            width: 100%;
+            max-width: 500px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--glass-shadow);
+            backdrop-filter: var(--glass-blur);
+            overflow: hidden;
+            animation: modalPop 0.3s ease;
+        }
+        @keyframes modalPop {
+            0% { opacity: 0; transform: scale(0.9) translateY(10px); }
+            100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .announcement-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+        }
+        .announcement-header h3 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .announcement-close-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: none;
+            background: rgba(0,0,0,0.05);
+            cursor: pointer;
+            font-size: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--trans-smooth);
+            color: var(--text-main);
+        }
+        .announcement-close-btn:hover {
+            background: rgba(0,0,0,0.1);
+            transform: rotate(90deg);
+        }
+
+        .announcement-content {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .announcement-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .announcement-item {
+            background: rgba(255,255,255,0.3);
+            border: 1px solid rgba(255,255,255,0.4);
+            border-radius: var(--radius-sm);
+            padding: 16px;
+            cursor: pointer;
+            transition: var(--trans-smooth);
+            opacity: 0;
+            transform: translateY(10px);
+        }
+        .announcement-item.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .announcement-item:hover {
+            background: rgba(255,255,255,0.5);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .announcement-item.unread {
+            border-left: 3px solid #ff3b60;
+            background: linear-gradient(90deg, rgba(255,59,96,0.08), rgba(255,255,255,0.3));
+        }
+        .announcement-item-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .announcement-item-title {
+            font-weight: 700;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .announcement-item-time {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .announcement-item-preview {
+            font-size: 13px;
+            color: var(--text-main);
+            line-height: 1.6;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        .unread-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff3b60;
+            flex-shrink: 0;
+        }
+
+        .announcement-detail {
+            display: none;
+        }
+        .announcement-detail.active {
+            display: block;
+            animation: fadeIn 0.25s ease;
+        }
+        .announcement-detail-header {
+            margin-bottom: 16px;
+        }
+        .announcement-detail-title {
+            font-weight: 700;
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+        .announcement-detail-time {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+        .announcement-detail-content {
+            font-size: 15px;
+            line-height: 1.8;
+            white-space: pre-wrap;
+        }
+        .announcement-back-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 99px;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.2);
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            transition: var(--trans-smooth);
+            margin-bottom: 16px;
+        }
+        .announcement-back-btn:hover {
+            background: rgba(255,255,255,0.35);
+            transform: translateX(-4px);
+        }
+        .announcement-delete-btn {
+            margin-left: auto;
+            padding: 6px 12px;
+            border-radius: 99px;
+            border: 1px solid rgba(255,59,96,0.3);
+            background: rgba(255,59,96,0.1);
+            color: #ff3b60;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            transition: var(--trans-smooth);
+        }
+        .announcement-delete-btn:hover {
+            background: rgba(255,59,96,0.2);
+        }
+        .announcement-empty {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+        }
+        .announcement-empty-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+        }
+
+        /* 管理员发布公告样式 */
+        .announcement-admin-area {
+            padding: 0 20px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+            margin-bottom: 16px;
+        }
+        .announcement-admin-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .announcement-admin-input {
+            width: 100%;
+            min-height: 80px;
+            padding: 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.2);
+            font-size: 14px;
+            color: var(--text-main);
+            outline: none;
+            resize: vertical;
+            font-family: inherit;
+            margin-bottom: 10px;
+        }
+        .announcement-admin-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(5,150,105,0.1);
+        }
+        .announcement-admin-row {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        .announcement-admin-btn {
+            padding: 8px 18px;
+            border-radius: 99px;
+            border: none;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--trans-smooth);
+        }
+        .announcement-admin-btn.primary {
+            background: linear-gradient(135deg, var(--primary), #34d399);
+            color: white;
+            box-shadow: 0 2px 8px rgba(5,150,105,0.25);
+        }
+        .announcement-admin-btn.primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(5,150,105,0.35);
+        }
     </style>
 </head>
 <body>
@@ -2049,6 +2362,15 @@
                 <div style="display:flex; align-items:center; gap:8px;">
                     <h1>xtj</h1>
                     <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
+                </div>
+                <div id="announcement-btn-wrapper" style="display:none; margin-right: 8px;">
+                    <button class="announcement-btn" id="announcementBtn" title="公告">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                        </svg>
+                        <span class="announcement-badge" id="announcementBadge" style="display:none;">0</span>
+                    </button>
                 </div>
                 <div class="nav-auth">
                     <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
@@ -2353,6 +2675,36 @@
         </div>
     </div>
 
+    <!-- 公告模态框 -->
+    <div class="announcement-modal-overlay" id="announcementModal" onclick="if(event.target===this)closeAnnouncementModal()">
+        <div class="announcement-modal" onclick="event.stopPropagation()">
+            <div class="announcement-header">
+                <h3>🔔 公告</h3>
+                <button class="announcement-close-btn" onclick="closeAnnouncementModal()">✕</button>
+            </div>
+            <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
+                <div class="announcement-admin-title">📢 发布新公告</div>
+                <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="输入公告内容..."></textarea>
+                <div class="announcement-admin-row">
+                    <button class="announcement-admin-btn primary" onclick="publishAnnouncement()">发布</button>
+                </div>
+            </div>
+            <div class="announcement-content">
+                <div id="announcementListContainer">
+                    <div class="announcement-list" id="announcementList"></div>
+                </div>
+                <div id="announcementDetail" class="announcement-detail">
+                    <button class="announcement-back-btn" onclick="showAnnouncementList()">← 返回</button>
+                    <div class="announcement-detail-header">
+                        <div class="announcement-detail-title" id="announcementDetailTitle"></div>
+                        <div class="announcement-detail-time" id="announcementDetailTime"></div>
+                    </div>
+                    <div class="announcement-detail-content" id="announcementDetailContent"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         (function () {
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
@@ -2554,17 +2906,20 @@
             function initUI() {
                 var unauthUI = document.getElementById("unauthUI");
                 var authUI = document.getElementById("authUI");
+                var annBtnWrapper = document.getElementById("announcement-btn-wrapper");
                 if (currentUser) {
                     unauthUI.style.display = "none";
                     authUI.style.display = "flex";
+                    annBtnWrapper.style.display = "block";
                     document.getElementById("myName").textContent = currentUser;
                     var avatar = document.getElementById("myAvatar");
                     avatar.textContent = currentUser[0].toUpperCase();
                     avatar.className = "avatar";
-                    try { subscribeToMessages(); startDMPolling(); updateUnreadBadge(); } catch(e) {}
+                    try { subscribeToMessages(); startDMPolling(); updateUnreadBadge(); loadAnnouncements(); subscribeToAnnouncements(); } catch(e) {}
                 } else {
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
+                    annBtnWrapper.style.display = "none";
                     try { stopDMPolling(); } catch(e) {}
                 }
             }
@@ -4048,6 +4403,234 @@
                 applyTheme(true);
             } else {
                 applyTheme(false);
+            }
+
+            // ========== 公告系统 ==========
+            const ANN_MARKER = '__ann__';
+            const ANN_READ_KEY = 'xtj_ann_read';
+            let announcements = [];
+            let currentAnnouncement = null;
+            let annRealtime = null;
+
+            function getReadAnnouncements() {
+                try {
+                    const data = localStorage.getItem(ANN_READ_KEY);
+                    return data ? JSON.parse(data) : [];
+                } catch(e) {
+                    return [];
+                }
+            }
+
+            function saveReadAnnouncements(readIds) {
+                localStorage.setItem(ANN_READ_KEY, JSON.stringify(readIds));
+            }
+
+            function markAnnouncementRead(annId) {
+                const readIds = getReadAnnouncements();
+                if (!readIds.includes(annId)) {
+                    readIds.push(annId);
+                    saveReadAnnouncements(readIds);
+                    updateAnnouncementBadge();
+                }
+            }
+
+            function isAnnouncementRead(annId) {
+                return getReadAnnouncements().includes(annId);
+            }
+
+            function updateAnnouncementBadge() {
+                const readIds = getReadAnnouncements();
+                const unreadCount = announcements.filter(a => !readIds.includes(a.id)).length;
+                const badge = document.getElementById('announcementBadge');
+                if (badge) {
+                    if (unreadCount > 0) {
+                        badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+                        badge.style.display = 'flex';
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                }
+            }
+
+            window.openAnnouncementModal = async function() {
+                document.getElementById('announcementModal').classList.add('active');
+                document.body.style.overflow = 'hidden';
+                showAnnouncementList();
+                await loadAnnouncements();
+                renderAnnouncementList();
+
+                // 如果是管理员，显示发布区域
+                if (isAdmin()) {
+                    document.getElementById('announcementAdminArea').style.display = 'block';
+                } else {
+                    document.getElementById('announcementAdminArea').style.display = 'none';
+                }
+            };
+
+            window.closeAnnouncementModal = function() {
+                document.getElementById('announcementModal').classList.remove('active');
+                document.body.style.overflow = '';
+                currentAnnouncement = null;
+            };
+
+            function showAnnouncementList() {
+                document.getElementById('announcementListContainer').style.display = 'block';
+                document.getElementById('announcementDetail').classList.remove('active');
+                currentAnnouncement = null;
+            }
+
+            window.showAnnouncementList = showAnnouncementList;
+
+            function showAnnouncementDetail(ann) {
+                currentAnnouncement = ann;
+                markAnnouncementRead(ann.id);
+
+                document.getElementById('announcementListContainer').style.display = 'none';
+                const detail = document.getElementById('announcementDetail');
+                detail.classList.add('active');
+
+                document.getElementById('announcementDetailTitle').textContent = '公告';
+                document.getElementById('announcementDetailTime').textContent = new Date(ann.created_at).toLocaleString('zh-CN');
+                document.getElementById('announcementDetailContent').textContent = ann.content;
+
+                // 如果是管理员，添加删除按钮
+                const existingDelBtn = detail.querySelector('.announcement-delete-btn');
+                if (existingDelBtn) existingDelBtn.remove();
+                if (isAdmin()) {
+                    const delBtn = document.createElement('button');
+                    delBtn.className = 'announcement-delete-btn';
+                    delBtn.textContent = '删除公告';
+                    delBtn.onclick = function() { deleteAnnouncement(ann); };
+                    const header = document.querySelector('.announcement-detail-header');
+                    if (header) header.appendChild(delBtn);
+                }
+
+                renderAnnouncementList(); // 重新渲染列表，更新已读状态
+            }
+
+            async function loadAnnouncements() {
+                try {
+                    const { data, error } = await sb.from('posts')
+                        .select('*')
+                        .eq('media_type', ANN_MARKER)
+                        .order('created_at', { ascending: false });
+                    if (error) throw error;
+                    announcements = data || [];
+                    updateAnnouncementBadge();
+                } catch(e) {
+                    console.error('加载公告失败:', e);
+                }
+            }
+
+            function renderAnnouncementList() {
+                const listEl = document.getElementById('announcementList');
+                if (!listEl) return;
+
+                if (!announcements.length) {
+                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">📭</div><div>暂无公告</div></div>';
+                    return;
+                }
+
+                listEl.innerHTML = '';
+                const readIds = getReadAnnouncements();
+
+                announcements.forEach((ann, index) => {
+                    const isRead = readIds.includes(ann.id);
+                    const item = document.createElement('div');
+                    item.className = 'announcement-item' + (isRead ? '' : ' unread');
+                    item.onclick = function() { showAnnouncementDetail(ann); };
+
+                    const preview = ann.content.length > 100 ? ann.content.substring(0, 100) + '...' : ann.content;
+                    item.innerHTML = `
+                        <div class="announcement-item-header">
+                            <div class="announcement-item-title">
+                                ${!isRead ? '<span class="unread-dot"></span>' : ''}
+                                公告
+                            </div>
+                            <div class="announcement-item-time">${new Date(ann.created_at).toLocaleString('zh-CN')}</div>
+                        </div>
+                        <div class="announcement-item-preview">${escapeHtml(preview)}</div>
+                    `;
+                    listEl.appendChild(item);
+
+                    // 添加渐入动画
+                    setTimeout(() => {
+                        item.classList.add('visible');
+                    }, index * 80);
+                });
+            }
+
+            window.publishAnnouncement = async function() {
+                const input = document.getElementById('announcementAdminInput');
+                const content = input.value.trim();
+                if (!content) {
+                    showToast('请输入公告内容');
+                    return;
+                }
+
+                try {
+                    const { error } = await sb.from('posts').insert([{
+                        user_name: ADMIN_NAME,
+                        content: content,
+                        media_type: ANN_MARKER,
+                        media_url: '',
+                        actor_key: 'admin_' + Date.now()
+                    }]);
+                    if (error) throw error;
+                    input.value = '';
+                    showToast('公告发布成功');
+                    await loadAnnouncements();
+                    renderAnnouncementList();
+                } catch(e) {
+                    showToast('发布失败: ' + (e.message || '未知错误'));
+                }
+            };
+
+            window.deleteAnnouncement = async function(ann) {
+                if (!confirm('确定要删除这条公告吗？')) return;
+
+                try {
+                    const { error } = await sb.rpc('delete_post_with_actor', {
+                        p_post_id: ann.id,
+                        p_actor_key: ann.actor_key || 'admin_' + Date.now()
+                    });
+                    if (error) throw error;
+
+                    // 从本地已读列表中移除
+                    const readIds = getReadAnnouncements();
+                    const filteredReadIds = readIds.filter(id => id !== ann.id);
+                    saveReadAnnouncements(filteredReadIds);
+
+                    showToast('公告已删除');
+                    await loadAnnouncements();
+                    showAnnouncementList();
+                    renderAnnouncementList();
+                } catch(e) {
+                    showToast('删除失败: ' + (e.message || '未知错误'));
+                }
+            };
+
+            function subscribeToAnnouncements() {
+                if (annRealtime) return;
+                annRealtime = sb.channel('announcements')
+                    .on('postgres_changes', {
+                        event: '*',
+                        schema: 'public',
+                        table: 'posts',
+                        filter: `media_type=eq.${ANN_MARKER}`
+                    }, async function() {
+                        await loadAnnouncements();
+                        if (document.getElementById('announcementModal').classList.contains('active')) {
+                            renderAnnouncementList();
+                        }
+                    })
+                    .subscribe();
+            }
+
+            // 绑定公告按钮事件
+            const annBtn = document.getElementById('announcementBtn');
+            if (annBtn) {
+                annBtn.addEventListener('click', openAnnouncementModal);
             }
         })();
     </script>

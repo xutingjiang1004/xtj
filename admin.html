@@ -255,6 +255,7 @@
     var DM_MARKER = "__dm__";
     var ANN_MARKER = "__ann__";
     var SESSION_KEY = "xtj_admin_session";
+    var TAB_KEY = "xtj_admin_tab";
 
     var sb = null;
     var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [];
@@ -299,6 +300,10 @@
         localStorage.setItem(SESSION_KEY, JSON.stringify({ t: Date.now() }));
     }
 
+    function saveCurrentTab() {
+        localStorage.setItem(TAB_KEY, currentTab);
+    }
+
     function clearSession() {
         localStorage.removeItem(SESSION_KEY);
     }
@@ -317,7 +322,16 @@
         document.getElementById('loginWrap').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         saveSession();
-        await loadAllData();
+        
+        // 尝试恢复之前的标签页
+        var savedTab = localStorage.getItem(TAB_KEY);
+        if (savedTab && ['ann','users','posts','likes','comments'].indexOf(savedTab) !== -1) {
+            currentTab = savedTab;
+            await loadAllData(true); // 保持当前标签
+            switchTab(savedTab); // 切换到保存的标签
+        } else {
+            await loadAllData(); // 默认加载
+        }
     }
 
     window.doAdminLogin = async function() {
@@ -371,6 +385,7 @@
 
     window.switchTab = function(tab) {
         currentTab = tab; // 保存当前tab
+        saveCurrentTab(); // 保存到localStorage
         ['ann','users','posts','likes','comments'].forEach(function(t) {
             document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.remove('active');
             document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn').classList.remove('active');
@@ -553,38 +568,47 @@
     };
 
     window.deleteAdminAnn = function(id) {
+        var ann = annList.find(function(x) { return x.id === id; });
+        var preview = ann ? (ann.content || '').slice(0, 50) : '';
+        if (preview && ann.content && ann.content.length > 50) preview += '...';
+        
         showConfirm(
-            '删除公告',
-            '确定要删除此公告吗？删除后所有用户将无法查看。',
-            '确认删除',
+            '⚠️ 删除公告',
+            '您确定要删除此公告吗？\n\n' + (preview ? '公告内容：' + preview + '\n\n' : '') + '删除后所有用户将无法查看此公告，此操作不可恢复。',
+            '🗑️ 确认删除',
             async function() {
                 try {
-                    var ann = annList.find(function(x) { return x.id === id; });
                     var key = ann ? ann.actor_key : 'admin_' + Date.now();
                     var res = await sb.rpc('delete_post_with_actor', { p_post_id: id, p_actor_key: key });
                     if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
                     if (!res.data) { showToast('公告不存在或已被删除', 'info'); }
                     await loadAllData(true); // 保持当前tab
-                    showToast('公告已删除', 'success');
+                    showToast('✅ 公告已成功删除', 'success');
                 } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
             }
         );
     };
 
     window.deleteAdminPost = function(id) {
+        var post = allPosts.find(function(x) { return x.id === id; });
+        var preview = post ? (post.content || '').slice(0, 50) : '';
+        if (preview && post.content && post.content.length > 50) preview += '...';
+        
         showConfirm(
-            '删除帖子',
-            '确定要删除此帖子吗？此操作不可恢复，相关的点赞和评论也会一并删除。',
-            '确认删除',
+            '⚠️ 删除帖子',
+            '您确定要删除此帖子吗？\n\n' + 
+            (post ? '发布者：' + (post.user_name || '') + '\n' : '') +
+            (preview ? '内容：' + preview + '\n\n' : '') + 
+            '删除后此帖子及相关的点赞和评论都会被移除，此操作不可恢复。',
+            '🗑️ 确认删除',
             async function() {
                 try {
-                    var post = allPosts.find(function(x) { return x.id === id; });
                     var key = post ? post.actor_key : 'admin_' + Date.now();
                     var res = await sb.rpc('delete_post_with_actor', { p_post_id: id, p_actor_key: key });
                     if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
                     if (!res.data) { showToast('帖子不存在或已被删除', 'info'); }
                     await loadAllData(true); // 保持当前tab
-                    showToast('帖子已删除', 'success');
+                    showToast('✅ 帖子已成功删除', 'success');
                 } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
             }
         );
@@ -592,10 +616,17 @@
 
     // 管理后台删除评论 - 通过 RPC 绕过 RLS
     window.deleteAdminComment = function(id, actorKey) {
+        var comment = allComments.find(function(c) { return c.id === id; });
+        var preview = comment ? (comment.content || '').slice(0, 50) : '';
+        if (preview && comment.content && comment.content.length > 50) preview += '...';
+        
         showConfirm(
-            '删除评论',
-            '确定要删除此评论吗？评论将标记为删除，但记录保留。',
-            '确认删除',
+            '⚠️ 删除评论',
+            '您确定要删除此评论吗？\n\n' + 
+            (comment ? '发布者：' + (comment.user_name || '') + '\n' : '') +
+            (preview ? '内容：' + preview + '\n\n' : '') + 
+            '评论将标记为删除，但记录会保留在数据库中。',
+            '🗑️ 确认删除',
             async function() {
                 try {
                     var { data, error } = await sb.rpc('delete_comment_v2', {
@@ -608,7 +639,7 @@
                     }
                     if (data === true) {
                         await loadAllData(true);
-                        showToast('评论已标记为删除', 'success');
+                        showToast('✅ 评论已标记为删除', 'success');
                     } else {
                         showToast('删除失败: 评论不存在或已被删除', 'error');
                     }
