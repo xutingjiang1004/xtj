@@ -175,7 +175,7 @@
     }
     @keyframes modalPop { 0%{opacity:0;transform:scale(0.9) translateY(10px)} 100%{opacity:1;transform:scale(1) translateY(0)} }
     .modal-dialog h3 { font-size: 17px; margin-bottom: 10px; }
-    .modal-dialog p { color: var(--text-muted); font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
+    .modal-dialog p { color: var(--text-muted); font-size: 14px; margin-bottom: 20px; line-height: 1.5; white-space: pre-line; }
     .modal-dialog .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
     .modal-dialog .modal-btns button {
         padding: 10px 22px; border-radius: 10px; border: 1px solid var(--border);
@@ -323,14 +323,18 @@
         document.getElementById('dashboard').style.display = 'block';
         saveSession();
         
-        // 尝试恢复之前的标签页
         var savedTab = localStorage.getItem(TAB_KEY);
         if (savedTab && ['ann','users','posts','likes','comments'].indexOf(savedTab) !== -1) {
             currentTab = savedTab;
-            await loadAllData(true); // 保持当前标签
-            switchTab(savedTab); // 切换到保存的标签
+            await loadAllData(true);
+            ['ann','users','posts','likes','comments'].forEach(function(t) {
+                document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.remove('active');
+                document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn').classList.remove('active');
+            });
+            document.getElementById('tab' + savedTab.charAt(0).toUpperCase() + savedTab.slice(1)).classList.add('active');
+            document.getElementById('tab' + savedTab.charAt(0).toUpperCase() + savedTab.slice(1) + 'Btn').classList.add('active');
         } else {
-            await loadAllData(); // 默认加载
+            await loadAllData();
         }
     }
 
