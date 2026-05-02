@@ -2469,6 +2469,156 @@
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(5,150,105,0.35);
         }
+
+        /* ========== "我的"按钮光波动画 ========== */
+        .dock-tab.anim-profile .anim-layer {
+            animation: profileContainerFade 1.4s ease forwards;
+        }
+        @keyframes profileContainerFade {
+            0%, 55% { opacity: 1; }
+            65% { opacity: 0.5; }
+            75% { opacity: 0.1; }
+            80% { opacity: 0; }
+            100% { opacity: 0; }
+        }
+
+        .dock-tab.anim-profile .dt-svg {
+            animation: profileIconFade 1.4s ease forwards;
+            transform-origin: center;
+        }
+        @keyframes profileIconFade {
+            0%   { opacity: 1; }
+            4%   { opacity: 0; }
+            45%  { opacity: 0; }
+            52%  { opacity: 0.1; }
+            60%  { opacity: 0.3; }
+            72%  { opacity: 0.7; }
+            85%  { opacity: 1; }
+            100% { opacity: 1; }
+        }
+
+        /* 小人头部+身体弹动 */
+        .dock-tab.anim-profile .al-person-head,
+        .dock-tab.anim-profile .al-person-body {
+            animation: profilePersonPop 1.4s ease forwards;
+        }
+        @keyframes profilePersonPop {
+            0%   { opacity: 0; transform: scale(0.5); }
+            5%   { opacity: 1; transform: scale(1); }
+            8%   { opacity: 1; transform: scale(1.2); }
+            12%  { opacity: 1; transform: scale(0.95); }
+            18%  { opacity: 1; transform: scale(1); }
+            55%  { opacity: 0.7; transform: scale(1); }
+            70%  { opacity: 0.3; transform: scale(1); }
+            80%  { opacity: 0; transform: scale(1); }
+            100% { opacity: 0; transform: scale(1); }
+        }
+
+        /* 7条光波飞散动画 - 参考petalFly模式 */
+        .dock-tab.anim-profile .al-wave-0 { animation: waveFly0 1.4s ease forwards; }
+        .dock-tab.anim-profile .al-wave-1 { animation: waveFly1 1.4s ease forwards; }
+        .dock-tab.anim-profile .al-wave-2 { animation: waveFly2 1.4s ease forwards; }
+        .dock-tab.anim-profile .al-wave-3 { animation: waveFly3 1.4s ease forwards; }
+        .dock-tab.anim-profile .al-wave-4 { animation: waveFly4 1.4s ease forwards; }
+        .dock-tab.anim-profile .al-wave-5 { animation: waveFly5 1.4s ease forwards; }
+        .dock-tab.anim-profile .al-wave-6 { animation: waveFly6 1.4s ease forwards; }
+
+        @keyframes waveFly0 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 1; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(0,-18px); opacity: 0.9; }
+            42%  { transform: translate(0,-14px); opacity: 0.7; }
+            58%  { transform: translate(0,-3px); opacity: 0.5; }
+            78%  { transform: translate(0,0); opacity: 0.2; }
+            95%  { transform: translate(0,0); opacity: 0.05; }
+            99%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+        @keyframes waveFly1 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 1; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(13,-13px); opacity: 0.9; }
+            42%  { transform: translate(10,-10px); opacity: 0.7; }
+            58%  { transform: translate(2,-2px); opacity: 0.5; }
+            78%  { transform: translate(0,0); opacity: 0.2; }
+            95%  { transform: translate(0,0); opacity: 0.05; }
+            99%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+        @keyframes waveFly2 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 1; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(18px,0); opacity: 0.9; }
+            42%  { transform: translate(14px,0); opacity: 0.7; }
+            58%  { transform: translate(3px,0); opacity: 0.5; }
+            78%  { transform: translate(0,0); opacity: 0.2; }
+            95%  { transform: translate(0,0); opacity: 0.05; }
+            99%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+        @keyframes waveFly3 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 1; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(13px,13px); opacity: 0.9; }
+            42%  { transform: translate(10px,10px); opacity: 0.7; }
+            58%  { transform: translate(2px,2px); opacity: 0.5; }
+            78%  { transform: translate(0,0); opacity: 0.2; }
+            95%  { transform: translate(0,0); opacity: 0.05; }
+            99%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+        @keyframes waveFly4 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 1; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(-13px,13px); opacity: 0.9; }
+            42%  { transform: translate(-10px,10px); opacity: 0.7; }
+            58%  { transform: translate(-2px,2px); opacity: 0.5; }
+            78%  { transform: translate(0,0); opacity: 0.2; }
+            95%  { transform: translate(0,0); opacity: 0.05; }
+            99%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+        @keyframes waveFly5 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 1; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(-18px,0); opacity: 0.9; }
+            42%  { transform: translate(-14px,0); opacity: 0.7; }
+            58%  { transform: translate(-3px,0); opacity: 0.5; }
+            78%  { transform: translate(0,0); opacity: 0.2; }
+            95%  { transform: translate(0,0); opacity: 0.05; }
+            99%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+        @keyframes waveFly6 {
+            0%   { transform: translate(0,0); opacity: 0; }
+            5%   { transform: translate(0,0); opacity: 1; }
+            9%   { transform: translate(0,0); opacity: 1; }
+            30%  { transform: translate(-13px,-13px); opacity: 0.9; }
+            42%  { transform: translate(-10px,-10px); opacity: 0.7; }
+            58%  { transform: translate(-2px,-2px); opacity: 0.5; }
+            78%  { transform: translate(0,0); opacity: 0.2; }
+            95%  { transform: translate(0,0); opacity: 0.05; }
+            99%  { transform: translate(0,0); opacity: 0; }
+            100% { transform: translate(0,0); opacity: 0; }
+        }
+
+        /* ========== "我的"页面样式 ========== */
+        [data-theme="dark"] .dock-profile-container { background: #1e1e28 !important; }
+        [data-theme="dark"] .profile-user-card { background: rgba(30,30,40,0.92) !important; border-color: rgba(255,255,255,0.1) !important; }
+        [data-theme="dark"] .profile-setting-item { border-bottom-color: rgba(255,255,255,0.06) !important; }
+        [data-theme="dark"] #profileLang { background: #1e1e28; border-color: rgba(255,255,255,0.12); color: #e5e5e5; }
+        [data-theme="dark"] .profile-slider { background: #4a4a5a !important; }
+
+        /* 开关滑块样式 */
+        .profile-switch input:checked + .profile-slider { background: #059669 !important; }
+        .profile-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.3s; }
+        .profile-switch input:checked + .profile-slider:before { transform: translateX(20px); }
     </style>
 </head>
 <body>
@@ -2611,6 +2761,48 @@
                 </div>
             </div>
         </div>
+
+        <div class="dock-panel" id="panelProfile">
+            <div class="dock-profile-container" style="display:flex;flex-direction:column;height:100%;background:#ffffff;padding:0 16px;">
+                <div style="padding:12px 0;margin-bottom:8px;border-bottom:1px solid rgba(0,0,0,0.06);flex-shrink:0;">
+                    <span style="font-weight:700;font-size:16px;color:var(--text-main);">我的</span>
+                </div>
+                <div class="profile-user-card" style="display:flex;align-items:center;gap:12px;padding:16px;border-radius:14px;background:rgba(255,255,255,0.92);border:1px solid rgba(0,0,0,0.06);margin-bottom:16px;cursor:pointer;" onclick="openAuthModal('login')">
+                    <span class="avatar" id="profileAvatar" style="width:44px;height:44px;font-size:18px;">?</span>
+                    <div>
+                        <div id="profileName" style="font-weight:700;font-size:15px;">未登录</div>
+                        <div style="font-size:12px;color:var(--text-muted);">点击登录</div>
+                    </div>
+                </div>
+                <div class="profile-settings" style="flex:1;">
+                    <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(0,0,0,0.05);">
+                        <span>深色模式</span>
+                        <label class="profile-switch" style="position:relative;display:inline-block;width:44px;height:24px;">
+                            <input type="checkbox" id="profileThemeToggle" style="opacity:0;width:0;height:0;">
+                            <span class="profile-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:24px;transition:0.3s;"></span>
+                        </label>
+                    </div>
+                    <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(0,0,0,0.05);">
+                        <span>语言</span>
+                        <select id="profileLang" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(0,0,0,0.1);background:#fff;font-size:13px;color:var(--text-main);outline:none;">
+                            <option value="zh">中文</option>
+                            <option value="en">English</option>
+                        </select>
+                    </div>
+                    <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(0,0,0,0.05);">
+                        <span>通知</span>
+                        <label class="profile-switch" style="position:relative;display:inline-block;width:44px;height:24px;">
+                            <input type="checkbox" id="profileNotifToggle" checked style="opacity:0;width:0;height:0;">
+                            <span class="profile-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:24px;transition:0.3s;"></span>
+                        </label>
+                    </div>
+                    <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;cursor:pointer;" onclick="showToast('xtj v1.0')">
+                        <span>关于</span>
+                        <span style="color:var(--text-muted);">xtj v1.0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="dock-bar" id="dockBar">
@@ -2687,7 +2879,7 @@
         </button>
         <button class="dock-tab" data-tab="ai">
             <span class="dt-icon">
-                <svg class="dt-svg" viewBox="-1 -1 26 26" width="28" height="28" fill="none">
+                <svg class="dt-svg" viewBox="-1 -1 26 26" width="20" height="20" fill="none">
                     <g transform="translate(12,12)">
                         <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(0)"/>
                         <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(60)"/>
@@ -2699,6 +2891,7 @@
                     </g>
                 </svg>
             </span>
+            <span class="dt-label" style="visibility:hidden;">AI</span>
             <svg class="anim-layer" viewBox="0 0 90 70" width="90" height="70" overflow="visible">
                 <defs>
                     <radialGradient id="flower-flash" cx="50%" cy="50%" r="50%">
@@ -2715,6 +2908,28 @@
                     <g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-8" rx="3.2" ry="8" fill="#F472B6" stroke="#EC4899" stroke-width="1"/></g></g>
                     <circle class="al-flower-center" cx="0" cy="0" r="2.5" fill="#FBBF24" stroke="#D97706" stroke-width="1"/>
                     <circle class="al-flash" cx="0" cy="0" r="10" fill="url(#flower-flash)" opacity="0"/>
+                </g>
+            </svg>
+        </button>
+        <button class="dock-tab" data-tab="profile">
+            <span class="dt-icon">
+                <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="8" r="4"/>
+                    <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
+                </svg>
+            </span>
+            <span class="dt-label">我的</span>
+            <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
+                <g class="al-person" transform="translate(40, 30)">
+                    <circle class="al-person-head" cx="0" cy="-8" r="5" fill="currentColor" opacity="0"/>
+                    <path class="al-person-body" d="M-7,2 a7,6 0 0,1 14,0" fill="currentColor" opacity="0"/>
+                    <g class="al-wave-0" opacity="0"><line x1="0" y1="-2" x2="0" y2="-16" stroke="#FF6B6B" stroke-width="2.5" stroke-linecap="round"/></g>
+                    <g class="al-wave-1" opacity="0"><line x1="0" y1="0" x2="11" y2="-11" stroke="#FBBF24" stroke-width="2.5" stroke-linecap="round"/></g>
+                    <g class="al-wave-2" opacity="0"><line x1="0" y1="0" x2="16" y2="0" stroke="#34D399" stroke-width="2.5" stroke-linecap="round"/></g>
+                    <g class="al-wave-3" opacity="0"><line x1="0" y1="0" x2="11" y2="11" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/></g>
+                    <g class="al-wave-4" opacity="0"><line x1="0" y1="0" x2="-11" y2="11" stroke="#A78BFA" stroke-width="2.5" stroke-linecap="round"/></g>
+                    <g class="al-wave-5" opacity="0"><line x1="0" y1="0" x2="-16" y2="0" stroke="#F472B6" stroke-width="2.5" stroke-linecap="round"/></g>
+                    <g class="al-wave-6" opacity="0"><line x1="0" y1="0" x2="-11" y2="-11" stroke="#2DD4BF" stroke-width="2.5" stroke-linecap="round"/></g>
                 </g>
             </svg>
         </button>
@@ -4102,6 +4317,10 @@
                     } else if (tab === 'ai') {
                         // AI页：回到顶部
                         scrollDockAIBottom();
+                    } else if (tab === 'profile') {
+                        // 我的页：回到顶部
+                        const panel = document.getElementById('panelProfile');
+                        if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                     }
                     return;
                 }
@@ -4115,14 +4334,15 @@
                 if (tabBtn) tabBtn.classList.add('active');
                 if (tab === 'chat') { loadDockChatList(); startDMPolling(30000); }
                 if (tab === 'ai') { scrollDockAIBottom(); }
+                if (tab === 'profile') { syncProfileUser(); }
             };
 
             // Animation class mapping
-            var animClassMap = { posts: 'anim-post', chat: 'anim-chat', ai: 'anim-ai' };
+            var animClassMap = { posts: 'anim-post', chat: 'anim-chat', ai: 'anim-ai', profile: 'anim-profile' };
             // Track which buttons currently have animation playing
             var animatingTabs = {};
             // Animation durations by tab (in ms, matching CSS)
-            var animDurations = { posts: 1500, chat: 2500, ai: 1400 };
+            var animDurations = { posts: 1500, chat: 2500, ai: 1400, profile: 1400 };
 
             function triggerTabAnimation(el, tab) {
                 var cls = animClassMap[tab];
@@ -4815,6 +5035,56 @@
                 document.addEventListener('DOMContentLoaded', calcPathLengths);
             } else {
                 calcPathLengths();
+            }
+        })();
+    </script>
+
+    <!-- Profile Page Logic -->
+    <script>
+        (function() {
+            // 同步用户信息到我的页面
+            window.syncProfileUser = function() {
+                var nameEl = document.getElementById('profileName');
+                var avatarEl = document.getElementById('profileAvatar');
+                var nameSpan = document.getElementById('myName');
+                var avatarSpan = document.getElementById('myAvatar');
+                if (nameSpan && nameEl) nameEl.textContent = nameSpan.textContent || '未登录';
+                if (avatarSpan && avatarEl) {
+                    avatarEl.textContent = avatarSpan.textContent || '?';
+                    avatarEl.style.background = avatarSpan.style.background;
+                }
+            };
+
+            // 初始化主题开关
+            var themeToggle = document.getElementById('profileThemeToggle');
+            if (themeToggle) {
+                themeToggle.checked = document.documentElement.getAttribute('data-theme') === 'dark';
+                themeToggle.addEventListener('change', function() {
+                    var isDark = this.checked;
+                    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+                    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+                    var topToggle = document.getElementById('themeToggle');
+                    if (topToggle) topToggle.textContent = isDark ? '🌙' : '☀️';
+                });
+            }
+
+            // 初始化语言选择
+            var langSelect = document.getElementById('profileLang');
+            if (langSelect) {
+                langSelect.value = localStorage.getItem('xtj-lang') || 'zh';
+                langSelect.addEventListener('change', function() {
+                    localStorage.setItem('xtj-lang', this.value);
+                    showToast(this.value === 'zh' ? '语言已切换为中文' : 'Language switched to English');
+                });
+            }
+
+            // 初始化通知开关
+            var notifToggle = document.getElementById('profileNotifToggle');
+            if (notifToggle) {
+                notifToggle.checked = localStorage.getItem('xtj-notif') !== 'off';
+                notifToggle.addEventListener('change', function() {
+                    localStorage.setItem('xtj-notif', this.checked ? 'on' : 'off');
+                });
             }
         })();
     </script>
