@@ -961,6 +961,170 @@
             border-color: rgba(255,255,255,0.06);
         }
         [data-theme="dark"] .theme-toggle-btn:hover { background: rgba(40,40,60,0.45); }
+
+        /* ========== 公告通知铃铛 ========== */
+        .nav-bell-btn {
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.25);
+            width: 34px; height: 34px; border-radius: 50%;
+            cursor: pointer; position: relative;
+            flex-shrink: 0; padding: 0;
+            display: none; align-items: center; justify-content: center;
+            transition: all 0.3s; margin-left: 2px;
+        }
+        .nav-bell-btn.visible { display: flex; }
+        .nav-bell-btn:hover { transform: scale(1.1); background: rgba(255,255,255,0.28); }
+        .nav-bell-btn svg { width: 16px; height: 16px; }
+        [data-theme="dark"] .nav-bell-btn {
+            background: rgba(30,30,50,0.35);
+            border-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .nav-bell-btn:hover { background: rgba(40,40,60,0.45); }
+        .nav-bell-badge {
+            position: absolute; top: -4px; right: -4px;
+            background: #ff3b60; color: white;
+            min-width: 16px; height: 16px; border-radius: 8px;
+            font-size: 10px; font-weight: 700;
+            display: none; align-items: center; justify-content: center;
+            padding: 0 4px; box-shadow: 0 2px 6px rgba(255,59,96,0.3);
+            line-height: 1; pointer-events: none;
+            transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .nav-bell-badge.show { display: flex; animation: bellBadgePop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        @keyframes bellBadgePop {
+            0% { transform: scale(0); }
+            60% { transform: scale(1.4); }
+            100% { transform: scale(1); }
+        }
+        @keyframes bellShake {
+            0%, 100% { transform: rotate(0); }
+            15% { transform: rotate(-12deg); }
+            30% { transform: rotate(12deg); }
+            45% { transform: rotate(-8deg); }
+            60% { transform: rotate(8deg); }
+            75% { transform: rotate(-4deg); }
+        }
+
+        /* ========== 公告列表模版 ========== */
+        .ann-modal {
+            max-width: 480px; padding: 0; overflow: hidden;
+        }
+        .ann-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 18px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.06);
+        }
+        .ann-header h3 { margin: 0; font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+        .ann-body {
+            padding: 16px 24px 24px;
+            max-height: 60vh; overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .ann-empty {
+            text-align: center; padding: 40px 0;
+            color: var(--text-muted); font-size: 14px;
+        }
+        .ann-item {
+            padding: 14px 16px; border-radius: var(--radius-sm);
+            cursor: pointer; margin-bottom: 10px;
+            box-shadow: 0 4px 16px rgba(5,150,105,0.06);
+            transition: var(--trans-spring);
+            position: relative; overflow: hidden;
+            opacity: 0; transform: translateY(12px);
+            animation: annItemIn 0.45s cubic-bezier(0.16,1,0.3,1) forwards;
+        }
+        .ann-item:last-child { margin-bottom: 0; }
+        .ann-item:hover { transform: translateY(-4px) scale(1.02); box-shadow: 0 12px 32px rgba(5,150,105,0.18), 0 4px 12px rgba(5,150,105,0.1); }
+        .ann-item.unread { border-left: 3px solid #ff3b60; padding-left: 13px; }
+        .ann-item.unread::after {
+            content: ''; position: absolute; top: 14px; right: 14px;
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #ff3b60; box-shadow: 0 0 8px rgba(255,59,96,0.5);
+        }
+        .ann-item .ann-item-header {
+            display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+        }
+        .ann-item .ann-item-title {
+            font-weight: 700; font-size: 14px; color: var(--text-main); flex: 1;
+        }
+        .ann-item .ann-item-time {
+            font-size: 11px; color: var(--text-muted); flex-shrink: 0;
+        }
+        .ann-item .ann-item-preview {
+            font-size: 13px; color: var(--text-muted);
+            line-height: 1.5; white-space: nowrap;
+            overflow: hidden; text-overflow: ellipsis;
+            padding-right: 20px;
+        }
+        @keyframes annItemIn {
+            0% { opacity: 0; transform: translateY(12px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+
+        .ann-detail-view {
+            animation: annDetailIn 0.3s cubic-bezier(0.16,1,0.3,1);
+        }
+        @keyframes annDetailIn {
+            0% { opacity: 0; transform: translateX(20px); }
+            100% { opacity: 1; transform: translateX(0); }
+        }
+        .ann-detail-time {
+            font-size: 12px; color: var(--text-muted); margin-bottom: 14px;
+        }
+        .ann-detail-content {
+            font-size: 14px; line-height: 1.8; color: var(--text-main);
+            white-space: pre-wrap; word-break: break-word;
+        }
+        .ann-back-btn {
+            font-size: 12px; padding: 4px 12px; border-radius: 99px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.15);
+            color: var(--text-muted); cursor: pointer;
+            font-weight: 500; transition: var(--trans-smooth);
+            margin-bottom: 14px;
+        }
+        .ann-back-btn:hover { background: rgba(255,255,255,0.28); }
+
+        .ann-admin-bar {
+            padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.05); display: none;
+        }
+        .ann-admin-bar.visible { display: block; }
+        .ann-publish-row {
+            display: flex; gap: 8px; align-items: flex-end;
+        }
+        .ann-publish-row textarea {
+            flex: 1; min-height: 56px; padding: 10px 14px;
+            border-radius: 12px; border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.2); outline: none;
+            font-size: 13px; font-family: inherit; resize: vertical;
+            color: var(--text-main);
+        }
+        .ann-publish-row textarea:focus { border-color: var(--primary); background: rgba(255,255,255,0.35); }
+        [data-theme="dark"] .ann-publish-row textarea {
+            background: rgba(30,30,50,0.35); border-color: rgba(255,255,255,0.08);
+        }
+        [data-theme="dark"] .ann-publish-row textarea:focus { background: rgba(40,40,60,0.45); }
+        .ann-publish-btn {
+            padding: 8px 18px; border-radius: 12px; border: none;
+            background: var(--primary); color: white;
+            font-weight: 600; cursor: pointer; white-space: nowrap;
+            transition: all 0.3s; flex-shrink: 0;
+        }
+        .ann-publish-btn:hover { opacity: 0.88; transform: scale(1.03); }
+        .ann-publish-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .ann-del-btn {
+            position: absolute; top: 10px; right: 10px;
+            width: 24px; height: 24px; border-radius: 50%;
+            border: none; background: rgba(255,59,96,0.15);
+            color: #ff3b60; font-size: 14px; cursor: pointer;
+            display: none; align-items: center; justify-content: center;
+            transition: all 0.3s; z-index: 2;
+        }
+        .ann-del-btn.visible { display: flex; }
+        .ann-del-btn:hover { background: rgba(255,59,96,0.3); transform: scale(1.15); }
+
         @media (max-width: 480px) {
             .chat-panel { height: 88vh; max-height: none; border-radius: 20px 20px 0 0; }
             .chat-msg { max-width: 88%; font-size: 14px; }
@@ -2056,6 +2220,13 @@
                         <button class="btn btn-ghost" onclick="openAuthModal('register')">注册</button>
                     </div>
                     <div id="authUI" style="display: none;">
+                        <button class="nav-bell-btn" id="navBellBtn" onclick="openAnnModal()" title="公告通知">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                            </svg>
+                            <span class="nav-bell-badge" id="navBellBadge">0</span>
+                        </button>
                         <div class="user-pill">
                             <span class="avatar" id="myAvatar" style="width:24px; height:24px; font-size:12px;">?</span>
                             <span id="myName"></span>
@@ -2353,6 +2524,22 @@
         </div>
     </div>
 
+    <div class="modal-overlay" id="annModal" onclick="if(event.target===this)closeModal('annModal')">
+        <div class="modal-box glass ann-modal" onclick="event.stopPropagation()">
+            <div class="ann-header">
+                <h3><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>群公告</h3>
+                <button class="btn btn-ghost" onclick="closeModal('annModal')" style="padding:4px 12px; font-size:16px;">✕</button>
+            </div>
+            <div class="ann-body" id="annBody"></div>
+            <div class="ann-admin-bar" id="annAdminBar">
+                <div class="ann-publish-row">
+                    <textarea id="annContentInp" placeholder="输入公告内容..." maxlength="2000"></textarea>
+                    <button class="ann-publish-btn" id="annPublishBtn" onclick="publishAnnouncement()">发布公告</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         (function () {
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
@@ -2380,6 +2567,178 @@
             const CACHE_DURATION = 2 * 60 * 1000;
 
             function isAdmin() { return currentUser === ADMIN_NAME; }
+
+            // ===================== 公告系统 =====================
+            const ANN_MARKER = '__ann__';
+            let annListCache = [];
+            let annUnreadCount = 0;
+
+            function getAnnReadMap() {
+                if (!currentUser) return {};
+                try {
+                    var raw = localStorage.getItem('xtj_ann_read_' + currentUser);
+                    return raw ? JSON.parse(raw) : {};
+                } catch(e) { return {}; }
+            }
+            function saveAnnReadMap(map) {
+                if (!currentUser) return;
+                localStorage.setItem('xtj_ann_read_' + currentUser, JSON.stringify(map));
+            }
+            function markAnnRead(annId) {
+                if (!currentUser) return;
+                var map = getAnnReadMap();
+                if (!map[annId]) {
+                    map[annId] = true;
+                    saveAnnReadMap(map);
+                    updateAnnBadge();
+                }
+            }
+            function isAnnRead(annId) {
+                var map = getAnnReadMap();
+                return !!map[annId];
+            }
+            async function loadAnnouncements() {
+                try {
+                    var { data, error } = await sb.from('posts')
+                        .select('id, content, created_at')
+                        .eq('media_type', ANN_MARKER)
+                        .order('created_at', { ascending: false })
+                        .limit(100);
+                    if (error) { annListCache = []; return []; }
+                    annListCache = data || [];
+                    return annListCache;
+                } catch(e) { annListCache = []; return []; }
+            }
+            function updateAnnBadge() {
+                if (!currentUser) return;
+                var map = getAnnReadMap();
+                var cnt = 0;
+                annListCache.forEach(function(a) {
+                    if (!map[a.id]) cnt++;
+                });
+                annUnreadCount = cnt;
+                var badge = document.getElementById('navBellBadge');
+                var bell = document.getElementById('navBellBtn');
+                if (badge && bell) {
+                    if (cnt > 0) {
+                        badge.textContent = cnt > 99 ? '99+' : cnt;
+                        badge.classList.add('show');
+                        bell.style.animation = 'bellShake 0.5s ease';
+                        setTimeout(function() { bell.style.animation = ''; }, 600);
+                    } else {
+                        badge.classList.remove('show');
+                    }
+                }
+            }
+            async function openAnnModal() {
+                var modal = document.getElementById('annModal');
+                if (!modal) return;
+                await loadAnnouncements();
+                renderAnnList();
+                var adminBar = document.getElementById('annAdminBar');
+                if (adminBar) {
+                    if (isAdmin()) { adminBar.classList.add('visible'); }
+                    else { adminBar.classList.remove('visible'); }
+                }
+                modal.classList.add('active');
+                document.body.style.overflow = 'hidden';
+            }
+            function renderAnnList() {
+                var body = document.getElementById('annBody');
+                if (!body) return;
+                body.classList.remove('ann-detail-view');
+                if (!annListCache.length) {
+                    body.innerHTML = '<div class="ann-empty">📢 暂无公告</div>';
+                    return;
+                }
+                var map = getAnnReadMap();
+                var h = '';
+                annListCache.forEach(function(a, i) {
+                    var unread = !map[a.id];
+                    var preview = (a.content || '').slice(0, 60);
+                    if (a.content && a.content.length > 60) preview += '...';
+                    var titleLine = preview.split('\n')[0] || '(无标题)';
+                    if (titleLine.length > 30) titleLine = titleLine.slice(0, 30) + '...';
+                    h += '<div class="ann-item' + (unread ? ' unread' : '') + '" style="animation-delay:' + (i * 0.06) + 's" onclick="viewAnnDetail(\'' + a.id + '\')" data-ann-id="' + a.id + '">';
+                    if (isAdmin()) {
+                        h += '<button class="ann-del-btn visible" onclick="event.stopPropagation();deleteAnnouncement(\'' + a.id + '\')" title="删除公告">✕</button>';
+                    }
+                    h += '<div class="ann-item-header"><span class="ann-item-title">' + escapeHtml(titleLine) + '</span><span class="ann-item-time">' + formatMsgTime(a.created_at) + '</span></div>';
+                    h += '<div class="ann-item-preview">' + escapeHtml(preview) + '</div>';
+                    h += '</div>';
+                });
+                body.innerHTML = h;
+            }
+            function viewAnnDetail(annId) {
+                markAnnRead(annId);
+                var a = annListCache.find(function(x) { return x.id === annId; });
+                if (!a) return;
+                var body = document.getElementById('annBody');
+                if (!body) return;
+                body.classList.add('ann-detail-view');
+                body.innerHTML = '<button class="ann-back-btn" onclick="renderAnnList()">‹ 返回列表</button>'
+                    + '<div class="ann-detail-time">' + new Date(a.created_at).toLocaleString() + '</div>'
+                    + '<div class="ann-detail-content">' + escapeHtml(a.content || '(无内容)') + '</div>';
+                setTimeout(function() {
+                    var items = document.querySelectorAll('.ann-item');
+                    items.forEach(function(item) {
+                        if (item.getAttribute('data-ann-id') === annId) {
+                            item.classList.remove('unread');
+                        }
+                    });
+                }, 100);
+            }
+            async function publishAnnouncement() {
+                if (!isAdmin()) { showToast('仅管理员可发布公告'); return; }
+                var inp = document.getElementById('annContentInp');
+                var btn = document.getElementById('annPublishBtn');
+                var content = (inp.value || '').trim();
+                if (!content) { showToast('请输入公告内容'); return; }
+                btn.disabled = true; btn.textContent = '发布中...';
+                try {
+                    var { error } = await sb.from('posts').insert([{
+                        user_name: ADMIN_NAME,
+                        content: content,
+                        media_type: ANN_MARKER,
+                        media_url: '',
+                        actor_key: deviceId
+                    }]);
+                    if (error) { showToast('发布失败: ' + (error.message || '未知错误')); btn.disabled = false; btn.textContent = '发布公告'; return; }
+                    inp.value = '';
+                    showToast('公告已发布');
+                    await loadAnnouncements();
+                    renderAnnList();
+                    updateAnnBadge();
+                } catch(e) { showToast('发布失败: ' + (e.message || '网络错误')); }
+                finally { btn.disabled = false; btn.textContent = '发布公告'; }
+            }
+            async function deleteAnnouncement(annId) {
+                if (!isAdmin()) return;
+                if (!confirm('确认删除此公告？')) return;
+                try {
+                    var { error } = await sb.from('posts').delete().eq('id', annId).eq('media_type', ANN_MARKER);
+                    if (error) { showToast('删除失败: ' + error.message); return; }
+                    showToast('公告已删除');
+                    await loadAnnouncements();
+                    renderAnnList();
+                    updateAnnBadge();
+                } catch(e) { showToast('删除失败: ' + (e.message || '网络错误')); }
+            }
+            function initAnnouncements() {
+                if (!currentUser) {
+                    var bell = document.getElementById('navBellBtn');
+                    if (bell) bell.classList.remove('visible');
+                    return;
+                }
+                var bell = document.getElementById('navBellBtn');
+                if (bell) bell.classList.add('visible');
+                loadAnnouncements().then(function() { updateAnnBadge(); });
+            }
+            window.openAnnModal = openAnnModal;
+            window.publishAnnouncement = publishAnnouncement;
+            window.deleteAnnouncement = deleteAnnouncement;
+            window.viewAnnDetail = viewAnnDetail;
+            window.renderAnnList = renderAnnList;
 
             function showToast(message) {
                 const container = document.getElementById('toastContainer');
@@ -2561,11 +2920,13 @@
                     var avatar = document.getElementById("myAvatar");
                     avatar.textContent = currentUser[0].toUpperCase();
                     avatar.className = "avatar";
-                    try { subscribeToMessages(); startDMPolling(); updateUnreadBadge(); } catch(e) {}
+                    try { subscribeToMessages(); startDMPolling(); updateUnreadBadge(); initAnnouncements(); } catch(e) {}
                 } else {
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
                     try { stopDMPolling(); } catch(e) {}
+                    var bell = document.getElementById('navBellBtn');
+                    if (bell) bell.classList.remove('visible');
                 }
             }
 
@@ -2768,6 +3129,7 @@
 
             window.closeModal = function (id) {
                 document.getElementById(id).classList.remove("active");
+                if (id === 'annModal') { document.body.style.overflow = ''; }
                 if (id === 'statModal' && statPollTimer) {
                     clearInterval(statPollTimer);
                     statPollTimer = null;
@@ -3056,7 +3418,7 @@
             }
 
             function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
+                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== ANN_MARKER);
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length + comments.length;
@@ -3169,7 +3531,7 @@
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
+                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== ANN_MARKER);
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
 
@@ -3448,7 +3810,7 @@
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
                     var postRes = results[0], commRes = results[1], likeRes = results[2];
-                    statAllPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER; });
+                    statAllPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== ANN_MARKER; });
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
                     var body = document.getElementById('statModalBody');
