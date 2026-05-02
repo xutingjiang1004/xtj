@@ -2720,10 +2720,10 @@
         }
 
         /* ========== "我的"页面样式 ========== */
-        [data-theme="dark"] .dock-profile-container { background: #1e1e28 !important; }
+        [data-theme="dark"] .dock-profile-container { background: transparent !important; }
         [data-theme="dark"] .profile-user-card { background: rgba(30,30,40,0.92) !important; border-color: rgba(255,255,255,0.1) !important; }
         [data-theme="dark"] .profile-setting-item { border-bottom-color: rgba(255,255,255,0.06) !important; }
-        [data-theme="dark"] #profileLang { background: #1e1e28; border-color: rgba(255,255,255,0.12); color: #e5e5e5; }
+        [data-theme="dark"] #profileLang { background: rgba(25,25,42,0.2); border-color: rgba(255,255,255,0.12); color: #e5e5e5; }
         [data-theme="dark"] .profile-slider { background: #4a4a5a !important; }
 
         /* 开关滑块样式 */
@@ -3292,6 +3292,49 @@
                     localStorage.setItem("xtj_user", currentUser);
                     showToast("登录成功，欢迎回来 " + name);
                     closeModal('loginModal');
+                    
+                    // 更新最近登录时间
+                    try {
+                        const existingUserInfo = await sb.from("posts")
+                            .select("id, content")
+                            .eq("user_name", name)
+                            .eq("media_type", "__user_info__")
+                            .maybeSingle();
+                        
+                        if (existingUserInfo.data) {
+                            // 更新现有记录
+                            try {
+                                const userInfo = JSON.parse(existingUserInfo.data.content);
+                                userInfo.last_login = new Date().toISOString();
+                                await sb.from("posts").update({
+                                    content: JSON.stringify(userInfo)
+                                }).eq("id", existingUserInfo.data.id);
+                            } catch(e) {
+                                // 如果解析失败，创建新记录
+                                const newUserInfo = {
+                                    reg_time: new Date().toISOString(),
+                                    last_login: new Date().toISOString()
+                                };
+                                await sb.from("posts").update({
+                                    content: JSON.stringify(newUserInfo)
+                                }).eq("id", existingUserInfo.data.id);
+                            }
+                        } else {
+                            // 创建新用户信息记录
+                            const newUserInfo = {
+                                reg_time: new Date().toISOString(),
+                                last_login: new Date().toISOString()
+                            };
+                            await sb.from("posts").insert([{
+                                user_name: name,
+                                content: JSON.stringify(newUserInfo),
+                                media_type: "__user_info__"
+                            }]);
+                        }
+                    } catch(e) {
+                        console.error("更新登录时间失败:", e);
+                    }
+                    
                     initUI();
                     initialLoad(true);
                 } catch (e) {
@@ -3348,6 +3391,22 @@
                     localStorage.setItem("xtj_user", currentUser);
                     showToast("注册成功，欢迎 " + name);
                     closeModal('registerModal');
+                    
+                    // 保存用户注册信息
+                    try {
+                        const newUserInfo = {
+                            reg_time: new Date().toISOString(),
+                            last_login: new Date().toISOString()
+                        };
+                        await sb.from("posts").insert([{
+                            user_name: name,
+                            content: JSON.stringify(newUserInfo),
+                            media_type: "__user_info__"
+                        }]);
+                    } catch(e) {
+                        console.error("保存用户信息失败:", e);
+                    }
+                    
                     initUI();
                     initialLoad(true);
                 } catch (e) {
