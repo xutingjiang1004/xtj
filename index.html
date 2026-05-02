@@ -4332,7 +4332,7 @@
                 }
             }
 
-            function renderFeed({ posts, comments, likes }) {
+            async function renderFeed({ posts, comments, likes }) {
                 const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
@@ -4348,10 +4348,9 @@
                 visiblePosts.forEach(p => allUsers.add(p.user_name));
                 comments.forEach(c => allUsers.add(c.user_name));
 
-                // 加载所有用户头像
-                loadAvatarsForUsers(Array.from(allUsers)).then(() => {
-                    renderFeedWithAvatars(visiblePosts, comments, likes);
-                });
+                // 等待头像加载完成后再渲染
+                await loadAvatarsForUsers(Array.from(allUsers));
+                renderFeedWithAvatars(visiblePosts, comments, likes);
             }
 
             // 缓存头像URL
