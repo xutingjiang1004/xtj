@@ -1359,6 +1359,11 @@
         .dock-tab:focus-visible { outline: none; box-shadow: none; }
         .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
         .dock-tab .dt-icon { transition: none; }
+        /* AI花朵按钮：图标更大(28x28)无文字标签，垂直居中保持和其他按钮等高 */
+        .dock-tab[data-tab="ai"] {
+            justify-content: center;
+        }
+        .dock-tab[data-tab="ai"] .dt-label { display: none; }
         /* Dock面板: 聊天 (复用聊天样式，去掉overlay固定定位) */
         .dock-chat-container {
             display: flex; flex-direction: column; height: 100%;
@@ -2879,7 +2884,7 @@
         </button>
         <button class="dock-tab" data-tab="ai">
             <span class="dt-icon">
-                <svg class="dt-svg" viewBox="-1 -1 26 26" width="20" height="20" fill="none">
+                <svg class="dt-svg" viewBox="-1 -1 26 26" width="28" height="28" fill="none">
                     <g transform="translate(12,12)">
                         <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(0)"/>
                         <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(60)"/>
@@ -2891,7 +2896,7 @@
                     </g>
                 </svg>
             </span>
-            <span class="dt-label" style="visibility:hidden;">AI</span>
+            <span class="dt-label" style="height:0;overflow:hidden;pointer-events:none;">.</span>
             <svg class="anim-layer" viewBox="0 0 90 70" width="90" height="70" overflow="visible">
                 <defs>
                     <radialGradient id="flower-flash" cx="50%" cy="50%" r="50%">
