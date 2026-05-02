@@ -424,17 +424,19 @@
 
     function renderAnnTab(el) {
         var h = '<div class="card"><h3>📢 发布新公告</h3>';
-        h += '<textarea id="adminAnnInp" placeholder="输入公告内容..." maxlength="2000"></textarea>';
+        h += '<input type="text" id="adminAnnTitleInp" placeholder="输入公告标题（可选）" style="width:100%;margin-bottom:8px;padding:10px 12px;border-radius:12px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:14px;outline:none;box-sizing:border-box;">';
+        h += '<textarea id="adminAnnInp" placeholder="输入公告内容（可选）" maxlength="2000"></textarea>';
         h += '<div class="publish-row"><button class="btn-sm primary" onclick="publishAdminAnn()">发布公告</button></div></div>';
         h += '<div class="card"><h3>📋 公告列表（' + annList.length + '条）</h3>';
         if (!annList.length) {
             h += '<div class="empty">暂无公告</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>内容</th><th>发布时间</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>标题</th><th>内容</th><th>发布者</th><th>发布时间</th><th>操作</th></tr></thead><tbody>';
             annList.forEach(function(a) {
-                var preview = (a.content || '').slice(0, 80);
-                if (a.content && a.content.length > 80) preview += '...';
-                h += '<tr><td>' + escapeHtml(preview) + '</td><td>' + formatTime(a.created_at) + '</td>';
+                var titlePreview = a.title ? escapeHtml(a.title) : '-';
+                var preview = (a.content || '').slice(0, 60);
+                if (a.content && a.content.length > 60) preview += '...';
+                h += '<tr><td>' + titlePreview + '</td><td>' + escapeHtml(preview || '-') + '</td><td>' + escapeHtml(a.user_name) + '</td><td>' + formatTime(a.created_at) + '</td>';
                 h += '<td><button class="btn-sm del" onclick="deleteAdminAnn(\'' + a.id + '\')">删除</button></td></tr>';
             });
             h += '</tbody></table></div>';
@@ -555,17 +557,25 @@
     }
 
     window.publishAdminAnn = async function() {
-        var inp = document.getElementById('adminAnnInp');
-        var content = (inp.value || '').trim();
-        if (!content) { showToast('请输入公告内容', 'error'); return; }
+        var titleInp = document.getElementById('adminAnnTitleInp');
+        var contentInp = document.getElementById('adminAnnInp');
+        var title = (titleInp.value || '').trim();
+        var content = (contentInp.value || '').trim();
+        
+        if (!title && !content) { 
+            showToast('请至少填写标题或内容', 'error'); 
+            return; 
+        }
+        
         try {
             var res = await sb.from('posts').insert([{
-                user_name: ADMIN, content: content,
+                user_name: ADMIN, title: title, content: content,
                 media_type: ANN_MARKER, media_url: '',
                 actor_key: 'admin_' + Date.now()
             }]);
             if (res.error) { showToast('发布失败: ' + res.error.message, 'error'); return; }
-            inp.value = '';
+            titleInp.value = '';
+            contentInp.value = '';
             await loadAllData(true); // 保持当前tab
             showToast('公告已发布', 'success');
         } catch(e) { showToast('发布失败: ' + e.message, 'error'); }
