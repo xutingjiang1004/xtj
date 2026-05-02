@@ -3790,7 +3790,8 @@
                                 user_name: currentUser,
                                 content: "用户头像",
                                 media_url: base64Data,
-                                media_type: "__avatar__"
+                                media_type: "__avatar__",
+                                actor_key: "__avatar__"
                             }]);
                             
                             if (error) {
@@ -4991,13 +4992,13 @@
                 chatRealtime = sb.channel('chat-dms')
                     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, function(payload) {
                         var m = payload.new;
+                        console.log('[CHAT-REALTIME] 收到新消息:', m);
                         if (m.media_type !== DM_MARKER) return;
                         if (!currentUser) return;
                         if (m.media_url !== currentUser) return;
                         if (m.user_name === currentUser) return;
-                        if (typeof dockChatActiveUser === 'undefined' || dockChatActiveUser !== m.user_name) {
-                            showNotification(m.user_name, m.content || '发送了一张图片/视频');
-                        }
+                        console.log('[CHAT-REALTIME] 触发通知:', m.user_name, m.content);
+                        showNotification(m.user_name, m.content || '发送了一张图片/视频');
                         if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser === m.user_name) {
                             loadDockChatMessages(m.user_name, false);
                         } else if (typeof dockChatActiveUser === 'undefined' || !dockChatActiveUser) {
