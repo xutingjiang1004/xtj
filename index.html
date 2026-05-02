@@ -918,7 +918,7 @@
             transition: all 0.3s; line-height: 1;
         }
         .chat-img-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.06); }
-        /* iMessage 风格发送动�?*/
+        /* iMessage 风格发送动画 */
         @keyframes msgSend {
             0%   { opacity: 0; transform: scale(0.6) translateY(16px); }
             55%  { opacity: 1; transform: scale(1.04) translateY(-4px); }
@@ -1831,7 +1831,7 @@
             100%    { transform: translate(8px, 10px) scale(0.9); opacity: 0; }
         }
 
-        /* Bubble 2 (Medium): Second message bubble - 右上方位�?*/
+        /* Bubble 2 (Medium): Second message bubble - 右上方位置 */
         .dock-tab.anim-chat .al-bubble-2 {
             animation: bubble2Inflate 2.5s ease forwards;
         }
@@ -1847,7 +1847,7 @@
             100%    { transform: translate(56px, -3px) scale(0.85); opacity: 0; }
         }
 
-        /* Bubble 3 (Small): Third message bubble - 左上方位�?*/
+        /* Bubble 3 (Small): Third message bubble - 左上方位置 */
         .dock-tab.anim-chat .al-bubble-3 {
             animation: bubble3Inflate 2.5s ease forwards;
         }
@@ -1901,7 +1901,7 @@
             12%  { opacity: 0; transform: scale(1.2); }
             100% { opacity: 0; }
         }
-        /* 花朵中心消失与重�?*/
+        /* 花朵中心消失与重现 */
         .dock-tab.anim-ai .al-flower-center {
             animation: centerPopNew 1.4s ease forwards;
         }
@@ -2014,7 +2014,7 @@
         }
 
         /* ========== 磨砂玻璃效果增强 ========== */
-        /* 导航�?*/
+        /* 导航栏 */
         nav {
             background: rgba(255, 255, 255, 0.25);
             backdrop-filter: blur(12px);
@@ -2026,7 +2026,7 @@
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        /* 发布�?*/
+        /* 发布框 */
         .publish-box {
             background: rgba(255, 255, 255, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.9);
@@ -2046,7 +2046,7 @@
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        /* 评论�?*/
+        /* 评论区 */
         .comment-item {
             background: rgba(255, 255, 255, 0.88);
             border: 1px solid rgba(255, 255, 255, 0.6);
@@ -2084,7 +2084,7 @@
             background: linear-gradient(135deg, #047857, #059669);
         }
 
-        /* 好友聊天气泡 - 接收�?*/
+        /* 好友聊天气泡 - 接收方 */
         .chat-msg.received {
             background: rgba(255, 255, 255, 0.95);
             border: 1px solid rgba(0, 0, 0, 0.08);
@@ -2112,7 +2112,7 @@
             background: linear-gradient(135deg, #047857, #059669);
         }
 
-        /* AI思考过�?*/
+        /* AI思考过程 */
         .ai-reasoning-content {
             background: rgba(255, 255, 255, 0.95);
             border: 1px solid rgba(99, 102, 241, 0.2);
@@ -2122,7 +2122,7 @@
             border: 1px solid rgba(99, 102, 241, 0.3);
         }
 
-        /* 通用glass�?*/
+        /* 通用glass类 */
         .glass {
             background: rgba(255, 255, 255, 0.92);
             border: 1px solid rgba(255, 255, 255, 0.7);
@@ -2132,7 +2132,7 @@
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        /* 统计详情用户�?*/
+        /* 统计详情用户组 */
         .stat-user-group {
             background: rgba(255, 255, 255, 0.88);
             border: 1px solid rgba(255, 255, 255, 0.6);
@@ -2142,7 +2142,7 @@
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
-        /* 聊天入口�?*/
+        /* 聊天入口条 */
         .chat-entry-bar {
             background: rgba(255, 255, 255, 0.95);
             border: 1px solid rgba(255, 255, 255, 0.8);
@@ -2153,7 +2153,7 @@
         }
 
         /* ========== 统计详情弹窗内的帖子卡片去除磨砂 ========== */
-        /* stat模态框内的.feed容器中的帖子卡片不应用磨砂效�?*/
+        /* stat模态框内的.feed容器中的帖子卡片不应用磨砂效果 */
         .modal-box .feed .post,
         .stat-modal-content .feed .post,
         .stat-detail-body .feed .post,
@@ -2176,7 +2176,7 @@
         .dock-ai-container .ai-chat-body::-webkit-scrollbar { display: none; }
         .chat-messages, .chat-list, .dock-panel, .ai-chat-body, .dock-ai-container .ai-chat-body { scrollbar-width: none; }
 
-        /* ========== 切换按钮/欢迎�?花朵飞散动画 (CSS class方式) ========== */
+        /* ========== 切换按钮/欢迎页 花朵飞散动画 (CSS class方式) ========== */
         /* AI页面花朵飞散动画 - 复用导航按钮petalFly逐瓣飞散 */
         .amt-flower-icon.amt-flower-scatter .al-petal-g:nth-child(1) { animation: petalFly0 1.4s ease forwards; }
         .amt-flower-icon.amt-flower-scatter .al-petal-g:nth-child(2) { animation: petalFly1 1.4s ease forwards; }
@@ -2185,7 +2185,7 @@
         .amt-flower-icon.amt-flower-scatter .al-petal-g:nth-child(5) { animation: petalFly4 1.4s ease forwards; }
         .amt-flower-icon.amt-flower-scatter .al-petal-g:nth-child(6) { animation: petalFly5 1.4s ease forwards; }
 
-        /* ========== 切换按钮/欢迎�?闪电劈下动画 (CSS class方式) ========== */
+        /* ========== 切换按钮/欢迎页 闪电劈下动画 (CSS class方式) ========== */
         .amt-lightning-icon.amt-lightning-strike {
             animation: amtLightningStrikeAnim 0.5s ease forwards;
         }
@@ -2213,7 +2213,7 @@
             <nav>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <h1>xtj</h1>
-                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀�?/button>
+                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
                 </div>
                 <div class="nav-auth">
                     <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
@@ -2240,20 +2240,20 @@
                 <div class="publish-box glass">
                     <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
                     <div class="publish-footer">
-                        <label for="fileInp" class="file-label">📷 选取照片或视�?/label>
+                        <label for="fileInp" class="file-label">📷 选取照片或视频</label>
                         <input type="file" id="fileInp" accept="image/*,video/*" style="display:none" />
-                        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动�?/button>
+                        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
                     </div>
                 </div>
 
                 <div class="stats">
-                    <div class="stat-card glass" onclick="openStatDetail('posts')" title="点击查看详情"><b id="sPosts">0</b><span>总动�?/span></div>
-                    <div class="stat-card glass" onclick="openStatDetail('views')" title="点击查看详情"><b id="sViews">0</b><span>总浏�?/span></div>
-                    <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>点赞和评�?/span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('posts')" title="点击查看详情"><b id="sPosts">0</b><span>总动态</span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('views')" title="点击查看详情"><b id="sViews">0</b><span>总浏览</span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>点赞和评论</span></div>
                 </div>
 
                 <div id="feed" class="feed">
-                    <div class="loading">内容加载�?..</div>
+                    <div class="loading">内容加载中...</div>
                 </div>
             </div>
         </div>
@@ -2261,7 +2261,7 @@
         <div class="dock-panel" id="panelChat">
             <div class="dock-chat-container" id="dockChatContainer">
                 <div class="chat-header">
-                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">�?/button>
+                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">‹</button>
                     <h3 id="dockChatTitle">消息</h3>
                 </div>
                 <div id="dockChatListView" class="chat-view">
@@ -2275,13 +2275,13 @@
                                 <input id="dockChatInput" placeholder="输入消息..." maxlength="500" />
                                 <div id="dockChatFilePreview" class="chat-file-preview hidden">
                                     <div class="cfp-thumb" id="dockCfpThumb">
-                                        <button class="cfp-x" id="dockCfpRemove" title="移除">�?/button>
+                                        <button class="cfp-x" id="dockCfpRemove" title="移除">✕</button>
                                     </div>
                                     <span class="cfp-name" id="dockCfpName"></span>
                                 </div>
                             </div>
-                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送图�?>📷</button>
-                            <button class="send-btn" id="dockChatSendBtn">�?/button>
+                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送图片">📷</button>
+                            <button class="send-btn" id="dockChatSendBtn">➤</button>
                         </div>
                     </div>
                     <input type="file" id="dockChatFileInp" accept="image/*,video/*" style="display:none" />
@@ -2293,7 +2293,7 @@
             <div class="dock-ai-container" id="dockAIContainer">
                 <div class="ai-chat-header">
                     <span class="ai-title">DeepSeek AI</span>
-                    <button class="ai-mode-toggle" id="dockAIModeBtn" title="切换思�?快速模�? onclick="toggleAIMode()">
+                    <button class="ai-mode-toggle" id="dockAIModeBtn" title="切换思考/快速模式" onclick="toggleAIMode()">
                         <span class="amt-label">
                             <svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="14" height="14" fill="none" style="vertical-align:middle;">
                                 <g class="al-petals" transform="translate(12,12)">
@@ -2306,10 +2306,10 @@
                                     <circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/>
                                 </g>
                             </svg>
-                            思�?
+                            思考
                         </span>
                         <span class="amt-switch"><span class="amt-knob"></span></span>
-                        <span class="amt-label amt-label-quick"><svg class="amt-lightning-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" style="vertical-align:middle;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="none" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> 快�?/span>
+                        <span class="amt-label amt-label-quick"><svg class="amt-lightning-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" style="vertical-align:middle;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="none" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg> 快速</span>
                     </button>
                 </div>
                 <div class="ai-chat-body" id="dockAIBody">
@@ -2327,12 +2327,12 @@
                                 </g>
                             </svg>
                         </span>
-                        你好！我�?DeepSeek AI 助手<br>直接输入问题开始对�?
+                        你好！我是 DeepSeek AI 助手<br>直接输入问题开始对话
                     </div>
                 </div>
                 <div class="ai-chat-footer">
                     <textarea id="dockAIInput" placeholder="输入你的问题..." rows="1" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();dockSendAI();}"></textarea>
-                    <button class="ai-send-btn" id="dockAISendBtn" title="发�? onclick="dockSendAI()">�?/button>
+                    <button class="ai-send-btn" id="dockAISendBtn" title="发送" onclick="dockSendAI()">➤</button>
                 </div>
             </div>
         </div>
@@ -2357,7 +2357,7 @@
                 </defs>
                 <path class="al-path" d="M 8,32 Q 22,12 38,28 T 70,18" fill="none" stroke="url(#g-stroke)" stroke-width="3" stroke-linecap="round"/>
                 <g class="al-pen">
-                    <!-- 修长蜡笔 - rotate(25)使笔尖更倾斜，跟着路径方向�?-->
+                    <!-- 修长蜡笔 - rotate(25)使笔尖更倾斜，跟着路径方向画 -->
                     <g transform="rotate(25)">
                         <!-- 蜡笔身体 - 缩短1/4，从32减到24 -->
                         <rect x="-2" y="-4" width="5" height="24" rx="1.5" fill="#F59E0B" stroke="#D97706" stroke-width="0.8"/>
@@ -2365,7 +2365,7 @@
                         <rect x="-2" y="6" width="5" height="4" rx="1" fill="#FBBF24" opacity="0.5"/>
                         <!-- 蜡笔金属包边 - 位置相应调整 -->
                         <rect x="-2" y="18" width="5" height="3" rx="0.5" fill="#9CA3AF" stroke="#6B7280" stroke-width="0.5"/>
-                        <!-- 蜡笔笔尖 - 三角形位置调�?-->
+                        <!-- 蜡笔笔尖 - 三角形位置调整 -->
                         <path d="M-2,21 L0.5,28 L3,21 Z" fill="#F59E0B" stroke="#D97706" stroke-width="0.6"/>
                         <!-- 笔尖尖端颜色 -->
                         <path d="M0,24 L0.5,28 L1,24 Z" fill="#FF6B6B"/>
@@ -2382,7 +2382,7 @@
             <span class="dt-label">聊天</span>
             <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
                 <!-- 3个气泡各自独立定位，明显分开 -->
-                <!-- Bubble 1 (Big)：主气泡 - 在中心偏�?-->
+                <!-- Bubble 1 (Big)：主气泡 - 在中心偏左 -->
                 <g class="al-bubble-1" opacity="0" transform="translate(8, 20)">
                     <path d="M0,0 Q0,-12 14,-12 L28,-12 Q32,-12 32,-8 L32,6 Q32,10 28,10 L18,10 L14,16 L10,10 L0,10 Q-4,10 -4,6 L-4,-8 Q-4,-12 0,0 Z" 
                           fill="rgba(74,108,247,0.15)" stroke="rgba(74,108,247,0.4)" stroke-width="1.2"/>
@@ -2390,21 +2390,21 @@
                     <line x1="4" y1="2" x2="18" y2="2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
                     <line x1="4" y1="8" x2="20" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.25"/>
                 </g>
-                <!-- Bubble 2 (Medium)：中气泡 - 在大气泡右上�?-->
+                <!-- Bubble 2 (Medium)：中气泡 - 在大气泡右上方 -->
                 <g class="al-bubble-2" opacity="0" transform="translate(50, 5)">
                     <path d="M0,0 Q0,-10 10,-10 L20,-10 Q24,-10 24,-6 L24,4 Q24,8 20,8 L12,8 L9,13 L6,8 L0,8 Q-4,8 -4,4 L-4,-6 Q-4,-10 0,0 Z" 
                           fill="rgba(74,108,247,0.12)" stroke="rgba(74,108,247,0.3)" stroke-width="1"/>
                     <line x1="2" y1="-3" x2="16" y2="-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.35"/>
                     <line x1="2" y1="2" x2="12" y2="2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.25"/>
                 </g>
-                <!-- Bubble 3 (Small)：小气泡 - 在大气泡左上�?-->
+                <!-- Bubble 3 (Small)：小气泡 - 在大气泡左上方 -->
                 <g class="al-bubble-3" opacity="0" transform="translate(0, 2)">
                     <path d="M0,0 Q0,-7 7,-7 L14,-7 Q17,-7 17,-4 L17,3 Q17,6 14,6 L8,6 L5,10 L2,6 L0,6 Q-4,6 -4,3 L-4,-4 Q-4,-7 0,0 Z" 
                           fill="rgba(74,108,247,0.1)" stroke="rgba(74,108,247,0.25)" stroke-width="1"/>
                     <line x1="1" y1="-1" x2="11" y2="-1" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
                     <line x1="1" y1="3" x2="8" y2="3" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.2"/>
                 </g>
-                <!-- 打字指示�?-->
+                <!-- 打字指示点 -->
                 <circle class="al-dot-1" cx="31" cy="25" r="2.8" fill="currentColor" opacity="0"/>
                 <circle class="al-dot-2" cx="40" cy="25" r="2.8" fill="currentColor" opacity="0"/>
                 <circle class="al-dot-3" cx="49" cy="25" r="2.8" fill="currentColor" opacity="0"/>
@@ -2460,8 +2460,8 @@
 
     <div class="modal-overlay" id="delModal">
         <div class="modal-box glass" style="text-align: center;">
-            <h3 style="margin-top:0;">确认删除帖子�?/h3>
-            <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢�?/p>
+            <h3 style="margin-top:0;">确认删除帖子？</h3>
+            <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢复</p>
             <div style="display: flex; gap: 10px;">
                 <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delModal')">取消</button>
                 <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
@@ -2486,7 +2486,7 @@
             <div class="auth-form">
                 <p class="af-title">创建账号</p>
                 <input id="regNickInp" class="af-input" placeholder="昵称" autocomplete="off" />
-                <input id="regPwInp" class="af-input" type="password" placeholder="密码（至�?位）" />
+                <input id="regPwInp" class="af-input" type="password" placeholder="密码（至少3位）" />
                 <button class="btn btn-primary af-btn" id="registerSubmitBtn">注册</button>
                 <span class="af-link" onclick="closeModal('registerModal');openAuthModal('login')">已有账号？去登录</span>
             </div>
@@ -2498,17 +2498,17 @@
         <div class="iv-wrapper" id="ivWrapper">
             <img id="ivImg" src="" alt="预览" draggable="false" />
         </div>
-        <div class="iv-zoom-hint" id="ivZoomHint">捏合双指可缩�?/div>
+        <div class="iv-zoom-hint" id="ivZoomHint">捏合双指可缩放</div>
     </div>
 
     <div class="modal-overlay" id="statModal" onclick="if(event.target===this)closeModal('statModal')">
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
                 <h3 id="statModalTitle">统计详情</h3>
-                <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">�?/button>
+                <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="stat-detail-body" id="statModalBody">
-                加载�?..
+                加载中...
             </div>
         </div>
     </div>
@@ -2517,10 +2517,10 @@
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
                 <h3 id="postDetailTitle">帖子详情</h3>
-                <button class="btn btn-ghost" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;">�?/button>
+                <button class="btn btn-ghost" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="stat-detail-body" id="postDetailBody">
-                加载�?..
+                加载中...
             </div>
         </div>
     </div>
@@ -2528,8 +2528,8 @@
     <div class="modal-overlay" id="annModal" onclick="if(event.target===this)closeModal('annModal')">
         <div class="modal-box glass ann-modal" onclick="event.stopPropagation()">
             <div class="ann-header">
-                <h3><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>群公�?/h3>
-                <button class="btn btn-ghost" onclick="closeModal('annModal')" style="padding:4px 12px; font-size:16px;">�?/button>
+                <h3><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>群公告</h3>
+                <button class="btn btn-ghost" onclick="closeModal('annModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="ann-body" id="annBody"></div>
             <div class="ann-admin-bar" id="annAdminBar">
@@ -2658,11 +2658,11 @@
                     var unread = !map[a.id];
                     var preview = (a.content || '').slice(0, 60);
                     if (a.content && a.content.length > 60) preview += '...';
-                    var titleLine = preview.split('\n')[0] || '(无标�?';
+                    var titleLine = preview.split('\n')[0] || '(无标题)';
                     if (titleLine.length > 30) titleLine = titleLine.slice(0, 30) + '...';
                     h += '<div class="ann-item' + (unread ? ' unread' : '') + '" style="animation-delay:' + (i * 0.06) + 's" onclick="viewAnnDetail(\'' + a.id + '\')" data-ann-id="' + a.id + '">';
                     if (isAdmin()) {
-                        h += '<button class="ann-del-btn visible" onclick="event.stopPropagation();deleteAnnouncement(\'' + a.id + '\')" title="删除公告">�?/button>';
+                        h += '<button class="ann-del-btn visible" onclick="event.stopPropagation();deleteAnnouncement(\'' + a.id + '\')" title="删除公告">✕</button>';
                     }
                     h += '<div class="ann-item-header"><span class="ann-item-title">' + escapeHtml(titleLine) + '</span><span class="ann-item-time">' + formatMsgTime(a.created_at) + '</span></div>';
                     h += '<div class="ann-item-preview">' + escapeHtml(preview) + '</div>';
@@ -2677,9 +2677,9 @@
                 var body = document.getElementById('annBody');
                 if (!body) return;
                 body.classList.add('ann-detail-view');
-                body.innerHTML = '<button class="ann-back-btn" onclick="renderAnnList()">�?返回列表</button>'
+                body.innerHTML = '<button class="ann-back-btn" onclick="renderAnnList()">‹ 返回列表</button>'
                     + '<div class="ann-detail-time">' + new Date(a.created_at).toLocaleString() + '</div>'
-                    + '<div class="ann-detail-content">' + escapeHtml(a.content || '(无内�?') + '</div>';
+                    + '<div class="ann-detail-content">' + escapeHtml(a.content || '(无内容)') + '</div>';
                 setTimeout(function() {
                     var items = document.querySelectorAll('.ann-item');
                     items.forEach(function(item) {
@@ -2690,12 +2690,12 @@
                 }, 100);
             }
             async function publishAnnouncement() {
-                if (!isAdmin()) { showToast('仅管理员可发布公�?); return; }
+                if (!isAdmin()) { showToast('仅管理员可发布公告'); return; }
                 var inp = document.getElementById('annContentInp');
                 var btn = document.getElementById('annPublishBtn');
                 var content = (inp.value || '').trim();
-                if (!content) { showToast('请输入公告内�?); return; }
-                btn.disabled = true; btn.textContent = '发布�?..';
+                if (!content) { showToast('请输入公告内容'); return; }
+                btn.disabled = true; btn.textContent = '发布中...';
                 try {
                     var { error } = await sb.from('posts').insert([{
                         user_name: ADMIN_NAME,
@@ -2706,7 +2706,7 @@
                     }]);
                     if (error) { showToast('发布失败: ' + (error.message || '未知错误')); btn.disabled = false; btn.textContent = '发布公告'; return; }
                     inp.value = '';
-                    showToast('公告已发�?);
+                    showToast('公告已发布');
                     await loadAnnouncements();
                     renderAnnList();
                     updateAnnBadge();
@@ -2717,11 +2717,9 @@
                 if (!isAdmin()) return;
                 if (!confirm('确认删除此公告？')) return;
                 try {
-                    var ann = annListCache.find(function(x) { return x.id === annId; });
-                    var key = ann ? ann.actor_key : deviceId;
-                    var { error } = await sb.rpc('delete_post_with_actor', { p_post_id: annId, p_actor_key: key });
+                    var { error } = await sb.from('posts').delete().eq('id', annId).eq('media_type', ANN_MARKER);
                     if (error) { showToast('删除失败: ' + error.message); return; }
-                    showToast('公告已删�?);
+                    showToast('公告已删除');
                     await loadAnnouncements();
                     renderAnnList();
                     updateAnnBadge();
@@ -2798,12 +2796,12 @@
             async function doLogin() {
                 const name = document.getElementById("loginNickInp").value.trim();
                 const pw = document.getElementById("loginPwInp").value;
-                if (!name) { showToast("请输入昵�?); return; }
-                if (!pw) { showToast("请输入密�?); return; }
+                if (!name) { showToast("请输入昵称"); return; }
+                if (!pw) { showToast("请输入密码"); return; }
 
                 const btn = document.getElementById("loginSubmitBtn");
                 btn.disabled = true;
-                btn.textContent = "验证�?..";
+                btn.textContent = "验证中...";
 
                 try {
                     if (name === ADMIN_NAME) {
@@ -2829,7 +2827,7 @@
 
                     currentUser = name;
                     localStorage.setItem("xtj_user", currentUser);
-                    showToast("登录成功，欢迎回�?" + name);
+                    showToast("登录成功，欢迎回来 " + name);
                     closeModal('loginModal');
                     initUI();
                     initialLoad(true);
@@ -2853,18 +2851,18 @@
             async function doRegister() {
                 const name = document.getElementById("regNickInp").value.trim();
                 const pw = document.getElementById("regPwInp").value;
-                if (!name) { showToast("请输入昵�?); return; }
-                if (!pw) { showToast("请输入密�?); return; }
-                if (pw.length < 3) { showToast("密码至少3�?); return; }
+                if (!name) { showToast("请输入昵称"); return; }
+                if (!pw) { showToast("请输入密码"); return; }
+                if (pw.length < 3) { showToast("密码至少3位"); return; }
 
                 const btn = document.getElementById("registerSubmitBtn");
                 btn.disabled = true;
-                btn.textContent = "注册�?..";
+                btn.textContent = "注册中...";
 
                 try {
                     const existing = await findAuthRecord(name);
                     if (existing) {
-                        showToast("昵称 '" + name + "' 已被注册，请换一�?);
+                        showToast("昵称 '" + name + "' 已被注册，请换一个");
                         btn.disabled = false; btn.textContent = "注册";
                         return;
                     }
@@ -2878,14 +2876,14 @@
                         actor_key: AUTH_MARKER
                     }]);
                     if (error) {
-                        showToast("注册失败�? + error.message);
+                        showToast("注册失败：" + error.message);
                         btn.disabled = false; btn.textContent = "注册";
                         return;
                     }
 
                     currentUser = name;
                     localStorage.setItem("xtj_user", currentUser);
-                    showToast("注册成功，欢�?" + name);
+                    showToast("注册成功，欢迎 " + name);
                     closeModal('registerModal');
                     initUI();
                     initialLoad(true);
@@ -2908,7 +2906,7 @@
                 if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; }
                 stopDMPolling();
                 document.body.style.overflow = '';
-                showToast("已退出登�?);
+                showToast("已退出登录");
                 initUI();
                 initialLoad(true);
             };
@@ -2978,13 +2976,13 @@
                 draw();
             }
 
-            // ===================== 发布动�?=====================
+            // ===================== 发布动态 =====================
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
                 const content = document.getElementById("postInp").value.trim();
                 const file = document.getElementById("fileInp").files[0];
-                if (!content && !file) { showToast("请输入内�?); return; }
-                const btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布�?..";
+                if (!content && !file) { showToast("请输入内容"); return; }
+                const btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中...";
                 try {
                     let media_url = "", media_type = "";
                     if (file) {
@@ -2994,12 +2992,12 @@
                         media_type = file.type.startsWith("image") ? "image" : "video";
                     }
                     var { error: insertErr } = await sb.from("posts").insert([{ user_name: currentUser, content, media_url, media_type, actor_key: deviceId }]);
-                    if (insertErr) { showToast("发布失败: " + (insertErr.message || "未知错误")); btn.disabled = false; btn.textContent = "发布动�?; return; }
+                    if (insertErr) { showToast("发布失败: " + (insertErr.message || "未知错误")); btn.disabled = false; btn.textContent = "发布动态"; return; }
                     document.getElementById("postInp").value = "";
                     document.getElementById("fileInp").value = "";
-                    showToast("发布成功�?);
+                    showToast("发布成功！");
                     loadFeed(true);
-                } catch (e) { showToast("发布失败: " + (e.message || "网络错误")); } finally { btn.disabled = false; btn.textContent = "发布动�?; }
+                } catch (e) { showToast("发布失败: " + (e.message || "网络错误")); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
             };
 
             // ===================== 点赞 =====================
@@ -3036,7 +3034,7 @@
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
-                const emojis = ["❤️","💕","💗","�?,"💖","💓"];
+                const emojis = ["❤️","💕","💗","✨","💖","💓"];
                 for (let i=0; i<8; i++) {
                     const heart = document.createElement('div');
                     heart.className = 'heart-particle';
@@ -3069,15 +3067,15 @@
             };
             document.getElementById("commBtn").onclick = async () => {
                 const content = document.getElementById("commInp").value.trim();
-                if (!content) { showToast("请输入评论内�?); return; }
+                if (!content) { showToast("请输入评论内容"); return; }
                 const btn = document.getElementById("commBtn");
-                btn.textContent = "提交�?..";
+                btn.textContent = "提交中...";
                 btn.disabled = true;
                 try {
                     const { error } = await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
                     if (error) throw error;
                     closeModal("commentModal");
-                    showToast("评论成功�?);
+                    showToast("评论成功！");
                     var scrollEl = document.getElementById('panelPosts');
                     var savedScroll = scrollEl ? scrollEl.scrollTop : 0;
                     await loadFeed(true);
@@ -3106,7 +3104,7 @@
                 if (!delPostId) return;
                 const btn = document.getElementById("delBtn");
                 btn.disabled = true;
-                btn.textContent = "删除�?..";
+                btn.textContent = "删除中...";
                 try {
                     const key = isAdmin() ? delOwnerKey : deviceId;
                     const { error } = await sb.rpc("delete_post_with_actor", {
@@ -3114,11 +3112,11 @@
                         p_actor_key: key
                     });
                     if (error) {
-                        showToast("删除失败�? + error.message);
+                        showToast("删除失败：" + error.message);
                         return;
                     }
                     closeModal("delModal");
-                    showToast("帖子已删�?);
+                    showToast("帖子已删除");
                     delPostId = null;
                     await loadFeed(true);
                 } catch (e) {
@@ -3139,7 +3137,7 @@
                 }
             };
 
-            // ===================== 图片查看�?=====================
+            // ===================== 图片查看器 =====================
             const ivZoomState = { scale: 1, tx: 0, ty: 0 };
             let ivIsZooming = false;
             let ivIsPanning = false;
@@ -3327,8 +3325,8 @@
                 }
             }, { passive: false });
 
-            // ===================== 浏览量统�?=====================
-            // 全局帖子信息缓存，用于浏览记�?
+            // ===================== 浏览量统计 =====================
+            // 全局帖子信息缓存，用于浏览记录
             const postInfoCache = {};
             const VIEW_HISTORY_KEY = 'xtj_view_history';
 
@@ -3344,7 +3342,7 @@
                 const exists = history.some(h => h.post_id === entry.post_id && h.user_name === entry.user_name);
                 if (!exists) {
                     history.unshift(entry);
-                    // 只保留最�?00�?
+                    // 只保留最近500条
                     if (history.length > 500) history.length = 500;
                     localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
                 }
@@ -3384,7 +3382,7 @@
                 }
             }
 
-            // ===================== 加载动�?=====================
+            // ===================== 加载动态 =====================
             async function loadFeed(forceRefresh = false) {
                 const now = Date.now();
                 if (!forceRefresh) {
@@ -3399,7 +3397,7 @@
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = `<div class="loading">加载�?..</div>`;
+                if (!forceRefresh) feed.innerHTML = `<div class="loading">加载中...</div>`;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").order("created_at", { ascending: false }),
@@ -3415,7 +3413,7 @@
                     localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: now }));
                     renderFeed(data);
                 } catch(e) {
-                    feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，刷新重�?/div>`;
+                    feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，刷新重试</div>`;
                     console.error(e);
                 }
             }
@@ -3512,7 +3510,7 @@
             }
 
             // ===================== 数据统计详情功能 =====================
-            // 存储当前的统计视图状�?
+            // 存储当前的统计视图状态
             let statCurrentType = null;
             let statAllPosts = [];
             let statAllComments = [];
@@ -3522,9 +3520,9 @@
             // 打开统计详情模态框
             window.openStatDetail = async function(type) {
                 statCurrentType = type;
-                const titles = { posts: '总动�?- 按用户分�?, views: '总浏�?- 浏览记录', likes: '点赞和评�?- 记录' };
+                const titles = { posts: '总动态 - 按用户分组', views: '总浏览 - 浏览记录', likes: '点赞和评论 - 记录' };
                 document.getElementById('statModalTitle').textContent = titles[type] || '统计详情';
-                document.getElementById('statModalBody').innerHTML = '<div class="loading">加载�?..</div>';
+                document.getElementById('statModalBody').innerHTML = '<div class="loading">加载中...</div>';
                 document.getElementById('statModal').classList.add('active');
 
                 try {
@@ -3570,7 +3568,7 @@
 
             window.openPostDetail = async function(postId) {
                 document.getElementById('postDetailTitle').textContent = '帖子详情';
-                document.getElementById('postDetailBody').innerHTML = '<div class="loading">加载�?..</div>';
+                document.getElementById('postDetailBody').innerHTML = '<div class="loading">加载中...</div>';
                 document.getElementById('postDetailModal').classList.add('active');
 
                 try {
@@ -3610,7 +3608,7 @@
                     <div class="post-detail-stats">浏览 ${vc} · 点赞 ${likes.length} · 评论 ${comments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
-                            <div class="stat-section-title">❤️ 点赞用户�?{likes.length}�?/div>
+                            <div class="stat-section-title">❤️ 点赞用户（${likes.length}）</div>
                             ${likes.length ? likes.map(l => `
                                 <div class="stat-like-item">
                                     <div class="sli-info">
@@ -3621,7 +3619,7 @@
                             `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
                         </div>
                         <div class="stat-col">
-                            <div class="stat-section-title">💬 评论列表�?{comments.length}�?/div>
+                            <div class="stat-section-title">💬 评论列表（${comments.length}）</div>
                             ${comments.length ? comments.map(c => `
                                 <div class="stat-comment-item">
                                     <div class="sci-info">
@@ -3636,7 +3634,7 @@
                 `;
             }
 
-            // 格式化帖子内容摘要（用于展示�?
+            // 格式化帖子内容摘要（用于展示）
             function formatPostSummary(p) {
                 const text = p.content || '';
                 const hasImg = p.media_url && p.media_type === 'image';
@@ -3645,11 +3643,11 @@
                 if (hasImg) tag = '<span class="spi-img-tag">🖼 图片</span>';
                 if (hasVid) tag = '<span class="spi-img-tag">🎬 视频</span>';
                 const summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
-                const display = summary || (hasImg ? '一张图�? : hasVid ? '一个视�? : '(无内�?');
+                const display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
                 return { display, tag, hasImg, hasVid, thumbUrl: hasImg ? p.media_url : null };
             }
 
-            // 生成帖子条目的HTML（可点击跳转�?
+            // 生成帖子条目的HTML（可点击跳转）
             function renderPostItemHTML(p) {
                 const fmt = formatPostSummary(p);
                 const onclick = `openPostDetail('${p.id}')`;
@@ -3668,7 +3666,7 @@
             // 渲染总动态统计（按用户分组）
             function renderPostStats() {
                 const body = document.getElementById('statModalBody');
-                // �?user_name 分组统计
+                // 按 user_name 分组统计
                 const userMap = {};
                 statAllPosts.forEach(p => {
                     if (!userMap[p.user_name]) userMap[p.user_name] = [];
@@ -3677,7 +3675,7 @@
                 const entries = Object.entries(userMap).sort((a, b) => b[1].length - a[1].length);
                 
                 if (!entries.length) {
-                    body.innerHTML = '<div class="stat-empty">暂无动态数�?/div>';
+                    body.innerHTML = '<div class="stat-empty">暂无动态数据</div>';
                     return;
                 }
 
@@ -3688,13 +3686,13 @@
                                 <div class="suh-avatar">${name[0].toUpperCase()}</div>
                                 <span class="suh-name">${name}</span>
                             </div>
-                            <span class="suh-count">${posts.length} �?/span>
+                            <span class="suh-count">${posts.length} 条</span>
                         </div>
                         <div class="stat-user-posts">
                             ${posts.slice(0, 3).map(p => renderPostItemHTML(p)).join('')}
                             ${posts.length > 3 ? `
                                 <div style="text-align:center; padding:8px 0;">
-                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${name.replace(/'/g, "\\'")}')">查看全部 ${posts.length} �?/button>
+                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${name.replace(/'/g, "\\'")}')">查看全部 ${posts.length} 条</button>
                                 </div>
                             ` : ''}
                         </div>
@@ -3702,20 +3700,20 @@
                 `).join('');
             }
 
-            // 查看指定用户的所有帖�?
+            // 查看指定用户的所有帖子
             window.loadUserAllPosts = function(userName) {
                 const body = document.getElementById('statModalBody');
                 const userPosts = statAllPosts.filter(p => p.user_name === userName);
                 body.innerHTML = `
-                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">�?返回总动�?/button>
+                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">← 返回总动态</button>
                     <div style="font-weight:700; font-size:15px; margin-bottom:12px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.1);">
-                        ${userName} 的全部帖子（�?${userPosts.length} 条）
+                        ${userName} 的全部帖子（共 ${userPosts.length} 条）
                     </div>
                     ${userPosts.map(p => renderPostItemHTML(p)).join('')}
                 `;
             };
 
-            // 渲染总浏览统计（�?localStorage 读取浏览历史�?
+            // 渲染总浏览统计（从 localStorage 读取浏览历史）
             function renderViewStats() {
                 const body = document.getElementById('statModalBody');
                 const history = getViewHistory();
@@ -3726,7 +3724,7 @@
                             <div style="font-size:16px; margin-bottom:8px;">📊 浏览记录</div>
                             <div style="font-size:13px;">暂无浏览详情数据</div>
                             <div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>
-                            <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数�?{document.getElementById('sViews').textContent} �?/div>
+                            <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
                         </div>
                     `;
                     return;
@@ -3736,14 +3734,14 @@
                     <div class="stat-view-item">
                         <div class="svi-info">
                             <div class="svi-user">${v.user_name}</div>
-                            <div class="svi-target">浏览�?<b>${v.post_author}</b> 的帖子：${v.post_content}</div>
+                            <div class="svi-target">浏览了 <b>${v.post_author}</b> 的帖子：${v.post_content}</div>
                         </div>
                         <span class="svi-time">${new Date(v.viewed_at).toLocaleString()}</span>
                     </div>
                 `).join('');
             }
 
-            // 渲染点赞和评论统�?
+            // 渲染点赞和评论统计
             function renderLikeStats() {
                 const body = document.getElementById('statModalBody');
 
@@ -3755,7 +3753,7 @@
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(l => {
                             const post = postMap[l.post_id];
-                            const postContent = post ? (post.content ? post.content.slice(0, 20) + '...' : '(图片/视频)') : '(已删�?';
+                            const postContent = post ? (post.content ? post.content.slice(0, 20) + '...' : '(图片/视频)') : '(已删除)';
                             return `
                         <div class="stat-like-item">
                             <div class="sli-info">
@@ -3777,12 +3775,12 @@
                     if (statAllComments.length) {
                         h += statAllComments.slice(0, 200).map(c => {
                             const post = postMap[c.post_id];
-                            const postContent = post ? (post.content ? post.content.slice(0, 20) + '...' : '(图片/视频)') : '(已删�?';
+                            const postContent = post ? (post.content ? post.content.slice(0, 20) + '...' : '(图片/视频)') : '(已删除)';
                             return `
                         <div class="stat-comment-item">
                             <div class="sci-info">
                                 <div class="sci-user">${c.user_name}</div>
-                                <div class="sci-target">评论了�?{postContent}」：${c.content}</div>
+                                <div class="sci-target">评论了「${postContent}」：${c.content}</div>
                             </div>
                             <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                         </div>
@@ -3824,7 +3822,7 @@
                 }).catch(function() {});
             }
 
-            // ===================== 聊天系统 (Dock 兼容�? =====================
+            // ===================== 聊天系统 (Dock 兼容版) =====================
             let chatRealtime = null;
             let dmpollTimer = null;
             let dmpollInterval = null;
@@ -3882,7 +3880,7 @@
                     })
                     .subscribe(function(status, err) {
                         if (err) { console.error('[CHAT-REALTIME]', err); }
-                        else if (status === 'SUBSCRIBED') { console.log('[CHAT-REALTIME] 已连�?); }
+                        else if (status === 'SUBSCRIBED') { console.log('[CHAT-REALTIME] 已连接'); }
                     });
             }
 
@@ -3966,7 +3964,7 @@
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
                 const now = Date.now();
                 if (tab === currentDockTab && !skipReturn) {
-                    // 已经在当前tab，单击执行返回操�?
+                    // 已经在当前tab，单击执行返回操作
                     if (tab === 'posts') {
                         // 帖子页：回到顶部
                         const panel = document.getElementById('panelPosts');
@@ -4064,7 +4062,7 @@
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
-                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载�?..</div></div>';
+                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中...</div></div>';
                 document.getElementById('dockChatListView').classList.add('hidden');
                 document.getElementById('dockChatDetailView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'flex';
@@ -4086,7 +4084,7 @@
                         .limit(1000);
                     if (error) throw error;
                     if (!allMsgs || !allMsgs.length) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像开始聊�?/div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像开始聊天</div></div>';
                         updateUnreadBadge();
                         return;
                     }
@@ -4150,7 +4148,7 @@
             function renderDockMessages(msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
                 if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>'; return; }
-                // 检测用户是否在查看历史记录（离底部超过100px视为在看历史�?
+                // 检测用户是否在查看历史记录（离底部超过100px视为在看历史）
                 var isNearBottom = !el.scrollHeight || (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
                 var shouldAutoScroll = forceScroll || isNearBottom;
                 const isBulk = msgs.length > 2;
@@ -4176,7 +4174,7 @@
                 if (shouldAutoScroll) {
                     el.scrollTop = el.scrollHeight;
                 }
-                // 渲染完毕，显示容�?
+                // 渲染完毕，显示容器
                 if (wasHidden) {
                     el.style.visibility = '';
                 }
@@ -4216,7 +4214,7 @@
                             }, 200);
                         }
                     }
-                } catch(e) { showToast('发送失�? ' + (e?.message || e)); inp.value = content; }
+                } catch(e) { showToast('发送失败: ' + (e?.message || e)); inp.value = content; }
                 finally { dockChatSending = false; }
             }
 
@@ -4285,9 +4283,9 @@
                 const welcome = document.getElementById('dockAIWelcome');
                 if (!welcome) return;
                 if (dockAIThinkMode) {
-                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="48" height="48" fill="none"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg></span>你好！我�?DeepSeek AI 助手<br>思考模�?�?深度推理，展示思考过�?;
+                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-flower-icon" viewBox="-1 -1 26 26" width="48" height="48" fill="none"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg></span>你好！我是 DeepSeek AI 助手<br>思考模式 — 深度推理，展示思考过程';
                 } else {
-                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-lightning-icon" viewBox="0 0 24 24" width="48" height="48" fill="none"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="none" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>你好！我�?DeepSeek AI 助手<br>快速模�?�?极速响应，跳过思考过�?;
+                    welcome.innerHTML = '<span class="ai-welcome-icon"><svg class="amt-lightning-icon" viewBox="0 0 24 24" width="48" height="48" fill="none"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="none" stroke="#FBBF24" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>你好！我是 DeepSeek AI 助手<br>快速模式 — 极速响应，跳过思考过程';
                 }
             }
             window.updateAIWelcome = updateAIWelcome;
@@ -4308,7 +4306,7 @@
                 if (welcome) welcome.remove();
                 body.insertAdjacentHTML('beforeend', '<div class="ai-msg user"><div class="ai-avatar">👤</div><div class="ai-bubble">' + escapeHtml(userText) + '</div></div>');
                 dockAIMessages.push({ role: 'user', content: userText });
-                const thinkingLabel = dockAIThinkMode ? '思考中' : '回复�?;
+                const thinkingLabel = dockAIThinkMode ? '思考中' : '回复中';
                 body.insertAdjacentHTML('beforeend', '<div class="ai-msg assistant"><div class="ai-avatar">AI</div><div class="ai-bubble" id="dockAIStreamBubble"><div class="ai-thinking"><span>' + thinkingLabel + '</span><div class="ai-thinking-dots"><span></span><span></span><span></span></div></div></div></div>');
                 scrollDockAIBottom();
                 const bubble = document.getElementById('dockAIStreamBubble');
@@ -4340,7 +4338,7 @@
                                         if (!reasoningBuilt && fullReasoning.length > 10) {
                                             reasoningBuilt = true;
                                             const flowerSvg = '<svg class="reasoning-flower-icon" viewBox="-1 -1 26 26" width="14" height="14" fill="none" style="vertical-align:middle;"><g class="al-petals" transform="translate(12,12)"><g class="al-petal-g"><g transform="rotate(0)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(60)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(120)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(180)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(240)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><g class="al-petal-g"><g transform="rotate(300)"><ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1.2"/></g></g><circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1.2"/></g></svg>';
-                                            const toggle = document.createElement('button'); toggle.className = 'ai-reasoning-toggle reasoning-anim'; toggle.innerHTML = flowerSvg + ' 思考过�?<span class="ar-arrow">�?/span>';
+                                            const toggle = document.createElement('button'); toggle.className = 'ai-reasoning-toggle reasoning-anim'; toggle.innerHTML = flowerSvg + ' 思考过程 <span class="ar-arrow">▾</span>';
                                             const rc = document.createElement('div'); rc.className = 'ai-reasoning-content'; rc.style.display = 'none'; rc.textContent = fullReasoning;
                                             toggle.addEventListener('click', function() { const s = rc.style.display === 'none'; rc.style.display = s ? 'block' : 'none'; toggle.classList.toggle('expanded', s); });
                                             reasoningToggle = toggle; reasoningContent = rc;
@@ -4367,8 +4365,8 @@
                     dockAIStreaming = false; dockAIAbort = null; sendBtn.disabled = false; inputEl.disabled = false; inputEl.focus();
                     bubble.removeAttribute('id');
                     const cursor = bubble.querySelector('.ai-streaming-cursor'); if (cursor) cursor.remove();
-                    if (fullContent === '' && fullReasoning === '') { const t = bubble.querySelector('.ai-thinking'); if (t) t.remove(); bubble.textContent = '未收到回复，请重�?; }
-                    else if (fullContent === '') { const t = bubble.querySelector('.ai-thinking'); if (t) t.remove(); bubble.textContent = fullReasoning || '(无文本回�?'; }
+                    if (fullContent === '' && fullReasoning === '') { const t = bubble.querySelector('.ai-thinking'); if (t) t.remove(); bubble.textContent = '未收到回复，请重试'; }
+                    else if (fullContent === '') { const t = bubble.querySelector('.ai-thinking'); if (t) t.remove(); bubble.textContent = fullReasoning || '(无文本回复)'; }
                     if (fullContent) dockAIMessages.push({ role: 'assistant', content: fullContent.trim() });
                     scrollDockAIBottom();
                 }
@@ -4391,7 +4389,7 @@
             function applyTheme(isDark) {
                 if (isDark) {
                     htmlEl.setAttribute('data-theme', 'dark');
-                    if (themeBtn) themeBtn.textContent = '☀�?;
+                    if (themeBtn) themeBtn.textContent = '☀️';
                     localStorage.setItem('xtj-theme', 'dark');
                 } else {
                     htmlEl.removeAttribute('data-theme');
@@ -4405,7 +4403,7 @@
                     applyTheme(!isDark);
                 });
             }
-            // 初始化主题：优先 localStorage，其次系统偏�?
+            // 初始化主题：优先 localStorage，其次系统偏好
             const savedTheme = localStorage.getItem('xtj-theme');
             if (savedTheme === 'dark') {
                 applyTheme(true);
