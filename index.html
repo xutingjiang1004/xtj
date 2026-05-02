@@ -2519,94 +2519,73 @@
             100% { opacity: 0; transform: scale(1); }
         }
 
-        /* 7条光波飞散动画 - 参考petalFly模式 */
+        /* 5条光波飞散动画 - 从脑袋周围散射，只向上和左右 */
         .dock-tab.anim-profile .al-wave-0 { animation: waveFly0 1.4s ease forwards; }
         .dock-tab.anim-profile .al-wave-1 { animation: waveFly1 1.4s ease forwards; }
         .dock-tab.anim-profile .al-wave-2 { animation: waveFly2 1.4s ease forwards; }
         .dock-tab.anim-profile .al-wave-3 { animation: waveFly3 1.4s ease forwards; }
         .dock-tab.anim-profile .al-wave-4 { animation: waveFly4 1.4s ease forwards; }
-        .dock-tab.anim-profile .al-wave-5 { animation: waveFly5 1.4s ease forwards; }
-        .dock-tab.anim-profile .al-wave-6 { animation: waveFly6 1.4s ease forwards; }
 
+        /* 上：向上飞 */
         @keyframes waveFly0 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
             9%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(0,-18px); opacity: 0.9; }
-            42%  { transform: translate(0,-14px); opacity: 0.7; }
-            58%  { transform: translate(0,-3px); opacity: 0.5; }
+            30%  { transform: translate(0,-13px); opacity: 0.9; }
+            42%  { transform: translate(0,-10px); opacity: 0.7; }
+            58%  { transform: translate(0,-2px); opacity: 0.5; }
             78%  { transform: translate(0,0); opacity: 0.2; }
             95%  { transform: translate(0,0); opacity: 0.05; }
             99%  { transform: translate(0,0); opacity: 0; }
             100% { transform: translate(0,0); opacity: 0; }
         }
+        /* 右上 */
         @keyframes waveFly1 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
             9%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(13,-13px); opacity: 0.9; }
-            42%  { transform: translate(10,-10px); opacity: 0.7; }
-            58%  { transform: translate(2,-2px); opacity: 0.5; }
+            30%  { transform: translate(10px,-10px); opacity: 0.9; }
+            42%  { transform: translate(8px,-8px); opacity: 0.7; }
+            58%  { transform: translate(1px,-1px); opacity: 0.5; }
             78%  { transform: translate(0,0); opacity: 0.2; }
             95%  { transform: translate(0,0); opacity: 0.05; }
             99%  { transform: translate(0,0); opacity: 0; }
             100% { transform: translate(0,0); opacity: 0; }
         }
+        /* 右 */
         @keyframes waveFly2 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
             9%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(18px,0); opacity: 0.9; }
-            42%  { transform: translate(14px,0); opacity: 0.7; }
-            58%  { transform: translate(3px,0); opacity: 0.5; }
+            30%  { transform: translate(13px,0); opacity: 0.9; }
+            42%  { transform: translate(10px,0); opacity: 0.7; }
+            58%  { transform: translate(2px,0); opacity: 0.5; }
             78%  { transform: translate(0,0); opacity: 0.2; }
             95%  { transform: translate(0,0); opacity: 0.05; }
             99%  { transform: translate(0,0); opacity: 0; }
             100% { transform: translate(0,0); opacity: 0; }
         }
+        /* 左 */
         @keyframes waveFly3 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
             9%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(13px,13px); opacity: 0.9; }
-            42%  { transform: translate(10px,10px); opacity: 0.7; }
-            58%  { transform: translate(2px,2px); opacity: 0.5; }
+            30%  { transform: translate(-13px,0); opacity: 0.9; }
+            42%  { transform: translate(-10px,0); opacity: 0.7; }
+            58%  { transform: translate(-2px,0); opacity: 0.5; }
             78%  { transform: translate(0,0); opacity: 0.2; }
             95%  { transform: translate(0,0); opacity: 0.05; }
             99%  { transform: translate(0,0); opacity: 0; }
             100% { transform: translate(0,0); opacity: 0; }
         }
+        /* 左上 */
         @keyframes waveFly4 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
             9%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(-13px,13px); opacity: 0.9; }
-            42%  { transform: translate(-10px,10px); opacity: 0.7; }
-            58%  { transform: translate(-2px,2px); opacity: 0.5; }
-            78%  { transform: translate(0,0); opacity: 0.2; }
-            95%  { transform: translate(0,0); opacity: 0.05; }
-            99%  { transform: translate(0,0); opacity: 0; }
-            100% { transform: translate(0,0); opacity: 0; }
-        }
-        @keyframes waveFly5 {
-            0%   { transform: translate(0,0); opacity: 0; }
-            5%   { transform: translate(0,0); opacity: 1; }
-            9%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(-18px,0); opacity: 0.9; }
-            42%  { transform: translate(-14px,0); opacity: 0.7; }
-            58%  { transform: translate(-3px,0); opacity: 0.5; }
-            78%  { transform: translate(0,0); opacity: 0.2; }
-            95%  { transform: translate(0,0); opacity: 0.05; }
-            99%  { transform: translate(0,0); opacity: 0; }
-            100% { transform: translate(0,0); opacity: 0; }
-        }
-        @keyframes waveFly6 {
-            0%   { transform: translate(0,0); opacity: 0; }
-            5%   { transform: translate(0,0); opacity: 1; }
-            9%   { transform: translate(0,0); opacity: 1; }
-            30%  { transform: translate(-13px,-13px); opacity: 0.9; }
-            42%  { transform: translate(-10px,-10px); opacity: 0.7; }
-            58%  { transform: translate(-2px,-2px); opacity: 0.5; }
+            30%  { transform: translate(-10px,-10px); opacity: 0.9; }
+            42%  { transform: translate(-8px,-8px); opacity: 0.7; }
+            58%  { transform: translate(-1px,-1px); opacity: 0.5; }
             78%  { transform: translate(0,0); opacity: 0.2; }
             95%  { transform: translate(0,0); opacity: 0.05; }
             99%  { transform: translate(0,0); opacity: 0; }
@@ -2928,13 +2907,17 @@
                 <g class="al-person" transform="translate(40, 30)">
                     <circle class="al-person-head" cx="0" cy="-8" r="5" fill="currentColor" opacity="0"/>
                     <path class="al-person-body" d="M-7,2 a7,6 0 0,1 14,0" fill="currentColor" opacity="0"/>
-                    <g class="al-wave-0" opacity="0"><line x1="0" y1="-2" x2="0" y2="-16" stroke="#FF6B6B" stroke-width="2.5" stroke-linecap="round"/></g>
-                    <g class="al-wave-1" opacity="0"><line x1="0" y1="0" x2="11" y2="-11" stroke="#FBBF24" stroke-width="2.5" stroke-linecap="round"/></g>
-                    <g class="al-wave-2" opacity="0"><line x1="0" y1="0" x2="16" y2="0" stroke="#34D399" stroke-width="2.5" stroke-linecap="round"/></g>
-                    <g class="al-wave-3" opacity="0"><line x1="0" y1="0" x2="11" y2="11" stroke="#60A5FA" stroke-width="2.5" stroke-linecap="round"/></g>
-                    <g class="al-wave-4" opacity="0"><line x1="0" y1="0" x2="-11" y2="11" stroke="#A78BFA" stroke-width="2.5" stroke-linecap="round"/></g>
-                    <g class="al-wave-5" opacity="0"><line x1="0" y1="0" x2="-16" y2="0" stroke="#F472B6" stroke-width="2.5" stroke-linecap="round"/></g>
-                    <g class="al-wave-6" opacity="0"><line x1="0" y1="0" x2="-11" y2="-11" stroke="#2DD4BF" stroke-width="2.5" stroke-linecap="round"/></g>
+                    <!-- 5条光波：从脑袋周围散射，只向上和左右，下方不发 -->
+                    <!-- 上 -->
+                    <g class="al-wave-0" opacity="0"><line x1="0" y1="-8" x2="0" y2="-22" stroke="#FF6B6B" stroke-width="2" stroke-linecap="round"/></g>
+                    <!-- 右上 -->
+                    <g class="al-wave-1" opacity="0"><line x1="3" y1="-10" x2="13" y2="-20" stroke="#FBBF24" stroke-width="2" stroke-linecap="round"/></g>
+                    <!-- 右 -->
+                    <g class="al-wave-2" opacity="0"><line x1="5" y1="-8" x2="18" y2="-8" stroke="#34D399" stroke-width="2" stroke-linecap="round"/></g>
+                    <!-- 左 -->
+                    <g class="al-wave-3" opacity="0"><line x1="-5" y1="-8" x2="-18" y2="-8" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/></g>
+                    <!-- 左上 -->
+                    <g class="al-wave-4" opacity="0"><line x1="-3" y1="-10" x2="-13" y2="-20" stroke="#A78BFA" stroke-width="2" stroke-linecap="round"/></g>
                 </g>
             </svg>
         </button>
