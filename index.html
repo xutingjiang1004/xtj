@@ -3134,16 +3134,36 @@
                 }
             };
 
+            // 判断评论是否已删除（content 编码为 __DELETED_BY_xxx__原文）
+            function isCommentDeleted(content) {
+                return content && content.startsWith('__DELETED_BY_');
+            }
+            // 从 content 中提取删除人
+            function getCommentDeletedBy(content) {
+                if (!content) return 'unknown';
+                var m = content.match(/^__DELETED_BY_(.+?)__/);
+                return m ? m[1] : 'unknown';
+            }
+            // 从 content 中提取原始评论内容
+            function getCommentOriginalContent(content) {
+                if (!content) return '';
+                if (!isCommentDeleted(content)) return content;
+                return content.replace(/^__DELETED_BY_.+?__/, '');
+            }
+
             // 评论删除函数
             window.deleteComment = async function (commentId, actorKey) {
                 if (!confirm('确定要删除此评论吗？')) return;
                 try {
-                    const { error } = await sb.from("comments")
-                        .update({ deleted_at: new Date().toISOString(), deleted_by: currentUser })
-                        .eq('id', commentId)
-                        .eq('deleted_at', null);
-                    if (error) {
-                        showToast('删除评论失败：' + error.message);
+                    // 先获取原内容
+                    var fetchRes = await sb.from("comments").select("content").eq("id", commentId).single();
+                    if (fetchRes.error) { showToast('删除失败：' + fetchRes.error.message); return; }
+                    var originalContent = fetchRes.data.content;
+                    if (isCommentDeleted(originalContent)) { showToast('评论已被删除'); return; }
+                    var marker = "__DELETED_BY_" + currentUser + "__" + originalContent;
+                    var updateRes = await sb.from("comments").update({ content: marker }).eq("id", commentId);
+                    if (updateRes.error) {
+                        showToast('删除评论失败：' + updateRes.error.message);
                         return;
                     }
                     showToast('评论已删除');
@@ -3462,7 +3482,7 @@
                 feed.innerHTML = visiblePosts.length ? visiblePosts.map(p => {
                     const pLikes = likes.filter(l=>l.post_id===p.id);
                     // 过滤已删除的评论
-                    const pComms = comments.filter(c=>c.post_id===p.id && !c.deleted_at);
+                    const pComms = comments.filter(c=>c.post_id===p.id && !isCommentDeleted(c.content));
                     const isLiked = pLikes.some(l=>l.actor_key===deviceId);
                     const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
                     trackView(p.id);
@@ -3628,7 +3648,7 @@
                 const body = document.getElementById('postDetailBody');
                 const vc = (post.views||0) + 1;
                 // 过滤已删除评论
-                const visibleComments = comments.filter(c => !c.deleted_at);
+                const visibleComments = comments.filter(c => !isCommentDeleted(c.content));
 
                 body.innerHTML = `
                     <div class="post-detail-header">
@@ -3812,19 +3832,30 @@
                 function buildCommentsCol() {
                     let h = '<div class="stat-section-title">💬 评论记录</div>';
                     if (statAllComments.length) {
-                        h += statAllComments.slice(0, 200).map(c => {
+                        var shownCount = 0;
+                        statAllComments.slice(0, 200).forEach(function(c) {
+                            if (isCommentDeleted(c.content) && shownCount >= 200) return;
+                            shownCount++;
                             const post = postMap[c.post_id];
                             const postContent = post ? (post.content ? post.content.slice(0, 20) + '...' : '(图片/视频)') : '(已删除)';
-                            return `
+                            var displayContent = getCommentOriginalContent(c.content);
+                            var deletedBadge = '';
+                            if (isCommentDeleted(c.content)) {
+                                deletedBadge = '<span style="color:#ff3b60;font-size:11px;">（已被 ' + getCommentDeletedBy(c.content) + ' 删除）</span>';
+                            }
+                            h += `
                         <div class="stat-comment-item">
                             <div class="sci-info">
-                                <div class="sci-user">${c.user_name}</div>
-                                <div class="sci-target">评论了「${postContent}」：${c.content}</div>
+                                <div class="sci-user">${c.user_name} ${deletedBadge}</div>
+                                <div class="sci-target">评论了「${postContent}」：${displayContent}</div>
                             </div>
                             <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                         </div>
                     `;
-                        }).join('');
+                        });
+                        if (!shownCount) {
+                            h += '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
+                        }
                     } else {
                         h += '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
                     }
