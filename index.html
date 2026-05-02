@@ -2717,7 +2717,9 @@
                 if (!isAdmin()) return;
                 if (!confirm('确认删除此公告？')) return;
                 try {
-                    var { error } = await sb.from('posts').delete().eq('id', annId).eq('media_type', ANN_MARKER);
+                    var ann = annListCache.find(function(x) { return x.id === annId; });
+                    var key = ann ? ann.actor_key : deviceId;
+                    var { error } = await sb.rpc('delete_post_with_actor', { p_post_id: annId, p_actor_key: key });
                     if (error) { showToast('删除失败: ' + error.message); return; }
                     showToast('公告已删除');
                     await loadAnnouncements();
