@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
@@ -538,7 +538,9 @@
             '确认删除',
             async function() {
                 try {
-                    var res = await sb.rpc('admin_delete_post', { p_post_id: id });
+                    var ann = annList.find(function(x) { return x.id === id; });
+                    var key = ann ? ann.actor_key : 'admin_' + Date.now();
+                    var res = await sb.rpc('delete_post_with_actor', { p_post_id: id, p_actor_key: key });
                     if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
                     if (!res.data) { showToast('公告不存在或已被删除', 'info'); }
                     await loadAllData();
@@ -556,7 +558,9 @@
             '确认删除',
             async function() {
                 try {
-                    var res = await sb.rpc('admin_delete_post', { p_post_id: id });
+                    var post = allPosts.find(function(x) { return x.id === id; });
+                    var key = post ? post.actor_key : 'admin_' + Date.now();
+                    var res = await sb.rpc('delete_post_with_actor', { p_post_id: id, p_actor_key: key });
                     if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
                     if (!res.data) { showToast('帖子不存在或已被删除', 'info'); }
                     await loadAllData();
