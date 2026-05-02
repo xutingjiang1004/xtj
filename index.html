@@ -3081,6 +3081,10 @@
                     var scrollEl = document.getElementById('panelPosts');
                     var savedScroll = scrollEl ? scrollEl.scrollTop : 0;
                     await loadFeed(true);
+                    // 需求1：如果打开了统计详情，刷新
+                    if (statCurrentType !== null && document.getElementById('statModal').classList.contains('active')) {
+                        await openStatDetail(statCurrentType);
+                    }
                     requestAnimationFrame(function() {
                         var p = document.getElementById('panelPosts');
                         if (p && savedScroll > 0) p.scrollTop = savedScroll;
@@ -3127,6 +3131,31 @@
                 } finally {
                     btn.disabled = false;
                     btn.textContent = "确认删除";
+                }
+            };
+
+            // 评论删除函数
+            window.deleteComment = async function (commentId, actorKey) {
+                if (!confirm('确定要删除此评论吗？')) return;
+                try {
+                    const { error } = await sb.rpc("soft_delete_comment", {
+                        p_comment_id: parseInt(commentId),
+                        p_actor_key: actorKey,
+                        p_deleted_by: currentUser
+                    });
+                    if (error) {
+                        showToast('删除评论失败：' + error.message);
+                        return;
+                    }
+                    showToast('评论已删除');
+                    await loadFeed(true);
+                    // 刷新统计详情
+                    if (statCurrentType !== null && document.getElementById('statModal').classList.contains('active')) {
+                        await openStatDetail(statCurrentType);
+                    }
+                } catch (e) {
+                    showToast('删除评论失败');
+                    console.error(e);
                 }
             };
 
@@ -3434,7 +3463,8 @@
                 const feed = document.getElementById("feed");
                 feed.innerHTML = visiblePosts.length ? visiblePosts.map(p => {
                     const pLikes = likes.filter(l=>l.post_id===p.id);
-                    const pComms = comments.filter(c=>c.post_id===p.id);
+                    // 过滤已删除的评论
+                    const pComms = comments.filter(c=>c.post_id===p.id && !c.deleted_at);
                     const isLiked = pLikes.some(l=>l.actor_key===deviceId);
                     const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
                     trackView(p.id);
@@ -3457,11 +3487,13 @@
                   </div>
                   ${pComms.length?`
                   <div class="comments">
-                    ${pComms.map(c=>`
-                    <div class="comment-item" data-comment-id="${c.id}">
+                    ${pComms.map(c=>{
+                        const canDelComment = c.actor_key === deviceId || isAdmin();
+                        return `
+                    <div class="comment-item" data-comment-id="${c.id}" style="display:flex;justify-content:space-between;align-items:center;">
                       <div><b>${c.user_name}:</b>${c.content}</div>
-                    </div>
-                    `).join('')}
+                      ${canDelComment?`<button class="action-btn del" style="font-size:12px;padding:2px 6px;" onclick="deleteComment('${c.id}','${c.actor_key}')">删除</button>`:''}
+                    </div>`;}).join('')}
                   </div>
                   `:''}
                 </div>
@@ -3597,6 +3629,8 @@
             function renderPostDetail(post, likes, comments) {
                 const body = document.getElementById('postDetailBody');
                 const vc = (post.views||0) + 1;
+                // 过滤已删除评论
+                const visibleComments = comments.filter(c => !c.deleted_at);
 
                 body.innerHTML = `
                     <div class="post-detail-header">
@@ -3607,7 +3641,7 @@
                     </div>
                     ${post.content ? `<div class="post-detail-content">${post.content}</div>` : ''}
                     ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${post.media_url}" controls preload="none"></video>`:`<img src="${post.media_url}" onclick="openImageViewer('${post.media_url}')" loading="lazy" />`}</div>` : ''}
-                    <div class="post-detail-stats">浏览 ${vc} · 点赞 ${likes.length} · 评论 ${comments.length}</div>
+                    <div class="post-detail-stats">浏览 ${vc} · 点赞 ${likes.length} · 评论 ${visibleComments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
                             <div class="stat-section-title">❤️ 点赞用户（${likes.length}）</div>
@@ -3621,16 +3655,21 @@
                             `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
                         </div>
                         <div class="stat-col">
-                            <div class="stat-section-title">💬 评论列表（${comments.length}）</div>
-                            ${comments.length ? comments.map(c => `
-                                <div class="stat-comment-item">
-                                    <div class="sci-info">
+                            <div class="stat-section-title">💬 评论列表（${visibleComments.length}）</div>
+                            ${visibleComments.length ? visibleComments.map(c => {
+                                const canDel = c.actor_key === deviceId || isAdmin();
+                                return `
+                                <div class="stat-comment-item" style="display:flex;justify-content:space-between;align-items:flex-start;">
+                                    <div class="sci-info" style="flex:1;">
                                         <div class="sci-user">${c.user_name}</div>
                                         <div class="sci-target">${c.content}</div>
                                     </div>
-                                    <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
-                                </div>
-                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无评论</div>'}
+                                    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                                        <span class="sci-time" style="font-size:11px;">${new Date(c.created_at).toLocaleString()}</span>
+                                        ${canDel ? `<button class="action-btn del" style="font-size:11px;padding:2px 6px;" onclick="deleteComment('${c.id}','${c.actor_key}')">删除</button>` : ''}
+                                    </div>
+                                </div>`;
+                            }).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无评论</div>'}
                         </div>
                     </div>
                 `;
