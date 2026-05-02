@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>xtj 管理后台</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+    :root {
+        --primary: #059669;
+        --primary-light: #34d399;
+        --danger: #ff3b60;
+        --bg: #f5f5f8;
+        --card-bg: rgba(255,255,255,0.75);
+        --text: #1d1d24;
+        --text-muted: #6b6c7a;
+        --border: rgba(255,255,255,0.5);
+        --radius: 16px;
+    }
+    [data-theme="dark"] {
+        --bg: #111118;
+        --card-bg: rgba(30,30,45,0.7);
+        --text: #e8e8f0;
+        --text-muted: #8e8ea0;
+        --border: rgba(255,255,255,0.08);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg); color: var(--text);
+        min-height: 100vh;
+    }
+    .login-wrap {
+        display: flex; align-items: center; justify-content: center;
+        min-height: 100vh; padding: 20px;
+    }
+    .login-card {
+        background: var(--card-bg); border: 1px solid var(--border);
+        border-radius: 24px; padding: 40px 32px; width: 100%; max-width: 380px;
+        backdrop-filter: blur(20px); box-shadow: 0 8px 40px rgba(0,0,0,0.08);
+    }
+    .login-card h1 { font-size: 24px; margin-bottom: 6px; }
+    .login-card p { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
+    .login-card input {
+        width: 100%; padding: 12px 16px; border-radius: 12px;
+        border: 1px solid var(--border); background: rgba(255,255,255,0.15);
+        font-size: 14px; margin-bottom: 12px; outline: none; color: var(--text);
+        transition: border 0.3s;
+    }
+    .login-card input:focus { border-color: var(--primary); }
+    .login-card button {
+        width: 100%; padding: 12px; border-radius: 12px;
+        border: none; background: var(--primary); color: white;
+        font-size: 15px; font-weight: 600; cursor: pointer;
+        transition: all 0.3s; margin-top: 6px;
+    }
+    .login-card button:hover { opacity: 0.88; }
+    .login-err { color: var(--danger); font-size: 12px; margin-top: 8px; text-align: center; }
+
+    .dashboard { display: none; }
+    .dash-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 16px 24px; background: var(--card-bg);
+        border-bottom: 1px solid var(--border);
+        backdrop-filter: blur(20px); position: sticky; top: 0; z-index: 10;
+        flex-wrap: wrap; gap: 8px;
+    }
+    .dash-header h1 { font-size: 18px; }
+    .dash-header .dh-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .dash-header button {
+        padding: 6px 16px; border-radius: 8px; border: 1px solid var(--border);
+        background: rgba(255,255,255,0.1); cursor: pointer; font-size: 13px;
+        color: var(--text); transition: all 0.3s;
+    }
+    .dash-header button:hover { background: rgba(255,255,255,0.18); }
+    .dash-header button.active { background: var(--primary); color: white; border-color: var(--primary); }
+    .dash-header button.danger { color: var(--danger); border-color: rgba(255,59,96,0.3); }
+
+    .dash-content { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; animation: fadeIn 0.35s ease; }
+    @keyframes fadeIn { 0%{opacity:0;transform:translateY(8px)} 100%{opacity:1;transform:translateY(0)} }
+
+    .card {
+        background: var(--card-bg); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+        backdrop-filter: blur(12px);
+    }
+    .card h3 { font-size: 15px; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+    .stats-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px,1fr)); gap: 12px; margin-bottom: 16px; }
+    .stat-box {
+        background: var(--card-bg); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 16px; text-align: center;
+        backdrop-filter: blur(12px);
+    }
+    .stat-box .val { font-size: 28px; font-weight: 800; color: var(--primary); }
+    .stat-box .lbl { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { font-weight: 600; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    td { color: var(--text); }
+    tr:hover td { background: rgba(5,150,105,0.03); }
+    .table-wrap { max-height: 400px; overflow-y: auto; border-radius: var(--radius); }
+
+    .btn-sm {
+        padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border);
+        background: rgba(255,255,255,0.1); cursor: pointer; font-size: 12px;
+        color: var(--text); transition: all 0.3s; margin: 2px;
+    }
+    .btn-sm:hover { background: rgba(255,255,255,0.18); }
+    .btn-sm.del { color: var(--danger); border-color: rgba(255,59,96,0.3); }
+    .btn-sm.del:hover { background: rgba(255,59,96,0.12); }
+    .btn-sm.primary { background: var(--primary); color: white; border-color: var(--primary); }
+
+    textarea {
+        width: 100%; min-height: 80px; padding: 12px; border-radius: 12px;
+        border: 1px solid var(--border); background: rgba(255,255,255,0.1);
+        font-size: 13px; outline: none; resize: vertical; color: var(--text);
+        font-family: inherit;
+    }
+    textarea:focus { border-color: var(--primary); }
+    .publish-row { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
+    .publish-row textarea { flex: 1; }
+    .publish-row button { flex-shrink: 0; padding: 8px 20px; }
+
+    .loading { text-align: center; padding: 40px; color: var(--text-muted); }
+    .empty { text-align: center; padding: 32px; color: var(--text-muted); font-size: 13px; }
+    .badge {
+        display: inline-block; padding: 2px 8px; border-radius: 99px;
+        font-size: 11px; font-weight: 600;
+    }
+    .badge-green { background: rgba(5,150,105,0.15); color: var(--primary); }
+    .badge-red { background: rgba(255,59,96,0.15); color: var(--danger); }
+
+    .search-bar {
+        display: flex; gap: 8px; margin-bottom: 14px;
+    }
+    .search-bar input {
+        flex: 1; padding: 8px 14px; border-radius: 10px;
+        border: 1px solid var(--border); background: rgba(255,255,255,0.1);
+        font-size: 13px; outline: none; color: var(--text);
+    }
+    .search-bar input:focus { border-color: var(--primary); }
+
+    @media (max-width: 640px) {
+        .dash-header { flex-direction: column; align-items: flex-start; }
+        .dash-header .dh-right { width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+        .stats-row { grid-template-columns: repeat(2,1fr); }
+        .dash-content { padding: 12px; }
+        table { font-size: 11px; }
+        th, td { padding: 8px 6px; }
+    }
+</style>
+</head>
+<body>
+<div class="login-wrap" id="loginWrap">
+    <div class="login-card">
+        <h1>🔐 xtj 管理后台</h1>
+        <p>仅限管理员 xxz 登录</p>
+        <input id="loginName" placeholder="管理员账号" autocomplete="off" />
+        <input id="loginPw" type="password" placeholder="管理员密码" />
+        <button onclick="doAdminLogin()">登录后台</button>
+        <div class="login-err" id="loginErr"></div>
+    </div>
+</div>
+
+<div class="dashboard" id="dashboard">
+    <div class="dash-header">
+        <h1>⚙️ xtj 管理后台</h1>
+        <div class="dh-right">
+            <button id="tabAnnBtn" class="active" onclick="switchTab('ann')">📢 公告管理</button>
+            <button id="tabUsersBtn" onclick="switchTab('users')">👥 用户数据</button>
+            <button id="tabPostsBtn" onclick="switchTab('posts')">📝 帖子管理</button>
+            <button id="tabLikesBtn" onclick="switchTab('likes')">❤️ 点赞数据</button>
+            <button id="tabCommentsBtn" onclick="switchTab('comments')">💬 评论数据</button>
+            <button onclick="toggleTheme()" title="切换主题">🌓</button>
+            <button class="danger" onclick="doAdminLogout()">退出</button>
+        </div>
+    </div>
+    <div class="dash-content">
+        <div class="tab-panel active" id="tabAnn"></div>
+        <div class="tab-panel" id="tabUsers"></div>
+        <div class="tab-panel" id="tabPosts"></div>
+        <div class="tab-panel" id="tabLikes"></div>
+        <div class="tab-panel" id="tabComments"></div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
+    const ADMIN = "xxz";
+    const ADMIN_PW = "xxz123";
+    const AUTH_MARKER = "__auth__";
+    const DM_MARKER = "__dm__";
+    const ANN_MARKER = "__ann__";
+
+    let sb = null;
+    let allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [];
+    let searchUser = '', searchPost = '';
+
+    window.doAdminLogin = async function() {
+        var name = document.getElementById('loginName').value.trim();
+        var pw = document.getElementById('loginPw').value;
+        var err = document.getElementById('loginErr');
+        if (name !== ADMIN) { err.textContent = '账号不正确'; return; }
+        if (pw !== ADMIN_PW) { err.textContent = '密码错误'; return; }
+        err.textContent = '';
+        sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        document.getElementById('loginWrap').style.display = 'none';
+        document.getElementById('dashboard').style.display = 'block';
+        await loadAllData();
+    };
+
+    window.doAdminLogout = function() {
+        sb = null;
+        allPosts = []; allLikes = []; allComments = []; allUsers = [];
+        annList = [];
+        document.getElementById('loginWrap').style.display = 'flex';
+        document.getElementById('dashboard').style.display = 'none';
+        document.getElementById('loginName').value = '';
+        document.getElementById('loginPw').value = '';
+    };
+
+    async function loadAllData() {
+        try {
+            var [postRes, likeRes, commRes] = await Promise.all([
+                sb.from('posts').select('*').order('created_at', {ascending: false}).limit(5000),
+                sb.from('likes').select('*').order('created_at', {ascending: false}).limit(5000),
+                sb.from('comments').select('*').order('created_at', {ascending: false}).limit(5000)
+            ]);
+            allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER; });
+            annList = (postRes.data || []).filter(function(p) { return p.media_type === ANN_MARKER; });
+            allLikes = likeRes.data || [];
+            allComments = commRes.data || [];
+
+            var userMap = {};
+            allPosts.forEach(function(p) { userMap[p.user_name] = true; });
+            allLikes.forEach(function(l) { userMap[l.user_name] = true; });
+            allComments.forEach(function(c) { userMap[c.user_name] = true; });
+            allUsers = Object.keys(userMap).sort();
+
+            switchTab('ann');
+        } catch(e) {
+            console.error(e);
+        }
+    }
+
+    window.switchTab = function(tab) {
+        ['ann','users','posts','likes','comments'].forEach(function(t) {
+            document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.remove('active');
+            document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn').classList.remove('active');
+        });
+        document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+        document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1) + 'Btn').classList.add('active');
+        renderTab(tab);
+    };
+
+    function escapeHtml(s) {
+        var d = document.createElement('div');
+        d.textContent = s || '';
+        return d.innerHTML;
+    }
+
+    function formatTime(d) {
+        if (!d) return '';
+        return new Date(d).toLocaleString();
+    }
+
+    function renderTab(tab) {
+        var el = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+        if (!el) return;
+        switch(tab) {
+            case 'ann': renderAnnTab(el); break;
+            case 'users': renderUsersTab(el); break;
+            case 'posts': renderPostsTab(el); break;
+            case 'likes': renderLikesTab(el); break;
+            case 'comments': renderCommentsTab(el); break;
+        }
+    }
+
+    function renderAnnTab(el) {
+        var h = '<div class="card"><h3>📢 发布新公告</h3>';
+        h += '<textarea id="adminAnnInp" placeholder="输入公告内容..." maxlength="2000"></textarea>';
+        h += '<div class="publish-row"><button class="btn-sm primary" onclick="publishAdminAnn()">发布公告</button></div></div>';
+        h += '<div class="card"><h3>📋 公告列表（' + annList.length + '条）</h3>';
+        if (!annList.length) {
+            h += '<div class="empty">暂无公告</div>';
+        } else {
+            h += '<div class="table-wrap"><table><thead><tr><th>内容</th><th>发布时间</th><th>操作</th></tr></thead><tbody>';
+            annList.forEach(function(a) {
+                var preview = (a.content || '').slice(0, 80);
+                if (a.content && a.content.length > 80) preview += '...';
+                h += '<tr><td>' + escapeHtml(preview) + '</td><td>' + formatTime(a.created_at) + '</td>';
+                h += '<td><button class="btn-sm del" onclick="deleteAdminAnn(\'' + a.id + '\')">删除</button></td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    }
+
+    function renderUsersTab(el) {
+        var authPosts = allPosts.filter(function(p) { return false; });
+        var h = '<div class="stats-row">';
+        h += '<div class="stat-box"><div class="val">' + allUsers.length + '</div><div class="lbl">注册用户总数</div></div>';
+        h += '<div class="stat-box"><div class="val">' + allPosts.length + '</div><div class="lbl">总帖子数</div></div>';
+        h += '<div class="stat-box"><div class="val">' + allLikes.length + '</div><div class="lbl">总点赞数</div></div>';
+        h += '<div class="stat-box"><div class="val">' + allComments.length + '</div><div class="lbl">总评论数</div></div>';
+        h += '</div>';
+        h += '<div class="card"><h3>👥 用户列表</h3>';
+        h += '<div class="search-bar"><input id="userSearchInp" placeholder="搜索用户..." oninput="searchUserInp()" /></div>';
+        var filtered = allUsers;
+        if (searchUser) filtered = allUsers.filter(function(u) { return u.toLowerCase().includes(searchUser.toLowerCase()); });
+        if (!filtered.length) { h += '<div class="empty">无匹配用户</div>'; }
+        else {
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>帖子数</th><th>点赞数</th><th>评论数</th></tr></thead><tbody>';
+            filtered.forEach(function(u) {
+                var pc = allPosts.filter(function(p) { return p.user_name === u; }).length;
+                var lc = allLikes.filter(function(l) { return l.user_name === u; }).length;
+                var cc = allComments.filter(function(c) { return c.user_name === u; }).length;
+                h += '<tr><td><strong>' + escapeHtml(u) + '</strong>' + (u === ADMIN ? ' <span class="badge badge-red">管理员</span>' : '') + '</td>';
+                h += '<td>' + pc + '</td><td>' + lc + '</td><td>' + cc + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    }
+
+    function renderPostsTab(el) {
+        var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER; });
+        var h = '<div class="card"><h3>📝 帖子管理（' + visiblePosts.length + '条）</h3>';
+        h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
+        var filtered = visiblePosts;
+        if (searchPost) {
+            var q = searchPost.toLowerCase();
+            filtered = visiblePosts.filter(function(p) {
+                return (p.user_name || '').toLowerCase().includes(q) || (p.content || '').toLowerCase().includes(q);
+            });
+        }
+        if (!filtered.length) { h += '<div class="empty">无匹配帖子</div>'; }
+        else {
+            h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>内容</th><th>浏览</th><th>时间</th><th>操作</th></tr></thead><tbody>';
+            filtered.forEach(function(p) {
+                var content = (p.content || '').slice(0, 50);
+                if (p.content && p.content.length > 50) content += '...';
+                h += '<tr><td>' + escapeHtml(p.user_name || '') + '</td>';
+                h += '<td>' + escapeHtml(content) + (p.media_url ? ' 📎' : '') + '</td>';
+                h += '<td>' + (p.views || 0) + '</td>';
+                h += '<td>' + formatTime(p.created_at) + '</td>';
+                h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + p.id + '\')">删除</button></td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    }
+
+    function renderLikesTab(el) {
+        var h = '<div class="card"><h3>❤️ 点赞记录（' + allLikes.length + '条）</h3>';
+        if (!allLikes.length) { h += '<div class="empty">暂无点赞数据</div>'; }
+        else {
+            h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>帖子作者</th><th>帖子内容</th><th>时间</th></tr></thead><tbody>';
+            var recentLikes = allLikes.slice(0, 500);
+            recentLikes.forEach(function(l) {
+                var post = allPosts.find(function(p) { return p.id === l.post_id; });
+                var postContent = post ? ((post.content || '').slice(0, 30) + (post.content && post.content.length > 30 ? '...' : '')) : '(已删除)';
+                h += '<tr><td>' + escapeHtml(l.user_name || '') + '</td>';
+                h += '<td>' + escapeHtml((post && post.user_name) || '') + '</td>';
+                h += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(postContent) + '</td>';
+                h += '<td>' + formatTime(l.created_at) + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+            if (allLikes.length > 500) h += '<div class="empty">仅显示最近500条记录</div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    }
+
+    function renderCommentsTab(el) {
+        var h = '<div class="card"><h3>💬 评论记录（' + allComments.length + '条）</h3>';
+        if (!allComments.length) { h += '<div class="empty">暂无评论数据</div>'; }
+        else {
+            h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>评论内容</th><th>时间</th></tr></thead><tbody>';
+            var recentComments = allComments.slice(0, 500);
+            recentComments.forEach(function(c) {
+                h += '<tr><td>' + escapeHtml(c.user_name || '') + '</td>';
+                h += '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(c.content || '') + '</td>';
+                h += '<td>' + formatTime(c.created_at) + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+            if (allComments.length > 500) h += '<div class="empty">仅显示最近500条记录</div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    }
+
+    window.publishAdminAnn = async function() {
+        var inp = document.getElementById('adminAnnInp');
+        var content = (inp.value || '').trim();
+        if (!content) { alert('请输入公告内容'); return; }
+        try {
+            var { error } = await sb.from('posts').insert([{
+                user_name: ADMIN, content: content,
+                media_type: ANN_MARKER, media_url: '',
+                actor_key: 'admin_' + Date.now()
+            }]);
+            if (error) { alert('发布失败: ' + error.message); return; }
+            inp.value = '';
+            await loadAllData();
+            renderTab('ann');
+            alert('公告已发布');
+        } catch(e) { alert('发布失败: ' + e.message); }
+    };
+
+    window.deleteAdminAnn = async function(id) {
+        if (!confirm('确认删除此公告？')) return;
+        try {
+            var { error } = await sb.from('posts').delete().eq('id', id).eq('media_type', ANN_MARKER);
+            if (error) { alert('删除失败: ' + error.message); return; }
+            await loadAllData();
+            renderTab('ann');
+            alert('公告已删除');
+        } catch(e) { alert('删除失败: ' + e.message); }
+    };
+
+    window.deleteAdminPost = async function(id) {
+        if (!confirm('确认删除此帖子？此操作不可恢复！')) return;
+        try {
+            var { error } = await sb.from('posts').delete().eq('id', id);
+            if (error) { alert('删除失败: ' + error.message); return; }
+            await loadAllData();
+            renderTab('posts');
+            alert('帖子已删除');
+        } catch(e) { alert('删除失败: ' + e.message); }
+    };
+
+    window.searchUserInp = function() {
+        searchUser = document.getElementById('userSearchInp').value.trim();
+        renderTab('users');
+    };
+    window.searchPostInp = function() {
+        searchPost = document.getElementById('postSearchInp').value.trim();
+        renderTab('posts');
+    };
+
+    window.toggleTheme = function() {
+        var html = document.documentElement;
+        var isDark = html.getAttribute('data-theme') === 'dark';
+        if (isDark) { html.removeAttribute('data-theme'); localStorage.setItem('xtj-admin-theme', 'light'); }
+        else { html.setAttribute('data-theme', 'dark'); localStorage.setItem('xtj-admin-theme', 'dark'); }
+    };
+
+    (function() {
+        var saved = localStorage.getItem('xtj-admin-theme');
+        if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+    })();
+})();
+</script>
+</body>
+</html>
