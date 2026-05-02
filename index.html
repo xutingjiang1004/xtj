@@ -3161,10 +3161,19 @@
                     var originalContent = fetchRes.data.content;
                     if (isCommentDeleted(originalContent)) { showToast('评论已被删除'); return; }
                     var marker = "__DELETED_BY_" + currentUser + "__" + originalContent;
-                    var updateRes = await sb.from("comments").update({ content: marker }).eq("id", commentId);
+                    var updateRes = await sb.from("comments").update({ content: marker }).eq("id", commentId).select();
                     if (updateRes.error) {
                         showToast('删除评论失败：' + updateRes.error.message);
                         return;
+                    }
+                    // 确认是否真正更新成功
+                    if (!updateRes.data || updateRes.data.length === 0) {
+                        // 再查一次验证
+                        var verifyRes = await sb.from("comments").select("content").eq("id", commentId).single();
+                        if (verifyRes.data && !isCommentDeleted(verifyRes.data.content)) {
+                            showToast('删除失败：暂无权限，请刷新后重试');
+                            return;
+                        }
                     }
                     showToast('评论已删除');
                     await loadFeed(true);

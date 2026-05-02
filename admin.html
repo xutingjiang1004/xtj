@@ -603,8 +603,16 @@
                     var originalContent = fetchRes.data.content;
                     if (originalContent && originalContent.startsWith('__DELETED_BY_')) { showToast('评论已被删除', 'info'); return; }
                     var marker = "__DELETED_BY_" + ADMIN + "__" + originalContent;
-                    var res = await sb.from('comments').update({ content: marker }).eq('id', id);
+                    var res = await sb.from('comments').update({ content: marker }).eq('id', id).select();
                     if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
+                    // 确认是否真正更新成功
+                    if (!res.data || res.data.length === 0) {
+                        var verifyRes = await sb.from('comments').select('content').eq('id', id).single();
+                        if (verifyRes.data && !verifyRes.data.content.startsWith('__DELETED_BY_')) {
+                            showToast('删除失败：无权限，请执行SQL策略', 'error');
+                            return;
+                        }
+                    }
                     await loadAllData(true);
                     showToast('评论已标记为删除', 'success');
                 } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
