@@ -592,7 +592,7 @@
             async function() {
                 try {
                     var res = await sb.rpc('soft_delete_comment', { 
-                        p_comment_id: parseInt(id, 10), 
+                        p_comment_id: id, // 不用 parseInt，UUID是字符串
                         p_actor_key: String(actorKey || 'admin_' + Date.now()),
                         p_deleted_by: String(ADMIN)
                     });

@@ -3139,7 +3139,7 @@
                 if (!confirm('确定要删除此评论吗？')) return;
                 try {
                     const { error } = await sb.rpc("soft_delete_comment", {
-                        p_comment_id: parseInt(commentId),
+                        p_comment_id: commentId, // 不用 parseInt，UUID是字符串
                         p_actor_key: actorKey,
                         p_deleted_by: currentUser
                     });

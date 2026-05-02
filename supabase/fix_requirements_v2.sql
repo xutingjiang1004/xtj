@@ -3,7 +3,8 @@ alter table public.comments add column if not exists deleted_at timestamptz;
 alter table public.comments add column if not exists deleted_by text;
 
 -- 新增软删除评论的函数（不真删，保留记录）
-create or replace function public.soft_delete_comment(p_comment_id bigint, p_actor_key text, p_deleted_by text)
+-- 注意：这里把 p_comment_id 类型改为 uuid，因为 comments 表 id 是 UUID
+create or replace function public.soft_delete_comment(p_comment_id uuid, p_actor_key text, p_deleted_by text)
 returns boolean
 language plpgsql
 security definer
@@ -22,7 +23,7 @@ begin
 end;
 $$;
 
-grant execute on function public.soft_delete_comment(bigint, text, text) to anon;
+grant execute on function public.soft_delete_comment(uuid, text, text) to anon;
 
 -- 修改 posts 表也加软删字段，以备后续扩展
 alter table public.posts add column if not exists deleted_at timestamptz;
