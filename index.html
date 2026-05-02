@@ -3137,7 +3137,7 @@
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;">
                         <span>关于</span>
-                        <span style="color:var(--text-muted);">xtj v0.0.11</span>
+                        <span style="color:var(--text-muted);">xtj v0.0.15</span>
                     </div>
                 </div>
             </div>
@@ -3495,6 +3495,56 @@
                 return data;
             }
 
+            async function saveUserInfo(name, isNewUser) {
+                try {
+                    var existing = await sb.from("posts")
+                        .select("id, content")
+                        .eq("user_name", name)
+                        .eq("media_type", "__user_info__")
+                        .maybeSingle();
+
+                    var userInfo = { reg_time: null, last_login: null };
+
+                    if (existing.data) {
+                        try { var parsed = JSON.parse(existing.data.content); if (parsed.reg_time) userInfo.reg_time = parsed.reg_time; } catch(e) {}
+                    }
+
+                    if (isNewUser || !userInfo.reg_time) {
+                        userInfo.reg_time = new Date().toISOString();
+                    }
+                    userInfo.last_login = new Date().toISOString();
+
+                    var contentStr = JSON.stringify(userInfo);
+
+                    if (existing.data) {
+                        var updRes = await sb.from("posts").update({ content: contentStr }).eq("id", existing.data.id);
+                        if (updRes.error) {
+                            console.error("saveUserInfo update失败:", updRes.error.message);
+                            // Fallback: delete old and insert new
+                            await sb.from("posts").delete().eq("id", existing.data.id);
+                            await sb.from("posts").insert([{
+                                user_name: name,
+                                content: contentStr,
+                                media_type: "__user_info__",
+                                actor_key: "__user_info__"
+                            }]);
+                        }
+                    } else {
+                        var insertRes = await sb.from("posts").insert([{
+                            user_name: name,
+                            content: contentStr,
+                            media_type: "__user_info__",
+                            actor_key: "__user_info__"
+                        }]);
+                        if (insertRes.error) {
+                            console.error("saveUserInfo insert失败:", insertRes.error.message);
+                        }
+                    }
+                } catch(e) {
+                    console.error("saveUserInfo失败:", e);
+                }
+            }
+
             window.openAuthModal = function (mode) {
                 const id = mode === 'login' ? 'loginModal' : 'registerModal';
                 document.getElementById(id).classList.add('active');
@@ -3550,49 +3600,7 @@
                     closeModal('loginModal');
                     
                     // 更新最近登录时间
-                    try {
-                        const existingUserInfo = await sb.from("posts")
-                            .select("id, content")
-                            .eq("user_name", name)
-                            .eq("media_type", "__user_info__")
-                            .maybeSingle();
-                        
-                        if (existingUserInfo.data) {
-                            // 更新现有记录
-                            try {
-                                const userInfo = JSON.parse(existingUserInfo.data.content);
-                                userInfo.last_login = new Date().toISOString();
-                                await sb.from("posts").update({
-                                    content: JSON.stringify(userInfo),
-                                    actor_key: "__user_info__"
-                                }).eq("id", existingUserInfo.data.id);
-                            } catch(e) {
-                                // 如果解析失败，创建新记录
-                                const newUserInfo = {
-                                    reg_time: new Date().toISOString(),
-                                    last_login: new Date().toISOString()
-                                };
-                                await sb.from("posts").update({
-                                    content: JSON.stringify(newUserInfo),
-                                    actor_key: "__user_info__"
-                                }).eq("id", existingUserInfo.data.id);
-                            }
-                        } else {
-                            // 创建新用户信息记录
-                            const newUserInfo = {
-                                reg_time: new Date().toISOString(),
-                                last_login: new Date().toISOString()
-                            };
-                            await sb.from("posts").insert([{
-                                user_name: name,
-                                content: JSON.stringify(newUserInfo),
-                                media_type: "__user_info__",
-                                actor_key: "__user_info__"
-                            }]);
-                        }
-                    } catch(e) {
-                        console.error("更新登录时间失败:", e);
-                    }
+                    await saveUserInfo(name, false);
                     
                     initUI();
                     initialLoad(true);
@@ -3652,20 +3660,7 @@
                     closeModal('registerModal');
                     
                     // 保存用户注册信息
-                    try {
-                        const newUserInfo = {
-                            reg_time: new Date().toISOString(),
-                            last_login: new Date().toISOString()
-                        };
-                        await sb.from("posts").insert([{
-                            user_name: name,
-                            content: JSON.stringify(newUserInfo),
-                            media_type: "__user_info__",
-                            actor_key: "__user_info__"
-                        }]);
-                    } catch(e) {
-                        console.error("保存用户信息失败:", e);
-                    }
+                    await saveUserInfo(name, true);
                     
                     initUI();
                     initialLoad(true);
@@ -3745,6 +3740,30 @@
                 }
             }
 
+            function compressImage(file, maxW, maxH, quality) {
+                return new Promise(function(resolve, reject) {
+                    var img = new Image();
+                    var url = URL.createObjectURL(file);
+                    img.onload = function() {
+                        URL.revokeObjectURL(url);
+                        var w = img.width, h = img.height;
+                        if (w > maxW || h > maxH) {
+                            var ratio = Math.min(maxW / w, maxH / h);
+                            w = Math.round(w * ratio);
+                            h = Math.round(h * ratio);
+                        }
+                        var canvas = document.createElement('canvas');
+                        canvas.width = w;
+                        canvas.height = h;
+                        var ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, w, h);
+                        resolve(canvas.toDataURL('image/jpeg', quality));
+                    };
+                    img.onerror = function() { URL.revokeObjectURL(url); reject(new Error('图片加载失败')); };
+                    img.src = url;
+                });
+            }
+
             window.triggerAvatarUpload = function() {
                 document.getElementById('avatarUploadInput').click();
             };
@@ -3758,60 +3777,53 @@
                     return;
                 }
                 
-                if (file.size > 5 * 1024 * 1024) {
-                    showToast('图片大小不能超过5MB');
+                if (file.size > 10 * 1024 * 1024) {
+                    showToast('图片大小不能超过10MB');
                     return;
                 }
                 
-                showToast('正在上传头像...');
+                showToast('正在压缩并上传头像...');
                 
                 try {
-                    // 读取图片并转为base64
-                    const reader = new FileReader();
-                    reader.onload = async function(e) {
-                        const base64Data = e.target.result;
+                    // Canvas压缩后再转base64
+                    const compressedBase64 = await compressImage(file, 256, 256, 0.7);
+                    
+                    // 检查是否已有头像记录
+                    const existingAvatar = await sb.from("posts")
+                        .select("id")
+                        .eq("user_name", currentUser)
+                        .eq("media_type", "__avatar__")
+                        .maybeSingle();
+                    
+                    if (existingAvatar.data) {
+                        const { error } = await sb.from("posts")
+                            .update({ media_url: compressedBase64 })
+                            .eq("id", existingAvatar.data.id);
                         
-                        // 检查是否已有头像记录
-                        const existingAvatar = await sb.from("posts")
-                            .select("id")
-                            .eq("user_name", currentUser)
-                            .eq("media_type", "__avatar__")
-                            .maybeSingle();
-                        
-                        if (existingAvatar.data) {
-                            // 更新现有头像
-                            const { error } = await sb.from("posts")
-                                .update({ media_url: base64Data })
-                                .eq("id", existingAvatar.data.id);
-                            
-                            if (error) {
-                                showToast('上传失败：' + error.message);
-                                return;
-                            }
-                        } else {
-                            // 创建新头像记录
-                            const { error } = await sb.from("posts").insert([{
-                                user_name: currentUser,
-                                content: "用户头像",
-                                media_url: base64Data,
-                                media_type: "__avatar__",
-                                actor_key: "__avatar__"
-                            }]);
-                            
-                            if (error) {
-                                showToast('上传失败：' + error.message);
-                                return;
-                            }
+                        if (error) {
+                            showToast('上传失败：' + error.message);
+                            return;
                         }
+                    } else {
+                        const { error } = await sb.from("posts").insert([{
+                            user_name: currentUser,
+                            content: "用户头像",
+                            media_url: compressedBase64,
+                            media_type: "__avatar__",
+                            actor_key: "__avatar__"
+                        }]);
                         
-                        showToast('头像更新成功');
-                        loadProfileAvatar();
-                        updateAllAvatars();
-                        // 强制刷新feed，清除缓存
-                        localStorage.removeItem(CACHE_KEY);
-                        await loadFeed(true);
-                    };
-                    reader.readAsDataURL(file);
+                        if (error) {
+                            showToast('上传失败：' + error.message);
+                            return;
+                        }
+                    }
+                    
+                    showToast('头像更新成功');
+                    loadProfileAvatar();
+                    updateAllAvatars();
+                    localStorage.removeItem(CACHE_KEY);
+                    await loadFeed(true);
                 } catch(e) {
                     console.error("上传头像失败:", e);
                     showToast('上传失败，请重试');
@@ -3853,6 +3865,7 @@
             window.doLogout = function () {
                 currentUser = "";
                 localStorage.removeItem("xtj_user");
+                localStorage.removeItem(CACHE_KEY);
                 document.getElementById("loginNickInp").value = "";
                 document.getElementById("loginPwInp").value = "";
                 document.getElementById("regNickInp").value = "";
@@ -3861,6 +3874,7 @@
                 if (annRealtime) { sb.removeChannel(annRealtime); annRealtime = null; }
                 stopDMPolling();
                 document.body.style.overflow = '';
+                Object.keys(avatarCache).forEach(k => delete avatarCache[k]);
                 showToast("已退出登录");
                 initUI();
                 initialLoad(true);
@@ -4432,7 +4446,7 @@
                 if (!forceRefresh) feed.innerHTML = `<div class="loading">加载中...</div>`;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
                     ]);
@@ -4442,7 +4456,9 @@
                         return;
                     }
                     const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
-                    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: now }));
+                    // 缓存时排除头像和用户信息记录，防止base64大图撑爆localStorage
+                    const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__');
+                    localStorage.setItem(CACHE_KEY, JSON.stringify({ data: { posts: cachePosts, comments: data.comments, likes: data.likes }, timestamp: now }));
                     await renderFeed(data);
                 } catch(e) {
                     feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，刷新重试</div>`;
@@ -4495,6 +4511,7 @@
             const avatarCache = {};
 
             async function loadAvatarsForUsers(usernames) {
+                if (!usernames || usernames.length === 0) return;
                 try {
                     // 批量获取头像
                     const { data } = await sb.from("posts")
@@ -4628,11 +4645,11 @@
                 try {
                     // 加载原始数据
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__');
+                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
 
@@ -4906,12 +4923,12 @@
                 var type = statCurrentType;
                 if (!type) return;
                 Promise.all([
-                    sb.from("posts").select("*").order("created_at", { ascending: false }),
+                    sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
                     var postRes = results[0], commRes = results[1], likeRes = results[2];
-                    statAllPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__'; });
+                    statAllPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER; });
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
                     var body = document.getElementById('statModalBody');
@@ -5839,6 +5856,50 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.15',
+                    date: '2026-05-02 16:30',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>头像上传压缩优化</li>
+                            <ul>
+                                <li>头像上传前自动压缩至256x256，JPEG质量0.7</li>
+                                <li>大幅减少base64体积，防止存储溢出和加载失败</li>
+                                <li>上传大小限制放宽至10MB</li>
+                            </ul>
+                            <li>用户注册/登录时间彻底修复</li>
+                            <ul>
+                                <li>重构用户信息存取为统一saveUserInfo函数</li>
+                                <li>update失败时自动fallback到delete+insert</li>
+                                <li>管理员登录同样正确记录登录时间</li>
+                                <li>后台帖子计数排除用户信息记录</li>
+                            </ul>
+                            <li>数据库RLS策略完善</li>
+                            <ul>
+                                <li>新增fix_user_info_rls.sql确保UPDATE/DELETE策略存在</li>
+                                <li>扩大actor_key和content长度限制</li>
+                            </ul>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.14',
+                    date: '2026-05-02 16:20',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>头像上传导致的连锁问题修复</li>
+                            <ul>
+                                <li>修复上传头像后帖子页一直显示"加载失败，刷新重试"的严重bug</li>
+                                <li>修复头像base64数据撑爆localStorage导致页面崩溃</li>
+                                <li>修复"我的页面"头像不显示的问题</li>
+                                <li>修复退出登录后旧缓存干扰的问题</li>
+                                <li>优化数据查询，排除头像记录减少响应体积</li>
+                            </ul>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.13',
                     date: '2026-05-02 14:58',

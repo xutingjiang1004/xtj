@@ -361,11 +361,11 @@
 
     async function loadAllData(keepTab) {
         try {
-            var postRes = await sb.from('posts').select('*').order('created_at', {ascending: false}).limit(5000);
+            var postRes = await sb.from('posts').select('*').neq('media_type', '__avatar__').order('created_at', {ascending: false}).limit(5000);
             var likeRes = await sb.from('likes').select('*').order('created_at', {ascending: false}).limit(5000);
             var commRes = await sb.from('comments').select('*').order('created_at', {ascending: false}).limit(5000);
 
-            allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER; });
+            allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__user_info__'; });
             annList = (postRes.data || []).filter(function(p) { return p.media_type === ANN_MARKER; });
             allLikes = likeRes.data || [];
             allComments = commRes.data || [];
