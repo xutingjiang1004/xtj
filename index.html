@@ -3457,6 +3457,7 @@
             const viewTracked = new Set();
             const CACHE_KEY = "xtj_feed_cache";
             const CACHE_DURATION = 5 * 60 * 1000; // 缓存5分钟
+            const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
 
             function isAdmin() { return currentUser === ADMIN_NAME; }
 
@@ -3741,76 +3742,44 @@
                 }
             }
 
-            window.triggerAvatarUpload = function() {
-                document.getElementById('avatarUploadInput').click();
-            };
-
-            window.handleAvatarUpload = async function(event) {
+                        window.handleAvatarUpload = async function(event) {
                 const file = event.target.files[0];
                 if (!file) return;
-                
-                if (!file.type.startsWith('image/')) {
-                    showToast('请选择图片文件');
-                    return;
-                }
-                
-                if (file.size > 5 * 1024 * 1024) {
-                    showToast('图片大小不能超过5MB');
-                    return;
-                }
-                
+                if (!file.type.startsWith('image/')) { showToast('请选择图片文件'); return; }
+                if (file.size > 5 * 1024 * 1024) { showToast('图片大小不能超过5MB'); return; }
                 showToast('正在上传头像...');
-                
                 try {
-                    // 读取图片并转为base64
-                    const reader = new FileReader();
-                    reader.onload = async function(e) {
-                        const base64Data = e.target.result;
-                        
-                        // 检查是否已有头像记录
-                        const existingAvatar = await sb.from("posts")
-                            .select("id")
-                            .eq("user_name", currentUser)
-                            .eq("media_type", "__avatar__")
-                            .maybeSingle();
-                        
-                        if (existingAvatar.data) {
-                            // 更新现有头像
-                            const { error } = await sb.from("posts")
-                                .update({ media_url: base64Data })
-                                .eq("id", existingAvatar.data.id);
-                            
-                            if (error) {
-                                showToast('上传失败：' + error.message);
-                                return;
-                            }
-                        } else {
-                            // 创建新头像记录
-                            const { error } = await sb.from("posts").insert([{
-                                user_name: currentUser,
-                                content: "用户头像",
-                                media_url: base64Data,
-                                media_type: "__avatar__",
-                                actor_key: "__avatar__"
-                            }]);
-                            
-                            if (error) {
-                                showToast('上传失败：' + error.message);
-                                return;
-                            }
-                        }
-                        
-                        showToast('头像更新成功');
-                        loadProfileAvatar();
-                        updateAllAvatars();
-                    };
-                    reader.readAsDataURL(file);
+                    // 先把原记录删了，再上传到Storage，最后写新记录
+                    const existing = await sb.from("posts")
+                        .select("id, media_url")
+                        .eq("user_name", currentUser)
+                        .eq("media_type", "__avatar__")
+                        .maybeSingle();
+                    
+                    // 上传到 Storage
+                    const path = `avatars/${currentUser}_${Date.now()}.jpg`;
+                    const { error: upErr } = await sb.storage.from("uploads").upload(path, file, { upsert: true, contentType: file.type });
+                    if (upErr) { showToast('上传失败：' + upErr.message); return; }
+                    
+                    const avatarUrl = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
+                    
+                    if (existing.data) {
+                        await sb.from("posts").update({ media_url: avatarUrl }).eq("id", existing.data.id);
+                    } else {
+                        await sb.from("posts").insert([{
+                            user_name: currentUser, content: "用户头像",
+                            media_url: avatarUrl, media_type: "__avatar__", actor_key: "__avatar__"
+                        }]);
+                    }
+                    
+                    showToast('头像更新成功');
+                    avatarCache[currentUser] = avatarUrl;
+                    loadProfileAvatar();
+                    updateAllAvatars();
                 } catch(e) {
                     console.error("上传头像失败:", e);
                     showToast('上传失败，请重试');
                 }
-                
-                // 清空input，允许重复选择同一文件
                 event.target.value = '';
             };
 
@@ -4432,8 +4401,20 @@
                         feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败: ${errMsg}</div>`;
                         return;
                     }
-                    const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
-                    localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: now }));
+                                        const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
+                    try {
+                        const cacheData = {
+                            posts: (data.posts || []).map(p => {
+                                if (p.media_type === '__avatar__' && p.media_url && p.media_url.startsWith('data:')) {
+                                    return { ...p, media_url: '' };
+                                }
+                                return p;
+                            }),
+                            comments: data.comments, likes: data.likes
+                        };
+                        localStorage.setItem(CACHE_KEY, JSON.stringify({ data: cacheData, timestamp: now }));
+                    } catch(e) { console.warn('缓存写入失败', e.message); }
+
                     await renderFeed(data);
                 } catch(e) {
                     feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，刷新重试</div>`;
@@ -4442,7 +4423,8 @@
             }
 
             async function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
+                const visiblePosts = posts.filter(p => !INTERNAL_TYPES.includes(p.media_type));
+
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length + comments.length;
@@ -4601,7 +4583,7 @@
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
+                    statAllPosts = (postRes.data || []).filter(p => !INTERNAL_TYPES.includes(p.media_type));
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
 
@@ -4880,7 +4862,7 @@
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
                     var postRes = results[0], commRes = results[1], likeRes = results[2];
-                    statAllPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER; });
+                    statAllPosts = (postRes.data || []).filter(function(p) { return !INTERNAL_TYPES.includes(p.media_type); });
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
                     var body = document.getElementById('statModalBody');
@@ -6372,10 +6354,10 @@
                 });
                 // 同时更新原始的select（向后兼容）
                 var langSelect = document.getElementById('profileLang');
-                if (langSelect) langSelect.value = lang;
-                var dict = translations[lang] || translations['zh'];
-                showToast(dict['langChanged']);
-            };
+                if (avatarSpan && avatarEl) {
+                 avatarEl.innerHTML = avatarSpan.innerHTML || '?';
+            }
+
 
             // 初始化语言选择
             var langSelect = document.getElementById('profileLang');
