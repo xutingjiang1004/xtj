@@ -3138,18 +3138,16 @@
             window.deleteComment = async function (commentId, actorKey) {
                 if (!confirm('确定要删除此评论吗？')) return;
                 try {
-                    const { error } = await sb.rpc("soft_delete_comment", {
-                        p_comment_id: commentId, // 不用 parseInt，UUID是字符串
-                        p_actor_key: actorKey,
-                        p_deleted_by: currentUser
-                    });
+                    const { error } = await sb.from("comments")
+                        .update({ deleted_at: new Date().toISOString(), deleted_by: currentUser })
+                        .eq('id', commentId)
+                        .eq('deleted_at', null);
                     if (error) {
                         showToast('删除评论失败：' + error.message);
                         return;
                     }
                     showToast('评论已删除');
                     await loadFeed(true);
-                    // 刷新统计详情
                     if (statCurrentType !== null && document.getElementById('statModal').classList.contains('active')) {
                         await openStatDetail(statCurrentType);
                     }
