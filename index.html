@@ -2315,6 +2315,29 @@
             flex: 1;
             min-width: 0;
         }
+        .announcement-detail-user {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .announcement-detail-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #059669 0%, #10b981 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+        .announcement-detail-name {
+            font-weight: 600;
+            font-size: 15px;
+        }
         .announcement-detail-title {
             font-weight: 700;
             font-size: 18px;
@@ -2388,6 +2411,22 @@
             display: flex;
             align-items: center;
             gap: 6px;
+        }
+        .announcement-admin-title-input {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.2);
+            font-size: 14px;
+            margin-bottom: 8px;
+            outline: none;
+            transition: var(--trans-smooth);
+        }
+        .announcement-admin-title-input:focus {
+            background: rgba(255,255,255,0.35);
+            border-color: rgba(5,150,105,0.4);
+            box-shadow: 0 0 0 3px rgba(5,150,105,0.12);
         }
         .announcement-admin-input {
             width: 100%;
@@ -2770,7 +2809,8 @@
             </div>
             <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
                 <div class="announcement-admin-title">📢 发布新公告</div>
-                <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="输入公告内容..."></textarea>
+                <input type="text" id="announcementAdminTitle" class="announcement-admin-title-input" placeholder="输入公告标题（可选）">
+                <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="输入公告内容（可选）"></textarea>
                 <div class="announcement-admin-row">
                     <button class="announcement-admin-btn primary" onclick="publishAnnouncement()">发布</button>
                 </div>
@@ -2783,6 +2823,7 @@
                     <button class="announcement-back-btn" onclick="showAnnouncementList()">← 返回</button>
                     <div class="announcement-detail-header">
                         <div class="announcement-detail-left">
+                            <div class="announcement-detail-user" id="announcementDetailUserInfo"></div>
                             <div class="announcement-detail-title" id="announcementDetailTitle"></div>
                             <div class="announcement-detail-time" id="announcementDetailTime"></div>
                         </div>
@@ -4587,9 +4628,19 @@
                 const detail = document.getElementById('announcementDetail');
                 detail.classList.add('active');
 
-                document.getElementById('announcementDetailTitle').textContent = '公告';
+                const displayTitle = ann.title || '公告';
+                document.getElementById('announcementDetailTitle').textContent = displayTitle;
                 document.getElementById('announcementDetailTime').textContent = new Date(ann.created_at).toLocaleString('zh-CN');
-                document.getElementById('announcementDetailContent').textContent = ann.content;
+                document.getElementById('announcementDetailContent').textContent = ann.content || '';
+                
+                // 设置发布者信息
+                const userInfoEl = document.getElementById('announcementDetailUserInfo');
+                if (userInfoEl) {
+                    userInfoEl.innerHTML = `
+                        <div class="announcement-detail-avatar">${ann.user_name.charAt(0).toUpperCase()}</div>
+                        <div class="announcement-detail-name">${escapeHtml(ann.user_name)}</div>
+                    `;
+                }
 
                 // 如果是管理员，添加删除按钮
                 const existingDelBtn = detail.querySelector('.announcement-delete-btn');
@@ -4638,16 +4689,18 @@
                     item.className = 'announcement-item' + (isRead ? '' : ' unread');
                     item.onclick = function() { showAnnouncementDetail(ann); };
 
-                    const preview = ann.content.length > 100 ? ann.content.substring(0, 100) + '...' : ann.content;
+                    const displayTitle = ann.title || '公告';
+                    const previewContent = ann.content ? (ann.content.length > 100 ? ann.content.substring(0, 100) + '...' : ann.content) : '';
+                    
                     item.innerHTML = `
                         <div class="announcement-item-header">
                             <div class="announcement-item-title">
                                 ${!isRead ? '<span class="unread-dot"></span>' : ''}
-                                公告
+                                ${escapeHtml(displayTitle)}
                             </div>
                             <div class="announcement-item-time">${new Date(ann.created_at).toLocaleString('zh-CN')}</div>
                         </div>
-                        <div class="announcement-item-preview">${escapeHtml(preview)}</div>
+                        ${previewContent ? `<div class="announcement-item-preview">${escapeHtml(previewContent)}</div>` : ''}
                     `;
                     listEl.appendChild(item);
 
@@ -4660,23 +4713,28 @@
             }
 
             window.publishAnnouncement = async function() {
-                const input = document.getElementById('announcementAdminInput');
-                const content = input.value.trim();
-                if (!content) {
-                    showToast('请输入公告内容');
+                const titleInput = document.getElementById('announcementAdminTitle');
+                const contentInput = document.getElementById('announcementAdminInput');
+                const title = titleInput.value.trim();
+                const content = contentInput.value.trim();
+                
+                if (!title && !content) {
+                    showToast('请至少填写标题或内容');
                     return;
                 }
 
                 try {
                     const { error } = await sb.from('posts').insert([{
                         user_name: ADMIN_NAME,
+                        title: title, // 保存标题
                         content: content,
                         media_type: ANN_MARKER,
                         media_url: '',
                         actor_key: 'admin_' + Date.now()
                     }]);
                     if (error) throw error;
-                    input.value = '';
+                    titleInput.value = '';
+                    contentInput.value = '';
                     showToast('公告发布成功');
                     await loadAnnouncements();
                     renderAnnouncementList();
