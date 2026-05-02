@@ -3766,7 +3766,6 @@
                 var annBtnWrapper = document.getElementById("announcement-btn-wrapper");
                 var profileName = document.getElementById("profileName");
                 var profileStatus = document.getElementById("profileName").nextElementSibling;
-                var profileUserCard = document.getElementById("profileUserCard");
                 var publishBox = document.getElementById("publishBox");
                 
                 if (currentUser) {
@@ -3781,7 +3780,6 @@
                     // 更新我的页面显示
                     profileName.textContent = currentUser;
                     profileStatus.textContent = "查看资料";
-                    profileUserCard.onclick = function() { openProfileDetail(); };
                     
                     // 显示发布区域
                     if (publishBox) publishBox.style.display = "block";
@@ -3798,7 +3796,6 @@
                     // 更新我的页面显示（未登录）
                     profileName.textContent = "未登录";
                     profileStatus.textContent = "点击登录";
-                    profileUserCard.onclick = function() { openAuthModal('login'); };
                     
                     // 隐藏发布区域
                     if (publishBox) publishBox.style.display = "none";
@@ -4041,6 +4038,10 @@
                     btn.disabled = false;
                     btn.textContent = "确认删除";
                 }
+            };
+
+            window.openModal = function (id) {
+                document.getElementById(id).classList.add("active");
             };
 
             window.closeModal = function (id) {
@@ -4305,7 +4306,7 @@
                         try {
                             const parsed = JSON.parse(cached);
                             if (parsed?.data && now - parsed.timestamp < CACHE_DURATION) {
-                                renderFeed(parsed.data); return;
+                                await renderFeed(parsed.data); return;
                             }
                         } catch(e){}
                     }
@@ -4325,7 +4326,7 @@
                     }
                     const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
                     localStorage.setItem(CACHE_KEY, JSON.stringify({ data, timestamp: now }));
-                    renderFeed(data);
+                    await renderFeed(data);
                 } catch(e) {
                     feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，刷新重试</div>`;
                     console.error(e);
