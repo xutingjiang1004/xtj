@@ -9,7 +9,7 @@ language plpgsql
 security definer
 as $$
 declare
-    v_found boolean;
+    v_updated_count integer;
 begin
     update public.comments
     set deleted_at = now(),
@@ -17,8 +17,8 @@ begin
     where id = p_comment_id
       and (actor_key = p_actor_key or p_deleted_by = 'xxz')
       and deleted_at is null;
-    get diagnostics v_found = found;
-    return v_found;
+    get diagnostics v_updated_count = row_count;
+    return v_updated_count > 0;
 end;
 $$;
 
