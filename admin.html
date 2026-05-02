@@ -590,7 +590,7 @@
         );
     };
 
-    // 管理后台删除评论
+    // 管理后台删除评论 - 通过 RPC 绕过 RLS
     window.deleteAdminComment = function(id, actorKey) {
         showConfirm(
             '删除评论',
@@ -599,22 +599,20 @@
             async function() {
                 try {
                     var cid = parseInt(id, 10);
-                    var fetchRes = await sb.from('comments').select('content').eq('id', cid).single();
-                    if (fetchRes.error) { showToast('删除失败: ' + fetchRes.error.message, 'error'); return; }
-                    var originalContent = fetchRes.data.content;
-                    if (originalContent && originalContent.startsWith('__DELETED_BY_')) { showToast('评论已被删除', 'info'); return; }
-                    var marker = "__DELETED_BY_" + ADMIN + "__" + originalContent;
-                    var res = await sb.from('comments').update({ content: marker }).eq('id', cid).select();
-                    if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
-                    if (!res.data || res.data.length === 0) {
-                        var verifyRes = await sb.from('comments').select('content').eq('id', cid).single();
-                        if (verifyRes.data && !verifyRes.data.content.startsWith('__DELETED_BY_')) {
-                            showToast('删除失败：无权限，请执行SQL后刷新', 'error');
-                            return;
-                        }
+                    var res = await sb.rpc('delete_comment_v2', {
+                        p_comment_id: cid,
+                        p_deleted_by: ADMIN
+                    });
+                    if (res.error) {
+                        showToast('删除失败: ' + res.error.message, 'error');
+                        return;
                     }
-                    await loadAllData(true);
-                    showToast('评论已标记为删除', 'success');
+                    if (res.data && res.data.success) {
+                        await loadAllData(true);
+                        showToast('评论已标记为删除', 'success');
+                    } else {
+                        showToast('删除失败: ' + (res.data && res.data.message ? res.data.message : '未知错误'), 'error');
+                    }
                 } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
             }
         );
