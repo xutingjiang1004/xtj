@@ -3349,7 +3349,7 @@
             let activePostId = null;
             const viewTracked = new Set();
             const CACHE_KEY = "xtj_feed_cache";
-            const CACHE_DURATION = 2 * 60 * 1000;
+            const CACHE_DURATION = 5 * 60 * 1000; // 缓存5分钟
 
             function isAdmin() { return currentUser === ADMIN_NAME; }
 
@@ -4919,7 +4919,7 @@
             }
 
             // ========== Dock 切换 ==========
-            let currentDockTab = 'posts';
+            let currentDockTab = localStorage.getItem('xtj_current_tab') || 'posts';
             let lastTabTapTime = {};
             window.switchDockTab = function(tab, skipReturn) {
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
@@ -4950,6 +4950,7 @@
                 }
                 lastTabTapTime[tab] = now;
                 currentDockTab = tab;
+                localStorage.setItem('xtj_current_tab', tab);
                 document.querySelectorAll('.dock-panel').forEach(p => p.classList.remove('active'));
                 document.querySelectorAll('.dock-tab').forEach(t => t.classList.remove('active'));
                 const panel = document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1));
@@ -5347,6 +5348,11 @@
                 const modeBtn = document.getElementById('dockAIModeBtn');
                 if (!dockAIThinkMode) { modeBtn.classList.add('quick'); }
                 updateAIWelcome();
+                // 恢复上次保存的标签页
+                const savedTab = localStorage.getItem('xtj_current_tab');
+                if (savedTab && savedTab !== 'posts') {
+                    switchDockTab(savedTab, true);
+                }
             });
 
             // ========== 主题切换 ==========
