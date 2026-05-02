@@ -3402,15 +3402,15 @@
                 </div>
                 <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
-            <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
-                <div class="announcement-admin-title">📢 发布新公告</div>
-                <input type="text" id="announcementAdminTitle" class="announcement-admin-title-input" placeholder="输入公告标题（可选）">
-                <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="输入公告内容（可选）"></textarea>
-                <div class="announcement-admin-row">
-                    <button class="announcement-admin-btn primary" onclick="publishAnnouncement()">发布</button>
-                </div>
-            </div>
             <div class="announcement-content">
+                <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
+                    <div class="announcement-admin-title">📢 发布新公告</div>
+                    <input type="text" id="announcementAdminTitle" class="announcement-admin-title-input" placeholder="输入公告标题（可选）">
+                    <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="输入公告内容（可选）"></textarea>
+                    <div class="announcement-admin-row">
+                        <button class="announcement-admin-btn primary" onclick="publishAnnouncement()">发布</button>
+                    </div>
+                </div>
                 <div id="announcementListContainer">
                     <div class="announcement-list" id="announcementList"></div>
                 </div>
@@ -3563,7 +3563,8 @@
                                 const userInfo = JSON.parse(existingUserInfo.data.content);
                                 userInfo.last_login = new Date().toISOString();
                                 await sb.from("posts").update({
-                                    content: JSON.stringify(userInfo)
+                                    content: JSON.stringify(userInfo),
+                                    actor_key: "__user_info__"
                                 }).eq("id", existingUserInfo.data.id);
                             } catch(e) {
                                 // 如果解析失败，创建新记录
@@ -3572,7 +3573,8 @@
                                     last_login: new Date().toISOString()
                                 };
                                 await sb.from("posts").update({
-                                    content: JSON.stringify(newUserInfo)
+                                    content: JSON.stringify(newUserInfo),
+                                    actor_key: "__user_info__"
                                 }).eq("id", existingUserInfo.data.id);
                             }
                         } else {
@@ -3584,7 +3586,8 @@
                             await sb.from("posts").insert([{
                                 user_name: name,
                                 content: JSON.stringify(newUserInfo),
-                                media_type: "__user_info__"
+                                media_type: "__user_info__",
+                                actor_key: "__user_info__"
                             }]);
                         }
                     } catch(e) {
@@ -3657,7 +3660,8 @@
                         await sb.from("posts").insert([{
                             user_name: name,
                             content: JSON.stringify(newUserInfo),
-                            media_type: "__user_info__"
+                            media_type: "__user_info__",
+                            actor_key: "__user_info__"
                         }]);
                     } catch(e) {
                         console.error("保存用户信息失败:", e);
@@ -3803,6 +3807,9 @@
                         showToast('头像更新成功');
                         loadProfileAvatar();
                         updateAllAvatars();
+                        // 强制刷新feed，清除缓存
+                        localStorage.removeItem(CACHE_KEY);
+                        await loadFeed(true);
                     };
                     reader.readAsDataURL(file);
                 } catch(e) {
@@ -3827,6 +3834,8 @@
                     if (profileAvatar) {
                         if (avatarRes.data && avatarRes.data.media_url) {
                             profileAvatar.innerHTML = '<img src="' + avatarRes.data.media_url + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            // 更新头像缓存
+                            avatarCache[currentUser] = avatarRes.data.media_url;
                         } else {
                             profileAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
                         }
@@ -4442,7 +4451,7 @@
             }
 
             async function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
+                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__');
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length + comments.length;
@@ -4460,6 +4469,26 @@
                 // 等待头像加载完成后再渲染
                 await loadAvatarsForUsers(Array.from(allUsers));
                 renderFeedWithAvatars(visiblePosts, comments, likes);
+            }
+
+            // 预构建评论和点赞的映射表，提升渲染性能
+            function buildPostMaps(comments, likes) {
+                const commentMap = {};
+                const likeMap = {};
+                const likeUserMap = {};
+
+                comments.forEach(c => {
+                    if (!commentMap[c.post_id]) commentMap[c.post_id] = [];
+                    commentMap[c.post_id].push(c);
+                });
+
+                likes.forEach(l => {
+                    if (!likeMap[l.post_id]) likeMap[l.post_id] = [];
+                    likeMap[l.post_id].push(l);
+                    likeUserMap[l.post_id + '|' + l.actor_key] = true;
+                });
+
+                return { commentMap, likeMap, likeUserMap };
             }
 
             // 缓存头像URL
@@ -4496,10 +4525,12 @@
 
             function renderFeedWithAvatars(visiblePosts, comments, likes) {
                 const feed = document.getElementById("feed");
+                const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
+
                 feed.innerHTML = visiblePosts.length ? visiblePosts.map(p => {
-                    const pLikes = likes.filter(l=>l.post_id===p.id);
-                    const pComms = comments.filter(c=>c.post_id===p.id);
-                    const isLiked = pLikes.some(l=>l.actor_key===deviceId);
+                    const pLikes = likeMap[p.id] || [];
+                    const pComms = commentMap[p.id] || [];
+                    const isLiked = likeUserMap[p.id + '|' + deviceId];
                     const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
                     trackView(p.id);
                     return `
@@ -4601,7 +4632,7 @@
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
+                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__');
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
 
@@ -4880,7 +4911,7 @@
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
                     var postRes = results[0], commRes = results[1], likeRes = results[2];
-                    statAllPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER; });
+                    statAllPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__'; });
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
                     var body = document.getElementById('statModalBody');
@@ -5808,6 +5839,35 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.13',
+                    date: '2026-05-02 14:58',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>头像功能修复</li>
+                            <ul>
+                                <li>修复头像上传后作为帖子显示的问题</li>
+                                <li>修复刷新页面后头像消失的问题</li>
+                                <li>头像上传成功后自动刷新feed显示新头像</li>
+                                <li>更新头像缓存机制，确保头像正确显示</li>
+                            </ul>
+                            <li>性能优化</li>
+                            <ul>
+                                <li>优化帖子渲染性能，预构建评论和点赞映射表</li>
+                                <li>提升整体流畅度，减少卡顿</li>
+                            </ul>
+                            <li>公告系统优化</li>
+                            <ul>
+                                <li>修复公告发布区域固定不动的问题，现在会随内容滚动</li>
+                            </ul>
+                            <li>后台管理优化</li>
+                            <ul>
+                                <li>修复用户注册和登录时间保存问题，添加actor_key确保数据正确写入</li>
+                            </ul>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.12',
                     date: '2026-05-02 01:00',
