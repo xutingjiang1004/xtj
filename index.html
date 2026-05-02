@@ -2250,6 +2250,40 @@
             background: linear-gradient(135deg, rgba(5,150,105,0.95), rgba(16,185,129,0.95));
             border-color: rgba(16,185,129,0.3);
         }
+        .profile-lang-tabs {
+            display: flex;
+            gap: 8px;
+        }
+        .profile-lang-tab {
+            padding: 6px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.2);
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            transition: var(--trans-smooth);
+        }
+        .profile-lang-tab:hover {
+            background: rgba(255,255,255,0.4);
+        }
+        .profile-lang-tab.active {
+            background: linear-gradient(135deg, rgba(5,150,105,0.9), rgba(16,185,129,0.9));
+            border-color: rgba(5,150,105,0.5);
+            color: white;
+        }
+        [data-theme="dark"] .profile-lang-tab {
+            border-color: rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.08);
+        }
+        [data-theme="dark"] .profile-lang-tab:hover {
+            background: rgba(255,255,255,0.15);
+        }
+        [data-theme="dark"] .profile-lang-tab.active {
+            background: linear-gradient(135deg, rgba(5,150,105,0.95), rgba(16,185,129,0.95));
+            border-color: rgba(16,185,129,0.3);
+        }
         .changelog-list {
             display: flex;
             flex-direction: column;
@@ -2861,7 +2895,12 @@
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(0,0,0,0.05);">
                         <span>语言</span>
-                        <select id="profileLang" style="padding:6px 10px;border-radius:8px;border:1px solid rgba(0,0,0,0.1);background:#fff;font-size:13px;color:var(--text-main);outline:none;">
+                        <div class="profile-lang-tabs">
+                            <button class="profile-lang-tab" data-lang="zh" onclick="setProfileLang('zh')">中文</button>
+                            <button class="profile-lang-tab" data-lang="en" onclick="setProfileLang('en')">English</button>
+                            <button class="profile-lang-tab" data-lang="ko" onclick="setProfileLang('ko')">한국어</button>
+                        </div>
+                        <select id="profileLang" style="display:none;">
                             <option value="zh">中文</option>
                             <option value="en">English</option>
                             <option value="ko">한국어</option>
@@ -3105,7 +3144,7 @@
                     <button class="announcement-tab active" data-tab="announcements">🔔 公告</button>
                     <button class="announcement-tab" data-tab="changelog">📝 更新日志</button>
                 </div>
-                <button class="announcement-close-btn" onclick="closeAnnouncementModal()">✕</button>
+                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
                 <div class="announcement-admin-title">📢 发布新公告</div>
@@ -5587,6 +5626,26 @@
                 });
             }
 
+            // 设置语言函数
+            window.setProfileLang = function(lang) {
+                localStorage.setItem('xtj-lang', lang);
+                window.translatePage(lang);
+                // 更新胶囊按钮的状态
+                var tabs = document.querySelectorAll('.profile-lang-tab');
+                tabs.forEach(function(tab) {
+                    if (tab.dataset.lang === lang) {
+                        tab.classList.add('active');
+                    } else {
+                        tab.classList.remove('active');
+                    }
+                });
+                // 同时更新原始的select（向后兼容）
+                var langSelect = document.getElementById('profileLang');
+                if (langSelect) langSelect.value = lang;
+                var dict = translations[lang] || translations['zh'];
+                showToast(dict['langChanged']);
+            };
+
             // 初始化语言选择
             var langSelect = document.getElementById('profileLang');
             if (langSelect) {
@@ -5594,11 +5653,18 @@
                 langSelect.value = savedLang;
                 // 初始化页面翻译
                 window.translatePage(savedLang);
+                // 初始化胶囊按钮的状态
+                var tabs = document.querySelectorAll('.profile-lang-tab');
+                tabs.forEach(function(tab) {
+                    if (tab.dataset.lang === savedLang) {
+                        tab.classList.add('active');
+                    } else {
+                        tab.classList.remove('active');
+                    }
+                });
                 langSelect.addEventListener('change', function() {
                     var newLang = this.value;
-                    window.translatePage(newLang);
-                    var dict = translations[newLang] || translations['zh'];
-                    showToast(dict['langChanged']);
+                    window.setProfileLang(newLang);
                 });
             }
 

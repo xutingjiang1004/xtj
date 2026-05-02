@@ -370,11 +370,28 @@
             allLikes = likeRes.data || [];
             allComments = commRes.data || [];
 
+            // 收集用户信息
             var userMap = {};
             allPosts.forEach(function(p) { userMap[p.user_name] = true; });
             allLikes.forEach(function(l) { userMap[l.user_name] = true; });
             allComments.forEach(function(c) { userMap[c.user_name] = true; });
-            allUsers = Object.keys(userMap).sort();
+            
+            // 获取用户详细信息
+            var userInfoList = (postRes.data || []).filter(function(p) { return p.media_type === '__user_info__'; });
+            var userInfoMap = {};
+            userInfoList.forEach(function(ui) {
+                try {
+                    var info = JSON.parse(ui.content);
+                    userInfoMap[ui.user_name] = info;
+                } catch(e) {}
+            });
+            
+            allUsers = Object.keys(userMap).sort().map(function(u) {
+                return {
+                    name: u,
+                    info: userInfoMap[u] || null
+                };
+            });
 
             if (!keepTab) {
                 switchTab('ann');
@@ -455,16 +472,18 @@
         h += '<div class="card"><h3>👥 用户列表</h3>';
         h += '<div class="search-bar"><input id="userSearchInp" placeholder="搜索用户..." oninput="searchUserInp()" /></div>';
         var filtered = allUsers;
-        if (searchUser) filtered = allUsers.filter(function(u) { return u.toLowerCase().includes(searchUser.toLowerCase()); });
+        if (searchUser) filtered = allUsers.filter(function(u) { return u.name.toLowerCase().includes(searchUser.toLowerCase()); });
         if (!filtered.length) { h += '<div class="empty">无匹配用户</div>'; }
         else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>帖子数</th><th>点赞数</th><th>评论数</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>帖子数</th><th>点赞数</th><th>评论数</th><th>注册时间</th><th>最近登录</th></tr></thead><tbody>';
             filtered.forEach(function(u) {
-                var pc = allPosts.filter(function(p) { return p.user_name === u; }).length;
-                var lc = allLikes.filter(function(l) { return l.user_name === u; }).length;
-                var cc = allComments.filter(function(c) { return c.user_name === u; }).length;
-                h += '<tr><td><strong>' + escapeHtml(u) + '</strong>' + (u === ADMIN ? ' <span class="badge badge-red">管理员</span>' : '') + '</td>';
-                h += '<td>' + pc + '</td><td>' + lc + '</td><td>' + cc + '</td></tr>';
+                var pc = allPosts.filter(function(p) { return p.user_name === u.name; }).length;
+                var lc = allLikes.filter(function(l) { return l.user_name === u.name; }).length;
+                var cc = allComments.filter(function(c) { return c.user_name === u.name; }).length;
+                var regTime = u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-';
+                var lastLogin = u.info && u.info.last_login ? formatTime(u.info.last_login) : '-';
+                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong>' + (u.name === ADMIN ? ' <span class="badge badge-red">管理员</span>' : '') + '</td>';
+                h += '<td>' + pc + '</td><td>' + lc + '</td><td>' + cc + '</td><td>' + regTime + '</td><td>' + lastLogin + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
