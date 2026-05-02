@@ -2845,6 +2845,111 @@
         [data-theme="dark"] .profile-detail-logout-btn {
             background: rgba(255,59,96,0.15);
         }
+
+        /* ========== 通知系统 ========== */
+        .notification-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+        .notification-bubble {
+            pointer-events: auto;
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border-radius: 16px;
+            padding: 14px 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            min-width: 300px;
+            max-width: 400px;
+            box-shadow: 
+                0 8px 32px rgba(0, 0, 0, 0.12),
+                0 2px 8px rgba(0, 0, 0, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            transform: translateX(120%) scale(0.9);
+            opacity: 0;
+            cursor: pointer;
+        }
+        .notification-bubble.show {
+            transform: translateX(0) scale(1);
+            opacity: 1;
+        }
+        .notification-bubble.hide {
+            transform: translateX(120%) scale(0.9);
+            opacity: 0;
+        }
+        .notification-bubble:hover {
+            box-shadow: 
+                0 12px 40px rgba(0, 0, 0, 0.15),
+                0 4px 12px rgba(0, 0, 0, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.7);
+        }
+        .notification-avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+            background: linear-gradient(135deg, #059669, #34d399);
+            color: white;
+            box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+            overflow: hidden;
+        }
+        .notification-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+        .notification-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .notification-name {
+            font-weight: 600;
+            font-size: 15px;
+            color: var(--text-main);
+            margin-bottom: 4px;
+            line-height: 1.2;
+        }
+        .notification-text {
+            font-size: 14px;
+            color: var(--text-muted);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.4;
+        }
+
+        [data-theme="dark"] .notification-bubble {
+            background: rgba(30, 30, 45, 0.75);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border-color: rgba(255, 255, 255, 0.15);
+            box-shadow: 
+                0 8px 32px rgba(0, 0, 0, 0.4),
+                0 2px 8px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+        [data-theme="dark"] .notification-bubble:hover {
+            box-shadow: 
+                0 12px 40px rgba(0, 0, 0, 0.5),
+                0 4px 12px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.15);
+        }
     </style>
 </head>
 <body>
@@ -2854,6 +2959,8 @@
     </div>
 
     <div class="toast-container" id="toastContainer"></div>
+
+    <div class="notification-container" id="notificationContainer"></div>
 
     <div class="app-container">
 
@@ -4783,6 +4890,63 @@
                 }).catch(function() {});
             }
 
+            // ===================== 通知系统 =====================
+            let activeNotifications = [];
+
+            function showNotification(userName, message) {
+                if (!userName || !message) return;
+                if (localStorage.getItem('xtj-notif') === 'off') return;
+                if (currentDockTab === 'chat' && dockChatActiveUser === userName) return;
+
+                const container = document.getElementById('notificationContainer');
+                if (!container) return;
+
+                const bubble = document.createElement('div');
+                bubble.className = 'notification-bubble';
+
+                const avatarHtml = avatarCache[userName] ? 
+                    `<img src="${avatarCache[userName]}" alt="${userName}">` : 
+                    userName[0].toUpperCase();
+
+                const truncatedMsg = message.length > 50 ? message.slice(0, 50) + '...' : message;
+
+                bubble.innerHTML = `
+                    <div class="notification-avatar">${avatarHtml}</div>
+                    <div class="notification-content">
+                        <div class="notification-name">${escapeHtml(userName)}</div>
+                        <div class="notification-text">${escapeHtml(truncatedMsg)}</div>
+                    </div>
+                `;
+
+                bubble.addEventListener('click', () => {
+                    switchDockTab('chat');
+                    openChat(userName);
+                    bubble.classList.remove('show');
+                    bubble.classList.add('hide');
+                    setTimeout(() => {
+                        if (bubble.parentNode) bubble.remove();
+                    }, 400);
+                });
+
+                container.appendChild(bubble);
+
+                requestAnimationFrame(() => {
+                    bubble.classList.add('show');
+                });
+
+                const notifId = Date.now() + Math.random();
+                activeNotifications.push({ id: notifId, element: bubble });
+
+                setTimeout(() => {
+                    bubble.classList.remove('show');
+                    bubble.classList.add('hide');
+                    setTimeout(() => {
+                        if (bubble.parentNode) bubble.remove();
+                        activeNotifications = activeNotifications.filter(n => n.id !== notifId);
+                    }, 400);
+                }, 3000);
+            }
+
             // ===================== 聊天系统 (Dock 兼容版) =====================
             let chatRealtime = null;
             let dmpollTimer = null;
@@ -4831,6 +4995,9 @@
                         if (!currentUser) return;
                         if (m.media_url !== currentUser) return;
                         if (m.user_name === currentUser) return;
+                        if (typeof dockChatActiveUser === 'undefined' || dockChatActiveUser !== m.user_name) {
+                            showNotification(m.user_name, m.content || '发送了一张图片/视频');
+                        }
                         if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser === m.user_name) {
                             loadDockChatMessages(m.user_name, false);
                         } else if (typeof dockChatActiveUser === 'undefined' || !dockChatActiveUser) {
