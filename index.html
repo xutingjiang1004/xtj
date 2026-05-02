@@ -2216,6 +2216,99 @@
             background: rgba(0,0,0,0.1);
             transform: rotate(90deg);
         }
+        .announcement-tab-bar {
+            display: flex;
+            gap: 8px;
+        }
+        .announcement-tab {
+            padding: 8px 16px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.2);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-main);
+            transition: var(--trans-smooth);
+        }
+        .announcement-tab:hover {
+            background: rgba(255,255,255,0.4);
+        }
+        .announcement-tab.active {
+            background: linear-gradient(135deg, rgba(5,150,105,0.9), rgba(16,185,129,0.9));
+            border-color: rgba(5,150,105,0.5);
+            color: white;
+        }
+        [data-theme="dark"] .announcement-tab {
+            border-color: rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.08);
+        }
+        [data-theme="dark"] .announcement-tab:hover {
+            background: rgba(255,255,255,0.15);
+        }
+        [data-theme="dark"] .announcement-tab.active {
+            background: linear-gradient(135deg, rgba(5,150,105,0.95), rgba(16,185,129,0.95));
+            border-color: rgba(16,185,129,0.3);
+        }
+        .changelog-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .changelog-item {
+            background: rgba(255,255,255,0.88);
+            border: 1px solid rgba(255,255,255,0.6);
+            border-radius: var(--radius-sm);
+            padding: 16px;
+            transition: var(--trans-smooth);
+        }
+        .changelog-item:hover {
+            background: rgba(255,255,255,0.95);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .changelog-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .changelog-version {
+            font-weight: 700;
+            font-size: 16px;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .changelog-date {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+        .changelog-content {
+            font-size: 14px;
+            line-height: 1.8;
+        }
+        .changelog-content h4 {
+            margin: 8px 0 6px 0;
+            font-size: 14px;
+            color: var(--text-main);
+        }
+        .changelog-content ul {
+            margin: 0 0 0 16px;
+            padding: 0;
+        }
+        .changelog-content li {
+            margin-bottom: 4px;
+        }
+        [data-theme="dark"] .changelog-item {
+            background: rgba(30,30,40,0.88);
+            border-color: rgba(255,255,255,0.1);
+        }
+        [data-theme="dark"] .changelog-item:hover {
+            background: rgba(30,30,50,0.95);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
 
         .announcement-content {
             position: relative;
@@ -3007,7 +3100,10 @@
     <div class="announcement-modal-overlay" id="announcementModal" onclick="if(event.target===this)closeAnnouncementModal()">
         <div class="announcement-modal" onclick="event.stopPropagation()">
             <div class="announcement-header">
-                <h3>🔔 公告</h3>
+                <div class="announcement-tab-bar">
+                    <button class="announcement-tab active" data-tab="announcements">🔔 公告</button>
+                    <button class="announcement-tab" data-tab="changelog">📝 更新日志</button>
+                </div>
                 <button class="announcement-close-btn" onclick="closeAnnouncementModal()">✕</button>
             </div>
             <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
@@ -3022,7 +3118,7 @@
                 <div id="announcementListContainer">
                     <div class="announcement-list" id="announcementList"></div>
                 </div>
-                <div id="announcementDetail" class="announcement-detail">
+                <div id="announcementDetail" class="announcement-detail" style="display:none;">
                     <button class="announcement-back-btn" onclick="showAnnouncementList()">← 返回</button>
                     <div class="announcement-detail-header">
                         <div class="announcement-detail-left">
@@ -3032,6 +3128,9 @@
                         </div>
                     </div>
                     <div class="announcement-detail-content" id="announcementDetailContent"></div>
+                </div>
+                <div id="changelogContainer" style="display:none;">
+                    <div class="changelog-list" id="changelogList"></div>
                 </div>
             </div>
         </div>
@@ -4993,10 +5092,260 @@
                     .subscribe();
             }
 
+            // ========== 更新日志系统 ==========
+            const changelogData = [
+                {
+                    version: 'v1.4.3',
+                    date: '2026-05-02',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>新增「我的」页面</li>
+                            <ul>
+                                <li>深色/浅色模式切换开关</li>
+                                <li>语言切换功能</li>
+                                <li>通知设置选项</li>
+                                <li>关于应用信息</li>
+                                <li>统一白色磨砂风格设计</li>
+                            </ul>
+                            <li>「我的」按钮动画优化</li>
+                            <ul>
+                                <li>点击按钮时显示5条彩色光波从小人脑袋上方散射的动画</li>
+                            </ul>
+                            <li>底部导航栏整体优化</li>
+                            <ul>
+                                <li>AI花朵按钮点击范围对齐</li>
+                                <li>四按钮大小统一规范</li>
+                                <li>视觉平衡度提升</li>
+                            </ul>
+                            <li>AI页面动画升级</li>
+                            <ul>
+                                <li>花朵动画改为逐瓣飞散效果（与导航栏按钮保持一致）</li>
+                                <li>闪电切换按钮改为SVG图标，视觉更精致</li>
+                                <li>动画过渡更流畅自然</li>
+                            </ul>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v1.4.2',
+                    date: '2026-05-02',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>公告系统功能增强</li>
+                            <ul>
+                                <li>管理员发布公告时可选择输入标题和内容（不强制，至少填写一项）</li>
+                                <li>用户查看公告列表时展示公告标题</li>
+                                <li>公告详情页新增发布者信息展示（头像 + 用户名）</li>
+                                <li>管理后台公告列表新增标题、发布者列显示</li>
+                                <li>管理后台新增标题输入框</li>
+                                <li>适配深色/浅色主题</li>
+                                <li>保持原有白色磨砂风格统一</li>
+                            </ul>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v1.4.1',
+                    date: '2026-05-02',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>公告系统视觉与交互优化</li>
+                            <ul>
+                                <li>公告模态框改为与总动态总浏览完全一致的白色磨砂风格</li>
+                                <li>公告列表项样式统一为白色磨砂效果</li>
+                                <li>完全移除公告内容区域的滚动条</li>
+                                <li>禁止公告区域横向拖拽滚动</li>
+                                <li>公告详情头部优化布局，修复删除按钮位置</li>
+                            </ul>
+                            <li>聊天与AI区域视觉统一</li>
+                            <ul>
+                                <li>聊天输入区域背景改为透明，与背景色一致</li>
+                                <li>AI容器背景完全透明化</li>
+                                <li>AI输入框、模式切换按钮、AI气泡统一为磨砂风格</li>
+                                <li>优化AI消息气泡与思考过程卡片样式</li>
+                            </ul>
+                            <li>深色/浅色主题全面适配</li>
+                            <ul>
+                                <li>公告系统深色模式完全对齐总动态风格</li>
+                                <li>所有元素支持主题自动切换</li>
+                            </ul>
+                            <li>性能与流畅度优化</li>
+                            <ul>
+                                <li>优化公告列表动画效果</li>
+                                <li>添加will-change属性提升渲染性能</li>
+                                <li>优化事件处理逻辑</li>
+                            </ul>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v1.4.0',
+                    date: '2026-05-02',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>新增公告通知系统</li>
+                            <ul>
+                                <li>公告铃铛按钮（登录后可见）</li>
+                                <li>未读公告计数提示</li>
+                                <li>公告详情查看与列表返回功能</li>
+                                <li>公告发布与删除管理权限</li>
+                            </ul>
+                            <li>新增独立管理后台页面</li>
+                            <ul>
+                                <li>多维度数据管理面板</li>
+                                <li>公告发布管理</li>
+                                <li>用户及内容数据查看</li>
+                                <li>响应式设计适配</li>
+                            </ul>
+                            <li>公告数据与主应用完全互通</li>
+                            <li>优化交互过渡动画提升流畅度</li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v1.3.0',
+                    date: '2026-05-01',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>优化顶部导航栏交互</li>
+                            <ul>
+                                <li>去除重复聊天入口</li>
+                                <li>优化底部 Dock 栏点击区域，允许框外区域交互</li>
+                            </ul>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v1.2.0',
+                    date: '2026-04-30',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>三大核心功能按钮SVG动画优化</li>
+                            <ul>
+                                <li>重新设计帖子按钮钢笔绘制动画</li>
+                                <li>重新设计聊天按钮气泡动画</li>
+                                <li>AI按钮更换为花朵绽放与花瓣归位动画</li>
+                                <li>所有动画支持按钮外区域显示</li>
+                                <li>严格使用CSS @keyframes实现</li>
+                            </ul>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v1.1.0',
+                    date: '2026-04-29',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>三大核心功能按钮全新SVG动画实现</li>
+                            <ul>
+                                <li>帖子按钮钢笔路径绘制（1.5秒）</li>
+                                <li>聊天按钮打字点与气泡动画（2秒）</li>
+                                <li>AI按钮脉冲发光效果（1.8秒）</li>
+                                <li>使用stroke-dasharray/dashoffset技术</li>
+                                <li>纯CSS实现，无定时器依赖</li>
+                            </ul>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v1.0.0',
+                    date: '2026-04-28',
+                    content: `
+                        <h4>初始版本</h4>
+                        <ul>
+                            <li>基础功能框架搭建</li>
+                            <li>用户认证系统</li>
+                            <li>帖子发布与浏览</li>
+                            <li>评论与点赞功能</li>
+                            <li>私信聊天系统</li>
+                            <li>AI对话功能</li>
+                            <li>深色/浅色主题切换</li>
+                        </ul>
+                    `
+                }
+            ];
+            let currentAnnouncementTab = 'announcements';
+            function switchAnnouncementTab(tab) {
+                currentAnnouncementTab = tab;
+                const tabs = document.querySelectorAll('.announcement-tab');
+                tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+                const listContainer = document.getElementById('announcementListContainer');
+                const detailContainer = document.getElementById('announcementDetail');
+                const changelogContainer = document.getElementById('changelogContainer');
+                const adminArea = document.getElementById('announcementAdminArea');
+                if (tab === 'announcements') {
+                    listContainer.style.display = 'block';
+                    detailContainer.style.display = 'none';
+                    changelogContainer.style.display = 'none';
+                    if (isAdmin()) adminArea.style.display = 'block';
+                } else {
+                    listContainer.style.display = 'none';
+                    detailContainer.style.display = 'none';
+                    changelogContainer.style.display = 'block';
+                    adminArea.style.display = 'none';
+                    renderChangelogList();
+                }
+            }
+            function renderChangelogList() {
+                const listEl = document.getElementById('changelogList');
+                if (!listEl) return;
+                listEl.innerHTML = '';
+                changelogData.forEach((item, index) => {
+                    const div = document.createElement('div');
+                    div.className = 'changelog-item';
+                    div.innerHTML = `
+                        <div class="changelog-header">
+                            <div class="changelog-version">🚀 ${item.version}</div>
+                            <div class="changelog-date">${item.date}</div>
+                        </div>
+                        <div class="changelog-content">
+                            ${item.content}
+                        </div>
+                    `;
+                    listEl.appendChild(div);
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            div.style.opacity = '1';
+                            div.style.transform = 'translateY(0)';
+                        }, index * 80);
+                    });
+                });
+            }
+            // 绑定切换事件
+            document.querySelectorAll('.announcement-tab').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    switchAnnouncementTab(this.dataset.tab);
+                });
+            });
+            // 修改原有的 showAnnouncementList 以支持当前标签状态
+            const originalShowAnnouncementList = showAnnouncementList;
+            window.showAnnouncementList = function() {
+                if (currentAnnouncementTab !== 'announcements') {
+                    switchAnnouncementTab('announcements');
+                }
+                originalShowAnnouncementList();
+            };
+
             // 绑定公告按钮事件
             const annBtn = document.getElementById('announcementBtn');
             if (annBtn) {
-                annBtn.addEventListener('click', openAnnouncementModal);
+                annBtn.addEventListener('click', function() {
+                    currentAnnouncementTab = 'announcements';
+                    document.querySelectorAll('.announcement-tab').forEach(t => 
+                        t.classList.toggle('active', t.dataset.tab === 'announcements')
+                    );
+                    document.getElementById('announcementListContainer').style.display = 'block';
+                    document.getElementById('announcementDetail').style.display = 'none';
+                    document.getElementById('changelogContainer').style.display = 'none';
+                    openAnnouncementModal();
+                });
             }
         })();
     </script>
