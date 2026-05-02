@@ -189,6 +189,68 @@
         [data-theme="dark"] .post-time { color: var(--text-muted); }
         [data-theme="dark"] .loading { color: var(--text-muted); }
         [data-theme="dark"] .post-detail-stats { color: var(--text-muted); }
+        [data-theme="dark"] .announcement-modal-overlay { background: rgba(0,0,0,0.75); }
+        [data-theme="dark"] .announcement-modal {
+            background: linear-gradient(135deg, rgba(25,25,45,0.7) 0%, rgba(20,20,40,0.55) 100%);
+            border-color: rgba(255,255,255,0.06);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        }
+        [data-theme="dark"] .announcement-header {
+            border-bottom-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .announcement-close-btn {
+            background: rgba(255,255,255,0.06);
+            color: var(--text-muted);
+        }
+        [data-theme="dark"] .announcement-close-btn:hover {
+            background: rgba(255,255,255,0.12);
+        }
+        [data-theme="dark"] .announcement-item {
+            background: rgba(25,25,42,0.2);
+            border-color: rgba(255,255,255,0.05);
+        }
+        [data-theme="dark"] .announcement-item.visible:hover {
+            background: rgba(30,30,50,0.35);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        [data-theme="dark"] .announcement-item.unread {
+            border-left-color: #ff3b60;
+            background: linear-gradient(90deg, rgba(255,59,96,0.12), rgba(25,25,42,0.2));
+        }
+        [data-theme="dark"] .announcement-back-btn {
+            background: rgba(255,255,255,0.06);
+            border-color: rgba(255,255,255,0.08);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .announcement-back-btn:hover {
+            background: rgba(255,255,255,0.12);
+        }
+        [data-theme="dark"] .announcement-admin-area {
+            border-bottom-color: rgba(255,255,255,0.06);
+        }
+        [data-theme="dark"] .announcement-admin-input {
+            background: rgba(35,35,55,0.35);
+            border-color: rgba(255,255,255,0.06);
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .announcement-admin-input:focus {
+            background: rgba(40,40,60,0.45);
+            border-color: rgba(5,150,105,0.25);
+        }
+        [data-theme="dark"] .announcement-delete-btn {
+            background: rgba(255,59,96,0.12);
+            border-color: rgba(255,59,96,0.2);
+        }
+        [data-theme="dark"] .announcement-delete-btn:hover {
+            background: rgba(255,59,96,0.22);
+        }
+        [data-theme="dark"] .announcement-btn {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(255,255,255,0.12);
+        }
+        [data-theme="dark"] .announcement-btn:hover {
+            background: rgba(255,255,255,0.16);
+        }
 
         html { scroll-behavior: smooth; scroll-padding: 20px; }
         * { 
@@ -2086,7 +2148,7 @@
             position: fixed;
             inset: 0;
             z-index: 1000;
-            background: rgba(0,0,0,0.5);
+            background: rgba(0,0,0,0.4);
             backdrop-filter: blur(4px);
             display: none;
             align-items: center;
@@ -2098,18 +2160,20 @@
             animation: fadeIn 0.25s ease;
         }
         .announcement-modal {
-            background: var(--glass-bg, rgba(255,255,255,0.9));
-            border: 1px solid var(--glass-border, rgba(255,255,255,0.7));
-            border-radius: var(--radius-md);
+            background: rgba(255,255,255,0.3);
+            border: 1px solid rgba(255,255,255,0.8);
+            border-radius: var(--radius-lg);
             width: 100%;
             max-width: 500px;
             max-height: 85vh;
             display: flex;
             flex-direction: column;
-            box-shadow: var(--glass-shadow);
-            backdrop-filter: var(--glass-blur);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            backdrop-filter: blur(38px);
+            -webkit-backdrop-filter: blur(38px);
             overflow: hidden;
             animation: modalPop 0.3s ease;
+            will-change: transform, opacity;
         }
         @keyframes modalPop {
             0% { opacity: 0; transform: scale(0.9) translateY(10px); }
@@ -2151,9 +2215,12 @@
         }
 
         .announcement-content {
+            position: relative;
             padding: 20px;
             overflow-y: auto;
             flex: 1;
+            -webkit-overflow-scrolling: touch;
+            scroll-behavior: smooth;
         }
 
         .announcement-list {
@@ -2171,12 +2238,13 @@
             transition: var(--trans-smooth);
             opacity: 0;
             transform: translateY(10px);
+            will-change: transform, opacity;
         }
         .announcement-item.visible {
             opacity: 1;
             transform: translateY(0);
         }
-        .announcement-item:hover {
+        .announcement-item.visible:hover {
             background: rgba(255,255,255,0.5);
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0,0,0,0.08);
@@ -2221,14 +2289,32 @@
         }
 
         .announcement-detail {
-            display: none;
+            opacity: 0;
+            pointer-events: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            transform: translateX(20px);
         }
         .announcement-detail.active {
-            display: block;
-            animation: fadeIn 0.25s ease;
+            opacity: 1;
+            pointer-events: all;
+            position: relative;
+            transform: translateX(0);
         }
         .announcement-detail-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
             margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .announcement-detail-left {
+            flex: 1;
+            min-width: 0;
         }
         .announcement-detail-title {
             font-weight: 700;
@@ -2238,12 +2324,13 @@
         .announcement-detail-time {
             font-size: 13px;
             color: var(--text-muted);
-            margin-bottom: 16px;
+            margin-bottom: 12px;
         }
         .announcement-detail-content {
             font-size: 15px;
             line-height: 1.8;
             white-space: pre-wrap;
+            word-break: break-word;
         }
         .announcement-back-btn {
             display: inline-flex;
@@ -2696,8 +2783,10 @@
                 <div id="announcementDetail" class="announcement-detail">
                     <button class="announcement-back-btn" onclick="showAnnouncementList()">← 返回</button>
                     <div class="announcement-detail-header">
-                        <div class="announcement-detail-title" id="announcementDetailTitle"></div>
-                        <div class="announcement-detail-time" id="announcementDetailTime"></div>
+                        <div class="announcement-detail-left">
+                            <div class="announcement-detail-title" id="announcementDetailTitle"></div>
+                            <div class="announcement-detail-time" id="announcementDetailTime"></div>
+                        </div>
                     </div>
                     <div class="announcement-detail-content" id="announcementDetailContent"></div>
                 </div>
@@ -2896,6 +2985,7 @@
                 document.getElementById("regNickInp").value = "";
                 document.getElementById("regPwInp").value = "";
                 if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; }
+                if (annRealtime) { sb.removeChannel(annRealtime); annRealtime = null; }
                 stopDMPolling();
                 document.body.style.overflow = '';
                 showToast("已退出登录");
@@ -4453,13 +4543,15 @@
             }
 
             window.openAnnouncementModal = async function() {
-                document.getElementById('announcementModal').classList.add('active');
+                const overlay = document.getElementById('announcementModal');
+                overlay.style.opacity = '';
+                overlay.style.transition = '';
+                overlay.classList.add('active');
                 document.body.style.overflow = 'hidden';
                 showAnnouncementList();
                 await loadAnnouncements();
                 renderAnnouncementList();
 
-                // 如果是管理员，显示发布区域
                 if (isAdmin()) {
                     document.getElementById('announcementAdminArea').style.display = 'block';
                 } else {
@@ -4468,9 +4560,16 @@
             };
 
             window.closeAnnouncementModal = function() {
-                document.getElementById('announcementModal').classList.remove('active');
-                document.body.style.overflow = '';
-                currentAnnouncement = null;
+                const overlay = document.getElementById('announcementModal');
+                overlay.style.opacity = '0';
+                overlay.style.transition = 'opacity 0.2s ease';
+                setTimeout(() => {
+                    overlay.classList.remove('active');
+                    overlay.style.opacity = '';
+                    overlay.style.transition = '';
+                    document.body.style.overflow = '';
+                    currentAnnouncement = null;
+                }, 200);
             };
 
             function showAnnouncementList() {
@@ -4500,8 +4599,8 @@
                     const delBtn = document.createElement('button');
                     delBtn.className = 'announcement-delete-btn';
                     delBtn.textContent = '删除公告';
-                    delBtn.onclick = function() { deleteAnnouncement(ann); };
-                    const header = document.querySelector('.announcement-detail-header');
+                    delBtn.onclick = function(e) { e.stopPropagation(); deleteAnnouncement(ann); };
+                    const header = detail.querySelector('.announcement-detail-header');
                     if (header) header.appendChild(delBtn);
                 }
 
@@ -4553,10 +4652,11 @@
                     `;
                     listEl.appendChild(item);
 
-                    // 添加渐入动画
-                    setTimeout(() => {
-                        item.classList.add('visible');
-                    }, index * 80);
+                    requestAnimationFrame(() => {
+                        setTimeout(() => {
+                            item.classList.add('visible');
+                        }, index * 60);
+                    });
                 });
             }
 
@@ -4619,6 +4719,7 @@
                         table: 'posts',
                         filter: `media_type=eq.${ANN_MARKER}`
                     }, async function() {
+                        if (!currentUser) return;
                         await loadAnnouncements();
                         if (document.getElementById('announcementModal').classList.contains('active')) {
                             renderAnnouncementList();
