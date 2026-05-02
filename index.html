@@ -3135,9 +3135,9 @@
                             <span class="profile-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:24px;transition:0.3s;"></span>
                         </label>
                     </div>
-                    <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;cursor:pointer;" onclick="showToast('xtj v1.4.5')">
+                    <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;">
                         <span>关于</span>
-                        <span style="color:var(--text-muted);">xtj v1.4.5</span>
+                        <span style="color:var(--text-muted);">xtj v0.0.11</span>
                     </div>
                 </div>
             </div>
@@ -4841,7 +4841,7 @@
                 function buildCommentsCol() {
                     let h = '<div class="stat-section-title">💬 评论记录</div>';
                     if (statAllComments.length) {
-                        h += statAllComments.slice(0, 200).map(c => {
+                        h += [...statAllComments].reverse().slice(0, 200).map(c => {
                             const post = postMap[c.post_id];
                             const postContent = post ? (post.content ? post.content.slice(0, 20) + '...' : '(图片/视频)') : '(已删除)';
                             return `
@@ -5808,7 +5808,34 @@
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
-                    version: 'v1.5.0',
+                    version: 'v0.0.12',
+                    date: '2026-05-02',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>新增消息通知功能</li>
+                            <ul>
+                                <li>收到新消息时顶部弹出液态玻璃风格通知</li>
+                                <li>显示发送者头像、用户名和消息内容</li>
+                                <li>通知3秒后自动淡出收回</li>
+                                <li>点击通知直接跳转到对应聊天对话</li>
+                                <li>智能判断：已在聊天时不重复弹出</li>
+                            </ul>
+                            <li>后台管理功能修复</li>
+                            <ul>
+                                <li>修复新注册用户（无发帖记录）不显示的问题</li>
+                                <li>确保所有注册用户都能在后台正确展示</li>
+                            </ul>
+                            <li>统计页面优化</li>
+                            <ul>
+                                <li>修复评论记录时间排序问题</li>
+                                <li>最新评论现在显示在最上方</li>
+                            </ul>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.11',
                     date: '2026-05-02',
                     content: `
                         <h4>更新内容</h4>
@@ -5838,7 +5865,7 @@
                     `
                 },
                 {
-                    version: 'v1.4.3',
+                    version: 'v0.0.10',
                     date: '2026-05-02',
                     content: `
                         <h4>更新内容</h4>
@@ -5871,7 +5898,7 @@
                     `
                 },
                 {
-                    version: 'v1.4.2',
+                    version: 'v0.0.9',
                     date: '2026-05-02',
                     content: `
                         <h4>更新内容</h4>
@@ -5890,7 +5917,7 @@
                     `
                 },
                 {
-                    version: 'v1.4.1',
+                    version: 'v0.0.8',
                     date: '2026-05-02',
                     content: `
                         <h4>更新内容</h4>
@@ -5925,7 +5952,7 @@
                     `
                 },
                 {
-                    version: 'v1.4.0',
+                    version: 'v0.0.7',
                     date: '2026-05-02',
                     content: `
                         <h4>更新内容</h4>
@@ -5950,7 +5977,7 @@
                     `
                 },
                 {
-                    version: 'v1.3.0',
+                    version: 'v0.0.6',
                     date: '2026-05-01',
                     content: `
                         <h4>更新内容</h4>
@@ -5964,7 +5991,7 @@
                     `
                 },
                 {
-                    version: 'v1.2.0',
+                    version: 'v0.0.5',
                     date: '2026-04-30',
                     content: `
                         <h4>更新内容</h4>
@@ -5981,7 +6008,7 @@
                     `
                 },
                 {
-                    version: 'v1.1.0',
+                    version: 'v0.0.4',
                     date: '2026-04-29',
                     content: `
                         <h4>更新内容</h4>
@@ -5998,7 +6025,7 @@
                     `
                 },
                 {
-                    version: 'v1.0.0',
+                    version: 'v0.0.3',
                     date: '2026-04-28',
                     content: `
                         <h4>初始版本</h4>

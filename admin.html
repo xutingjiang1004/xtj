@@ -383,6 +383,7 @@
                 try {
                     var info = JSON.parse(ui.content);
                     userInfoMap[ui.user_name] = info;
+                    userMap[ui.user_name] = true;
                 } catch(e) {}
             });
             
