@@ -393,13 +393,13 @@
             color: white;
             box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
         }
-        .btn-primary:hover { transform: translateY(-4px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
         .btn-ghost {
             background: rgba(255,255,255,0.5);
             color: var(--text-main);
             border: 1px solid rgba(255,255,255,0.7);
         }
-        .btn-ghost:hover { background: rgba(255,255,255,0.8); transform: translateY(-4px); }
+        .btn-ghost:hover { background: rgba(255,255,255,0.8); transform: translateY(-2px); }
         .user-pill {
             display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px;
             background: rgba(255, 255, 255, 0.7);
@@ -474,7 +474,7 @@
 
         .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 4px; }
         .stat-card { padding: 16px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); cursor: pointer; box-shadow: 0 4px 16px rgba(5, 150, 105, 0.06); }
-        .stat-card:hover { transform: translateY(-6px) scale(1.03); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.18), 0 4px 12px rgba(5, 150, 105, 0.1); }
+        .stat-card:hover { transform: translateY(-3px) scale(1.015); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.18), 0 4px 12px rgba(5, 150, 105, 0.1); }
         .stat-card b { display: block; font-size: 22px; color: var(--primary); font-weight: 800; }
         .stat-card span { font-size: 12px; color: var(--text-muted); }
 
@@ -486,13 +486,13 @@
             transition: var(--trans-spring);
             overflow: hidden;
         }
-        .chat-entry-bar:hover { transform: translateY(-4px); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.2), 0 4px 12px rgba(5, 150, 105, 0.1); }
-        .chat-entry-bar:active { transform: scale(0.98); }
+        .chat-entry-bar:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.2), 0 4px 12px rgba(5, 150, 105, 0.1); }
+        .chat-entry-bar:active { transform: scale(0.99); }
         .ceb-icon {
             font-size: 26px; flex-shrink: 0;
-            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
-        .chat-entry-bar:hover .ceb-icon { transform: scale(1.15) rotate(-5deg); }
+        .chat-entry-bar:hover .ceb-icon { transform: scale(1.075) rotate(-2.5deg); }
         .ceb-label { font-size: 15px; font-weight: 600; color: var(--text-main); }
         .ceb-notify {
             margin-left: auto; font-size: 13px; color: var(--primary);
@@ -524,8 +524,8 @@
         .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; }
         .post {
             padding: 24px; border-radius: var(--radius-md);
-            opacity: 0; transform: translateY(30px) scale(0.95);
-            transition: opacity 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s cubic-bezier(0.25, 1, 0.3, 1);
+            opacity: 0; transform: translateY(15px) scale(0.97);
+            transition: opacity 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s cubic-bezier(0.25, 1, 0.3, 1);
             will-change: opacity, transform;
             background: rgba(255,255,255,0.3);
             border: 1px solid rgba(255,255,255,0.4);
@@ -536,7 +536,7 @@
             transform: translateY(0) scale(1); 
             will-change: auto;
         }
-        .post:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.06); transform: translateY(-4px); }
+        .post:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.06); transform: translateY(-2px); }
 
         .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
         .avatar {
@@ -545,7 +545,7 @@
             transition: var(--trans-spring);
         }
         .avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3); }
-        .avatar:hover { transform: scale(1.1); }
+        .avatar:hover { transform: scale(1.05); }
         .user-info { display: flex; flex-direction: column; }
         .user-name { font-weight: 700; font-size: 15px; }
         .post-time { font-size: 12px; color: var(--text-muted); }
@@ -742,7 +742,7 @@
             -webkit-backdrop-filter: blur(8px);
             z-index: 10;
         }
-        .img-viewer .iv-close:hover { background: rgba(255,255,255,0.25); transform: scale(1.1); }
+        .img-viewer .iv-close:hover { background: rgba(255,255,255,0.25); transform: scale(1.05); }
         .img-viewer .iv-zoom-hint {
             position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%);
             background: rgba(255,255,255,0.1);
@@ -816,7 +816,7 @@
             transition: all 0.25s cubic-bezier(0.25, 1, 0.3, 1); position: relative;
             border-bottom: 1px solid rgba(255,255,255,0.04);
         }
-        .chat-list-item:hover { background: rgba(255,255,255,0.12); transform: translateX(4px); }
+        .chat-list-item:hover { background: rgba(255,255,255,0.12); transform: translateX(2px); }
         .chat-list-item:active { background: rgba(255,255,255,0.18); transform: translateX(2px); }
         .chat-list-item .cli-avatar {
             width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
@@ -874,13 +874,35 @@
             color: var(--text-main);
             border-bottom-left-radius: 6px;
         }
+        .chat-msg-row {
+            display: flex; align-items: flex-end; gap: 8px;
+        }
+        .chat-msg-row.sent {
+            justify-content: flex-end;
+        }
+        .chat-msg-row.received {
+            justify-content: flex-start;
+        }
+        .chat-msg-avatar {
+            width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #059669, #34d399);
+            color: white; font-weight: bold; font-size: 13px;
+            overflow: hidden;
+        }
+        .chat-msg-avatar img {
+            width: 100%; height: 100%; object-fit: cover;
+        }
+        .chat-msg-row .chat-msg {
+            max-width: 75%;
+        }
         .chat-msg .msg-img {
             display: block; max-width: 200px; max-height: 260px;
             border-radius: 10px; cursor: pointer;
             object-fit: cover;
             transition: transform 0.2s;
         }
-        .chat-msg .msg-img:hover { transform: scale(1.02); }
+        .chat-msg .msg-img:hover { transform: scale(1.01); }
         .chat-msg video.msg-img {
             cursor: default;
             object-fit: contain;
@@ -953,7 +975,7 @@
             transition: all 0.2s;
             box-shadow: 0 1px 4px rgba(0,0,0,0.3);
         }
-        .cfp-x:hover { background: #ff3b60; transform: scale(1.15); }
+        .cfp-x:hover { background: #ff3b60; transform: scale(1.075); }
         .cfp-name {
             flex: 1; font-size: 12px; color: var(--text-muted);
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -970,7 +992,7 @@
             color: white; font-size: 18px;
             transition: all 0.3s;
         }
-        .send-btn:hover { transform: scale(1.06); box-shadow: 0 4px 14px rgba(5,150,105,0.3); }
+        .send-btn:hover { transform: scale(1.03); box-shadow: 0 4px 14px rgba(5,150,105,0.3); }
         .send-btn:disabled { opacity: 0.4; transform: none !important; }
         .chat-img-btn {
             width: 40px; height: 40px; border-radius: 50%;
@@ -979,7 +1001,7 @@
             background: rgba(255,255,255,0.1); font-size: 18px;
             transition: all 0.3s; line-height: 1;
         }
-        .chat-img-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.06); }
+        .chat-img-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.03); }
         /* iMessage 风格发送动画 */
         @keyframes msgSend {
             0%   { opacity: 0; transform: scale(0.6) translateY(16px); }
@@ -1017,7 +1039,7 @@
             transition: all 0.3s; flex-shrink: 0;
             padding: 0; margin: 0;
         }
-        .theme-toggle-btn:hover { transform: scale(1.1); background: rgba(255,255,255,0.28); }
+        .theme-toggle-btn:hover { transform: scale(1.05); background: rgba(255,255,255,0.28); }
         [data-theme="dark"] .theme-toggle-btn {
             background: rgba(30,30,50,0.35);
             border-color: rgba(255,255,255,0.06);
@@ -1117,7 +1139,7 @@
         }
         .stat-view-btn:hover {
             background: rgba(5,150,105,0.18);
-            transform: scale(1.05);
+            transform: scale(1.025);
         }
         .stat-user-posts {
             padding: 8px 16px;
@@ -1468,6 +1490,7 @@
             width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
             font-size: 14px; font-weight: 700;
+            overflow: hidden;
         }
         .ai-msg.assistant .ai-avatar {
             background: linear-gradient(135deg, #6366f1, #8b5cf6); color: white;
@@ -1535,7 +1558,7 @@
             transition: all 0.3s;
             box-shadow: 0 2px 10px rgba(5,150,105,0.3);
         }
-        .ai-send-btn:hover { transform: scale(1.06); box-shadow: 0 4px 16px rgba(5,150,105,0.4); }
+        .ai-send-btn:hover { transform: scale(1.03); box-shadow: 0 4px 16px rgba(5,150,105,0.4); }
         .ai-send-btn:disabled { opacity: 0.4; transform: none !important; box-shadow: none; cursor: not-allowed; }
         .ai-thinking {
             display: inline-flex; align-items: center; gap: 6px;
@@ -2117,7 +2140,7 @@
         }
         .announcement-btn:hover {
             background: rgba(255,255,255,0.35);
-            transform: scale(1.05);
+            transform: scale(1.025);
         }
         .announcement-btn svg {
             width: 20px;
@@ -2214,7 +2237,7 @@
         }
         .announcement-close-btn:hover {
             background: rgba(0,0,0,0.1);
-            transform: rotate(90deg);
+            transform: rotate(45deg);
         }
         .announcement-tab-bar {
             display: flex;
@@ -2505,7 +2528,7 @@
         }
         .announcement-back-btn:hover {
             background: rgba(255,255,255,0.35);
-            transform: translateX(-4px);
+            transform: translateX(-2px);
         }
         .announcement-delete-btn {
             margin-left: auto;
@@ -2773,7 +2796,7 @@
             transition: var(--trans-smooth);
         }
         .profile-detail-avatar:hover {
-            transform: scale(1.05);
+            transform: scale(1.025);
         }
         .profile-detail-avatar img {
             width: 100%;
@@ -2844,6 +2867,82 @@
         }
         [data-theme="dark"] .profile-detail-logout-btn {
             background: rgba(255,59,96,0.15);
+        }
+
+        /* ========== 查看用户资料卡片 ========== */
+        .user-profile-card-modal {
+            max-width: 380px;
+            padding: 0;
+            overflow: hidden;
+        }
+        .upc-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 18px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.06);
+        }
+        .upc-header h3 {
+            margin: 0;
+            font-size: 17px;
+            font-weight: 700;
+        }
+        .upc-body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 28px 24px 24px;
+        }
+        .upc-avatar {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #059669, #34d399);
+            color: white;
+            font-weight: bold;
+            font-size: 36px;
+            overflow: hidden;
+            margin-bottom: 14px;
+        }
+        .upc-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .upc-name {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .upc-login {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+        }
+        .upc-msg-btn {
+            width: 100%;
+            max-width: 200px;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 24px;
+            background: linear-gradient(135deg, #059669, #34d399);
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--trans-smooth);
+        }
+        .upc-msg-btn:hover {
+            transform: scale(1.02);
+            opacity: 0.9;
+        }
+        [data-theme="dark"] .upc-header {
+            background: rgba(255,255,255,0.04);
+            border-bottom-color: rgba(255,255,255,0.08);
         }
 
         /* ========== 通知系统 ========== */
@@ -3137,7 +3236,7 @@
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;">
                         <span>关于</span>
-                        <span style="color:var(--text-muted);">xtj v0.0.15</span>
+                        <span style="color:var(--text-muted);">xtj v0.0.17</span>
                     </div>
                 </div>
             </div>
@@ -3388,6 +3487,24 @@
                     </div>
                 </div>
                 <button class="profile-detail-logout-btn" onclick="doLogoutFromProfile()">退出登录</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 查看用户资料卡片模态框 -->
+    <div class="modal-overlay" id="userProfileModal" onclick="if(event.target===this)closeModal('userProfileModal')">
+        <div class="modal-box glass user-profile-card-modal" onclick="event.stopPropagation()">
+            <div class="upc-header">
+                <h3>用户资料</h3>
+                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;">✕</button>
+            </div>
+            <div class="upc-body">
+                <div class="upc-avatar" id="upcAvatar">
+                    <span id="upcAvatarText">?</span>
+                </div>
+                <div class="upc-name" id="upcName">-</div>
+                <div class="upc-login" id="upcLogin">最近登录：加载中...</div>
+                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">💬 发消息</button>
             </div>
         </div>
     </div>
@@ -3673,6 +3790,84 @@
                 }
             }
 
+            // ========== 查看其他用户资料卡片 ==========
+            let upcTargetUser = null;
+
+            window.openUserProfile = async function(userName) {
+                upcTargetUser = userName;
+                document.getElementById('upcName').textContent = userName;
+                document.getElementById('upcLogin').textContent = '最近登录：加载中...';
+                
+                var avatarEl = document.getElementById('upcAvatar');
+                if (avatarCache[userName]) {
+                    avatarEl.innerHTML = '<img src="' + avatarCache[userName] + '" alt="头像">';
+                } else {
+                    avatarEl.innerHTML = '<span id="upcAvatarText">' + userName[0].toUpperCase() + '</span>';
+                }
+                
+                var msgBtn = document.getElementById('upcMsgBtn');
+                if (userName === currentUser) {
+                    msgBtn.textContent = '这是你自己';
+                    msgBtn.disabled = true;
+                    msgBtn.style.opacity = '0.5';
+                } else if (!currentUser) {
+                    msgBtn.textContent = '请先登录再发消息';
+                    msgBtn.disabled = true;
+                    msgBtn.style.opacity = '0.5';
+                } else {
+                    msgBtn.textContent = '💬 发消息';
+                    msgBtn.disabled = false;
+                    msgBtn.style.opacity = '1';
+                }
+                
+                openModal('userProfileModal');
+                
+                // 异步加载头像和登录时间
+                try {
+                    var avatarRes = await sb.from("posts")
+                        .select("media_url")
+                        .eq("user_name", userName)
+                        .eq("media_type", "__avatar__")
+                        .maybeSingle();
+                    
+                    if (avatarRes.data && avatarRes.data.media_url) {
+                        avatarCache[userName] = avatarRes.data.media_url;
+                        if (document.getElementById('userProfileModal').classList.contains('active')) {
+                            avatarEl.innerHTML = '<img src="' + avatarRes.data.media_url + '" alt="头像">';
+                        }
+                    }
+                    
+                    var userInfoRes = await sb.from("posts")
+                        .select("content")
+                        .eq("user_name", userName)
+                        .eq("media_type", "__user_info__")
+                        .maybeSingle();
+                    
+                    if (userInfoRes.data) {
+                        try {
+                            var info = JSON.parse(userInfoRes.data.content);
+                            if (info.last_login) {
+                                document.getElementById('upcLogin').textContent = '最近登录：' + new Date(info.last_login).toLocaleString();
+                            } else {
+                                document.getElementById('upcLogin').textContent = '最近登录：-';
+                            }
+                        } catch(e) {
+                            document.getElementById('upcLogin').textContent = '最近登录：-';
+                        }
+                    } else {
+                        document.getElementById('upcLogin').textContent = '最近登录：-';
+                    }
+                } catch(e) {
+                    document.getElementById('upcLogin').textContent = '最近登录：加载失败';
+                }
+            };
+
+            window.upcSendMessage = function() {
+                if (!upcTargetUser || !currentUser) return;
+                closeModal('userProfileModal');
+                setTimeout(function() { openChat(upcTargetUser); }, 300);
+            };
+
             // ========== 个人资料详情功能 ==========
             window.openProfileDetail = async function() {
                 if (!currentUser) {
@@ -3953,7 +4148,7 @@
                     const myAvatar = document.getElementById('myAvatar');
                     
                     if (avatarRes.data && avatarRes.data.media_url) {
-                        // 有自定义头像
+                        avatarCache[currentUser] = avatarRes.data.media_url;
                         if (profileAvatar) {
                             profileAvatar.innerHTML = '<img src="' + avatarRes.data.media_url + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                         }
@@ -4485,6 +4680,8 @@
                 // 等待头像加载完成后再渲染
                 await loadAvatarsForUsers(Array.from(allUsers));
                 renderFeedWithAvatars(visiblePosts, comments, likes);
+                // 后台预加载统计数据
+                setTimeout(function() { prefetchStatData(); }, 1000);
             }
 
             // 预构建评论和点赞的映射表，提升渲染性能
@@ -4534,9 +4731,9 @@
             function getAvatarHtml(username, size = 32) {
                 const avatarUrl = avatarCache[username];
                 if (avatarUrl) {
-                    return '<div class="avatar clickable" onclick="openChat(\'' + username.replace(/'/g, "\\'") + '\')"><img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + username.replace(/'/g, "\\'") + '\')"><img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
                 } else {
-                    return '<div class="avatar clickable" onclick="openChat(\'' + username.replace(/'/g, "\\'") + '\')">' + username[0].toUpperCase() + '</div>';
+                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + username.replace(/'/g, "\\'") + '\')">' + username[0].toUpperCase() + '</div>';
                 }
             }
 
@@ -4633,17 +4830,13 @@
             let statAllComments = [];
             let statAllLikes = [];
             let statPollTimer = null;
+            let statCacheTime = 0;
+            const STAT_CACHE_DURATION = 30000; // 30秒缓存
 
-            // 打开统计详情模态框
-            window.openStatDetail = async function(type) {
-                statCurrentType = type;
-                const titles = { posts: '总动态 - 按用户分组', views: '总浏览 - 浏览记录', likes: '点赞和评论 - 记录' };
-                document.getElementById('statModalTitle').textContent = titles[type] || '统计详情';
-                document.getElementById('statModalBody').innerHTML = '<div class="loading">加载中...</div>';
-                document.getElementById('statModal').classList.add('active');
-
+            // 后台预加载统计数据
+            window.prefetchStatData = async function() {
+                if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
-                    // 加载原始数据
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
@@ -4652,14 +4845,45 @@
                     statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
+                    statCacheTime = Date.now();
+                } catch(e) {}
+            };
 
-                    if (type === 'posts') {
-                        renderPostStats();
-                    } else if (type === 'views') {
-                        renderViewStats();
-                    } else if (type === 'likes') {
-                        renderLikeStats();
-                    }
+            // 打开统计详情模态框
+            window.openStatDetail = async function(type) {
+                statCurrentType = type;
+                const titles = { posts: '总动态 - 按用户分组', views: '总浏览 - 浏览记录', likes: '点赞和评论 - 记录' };
+                document.getElementById('statModalTitle').textContent = titles[type] || '统计详情';
+                document.getElementById('statModal').classList.add('active');
+
+                // 如果有缓存数据，立即渲染，同时异步刷新
+                if (statAllPosts.length > 0 && Date.now() - statCacheTime < STAT_CACHE_DURATION) {
+                    renderStatByType(type);
+                    if (statPollTimer) clearInterval(statPollTimer);
+                    statPollTimer = setInterval(refreshStatModal, 5000);
+                    // 后台静默刷新
+                    prefetchStatData().then(function() {
+                        if (document.getElementById('statModal').classList.contains('active') && statCurrentType === type) {
+                            renderStatByType(type);
+                        }
+                    });
+                    return;
+                }
+
+                document.getElementById('statModalBody').innerHTML = '<div class="loading">加载中...</div>';
+
+                try {
+                    const [postRes, commRes, likeRes] = await Promise.all([
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").order("created_at", { ascending: false }),
+                        sb.from("comments").select("*").order("created_at"),
+                        sb.from("likes").select("*").order("created_at", { ascending: false })
+                    ]);
+                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
+                    statAllComments = commRes.data || [];
+                    statAllLikes = likeRes.data || [];
+                    statCacheTime = Date.now();
+
+                    renderStatByType(type);
                 } catch(e) {
                     document.getElementById('statModalBody').innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
                     console.error('stat error', e);
@@ -4668,6 +4892,16 @@
                 if (statPollTimer) clearInterval(statPollTimer);
                 statPollTimer = setInterval(refreshStatModal, 5000);
             };
+
+            function renderStatByType(type) {
+                if (type === 'posts') {
+                    renderPostStats();
+                } else if (type === 'views') {
+                    renderViewStats();
+                } else if (type === 'likes') {
+                    renderLikeStats();
+                }
+            }
 
             // 滚动到指定帖子并高亮
             window.scrollToPost = function(postId) {
@@ -5175,7 +5409,7 @@
                 if (tabBtn) tabBtn.classList.add('active');
                 if (tab === 'chat') { loadDockChatList(); startDMPolling(30000); }
                 if (tab === 'ai') { scrollDockAIBottom(); }
-                if (tab === 'profile') { syncProfileUser(); }
+                if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); }
             };
 
             // Animation class mapping
@@ -5282,12 +5516,35 @@
                         }
                     });
                     const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
-                    el.innerHTML = convs.map(c => `
+                    // 预加载聊天列表头像
+                    var chatUsers = convs.map(function(c) { return c.other_user; });
+                    if (chatUsers.length > 0) {
+                        var uncachedUsers = chatUsers.filter(function(u) { return !avatarCache[u]; });
+                        if (uncachedUsers.length > 0) {
+                            try {
+                                var avatarRes = await sb.from("posts")
+                                    .select("user_name, media_url")
+                                    .eq("media_type", "__avatar__")
+                                    .in("user_name", uncachedUsers);
+                                if (avatarRes.data) {
+                                    avatarRes.data.forEach(function(a) {
+                                        if (a.media_url) avatarCache[a.user_name] = a.media_url;
+                                    });
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                    el.innerHTML = convs.map(c => {
+                        var avHtml = avatarCache[c.other_user]
+                            ? '<img src="' + avatarCache[c.other_user] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">'
+                            : c.other_user[0].toUpperCase();
+                        return `
                         <div class="chat-list-item" onclick="openChat('${c.other_user.replace(/'/g, "\\'")}')">
-                            <div class="cli-avatar">${c.other_user[0].toUpperCase()}</div>
+                            <div class="cli-avatar">${avHtml}</div>
                             <div class="cli-info"><div class="cli-name">${c.other_user}</div><div class="cli-preview">${c.last_message}</div></div>
                             <div class="cli-right"><span class="cli-time">${formatMsgTime(c.last_time)}</span>${c.unread ? '<span class="cli-badge">' + (c.unread > 99 ? '99+' : c.unread) + '</span>' : ''}</div>
-                        </div>`).join('');
+                        </div>`;
+                    }).join('');
                     updateUnreadBadge();
                 } catch(e) {
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">⚠️</div><div>' + (e.message || '加载失败') + '</div></div>';
@@ -5299,6 +5556,23 @@
 
             async function loadDockChatMessages(userName, forceScroll) {
                 if (dockChatMsgsBusy && dockChatMsgsUser === userName) { dockChatMsgsDirty = userName; return; }
+                // 预加载双方头像
+                var needAvatars = [];
+                if (currentUser && !avatarCache[currentUser]) needAvatars.push(currentUser);
+                if (userName && !avatarCache[userName]) needAvatars.push(userName);
+                if (needAvatars.length > 0) {
+                    try {
+                        var avatarRes = await sb.from("posts")
+                            .select("user_name, media_url")
+                            .eq("media_type", "__avatar__")
+                            .in("user_name", needAvatars);
+                        if (avatarRes.data) {
+                            avatarRes.data.forEach(function(a) {
+                                if (a.media_url) avatarCache[a.user_name] = a.media_url;
+                            });
+                        }
+                    } catch(e) {}
+                }
                 // 有缓存先立即显示
                 var cacheKey = currentUser + '_' + userName;
                 if (_chatCache[cacheKey] && !forceScroll) {
@@ -5341,6 +5615,9 @@
                     el.style.visibility = 'hidden';
                     wasHidden = true;
                 }
+                var otherUser = msgs[0] ? (msgs[0].user_name === currentUser ? msgs[0].media_url : msgs[0].user_name) : '';
+                var myAvatarHtml = avatarCache[currentUser] ? '<img src="' + avatarCache[currentUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">' : (currentUser ? currentUser[0].toUpperCase() : '?');
+                var otherAvatarHtml = avatarCache[otherUser] ? '<img src="' + avatarCache[otherUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">' : (otherUser ? otherUser[0].toUpperCase() : '?');
                 el.innerHTML = msgs.map(m => {
                     const sent = m.user_name === currentUser;
                     const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
@@ -5352,7 +5629,13 @@
                         body = '<video class="msg-img" src="' + getMediaUrl('__dm_vid__', m.actor_key.replace('__dm_vid__', '')) + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
                         if (m.content) body += '<div class="msg-text">' + escapeHtml(m.content) + '</div>';
                     } else { body = '<span class="msg-text">' + escapeHtml(m.content || '') + '</span>'; }
-                    return '<div class="chat-msg ' + (sent ? 'sent' : 'received') + (isBulk ? ' no-anim' : '') + '">' + body + readStatus + '<span class="msg-time">' + formatMsgTime(m.created_at) + '</span></div>';
+                    var avatarHtml = sent ? myAvatarHtml : otherAvatarHtml;
+                    var bubble = '<div class="chat-msg ' + (sent ? 'sent' : 'received') + (isBulk ? ' no-anim' : '') + '">' + body + readStatus + '<span class="msg-time">' + formatMsgTime(m.created_at) + '</span></div>';
+                    if (sent) {
+                        return '<div class="chat-msg-row sent">' + bubble + '<div class="chat-msg-avatar">' + avatarHtml + '</div></div>';
+                    } else {
+                        return '<div class="chat-msg-row received"><div class="chat-msg-avatar">' + avatarHtml + '</div>' + bubble + '</div>';
+                    }
                 }).join('');
                 if (shouldAutoScroll) {
                     el.scrollTop = el.scrollHeight;
@@ -5478,6 +5761,13 @@
                 if (body) requestAnimationFrame(function() { body.scrollTop = body.scrollHeight; });
             }
 
+            function getUserAvatarHtml() {
+                if (currentUser && avatarCache[currentUser]) {
+                    return '<img src="' + avatarCache[currentUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                }
+                return currentUser ? currentUser[0].toUpperCase() : '👤';
+            }
+
             window.dockSendAI = async function() {
                 if (dockAIStreaming) return;
                 const inp = document.getElementById('dockAIInput');
@@ -5487,7 +5777,7 @@
                 const body = document.getElementById('dockAIBody');
                 const welcome = document.getElementById('dockAIWelcome');
                 if (welcome) welcome.remove();
-                body.insertAdjacentHTML('beforeend', '<div class="ai-msg user"><div class="ai-avatar">👤</div><div class="ai-bubble">' + escapeHtml(userText) + '</div></div>');
+                body.insertAdjacentHTML('beforeend', '<div class="ai-msg user"><div class="ai-avatar">' + getUserAvatarHtml() + '</div><div class="ai-bubble">' + escapeHtml(userText) + '</div></div>');
                 dockAIMessages.push({ role: 'user', content: userText });
                 const thinkingLabel = dockAIThinkMode ? '思考中' : '回复中';
                 body.insertAdjacentHTML('beforeend', '<div class="ai-msg assistant"><div class="ai-avatar">AI</div><div class="ai-bubble" id="dockAIStreamBubble"><div class="ai-thinking"><span>' + thinkingLabel + '</span><div class="ai-thinking-dots"><span></span><span></span><span></span></div></div></div></div>');
@@ -5856,6 +6146,47 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.17',
+                    date: '2026-05-02 17:00',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>动画效果减半优化</li>
+                            <ul>
+                                <li>帖子滑入动画速度减半，translateY距离减半</li>
+                                <li>所有按钮hover动画幅度减半（底部导航栏除外）</li>
+                                <li>包括hover上浮、缩放、旋转等动画均减半</li>
+                            </ul>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.16',
+                    date: '2026-05-02 16:53',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>头像点击行为优化</li>
+                            <ul>
+                                <li>点击帖子和评论中的头像不再直接跳转聊天</li>
+                                <li>新增用户资料卡片弹窗，显示头像、用户名、最近登录时间</li>
+                                <li>资料卡片中点击"发消息"按钮才跳转到聊天对话</li>
+                            </ul>
+                            <li>统计版块加载速度优化</li>
+                            <ul>
+                                <li>统计数据增加30秒内存缓存，二次打开秒出</li>
+                                <li>后台预加载统计数据，首次打开也更快</li>
+                            </ul>
+                            <li>聊天功能头像显示</li>
+                            <ul>
+                                <li>用户聊天消息增加双方头像显示</li>
+                                <li>聊天列表显示联系人真实头像</li>
+                                <li>AI对话中显示用户真实头像</li>
+                            </ul>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.15',
                     date: '2026-05-02 16:30',
@@ -6460,8 +6791,7 @@
                     nameEl.textContent = nameSpan.textContent || dict['notLoggedIn'];
                 }
                 if (avatarSpan && avatarEl) {
-                    avatarEl.textContent = avatarSpan.textContent || '?';
-                    avatarEl.style.background = avatarSpan.style.background;
+                    avatarEl.innerHTML = avatarSpan.innerHTML || '?';
                 }
             };
 
