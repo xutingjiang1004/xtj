@@ -154,7 +154,7 @@
             border-color: rgba(255,255,255,0.05);
             color: var(--text-main);
         }
-        [data-theme="dark"] .chat-input-area { background: rgba(255,255,255,0.03); }
+        [data-theme="dark"] .chat-input-area { background: transparent; }
         [data-theme="dark"] .chat-input-wrap {
             background: rgba(35,35,55,0.35);
             border-color: rgba(255,255,255,0.06);
@@ -896,7 +896,7 @@
             padding: 12px 16px 16px;
             border-top: 1px solid rgba(0,0,0,0.06);
             flex-shrink: 0;
-            background: rgba(255,255,255,0.9);
+            background: transparent;
         }
         .chat-input-row {
             display: flex; gap: 10px; align-items: flex-end;
@@ -906,13 +906,13 @@
             flex: 1; min-width: 0;
             display: flex; align-items: center;
             border-radius: 99px;
-            border: 1px solid rgba(0,0,0,0.1);
-            background: rgba(255,255,255,0.95);
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.3);
             transition: all 0.3s;
             min-height: 44px;
         }
         .chat-input-wrap:focus-within {
-            background: rgba(255,255,255,1);
+            background: rgba(255,255,255,0.5);
             border-color: rgba(5,150,105,0.3);
             box-shadow: 0 0 0 3px rgba(5,150,105,0.1);
         }
@@ -1376,7 +1376,7 @@
         /* Dock面板: AI (内嵌风格，与聊天统一) */
         .dock-ai-container {
             display: flex; flex-direction: column; height: 100%;
-            background: #ffffff;
+            background: transparent;
         }
         .dock-ai-container .ai-chat-header {
             padding: 12px 0; margin-bottom: 8px;
@@ -1389,13 +1389,13 @@
         }
         .ai-mode-toggle {
             display: inline-flex; align-items: center; gap: 6px;
-            background: #ffffff; border: 1px solid rgba(0,0,0,0.1);
+            background: rgba(255,255,255,0.3); border: 1px solid rgba(255,255,255,0.4);
             border-radius: 99px; padding: 3px 10px 3px 4px;
             cursor: pointer; transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             font-size: 11px; flex-shrink: 0; user-select: none;
             position: relative; overflow: visible;
         }
-        .ai-mode-toggle:hover { background: rgba(0,0,0,0.05); }
+        .ai-mode-toggle:hover { background: rgba(255,255,255,0.4); }
         .ai-mode-toggle .amt-label {
             font-weight: 500; color: var(--text-muted);
             transition: all 0.3s; line-height: 1;
@@ -1433,7 +1433,7 @@
         .dock-ai-container .ai-chat-footer {
             padding: 10px 0; border-top: 1px solid rgba(0,0,0,0.06);
             display: flex; gap: 8px; align-items: flex-end; flex-shrink: 0;
-            background: #ffffff;
+            background: transparent;
         }
 
         /* AI气泡样式保持 */
@@ -1476,8 +1476,8 @@
             word-break: break-word; white-space: pre-wrap; position: relative;
         }
         .ai-msg.assistant .ai-bubble {
-            background: #ffffff; border-radius: 4px 16px 16px 16px; color: var(--text-main);
-            border: 1px solid rgba(0,0,0,0.06);
+            background: rgba(255,255,255,0.3); border-radius: 4px 16px 16px 16px; color: var(--text-main);
+            border: 1px solid rgba(255,255,255,0.4);
         }
         .ai-msg.user .ai-bubble {
             background: linear-gradient(135deg, #059669, #10b981);
@@ -1509,8 +1509,8 @@
         }
         .ai-chat-footer textarea {
             flex: 1; padding: 10px 14px; border-radius: 14px;
-            border: 1px solid rgba(0,0,0,0.1);
-            background: #ffffff;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.3);
             font-size: 14px; outline: none; color: var(--text-main);
             resize: none; font-family: inherit;
             line-height: 1.4; max-height: 80px; min-height: 20px;
@@ -1518,7 +1518,7 @@
         }
         .ai-chat-footer textarea:focus {
             border-color: rgba(5,150,105,0.3);
-            background: #ffffff;
+            background: rgba(255,255,255,0.5);
         }
         .ai-chat-footer textarea::placeholder { color: var(--text-muted); }
         .ai-send-btn {
@@ -1558,10 +1558,10 @@
         [data-theme="dark"] .dock-indicator { background: linear-gradient(90deg, #059669, #34d399); box-shadow: 0 0 10px rgba(52,211,153,0.5); }
         [data-theme="dark"] .dock-chat-container .chat-header { border-bottom-color: rgba(255,255,255,0.06); }
         [data-theme="dark"] .dock-chat-container .chat-list-item { border-bottom-color: rgba(255,255,255,0.03); }
-        [data-theme="dark"] .dock-ai-container { background: #141423; }
+        [data-theme="dark"] .dock-ai-container { background: transparent; }
         [data-theme="dark"] .dock-ai-container .ai-chat-header { border-bottom-color: rgba(255,255,255,0.06); }
-        [data-theme="dark"] .dock-ai-container .ai-chat-footer { border-top-color: rgba(255,255,255,0.06); background: #141423; }
-        [data-theme="dark"] .ai-mode-toggle { background: #1e1e28; border-color: rgba(255,255,255,0.12); }
+        [data-theme="dark"] .dock-ai-container .ai-chat-footer { border-top-color: rgba(255,255,255,0.06); background: transparent; }
+        [data-theme="dark"] .ai-mode-toggle { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.08); }
         [data-theme="dark"] .ai-mode-toggle:hover { background: rgba(255,255,255,0.06); }
         [data-theme="dark"] .ai-mode-toggle .amt-knob { box-shadow: 0 1px 4px rgba(0,0,0,0.4); }
         [data-theme="dark"] .ai-mode-toggle:not(.quick) .amt-label:first-child { color: #818cf8; }
@@ -1993,12 +1993,12 @@
 
         /* AI气泡 - 助手 */
         .ai-msg.assistant .ai-bubble {
-            background: #ffffff;
-            border: 1px solid rgba(0, 0, 0, 0.06);
+            background: rgba(255,255,255,0.3);
+            border: 1px solid rgba(255,255,255,0.4);
         }
         [data-theme="dark"] .ai-msg.assistant .ai-bubble {
-            background: #1e1e28;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(25,25,42,0.3);
+            border: 1px solid rgba(255,255,255,0.06);
         }
 
         /* AI气泡 - 用户 */
@@ -2011,12 +2011,12 @@
 
         /* AI思考过程 */
         .ai-reasoning-content {
-            background: rgba(255, 255, 255, 0.95);
-            border: 1px solid rgba(99, 102, 241, 0.2);
+            background: rgba(255, 255, 255, 0.3);
+            border: 1px solid rgba(255,255,255,0.4);
         }
         [data-theme="dark"] .ai-reasoning-content {
-            background: rgba(30, 30, 40, 0.92);
-            border: 1px solid rgba(99, 102, 241, 0.3);
+            background: rgba(25,25,42,0.3);
+            border: 1px solid rgba(255,255,255,0.06);
         }
 
         /* 通用glass类 */
