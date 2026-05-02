@@ -3156,22 +3156,22 @@
                 if (!confirm('确定要删除此评论吗？')) return;
                 try {
                     var cid = parseInt(commentId, 10);
-                    var res = await sb.rpc('delete_comment_v2', {
+                    var { data, error } = await sb.rpc('delete_comment_v2', {
                         p_comment_id: cid,
                         p_deleted_by: currentUser
                     });
-                    if (res.error) {
-                        showToast('删除失败：' + res.error.message);
+                    if (error) {
+                        showToast('删除失败：' + error.message);
                         return;
                     }
-                    if (res.data && res.data.success) {
+                    if (data === true) {
                         showToast('评论已删除');
                         await loadFeed(true);
                         if (statCurrentType !== null && document.getElementById('statModal').classList.contains('active')) {
                             await openStatDetail(statCurrentType);
                         }
                     } else {
-                        showToast('删除失败：' + (res.data && res.data.message ? res.data.message : '未知错误'));
+                        showToast('删除失败：评论不存在或已被删除');
                     }
                 } catch (e) {
                     showToast('删除评论失败');
