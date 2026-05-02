@@ -598,18 +598,18 @@
             '确认删除',
             async function() {
                 try {
-                    var fetchRes = await sb.from('comments').select('content').eq('id', id).single();
+                    var cid = parseInt(id, 10);
+                    var fetchRes = await sb.from('comments').select('content').eq('id', cid).single();
                     if (fetchRes.error) { showToast('删除失败: ' + fetchRes.error.message, 'error'); return; }
                     var originalContent = fetchRes.data.content;
                     if (originalContent && originalContent.startsWith('__DELETED_BY_')) { showToast('评论已被删除', 'info'); return; }
                     var marker = "__DELETED_BY_" + ADMIN + "__" + originalContent;
-                    var res = await sb.from('comments').update({ content: marker }).eq('id', id).select();
+                    var res = await sb.from('comments').update({ content: marker }).eq('id', cid).select();
                     if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
-                    // 确认是否真正更新成功
                     if (!res.data || res.data.length === 0) {
-                        var verifyRes = await sb.from('comments').select('content').eq('id', id).single();
+                        var verifyRes = await sb.from('comments').select('content').eq('id', cid).single();
                         if (verifyRes.data && !verifyRes.data.content.startsWith('__DELETED_BY_')) {
-                            showToast('删除失败：无权限，请执行SQL策略', 'error');
+                            showToast('删除失败：无权限，请执行SQL后刷新', 'error');
                             return;
                         }
                     }
