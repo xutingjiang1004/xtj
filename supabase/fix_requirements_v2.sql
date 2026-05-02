@@ -1,12 +1,15 @@
 -- ============================================================
--- 评论软删除：完全照搬 delete_post_with_actor 的写法
+-- 终极方案：DDL 修改强制 PostgREST 刷新缓存
 -- ============================================================
 
--- 1. 彻底删除旧函数（确保 PostgREST 重新识别）
-drop function if exists public.delete_comment_v2(bigint, text);
+-- 1. 从根上清除旧函数
 drop function if exists public.delete_comment_v2;
 
--- 2. 完全照着 delete_post_with_actor 写
+-- 2. 对 comments 表做无害 DDL 修改（PostgREST 检测到 DDL 会自动刷新）
+comment on table public.comments is 'pgrst_reload';
+comment on column public.comments.content is 'pgrst_reload';
+
+-- 3. 创建函数
 create or replace function public.delete_comment_v2(p_comment_id bigint, p_deleted_by text)
 returns boolean
 language plpgsql
@@ -37,12 +40,19 @@ begin
 end;
 $$;
 
--- 3. 完全照着 delete_post_with_actor 给权限
+-- 4. 给权限
 grant execute on function public.delete_comment_v2(bigint, text) to anon;
 
--- 4. 彻底刷新 PostgREST
+-- 5. 多重通知刷新 PostgREST
 notify pgrst, 'reload schema';
-notify pgrst, 'reload schema';
+select pg_notify('pgrst', 'reload schema');
 
--- 5. 验证函数存在
+-- 6. 再改一次表注释以确保 DDL 变更被检测到
+comment on table public.comments is 'pgrst_reload2';
+comment on column public.comments.content is 'pgrst_reload2';
+
+-- 7. 验证函数
 select proname from pg_proc where proname = 'delete_comment_v2';
+
+-- 8. 直接测试函数是否可调用
+select public.delete_comment_v2(0::bigint, 'test');
