@@ -256,12 +256,13 @@
             will-change: auto;
         }
 
+        html { overflow: hidden; }
         body {
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
             color: var(--text-main);
             min-height: 100vh;
-            overflow-x: hidden;
+            overflow: hidden;
             -webkit-font-smoothing: antialiased;
             position: relative;
             isolation: isolate;
@@ -1341,6 +1342,7 @@
             box-shadow: none;
             z-index: 100;
             pointer-events: none;
+            touch-action: none;
         }
         .dock-tab {
             flex: 1; max-width: 80px;
@@ -1353,6 +1355,7 @@
             position: relative;
             -webkit-tap-highlight-color: transparent;
             pointer-events: auto;
+            touch-action: manipulation;
             outline: none !important;
             box-shadow: none !important;
             -webkit-user-select: none;
@@ -3255,7 +3258,7 @@
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding: 14px 0;">
                         <span>关于</span>
-                        <span style="color:var(--text-muted);">xtj v0.0.18</span>
+                        <span style="color:var(--text-muted);">xtj v0.0.22</span>
                     </div>
                 </div>
             </div>
@@ -4199,6 +4202,9 @@
                     // 加载头像
                     loadUserAvatar();
                     
+                    // 更新最近登录时间（页面每次打开都刷新）
+                    saveUserInfo(currentUser, false);
+                    
                     try { subscribeToMessages(); startDMPolling(); updateUnreadBadge(); loadAnnouncements(); subscribeToAnnouncements(); } catch(e) {}
                 } else {
                     unauthUI.style.display = "flex";
@@ -4797,9 +4803,10 @@
                 try {
                     // 批量获取头像
                     const { data } = await sb.from("posts")
-                        .select("user_name, media_url")
-                        .eq("media_type", "__avatar__")
-                        .in("user_name", usernames);
+                    .select("user_name, media_url")
+                    .eq("media_type", "__avatar__")
+                    .in("user_name", usernames)
+                    .order("created_at", { ascending: true });
                     
                     if (data) {
                         data.forEach(avatar => {
@@ -6252,6 +6259,19 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.22',
+                    date: '2026-05-03 09:50',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>修复其他用户看不到最新头像（loadAvatarsForUsers排序取最新）</li>
+                            <li>修复底部导航栏可被滑动问题（touch-action禁止手势）</li>
+                            <li>彻底去掉页面右侧竖滑动条（html/body overflow:hidden）</li>
+                            <li>修复登录时间不更新bug（每次打开页面刷新登录时间）</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.21',
                     date: '2026-05-03 09:30',
