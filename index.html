@@ -2405,12 +2405,12 @@
         .announcement-list {
             display: flex;
             flex-direction: column;
-            gap: 12px;
+            gap: 16px;
         }
 
         .announcement-item {
-            background: rgba(255, 255, 255, 0.88);
-            border: 1px solid rgba(255, 255, 255, 0.6);
+            background: rgba(255,255,255,0.88);
+            border: 1px solid rgba(255,255,255,0.6);
             border-radius: var(--radius-sm);
             padding: 16px;
             cursor: pointer;
@@ -2424,7 +2424,7 @@
             transform: translateY(0);
         }
         .announcement-item.visible:hover {
-            background: rgba(255,255,255,0.98);
+            background: rgba(255,255,255,0.95);
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0,0,0,0.08);
         }
@@ -2436,23 +2436,24 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 8px;
+            margin-bottom: 12px;
         }
         .announcement-item-title {
             font-weight: 700;
-            font-size: 15px;
+            font-size: 16px;
+            color: var(--primary);
             display: flex;
             align-items: center;
             gap: 8px;
         }
         .announcement-item-time {
-            font-size: 12px;
+            font-size: 13px;
             color: var(--text-muted);
         }
         .announcement-item-preview {
-            font-size: 13px;
+            font-size: 14px;
             color: var(--text-main);
-            line-height: 1.6;
+            line-height: 1.8;
             overflow: hidden;
             text-overflow: ellipsis;
             display: -webkit-box;
@@ -2531,7 +2532,7 @@
             margin-bottom: 12px;
         }
         .announcement-detail-content {
-            font-size: 15px;
+            font-size: 14px;
             line-height: 1.8;
             white-space: pre-wrap;
             word-break: break-word;
@@ -3877,6 +3878,7 @@
                         .select("media_url")
                         .eq("user_name", userName)
                         .eq("media_type", "__avatar__")
+                        .eq("actor_key", "__avatar__")
                         .order("created_at", { ascending: false })
                         .limit(1);
                     
@@ -3975,6 +3977,7 @@
                         .select("media_url")
                         .eq("user_name", currentUser)
                         .eq("media_type", "__avatar__")
+                        .eq("actor_key", "__avatar__")
                         .order("created_at", { ascending: false })
                         .limit(1);
                     
@@ -4247,6 +4250,7 @@
                             .select("media_url")
                             .eq("user_name", currentUser)
                             .eq("media_type", "__avatar__")
+                            .eq("actor_key", "__avatar__")
                             .order("created_at", { ascending: false })
                             .limit(1);
                         if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
@@ -4813,8 +4817,9 @@
                     const { data } = await sb.from("posts")
                     .select("user_name, media_url")
                     .eq("media_type", "__avatar__")
+                    .eq("actor_key", "__avatar__")
                     .in("user_name", usernames)
-                    .order("created_at", { ascending: true });
+                    .order("created_at", { ascending: false });
                     
                     if (data) {
                         data.forEach(avatar => {
@@ -6285,6 +6290,27 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.25',
+                    date: '2026-05-03 10:35',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>统一公告列表/详情/更新日志的样式大小（字体/间距都统一跟更新日志一致）</li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.24',
+                    date: '2026-05-03 10:20',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>彻底修复头像查询：所有头像查询强制加 actor_key=__avatar__，彻底排除旧数据干扰</li>
+                            <li>修复手机底部导航往上飘（position:fixed+适配安全区域）</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.23',
                     date: '2026-05-03 10:00',
