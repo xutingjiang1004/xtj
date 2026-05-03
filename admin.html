@@ -451,9 +451,13 @@
         } else {
             h += '<div class="table-wrap"><table><thead><tr><th>标题</th><th>内容</th><th>发布者</th><th>发布时间</th><th>操作</th></tr></thead><tbody>';
             annList.forEach(function(a) {
-                var titlePreview = a.title ? escapeHtml(a.title) : '-';
-                var preview = (a.content || '').slice(0, 60);
-                if (a.content && a.content.length > 60) preview += '...';
+                var displayTitle = '-', displayContent = a.content || '';
+                if (a.content) {
+                    try { var p = JSON.parse(a.content); if (p.title !== undefined) { displayTitle = p.title || '-'; displayContent = p.content || ''; } } catch(e) {}
+                }
+                var titlePreview = displayTitle ? escapeHtml(displayTitle) : '-';
+                var preview = (displayContent || '').slice(0, 60);
+                if (displayContent && displayContent.length > 60) preview += '...';
                 h += '<tr><td>' + titlePreview + '</td><td>' + escapeHtml(preview || '-') + '</td><td>' + escapeHtml(a.user_name) + '</td><td>' + formatTime(a.created_at) + '</td>';
                 h += '<td><button class="btn-sm del" onclick="deleteAdminAnn(\'' + a.id + '\')">删除</button></td></tr>';
             });
@@ -588,15 +592,17 @@
         }
         
         try {
+            // content字段存JSON（posts表没有title列）
+            var storeData = JSON.stringify({ title: title, content: content });
             var res = await sb.from('posts').insert([{
-                user_name: ADMIN, title: title, content: content,
+                user_name: ADMIN, content: storeData,
                 media_type: ANN_MARKER, media_url: '',
                 actor_key: 'admin_' + Date.now()
             }]);
             if (res.error) { showToast('发布失败: ' + res.error.message, 'error'); return; }
             titleInp.value = '';
             contentInp.value = '';
-            await loadAllData(true); // 保持当前tab
+            await loadAllData(true);
             showToast('公告已发布', 'success');
         } catch(e) { showToast('发布失败: ' + e.message, 'error'); }
     };
