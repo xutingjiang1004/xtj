@@ -6098,6 +6098,46 @@
             document.getElementById('dockAIInput').addEventListener('input', function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 80) + 'px'; });
 
             window.addEventListener('DOMContentLoaded', async function() {
+                // iOS 键盘弹出修复: 避免 dock-bar 被键盘顶上去
+                (function() {
+                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                    if (!isIOS) return;
+
+                    const dockBar = document.getElementById('dockBar');
+                    const inputs = ['dockChatInput', 'dockAIInput', 'postInp', 'announcementAdminInput', 'announcementAdminTitle', 'authUserInput', 'authPassInput'];
+                    let keyboardOpen = false;
+
+                    function handleFocus(e) {
+                        if (dockBar) dockBar.style.display = 'none';
+                        keyboardOpen = true;
+                        // 让输入框自动滚到可见区域
+                        setTimeout(() => {
+                            if (e.target && e.target.scrollIntoViewIfNeeded) {
+                                e.target.scrollIntoViewIfNeeded(true);
+                            } else if (e.target && e.target.scrollIntoView) {
+                                e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }
+                        }, 300);
+                    }
+
+                    function handleBlur() {
+                        if (dockBar) dockBar.style.display = 'flex';
+                        keyboardOpen = false;
+                    }
+
+                    inputs.forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) {
+                            el.addEventListener('focus', handleFocus);
+                            el.addEventListener('blur', handleBlur);
+                        }
+                    });
+
+                    window.addEventListener('resize', function() {
+                        if (!keyboardOpen) adjustIOSHeight();
+                    });
+                })();
+
                 // iOS viewport height fix: 动态调整容器高度适配 Safari 工具栏
                 function adjustIOSHeight() {
                     var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
