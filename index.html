@@ -1315,15 +1315,19 @@
         .dock-panels { flex: 1; overflow: hidden; position: relative; }
         .dock-panel {
             position: absolute; inset: 0;
-            overflow-y: scroll; overflow-x: hidden;
+            overflow-y: auto; overflow-x: hidden;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
             -webkit-overflow-scrolling: touch;
-            scrollbar-gutter: stable;
             opacity: 0; pointer-events: none;
             transform: translateY(10px);
             transition: opacity 0.25s ease-out, transform 0.25s ease-out;
             padding: 16px 16px 72px;
             will-change: opacity, transform;
         }
+        .dock-panel::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
+        .dock-panel::-webkit-scrollbar-track { display: none !important; }
+        .dock-panel::-webkit-scrollbar-thumb { display: none !important; background: transparent !important; }
         .dock-panel.active {
             opacity: 1; pointer-events: all;
             transform: translateY(0);
@@ -2110,15 +2114,12 @@
             background: transparent !important;
         }
         /* 隐藏所有滚动条 */
-        .dock-panel::-webkit-scrollbar { display: none; width: 0; height: 0; }
-        .dock-panel::-webkit-scrollbar-track { display: none; }
-        .dock-panel::-webkit-scrollbar-thumb { display: none; }
         .chat-messages::-webkit-scrollbar,
         .chat-list::-webkit-scrollbar,
         .ai-chat-body::-webkit-scrollbar,
         .dock-ai-container .ai-chat-body::-webkit-scrollbar,
         .announcement-content::-webkit-scrollbar { display: none; }
-        .chat-messages, .chat-list, .dock-panel, .ai-chat-body, .dock-ai-container .ai-chat-body, .announcement-content { scrollbar-width: none; -ms-overflow-style: none; }
+        .chat-messages, .chat-list, .ai-chat-body, .dock-ai-container .ai-chat-body, .announcement-content { scrollbar-width: none; -ms-overflow-style: none; }
 
         /* ========== 切换按钮/欢迎页 花朵飞散动画 (CSS class方式) ========== */
         /* AI页面花朵飞散动画 - 复用导航按钮petalFly逐瓣飞散 */
@@ -3582,6 +3583,8 @@
             const AVATAR_CACHE_KEY = "xtj_avatars";
 
             let currentUser = localStorage.getItem("xtj_user") || "";
+            let dockChatListCacheTime = 0;
+            const DOCK_CHAT_CACHE_DURATION = 30000;
             let deviceId = localStorage.getItem("xtj_device_id");
             if (!deviceId) {
                 deviceId = crypto.randomUUID();
@@ -4095,12 +4098,6 @@
                         }
                     }
                 });
-                document.querySelectorAll('#feed .comment-item .avatar').forEach(function(el) {
-                    var nameEl = el.parentElement ? el.parentElement.querySelector('b') : null;
-                    if (nameEl && nameEl.textContent.replace(':', '') === currentUser) {
-                        el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
-                    }
-                });
                 document.querySelectorAll('#dockChatMessages .chat-msg-avatar').forEach(function(el) {
                     if (el.closest('.chat-msg-row.sent')) {
                         el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
@@ -4226,37 +4223,31 @@
             }
 
             async function loadUserAvatar() {
-                // 先从localStorage读取缓存的头像
                 try {
                     var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
                     if (cachedAvatars[currentUser]) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
                         updateAllAvatarElements(cachedAvatars[currentUser]);
-                    }
-                } catch(e) {}
-                // 再从数据库加载（覆盖缓存）
-                try {
-                    const avatarRes = await sb.from("posts")
-                        .select("media_url")
-                        .eq("user_name", currentUser)
-                        .eq("media_type", "__avatar__")
-                        .maybeSingle();
-                    
-                    if (avatarRes.data && avatarRes.data.media_url) {
-                        avatarCache[currentUser] = avatarRes.data.media_url;
-                        // 保存到localStorage
-                        try {
-                            var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
-                            cachedAvatars[currentUser] = avatarRes.data.media_url;
-                            localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
-                        } catch(e) {}
-                        updateAllAvatarElements(avatarRes.data.media_url);
-                    } else if (!avatarCache[currentUser]) {
-                        // 数据库没有，本地也没有，显示首字母
-                        var profileAvatar = document.getElementById('profileAvatar');
-                        var myAvatar = document.getElementById('myAvatar');
-                        if (profileAvatar) profileAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
-                        if (myAvatar) myAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
+                    } else {
+                        // localStorage没有，再从数据库加载
+                        const avatarRes = await sb.from("posts")
+                            .select("media_url")
+                            .eq("user_name", currentUser)
+                            .eq("media_type", "__avatar__")
+                            .maybeSingle();
+                        if (avatarRes.data && avatarRes.data.media_url) {
+                            avatarCache[currentUser] = avatarRes.data.media_url;
+                            try {
+                                cachedAvatars[currentUser] = avatarRes.data.media_url;
+                                localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                            } catch(e) {}
+                            updateAllAvatarElements(avatarRes.data.media_url);
+                        } else {
+                            var profileAvatar = document.getElementById('profileAvatar');
+                            var myAvatar = document.getElementById('myAvatar');
+                            if (profileAvatar) profileAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
+                            if (myAvatar) myAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
+                        }
                     }
                 } catch(e) {
                     console.error("加载头像失败:", e);
@@ -4878,10 +4869,7 @@
                   <div class="comments">
                     ${pComms.map(c=>`
                     <div class="comment-item" data-comment-id="${c.id}">
-                      <div style="display:flex;align-items:center;gap:8px;">
-                        ${getAvatarHtml(c.user_name, 24)}
-                        <div><b>${c.user_name}:</b>${c.content}</div>
-                      </div>
+                      <div><b>${c.user_name}:</b> ${c.content}</div>
                     </div>
                     `).join('')}
                   </div>
@@ -4930,11 +4918,12 @@
                     if (cached) {
                         try {
                             const parsed = JSON.parse(cached);
-                            if (parsed?.data && Date.now()-parsed.timestamp < CACHE_DURATION) { renderFeed(parsed.data); loadFeed(true); return; }
+                            if (parsed?.data && Date.now()-parsed.timestamp < CACHE_DURATION) { renderFeed(parsed.data); loadFeed(true); if (currentUser) loadDockChatList(); return; }
                         } catch(e){}
                     }
                 }
                 await loadFeed(false);
+                if (currentUser) loadDockChatList();
             }
 
             // ===================== 数据统计详情功能 =====================
@@ -5606,6 +5595,8 @@
             async function loadDockChatList() {
                 const el = document.getElementById('dockChatList');
                 if (!el) return;
+                if (Date.now() - dockChatListCacheTime < DOCK_CHAT_CACHE_DURATION) return;
+                dockChatListCacheTime = Date.now();
                 el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">⏳</div><div>加载中...</div></div>';
                 try {
                     const { data: allMsgs, error } = await sb.from("posts")
@@ -6262,13 +6253,25 @@
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
+                    version: 'v0.0.21',
+                    date: '2026-05-03 09:30',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>修复头像过一会儿自动回退bug（localStorage权威优先，DB不再覆盖）</li>
+                            <li>去掉评论头像，只显示名字</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.0.20',
-                    date: '2026-05-03 09:xx',
+                    date: '2026-05-03 09:20',
                     content: `
                         <h4>更新内容</h4>
                         <ul>
                             <li>修复聊天列表打开空白/加载慢问题</li>
-                            <li>去掉帖子列表右侧竖滑动条闪烁</li>
+                            <li>聊天列表后台预加载，点开秒出</li>
+                            <li>彻底去掉帖子列表右侧竖滑动条</li>
                             <li>修复帖子滑动卡顿/抽搐抖动（仅淡入一次+图片加载优化）</li>
                         </ul>
                     `
