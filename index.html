@@ -1859,33 +1859,52 @@
         }
         .ts-detail-hero {
             position: relative;
-            min-height: 360px;
+            min-height: 440px;
             overflow: hidden;
-            background: #201b20;
-            color: white;
+            background: #111;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .ts-am-glow {
+            position: absolute;
+            inset: -20%;
+            background-size: cover;
+            background-position: center;
+            filter: blur(60px) saturate(200%);
+            opacity: 0.85;
+            z-index: 1;
+            animation: am-fluid 12s infinite alternate ease-in-out;
         }
         .ts-detail-cover {
-            position: absolute;
-            inset: 0;
-            width: 100%;
-            height: 100%;
+            position: relative;
+            z-index: 2;
+            width: 240px;
+            height: 240px;
             object-fit: cover;
+            border-radius: 12px;
+            box-shadow: 0 30px 60px rgba(0,0,0,0.7);
+            animation: am-breathe 8s infinite alternate ease-in-out;
             pointer-events: none;
             user-select: none;
-            -webkit-user-select: none;
-            -webkit-touch-callout: none;
-            opacity: 0.74;
-            animation: tsDetailCover 10s ease-in-out infinite alternate;
-        }
-        @keyframes tsDetailCover {
-            from { transform: scale(1.02) translateY(-4px); filter: saturate(0.98); }
-            to { transform: scale(1.11) translateY(4px); filter: saturate(1.12); }
         }
         .ts-detail-hero::after {
             content: "";
             position: absolute;
             inset: 0;
-            background: linear-gradient(180deg, rgba(0,0,0,0.08), rgba(0,0,0,0.74));
+            z-index: 2;
+            background: linear-gradient(180deg, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.85) 100%);
+            pointer-events: none;
+        }
+        @keyframes am-fluid {
+            0% { transform: scale(1) translate(0, 0) rotate(0deg); }
+            33% { transform: scale(1.1) translate(3%, -2%) rotate(2deg); opacity: 0.95; }
+            66% { transform: scale(1.05) translate(-2%, 3%) rotate(-1deg); }
+            100% { transform: scale(1.15) translate(-3%, -3%) rotate(3deg); opacity: 0.75; }
+        }
+        @keyframes am-breathe {
+            0% { transform: scale(1) translateY(0); }
+            100% { transform: scale(1.04) translateY(-8px); }
         }
         .ts-detail-close {
             position: absolute;
@@ -1906,9 +1925,10 @@
             position: absolute;
             left: 20px;
             right: 20px;
-            bottom: 18px;
+            bottom: 24px;
             z-index: 3;
-            text-shadow: 0 2px 20px rgba(0,0,0,0.42);
+            color: white;
+            text-shadow: 0 4px 24px rgba(0,0,0,0.8);
         }
         .ts-detail-title small {
             display: block;
@@ -3579,7 +3599,7 @@
             <div class="ts-container">
                 <div class="ts-signature">
                     <div class="ts-sig-card">
-                        <svg viewBox="0 0 420 150" class="ts-sig-svg" aria-label="Taylor Swift animated signature">
+                        <svg viewBox="0 0 500 150" class="ts-sig-svg" aria-label="Taylor Swift animated signature">
                             <defs>
                                 <linearGradient id="tsInkGrad" x1="0%" y1="0%" x2="100%" y2="0%">
                                     <stop offset="0%" stop-color="#8d4a68"/>
@@ -3587,11 +3607,10 @@
                                     <stop offset="100%" stop-color="#6f8fb2"/>
                                 </linearGradient>
                             </defs>
-                            <path class="ts-sign-path" d="M30 78 C50 42 76 36 82 52 C89 71 53 95 43 80 C33 65 60 48 94 52 C126 56 143 82 121 88 C105 93 101 76 116 65 C133 52 154 60 157 79 C160 96 138 101 134 87 C130 73 148 56 173 57 C204 58 215 85 197 96 C184 104 170 94 178 78 C187 59 218 51 238 66 C255 79 253 101 232 107 C214 112 205 98 212 84 C219 69 239 66 250 79 C261 92 255 112 236 122"/>
-                            <path class="ts-sign-path ts-sign-word-2" d="M152 118 C184 83 224 61 259 65 C295 69 305 101 276 106 C254 110 244 91 259 77 C278 59 315 65 325 89 C334 112 304 130 288 113 C274 98 291 74 319 72 C348 70 370 88 366 106 C361 126 331 123 333 103 C335 79 377 71 399 92"/>
-                            <path class="ts-sign-flourish" d="M70 119 C146 136 253 139 360 111"/>
-                            <circle class="ts-sign-dot dot-1" cx="111" cy="39" r="3.6" fill="#cf789b"/>
-                            <circle class="ts-sign-dot dot-2" cx="301" cy="52" r="3.2" fill="#7b9fbe"/>
+                            <path class="ts-sign-path" d="M 40 50 Q 80 20 120 40 M 80 30 C 70 80 60 130 50 140 C 40 150 20 130 40 100 C 60 70 80 70 90 80 C 100 90 90 110 80 120 C 70 130 90 140 110 120 C 130 100 140 80 150 70" />
+                            <path class="ts-sign-path ts-sign-word-2" d="M 150 70 C 140 60 130 90 140 100 C 150 110 170 100 180 80 C 190 60 200 40 210 30 C 200 80 190 130 180 140 C 170 150 160 130 180 100 C 200 70 220 70 230 80" />
+                            <path class="ts-sign-path" d="M 270 50 C 250 50 240 70 250 90 C 260 110 290 100 300 80 C 310 60 300 40 280 40 C 260 40 250 70 260 120 C 270 160 300 150 320 120 C 340 90 350 70 360 80 C 370 90 360 110 350 120 C 340 130 360 140 380 120 C 400 100 410 80 420 70 C 430 60 420 50 410 60 C 400 70 400 90 410 100" />
+                            <path class="ts-sign-flourish" d="M 390 60 C 410 60 430 60 450 60" />
                         </svg>
                         <div class="ts-hero-kicker">ERA COLLECTION</div>
                         <div class="ts-hero-copy">a poster wall of albums, tour light, and soft-focus public moments</div>
@@ -3751,6 +3770,7 @@
                     <div class="ts-detail-panel">
                         <div class="ts-detail-hero" id="tsDetailHero">
                             <button class="ts-detail-close" onclick="closeTSAlbumDetail()" title="关闭">×</button>
+                            <div class="ts-am-glow" id="tsDetailGlow"></div>
                             <img class="ts-detail-cover" id="tsDetailCover" alt="" draggable="false">
                             <div class="ts-detail-title">
                                 <small id="tsDetailEra"></small>
@@ -6512,6 +6532,28 @@
                 { key:"debut", title:"Debut", fullTitle:"Taylor Swift", year:"2006", no:"2006.10.24", tag:"COUNTRY", glow:"rgba(91,154,132,0.42)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/1/1f/Taylor_Swift_-_Taylor_Swift.png/500px-Taylor_Swift_-_Taylor_Swift.png", sub:"green-blue diary glow", intro:"The first chapter: country radio, teenage detail, porch-light storytelling, and a songwriter introducing herself.", story:"Debut is built from crushes, small towns, guitars, and the confidence of a young writer already shaping her own voice.", background:"Released when Swift was still a teenager, it established the diaristic writing style that later eras kept transforming.", songs:["Tim McGraw","Picture to Burn","Teardrops on My Guitar","A Place in This World","Cold As You","The Outside","Should've Said No","Mary's Song","Our Song","I'm Only Me When I'm With You"], photos:[tsPublicPhotos.fearlessLive,tsPublicPhotos.erasGold,tsPublicPhotos.erasPink] }
             ];
 
+            // 强制覆盖各时期真实照片数据
+            const realEraPhotos = {
+                "showgirl": ["https://upload.wikimedia.org/wikipedia/commons/thumb/7/7e/Taylor_Swift_Eras_Tour_London_2024.jpg/640px-Taylor_Swift_Eras_Tour_London_2024.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Taylor_Swift_Eras_Tour_Miami_2024.jpg/640px-Taylor_Swift_Eras_Tour_Miami_2024.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/4/42/Taylor_Swift_Eras_Tour_Toronto_2024.jpg/640px-Taylor_Swift_Eras_Tour_Toronto_2024.jpg"],
+                "ttpd": ["https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/Taylor_Swift_Eras_Tour_Paris_2024.jpg/640px-Taylor_Swift_Eras_Tour_Paris_2024.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/1/18/Taylor_Swift_-_The_Eras_Tour_Paris_2024.jpg/640px-Taylor_Swift_-_The_Eras_Tour_Paris_2024.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9b/Taylor_Swift_Eras_Tour_Paris_2024_2.jpg/640px-Taylor_Swift_Eras_Tour_Paris_2024_2.jpg"],
+                "midnights": ["https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023_-_Midnights.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023_-_Midnights.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Taylor_Swift_-_Eras_Tour_-_Tampa.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Tampa.jpg"],
+                "evermore": ["https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023_-_evermore.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023_-_evermore.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023_-_evermore.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023_-_evermore.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Taylor_Swift_-_Eras_Tour_-_Houston_-_2023.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Houston_-_2023.jpg"],
+                "folklore": ["https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/6/66/Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Taylor_Swift_-_Eras_Tour_-_Atlanta.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Atlanta.jpg"],
+                "lover": ["https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/Taylor_Swift_Lover_Fest.jpg/640px-Taylor_Swift_Lover_Fest.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Taylor_Swift_-_City_of_Lover_%282%29.jpg/640px-Taylor_Swift_-_City_of_Lover_%282%29.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/Taylor_Swift_at_the_2019_AMAs.jpg/640px-Taylor_Swift_at_the_2019_AMAs.jpg"],
+                "reputation": ["https://upload.wikimedia.org/wikipedia/commons/thumb/b/b1/Reputation_Stadium_Tour_Glendale.jpg/640px-Reputation_Stadium_Tour_Glendale.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Reputation_Stadium_Tour_Glendale_2.jpg/640px-Reputation_Stadium_Tour_Glendale_2.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Taylor_Swift_Reputation_Tour_2018.jpg/640px-Taylor_Swift_Reputation_Tour_2018.jpg"],
+                "1989": ["https://upload.wikimedia.org/wikipedia/commons/thumb/b/b5/1989_Tour_St_Louis_1.jpg/640px-1989_Tour_St_Louis_1.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/1989_Tour_St_Louis_2.jpg/640px-1989_Tour_St_Louis_2.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/1989_Tour_St_Louis_3.jpg/640px-1989_Tour_St_Louis_3.jpg"],
+                "red": ["https://upload.wikimedia.org/wikipedia/commons/thumb/2/29/Taylor_Swift_Red_Tour_2013.jpg/640px-Taylor_Swift_Red_Tour_2013.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Taylor_Swift_Red_Tour.jpg/640px-Taylor_Swift_Red_Tour.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Taylor_Swift_Red_Tour_Sydney.jpg/640px-Taylor_Swift_Red_Tour_Sydney.jpg"],
+                "speaknow": ["https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Taylor_Swift_Speak_Now_Tour.jpg/640px-Taylor_Swift_Speak_Now_Tour.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Taylor_Swift_Speak_Now_Tour_2011.jpg/640px-Taylor_Swift_Speak_Now_Tour_2011.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Taylor_Swift_Speak_Now_Tour_2.jpg/640px-Taylor_Swift_Speak_Now_Tour_2.jpg"],
+                "fearless": ["https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Fearless_Tour_2010.jpg/640px-Fearless_Tour_2010.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Taylor_Swift_Fearless_Tour_2010.jpg/640px-Taylor_Swift_Fearless_Tour_2010.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Taylor_Swift_CMA_Awards.jpg/640px-Taylor_Swift_CMA_Awards.jpg"],
+                "debut": ["https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Taylor_Swift_at_the_2009_Tribeca_Film_Festival.jpg/640px-Taylor_Swift_at_the_2009_Tribeca_Film_Festival.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e9/Taylor_Swift_in_2008.jpg/640px-Taylor_Swift_in_2008.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/Taylor_Swift_2007.jpg/640px-Taylor_Swift_2007.jpg"]
+            };
+
+            tsAlbumData.forEach(album => {
+                if (realEraPhotos[album.key]) {
+                    album.photos = realEraPhotos[album.key];
+                }
+            });
+
             let tsGalleryRendered = false;
             let tsSignatureTimer = null;
 
@@ -6567,6 +6609,10 @@
                 if (!album) return;
                 document.getElementById('tsDetailCover').src = album.cover;
                 document.getElementById('tsDetailCover').alt = album.fullTitle + ' album cover';
+                
+                // 新增：注入环境光背景图
+                document.getElementById('tsDetailGlow').style.backgroundImage = 'url("' + album.cover + '")';
+                
                 document.getElementById('tsDetailEra').textContent = album.no + ' - ' + album.tag;
                 document.getElementById('tsDetailTitle').textContent = album.fullTitle;
                 document.getElementById('tsDetailIntro').textContent = album.intro;
