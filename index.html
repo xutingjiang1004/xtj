@@ -3587,7 +3587,7 @@
 
             let currentUser = localStorage.getItem("xtj_user") || "";
             let dockChatListCacheTime = 0;
-            const DOCK_CHAT_CACHE_DURATION = 30000;
+            const DOCK_CHAT_CACHE_DURATION = 120000;
             let deviceId = localStorage.getItem("xtj_device_id");
             if (!deviceId) {
                 deviceId = crypto.randomUUID();
@@ -3874,6 +3874,7 @@
                         .select("media_url")
                         .eq("user_name", userName)
                         .eq("media_type", "__avatar__")
+                        .order("created_at", { ascending: false })
                         .maybeSingle();
                     
                     if (avatarRes.data && avatarRes.data.media_url) {
@@ -3959,21 +3960,25 @@
             };
 
             async function loadProfileAvatar() {
+                const avatarEl = document.getElementById('profileDetailAvatar');
+                
+                // 先用缓存显示
+                if (avatarCache[currentUser]) {
+                    avatarEl.innerHTML = '<img src="' + avatarCache[currentUser] + '" alt="头像">';
+                }
+                
                 try {
                     const avatarRes = await sb.from("posts")
                         .select("media_url")
                         .eq("user_name", currentUser)
                         .eq("media_type", "__avatar__")
+                        .order("created_at", { ascending: false })
                         .maybeSingle();
                     
-                    const avatarEl = document.getElementById('profileDetailAvatar');
-                    
                     if (avatarRes.data && avatarRes.data.media_url) {
-                        // 有自定义头像
                         avatarEl.innerHTML = '<img src="' + avatarRes.data.media_url + '" alt="头像">';
                         avatarCache[currentUser] = avatarRes.data.media_url;
-                    } else {
-                        // 使用默认头像（首字母）
+                    } else if (!avatarCache[currentUser]) {
                         avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
                     }
                 } catch(e) {
@@ -5611,7 +5616,7 @@
                         .eq("media_type", DM_MARKER)
                         .or(`user_name.eq.${currentUser},media_url.eq.${currentUser}`)
                         .order("created_at", { ascending: false })
-                        .limit(1000);
+                        .limit(200);
                     if (error) throw error;
                     if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像开始聊天</div></div>';
@@ -5638,10 +5643,15 @@
                                 var avatarRes = await sb.from("posts")
                                     .select("user_name, media_url")
                                     .eq("media_type", "__avatar__")
-                                    .in("user_name", uncachedUsers);
+                                    .in("user_name", uncachedUsers)
+                                    .order("created_at", { ascending: false });
                                 if (avatarRes.data) {
+                                    var seen = {};
                                     avatarRes.data.forEach(function(a) {
-                                        if (a.media_url) avatarCache[a.user_name] = a.media_url;
+                                        if (a.media_url && !seen[a.user_name]) {
+                                            seen[a.user_name] = true;
+                                            avatarCache[a.user_name] = a.media_url;
+                                        }
                                     });
                                 }
                             } catch(e) {}
@@ -6100,10 +6110,10 @@
                 detail.style.display = 'block';
                 detail.classList.add('active');
 
-                const displayTitle = ann.title || '公告';
-                document.getElementById('announcementDetailTitle').textContent = displayTitle;
+                var annData = parseAnnData(ann);
+                document.getElementById('announcementDetailTitle').textContent = annData.title;
                 document.getElementById('announcementDetailTime').textContent = new Date(ann.created_at).toLocaleString('zh-CN');
-                document.getElementById('announcementDetailContent').textContent = ann.content || '';
+                document.getElementById('announcementDetailContent').textContent = annData.content;
                 
                 // 设置发布者信息
                 const userInfoEl = document.getElementById('announcementDetailUserInfo');
@@ -6143,6 +6153,17 @@
                 }
             }
 
+            function parseAnnData(ann) {
+                var title = '公告', content = ann.content || '';
+                if (ann.content) {
+                    try {
+                        var parsed = JSON.parse(ann.content);
+                        if (parsed.title !== undefined) { title = parsed.title || '公告'; content = parsed.content || ''; }
+                    } catch(e) {}
+                }
+                return { title: title, content: content };
+            }
+
             function renderAnnouncementList() {
                 const listEl = document.getElementById('announcementList');
                 if (!listEl) return;
@@ -6161,8 +6182,9 @@
                     item.className = 'announcement-item' + (isRead ? '' : ' unread');
                     item.onclick = function() { showAnnouncementDetail(ann); };
 
-                    const displayTitle = ann.title || '公告';
-                    const previewContent = ann.content ? (ann.content.length > 100 ? ann.content.substring(0, 100) + '...' : ann.content) : '';
+                    var annData = parseAnnData(ann);
+                    const displayTitle = annData.title;
+                    const previewContent = annData.content ? (annData.content.length > 100 ? annData.content.substring(0, 100) + '...' : annData.content) : '';
                     
                     item.innerHTML = `
                         <div class="announcement-item-header">
@@ -6196,10 +6218,11 @@
                 }
 
                 try {
+                    // content字段存JSON：{title, content}（posts表没有title列）
+                    const storeData = JSON.stringify({ title: title, content: content });
                     const { error } = await sb.from('posts').insert([{
                         user_name: ADMIN_NAME,
-                        title: title, // 保存标题
-                        content: content,
+                        content: storeData,
                         media_type: ANN_MARKER,
                         media_url: '',
                         actor_key: 'admin_' + Date.now()
@@ -6259,6 +6282,18 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.23',
+                    date: '2026-05-03 10:00',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>修复公告发布失败bug（不用title列，JSON存content）</li>
+                            <li>修复点击头像/个人资料显示旧头像（排序取最新+缓存优先）</li>
+                            <li>修复聊天列表加载慢（limit 1000→200，缓存30秒→120秒）</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.22',
                     date: '2026-05-03 09:50',
