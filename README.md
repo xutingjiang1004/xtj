@@ -2,9 +2,11 @@
 
 ## v0.0.26 - 2026-05-03 12:00
 ### 更新内容
+- 修复PC浏览器打开空白页问题（移除100dvh防止高度塌陷，crypto加try/catch防崩溃，CDN移到底部不阻塞渲染）
+- 修复iOS灵动岛/刘海屏区域视觉适配（safe-area统一加到面板层，消除重复padding）
 - 修复登录时间不更新问题（改用UPDATE→fallback INSERT策略，读端order().limit(1)彻底解决多行覆盖）
 - 修复注册时间/登录时间显示为"-"的问题
-- iOS Safari浏览器完整适配（viewport-fit=cover + safe-area-inset-* + -webkit-fill-available）
+- iOS Safari浏览器完整适配（动态--vh方案解决100vh工具栏问题）
 - 修复底部导航栏/通知/Toast在iOS刘海屏下位置异常
 
 ## v0.0.25 - 2026-05-03 10:35
