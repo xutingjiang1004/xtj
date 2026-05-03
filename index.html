@@ -1349,6 +1349,10 @@
             opacity: 1; pointer-events: all;
             transform: translateY(0);
         }
+        /* 聊天和AI面板不需要额外的底部72px padding，因为输入框自己固定在底部 */
+        #panelChat, #panelAi {
+            padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+        }
         .dock-bar {
             position: fixed; bottom: 0; left: 0; right: 0;
             display: flex; justify-content: center; align-items: center;
