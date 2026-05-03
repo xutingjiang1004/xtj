@@ -1444,515 +1444,112 @@
         .dock-chat-container .chat-view.hidden { display: none; }
         .dock-chat-container .chat-list-item { border-bottom-color: rgba(0,0,0,0.04); }
 
-        /* Dock面板: Taylor Swift 专题 */
-        .ts-container {
-            --ts-ink: #2d1f27;
-            --ts-paper: rgba(255, 252, 246, 0.82);
-            --ts-border: rgba(45, 31, 39, 0.08);
-            --ts-shadow: 0 24px 70px rgba(86, 53, 67, 0.16);
+        /* ========== 双人专辑展示墙 ========== */
+        @import url('https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap');
+
+        .idol-page {
             height: 100%;
             overflow-y: auto;
+            padding: 24px 16px 86px;
             -webkit-overflow-scrolling: touch;
-            padding: 0 14px 86px;
-            color: var(--ts-ink);
-            background:
-                radial-gradient(circle at 18% 8%, rgba(245, 180, 201, 0.22), transparent 28%),
-                radial-gradient(circle at 86% 2%, rgba(155, 194, 214, 0.24), transparent 26%),
-                linear-gradient(180deg, rgba(255,255,255,0.18), rgba(255,255,255,0));
-        }
-        .ts-signature {
-            position: relative;
-            padding: 18px 0 16px;
-            text-align: center;
-            flex-shrink: 0;
-        }
-        .ts-signature::after {
-            content: "";
-            position: absolute;
-            left: 8%;
-            right: 8%;
-            bottom: 0;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(45,31,39,0.14), transparent);
-        }
-        .ts-sig-card {
-            position: relative;
-            overflow: hidden;
-            border-radius: 18px;
-            padding: 18px 14px 16px;
-            background: linear-gradient(135deg, rgba(255,255,255,0.74), rgba(255,247,250,0.46));
-            border: 1px solid rgba(255,255,255,0.7);
-            box-shadow: 0 18px 46px rgba(72, 42, 58, 0.10), inset 0 1px 0 rgba(255,255,255,0.75);
-            backdrop-filter: blur(18px) saturate(140%);
-            -webkit-backdrop-filter: blur(18px) saturate(140%);
-        }
-        .ts-sig-card::before {
-            content: "";
-            position: absolute;
-            inset: -30% -20%;
-            background: linear-gradient(115deg, transparent 22%, rgba(255,255,255,0.34) 42%, transparent 58%);
-            transform: translateX(-54%) rotate(8deg);
-            animation: tsSoftSweep 4.8s ease-in-out infinite 1.7s;
-            pointer-events: none;
-        }
-        @keyframes tsSoftSweep {
-            0%, 42% { transform: translateX(-58%) rotate(8deg); opacity: 0; }
-            58% { opacity: 1; }
-            100% { transform: translateX(54%) rotate(8deg); opacity: 0; }
-        }
-        .ts-sig-svg {
-            position: relative;
-            width: min(100%, 360px);
-            height: auto;
-            display: block;
-            margin: 0 auto;
-            overflow: visible;
-        }
-        .ts-sign-path {
-            fill: none;
-            stroke: url(#tsInkGrad);
-            stroke-width: 5.2;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-            /* 配合 pathLength="100" 使用，免去计算乱七八糟的长度 */
-            stroke-dasharray: 100;
-            stroke-dashoffset: 100;
-            filter: drop-shadow(0 3px 8px rgba(163, 87, 118, 0.18));
-            animation: tsSignDraw 3.2s cubic-bezier(0.62, 0, 0.18, 1) forwards;
-        }
-        .ts-sign-path.ts-sign-word-2 {
-            stroke-dasharray: 100;
-            stroke-dashoffset: 100;
-            animation-delay: 1.12s;
-        }
-        .ts-sign-flourish {
-            fill: none;
-            stroke: rgba(188, 120, 146, 0.62);
-            stroke-width: 2.1;
-            stroke-linecap: round;
-            stroke-dasharray: 100;
-            stroke-dashoffset: 100;
-            animation: tsSignDraw 1.45s ease forwards 2.55s;
-        }
-        @keyframes tsSignDraw { to { stroke-dashoffset: 0; } }
-        
-        .ts-signature.ts-sign-loop .ts-sign-path,
-        .ts-signature.ts-sign-loop .ts-sign-flourish {
-            animation-play-state: running;
-        }
-        /* ... 保留其间的 ts-hero-kicker 等基础样式 ... */
-
-        /* ========== Apple Music 动态流体专辑卡片 ========== */
-        .ts-card {
-            position: relative;
-            min-height: 270px;
-            border-radius: 20px;
-            cursor: pointer;
             background: transparent;
-            border: none;
-            box-shadow: none; /* 阴影转移到内层 */
-            opacity: 0;
-            transform: translateY(26px) scale(0.98) translateZ(0); /* 开启硬件加速 */
-            animation: tsCardIn 0.72s cubic-bezier(0.16,1,0.3,1) forwards;
-            transition: transform 0.55s cubic-bezier(0.16,1,0.3,1);
-            isolation: isolate;
-            will-change: transform, opacity;
         }
-        .ts-card:nth-child(1) { animation-delay: 0.05s; }
-        .ts-card:nth-child(2) { animation-delay: 0.12s; }
-        .ts-card:nth-child(3) { animation-delay: 0.19s; }
-        .ts-card:nth-child(4) { animation-delay: 0.26s; }
-        .ts-card:nth-child(5) { animation-delay: 0.33s; }
-        .ts-card:nth-child(6) { animation-delay: 0.40s; }
-        .ts-card:nth-child(7) { animation-delay: 0.47s; }
-        .ts-card:nth-child(8) { animation-delay: 0.54s; }
-        .ts-card:nth-child(9) { animation-delay: 0.61s; }
-        .ts-card:nth-child(10) { animation-delay: 0.68s; }
-        .ts-card:nth-child(11) { animation-delay: 0.75s; }
-        .ts-card:nth-child(12) { animation-delay: 0.82s; }
-        
-        @keyframes tsCardIn {
-            from { opacity: 0; transform: translateY(26px) scale(0.98) translateZ(0); filter: blur(8px); }
-            to { opacity: 1; transform: translateY(0) scale(1) translateZ(0); filter: blur(0); }
+        .idol-section {
+            margin-bottom: 40px;
         }
-
-        /* 废弃旧的遮罩和背景，提升性能 */
-        .ts-card::before, .ts-card::after { display: none !important; }
-
-        /* Apple Music 标志性动态模糊底层 */
-        .ts-am-bg {
-            position: absolute;
-            inset: 2%;
-            z-index: 0;
-            background-size: cover;
-            background-position: center;
-            filter: blur(28px) saturate(220%);
-            opacity: 0.65;
-            transform: scale(0.95) translateZ(0);
-            transition: all 0.6s cubic-bezier(0.16,1,0.3,1);
-            animation: tsAMFluid 8s ease-in-out infinite alternate;
-            will-change: transform, opacity, filter;
-            pointer-events: none;
+        .idol-title {
+            font-family: 'Great Vibes', cursive;
+            font-size: 46px;
+            text-align: center;
+            margin-bottom: 24px;
+            color: var(--text-main);
+            text-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            letter-spacing: 2px;
         }
-
-        .ts-card:hover .ts-am-bg {
-            opacity: 1;
-            filter: blur(40px) saturate(260%);
-            transform: scale(1.15) translateZ(0);
+        [data-theme="dark"] .idol-title {
+            text-shadow: 0 4px 16px rgba(0,0,0,0.6);
         }
-
-        @keyframes tsAMFluid {
-            0% { transform: scale(1) translate(0, 0) rotate(0deg); }
-            33% { transform: scale(1.08) translate(4%, -4%) rotate(2deg); }
-            66% { transform: scale(1.04) translate(-4%, 4%) rotate(-2deg); }
-            100% { transform: scale(1.12) translate(-2%, -2%) rotate(3deg); }
+        .idol-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
         }
-
-        /* 专辑真实内容容器 */
-        .ts-card-inner {
+        @media (min-width: 480px) {
+            .idol-grid { grid-template-columns: repeat(3, 1fr); }
+        }
+        .idol-card {
             position: relative;
-            z-index: 2;
-            width: 100%;
-            height: 100%;
-            min-height: inherit;
-            border-radius: 20px;
+            border-radius: 16px;
             overflow: hidden;
-            box-shadow: 0 18px 42px rgba(0,0,0,0.35);
-            background: #111;
-            transition: box-shadow 0.55s ease, border-radius 0.55s ease;
-            transform: translateZ(0);
-            will-change: box-shadow;
-        }
-
-        .ts-card-inner::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.85) 100%);
-            z-index: 1;
-            pointer-events: none;
-        }
-
-        .ts-card:active { transform: scale(0.95) translateZ(0); }
-        .ts-card:hover { transform: translateY(-8px) scale(1.03) translateZ(0); }
-        .ts-card:hover .ts-card-inner { box-shadow: 0 32px 80px rgba(0,0,0,0.65); }
-
-        .ts-card-img {
-            position: absolute;
-            inset: 0;
-            overflow: hidden;
+            aspect-ratio: 1 / 1;
             background: #1a1a1a;
+            transform: translateZ(0);
+            box-shadow: 0 10px 28px rgba(0,0,0,0.12);
         }
-        .ts-card-img img {
+        .idol-cover {
             width: 100%;
             height: 100%;
             object-fit: cover;
+            /* 绝对禁止点击、放大、下载和拖拽 */
             pointer-events: none;
             user-select: none;
-            -webkit-user-select: none;
-            -webkit-touch-callout: none;
-            transform: scale(1.04);
-            filter: brightness(0.92);
-            animation: tsCoverDrift 10s ease-in-out infinite alternate;
+            -webkit-user-drag: none;
+            transition: transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .ts-card-img-protect {
+        .idol-overlay {
             position: absolute;
             inset: 0;
-            z-index: 1;
-        }
-        @keyframes tsCoverDrift {
-            from { transform: scale(1.04) translate3d(-1px, -2px, 0); }
-            to { transform: scale(1.10) translate3d(2px, 3px, 0); }
-        }
-        .ts-card:hover .ts-card-img img {
-            transform: scale(1.14);
-            filter: brightness(1.02) saturate(1.1);
-        }
-        .ts-poster-meta {
-            position: absolute;
-            left: 18px;
-            right: 18px;
-            bottom: 20px;
-            z-index: 4;
-            color: white;
-            text-align: left;
-            text-shadow: 0 3px 20px rgba(0,0,0,0.55);
-        }
-        .ts-poster-no {
-            font-size: 10px;
-            letter-spacing: 3px;
-            font-weight: 800;
-            color: rgba(255,255,255,0.78);
-            text-transform: uppercase;
-        }
-        .ts-poster-title {
-            margin-top: 5px;
-            font-family: Georgia, "Times New Roman", serif;
-            font-size: 26px;
-            line-height: 0.95;
-            font-style: italic;
-            letter-spacing: 0;
-        }
-        .ts-photo-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 12px;
-            margin-bottom: 18px;
-        }
-        .ts-photo-card {
-            position: relative;
-            overflow: hidden;
-            min-height: 180px;
-            border-radius: 12px;
-            background: var(--photo-img) center / cover no-repeat;
-            border: 1px solid rgba(255,255,255,0.55);
-            box-shadow: 0 18px 50px rgba(41, 35, 38, 0.13);
-            opacity: 0;
-            transform: translateY(22px);
-            animation: tsPanelIn 0.7s cubic-bezier(0.16,1,0.3,1) forwards;
-        }
-        .ts-photo-card:nth-child(1) { animation-delay: 0.16s; }
-        .ts-photo-card:nth-child(2) { animation-delay: 0.28s; }
-        .ts-photo-card:nth-child(3) { animation-delay: 0.40s; }
-        .ts-photo-card::before {
-            content: "";
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(180deg, rgba(0,0,0,0.02), rgba(0,0,0,0.50));
-        }
-        .ts-photo-card span {
-            position: absolute;
-            left: 14px;
-            right: 14px;
-            bottom: 13px;
-            color: white;
-            font-size: 12px;
-            line-height: 1.5;
-            font-weight: 700;
-            text-shadow: 0 2px 14px rgba(0,0,0,0.5);
-        }
-        .ts-footer {
-            margin: 12px 0 0;
-            text-align: center;
-            font-size: 11px;
-            line-height: 1.7;
-            color: rgba(45,31,39,0.56);
-            font-style: italic;
-        }
-        .ts-detail-overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 95;
-            padding: 14px 14px calc(86px + env(safe-area-inset-bottom, 0px));
-            background: rgba(248, 241, 237, 0.72);
-            backdrop-filter: blur(22px) saturate(130%);
-            -webkit-backdrop-filter: blur(22px) saturate(130%);
-            opacity: 0;
-            pointer-events: none;
-            transform: translateY(14px);
-            transition: opacity 0.32s ease, transform 0.32s cubic-bezier(0.16,1,0.3,1);
-        }
-        .ts-detail-overlay.active {
-            opacity: 1;
-            pointer-events: auto;
-            transform: translateY(0);
-        }
-        .ts-detail-panel {
-            height: 100%;
-            max-width: 680px;
-            margin: 0 auto;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-            border-radius: 18px;
-            background: rgba(255, 252, 247, 0.88);
-            border: 1px solid rgba(255,255,255,0.72);
-            box-shadow: 0 30px 90px rgba(54, 41, 47, 0.22);
-        }
-        .ts-detail-hero {
-            position: relative;
-            min-height: 440px;
-            overflow: hidden;
-            background: #111;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(0px);
+            -webkit-backdrop-filter: blur(0px);
             display: flex;
             align-items: center;
             justify-content: center;
-        }
-        .ts-am-glow {
-            position: absolute;
-            inset: -20%;
-            background-size: cover;
-            background-position: center;
-            filter: blur(60px) saturate(200%);
-            opacity: 0.85;
-            z-index: 1;
-            animation: am-fluid 12s infinite alternate ease-in-out;
-        }
-        .ts-detail-cover {
-            position: relative;
+            opacity: 0;
+            transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: none; /* 让鼠标事件彻底失效 */
             z-index: 2;
-            width: 240px;
-            height: 240px;
-            object-fit: cover;
-            border-radius: 12px;
-            box-shadow: 0 30px 60px rgba(0,0,0,0.7);
-            animation: am-breathe 8s infinite alternate ease-in-out;
-            pointer-events: none;
-            user-select: none;
         }
-        .ts-detail-hero::after {
-            content: "";
-            position: absolute;
-            inset: 0;
-            z-index: 2;
-            background: linear-gradient(180deg, rgba(0,0,0,0.05) 40%, rgba(0,0,0,0.85) 100%);
-            pointer-events: none;
+        [data-theme="dark"] .idol-overlay {
+            background: rgba(0, 0, 0, 0.2);
         }
-        @keyframes am-fluid {
-            0% { transform: scale(1) translate(0, 0) rotate(0deg); }
-            33% { transform: scale(1.1) translate(3%, -2%) rotate(2deg); opacity: 0.95; }
-            66% { transform: scale(1.05) translate(-2%, 3%) rotate(-1deg); }
-            100% { transform: scale(1.15) translate(-3%, -3%) rotate(3deg); opacity: 0.75; }
+        .idol-card:hover .idol-cover {
+            transform: scale(1.12);
         }
-        @keyframes am-breathe {
-            0% { transform: scale(1) translateY(0); }
-            100% { transform: scale(1.04) translateY(-8px); }
+        .idol-card:hover .idol-overlay {
+            opacity: 1;
+            /* 极致丝滑的高斯模糊磨砂效果 */
+            backdrop-filter: blur(12px) saturate(130%);
+            -webkit-backdrop-filter: blur(12px) saturate(130%);
         }
-        .ts-detail-close {
-            position: absolute;
-            top: 14px;
-            right: 14px;
-            z-index: 3;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            border: 1px solid rgba(255,255,255,0.42);
-            background: rgba(0,0,0,0.24);
-            color: white;
-            cursor: pointer;
-            font-size: 22px;
-            line-height: 1;
+        .idol-sig-svg {
+            width: 100%;
+            height: 100%;
+            overflow: visible;
         }
-        .ts-detail-title {
-            position: absolute;
-            left: 20px;
-            right: 20px;
-            bottom: 24px;
-            z-index: 3;
-            color: white;
-            text-shadow: 0 4px 24px rgba(0,0,0,0.8);
+        .idol-sig-text {
+            font-family: 'Great Vibes', cursive;
+            font-size: 42px;
+            fill: transparent;
+            stroke: #fff;
+            stroke-width: 1.5px;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            stroke-dasharray: 300;
+            stroke-dashoffset: 300;
+            text-anchor: middle;
+            dominant-baseline: middle;
         }
-        .ts-detail-title small {
-            display: block;
-            font-size: 10px;
-            letter-spacing: 2.4px;
-            font-weight: 900;
-            color: rgba(255,255,255,0.74);
-            margin-bottom: 8px;
+        .idol-card:hover .idol-sig-text {
+            /* 描边写字动画1.5秒，然后0.5秒淡入实心填充，真实得一批 */
+            animation: sigDraw 1.5s ease-out forwards, sigFill 0.5s ease-in 1.2s forwards;
         }
-        .ts-detail-title h2 {
-            margin: 0;
-            font-family: Georgia, "Times New Roman", serif;
-            font-style: italic;
-            font-size: 38px;
-            line-height: 0.96;
-            letter-spacing: 0;
+        @keyframes sigDraw {
+            to { stroke-dashoffset: 0; }
         }
-        .ts-detail-title p {
-            margin: 10px 0 0;
-            max-width: 420px;
-            font-size: 12px;
-            line-height: 1.7;
-            color: rgba(255,255,255,0.82);
+        @keyframes sigFill {
+            to { fill: #fff; stroke-width: 0.5px; text-shadow: 0 4px 12px rgba(0,0,0,0.5); }
         }
-        .ts-detail-body {
-            padding: 18px;
-            color: #2d1f27;
-        }
-        .ts-detail-photo-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr); /* 改为 2 列布局 */
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-        .ts-detail-photo {
-            min-height: 180px; /* 稍微增加高度，适配 2x2 布局 */
-            border-radius: 12px;
-            background-size: cover;
-            background-position: center;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
-            overflow: hidden;
-            background: var(--detail-photo) center / cover no-repeat;
-            animation: tsDetailPhotoFloat 7s ease-in-out infinite alternate;
-        }
-        .ts-detail-photo:nth-child(2) { animation-delay: 0.8s; }
-        .ts-detail-photo:nth-child(3) { animation-delay: 1.4s; }
-        @keyframes tsDetailPhotoFloat {
-            from { transform: translateY(0) scale(1); filter: saturate(0.95); }
-            to { transform: translateY(-4px) scale(1.015); filter: saturate(1.08); }
-        }
-        .ts-detail-section {
-            padding: 16px 0;
-            border-top: 1px solid rgba(45,31,39,0.08);
-        }
-        .ts-detail-section h4 {
-            margin: 0 0 9px;
-            font-size: 12px;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            color: rgba(45,31,39,0.54);
-        }
-        .ts-detail-section p {
-            margin: 0;
-            font-size: 13px;
-            line-height: 1.8;
-            color: rgba(45,31,39,0.78);
-        }
-        .ts-song-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-        .ts-song-list span {
-            max-width: 100%;
-            padding: 7px 10px;
-            border-radius: 99px;
-            background: rgba(45,31,39,0.06);
-            border: 1px solid rgba(45,31,39,0.08);
-            font-size: 12px;
-            color: rgba(45,31,39,0.76);
-        }
-        @media (min-width: 620px) {
-            .ts-container { padding-left: 22px; padding-right: 22px; }
-            .ts-gallery { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-            .ts-photo-grid { grid-template-columns: 1.1fr 0.9fr; }
-            .ts-photo-card:first-child { grid-row: span 2; min-height: 372px; }
-            .ts-detail-photo-grid { grid-template-columns: repeat(2, 1fr); }
-        }
-        [data-theme="dark"] .ts-container {
-            --ts-ink: #f0e6ed;
-            --ts-paper: rgba(24, 22, 28, 0.68);
-            --ts-border: rgba(255,255,255,0.08);
-            --ts-shadow: 0 24px 70px rgba(0,0,0,0.28);
-            background:
-                radial-gradient(circle at 18% 8%, rgba(192, 89, 128, 0.16), transparent 28%),
-                radial-gradient(circle at 86% 2%, rgba(89, 153, 188, 0.16), transparent 26%),
-                linear-gradient(180deg, rgba(0,0,0,0.1), rgba(0,0,0,0));
-        }
-        [data-theme="dark"] .ts-sig-card {
-            background: linear-gradient(135deg, rgba(26,24,32,0.78), rgba(40,30,42,0.48));
-            border-color: rgba(255,255,255,0.08);
-        }
-        [data-theme="dark"] .ts-hero-kicker,
-        [data-theme="dark"] .ts-section-title span,
-        [data-theme="dark"] .ts-hero-copy,
-        [data-theme="dark"] .ts-footer { color: rgba(240,230,237,0.62); }
-        [data-theme="dark"] .ts-detail-overlay { background: rgba(13, 12, 16, 0.72); }
-        [data-theme="dark"] .ts-detail-panel { background: rgba(28, 25, 32, 0.92); border-color: rgba(255,255,255,0.08); }
-        [data-theme="dark"] .ts-detail-body { color: #f0e6ed; }
-        [data-theme="dark"] .ts-detail-section { border-top-color: rgba(255,255,255,0.08); }
-        [data-theme="dark"] .ts-detail-section h4 { color: rgba(240,230,237,0.58); }
-        [data-theme="dark"] .ts-detail-section p { color: rgba(240,230,237,0.76); }
-        [data-theme="dark"] .ts-song-list span { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.08); color: rgba(240,230,237,0.78); }
 
         /* 暗色模式 Dock */
         [data-theme="dark"] .dock-bar {
@@ -3508,81 +3105,170 @@
             </div>
         </div>
 
-        <div class="dock-panel" id="panelAi">
-            <div class="ts-container">
-                <div class="ts-signature">
-                    <div class="ts-sig-card">
-                        <svg viewBox="0 0 500 150" class="ts-sig-svg" aria-label="Taylor Swift animated signature">
-                            <defs>
-                                <linearGradient id="tsInkGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                    <stop offset="0%" stop-color="#8d4a68"/>
-                                    <stop offset="48%" stop-color="#cf789b"/>
-                                    <stop offset="100%" stop-color="#6f8fb2"/>
-                                </linearGradient>
-                            </defs>
-                            <path class="ts-sign-path" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" />
-                            <path class="ts-sign-path ts-sign-word-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" />
-                            <path class="ts-sign-flourish" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" />
-                        </svg>
-                        <div class="ts-hero-kicker">ERA COLLECTION</div>
-                        <div class="ts-hero-copy">a poster wall of albums, tour light, and soft-focus public moments</div>
-                    </div>
-                </div>
-                <div class="ts-feature">
-                    <div class="ts-feature-frame" style="--ts-feature-img:url('https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(52791470537).jpg?width=1280');">
-                        <div class="ts-feature-copy">
-                            <b>The Eras Edit</b>
-                            <span>Album covers, stage photography, and a handwritten opening moment in one curated scroll.</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="ts-section-title">
-                    <h3>Album Posters</h3>
-                    <span>12 STUDIO ERAS</span>
-                </div>
-                <div class="ts-gallery" id="tsGallery">
-                </div>
-                <div class="ts-section-title">
-                    <h3>Public Photo Notes</h3>
-                    <span>LIVE FRAMES</span>
-                </div>
-                <div class="ts-photo-grid">
-                    <div class="ts-photo-card" style="--photo-img:url('https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(52792486908).jpg?width=1280');">
-                        <span>stage contrast, reputation-scale lighting</span>
-                    </div>
-                    <div class="ts-photo-card" style="--photo-img:url('https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(52792258594).jpg?width=1024');">
-                        <span>gold hour, full-room performance energy</span>
-                    </div>
-                    <div class="ts-photo-card" style="--photo-img:url('https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(5204582578).jpg?width=640');">
-                        <span>Fearless-era archive frame</span>
-                    </div>
-                </div>
-                <div class="ts-footer">Album art from public encyclopedia pages; live photos from Wikimedia Commons.</div>
-                <div class="ts-detail-overlay" id="tsAlbumDetail" onclick="if(event.target===this) closeTSAlbumDetail()">
-                    <div class="ts-detail-panel">
-                        <div class="ts-detail-hero" id="tsDetailHero">
-                            <button class="ts-detail-close" onclick="closeTSAlbumDetail()" title="关闭">×</button>
-                            <div class="ts-am-glow" id="tsDetailGlow"></div>
-                            <img class="ts-detail-cover" id="tsDetailCover" alt="" draggable="false">
-                            <div class="ts-detail-title">
-                                <small id="tsDetailEra"></small>
-                                <h2 id="tsDetailTitle"></h2>
-                                <p id="tsDetailIntro"></p>
-                            </div>
-                        </div>
-                        <div class="ts-detail-body">
-                            <div class="ts-detail-photo-grid" id="tsDetailPhotos"></div>
-                            <div class="ts-detail-section">
-                                <h4>Album Story</h4>
-                                <p id="tsDetailStory"></p>
-                            </div>
-                            <div class="ts-detail-section">
-                                <h4>Songs</h4>
-                                <div class="ts-song-list" id="tsDetailSongs"></div>
-                            </div>
+        
+           
                             <div class="ts-detail-section">
                                 <h4>Background</h4>
                                 <p id="tsDetailBackground"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="dock-panel" id="panelAi">
+            <div class="idol-page">
+                <div class="idol-section">
+                    <div class="idol-title">Taylor Swift</div>
+                    <div class="idol-grid">
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/1/1f/Taylor_Swift_-_Taylor_Swift.png/500px-Taylor_Swift_-_Taylor_Swift.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/8/86/Taylor_Swift_-_Fearless.png/500px-Taylor_Swift_-_Fearless.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/8/8f/Taylor_Swift_-_Speak_Now_cover.png/500px-Taylor_Swift_-_Speak_Now_cover.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/e/e8/Taylor_Swift_-_Red.png/500px-Taylor_Swift_-_Red.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/Taylor_Swift_-_1989.png/500px-Taylor_Swift_-_1989.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f2/Taylor_Swift_-_Reputation.png/500px-Taylor_Swift_-_Reputation.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/c/cd/Taylor_Swift_-_Lover.png/500px-Taylor_Swift_-_Lover.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f8/Taylor_Swift_-_Folklore.png/500px-Taylor_Swift_-_Folklore.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/0/0a/Taylor_Swift_-_Evermore.png/500px-Taylor_Swift_-_Evermore.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/9/9f/Midnights_-_Taylor_Swift.png/500px-Midnights_-_Taylor_Swift.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/6/6e/Taylor_Swift_%E2%80%93_The_Tortured_Poets_Department_%28album_cover%29.png/500px-Taylor_Swift_%E2%80%93_The_Tortured_Poets_Department_%28album_cover%29.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f4/Taylor_Swift_%E2%80%93_The_Life_of_a_Showgirl_%28album_cover%29.png/500px-Taylor_Swift_%E2%80%93_The_Life_of_a_Showgirl_%28album_cover%29.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Taylor Swift</text>
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="idol-section">
+                    <div class="idol-title">Jennie Ruby Jane</div>
+                    <div class="idol-grid">
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/8/8c/Jennie_-_Solo.png/500px-Jennie_-_Solo.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Jennie</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/e/e0/Jennie_-_You_%26_Me.png/500px-Jennie_-_You_%26_Me.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Jennie</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/0/0e/The_Weeknd%2C_Jennie_and_Lily-Rose_Depp_-_One_of_the_Girls.png/500px-The_Weeknd%2C_Jennie_and_Lily-Rose_Depp_-_One_of_the_Girls.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Jennie</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/7/7d/Matt_Champion_and_Jennie_-_Slow_Motion.png/500px-Matt_Champion_and_Jennie_-_Slow_Motion.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Jennie</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/1/15/Zico_-_Spot%21.png/500px-Zico_-_Spot%21.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Jennie</text>
+                                </svg>
+                            </div>
+                        </div>
+                        <div class="idol-card">
+                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f3/Jennie_-_Mantra.png/500px-Jennie_-_Mantra.png" draggable="false">
+                            <div class="idol-overlay">
+                                <svg class="idol-sig-svg" viewBox="0 0 200 100">
+                                    <text x="50%" y="55%" class="idol-sig-text">Jennie</text>
+                                </svg>
                             </div>
                         </div>
                     </div>
@@ -5942,26 +5628,19 @@
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
                 const now = Date.now();
                 if (tab === currentDockTab && !skipReturn) {
-                    // 已经在当前tab，单击执行返回操作
                     if (tab === 'posts') {
-                        // 帖子页：回到顶部
                         const panel = document.getElementById('panelPosts');
                         if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                     } else if (tab === 'chat') {
-                        // 聊天页：如果在对话中，返回聊天列表；否则回到顶部
-                        if (dockChatActiveUser) {
-                            dockChatGoBack();
-                        } else {
+                        if (dockChatActiveUser) dockChatGoBack();
+                        else {
                             const panel = document.getElementById('panelChat');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         }
                     } else if (tab === 'ai') {
-                        // TS专题：回到顶部
-                        const tsContainer = document.querySelector('.ts-container');
-                        if (tsContainer) tsContainer.scrollTo({ top: 0, behavior: 'smooth' });
-                        restartTSSignature();
+                        const idolPage = document.querySelector('.idol-page');
+                        if (idolPage) idolPage.scrollTo({ top: 0, behavior: 'smooth' });
                     } else if (tab === 'profile') {
-                        // 我的页：回到顶部
                         const panel = document.getElementById('panelProfile');
                         if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                     }
@@ -5977,8 +5656,6 @@
                 const tabBtn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
                 if (tabBtn) tabBtn.classList.add('active');
                 if (tab === 'chat') { loadDockChatList(); startDMPolling(30000); }
-                if (tab === 'ai') { initTSGallery(); startTSSignatureLoop(); }
-                else { stopTSSignatureLoop(); closeTSAlbumDetail(true); }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); }
             };
 
@@ -6302,136 +5979,7 @@
             document.getElementById('dockChatFileInp').addEventListener('change', function() { if (this.files.length) showDockChatFilePreview(this.files[0]); });
             document.getElementById('dockCfpRemove').addEventListener('click', clearDockChatFilePreview);
 
-            // ========== Taylor Swift 画廊 ==========
-            const tsPublicPhotos = {
-                erasPink: "https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(52791470537).jpg?width=1280",
-                erasStage: "https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(52792486908).jpg?width=1280",
-                erasGold: "https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(52792258594).jpg?width=1024",
-                fearlessLive: "https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(5204582578).jpg?width=640"
-            };
-            const tsAlbumData = [
-                { key:"showgirl", title:"Showgirl", fullTitle:"The Life of a Showgirl", year:"2025", no:"2025.10.3", tag:"SHOW", glow:"rgba(232,91,51,0.54)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/f/f4/Taylor_Swift_%E2%80%93_The_Life_of_a_Showgirl_%28album_cover%29.png/500px-Taylor_Swift_%E2%80%93_The_Life_of_a_Showgirl_%28album_cover%29.png", sub:"glamour, water, orange light", intro:"A theatrical pop era built around stage spectacle and the private life behind it.", story:"This era turns the Eras Tour afterglow into a glossy backstage world: bright color, performance mythology, and the cost of being watched.", background:"Released after the massive Eras Tour cycle, it frames fame as both performance and confession, with show-business imagery leading the visual language.", songs:["The Fate of Ophelia","Elizabeth Taylor","Opalite","Father Figure","Eldest Daughter","Ruin The Friendship","Actually Romantic","Wi$h Li$t","Wood","CANCELLED!","Honey","The Life of a Showgirl"], photos:[tsPublicPhotos.erasPink,tsPublicPhotos.erasStage,tsPublicPhotos.erasGold] },
-                { key:"ttpd", title:"TTPD", fullTitle:"The Tortured Poets Department", year:"2024", no:"2024.4.19", tag:"POETS", glow:"rgba(170,160,146,0.44)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/6/6e/Taylor_Swift_%E2%80%93_The_Tortured_Poets_Department_%28album_cover%29.png/500px-Taylor_Swift_%E2%80%93_The_Tortured_Poets_Department_%28album_cover%29.png", sub:"monochrome room, ink-stained", intro:"A monochrome literary chapter: messy endings, self-mythology, and diary pages turned into sharp pop writing.", story:"The album leans into the image of a writer under pressure, mixing public scrutiny with private heartbreak and theatrical self-awareness.", background:"It arrived during the Eras Tour era and expanded Swift's late-career autobiographical style into a stark, text-heavy visual world.", songs:["Fortnight","The Tortured Poets Department","Down Bad","So Long, London","But Daddy I Love Him","Florida!!!","Guilty as Sin?","Who's Afraid of Little Old Me?","I Can Do It With a Broken Heart"], photos:[tsPublicPhotos.erasGold,tsPublicPhotos.erasPink,tsPublicPhotos.erasStage] },
-                { key:"midnights", title:"Midnights", fullTitle:"Midnights", year:"2022", no:"2022.10.21", tag:"NIGHT", glow:"rgba(54,82,130,0.50)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/9/9f/Midnights_-_Taylor_Swift.png/500px-Midnights_-_Taylor_Swift.png", sub:"lighter flame, blue hour", intro:"A late-night pop record about sleepless memory, anxiety, revenge fantasies, and glittering self-examination.", story:"Midnights frames the songs as thoughts that arrive after dark, with synth-pop surfaces and sharp autobiographical turns.", background:"After the folk-leaning sister albums, this era returned to polished pop while keeping a diaristic, adult perspective.", songs:["Lavender Haze","Maroon","Anti-Hero","Snow on the Beach","You're On Your Own, Kid","Midnight Rain","Vigilante Shit","Bejeweled","Karma","Mastermind"], photos:[tsPublicPhotos.erasPink,tsPublicPhotos.erasGold,tsPublicPhotos.erasStage] },
-                { key:"evermore", title:"evermore", fullTitle:"evermore", year:"2020", no:"2020.12.11", tag:"AMBER", glow:"rgba(131,83,49,0.48)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/0/0a/Taylor_Swift_-_Evermore.png/500px-Taylor_Swift_-_Evermore.png", sub:"winter braid, sister record", intro:"The wintry sister record to folklore, full of fictional rooms, regret, and long-shadowed storytelling.", story:"evermore deepens the folk-pop palette with character studies, moral knots, and endings that feel unresolved on purpose.", background:"Released only months after folklore, it extended the isolation-era writing world rather than starting a totally separate visual universe.", songs:["willow","champagne problems","gold rush","'tis the damn season","tolerate it","no body, no crime","happiness","dorothea","ivy","cowboy like me","evermore"], photos:[tsPublicPhotos.erasGold,tsPublicPhotos.fearlessLive,tsPublicPhotos.erasPink] },
-                { key:"folklore", title:"folklore", fullTitle:"folklore", year:"2020", no:"2020.7.24", tag:"MONO", glow:"rgba(190,190,190,0.44)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/f/f8/Taylor_Swift_-_Folklore.png/500px-Taylor_Swift_-_Folklore.png", sub:"trees, fog, private myth", intro:"A grayscale forest record where autobiography and fiction blur into quiet, detailed storytelling.", story:"folklore trades stadium brightness for cabins, cardigans, teenage triangles, and songs that feel like found letters.", background:"Created during the pandemic period, it marked a major pivot into indie-folk textures and narrative songwriting.", songs:["the 1","cardigan","the last great american dynasty","exile","my tears ricochet","mirrorball","seven","august","this is me trying","invisible string","betty","peace"], photos:[tsPublicPhotos.erasGold,tsPublicPhotos.erasPink,tsPublicPhotos.fearlessLive] },
-                { key:"lover", title:"Lover", fullTitle:"Lover", year:"2019", no:"2019.8.23", tag:"PASTEL", glow:"rgba(246,133,177,0.50)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/c/cd/Taylor_Swift_-_Lover.png/500px-Taylor_Swift_-_Lover.png", sub:"cloud color, open window", intro:"A pastel pop album about devotion, daylight, anxiety, politics, and choosing softness after a darker era.", story:"Lover opens the windows after reputation, moving toward color, romantic optimism, and public self-definition.", background:"It was Swift's first album after leaving Big Machine, making the era feel like both a personal and business reset.", songs:["Cruel Summer","Lover","The Man","The Archer","Miss Americana & the Heartbreak Prince","Paper Rings","Cornelia Street","Death By A Thousand Cuts","You Need To Calm Down","Daylight"], photos:[tsPublicPhotos.erasPink,tsPublicPhotos.erasGold,tsPublicPhotos.erasStage] },
-                { key:"reputation", title:"reputation", fullTitle:"reputation", year:"2017", no:"2017.11.10", tag:"NOIR", glow:"rgba(45,45,49,0.58)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/f/f2/Taylor_Swift_-_Reputation.png/500px-Taylor_Swift_-_Reputation.png", sub:"print, shadow, voltage", intro:"A black-and-white, high-voltage pop era about public image, backlash, obsession, and private love under noise.", story:"reputation weaponizes tabloid language, then hides a surprisingly intimate love story inside the armor.", background:"After intense public scrutiny, the album used silence, snakes, newspapers, and stadium-scale darkness as its grammar.", songs:["...Ready For It?","End Game","I Did Something Bad","Don't Blame Me","Delicate","Look What You Made Me Do","Gorgeous","Getaway Car","Call It What You Want","New Year's Day"], photos:[tsPublicPhotos.erasStage,tsPublicPhotos.erasPink,tsPublicPhotos.erasGold] },
-                { key:"1989", title:"1989", fullTitle:"1989", year:"2014", no:"2014.10.27", tag:"POP", glow:"rgba(91,166,204,0.46)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/Taylor_Swift_-_1989.png/500px-Taylor_Swift_-_1989.png", sub:"polaroid sky, clean lines", intro:"A clean-lined pop reinvention inspired by city light, Polaroids, synth shine, and the thrill of starting over.", story:"1989 is the full pop pivot: sharp hooks, bright choruses, and a visual world built from blue skies and instant film.", background:"The era moved Swift from country crossover to global pop architect, with New York imagery and a carefully styled media presence.", songs:["Welcome To New York","Blank Space","Style","Out of the Woods","Shake It Off","I Wish You Would","Bad Blood","Wildest Dreams","I Know Places","Clean"], photos:[tsPublicPhotos.erasGold,tsPublicPhotos.erasPink,tsPublicPhotos.fearlessLive] },
-                { key:"red", title:"Red", fullTitle:"Red", year:"2012", no:"2012.10.22", tag:"SCARLET", glow:"rgba(161,45,37,0.48)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/e/e8/Taylor_Swift_-_Red.png/500px-Taylor_Swift_-_Red.png", sub:"autumn cinema, sharp memory", intro:"A breakup mosaic of country, pop, rock, and autumn-colored emotional whiplash.", story:"Red is designed like a memory box: scarves, city streets, impossible phone calls, and the first big steps toward pop maximalism.", background:"The era sits at the bridge between Nashville storytelling and global pop ambition, making it one of her key transition records.", songs:["State of Grace","Red","Treacherous","I Knew You Were Trouble","All Too Well","22","We Are Never Ever Getting Back Together","Holy Ground","The Lucky One","Begin Again"], photos:[tsPublicPhotos.fearlessLive,tsPublicPhotos.erasGold,tsPublicPhotos.erasPink] },
-                { key:"speaknow", title:"Speak Now", fullTitle:"Speak Now", year:"2010", no:"2010.10.25", tag:"VIOLET", glow:"rgba(151,74,168,0.48)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/8/8f/Taylor_Swift_-_Speak_Now_cover.png/500px-Taylor_Swift_-_Speak_Now_cover.png", sub:"orchid dress, confessional", intro:"A self-written fairytale-pop record about saying the thing before the moment disappears.", story:"Speak Now turns confession into theater: weddings, apologies, revenge fantasies, and purple-lit grand gestures.", background:"Written solely by Swift, the album became a statement about authorship and control at a young age.", songs:["Mine","Sparks Fly","Back to December","Speak Now","Dear John","Mean","The Story of Us","Enchanted","Better than Revenge","Long Live"], photos:[tsPublicPhotos.fearlessLive,tsPublicPhotos.erasPink,tsPublicPhotos.erasGold] },
-                { key:"fearless", title:"Fearless", fullTitle:"Fearless", year:"2008", no:"2008.11.11", tag:"GOLD", glow:"rgba(230,187,88,0.44)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/8/86/Taylor_Swift_-_Fearless.png/500px-Taylor_Swift_-_Fearless.png", sub:"wind, shimmer, first myth", intro:"A golden country-pop coming-of-age album about first love, school hallways, and big feelings made cinematic.", story:"Fearless made teenage romance feel epic without losing the diary-page closeness that defined her early writing.", background:"This was the breakthrough era that carried Swift from country success into mainstream pop culture visibility.", songs:["Fearless","Fifteen","Love Story","Hey Stephen","White Horse","You Belong With Me","Breathe","Tell Me Why","The Way I Loved You","Forever & Always"], photos:[tsPublicPhotos.fearlessLive,tsPublicPhotos.erasGold,tsPublicPhotos.erasPink] },
-                { key:"debut", title:"Debut", fullTitle:"Taylor Swift", year:"2006", no:"2006.10.24", tag:"COUNTRY", glow:"rgba(91,154,132,0.42)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/1/1f/Taylor_Swift_-_Taylor_Swift.png/500px-Taylor_Swift_-_Taylor_Swift.png", sub:"green-blue diary glow", intro:"The first chapter: country radio, teenage detail, porch-light storytelling, and a songwriter introducing herself.", story:"Debut is built from crushes, small towns, guitars, and the confidence of a young writer already shaping her own voice.", background:"Released when Swift was still a teenager, it established the diaristic writing style that later eras kept transforming.", songs:["Tim McGraw","Picture to Burn","Teardrops on My Guitar","A Place in This World","Cold As You","The Outside","Should've Said No","Mary's Song","Our Song","I'm Only Me When I'm With You"], photos:[tsPublicPhotos.fearlessLive,tsPublicPhotos.erasGold,tsPublicPhotos.erasPink] }
-            ];
 
-            // 强制覆盖各时期真实照片数据
-            const realEraPhotos = {
-                "showgirl": ["https://upload.wikimedia.org/wikipedia/commons/thumb/7/7e/Taylor_Swift_Eras_Tour_London_2024.jpg/640px-Taylor_Swift_Eras_Tour_London_2024.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a8/Taylor_Swift_Eras_Tour_Miami_2024.jpg/640px-Taylor_Swift_Eras_Tour_Miami_2024.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/4/42/Taylor_Swift_Eras_Tour_Toronto_2024.jpg/640px-Taylor_Swift_Eras_Tour_Toronto_2024.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Taylor_Swift_Eras_Tour_2024.jpg/640px-Taylor_Swift_Eras_Tour_2024.jpg"],
-                "ttpd": ["https://upload.wikimedia.org/wikipedia/commons/thumb/5/52/Taylor_Swift_Eras_Tour_Paris_2024.jpg/640px-Taylor_Swift_Eras_Tour_Paris_2024.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/1/18/Taylor_Swift_-_The_Eras_Tour_Paris_2024.jpg/640px-Taylor_Swift_-_The_Eras_Tour_Paris_2024.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9b/Taylor_Swift_Eras_Tour_Paris_2024_2.jpg/640px-Taylor_Swift_Eras_Tour_Paris_2024_2.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/Taylor_Swift_at_the_66th_Annual_Grammy_Awards.jpg/640px-Taylor_Swift_at_the_66th_Annual_Grammy_Awards.jpg"],
-                "midnights": ["https://upload.wikimedia.org/wikipedia/commons/thumb/d/d4/Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023_-_Midnights.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023_-_Midnights.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Taylor_Swift_-_Eras_Tour_-_Tampa.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Tampa.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4d/Taylor_Swift_at_the_2022_MTV_VMAs.jpg/640px-Taylor_Swift_at_the_2022_MTV_VMAs.jpg"],
-                "evermore": ["https://upload.wikimedia.org/wikipedia/commons/thumb/8/8f/Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023_-_evermore.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023_-_evermore.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3c/Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023_-_evermore.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023_-_evermore.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Taylor_Swift_-_Eras_Tour_-_Houston_-_2023.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Houston_-_2023.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ae/Taylor_Swift_Eras_Tour_2023.jpg/640px-Taylor_Swift_Eras_Tour_2023.jpg"],
-                "folklore": ["https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Arlington_-_2023.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/6/66/Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Glendale_-_2023.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1d/Taylor_Swift_-_Eras_Tour_-_Atlanta.jpg/640px-Taylor_Swift_-_Eras_Tour_-_Atlanta.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Taylor_Swift_Grammys_2021.jpg/640px-Taylor_Swift_Grammys_2021.jpg"],
-                "lover": ["https://upload.wikimedia.org/wikipedia/commons/thumb/6/6b/Taylor_Swift_Lover_Fest.jpg/640px-Taylor_Swift_Lover_Fest.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Taylor_Swift_-_City_of_Lover_%282%29.jpg/640px-Taylor_Swift_-_City_of_Lover_%282%29.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/Taylor_Swift_at_the_2019_AMAs.jpg/640px-Taylor_Swift_at_the_2019_AMAs.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0e/Taylor_Swift_at_the_2019_VMAs.jpg/640px-Taylor_Swift_at_the_2019_VMAs.jpg"],
-                "reputation": ["https://upload.wikimedia.org/wikipedia/commons/thumb/b/b1/Reputation_Stadium_Tour_Glendale.jpg/640px-Reputation_Stadium_Tour_Glendale.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7b/Reputation_Stadium_Tour_Glendale_2.jpg/640px-Reputation_Stadium_Tour_Glendale_2.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0b/Taylor_Swift_Reputation_Tour_2018.jpg/640px-Taylor_Swift_Reputation_Tour_2018.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/Taylor_Swift_Reputation_Stadium_Tour_Tokyo.jpg/640px-Taylor_Swift_Reputation_Stadium_Tour_Tokyo.jpg"],
-                "1989": ["https://upload.wikimedia.org/wikipedia/commons/thumb/b/b5/1989_Tour_St_Louis_1.jpg/640px-1989_Tour_St_Louis_1.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fa/1989_Tour_St_Louis_2.jpg/640px-1989_Tour_St_Louis_2.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/1989_Tour_St_Louis_3.jpg/640px-1989_Tour_St_Louis_3.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Taylor_Swift_at_the_2015_MTV_Video_Music_Awards.jpg/640px-Taylor_Swift_at_the_2015_MTV_Video_Music_Awards.jpg"],
-                "red": ["https://upload.wikimedia.org/wikipedia/commons/thumb/2/29/Taylor_Swift_Red_Tour_2013.jpg/640px-Taylor_Swift_Red_Tour_2013.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/5/53/Taylor_Swift_Red_Tour.jpg/640px-Taylor_Swift_Red_Tour.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Taylor_Swift_Red_Tour_Sydney.jpg/640px-Taylor_Swift_Red_Tour_Sydney.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/3/39/Taylor_Swift_Red_Tour_4.jpg/640px-Taylor_Swift_Red_Tour_4.jpg"],
-                "speaknow": ["https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Taylor_Swift_Speak_Now_Tour.jpg/640px-Taylor_Swift_Speak_Now_Tour.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Taylor_Swift_Speak_Now_Tour_2011.jpg/640px-Taylor_Swift_Speak_Now_Tour_2011.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Taylor_Swift_Speak_Now_Tour_2.jpg/640px-Taylor_Swift_Speak_Now_Tour_2.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0c/Taylor_Swift_Speak_Now_Tour_3.jpg/640px-Taylor_Swift_Speak_Now_Tour_3.jpg"],
-                "fearless": ["https://upload.wikimedia.org/wikipedia/commons/thumb/8/86/Fearless_Tour_2010.jpg/640px-Fearless_Tour_2010.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/Taylor_Swift_Fearless_Tour_2010.jpg/640px-Taylor_Swift_Fearless_Tour_2010.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Taylor_Swift_CMA_Awards.jpg/640px-Taylor_Swift_CMA_Awards.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/3/30/Taylor_Swift_at_the_2009_MTV_Video_Music_Awards.jpg/640px-Taylor_Swift_at_the_2009_MTV_Video_Music_Awards.jpg"],
-                "debut": ["https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Taylor_Swift_at_the_2009_Tribeca_Film_Festival.jpg/640px-Taylor_Swift_at_the_2009_Tribeca_Film_Festival.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e9/Taylor_Swift_in_2008.jpg/640px-Taylor_Swift_in_2008.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b3/Taylor_Swift_2007.jpg/640px-Taylor_Swift_2007.jpg", "https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/Taylor_Swift_at_the_2006_CMA_Awards.jpg/640px-Taylor_Swift_at_the_2006_CMA_Awards.jpg"]
-            };
-
-            tsAlbumData.forEach(album => {
-                if (realEraPhotos[album.key]) {
-                    album.photos = realEraPhotos[album.key];
-                }
-            });
-
-            let tsGalleryRendered = false;
-            let tsSignatureTimer = null;
-
-            function renderTSAlbumCard(album) {
-                return '<div class="ts-card ts-card-era" data-key="' + album.key + '" data-era="' + escapeHtml(album.fullTitle) + '">' +
-                    '<div class="ts-am-bg" style="background-image:url(\'' + album.cover + '\')"></div>' +
-                    '<div class="ts-card-inner">' +
-                        '<div class="ts-card-img"><img src="' + album.cover + '" alt="' + escapeHtml(album.fullTitle) + ' album cover" loading="lazy" draggable="false"><div class="ts-card-img-protect"></div></div>' +
-                        '<div class="ts-poster-meta"><div class="ts-poster-no">' + escapeHtml(album.no) + '</div><div class="ts-poster-title">' + escapeHtml(album.title) + '</div></div>' +
-                    '</div>' +
-                    '</div>';
-            }
-
-            function restartTSSignature() {
-                const signature = document.querySelector('.ts-signature');
-                if (!signature) return;
-                signature.classList.remove('ts-sign-loop');
-                const animated = signature.querySelectorAll('.ts-sign-path, .ts-sign-flourish');
-                animated.forEach(function(el) { el.style.animation = 'none'; });
-                void signature.offsetWidth;
-                animated.forEach(function(el) { el.style.animation = ''; });
-                signature.classList.add('ts-sign-loop');
-            }
-
-            function startTSSignatureLoop() {
-                restartTSSignature();
-                if (tsSignatureTimer) clearInterval(tsSignatureTimer);
-                tsSignatureTimer = setInterval(function() {
-                    if (currentDockTab === 'ai') restartTSSignature();
-                }, 6800);
-            }
-
-            function stopTSSignatureLoop() {
-                if (tsSignatureTimer) clearInterval(tsSignatureTimer);
-                tsSignatureTimer = null;
-            }
-
-            function initTSGallery() {
-                const gallery = document.getElementById('tsGallery');
-                if (gallery && !tsGalleryRendered) {
-                    gallery.innerHTML = tsAlbumData.map(renderTSAlbumCard).join('');
-                    tsGalleryRendered = true;
-                }
-                var cards = document.querySelectorAll('.ts-card');
-                cards.forEach(function(card) {
-                    if (card.dataset.bound === '1') return;
-                    card.dataset.bound = '1';
-                    card.addEventListener('click', function() {
-                        openTSAlbumDetail(card.dataset.key);
-                    });
-                });
-            }
-
-            function openTSAlbumDetail(key) {
-                const album = tsAlbumData.find(function(item) { return item.key === key; });
-                if (!album) return;
-                document.getElementById('tsDetailCover').src = album.cover;
-                document.getElementById('tsDetailCover').alt = album.fullTitle + ' album cover';
-                
-                // 新增：注入环境光背景图
-                document.getElementById('tsDetailGlow').style.backgroundImage = 'url("' + album.cover + '")';
-                
-                document.getElementById('tsDetailEra').textContent = album.no + ' - ' + album.tag;
-                document.getElementById('tsDetailTitle').textContent = album.fullTitle;
-                document.getElementById('tsDetailIntro').textContent = album.intro;
-                document.getElementById('tsDetailStory').textContent = album.story;
-                document.getElementById('tsDetailBackground').textContent = album.background;
-                document.getElementById('tsDetailPhotos').innerHTML = album.photos.slice(0, 4).map(function(src) {
-                    return '<div class="ts-detail-photo" style="--detail-photo:url(\'' + src + '\')"></div>';
-                }).join('');
-                document.getElementById('tsDetailSongs').innerHTML = album.songs.map(function(song) {
-                    return '<span>' + escapeHtml(song) + '</span>';
-                }).join('');
-                document.getElementById('tsAlbumDetail').classList.add('active');
-            }
-
-            function closeTSAlbumDetail(silent) {
-                const detail = document.getElementById('tsAlbumDetail');
-                if (!detail) return;
-                detail.classList.remove('active');
-                if (!silent && currentDockTab === 'ai') restartTSSignature();
-            }
-
-            window.openTSAlbumDetail = openTSAlbumDetail;
-            window.closeTSAlbumDetail = closeTSAlbumDetail;
-            window.initTSGallery = initTSGallery;
 
             window.addEventListener('DOMContentLoaded', async function() {
                 // iOS 键盘弹出修复: 避免 dock-bar 被键盘顶上去
