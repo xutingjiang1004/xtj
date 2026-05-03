@@ -6,8 +6,6 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>xtj</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">
-    </script>
     <style>
         html, body {
             touch-action: manipulation;
@@ -276,12 +274,11 @@
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
             color: var(--text-main);
-            min-height: 100vh; min-height: 100dvh; min-height: -webkit-fill-available;
+            min-height: 100vh;
             overflow: hidden;
             -webkit-font-smoothing: antialiased;
             position: relative;
             isolation: isolate;
-            -webkit-overflow-scrolling: touch;
         }
 
         .rain-bg-container {
@@ -361,7 +358,6 @@
 
         nav {
             padding: 16px 4px 8px;
-            padding-top: calc(16px + env(safe-area-inset-top, 0px));
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1324,7 +1320,7 @@
         /* ========== App容器 / Dock / 面板 ========== */
         .app-container {
             display: flex; flex-direction: column;
-            height: 100vh; height: 100dvh; height: -webkit-fill-available;
+            height: 100vh;
             overflow: hidden;
             max-width: 640px; margin: 0 auto;
             position: relative;
@@ -1340,6 +1336,7 @@
             transform: translateY(10px);
             transition: opacity 0.25s ease-out, transform 0.25s ease-out;
             padding: 16px 16px 72px;
+            padding-top: calc(16px + env(safe-area-inset-top, 0px));
             padding-left: calc(16px + env(safe-area-inset-left, 0px));
             padding-right: calc(16px + env(safe-area-inset-right, 0px));
             padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
@@ -3600,6 +3597,7 @@
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
         (function () {
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
@@ -3619,7 +3617,7 @@
             const DOCK_CHAT_CACHE_DURATION = 120000;
             let deviceId = localStorage.getItem("xtj_device_id");
             if (!deviceId) {
-                deviceId = crypto.randomUUID();
+                try { deviceId = crypto.randomUUID(); } catch(e) { deviceId = 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2,9); }
                 localStorage.setItem("xtj_device_id", deviceId);
             }
 
@@ -6100,6 +6098,20 @@
             document.getElementById('dockAIInput').addEventListener('input', function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 80) + 'px'; });
 
             window.addEventListener('DOMContentLoaded', async function() {
+                // iOS viewport height fix: 动态调整容器高度适配 Safari 工具栏
+                function adjustIOSHeight() {
+                    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                    if (isIOS) {
+                        var vh = window.innerHeight * 0.01;
+                        document.documentElement.style.setProperty('--vh', vh + 'px');
+                        var app = document.querySelector('.app-container');
+                        if (app) app.style.height = 'calc(var(--vh, 1vh) * 100)';
+                    }
+                }
+                adjustIOSHeight();
+                window.addEventListener('resize', adjustIOSHeight);
+                window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
+
                 await initUI(); initRainAnimation(); initialLoad();
                 const savedThink = localStorage.getItem('xtj-ai-think');
                 if (savedThink === '0') { dockAIThinkMode = false; }
@@ -6430,9 +6442,11 @@
                     content: `
                         <h4>更新内容</h4>
                         <ul>
+                            <li>修复PC浏览器打开空白页问题（移除100dvh防止高度塌陷，crypto加try/catch防崩溃，CDN移到底部不阻塞渲染）</li>
+                            <li>修复iOS灵动岛/刘海屏区域视觉适配（safe-area统一加到面板层，消除重复padding）</li>
                             <li>修复登录时间不更新问题（改用UPDATE→fallback INSERT策略，读端order().limit(1)彻底解决多行覆盖）</li>
                             <li>修复注册时间/登录时间显示为"-"的问题</li>
-                            <li>iOS Safari浏览器完整适配（viewport-fit=cover + safe-area-inset-* + -webkit-fill-available）</li>
+                            <li>iOS Safari浏览器完整适配（动态--vh方案解决100vh工具栏问题）</li>
                             <li>修复底部导航栏/通知/Toast在iOS刘海屏下位置异常</li>
                         </ul>
                     `
