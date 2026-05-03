@@ -1389,6 +1389,16 @@
             outline: none !important;
             box-shadow: none !important;
             -webkit-box-shadow: none !important;
+            border-color: transparent !important;
+            background: transparent !important;
+        }
+        .dock-tab:focus-visible {
+            outline: none !important;
+            box-shadow: none !important;
+            -webkit-box-shadow: none !important;
+        }
+        .dock-tab::-moz-focus-inner {
+            border: 0 !important;
         }
         .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
         .dock-tab .dt-icon { transition: none; }
@@ -3651,11 +3661,8 @@
                         } catch(e) {}
                     }
 
-                    // Only set reg_time to now if it's a new user and still no reg_time
-                    if (isNewUser || !userInfo.reg_time) {
-                        if (!userInfo.reg_time) {
-                            userInfo.reg_time = new Date().toISOString();
-                        }
+                    if (isNewUser && !userInfo.reg_time) {
+                        userInfo.reg_time = new Date().toISOString();
                     }
                     userInfo.last_login = new Date().toISOString();
 
@@ -4008,10 +4015,8 @@
                 showToast('正在压缩并上传头像...');
                 
                 try {
-                    // Canvas压缩后再转base64
-                    const compressedBase64 = await compressImage(file, 256, 256, 0.7);
+                    const compressedBase64 = await compressImage(file, 128, 128, 0.5);
                     
-                    // 检查是否已有头像记录
                     const existingAvatar = await sb.from("posts")
                         .select("id")
                         .eq("user_name", currentUser)
@@ -4042,20 +4047,34 @@
                         }
                     }
                     
+                    avatarCache[currentUser] = compressedBase64;
+                    updateAllAvatarElements(compressedBase64);
+                    
                     showToast('头像更新成功');
-                    // 更新所有地方的头像
-                    await loadUserAvatar();
-                    // 强制刷新feed
                     localStorage.removeItem(CACHE_KEY);
                     await loadFeed(true);
+                    avatarCache[currentUser] = compressedBase64;
+                    updateAllAvatarElements(compressedBase64);
                 } catch(e) {
                     console.error("上传头像失败:", e);
                     showToast('上传失败，请重试');
                 }
                 
-                // 清空input，允许重复选择同一文件
                 event.target.value = '';
             };
+
+            function updateAllAvatarElements(avatarUrl) {
+                var els = [
+                    document.getElementById('profileAvatar'),
+                    document.getElementById('myAvatar'),
+                    document.getElementById('profileDetailAvatar')
+                ];
+                els.forEach(function(el) {
+                    if (el) {
+                        el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                    }
+                });
+            }
 
             async function updateAllAvatars() {
                 // 更新我的页面的头像
@@ -6181,10 +6200,11 @@
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修复更换头像后不更新的bug</li>
-                            <li>去掉底部导航栏点击时的黑色框</li>
+                            <li>修复更换头像后不更新的bug（彻底修复）</li>
+                            <li>去掉底部导航栏点击时的黑色框（彻底修复）</li>
                             <li>帖子加载动画从滑入改成淡入</li>
-                            <li>修复注册时间与登录时间相同的bug</li>
+                            <li>修复注册时间与登录时间相同的bug（彻底修复）</li>
+                            <li>头像上传压缩优化（128x128）</li>
                         </ul>
                     `
                 },
