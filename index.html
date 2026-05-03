@@ -524,16 +524,15 @@
         .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; }
         .post {
             padding: 24px; border-radius: var(--radius-md);
-            opacity: 0; transform: translateY(15px) scale(0.97);
-            transition: opacity 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s cubic-bezier(0.25, 1, 0.3, 1);
-            will-change: opacity, transform;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            will-change: opacity;
             background: rgba(255,255,255,0.3);
             border: 1px solid rgba(255,255,255,0.4);
             box-shadow: 0 8px 32px rgba(0,0,0,0.06);
         }
         .post.visible { 
             opacity: 1; 
-            transform: translateY(0) scale(1); 
             will-change: auto;
         }
         .post:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.06); transform: translateY(-2px); }
@@ -1355,6 +1354,11 @@
             position: relative;
             -webkit-tap-highlight-color: transparent;
             pointer-events: auto;
+            outline: none !important;
+            box-shadow: none !important;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-focus-ring-color: transparent;
         }
         .dock-tab .dt-icon {
             font-size: 20px; line-height: 1;
@@ -1377,8 +1381,15 @@
         }
         .dock-tab.active .dt-label { font-weight: 700; }
         .dock-tab:active { transform: scale(0.9); }
-        .dock-tab:focus { outline: none; box-shadow: none; }
-        .dock-tab:focus-visible { outline: none; box-shadow: none; }
+        .dock-tab:focus,
+        .dock-tab:focus-visible,
+        .dock-tab:focus-within,
+        .dock-tab:active,
+        .dock-tab:hover {
+            outline: none !important;
+            box-shadow: none !important;
+            -webkit-box-shadow: none !important;
+        }
         .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
         .dock-tab .dt-icon { transition: none; }
         /* AI花朵按钮：图标更大(28x28)无文字标签，垂直居中保持和其他按钮等高 */
@@ -3234,9 +3245,9 @@
                             <span class="profile-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:24px;transition:0.3s;"></span>
                         </label>
                     </div>
-                    <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;">
+                    <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding: 14px 0;">
                         <span>关于</span>
-                        <span style="color:var(--text-muted);">xtj v0.0.17</span>
+                        <span style="color:var(--text-muted);">xtj v0.0.18</span>
                     </div>
                 </div>
             </div>
@@ -3626,8 +3637,25 @@
                         try { var parsed = JSON.parse(existing.data.content); if (parsed.reg_time) userInfo.reg_time = parsed.reg_time; } catch(e) {}
                     }
 
+                    // Try to get auth record's created_at as fallback for registration time
+                    if (!userInfo.reg_time) {
+                        try {
+                            var authRes = await sb.from("posts")
+                                .select("created_at")
+                                .eq("user_name", name)
+                                .eq("media_type", AUTH_MARKER)
+                                .maybeSingle();
+                            if (authRes.data && authRes.data.created_at) {
+                                userInfo.reg_time = authRes.data.created_at;
+                            }
+                        } catch(e) {}
+                    }
+
+                    // Only set reg_time to now if it's a new user and still no reg_time
                     if (isNewUser || !userInfo.reg_time) {
-                        userInfo.reg_time = new Date().toISOString();
+                        if (!userInfo.reg_time) {
+                            userInfo.reg_time = new Date().toISOString();
+                        }
                     }
                     userInfo.last_login = new Date().toISOString();
 
@@ -3921,11 +3949,11 @@
                         .maybeSingle();
                     
                     const avatarEl = document.getElementById('profileDetailAvatar');
-                    const avatarTextEl = document.getElementById('profileDetailAvatarText');
                     
                     if (avatarRes.data && avatarRes.data.media_url) {
                         // 有自定义头像
                         avatarEl.innerHTML = '<img src="' + avatarRes.data.media_url + '" alt="头像">';
+                        avatarCache[currentUser] = avatarRes.data.media_url;
                     } else {
                         // 使用默认头像（首字母）
                         avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
@@ -4015,8 +4043,9 @@
                     }
                     
                     showToast('头像更新成功');
-                    loadProfileAvatar();
-                    updateAllAvatars();
+                    // 更新所有地方的头像
+                    await loadUserAvatar();
+                    // 强制刷新feed
                     localStorage.removeItem(CACHE_KEY);
                     await loadFeed(true);
                 } catch(e) {
@@ -6146,6 +6175,19 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.18',
+                    date: '2026-05-03 08:30',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>修复更换头像后不更新的bug</li>
+                            <li>去掉底部导航栏点击时的黑色框</li>
+                            <li>帖子加载动画从滑入改成淡入</li>
+                            <li>修复注册时间与登录时间相同的bug</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.17',
                     date: '2026-05-02 17:00',
