@@ -525,14 +525,16 @@
         .post {
             padding: 24px; border-radius: var(--radius-md);
             opacity: 0;
-            transition: opacity 0.3s ease;
-            will-change: opacity;
+            transform: translateY(20px);
+            transition: opacity 0.5s cubic-bezier(0.16,1,0.3,1), transform 0.5s cubic-bezier(0.16,1,0.3,1);
+            will-change: opacity, transform;
             background: rgba(255,255,255,0.3);
             border: 1px solid rgba(255,255,255,0.4);
             box-shadow: 0 8px 32px rgba(0,0,0,0.06);
         }
         .post.visible { 
             opacity: 1; 
+            transform: translateY(0);
             will-change: auto;
         }
         .post:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.06); transform: translateY(-2px); }
@@ -3647,20 +3649,27 @@
                         try { var parsed = JSON.parse(existing.data.content); if (parsed.reg_time) userInfo.reg_time = parsed.reg_time; } catch(e) {}
                     }
 
-                    // Try to get auth record's created_at as fallback for registration time
-                    if (!userInfo.reg_time) {
-                        try {
-                            var authRes = await sb.from("posts")
-                                .select("created_at")
-                                .eq("user_name", name)
-                                .eq("media_type", AUTH_MARKER)
-                                .maybeSingle();
-                            if (authRes.data && authRes.data.created_at) {
-                                userInfo.reg_time = authRes.data.created_at;
-                            }
-                        } catch(e) {}
+                    // Get auth record's created_at as authoritative registration time
+                    var authCreatedAt = null;
+                    try {
+                        var authRes = await sb.from("posts")
+                            .select("created_at")
+                            .eq("user_name", name)
+                            .eq("media_type", AUTH_MARKER)
+                            .maybeSingle();
+                        if (authRes.data && authRes.data.created_at) {
+                            authCreatedAt = authRes.data.created_at;
+                        }
+                    } catch(e) {}
+
+                    // Always prefer auth record's created_at (it's the true registration time)
+                    if (authCreatedAt) {
+                        if (!userInfo.reg_time || authCreatedAt < userInfo.reg_time) {
+                            userInfo.reg_time = authCreatedAt;
+                        }
                     }
 
+                    // Only set reg_time to now if new user and still no reg_time
                     if (isNewUser && !userInfo.reg_time) {
                         userInfo.reg_time = new Date().toISOString();
                     }
@@ -4067,11 +4076,35 @@
                 var els = [
                     document.getElementById('profileAvatar'),
                     document.getElementById('myAvatar'),
-                    document.getElementById('profileDetailAvatar')
+                    document.getElementById('profileDetailAvatar'),
+                    document.getElementById('upcAvatar')
                 ];
                 els.forEach(function(el) {
                     if (el) {
                         el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                    }
+                });
+                document.querySelectorAll('#feed .post .avatar').forEach(function(el) {
+                    var header = el.closest('.post-header');
+                    if (header) {
+                        var nameEl = header.querySelector('.user-name');
+                        if (nameEl && nameEl.textContent === currentUser) {
+                            el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                        }
+                    }
+                });
+                document.querySelectorAll('#dockChatMessages .chat-msg-avatar').forEach(function(el) {
+                    if (el.closest('.chat-msg-row.sent')) {
+                        el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                    }
+                });
+                document.querySelectorAll('#dockChatList .chat-list-item').forEach(function(el) {
+                    var nameEl = el.querySelector('.cli-name');
+                    if (nameEl && nameEl.textContent === currentUser) {
+                        var avEl = el.querySelector('.cli-avatar');
+                        if (avEl) {
+                            avEl.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                        }
                     }
                 });
             }
@@ -4833,9 +4866,15 @@
 
             function initPostScrollAnimation() {
                 const observer = new IntersectionObserver(e => {
-                    e.forEach(i => { if(i.isIntersecting){ i.target.classList.add('visible'); observer.unobserve(i.target); } });
-                }, { threshold: 0.1 });
-                document.querySelectorAll('.post').forEach(p => { if(!p.classList.contains('visible')) observer.observe(p); });
+                    e.forEach(i => {
+                        if (i.isIntersecting) {
+                            i.target.classList.add('visible');
+                        } else {
+                            i.target.classList.remove('visible');
+                        }
+                    });
+                }, { threshold: 0.08 });
+                document.querySelectorAll('.post').forEach(p => observer.observe(p));
             }
 
             function updateFeedStats() {
@@ -6200,10 +6239,10 @@
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修复更换头像后不更新的bug（彻底修复）</li>
+                            <li>修复更换头像后不更新的bug（帖子/聊天/头像全部同步更新）</li>
                             <li>去掉底部导航栏点击时的黑色框（彻底修复）</li>
-                            <li>帖子加载动画从滑入改成淡入</li>
-                            <li>修复注册时间与登录时间相同的bug（彻底修复）</li>
+                            <li>帖子划入划出动画重设计：淡入+上移、淡出+下移</li>
+                            <li>修复注册时间与登录时间相同的bug（使用auth记录created_at作为权威注册时间）</li>
                             <li>头像上传压缩优化（128x128）</li>
                         </ul>
                     `
