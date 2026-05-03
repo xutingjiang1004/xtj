@@ -333,6 +333,7 @@
             0% { transform: scale(1) translateY(0); opacity: 1; }
             100% { transform: scale(0.8) translateY(-30px); opacity: 0; }
         }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
 
         .glass {
             background: rgba(255, 255, 255, 0.13);
@@ -524,15 +525,15 @@
             opacity: 0;
             transform: translateY(20px);
             transition: opacity 0.5s cubic-bezier(0.16,1,0.3,1), transform 0.5s cubic-bezier(0.16,1,0.3,1);
-            will-change: opacity, transform;
             background: rgba(255,255,255,0.3);
             border: 1px solid rgba(255,255,255,0.4);
             box-shadow: 0 8px 32px rgba(0,0,0,0.06);
+            content-visibility: auto;
+            contain-intrinsic-size: 200px;
         }
         .post.visible { 
             opacity: 1; 
             transform: translateY(0);
-            will-change: auto;
         }
 
         .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -1314,8 +1315,9 @@
         .dock-panels { flex: 1; overflow: hidden; position: relative; }
         .dock-panel {
             position: absolute; inset: 0;
-            overflow-y: auto; overflow-x: hidden;
+            overflow-y: scroll; overflow-x: hidden;
             -webkit-overflow-scrolling: touch;
+            scrollbar-gutter: stable;
             opacity: 0; pointer-events: none;
             transform: translateY(10px);
             transition: opacity 0.25s ease-out, transform 0.25s ease-out;
@@ -2108,13 +2110,15 @@
             background: transparent !important;
         }
         /* 隐藏所有滚动条 */
+        .dock-panel::-webkit-scrollbar { display: none; width: 0; height: 0; }
+        .dock-panel::-webkit-scrollbar-track { display: none; }
+        .dock-panel::-webkit-scrollbar-thumb { display: none; }
         .chat-messages::-webkit-scrollbar,
         .chat-list::-webkit-scrollbar,
-        .dock-panel::-webkit-scrollbar,
         .ai-chat-body::-webkit-scrollbar,
         .dock-ai-container .ai-chat-body::-webkit-scrollbar,
         .announcement-content::-webkit-scrollbar { display: none; }
-        .chat-messages, .chat-list, .dock-panel, .ai-chat-body, .dock-ai-container .ai-chat-body, .announcement-content { scrollbar-width: none; }
+        .chat-messages, .chat-list, .dock-panel, .ai-chat-body, .dock-ai-container .ai-chat-body, .announcement-content { scrollbar-width: none; -ms-overflow-style: none; }
 
         /* ========== 切换按钮/欢迎页 花朵飞散动画 (CSS class方式) ========== */
         /* AI页面花朵飞散动画 - 复用导航按钮petalFly逐瓣飞散 */
@@ -4016,7 +4020,7 @@
                 showToast('正在压缩并上传头像...');
                 
                 try {
-                    const compressedBase64 = await compressImage(file, 128, 128, 0.5);
+                    const compressedBase64 = await compressImage(file, 80, 80, 0.4);
                     
                     const existingAvatar = await sb.from("posts")
                         .select("id")
@@ -4828,7 +4832,14 @@
             }
 
             function getAvatarHtml(username, size = 32) {
-                const avatarUrl = avatarCache[username];
+                var avatarUrl = avatarCache[username];
+                if (!avatarUrl) {
+                    try {
+                        var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                        avatarUrl = cachedAvatars[username];
+                        if (avatarUrl) avatarCache[username] = avatarUrl;
+                    } catch(e) {}
+                }
                 if (avatarUrl) {
                     return '<div class="avatar clickable" onclick="openUserProfile(\'' + username.replace(/'/g, "\\'") + '\')"><img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
                 } else {
@@ -4887,11 +4898,9 @@
                     e.forEach(i => {
                         if (i.isIntersecting) {
                             i.target.classList.add('visible');
-                        } else {
-                            i.target.classList.remove('visible');
                         }
                     });
-                }, { threshold: 0.08 });
+                }, { threshold: 0.05 });
                 document.querySelectorAll('.post').forEach(p => observer.observe(p));
             }
 
@@ -5597,6 +5606,7 @@
             async function loadDockChatList() {
                 const el = document.getElementById('dockChatList');
                 if (!el) return;
+                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">⏳</div><div>加载中...</div></div>';
                 try {
                     const { data: allMsgs, error } = await sb.from("posts")
                         .select("id, user_name, media_url, content, created_at")
@@ -6252,12 +6262,26 @@
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
+                    version: 'v0.0.20',
+                    date: '2026-05-03 09:xx',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>修复聊天列表打开空白/加载慢问题</li>
+                            <li>去掉帖子列表右侧竖滑动条闪烁</li>
+                            <li>修复帖子滑动卡顿/抽搐抖动（仅淡入一次+图片加载优化）</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.0.19',
                     date: '2026-05-03 09:10',
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修复更换头像后不更新的bug（帖子/头像/评论/聊天全部同步更新+localStorage持久化）</li>
+                            <li>修复刷新网页后头像回退bug</li>
+                            <li>头像照片压缩进一步减小（80x80 @0.4）</li>
+                            <li>修复更换头像后不更新的bug</li>
                             <li>帖子划入划出动画重设计：淡入+上移、淡出+下移</li>
                             <li>去掉帖子和评论的hover悬浮效果</li>
                         </ul>
