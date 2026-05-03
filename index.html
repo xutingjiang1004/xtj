@@ -1334,15 +1334,18 @@
             transform: translateY(0);
         }
         .dock-bar {
-            position: absolute; bottom: 0; left: 0; right: 0;
+            position: fixed; bottom: 0; left: 0; right: 0;
             display: flex; justify-content: center; align-items: center;
             gap: 3px; padding: 4px 12px 10px;
+            padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
             background: transparent;
             border: none;
             box-shadow: none;
             z-index: 100;
             pointer-events: none;
             touch-action: none;
+            max-width: 640px;
+            margin: 0 auto;
         }
         .dock-tab {
             flex: 1; max-width: 80px;
@@ -3875,12 +3878,12 @@
                         .eq("user_name", userName)
                         .eq("media_type", "__avatar__")
                         .order("created_at", { ascending: false })
-                        .maybeSingle();
+                        .limit(1);
                     
-                    if (avatarRes.data && avatarRes.data.media_url) {
-                        avatarCache[userName] = avatarRes.data.media_url;
+                    if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
+                        avatarCache[userName] = avatarRes.data[0].media_url;
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
-                            avatarEl.innerHTML = '<img src="' + avatarRes.data.media_url + '" alt="头像">';
+                            avatarEl.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" alt="头像">';
                         }
                     }
                     
@@ -3973,11 +3976,11 @@
                         .eq("user_name", currentUser)
                         .eq("media_type", "__avatar__")
                         .order("created_at", { ascending: false })
-                        .maybeSingle();
+                        .limit(1);
                     
-                    if (avatarRes.data && avatarRes.data.media_url) {
-                        avatarEl.innerHTML = '<img src="' + avatarRes.data.media_url + '" alt="头像">';
-                        avatarCache[currentUser] = avatarRes.data.media_url;
+                    if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
+                        avatarEl.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" alt="头像">';
+                        avatarCache[currentUser] = avatarRes.data[0].media_url;
                     } else if (!avatarCache[currentUser]) {
                         avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
                     }
@@ -4033,34 +4036,33 @@
                 try {
                     const compressedBase64 = await compressImage(file, 80, 80, 0.4);
                     
-                    const existingAvatar = await sb.from("posts")
+                    // 删除所有旧头像记录（保证库中只留一条最新）
+                    var oldIds = await sb.from("posts")
                         .select("id")
                         .eq("user_name", currentUser)
-                        .eq("media_type", "__avatar__")
-                        .maybeSingle();
+                        .eq("media_type", "__avatar__");
+                    if (oldIds.data && oldIds.data.length > 0) {
+                        for (var oi of oldIds.data) {
+                            try {
+                                await sb.rpc('delete_post_with_actor', {
+                                    p_post_id: oi.id,
+                                    p_actor_key: '__avatar__'
+                                });
+                            } catch(e) {}
+                        }
+                    }
                     
-                    if (existingAvatar.data) {
-                        const { error } = await sb.from("posts")
-                            .update({ media_url: compressedBase64 })
-                            .eq("id", existingAvatar.data.id);
-                        
-                        if (error) {
-                            showToast('上传失败：' + error.message);
-                            return;
-                        }
-                    } else {
-                        const { error } = await sb.from("posts").insert([{
-                            user_name: currentUser,
-                            content: "用户头像",
-                            media_url: compressedBase64,
-                            media_type: "__avatar__",
-                            actor_key: "__avatar__"
-                        }]);
-                        
-                        if (error) {
-                            showToast('上传失败：' + error.message);
-                            return;
-                        }
+                    var { error } = await sb.from("posts").insert([{
+                        user_name: currentUser,
+                        content: "用户头像",
+                        media_url: compressedBase64,
+                        media_type: "__avatar__",
+                        actor_key: "__avatar__"
+                    }]);
+                    
+                    if (error) {
+                        showToast('上传失败：' + error.message);
+                        return;
                     }
                     
                     avatarCache[currentUser] = compressedBase64;
@@ -4245,14 +4247,15 @@
                             .select("media_url")
                             .eq("user_name", currentUser)
                             .eq("media_type", "__avatar__")
-                            .maybeSingle();
-                        if (avatarRes.data && avatarRes.data.media_url) {
-                            avatarCache[currentUser] = avatarRes.data.media_url;
+                            .order("created_at", { ascending: false })
+                            .limit(1);
+                        if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
+                            avatarCache[currentUser] = avatarRes.data[0].media_url;
                             try {
-                                cachedAvatars[currentUser] = avatarRes.data.media_url;
+                                cachedAvatars[currentUser] = avatarRes.data[0].media_url;
                                 localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
                             } catch(e) {}
-                            updateAllAvatarElements(avatarRes.data.media_url);
+                            updateAllAvatarElements(avatarRes.data[0].media_url);
                         } else {
                             var profileAvatar = document.getElementById('profileAvatar');
                             var myAvatar = document.getElementById('myAvatar');
@@ -6289,7 +6292,7 @@
                         <h4>更新内容</h4>
                         <ul>
                             <li>修复公告发布失败bug（不用title列，JSON存content）</li>
-                            <li>修复点击头像/个人资料显示旧头像（排序取最新+缓存优先）</li>
+                            <li>修复点击头像/个人资料显示旧头像（maybeSingle→limit(1)+上传先删后插，杜绝重复记录）</li>
                             <li>修复聊天列表加载慢（limit 1000→200，缓存30秒→120秒）</li>
                         </ul>
                     `
