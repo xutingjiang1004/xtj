@@ -1547,6 +1547,11 @@
             70% { opacity: 1; transform: scale(1.18); }
             100% { opacity: 1; transform: scale(1); }
         }
+        .ts-signature.ts-sign-loop .ts-sign-path,
+        .ts-signature.ts-sign-loop .ts-sign-flourish,
+        .ts-signature.ts-sign-loop .ts-sign-dot {
+            animation-play-state: running;
+        }
         .ts-hero-kicker {
             margin-top: 6px;
             font-size: 9px;
@@ -1720,7 +1725,12 @@
             height: 100%;
             object-fit: cover;
             transform: scale(1.02);
+            animation: tsCoverDrift 9s ease-in-out infinite alternate;
             transition: transform 0.7s cubic-bezier(0.16,1,0.3,1), filter 0.7s ease;
+        }
+        @keyframes tsCoverDrift {
+            from { transform: scale(1.02) translate3d(-1px, -2px, 0); }
+            to { transform: scale(1.08) translate3d(2px, 2px, 0); }
         }
         .ts-card:hover .ts-card-img img {
             transform: scale(1.1);
@@ -1823,11 +1833,168 @@
             color: rgba(45,31,39,0.56);
             font-style: italic;
         }
+        .ts-detail-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 95;
+            padding: 14px 14px calc(86px + env(safe-area-inset-bottom, 0px));
+            background: rgba(248, 241, 237, 0.72);
+            backdrop-filter: blur(22px) saturate(130%);
+            -webkit-backdrop-filter: blur(22px) saturate(130%);
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(14px);
+            transition: opacity 0.32s ease, transform 0.32s cubic-bezier(0.16,1,0.3,1);
+        }
+        .ts-detail-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(0);
+        }
+        .ts-detail-panel {
+            height: 100%;
+            max-width: 680px;
+            margin: 0 auto;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            border-radius: 18px;
+            background: rgba(255, 252, 247, 0.88);
+            border: 1px solid rgba(255,255,255,0.72);
+            box-shadow: 0 30px 90px rgba(54, 41, 47, 0.22);
+        }
+        .ts-detail-hero {
+            position: relative;
+            min-height: 360px;
+            overflow: hidden;
+            background: #201b20;
+            color: white;
+        }
+        .ts-detail-cover {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.74;
+            animation: tsDetailCover 10s ease-in-out infinite alternate;
+        }
+        @keyframes tsDetailCover {
+            from { transform: scale(1.02) translateY(-4px); filter: saturate(0.98); }
+            to { transform: scale(1.11) translateY(4px); filter: saturate(1.12); }
+        }
+        .ts-detail-hero::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(180deg, rgba(0,0,0,0.08), rgba(0,0,0,0.74));
+        }
+        .ts-detail-close {
+            position: absolute;
+            top: 14px;
+            right: 14px;
+            z-index: 3;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.42);
+            background: rgba(0,0,0,0.24);
+            color: white;
+            cursor: pointer;
+            font-size: 22px;
+            line-height: 1;
+        }
+        .ts-detail-title {
+            position: absolute;
+            left: 20px;
+            right: 20px;
+            bottom: 18px;
+            z-index: 3;
+            text-shadow: 0 2px 20px rgba(0,0,0,0.42);
+        }
+        .ts-detail-title small {
+            display: block;
+            font-size: 10px;
+            letter-spacing: 2.4px;
+            font-weight: 900;
+            color: rgba(255,255,255,0.74);
+            margin-bottom: 8px;
+        }
+        .ts-detail-title h2 {
+            margin: 0;
+            font-family: Georgia, "Times New Roman", serif;
+            font-style: italic;
+            font-size: 38px;
+            line-height: 0.96;
+            letter-spacing: 0;
+        }
+        .ts-detail-title p {
+            margin: 10px 0 0;
+            max-width: 420px;
+            font-size: 12px;
+            line-height: 1.7;
+            color: rgba(255,255,255,0.82);
+        }
+        .ts-detail-body {
+            padding: 18px;
+            color: #2d1f27;
+        }
+        .ts-detail-photo-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .ts-detail-photo {
+            min-height: 148px;
+            border-radius: 10px;
+            overflow: hidden;
+            background: var(--detail-photo) center / cover no-repeat;
+            box-shadow: 0 12px 32px rgba(45,31,39,0.14);
+            animation: tsDetailPhotoFloat 7s ease-in-out infinite alternate;
+        }
+        .ts-detail-photo:nth-child(2) { animation-delay: 0.8s; }
+        .ts-detail-photo:nth-child(3) { animation-delay: 1.4s; }
+        @keyframes tsDetailPhotoFloat {
+            from { transform: translateY(0) scale(1); filter: saturate(0.95); }
+            to { transform: translateY(-4px) scale(1.015); filter: saturate(1.08); }
+        }
+        .ts-detail-section {
+            padding: 16px 0;
+            border-top: 1px solid rgba(45,31,39,0.08);
+        }
+        .ts-detail-section h4 {
+            margin: 0 0 9px;
+            font-size: 12px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: rgba(45,31,39,0.54);
+        }
+        .ts-detail-section p {
+            margin: 0;
+            font-size: 13px;
+            line-height: 1.8;
+            color: rgba(45,31,39,0.78);
+        }
+        .ts-song-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .ts-song-list span {
+            max-width: 100%;
+            padding: 7px 10px;
+            border-radius: 99px;
+            background: rgba(45,31,39,0.06);
+            border: 1px solid rgba(45,31,39,0.08);
+            font-size: 12px;
+            color: rgba(45,31,39,0.76);
+        }
         @media (min-width: 620px) {
             .ts-container { padding-left: 22px; padding-right: 22px; }
             .ts-gallery { grid-template-columns: repeat(4, minmax(0, 1fr)); }
             .ts-photo-grid { grid-template-columns: 1.1fr 0.9fr; }
             .ts-photo-card:first-child { grid-row: span 2; min-height: 372px; }
+            .ts-detail-photo-grid { grid-template-columns: repeat(3, 1fr); }
         }
         [data-theme="dark"] .ts-container {
             --ts-ink: #f0e6ed;
@@ -1847,6 +2014,13 @@
         [data-theme="dark"] .ts-section-title span,
         [data-theme="dark"] .ts-hero-copy,
         [data-theme="dark"] .ts-footer { color: rgba(240,230,237,0.62); }
+        [data-theme="dark"] .ts-detail-overlay { background: rgba(13, 12, 16, 0.72); }
+        [data-theme="dark"] .ts-detail-panel { background: rgba(28, 25, 32, 0.92); border-color: rgba(255,255,255,0.08); }
+        [data-theme="dark"] .ts-detail-body { color: #f0e6ed; }
+        [data-theme="dark"] .ts-detail-section { border-top-color: rgba(255,255,255,0.08); }
+        [data-theme="dark"] .ts-detail-section h4 { color: rgba(240,230,237,0.58); }
+        [data-theme="dark"] .ts-detail-section p { color: rgba(240,230,237,0.76); }
+        [data-theme="dark"] .ts-song-list span { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.08); color: rgba(240,230,237,0.78); }
 
         /* 暗色模式 Dock */
         [data-theme="dark"] .dock-bar {
@@ -3586,6 +3760,34 @@
                     </div>
                 </div>
                 <div class="ts-footer">Album art from public encyclopedia pages; live photos from Wikimedia Commons.</div>
+                <div class="ts-detail-overlay" id="tsAlbumDetail" onclick="if(event.target===this) closeTSAlbumDetail()">
+                    <div class="ts-detail-panel">
+                        <div class="ts-detail-hero" id="tsDetailHero">
+                            <button class="ts-detail-close" onclick="closeTSAlbumDetail()" title="关闭">×</button>
+                            <img class="ts-detail-cover" id="tsDetailCover" alt="">
+                            <div class="ts-detail-title">
+                                <small id="tsDetailEra"></small>
+                                <h2 id="tsDetailTitle"></h2>
+                                <p id="tsDetailIntro"></p>
+                            </div>
+                        </div>
+                        <div class="ts-detail-body">
+                            <div class="ts-detail-photo-grid" id="tsDetailPhotos"></div>
+                            <div class="ts-detail-section">
+                                <h4>Album Story</h4>
+                                <p id="tsDetailStory"></p>
+                            </div>
+                            <div class="ts-detail-section">
+                                <h4>Songs</h4>
+                                <div class="ts-song-list" id="tsDetailSongs"></div>
+                            </div>
+                            <div class="ts-detail-section">
+                                <h4>Background</h4>
+                                <p id="tsDetailBackground"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -3631,7 +3833,7 @@
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding: 14px 0;">
                         <span>关于</span>
-                        <span style="color:var(--text-muted);">xtj v0.0.28</span>
+                        <span style="color:var(--text-muted);">xtj v0.0.29</span>
                     </div>
                 </div>
             </div>
@@ -5958,6 +6160,7 @@
                         // TS专题：回到顶部
                         const tsContainer = document.querySelector('.ts-container');
                         if (tsContainer) tsContainer.scrollTo({ top: 0, behavior: 'smooth' });
+                        restartTSSignature();
                     } else if (tab === 'profile') {
                         // 我的页：回到顶部
                         const panel = document.getElementById('panelProfile');
@@ -5975,7 +6178,8 @@
                 const tabBtn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
                 if (tabBtn) tabBtn.classList.add('active');
                 if (tab === 'chat') { loadDockChatList(); startDMPolling(30000); }
-                if (tab === 'ai') { initTSGallery(); }
+                if (tab === 'ai') { initTSGallery(); startTSSignatureLoop(); }
+                else { stopTSSignatureLoop(); closeTSAlbumDetail(true); }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); }
             };
 
@@ -6300,16 +6504,106 @@
             document.getElementById('dockCfpRemove').addEventListener('click', clearDockChatFilePreview);
 
             // ========== Taylor Swift 画廊 ==========
+            const tsPublicPhotos = {
+                erasPink: "https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(52791470537).jpg?width=1280",
+                erasStage: "https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(52792486908).jpg?width=1280",
+                erasGold: "https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(52792258594).jpg?width=1024",
+                fearlessLive: "https://commons.wikimedia.org/wiki/Special:FilePath/Taylor%20Swift%20(5204582578).jpg?width=640"
+            };
+            const tsAlbumData = [
+                { key:"showgirl", title:"Showgirl", fullTitle:"The Life of a Showgirl", year:"2025", no:"12 / 2025", tag:"SHOW", glow:"rgba(232,91,51,0.54)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/f/f4/Taylor_Swift_%E2%80%93_The_Life_of_a_Showgirl_%28album_cover%29.png/250px-Taylor_Swift_%E2%80%93_The_Life_of_a_Showgirl_%28album_cover%29.png", sub:"glamour, water, orange light", intro:"A theatrical pop era built around stage spectacle and the private life behind it.", story:"This era turns the Eras Tour afterglow into a glossy backstage world: bright color, performance mythology, and the cost of being watched.", background:"Released after the massive Eras Tour cycle, it frames fame as both performance and confession, with show-business imagery leading the visual language.", songs:["The Fate of Ophelia","Elizabeth Taylor","Opalite","Father Figure","Eldest Daughter","Ruin The Friendship","Actually Romantic","Wi$h Li$t","Wood","CANCELLED!","Honey","The Life of a Showgirl"], photos:[tsPublicPhotos.erasPink,tsPublicPhotos.erasStage,tsPublicPhotos.erasGold] },
+                { key:"ttpd", title:"TTPD", fullTitle:"The Tortured Poets Department", year:"2024", no:"11 / 2024", tag:"POETS", glow:"rgba(170,160,146,0.44)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/6/6e/Taylor_Swift_%E2%80%93_The_Tortured_Poets_Department_%28album_cover%29.png/250px-Taylor_Swift_%E2%80%93_The_Tortured_Poets_Department_%28album_cover%29.png", sub:"monochrome room, ink-stained", intro:"A monochrome literary chapter: messy endings, self-mythology, and diary pages turned into sharp pop writing.", story:"The album leans into the image of a writer under pressure, mixing public scrutiny with private heartbreak and theatrical self-awareness.", background:"It arrived during the Eras Tour era and expanded Swift's late-career autobiographical style into a stark, text-heavy visual world.", songs:["Fortnight","The Tortured Poets Department","Down Bad","So Long, London","But Daddy I Love Him","Florida!!!","Guilty as Sin?","Who's Afraid of Little Old Me?","I Can Do It With a Broken Heart"], photos:[tsPublicPhotos.erasGold,tsPublicPhotos.erasPink,tsPublicPhotos.erasStage] },
+                { key:"midnights", title:"Midnights", fullTitle:"Midnights", year:"2022", no:"10 / 2022", tag:"NIGHT", glow:"rgba(54,82,130,0.50)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/9/9f/Midnights_-_Taylor_Swift.png/250px-Midnights_-_Taylor_Swift.png", sub:"lighter flame, blue hour", intro:"A late-night pop record about sleepless memory, anxiety, revenge fantasies, and glittering self-examination.", story:"Midnights frames the songs as thoughts that arrive after dark, with synth-pop surfaces and sharp autobiographical turns.", background:"After the folk-leaning sister albums, this era returned to polished pop while keeping a diaristic, adult perspective.", songs:["Lavender Haze","Maroon","Anti-Hero","Snow on the Beach","You're On Your Own, Kid","Midnight Rain","Vigilante Shit","Bejeweled","Karma","Mastermind"], photos:[tsPublicPhotos.erasPink,tsPublicPhotos.erasGold,tsPublicPhotos.erasStage] },
+                { key:"evermore", title:"evermore", fullTitle:"evermore", year:"2020", no:"09 / 2020", tag:"AMBER", glow:"rgba(131,83,49,0.48)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/0/0a/Taylor_Swift_-_Evermore.png/250px-Taylor_Swift_-_Evermore.png", sub:"winter braid, sister record", intro:"The wintry sister record to folklore, full of fictional rooms, regret, and long-shadowed storytelling.", story:"evermore deepens the folk-pop palette with character studies, moral knots, and endings that feel unresolved on purpose.", background:"Released only months after folklore, it extended the isolation-era writing world rather than starting a totally separate visual universe.", songs:["willow","champagne problems","gold rush","'tis the damn season","tolerate it","no body, no crime","happiness","dorothea","ivy","cowboy like me","evermore"], photos:[tsPublicPhotos.erasGold,tsPublicPhotos.fearlessLive,tsPublicPhotos.erasPink] },
+                { key:"folklore", title:"folklore", fullTitle:"folklore", year:"2020", no:"08 / 2020", tag:"MONO", glow:"rgba(190,190,190,0.44)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/f/f8/Taylor_Swift_-_Folklore.png/250px-Taylor_Swift_-_Folklore.png", sub:"trees, fog, private myth", intro:"A grayscale forest record where autobiography and fiction blur into quiet, detailed storytelling.", story:"folklore trades stadium brightness for cabins, cardigans, teenage triangles, and songs that feel like found letters.", background:"Created during the pandemic period, it marked a major pivot into indie-folk textures and narrative songwriting.", songs:["the 1","cardigan","the last great american dynasty","exile","my tears ricochet","mirrorball","seven","august","this is me trying","invisible string","betty","peace"], photos:[tsPublicPhotos.erasGold,tsPublicPhotos.erasPink,tsPublicPhotos.fearlessLive] },
+                { key:"lover", title:"Lover", fullTitle:"Lover", year:"2019", no:"07 / 2019", tag:"PASTEL", glow:"rgba(246,133,177,0.50)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/c/cd/Taylor_Swift_-_Lover.png/250px-Taylor_Swift_-_Lover.png", sub:"cloud color, open window", intro:"A pastel pop album about devotion, daylight, anxiety, politics, and choosing softness after a darker era.", story:"Lover opens the windows after reputation, moving toward color, romantic optimism, and public self-definition.", background:"It was Swift's first album after leaving Big Machine, making the era feel like both a personal and business reset.", songs:["Cruel Summer","Lover","The Man","The Archer","Miss Americana & the Heartbreak Prince","Paper Rings","Cornelia Street","Death By A Thousand Cuts","You Need To Calm Down","Daylight"], photos:[tsPublicPhotos.erasPink,tsPublicPhotos.erasGold,tsPublicPhotos.erasStage] },
+                { key:"reputation", title:"reputation", fullTitle:"reputation", year:"2017", no:"06 / 2017", tag:"NOIR", glow:"rgba(45,45,49,0.58)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/f/f2/Taylor_Swift_-_Reputation.png/250px-Taylor_Swift_-_Reputation.png", sub:"print, shadow, voltage", intro:"A black-and-white, high-voltage pop era about public image, backlash, obsession, and private love under noise.", story:"reputation weaponizes tabloid language, then hides a surprisingly intimate love story inside the armor.", background:"After intense public scrutiny, the album used silence, snakes, newspapers, and stadium-scale darkness as its grammar.", songs:["...Ready For It?","End Game","I Did Something Bad","Don't Blame Me","Delicate","Look What You Made Me Do","Gorgeous","Getaway Car","Call It What You Want","New Year's Day"], photos:[tsPublicPhotos.erasStage,tsPublicPhotos.erasPink,tsPublicPhotos.erasGold] },
+                { key:"1989", title:"1989", fullTitle:"1989", year:"2014", no:"05 / 2014", tag:"POP", glow:"rgba(91,166,204,0.46)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/Taylor_Swift_-_1989.png/250px-Taylor_Swift_-_1989.png", sub:"polaroid sky, clean lines", intro:"A clean-lined pop reinvention inspired by city light, Polaroids, synth shine, and the thrill of starting over.", story:"1989 is the full pop pivot: sharp hooks, bright choruses, and a visual world built from blue skies and instant film.", background:"The era moved Swift from country crossover to global pop architect, with New York imagery and a carefully styled media presence.", songs:["Welcome To New York","Blank Space","Style","Out of the Woods","Shake It Off","I Wish You Would","Bad Blood","Wildest Dreams","I Know Places","Clean"], photos:[tsPublicPhotos.erasGold,tsPublicPhotos.erasPink,tsPublicPhotos.fearlessLive] },
+                { key:"red", title:"Red", fullTitle:"Red", year:"2012", no:"04 / 2012", tag:"SCARLET", glow:"rgba(161,45,37,0.48)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/e/e8/Taylor_Swift_-_Red.png/250px-Taylor_Swift_-_Red.png", sub:"autumn cinema, sharp memory", intro:"A breakup mosaic of country, pop, rock, and autumn-colored emotional whiplash.", story:"Red is designed like a memory box: scarves, city streets, impossible phone calls, and the first big steps toward pop maximalism.", background:"The era sits at the bridge between Nashville storytelling and global pop ambition, making it one of her key transition records.", songs:["State of Grace","Red","Treacherous","I Knew You Were Trouble","All Too Well","22","We Are Never Ever Getting Back Together","Holy Ground","The Lucky One","Begin Again"], photos:[tsPublicPhotos.fearlessLive,tsPublicPhotos.erasGold,tsPublicPhotos.erasPink] },
+                { key:"speaknow", title:"Speak Now", fullTitle:"Speak Now", year:"2010", no:"03 / 2010", tag:"VIOLET", glow:"rgba(151,74,168,0.48)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/8/8f/Taylor_Swift_-_Speak_Now_cover.png/250px-Taylor_Swift_-_Speak_Now_cover.png", sub:"orchid dress, confessional", intro:"A self-written fairytale-pop record about saying the thing before the moment disappears.", story:"Speak Now turns confession into theater: weddings, apologies, revenge fantasies, and purple-lit grand gestures.", background:"Written solely by Swift, the album became a statement about authorship and control at a young age.", songs:["Mine","Sparks Fly","Back to December","Speak Now","Dear John","Mean","The Story of Us","Enchanted","Better than Revenge","Long Live"], photos:[tsPublicPhotos.fearlessLive,tsPublicPhotos.erasPink,tsPublicPhotos.erasGold] },
+                { key:"fearless", title:"Fearless", fullTitle:"Fearless", year:"2008", no:"02 / 2008", tag:"GOLD", glow:"rgba(230,187,88,0.44)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/8/86/Taylor_Swift_-_Fearless.png/250px-Taylor_Swift_-_Fearless.png", sub:"wind, shimmer, first myth", intro:"A golden country-pop coming-of-age album about first love, school hallways, and big feelings made cinematic.", story:"Fearless made teenage romance feel epic without losing the diary-page closeness that defined her early writing.", background:"This was the breakthrough era that carried Swift from country success into mainstream pop culture visibility.", songs:["Fearless","Fifteen","Love Story","Hey Stephen","White Horse","You Belong With Me","Breathe","Tell Me Why","The Way I Loved You","Forever & Always"], photos:[tsPublicPhotos.fearlessLive,tsPublicPhotos.erasGold,tsPublicPhotos.erasPink] },
+                { key:"debut", title:"Debut", fullTitle:"Taylor Swift", year:"2006", no:"01 / 2006", tag:"COUNTRY", glow:"rgba(91,154,132,0.42)", cover:"https://upload.wikimedia.org/wikipedia/en/thumb/1/1f/Taylor_Swift_-_Taylor_Swift.png/250px-Taylor_Swift_-_Taylor_Swift.png", sub:"green-blue diary glow", intro:"The first chapter: country radio, teenage detail, porch-light storytelling, and a songwriter introducing herself.", story:"Debut is built from crushes, small towns, guitars, and the confidence of a young writer already shaping her own voice.", background:"Released when Swift was still a teenager, it established the diaristic writing style that later eras kept transforming.", songs:["Tim McGraw","Picture to Burn","Teardrops on My Guitar","A Place in This World","Cold As You","The Outside","Should've Said No","Mary's Song","Our Song","I'm Only Me When I'm With You"], photos:[tsPublicPhotos.fearlessLive,tsPublicPhotos.erasGold,tsPublicPhotos.erasPink] }
+            ];
+
+            let tsGalleryRendered = false;
+            let tsSignatureTimer = null;
+
+            function renderTSAlbumCard(album) {
+                return '<div class="ts-card ts-card-era" data-key="' + album.key + '" data-era="' + escapeHtml(album.fullTitle) + '" style="--era-glow:' + album.glow + ';">' +
+                    '<div class="ts-card-img"><img src="' + album.cover + '" alt="' + escapeHtml(album.fullTitle) + ' album cover" loading="lazy"></div>' +
+                    '<span class="ts-era-tag">' + escapeHtml(album.tag) + '</span>' +
+                    '<div class="ts-poster-meta"><div class="ts-poster-no">' + escapeHtml(album.no) + '</div><div class="ts-poster-title">' + escapeHtml(album.title) + '</div><div class="ts-poster-sub"><span>' + escapeHtml(album.sub) + '</span><span>LP</span></div></div>' +
+                    '</div>';
+            }
+
+            function restartTSSignature() {
+                const signature = document.querySelector('.ts-signature');
+                if (!signature) return;
+                signature.classList.remove('ts-sign-loop');
+                const animated = signature.querySelectorAll('.ts-sign-path, .ts-sign-flourish, .ts-sign-dot');
+                animated.forEach(function(el) { el.style.animation = 'none'; });
+                void signature.offsetWidth;
+                animated.forEach(function(el) { el.style.animation = ''; });
+                signature.classList.add('ts-sign-loop');
+            }
+
+            function startTSSignatureLoop() {
+                restartTSSignature();
+                if (tsSignatureTimer) clearInterval(tsSignatureTimer);
+                tsSignatureTimer = setInterval(function() {
+                    if (currentDockTab === 'ai') restartTSSignature();
+                }, 6800);
+            }
+
+            function stopTSSignatureLoop() {
+                if (tsSignatureTimer) clearInterval(tsSignatureTimer);
+                tsSignatureTimer = null;
+            }
+
             function initTSGallery() {
+                const gallery = document.getElementById('tsGallery');
+                if (gallery && !tsGalleryRendered) {
+                    gallery.innerHTML = tsAlbumData.map(renderTSAlbumCard).join('');
+                    tsGalleryRendered = true;
+                }
                 var cards = document.querySelectorAll('.ts-card');
-                cards.forEach(function(card, i) {
+                cards.forEach(function(card) {
+                    if (card.dataset.bound === '1') return;
+                    card.dataset.bound = '1';
                     card.addEventListener('click', function() {
-                        var era = card.dataset.era;
-                        if (era) showToast('Taylor Swift · ' + era);
+                        openTSAlbumDetail(card.dataset.key);
                     });
                 });
             }
 
+            function openTSAlbumDetail(key) {
+                const album = tsAlbumData.find(function(item) { return item.key === key; });
+                if (!album) return;
+                document.getElementById('tsDetailCover').src = album.cover;
+                document.getElementById('tsDetailCover').alt = album.fullTitle + ' album cover';
+                document.getElementById('tsDetailEra').textContent = album.no + ' - ' + album.tag;
+                document.getElementById('tsDetailTitle').textContent = album.fullTitle;
+                document.getElementById('tsDetailIntro').textContent = album.intro;
+                document.getElementById('tsDetailStory').textContent = album.story;
+                document.getElementById('tsDetailBackground').textContent = album.background;
+                document.getElementById('tsDetailPhotos').innerHTML = [album.cover].concat(album.photos).slice(0, 3).map(function(src) {
+                    return '<div class="ts-detail-photo" style="--detail-photo:url(\'' + src + '\')"></div>';
+                }).join('');
+                document.getElementById('tsDetailSongs').innerHTML = album.songs.map(function(song) {
+                    return '<span>' + escapeHtml(song) + '</span>';
+                }).join('');
+                document.getElementById('tsAlbumDetail').classList.add('active');
+            }
+
+            function closeTSAlbumDetail(silent) {
+                const detail = document.getElementById('tsAlbumDetail');
+                if (!detail) return;
+                detail.classList.remove('active');
+                if (!silent && currentDockTab === 'ai') restartTSSignature();
+            }
+
+            window.openTSAlbumDetail = openTSAlbumDetail;
+            window.closeTSAlbumDetail = closeTSAlbumDetail;
             window.initTSGallery = initTSGallery;
 
             window.addEventListener('DOMContentLoaded', async function() {
@@ -6686,6 +6980,23 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.29',
+                    date: '2026-05-03 15:30',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>Taylor Swift专题页交互升级</li>
+                            <ul>
+                                <li>签名手写动画进入专题页时重新播放，并每隔数秒循环播放</li>
+                                <li>12张专辑海报改为按时间倒序展示（最新专辑在前）</li>
+                                <li>每张专辑支持点击进入详情页</li>
+                                <li>专辑详情页新增专辑封面、时期照片、专辑故事、歌曲列表、背景故事</li>
+                                <li>专辑封面和详情照片加入动态漂移动画</li>
+                            </ul>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.28',
                     date: '2026-05-03 15:00',
