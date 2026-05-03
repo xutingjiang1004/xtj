@@ -102,9 +102,6 @@
             background: rgba(25,25,42,0.2);
             border-color: rgba(255,255,255,0.04);
         }
-        [data-theme="dark"] .comment-item:hover {
-            background: rgba(30,30,50,0.3);
-        }
         [data-theme="dark"] .comments { border-top-color: rgba(255,255,255,0.06); }
         [data-theme="dark"] .stat-card { color: var(--text-main); }
         [data-theme="dark"] .chat-entry-bar {
@@ -537,7 +534,6 @@
             transform: translateY(0);
             will-change: auto;
         }
-        .post:hover { box-shadow: 0 12px 40px rgba(0,0,0,0.1), 0 4px 16px rgba(0,0,0,0.06); transform: translateY(-2px); }
 
         .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
         .avatar {
@@ -609,11 +605,6 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.04);
             display: flex; justify-content: space-between; align-items: center; gap: 8px;
             transition: var(--trans-smooth);
-        }
-        .comment-item:hover {
-            transform: translateX(4px);
-            box-shadow: 0 4px 16px rgba(0,0,0,0.06);
-            background: rgba(255,255,255,1);
         }
         .modal-overlay {
             position: fixed; inset: 0; background: rgba(0,0,0,0.4);
@@ -3584,6 +3575,7 @@
             const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
             const ADMIN_NAME = "xxz";
+            const AVATAR_CACHE_KEY = "xtj_avatars";
 
             let currentUser = localStorage.getItem("xtj_user") || "";
             let deviceId = localStorage.getItem("xtj_device_id");
@@ -4057,6 +4049,12 @@
                     }
                     
                     avatarCache[currentUser] = compressedBase64;
+                    // 保存到localStorage持久化
+                    try {
+                        var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                        cachedAvatars[currentUser] = compressedBase64;
+                        localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                    } catch(e) {}
                     updateAllAvatarElements(compressedBase64);
                     
                     showToast('头像更新成功');
@@ -4091,6 +4089,12 @@
                         if (nameEl && nameEl.textContent === currentUser) {
                             el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                         }
+                    }
+                });
+                document.querySelectorAll('#feed .comment-item .avatar').forEach(function(el) {
+                    var nameEl = el.parentElement ? el.parentElement.querySelector('b') : null;
+                    if (nameEl && nameEl.textContent.replace(':', '') === currentUser) {
+                        el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                     }
                 });
                 document.querySelectorAll('#dockChatMessages .chat-msg-avatar').forEach(function(el) {
@@ -4218,6 +4222,15 @@
             }
 
             async function loadUserAvatar() {
+                // 先从localStorage读取缓存的头像
+                try {
+                    var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                    if (cachedAvatars[currentUser]) {
+                        avatarCache[currentUser] = cachedAvatars[currentUser];
+                        updateAllAvatarElements(cachedAvatars[currentUser]);
+                    }
+                } catch(e) {}
+                // 再从数据库加载（覆盖缓存）
                 try {
                     const avatarRes = await sb.from("posts")
                         .select("media_url")
@@ -4225,25 +4238,21 @@
                         .eq("media_type", "__avatar__")
                         .maybeSingle();
                     
-                    const profileAvatar = document.getElementById('profileAvatar');
-                    const myAvatar = document.getElementById('myAvatar');
-                    
                     if (avatarRes.data && avatarRes.data.media_url) {
                         avatarCache[currentUser] = avatarRes.data.media_url;
-                        if (profileAvatar) {
-                            profileAvatar.innerHTML = '<img src="' + avatarRes.data.media_url + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
-                        }
-                        if (myAvatar) {
-                            myAvatar.innerHTML = '<img src="' + avatarRes.data.media_url + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
-                        }
-                    } else {
-                        // 使用默认头像（首字母）
-                        if (profileAvatar) {
-                            profileAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
-                        }
-                        if (myAvatar) {
-                            myAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
-                        }
+                        // 保存到localStorage
+                        try {
+                            var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                            cachedAvatars[currentUser] = avatarRes.data.media_url;
+                            localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
+                        } catch(e) {}
+                        updateAllAvatarElements(avatarRes.data.media_url);
+                    } else if (!avatarCache[currentUser]) {
+                        // 数据库没有，本地也没有，显示首字母
+                        var profileAvatar = document.getElementById('profileAvatar');
+                        var myAvatar = document.getElementById('myAvatar');
+                        if (profileAvatar) profileAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
+                        if (myAvatar) myAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
                     }
                 } catch(e) {
                     console.error("加载头像失败:", e);
@@ -4803,6 +4812,15 @@
                                 avatarCache[avatar.user_name] = avatar.media_url;
                             }
                         });
+                        // 确保当前用户的头像不被DB旧数据覆盖
+                        if (currentUser) {
+                            try {
+                                var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                                if (cachedAvatars[currentUser]) {
+                                    avatarCache[currentUser] = cachedAvatars[currentUser];
+                                }
+                            } catch(e) {}
+                        }
                     }
                 } catch(e) {
                     console.error("加载头像失败:", e);
@@ -6234,15 +6252,27 @@
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
+                    version: 'v0.0.19',
+                    date: '2026-05-03 09:10',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>修复更换头像后不更新的bug（帖子/头像/评论/聊天全部同步更新+localStorage持久化）</li>
+                            <li>帖子划入划出动画重设计：淡入+上移、淡出+下移</li>
+                            <li>去掉帖子和评论的hover悬浮效果</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.0.18',
                     date: '2026-05-03 08:30',
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修复更换头像后不更新的bug（帖子/聊天/头像全部同步更新）</li>
+                            <li>修复更换头像后不更新的bug（彻底修复）</li>
                             <li>去掉底部导航栏点击时的黑色框（彻底修复）</li>
-                            <li>帖子划入划出动画重设计：淡入+上移、淡出+下移</li>
-                            <li>修复注册时间与登录时间相同的bug（使用auth记录created_at作为权威注册时间）</li>
+                            <li>帖子加载动画从滑入改成淡入</li>
+                            <li>修复注册时间与登录时间相同的bug（彻底修复）</li>
                             <li>头像上传压缩优化（128x128）</li>
                         </ul>
                     `
