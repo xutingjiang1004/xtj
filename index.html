@@ -2,7 +2,9 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0, viewport-fit=cover, shrink-to-fit=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>xtj</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">
     </script>
@@ -241,6 +243,19 @@
         [data-theme="dark"] .announcement-delete-btn:hover {
             background: rgba(255,59,96,0.22);
         }
+        [data-theme="dark"] .announcement-detail.active {
+            background: rgba(30, 30, 40, 0.88);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        [data-theme="dark"] .announcement-detail-content {
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .announcement-detail-title {
+            color: var(--text-main);
+        }
+        [data-theme="dark"] .announcement-detail-name {
+            color: var(--text-main);
+        }
         [data-theme="dark"] .announcement-btn {
             background: rgba(255,255,255,0.08);
             border-color: rgba(255,255,255,0.12);
@@ -261,7 +276,7 @@
             margin: 0;
             font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif;
             color: var(--text-main);
-            min-height: 100vh;
+            min-height: 100vh; min-height: 100dvh; min-height: -webkit-fill-available;
             overflow: hidden;
             -webkit-font-smoothing: antialiased;
             position: relative;
@@ -301,7 +316,7 @@
 
         .toast-container {
             position: fixed;
-            top: 70px;
+            top: calc(70px + env(safe-area-inset-top, 0px));
             left: 50%;
             transform: translateX(-50%);
             z-index: 9999;
@@ -346,6 +361,7 @@
 
         nav {
             padding: 16px 4px 8px;
+            padding-top: calc(16px + env(safe-area-inset-top, 0px));
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1308,7 +1324,7 @@
         /* ========== App容器 / Dock / 面板 ========== */
         .app-container {
             display: flex; flex-direction: column;
-            height: 100vh; height: 100dvh;
+            height: 100vh; height: 100dvh; height: -webkit-fill-available;
             overflow: hidden;
             max-width: 640px; margin: 0 auto;
             position: relative;
@@ -1324,6 +1340,9 @@
             transform: translateY(10px);
             transition: opacity 0.25s ease-out, transform 0.25s ease-out;
             padding: 16px 16px 72px;
+            padding-left: calc(16px + env(safe-area-inset-left, 0px));
+            padding-right: calc(16px + env(safe-area-inset-right, 0px));
+            padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
             will-change: opacity, transform;
         }
         .dock-panel::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
@@ -1337,6 +1356,8 @@
             position: fixed; bottom: 0; left: 0; right: 0;
             display: flex; justify-content: center; align-items: center;
             gap: 3px; padding: 4px 12px 10px;
+            padding-left: calc(12px + env(safe-area-inset-left, 0px));
+            padding-right: calc(12px + env(safe-area-inset-right, 0px));
             padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
             background: transparent;
             border: none;
@@ -2357,7 +2378,7 @@
         }
         .changelog-version {
             font-weight: 700;
-            font-size: 16px;
+            font-size: 14px;
             color: var(--primary);
             display: flex;
             align-items: center;
@@ -2485,12 +2506,16 @@
             pointer-events: all;
             position: relative;
             transform: translateX(0);
+            background: rgba(255,255,255,0.88);
+            border: 1px solid rgba(255,255,255,0.6);
+            border-radius: var(--radius-sm);
+            padding: 16px;
         }
         .announcement-detail-header {
             display: flex;
             align-items: flex-start;
             justify-content: space-between;
-            margin-bottom: 16px;
+            margin-bottom: 12px;
             flex-wrap: wrap;
             gap: 8px;
         }
@@ -2502,11 +2527,11 @@
             display: flex;
             align-items: center;
             gap: 10px;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
         .announcement-detail-avatar {
-            width: 40px;
-            height: 40px;
+            width: 36px;
+            height: 36px;
             border-radius: 50%;
             background: linear-gradient(135deg, #059669 0%, #10b981 100%);
             color: white;
@@ -2514,7 +2539,7 @@
             align-items: center;
             justify-content: center;
             font-weight: 700;
-            font-size: 16px;
+            font-size: 14px;
             flex-shrink: 0;
         }
         .announcement-detail-name {
@@ -2974,8 +2999,8 @@
         /* ========== 通知系统 ========== */
         .notification-container {
             position: fixed;
-            top: 20px;
-            right: 20px;
+            top: calc(20px + env(safe-area-inset-top, 0px));
+            right: calc(20px + env(safe-area-inset-right, 0px));
             z-index: 9999;
             display: flex;
             flex-direction: column;
@@ -3262,7 +3287,7 @@
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding: 14px 0;">
                         <span>关于</span>
-                        <span style="color:var(--text-muted);">xtj v0.0.22</span>
+                        <span style="color:var(--text-muted);">xtj v0.0.26</span>
                     </div>
                 </div>
             </div>
@@ -3657,16 +3682,17 @@
                         }
                     } catch(e) {}
 
-                    // 后备：从现有 __user_info__ 中读取 reg_time
+                    // 后备：从现有 __user_info__ 中读取 reg_time（用limit(1)而非maybeSingle，容错多行）
                     if (!regTime) {
                         try {
                             var existing = await sb.from("posts")
-                                .select("content")
+                                .select("content, id")
                                 .eq("user_name", name)
                                 .eq("media_type", "__user_info__")
-                                .maybeSingle();
-                            if (existing.data) {
-                                try { var parsed = JSON.parse(existing.data.content); if (parsed.reg_time) regTime = parsed.reg_time; } catch(e) {}
+                                .order("created_at", { ascending: false })
+                                .limit(1);
+                            if (existing.data && existing.data.length > 0) {
+                                try { var parsed = JSON.parse(existing.data[0].content); if (parsed.reg_time) regTime = parsed.reg_time; } catch(e) {}
                             }
                         } catch(e) {}
                     }
@@ -3679,24 +3705,39 @@
                     var userInfo = { reg_time: regTime, last_login: new Date().toISOString() };
                     var contentStr = JSON.stringify(userInfo);
 
-                    // 删除所有旧的 __user_info__ 记录（确保只有一条最新）
+                    // 尝试找到最新一条记录并UPDATE（比DELETE+INSERT更可靠，避免RLS拒绝DELETE）
+                    var updated = false;
                     try {
-                        await sb.from("posts").delete().eq("user_name", name).eq("media_type", "__user_info__");
-                    } catch(e) {
-                        console.error("saveUserInfo cleanup失败:", e);
-                    }
+                        var latest = await sb.from("posts")
+                            .select("id")
+                            .eq("user_name", name)
+                            .eq("media_type", "__user_info__")
+                            .order("created_at", { ascending: false })
+                            .limit(1);
+                        if (latest.data && latest.data.length > 0) {
+                            var updRes = await sb.from("posts")
+                                .update({ content: contentStr })
+                                .eq("id", latest.data[0].id);
+                            if (!updRes.error) {
+                                updated = true;
+                                console.log("saveUserInfo ✓ " + name + " 登录时间已更新(UPDATE): " + userInfo.last_login);
+                            }
+                        }
+                    } catch(e) {}
 
-                    // 插入最新记录
-                    var insertRes = await sb.from("posts").insert([{
-                        user_name: name,
-                        content: contentStr,
-                        media_type: "__user_info__",
-                        actor_key: "__user_info__"
-                    }]);
-                    if (insertRes.error) {
-                        console.error("saveUserInfo insert失败:", insertRes.error.message);
-                    } else {
-                        console.log("saveUserInfo ✓ " + name + " 登录时间已更新: " + userInfo.last_login);
+                    // UPDATE失败或无记录时，INSERT一条新记录
+                    if (!updated) {
+                        var insertRes = await sb.from("posts").insert([{
+                            user_name: name,
+                            content: contentStr,
+                            media_type: "__user_info__",
+                            actor_key: "__user_info__"
+                        }]);
+                        if (insertRes.error) {
+                            console.error("saveUserInfo insert失败:", insertRes.error.message);
+                        } else {
+                            console.log("saveUserInfo ✓ " + name + " 登录时间已更新(INSERT): " + userInfo.last_login);
+                        }
                     }
                 } catch(e) {
                     console.error("saveUserInfo失败:", e);
@@ -3914,11 +3955,12 @@
                         .select("content")
                         .eq("user_name", userName)
                         .eq("media_type", "__user_info__")
-                        .maybeSingle();
+                        .order("created_at", { ascending: false })
+                        .limit(1);
                     
-                    if (userInfoRes.data) {
+                    if (userInfoRes.data && userInfoRes.data.length > 0) {
                         try {
-                            var info = JSON.parse(userInfoRes.data.content);
+                            var info = JSON.parse(userInfoRes.data[0].content);
                             if (info.last_login) {
                                 document.getElementById('upcLogin').textContent = '最近登录：' + new Date(info.last_login).toLocaleString();
                             } else {
@@ -3958,11 +4000,12 @@
                         .select("content")
                         .eq("user_name", currentUser)
                         .eq("media_type", "__user_info__")
-                        .maybeSingle();
+                        .order("created_at", { ascending: false })
+                        .limit(1);
                     
-                    if (userInfoRes.data) {
+                    if (userInfoRes.data && userInfoRes.data.length > 0) {
                         try {
-                            const userInfo = JSON.parse(userInfoRes.data.content);
+                            const userInfo = JSON.parse(userInfoRes.data[0].content);
                             if (userInfo.reg_time) {
                                 document.getElementById('profileDetailRegTime').textContent = new Date(userInfo.reg_time).toLocaleString();
                             } else {
@@ -6381,6 +6424,19 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.26',
+                    date: '2026-05-03 12:00',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>修复登录时间不更新问题（改用UPDATE→fallback INSERT策略，读端order().limit(1)彻底解决多行覆盖）</li>
+                            <li>修复注册时间/登录时间显示为"-"的问题</li>
+                            <li>iOS Safari浏览器完整适配（viewport-fit=cover + safe-area-inset-* + -webkit-fill-available）</li>
+                            <li>修复底部导航栏/通知/Toast在iOS刘海屏下位置异常</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.25',
                     date: '2026-05-03 10:35',
