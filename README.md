@@ -1,5 +1,14 @@
 # 更新日志
 
+## v0.0.28 - 2026-05-03 15:00
+### 更新内容
+- Taylor Swift专题页升级为完整12张录音室专辑海报墙
+  - 新增evermore、Midnights、The Tortured Poets Department、The Life of a Showgirl
+  - 顶部Taylor Swift签名改为模拟真实手写描边动画
+  - 专辑卡片加入真实封面图、海报式排版、渐入和悬停过渡
+  - 新增公开现场照片区域，增强专题页视觉层次
+- 更新“我的”页面版本号为v0.0.28
+
 ## v0.0.27 - 2026-05-03 14:00
 ### 更新内容
 - AI聊天全面替换为Taylor Swift专题画廊
