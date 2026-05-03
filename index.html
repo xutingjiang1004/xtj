@@ -2440,7 +2440,7 @@
         }
         .announcement-item-title {
             font-weight: 700;
-            font-size: 16px;
+            font-size: 14px;
             color: var(--primary);
             display: flex;
             align-items: center;
@@ -2519,11 +2519,11 @@
         }
         .announcement-detail-name {
             font-weight: 600;
-            font-size: 15px;
+            font-size: 14px;
         }
         .announcement-detail-title {
             font-weight: 700;
-            font-size: 18px;
+            font-size: 14px;
             margin-bottom: 8px;
         }
         .announcement-detail-time {
@@ -4043,7 +4043,8 @@
                     var oldIds = await sb.from("posts")
                         .select("id")
                         .eq("user_name", currentUser)
-                        .eq("media_type", "__avatar__");
+                        .eq("media_type", "__avatar__")
+                        .eq("actor_key", "__avatar__");
                     if (oldIds.data && oldIds.data.length > 0) {
                         for (var oi of oldIds.data) {
                             try {
@@ -4827,7 +4828,7 @@
                                 avatarCache[avatar.user_name] = avatar.media_url;
                             }
                         });
-                        // 确保当前用户的头像不被DB旧数据覆盖
+                        // 优先使用localStorage里当前用户自己的头像
                         if (currentUser) {
                             try {
                                 var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
@@ -4845,11 +4846,14 @@
             function getAvatarHtml(username, size = 32) {
                 var avatarUrl = avatarCache[username];
                 if (!avatarUrl) {
-                    try {
-                        var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
-                        avatarUrl = cachedAvatars[username];
-                        if (avatarUrl) avatarCache[username] = avatarUrl;
-                    } catch(e) {}
+                    if (username === currentUser) {
+                        // 只从localStorage里拿当前用户自己的头像
+                        try {
+                            var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                            avatarUrl = cachedAvatars[username];
+                            if (avatarUrl) avatarCache[username] = avatarUrl;
+                        } catch(e) {}
+                    }
                 }
                 if (avatarUrl) {
                     return '<div class="avatar clickable" onclick="openUserProfile(\'' + username.replace(/'/g, "\\'") + '\')"><img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
@@ -5651,6 +5655,7 @@
                                 var avatarRes = await sb.from("posts")
                                     .select("user_name, media_url")
                                     .eq("media_type", "__avatar__")
+                                    .eq("actor_key", "__avatar__")
                                     .in("user_name", uncachedUsers)
                                     .order("created_at", { ascending: false });
                                 if (avatarRes.data) {
