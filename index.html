@@ -3849,8 +3849,19 @@
                 document.getElementById('upcLogin').textContent = '最近登录：加载中...';
                 
                 var avatarEl = document.getElementById('upcAvatar');
-                if (avatarCache[userName]) {
-                    avatarEl.innerHTML = '<img src="' + avatarCache[userName] + '" alt="头像">';
+                // localStorage权威优先：当前用户先检查本地缓存
+                var showAvatar = avatarCache[userName];
+                if (!showAvatar && userName === currentUser) {
+                    try {
+                        var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                        if (cachedAvatars[currentUser]) {
+                            showAvatar = cachedAvatars[currentUser];
+                            avatarCache[currentUser] = cachedAvatars[currentUser];
+                        }
+                    } catch(e) {}
+                }
+                if (showAvatar) {
+                    avatarEl.innerHTML = '<img src="' + showAvatar + '" alt="头像">';
                 } else {
                     avatarEl.innerHTML = '<span id="upcAvatarText">' + userName[0].toUpperCase() + '</span>';
                 }
@@ -3874,6 +3885,19 @@
                 
                 // 异步加载头像和登录时间
                 try {
+                    // 当前用户优先使用localStorage权威缓存
+                    if (userName === currentUser) {
+                        try {
+                            var cv = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                            if (cv[currentUser]) {
+                                avatarCache[currentUser] = cv[currentUser];
+                                if (document.getElementById('userProfileModal').classList.contains('active')) {
+                                    avatarEl.innerHTML = '<img src="' + cv[currentUser] + '" alt="头像">';
+                                }
+                            }
+                        } catch(e) {}
+                    }
+                    
                     var avatarRes = await sb.from("posts")
                         .select("media_url")
                         .eq("user_name", userName)
@@ -3883,9 +3907,15 @@
                         .limit(1);
                     
                     if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                        avatarCache[userName] = avatarRes.data[0].media_url;
+                        // 非当前用户才用DB值更新缓存（当前用户已在上面用localStorage设置）
+                        if (userName !== currentUser) {
+                            avatarCache[userName] = avatarRes.data[0].media_url;
+                        } else if (!avatarCache[currentUser]) {
+                            avatarCache[currentUser] = avatarRes.data[0].media_url;
+                        }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
-                            avatarEl.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" alt="头像">';
+                            var url = (userName === currentUser && avatarCache[currentUser]) ? avatarCache[currentUser] : avatarRes.data[0].media_url;
+                            avatarEl.innerHTML = '<img src="' + url + '" alt="头像">';
                         }
                     }
                     
@@ -3967,7 +3997,17 @@
             async function loadProfileAvatar() {
                 const avatarEl = document.getElementById('profileDetailAvatar');
                 
-                // 先用缓存显示
+                // localStorage权威优先：先检查本地缓存
+                try {
+                    var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                    if (cachedAvatars[currentUser]) {
+                        avatarCache[currentUser] = cachedAvatars[currentUser];
+                        avatarEl.innerHTML = '<img src="' + cachedAvatars[currentUser] + '" alt="头像">';
+                        return;
+                    }
+                } catch(e) {}
+                
+                // 先用内存缓存显示
                 if (avatarCache[currentUser]) {
                     avatarEl.innerHTML = '<img src="' + avatarCache[currentUser] + '" alt="头像">';
                 }
@@ -3984,6 +4024,12 @@
                     if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
                         avatarEl.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" alt="头像">';
                         avatarCache[currentUser] = avatarRes.data[0].media_url;
+                        // 同步到localStorage
+                        try {
+                            var cv = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                            cv[currentUser] = avatarRes.data[0].media_url;
+                            localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cv));
+                        } catch(e) {}
                     } else if (!avatarCache[currentUser]) {
                         avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
                     }
@@ -4129,20 +4175,39 @@
             }
 
             async function updateAllAvatars() {
-                // 更新我的页面的头像
+                // 更新我的页面的头像（localStorage权威优先）
+                try {
+                    var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                    if (cachedAvatars[currentUser]) {
+                        avatarCache[currentUser] = cachedAvatars[currentUser];
+                        const profileAvatar = document.getElementById('profileAvatar');
+                        if (profileAvatar) {
+                            profileAvatar.innerHTML = '<img src="' + cachedAvatars[currentUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                        }
+                        return;
+                    }
+                } catch(e) {}
+                
                 try {
                     const avatarRes = await sb.from("posts")
                         .select("media_url")
                         .eq("user_name", currentUser)
                         .eq("media_type", "__avatar__")
-                        .maybeSingle();
+                        .eq("actor_key", "__avatar__")
+                        .order("created_at", { ascending: false })
+                        .limit(1);
                     
                     const profileAvatar = document.getElementById('profileAvatar');
                     if (profileAvatar) {
-                        if (avatarRes.data && avatarRes.data.media_url) {
-                            profileAvatar.innerHTML = '<img src="' + avatarRes.data.media_url + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
-                            // 更新头像缓存
-                            avatarCache[currentUser] = avatarRes.data.media_url;
+                        if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
+                            profileAvatar.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            avatarCache[currentUser] = avatarRes.data[0].media_url;
+                            // 同步到localStorage
+                            try {
+                                var cv = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                                cv[currentUser] = avatarRes.data[0].media_url;
+                                localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cv));
+                            } catch(e) {}
                         } else {
                             profileAvatar.innerHTML = currentUser ? currentUser[0].toUpperCase() : '?';
                         }
@@ -4823,12 +4888,14 @@
                     .order("created_at", { ascending: false });
                     
                     if (data) {
+                        var seenUsers = {};
                         data.forEach(avatar => {
-                            if (avatar.media_url) {
+                            if (avatar.media_url && !seenUsers[avatar.user_name]) {
+                                seenUsers[avatar.user_name] = true;
                                 avatarCache[avatar.user_name] = avatar.media_url;
                             }
                         });
-                        // 优先使用localStorage里当前用户自己的头像
+                        // 优先使用localStorage里当前用户自己的头像（权威来源）
                         if (currentUser) {
                             try {
                                 var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
@@ -5701,11 +5768,26 @@
                         var avatarRes = await sb.from("posts")
                             .select("user_name, media_url")
                             .eq("media_type", "__avatar__")
-                            .in("user_name", needAvatars);
+                            .eq("actor_key", "__avatar__")
+                            .in("user_name", needAvatars)
+                            .order("created_at", { ascending: false });
                         if (avatarRes.data) {
+                            var seenAv = {};
                             avatarRes.data.forEach(function(a) {
-                                if (a.media_url) avatarCache[a.user_name] = a.media_url;
+                                if (a.media_url && !seenAv[a.user_name]) {
+                                    seenAv[a.user_name] = true;
+                                    avatarCache[a.user_name] = a.media_url;
+                                }
                             });
+                        }
+                    } catch(e) {}
+                }
+                // 当前用户优先使用localStorage权威缓存
+                if (currentUser) {
+                    try {
+                        var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                        if (cachedAvatars[currentUser]) {
+                            avatarCache[currentUser] = cachedAvatars[currentUser];
                         }
                     } catch(e) {}
                 }
@@ -6110,6 +6192,10 @@
                 detail.classList.remove('active');
                 detail.style.display = 'none';
                 currentAnnouncement = null;
+                // 返回列表时恢复管理员的发布区域
+                if (isAdmin()) {
+                    document.getElementById('announcementAdminArea').style.display = 'block';
+                }
             }
 
             window.showAnnouncementList = showAnnouncementList;
@@ -6118,6 +6204,8 @@
                 currentAnnouncement = ann;
                 markAnnouncementRead(ann.id);
 
+                // 进入详情时隐藏发布区域
+                document.getElementById('announcementAdminArea').style.display = 'none';
                 document.getElementById('announcementListContainer').style.display = 'none';
                 const detail = document.getElementById('announcementDetail');
                 detail.style.display = 'block';
@@ -6128,13 +6216,14 @@
                 document.getElementById('announcementDetailTime').textContent = new Date(ann.created_at).toLocaleString('zh-CN');
                 document.getElementById('announcementDetailContent').textContent = annData.content;
                 
-                // 设置发布者信息
+                // 设置发布者信息（显示最新头像）
                 const userInfoEl = document.getElementById('announcementDetailUserInfo');
                 if (userInfoEl) {
-                    userInfoEl.innerHTML = `
-                        <div class="announcement-detail-avatar">${ann.user_name.charAt(0).toUpperCase()}</div>
-                        <div class="announcement-detail-name">${escapeHtml(ann.user_name)}</div>
-                    `;
+                    var avUrl = avatarCache[ann.user_name];
+                    var avatarHtml = avUrl
+                        ? '<div class="announcement-detail-avatar"><img src="' + avUrl + '" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>'
+                        : '<div class="announcement-detail-avatar">' + ann.user_name.charAt(0).toUpperCase() + '</div>';
+                    userInfoEl.innerHTML = avatarHtml + '<div class="announcement-detail-name">' + escapeHtml(ann.user_name) + '</div>';
                 }
 
                 // 如果是管理员，添加删除按钮
@@ -6161,6 +6250,12 @@
                     if (error) throw error;
                     announcements = data || [];
                     updateAnnouncementBadge();
+                    // 预加载发布者头像
+                    if (announcements.length > 0) {
+                        var publishers = new Set();
+                        announcements.forEach(function(a) { publishers.add(a.user_name); });
+                        loadAvatarsForUsers(Array.from(publishers));
+                    }
                 } catch(e) {
                     console.error('加载公告失败:', e);
                 }
