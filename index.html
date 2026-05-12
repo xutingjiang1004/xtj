@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
@@ -7,8 +7,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>xtj</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap');
-
         html, body {
             touch-action: manipulation;
             overscroll-behavior: none;
@@ -1446,140 +1444,86 @@
         .dock-chat-container .chat-view.hidden { display: none; }
         .dock-chat-container .chat-list-item { border-bottom-color: rgba(0,0,0,0.04); }
 
-        /* ========== 双人专辑展示墙 ========== */
-
-        .idol-page {
-            height: 100%;
-            overflow-y: auto;
-            padding: 24px 16px 86px;
-            -webkit-overflow-scrolling: touch;
+        /* Dock面板: Taylor Swift 专题 */
+        .ts-container {
+            display: flex; flex-direction: column; height: 100%;
             background: transparent;
+            overflow-y: auto; -webkit-overflow-scrolling: touch;
         }
-        .idol-section {
-            margin-bottom: 40px;
+        .ts-signature {
+            text-align: center; padding: 20px 16px 10px;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            flex-shrink: 0;
         }
-        .idol-title {
-            font-family: 'Great Vibes', cursive;
-            font-size: 46px;
-            text-align: center;
-            margin-bottom: 24px;
-            color: var(--text-main);
-            text-shadow: 0 4px 12px rgba(0,0,0,0.08);
-            letter-spacing: 2px;
+        .ts-sig-svg { max-width: 320px; height: auto; display: block; margin: 0 auto; }
+        .ts-era-badge {
+            display: inline-block; margin-top: 6px;
+            font-size: 9px; letter-spacing: 3px; font-weight: 700;
+            color: #c9a0dc; background: rgba(201,160,220,0.12);
+            border-radius: 99px; padding: 3px 14px;
+            border: 1px solid rgba(201,160,220,0.3);
         }
-        [data-theme="dark"] .idol-title {
-            text-shadow: 0 4px 16px rgba(0,0,0,0.6);
-        }
-        .idol-grid {
-            display: grid;
+        .ts-gallery {
+            flex: 1; display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 16px;
+            gap: 10px; padding: 14px 16px 80px;
+            align-content: start;
         }
-        @media (min-width: 480px) {
-            .idol-grid { grid-template-columns: repeat(3, 1fr); }
+        .ts-card {
+            border-radius: 14px; overflow: hidden;
+            cursor: pointer;
+            opacity: 0; transform: translateY(20px) scale(0.95);
+            animation: tsCardIn 0.55s cubic-bezier(0.16,1,0.3,1) forwards;
+            transition: transform 0.35s cubic-bezier(0.16,1,0.3,1), box-shadow 0.35s;
+            background: rgba(255,255,255,0.85);
+            border: 1px solid rgba(0,0,0,0.06);
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
         }
-        .idol-card {
-            position: relative;
-            border-radius: 16px;
-            overflow: hidden;
-            aspect-ratio: 1 / 1;
-            background: #1a1a1a;
-            transform: translateZ(0);
-            box-shadow: 0 10px 28px rgba(0,0,0,0.12);
+        .ts-card:nth-child(1) { animation-delay: 0.05s; }
+        .ts-card:nth-child(2) { animation-delay: 0.12s; }
+        .ts-card:nth-child(3) { animation-delay: 0.19s; }
+        .ts-card:nth-child(4) { animation-delay: 0.26s; }
+        .ts-card:nth-child(5) { animation-delay: 0.33s; }
+        .ts-card:nth-child(6) { animation-delay: 0.40s; }
+        .ts-card:nth-child(7) { animation-delay: 0.47s; }
+        .ts-card:nth-child(8) { animation-delay: 0.54s; }
+        @keyframes tsCardIn {
+            from { opacity: 0; transform: translateY(20px) scale(0.95); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
         }
-        .idol-cover {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            /* 绝对禁止点击、放大、下载和拖拽 */
-            pointer-events: none;
-            user-select: none;
-            -webkit-user-drag: none;
-            transition: transform 0.65s cubic-bezier(0.16, 1, 0.3, 1);
+        .ts-card:active { transform: scale(0.96); }
+        .ts-card:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,0,0,0.08); }
+        .ts-card-img {
+            width: 100%; aspect-ratio: 3/4;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            position: relative; overflow: hidden;
         }
-        /* ========== 自动循环磨砂与真实手写签名时间轴 ========== */
-        /* ========== 自动循环磨砂与真实手写时间轴 ========== */
-        .idol-overlay {
-            position: absolute;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.25);
-            backdrop-filter: blur(12px) saturate(130%);
-            -webkit-backdrop-filter: blur(12px) saturate(130%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            pointer-events: none;
-            z-index: 2;
-            animation: overlayLoop 8s ease-in-out infinite;
+        .ts-card-img img {
+            width: 100%; height: 100%; object-fit: cover;
+            transition: transform 0.5s cubic-bezier(0.16,1,0.3,1);
         }
-
-        @keyframes overlayLoop {
-            0%, 100% { opacity: 0; }
-            12%, 75% { opacity: 1; }
-            85%      { opacity: 0; }
+        .ts-card:hover .ts-card-img img { transform: scale(1.05); }
+        .ts-era-tag {
+            position: absolute; bottom: 8px; right: 8px;
+            font-size: 9px; letter-spacing: 2px; font-weight: 700;
+            color: white; background: rgba(0,0,0,0.35);
+            border-radius: 4px; padding: 2px 8px;
+            backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
         }
-
-        .idol-sig-svg {
-            width: 85%;
-            height: auto;
-            max-height: 70%;
-            overflow: visible;
-            filter: drop-shadow(0 2px 8px rgba(0,0,0,0.6));
+        .ts-card-label {
+            text-align: center; font-size: 12px; font-weight: 600;
+            color: var(--text-main); padding: 10px 6px;
+            background: rgba(255,255,255,0.6);
         }
-
-        .real-sig-path {
-            fill: none;
-            stroke: #fff;
-            stroke-width: 4.5;
-            stroke-linecap: round;
-            stroke-linejoin: round;
-            stroke-dasharray: 100;
-            stroke-dashoffset: 100;
-            opacity: 0;
-            animation-duration: 8s;
-            animation-timing-function: ease-in-out;
-            animation-iteration-count: infinite;
+        .ts-footer {
+            text-align: center; font-size: 11px; color: var(--text-muted);
+            padding: 0 16px 20px; font-style: italic; flex-shrink: 0;
         }
-
-        .stroke-1 { animation-name: loopStroke1; }
-        .stroke-2 { animation-name: loopStroke2; }
-        .stroke-3 { animation-name: loopStroke3; }
-
-        @keyframes loopStroke1 {
-            0%, 12%  { stroke-dashoffset: 100; opacity: 0; }
-            14%      { stroke-dashoffset: 100; opacity: 1; }
-            30%      { stroke-dashoffset: 0;   opacity: 1; }
-            75%      { stroke-dashoffset: 0;   opacity: 1; }
-            85%      { stroke-dashoffset: 0;   opacity: 0; }
-            100%     { stroke-dashoffset: 100; opacity: 0; }
-        }
-
-        @keyframes loopStroke2 {
-            0%, 22%  { stroke-dashoffset: 100; opacity: 0; }
-            24%      { stroke-dashoffset: 100; opacity: 1; }
-            45%      { stroke-dashoffset: 0;   opacity: 1; }
-            75%      { stroke-dashoffset: 0;   opacity: 1; }
-            85%      { stroke-dashoffset: 0;   opacity: 0; }
-            100%     { stroke-dashoffset: 100; opacity: 0; }
-        }
-
-        @keyframes loopStroke3 {
-            0%, 40%  { stroke-dashoffset: 100; opacity: 0; }
-            42%      { stroke-dashoffset: 100; opacity: 1; }
-            55%      { stroke-dashoffset: 0;   opacity: 1; }
-            75%      { stroke-dashoffset: 0;   opacity: 1; }
-            85%      { stroke-dashoffset: 0;   opacity: 0; }
-            100%     { stroke-dashoffset: 100; opacity: 0; }
-        }
-
-        .idol-card:nth-child(2n) .idol-overlay,
-        .idol-card:nth-child(2n) .real-sig-path { animation-delay: 2.5s; }
-        
-        .idol-card:nth-child(3n) .idol-overlay,
-        .idol-card:nth-child(3n) .real-sig-path { animation-delay: 5.2s; }
-        
-        .idol-card:nth-child(5n) .idol-overlay,
-        .idol-card:nth-child(5n) .real-sig-path { animation-delay: 1.1s; }
+        [data-theme="dark"] .ts-signature { border-bottom-color: rgba(255,255,255,0.06); }
+        [data-theme="dark"] .ts-card { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.06); }
+        [data-theme="dark"] .ts-card-label { background: rgba(255,255,255,0.04); }
+        [data-theme="dark"] .ts-era-tag { background: rgba(0,0,0,0.5); }
 
         /* 暗色模式 Dock */
         [data-theme="dark"] .dock-bar {
@@ -3057,7 +3001,7 @@
             <nav>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <h1>xtj</h1>
-                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题">??</button>
+                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
                 </div>
                 <div id="announcement-btn-wrapper" style="display:none; margin-right: 8px;">
                     <button class="announcement-btn" id="announcementBtn" title="公告">
@@ -3086,7 +3030,7 @@
                 <div class="publish-box glass" id="publishBox">
                     <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
                     <div class="publish-footer">
-                        <label for="fileInp" class="file-label">?? 选取照片或视频</label>
+                        <label for="fileInp" class="file-label">📷 选取照片或视频</label>
                         <input type="file" id="fileInp" accept="image/*,video/*" style="display:none" />
                         <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
                     </div>
@@ -3107,7 +3051,7 @@
         <div class="dock-panel" id="panelChat">
             <div class="dock-chat-container" id="dockChatContainer">
                 <div class="chat-header">
-                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">?</button>
+                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">‹</button>
                     <h3 id="dockChatTitle">消息</h3>
                 </div>
                 <div id="dockChatListView" class="chat-view">
@@ -3121,13 +3065,13 @@
                                 <input id="dockChatInput" placeholder="输入消息..." maxlength="500" />
                                 <div id="dockChatFilePreview" class="chat-file-preview hidden">
                                     <div class="cfp-thumb" id="dockCfpThumb">
-                                        <button class="cfp-x" id="dockCfpRemove" title="移除">?</button>
+                                        <button class="cfp-x" id="dockCfpRemove" title="移除">✕</button>
                                     </div>
                                     <span class="cfp-name" id="dockCfpName"></span>
                                 </div>
                             </div>
-                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送图片">??</button>
-                            <button class="send-btn" id="dockChatSendBtn">?</button>
+                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送图片">📷</button>
+                            <button class="send-btn" id="dockChatSendBtn">➤</button>
                         </div>
                     </div>
                     <input type="file" id="dockChatFileInp" accept="image/*,video/*" style="display:none" />
@@ -3135,294 +3079,75 @@
             </div>
         </div>
 
-        
-           
-                            <div class="ts-detail-section">
-                                <h4>Background</h4>
-                                <p id="tsDetailBackground"></p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
         <div class="dock-panel" id="panelAi">
-            <div class="idol-page">
-                <div class="idol-section">
-                    <div class="idol-title">Taylor Swift</div>
-                    <div class="idol-grid">
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f4/Taylor_Swift_%E2%80%93_The_Life_of_a_Showgirl_%28album_cover%29.png/500px-Taylor_Swift_%E2%80%93_The_Life_of_a_Showgirl_%28album_cover%29.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
+            <div class="ts-container">
+                <div class="ts-signature">
+                    <svg viewBox="0 0 400 80" class="ts-sig-svg">
+                        <path d="M40,55 C45,20 55,15 60,25 C65,35 55,55 50,55 C45,55 42,50 45,40 C48,30 58,25 65,30 C72,35 70,50 62,55" fill="none" stroke="#d4a0c0" stroke-width="2.5" stroke-linecap="round"/>
+                        <text x="200" y="55" text-anchor="middle" font-family="'Georgia','Times New Roman',serif" font-size="32" font-style="italic" fill="url(#tsGrad)" font-weight="bold" letter-spacing="2">Taylor Swift</text>
+                        <defs><linearGradient id="tsGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#d4a0c0"/><stop offset="30%" stop-color="#c9a0dc"/><stop offset="60%" stop-color="#e8b4b8"/><stop offset="100%" stop-color="#d4a0c0"/></linearGradient></defs>
+                    </svg>
+                    <div class="ts-era-badge">ERA COLLECTION</div>
+                </div>
+                <div class="ts-gallery" id="tsGallery">
+                    <div class="ts-card ts-card-era" data-era="Debut">
+                        <div class="ts-card-img" style="background:linear-gradient(135deg,#b8d4c8,#7eb89e);">
+                            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="white" stroke-width="0.8" opacity="0.7"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M6 12h12"/></svg>
+                            <span class="ts-era-tag">TAYLOR SWIFT</span>
                         </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/6/6e/Taylor_Swift_%E2%80%93_The_Tortured_Poets_Department_%28album_cover%29.png/500px-Taylor_Swift_%E2%80%93_The_Tortured_Poets_Department_%28album_cover%29.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
+                        <div class="ts-card-label">Debut · 2006</div>
+                    </div>
+                    <div class="ts-card ts-card-era" data-era="Fearless">
+                        <div class="ts-card-img" style="background:linear-gradient(135deg,#f7e6c4,#e8c76a);">
+                            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="white" stroke-width="0.8" opacity="0.7"><path d="M12 2l2.4 7.2h7.6l-6 4.8 2.4 7.2-6-4.8-6 4.8 2.4-7.2-6-4.8h7.6z"/></svg>
+                            <span class="ts-era-tag">FEARLESS</span>
                         </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/9/9f/Midnights_-_Taylor_Swift.png/500px-Midnights_-_Taylor_Swift.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
+                        <div class="ts-card-label">Fearless · 2008</div>
+                    </div>
+                    <div class="ts-card ts-card-era" data-era="Speak Now">
+                        <div class="ts-card-img" style="background:linear-gradient(135deg,#d4a0d0,#9b59b6);">
+                            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="white" stroke-width="0.8" opacity="0.7"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+                            <span class="ts-era-tag">SPEAK NOW</span>
                         </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/0/0a/Taylor_Swift_-_Evermore.png/500px-Taylor_Swift_-_Evermore.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
+                        <div class="ts-card-label">Speak Now · 2010</div>
+                    </div>
+                    <div class="ts-card ts-card-era" data-era="Red">
+                        <div class="ts-card-img" style="background:linear-gradient(135deg,#e74c3c,#c0392b);">
+                            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="white" stroke-width="0.8" opacity="0.7"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 000-7.78z"/></svg>
+                            <span class="ts-era-tag">RED</span>
                         </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f8/Taylor_Swift_-_Folklore.png/500px-Taylor_Swift_-_Folklore.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
+                        <div class="ts-card-label">Red · 2012</div>
+                    </div>
+                    <div class="ts-card ts-card-era" data-era="1989">
+                        <div class="ts-card-img" style="background:linear-gradient(135deg,#87CEEB,#5DADE2);">
+                            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="white" stroke-width="0.8" opacity="0.7"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+                            <span class="ts-era-tag">1989</span>
                         </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/c/cd/Taylor_Swift_-_Lover.png/500px-Taylor_Swift_-_Lover.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
+                        <div class="ts-card-label">1989 · 2014</div>
+                    </div>
+                    <div class="ts-card ts-card-era" data-era="reputation">
+                        <div class="ts-card-img" style="background:linear-gradient(135deg,#2c3e50,#1a1a2e);">
+                            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="white" stroke-width="0.8" opacity="0.7"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26"/></svg>
+                            <span class="ts-era-tag">REPUTATION</span>
                         </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f2/Taylor_Swift_-_Reputation.png/500px-Taylor_Swift_-_Reputation.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
+                        <div class="ts-card-label">reputation · 2017</div>
+                    </div>
+                    <div class="ts-card ts-card-era" data-era="Lover">
+                        <div class="ts-card-img" style="background:linear-gradient(135deg,#f9c5d1,#f47a9b);">
+                            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="white" stroke-width="0.8" opacity="0.7"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+                            <span class="ts-era-tag">LOVER</span>
                         </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/f/f6/Taylor_Swift_-_1989.png/500px-Taylor_Swift_-_1989.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
+                        <div class="ts-card-label">Lover · 2019</div>
+                    </div>
+                    <div class="ts-card ts-card-era" data-era="folklore">
+                        <div class="ts-card-img" style="background:linear-gradient(135deg,#b8b8b8,#8e8e8e);">
+                            <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="white" stroke-width="0.8" opacity="0.7"><path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5z"/></svg>
+                            <span class="ts-era-tag">FOLKLORE</span>
                         </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/e/e8/Taylor_Swift_-_Red.png/500px-Taylor_Swift_-_Red.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
-                        </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/8/8f/Taylor_Swift_-_Speak_Now_cover.png/500px-Taylor_Swift_-_Speak_Now_cover.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
-                        </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/8/86/Taylor_Swift_-_Fearless.png/500px-Taylor_Swift_-_Fearless.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
-                        </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://upload.wikimedia.org/wikipedia/en/thumb/1/1f/Taylor_Swift_-_Taylor_Swift.png/500px-Taylor_Swift_-_Taylor_Swift.png" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150" aria-label="Taylor Swift animated signature">
-                                    <defs>
-                                        <linearGradient id="ts-ink-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                            <stop offset="0%" stop-color="#8d4a68"/>
-                                            <stop offset="48%" stop-color="#cf789b"/>
-                                            <stop offset="100%" stop-color="#6f8fb2"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 30 50 C 40 20, 80 20, 90 30 C 60 40, 50 60, 45 100 C 40 130, 60 120, 70 100 C 80 90, 80 80, 90 80 C 100 80, 100 100, 110 100 C 120 80, 120 110, 130 110 C 140 110, 150 80, 150 100" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 170 100 C 180 40, 230 40, 210 80 C 190 120, 160 120, 180 110 C 190 100, 190 80, 200 80 C 210 80, 210 100, 220 100 C 230 80, 230 110, 240 110 C 250 90, 250 70, 260 70 C 270 70, 260 110, 270 110 C 280 90, 290 80, 310 80" stroke="url(#ts-ink-grad)"/>
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 160 105 C 220 120, 350 90, 450 70" stroke="rgba(188, 120, 146, 0.62)"/>
-                                </svg>
-                            </div>
-                        </div>
+                        <div class="ts-card-label">folklore · 2020</div>
                     </div>
                 </div>
-
-                <div class="idol-section">
-                    <div class="idol-title">Jennie Ruby Jane</div>
-                    <div class="idol-grid">
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://is1-ssl.mzstatic.com/image/thumb/Music118/v4/8c/5e/2b/8c5e2bd9-38a8-5bc2-9a87-9bcd4011c2a7/00191222003792.rgb.jpg/500x500bb.jpg" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150">
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 50 85 C 45 35, 60 25, 75 35 C 90 45, 80 75, 65 95 C 50 115, 40 130, 35 120 C 28 108, 45 100, 60 100 C 75 100, 90 95, 95 85 C 98 78, 95 70, 85 68 C 75 66, 65 72, 70 82 C 75 92, 90 95, 105 88 C 115 82, 120 70, 120 65" />
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 150 70 C 155 45, 170 38, 180 48 C 190 58, 180 88, 165 98 C 155 105, 150 103, 155 93 C 163 75, 180 68, 190 68 C 200 68, 210 58, 215 45 C 220 32, 220 72, 215 82 C 210 94, 200 100, 193 102 C 187 104, 185 97, 190 90 C 197 80, 210 74, 220 74 C 230 74, 240 68, 245 58" />
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 265 58 C 270 43, 285 33, 295 43 C 305 53, 290 83, 278 91 C 270 97, 265 101, 270 108 C 275 115, 285 111, 295 103 C 305 95, 315 83, 320 75 C 325 67, 330 68, 330 73" />
-                                </svg>
-                            </div>
-                        </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/2e/2a/4c/2e2a4c59-62ac-25a3-9d91-5e680b4ba806/23UM1IM15529.rgb.jpg/500x500bb.jpg" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150">
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 50 85 C 45 35, 60 25, 75 35 C 90 45, 80 75, 65 95 C 50 115, 40 130, 35 120 C 28 108, 45 100, 60 100 C 75 100, 90 95, 95 85 C 98 78, 95 70, 85 68 C 75 66, 65 72, 70 82 C 75 92, 90 95, 105 88 C 115 82, 120 70, 120 65" />
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 150 70 C 155 45, 170 38, 180 48 C 190 58, 180 88, 165 98 C 155 105, 150 103, 155 93 C 163 75, 180 68, 190 68 C 200 68, 210 58, 215 45 C 220 32, 220 72, 215 82 C 210 94, 200 100, 193 102 C 187 104, 185 97, 190 90 C 197 80, 210 74, 220 74 C 230 74, 240 68, 245 58" />
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 265 58 C 270 43, 285 33, 295 43 C 305 53, 290 83, 278 91 C 270 97, 265 101, 270 108 C 275 115, 285 111, 295 103 C 305 95, 315 83, 320 75 C 325 67, 330 68, 330 73" />
-                                </svg>
-                            </div>
-                        </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/4f/3c/d3/4f3cd3d1-49aa-d6e7-dbf7-0c0b2c5a0c8f/196872525328.jpg/500x500bb.jpg" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150">
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 50 85 C 45 35, 60 25, 75 35 C 90 45, 80 75, 65 95 C 50 115, 40 130, 35 120 C 28 108, 45 100, 60 100 C 75 100, 90 95, 95 85 C 98 78, 95 70, 85 68 C 75 66, 65 72, 70 82 C 75 92, 90 95, 105 88 C 115 82, 120 70, 120 65" />
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 150 70 C 155 45, 170 38, 180 48 C 190 58, 180 88, 165 98 C 155 105, 150 103, 155 93 C 163 75, 180 68, 190 68 C 200 68, 210 58, 215 45 C 220 32, 220 72, 215 82 C 210 94, 200 100, 193 102 C 187 104, 185 97, 190 90 C 197 80, 210 74, 220 74 C 230 74, 240 68, 245 58" />
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 265 58 C 270 43, 285 33, 295 43 C 305 53, 290 83, 278 91 C 270 97, 265 101, 270 108 C 275 115, 285 111, 295 103 C 305 95, 315 83, 320 75 C 325 67, 330 68, 330 73" />
-                                </svg>
-                            </div>
-                        </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/1c/57/15/1c571583-f4bc-3307-6e5e-8b9e68d05913/196872850918.jpg/500x500bb.jpg" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150">
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 50 85 C 45 35, 60 25, 75 35 C 90 45, 80 75, 65 95 C 50 115, 40 130, 35 120 C 28 108, 45 100, 60 100 C 75 100, 90 95, 95 85 C 98 78, 95 70, 85 68 C 75 66, 65 72, 70 82 C 75 92, 90 95, 105 88 C 115 82, 120 70, 120 65" />
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 150 70 C 155 45, 170 38, 180 48 C 190 58, 180 88, 165 98 C 155 105, 150 103, 155 93 C 163 75, 180 68, 190 68 C 200 68, 210 58, 215 45 C 220 32, 220 72, 215 82 C 210 94, 200 100, 193 102 C 187 104, 185 97, 190 90 C 197 80, 210 74, 220 74 C 230 74, 240 68, 245 58" />
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 265 58 C 270 43, 285 33, 295 43 C 305 53, 290 83, 278 91 C 270 97, 265 101, 270 108 C 275 115, 285 111, 295 103 C 305 95, 315 83, 320 75 C 325 67, 330 68, 330 73" />
-                                </svg>
-                            </div>
-                        </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/a1/d7/15/a1d715f8-11c4-121a-5577-18e6a8c6023d/196872912623.jpg/500x500bb.jpg" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150">
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 50 85 C 45 35, 60 25, 75 35 C 90 45, 80 75, 65 95 C 50 115, 40 130, 35 120 C 28 108, 45 100, 60 100 C 75 100, 90 95, 95 85 C 98 78, 95 70, 85 68 C 75 66, 65 72, 70 82 C 75 92, 90 95, 105 88 C 115 82, 120 70, 120 65" />
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 150 70 C 155 45, 170 38, 180 48 C 190 58, 180 88, 165 98 C 155 105, 150 103, 155 93 C 163 75, 180 68, 190 68 C 200 68, 210 58, 215 45 C 220 32, 220 72, 215 82 C 210 94, 200 100, 193 102 C 187 104, 185 97, 190 90 C 197 80, 210 74, 220 74 C 230 74, 240 68, 245 58" />
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 265 58 C 270 43, 285 33, 295 43 C 305 53, 290 83, 278 91 C 270 97, 265 101, 270 108 C 275 115, 285 111, 295 103 C 305 95, 315 83, 320 75 C 325 67, 330 68, 330 73" />
-                                </svg>
-                            </div>
-                        </div>
-                        <div class="idol-card">
-                            <img class="idol-cover" src="https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/97/4d/0e/974d0ed9-0c7b-59da-da0f-7a22ebfc1479/196872953367.jpg/500x500bb.jpg" draggable="false">
-                            <div class="idol-overlay">
-                                <svg class="idol-sig-svg" viewBox="0 0 500 150">
-                                    <path class="real-sig-path stroke-1" pathLength="100" d="M 50 85 C 45 35, 60 25, 75 35 C 90 45, 80 75, 65 95 C 50 115, 40 130, 35 120 C 28 108, 45 100, 60 100 C 75 100, 90 95, 95 85 C 98 78, 95 70, 85 68 C 75 66, 65 72, 70 82 C 75 92, 90 95, 105 88 C 115 82, 120 70, 120 65" />
-                                    <path class="real-sig-path stroke-2" pathLength="100" d="M 150 70 C 155 45, 170 38, 180 48 C 190 58, 180 88, 165 98 C 155 105, 150 103, 155 93 C 163 75, 180 68, 190 68 C 200 68, 210 58, 215 45 C 220 32, 220 72, 215 82 C 210 94, 200 100, 193 102 C 187 104, 185 97, 190 90 C 197 80, 210 74, 220 74 C 230 74, 240 68, 245 58" />
-                                    <path class="real-sig-path stroke-3" pathLength="100" d="M 265 58 C 270 43, 285 33, 295 43 C 305 53, 290 83, 278 91 C 270 97, 265 101, 270 108 C 275 115, 285 111, 295 103 C 305 95, 315 83, 320 75 C 325 67, 330 68, 330 73" />
-                                </svg>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <div class="ts-footer">🦋 Long live all the magic we made · Taylor Swift 🦋</div>
             </div>
         </div>
 
@@ -3451,12 +3176,12 @@
                         <div class="profile-lang-tabs">
                             <button class="profile-lang-tab" data-lang="zh" onclick="setProfileLang('zh')">中文</button>
                             <button class="profile-lang-tab" data-lang="en" onclick="setProfileLang('en')">English</button>
-                            <button class="profile-lang-tab" data-lang="ko" onclick="setProfileLang('ko')">???</button>
+                            <button class="profile-lang-tab" data-lang="ko" onclick="setProfileLang('ko')">한국어</button>
                         </div>
                         <select id="profileLang" style="display:none;">
                             <option value="zh">中文</option>
                             <option value="en">English</option>
-                            <option value="ko">???</option>
+                            <option value="ko">한국어</option>
                         </select>
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(0,0,0,0.05);">
@@ -3468,7 +3193,7 @@
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding: 14px 0;">
                         <span>关于</span>
-                        <span style="color:var(--text-muted);">xtj v0.0.30</span>
+                        <span style="color:var(--text-muted);">xtj v0.0.27</span>
                     </div>
                 </div>
             </div>
@@ -3669,7 +3394,7 @@
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
                 <h3 id="statModalTitle">统计详情</h3>
-                <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">?</button>
+                <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="stat-detail-body" id="statModalBody">
                 加载中...
@@ -3681,7 +3406,7 @@
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
                 <h3 id="postDetailTitle">帖子详情</h3>
-                <button class="btn btn-ghost" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;">?</button>
+                <button class="btn btn-ghost" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="stat-detail-body" id="postDetailBody">
                 加载中...
@@ -3694,14 +3419,14 @@
         <div class="modal-box glass profile-detail-modal" onclick="event.stopPropagation()">
             <div class="profile-detail-header">
                 <h3>个人资料</h3>
-                <button class="btn btn-ghost" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;">?</button>
+                <button class="btn btn-ghost" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="profile-detail-body">
                 <div class="profile-detail-avatar-wrapper">
                     <div class="profile-detail-avatar" id="profileDetailAvatar" onclick="triggerAvatarUpload()">
                         <span id="profileDetailAvatarText">?</span>
                     </div>
-                    <div class="profile-detail-avatar-edit" onclick="triggerAvatarUpload()" title="更换头像">??</div>
+                    <div class="profile-detail-avatar-edit" onclick="triggerAvatarUpload()" title="更换头像">📷</div>
                     <input type="file" id="avatarUploadInput" accept="image/*" style="display:none;" onchange="handleAvatarUpload(event)">
                 </div>
                 <div class="profile-detail-info">
@@ -3728,7 +3453,7 @@
         <div class="modal-box glass user-profile-card-modal" onclick="event.stopPropagation()">
             <div class="upc-header">
                 <h3>用户资料</h3>
-                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;">?</button>
+                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="upc-body">
                 <div class="upc-avatar" id="upcAvatar">
@@ -3736,7 +3461,7 @@
                 </div>
                 <div class="upc-name" id="upcName">-</div>
                 <div class="upc-login" id="upcLogin">最近登录：加载中...</div>
-                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">✉️ 发消息</button>
+                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">💬 发消息</button>
             </div>
         </div>
     </div>
@@ -3746,14 +3471,14 @@
         <div class="announcement-modal" onclick="event.stopPropagation()">
             <div class="announcement-header">
                 <div class="announcement-tab-bar">
-                    <button class="announcement-tab active" data-tab="announcements">📢 公告</button>
-                    <button class="announcement-tab" data-tab="changelog">📋 更新日志</button>
+                    <button class="announcement-tab active" data-tab="announcements">🔔 公告</button>
+                    <button class="announcement-tab" data-tab="changelog">📝 更新日志</button>
                 </div>
-                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">?</button>
+                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="announcement-content">
                 <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
-                    <div class="announcement-admin-title">?? 发布新公告</div>
+                    <div class="announcement-admin-title">📢 发布新公告</div>
                     <input type="text" id="announcementAdminTitle" class="announcement-admin-title-input" placeholder="输入公告标题（可选）">
                     <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="输入公告内容（可选）"></textarea>
                     <div class="announcement-admin-row">
@@ -3902,7 +3627,7 @@
                                 .eq("id", latest.data[0].id);
                             if (!updRes.error) {
                                 updated = true;
-                                console.log("saveUserInfo ? " + name + " 登录时间已更新(UPDATE): " + userInfo.last_login);
+                                console.log("saveUserInfo ✓ " + name + " 登录时间已更新(UPDATE): " + userInfo.last_login);
                             }
                         }
                     } catch(e) {}
@@ -3918,7 +3643,7 @@
                         if (insertRes.error) {
                             console.error("saveUserInfo insert失败:", insertRes.error.message);
                         } else {
-                            console.log("saveUserInfo ? " + name + " 登录时间已更新(INSERT): " + userInfo.last_login);
+                            console.log("saveUserInfo ✓ " + name + " 登录时间已更新(INSERT): " + userInfo.last_login);
                         }
                     }
                 } catch(e) {
@@ -4090,7 +3815,7 @@
                     msgBtn.disabled = true;
                     msgBtn.style.opacity = '0.5';
                 } else {
-                    msgBtn.textContent = '?? 发消息';
+                    msgBtn.textContent = '💬 发消息';
                     msgBtn.disabled = false;
                     msgBtn.style.opacity = '1';
                 }
@@ -4659,7 +4384,7 @@
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
-                const emojis = ["❤️","🫶","💕","💖","💗","❤️‍🔥"];
+                const emojis = ["❤️","💕","💗","✨","💖","💓"];
                 for (let i=0; i<8; i++) {
                     const heart = document.createElement('div');
                     heart.className = 'heart-particle';
@@ -5376,7 +5101,7 @@
                     <div class="post-detail-stats">浏览 ${vc} · 点赞 ${likes.length} · 评论 ${comments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
-                            <div class="stat-section-title">?? 点赞用户（${likes.length}）</div>
+                            <div class="stat-section-title">❤️ 点赞用户（${likes.length}）</div>
                             ${likes.length ? likes.map(l => `
                                 <div class="stat-like-item">
                                     <div class="sli-info">
@@ -5387,7 +5112,7 @@
                             `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
                         </div>
                         <div class="stat-col">
-                            <div class="stat-section-title">?? 评论列表（${comments.length}）</div>
+                            <div class="stat-section-title">💬 评论列表（${comments.length}）</div>
                             ${comments.length ? comments.map(c => `
                                 <div class="stat-comment-item">
                                     <div class="sci-info">
@@ -5408,8 +5133,8 @@
                 const hasImg = p.media_url && p.media_type === 'image';
                 const hasVid = p.media_url && p.media_type === 'video';
                 let tag = '';
-                if (hasImg) tag = '<span class="spi-img-tag">?? 图片</span>';
-                if (hasVid) tag = '<span class="spi-img-tag">?? 视频</span>';
+                if (hasImg) tag = '<span class="spi-img-tag">🖼 图片</span>';
+                if (hasVid) tag = '<span class="spi-img-tag">🎬 视频</span>';
                 const summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
                 const display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
                 return { display, tag, hasImg, hasVid, thumbUrl: hasImg ? p.media_url : null };
@@ -5489,7 +5214,7 @@
                 if (!history.length) {
                     body.innerHTML = `
                         <div class="stat-empty">
-                            <div style="font-size:16px; margin-bottom:8px;">?? 浏览记录</div>
+                            <div style="font-size:16px; margin-bottom:8px;">📊 浏览记录</div>
                             <div style="font-size:13px;">暂无浏览详情数据</div>
                             <div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>
                             <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
@@ -5517,7 +5242,7 @@
                 statAllPosts.forEach(p => { postMap[p.id] = p; });
 
                 function buildLikesCol() {
-                    let h = '<div class="stat-section-title">?? 点赞记录</div>';
+                    let h = '<div class="stat-section-title">❤️ 点赞记录</div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(l => {
                             const post = postMap[l.post_id];
@@ -5539,7 +5264,7 @@
                 }
 
                 function buildCommentsCol() {
-                    let h = '<div class="stat-section-title">?? 评论记录</div>';
+                    let h = '<div class="stat-section-title">💬 评论记录</div>';
                     if (statAllComments.length) {
                         h += [...statAllComments].reverse().slice(0, 200).map(c => {
                             const post = postMap[c.post_id];
@@ -5778,19 +5503,25 @@
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
                 const now = Date.now();
                 if (tab === currentDockTab && !skipReturn) {
+                    // 已经在当前tab，单击执行返回操作
                     if (tab === 'posts') {
+                        // 帖子页：回到顶部
                         const panel = document.getElementById('panelPosts');
                         if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                     } else if (tab === 'chat') {
-                        if (dockChatActiveUser) dockChatGoBack();
-                        else {
+                        // 聊天页：如果在对话中，返回聊天列表；否则回到顶部
+                        if (dockChatActiveUser) {
+                            dockChatGoBack();
+                        } else {
                             const panel = document.getElementById('panelChat');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         }
                     } else if (tab === 'ai') {
-                        const idolPage = document.querySelector('.idol-page');
-                        if (idolPage) idolPage.scrollTo({ top: 0, behavior: 'smooth' });
+                        // TS专题：回到顶部
+                        const tsContainer = document.querySelector('.ts-container');
+                        if (tsContainer) tsContainer.scrollTo({ top: 0, behavior: 'smooth' });
                     } else if (tab === 'profile') {
+                        // 我的页：回到顶部
                         const panel = document.getElementById('panelProfile');
                         if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                     }
@@ -5806,6 +5537,7 @@
                 const tabBtn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
                 if (tabBtn) tabBtn.classList.add('active');
                 if (tab === 'chat') { loadDockChatList(); startDMPolling(30000); }
+                if (tab === 'ai') { initTSGallery(); }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); }
             };
 
@@ -5876,7 +5608,7 @@
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
-                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">??</div><div>加载中...</div></div>';
+                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中...</div></div>';
                 document.getElementById('dockChatListView').classList.add('hidden');
                 document.getElementById('dockChatDetailView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'flex';
@@ -5891,7 +5623,7 @@
                 if (!el) return;
                 if (Date.now() - dockChatListCacheTime < DOCK_CHAT_CACHE_DURATION) return;
                 dockChatListCacheTime = Date.now();
-                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">?</div><div>加载中...</div></div>';
+                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">⏳</div><div>加载中...</div></div>';
                 try {
                     const { data: allMsgs, error } = await sb.from("posts")
                         .select("id, user_name, media_url, content, created_at")
@@ -5901,7 +5633,7 @@
                         .limit(200);
                     if (error) throw error;
                     if (!allMsgs || !allMsgs.length) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">??</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像开始聊天</div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像开始聊天</div></div>';
                         updateUnreadBadge();
                         return;
                     }
@@ -5953,7 +5685,7 @@
                     }).join('');
                     updateUnreadBadge();
                 } catch(e) {
-                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">??</div><div>' + (e.message || '加载失败') + '</div></div>';
+                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">⚠️</div><div>' + (e.message || '加载失败') + '</div></div>';
                 }
             }
 
@@ -6015,7 +5747,7 @@
                     renderDockMessages(msgs || [], forceScroll);
                 } catch(e) {
                     if (!_chatCache[cacheKey]) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">??</div><div>' + (e.message || '加载失败') + '</div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">⚠️</div><div>' + (e.message || '加载失败') + '</div></div>';
                     }
                 } finally {
                     dockChatMsgsBusy = false;
@@ -6025,7 +5757,7 @@
 
             function renderDockMessages(msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
-                if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">??</div><div>发送第一条消息吧</div></div>'; return; }
+                if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>'; return; }
                 // 检测用户是否在查看历史记录（离底部超过100px视为在看历史）
                 var isNearBottom = !el.scrollHeight || (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
                 var shouldAutoScroll = forceScroll || isNearBottom;
@@ -6110,7 +5842,7 @@
                 const thumb = document.getElementById('dockCfpThumb'), name = document.getElementById('dockCfpName');
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
                 const xBtn = thumb.querySelector('.cfp-x'); thumb.innerHTML = '';
-                if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">??</span>'; }
+                if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">🎬</span>'; }
                 else { const img = document.createElement('img'); _dockPreviewUrl = URL.createObjectURL(file); img.src = _dockPreviewUrl; thumb.appendChild(img); }
                 if (xBtn) thumb.appendChild(xBtn);
                 name.textContent = file.name; input.classList.add('hidden'); preview.classList.remove('hidden');
@@ -6129,7 +5861,18 @@
             document.getElementById('dockChatFileInp').addEventListener('change', function() { if (this.files.length) showDockChatFilePreview(this.files[0]); });
             document.getElementById('dockCfpRemove').addEventListener('click', clearDockChatFilePreview);
 
+            // ========== Taylor Swift 画廊 ==========
+            function initTSGallery() {
+                var cards = document.querySelectorAll('.ts-card');
+                cards.forEach(function(card, i) {
+                    card.addEventListener('click', function() {
+                        var era = card.dataset.era;
+                        if (era) showToast('Taylor Swift · ' + era);
+                    });
+                });
+            }
 
+            window.initTSGallery = initTSGallery;
 
             window.addEventListener('DOMContentLoaded', async function() {
                 // iOS 键盘弹出修复: 避免 dock-bar 被键盘顶上去
@@ -6200,11 +5943,11 @@
             function applyTheme(isDark) {
                 if (isDark) {
                     htmlEl.setAttribute('data-theme', 'dark');
-                    if (themeBtn) themeBtn.textContent = '??';
+                    if (themeBtn) themeBtn.textContent = '☀️';
                     localStorage.setItem('xtj-theme', 'dark');
                 } else {
                     htmlEl.removeAttribute('data-theme');
-                    if (themeBtn) themeBtn.textContent = '??';
+                    if (themeBtn) themeBtn.textContent = '🌙';
                     localStorage.setItem('xtj-theme', 'light');
                 }
             }
@@ -6392,7 +6135,7 @@
                 if (!listEl) return;
 
                 if (!announcements.length) {
-                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">??</div><div>暂无公告</div></div>';
+                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">📭</div><div>暂无公告</div></div>';
                     return;
                 }
 
@@ -6505,66 +6248,6 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
-                {
-                    version: 'v0.0.30',
-                    date: '2026-05-03 16:00',
-                    content: `
-                        &lt;h4&gt;更新内容&lt;/h4&gt;
-                        &lt;ul&gt;
-                            &lt;li&gt;&lt;strong&gt;Taylor Swift专题页视觉与架构全面重构&lt;/strong&gt;
-                                &lt;ul&gt;
-                                    &lt;li&gt;删除所有旧的 .ts- 开头CSS样式&lt;/li&gt;
-                                    &lt;li&gt;新增双人专辑展示墙样式（.idol- 命名空间）&lt;/li&gt;
-                                    &lt;li&gt;引入Google Fonts Great Vibes手写体&lt;/li&gt;
-                                    &lt;li&gt;专辑卡片hover时缩放+磨砂玻璃遮罩效果&lt;/li&gt;
-                                    &lt;li&gt;SVG签名描边动画+实心填充淡入&lt;/li&gt;
-                                &lt;/ul&gt;
-                            &lt;/li&gt;
-                            &lt;li&gt;&lt;strong&gt;代码清理优化&lt;/strong&gt;
-                                &lt;ul&gt;
-                                    &lt;li&gt;删除全部Taylor Swift画廊JavaScript代码&lt;/li&gt;
-                                    &lt;li&gt;移除二级菜单相关废弃函数调用&lt;/li&gt;
-                                    &lt;li&gt;替换干净的switchDockTab函数&lt;/li&gt;
-                                    &lt;li&gt;代码架构更加清晰&lt;/li&gt;
-                                &lt;/ul&gt;
-                            &lt;/li&gt;
-                        &lt;/ul&gt;
-                    `
-                },
-                {
-                    version: 'v0.0.29',
-                    date: '2026-05-03 15:30',
-                    content: `
-                        <h4>更新内容</h4>
-                        <ul>
-                            <li>Taylor Swift专题页交互升级</li>
-                            <ul>
-                                <li>签名手写动画进入专题页时重新播放，并每隔数秒循环播放</li>
-                                <li>12张专辑海报改为按时间倒序展示（最新专辑在前）</li>
-                                <li>每张专辑支持点击进入详情页</li>
-                                <li>专辑详情页新增专辑封面、时期照片、专辑故事、歌曲列表、背景故事</li>
-                                <li>专辑封面和详情照片加入动态漂移动画</li>
-                            </ul>
-                        </ul>
-                    `
-                },
-                {
-                    version: 'v0.0.28',
-                    date: '2026-05-03 15:00',
-                    content: `
-                        <h4>更新内容</h4>
-                        <ul>
-                            <li>Taylor Swift专题页升级为完整12张录音室专辑海报墙</li>
-                            <ul>
-                                <li>新增evermore、Midnights、The Tortured Poets Department、The Life of a Showgirl</li>
-                                <li>顶部Taylor Swift签名改为模拟真实手写描边动画</li>
-                                <li>专辑卡片加入真实封面图、海报式排版、渐入和悬停过渡</li>
-                                <li>新增公开现场照片区域，增强专题页视觉层次</li>
-                            </ul>
-                            <li>更新“我的”页面版本号为v0.0.28</li>
-                        </ul>
-                    `
-                },
                 {
                     version: 'v0.0.27',
                     date: '2026-05-03 14:00',
@@ -7077,7 +6760,7 @@
                     div.className = 'changelog-item';
                     div.innerHTML = `
                         <div class="changelog-header">
-                            <div class="changelog-version">?? ${item.version}</div>
+                            <div class="changelog-version">🚀 ${item.version}</div>
                             <div class="changelog-date">${item.date}</div>
                         </div>
                         <div class="changelog-content">
@@ -7240,46 +6923,46 @@
                     'updateContent': 'Update Content'
                 },
                 ko: {
-                    'posts': '???',
-                    'chat': '??',
-                    'my': '? ??',
-                    'darkMode': '?? ??',
-                    'language': '??',
-                    'notifications': '??',
-                    'about': '??',
-                    'notLoggedIn': '??? ? ?',
-                    'clickToLogin': '???? ???',
-                    'langChanged': '??? ???? ???????',
-                    'announcement': '????',
-                    'changelog': '???? ??',
-                    'view': '??',
-                    'back': '????',
-                    'publish': '??',
-                    'delete': '??',
-                    'deleteConfirm': '?? ?????????',
-                    'deleteSuccess': '?? ??',
-                    'publishSuccess': '?? ??',
-                    'title': '??',
-                    'content': '??',
-                    'publisher': '???',
-                    'totalViews': '? ???',
-                    'totalPosts': '? ???',
-                    'enterYourQuestion': '??? ?????...',
-                    'send': '???',
-                    'aiWelcome': '?????! AI ????????. ??? ???????',
-                    'login': '???',
-                    'register': '????',
-                    'username': '????',
-                    'password': '????',
-                    'loginSuccess': '??? ??',
-                    'registerSuccess': '???? ??',
-                    'logout': '????',
-                    'logoutSuccess': '???? ??',
-                    'noAnnouncements': '????? ????',
-                    'noChangelog': '???? ??? ????',
-                    'version': '??',
-                    'date': '??',
-                    'updateContent': '???? ??'
+                    'posts': '게시물',
+                    'chat': '채팅',
+                    'my': '내 정보',
+                    'darkMode': '다크 모드',
+                    'language': '언어',
+                    'notifications': '알림',
+                    'about': '정보',
+                    'notLoggedIn': '로그인 안 됨',
+                    'clickToLogin': '클릭하여 로그인',
+                    'langChanged': '언어가 한국어로 전환되었습니다',
+                    'announcement': '공지사항',
+                    'changelog': '업데이트 기록',
+                    'view': '보기',
+                    'back': '돌아가기',
+                    'publish': '게시',
+                    'delete': '삭제',
+                    'deleteConfirm': '정말 삭제하시겠습니까?',
+                    'deleteSuccess': '삭제 완료',
+                    'publishSuccess': '게시 완료',
+                    'title': '제목',
+                    'content': '내용',
+                    'publisher': '게시자',
+                    'totalViews': '총 조회수',
+                    'totalPosts': '총 게시물',
+                    'enterYourQuestion': '질문을 입력하세요...',
+                    'send': '보내기',
+                    'aiWelcome': '안녕하세요! AI 어시스턴트입니다. 어떻게 도와드릴까요?',
+                    'login': '로그인',
+                    'register': '회원가입',
+                    'username': '사용자명',
+                    'password': '비밀번호',
+                    'loginSuccess': '로그인 성공',
+                    'registerSuccess': '회원가입 성공',
+                    'logout': '로그아웃',
+                    'logoutSuccess': '로그아웃 완료',
+                    'noAnnouncements': '공지사항이 없습니다',
+                    'noChangelog': '업데이트 기록이 없습니다',
+                    'version': '버전',
+                    'date': '날짜',
+                    'updateContent': '업데이트 내용'
                 }
             };
 
@@ -7354,7 +7037,7 @@
                     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
                     localStorage.setItem('xtj-theme', isDark ? 'dark' : 'light');
                     var topToggle = document.getElementById('themeToggle');
-                    if (topToggle) topToggle.textContent = isDark ? '??' : '??';
+                    if (topToggle) topToggle.textContent = isDark ? '🌙' : '☀️';
                 });
             }
 
