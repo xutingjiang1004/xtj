@@ -1445,6 +1445,9 @@
         .dock-chat-container .chat-list-item { border-bottom-color: rgba(0,0,0,0.04); }
 
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> fb7517debbbc1001df9862caba74ce09496dfd94
         /* Dock面板: 雅思单词专题 */
         .vocab-container {
             display: flex; flex-direction: column; height: 100%;
@@ -1524,6 +1527,8 @@
         [data-theme="dark"] .vocab-option { background: rgba(30,30,40,0.6); border-color: rgba(255,255,255,0.1); }
         [data-theme="dark"] .vocab-option:hover { background: rgba(40,40,50,0.9); }
         [data-theme="dark"] .vocab-feedback { background: rgba(255,255,255,0.05); }
+<<<<<<< HEAD
+=======
 =======
         /* Dock面板: Taylor Swift 专题 */
         .ts-container {
@@ -1606,6 +1611,7 @@
         [data-theme="dark"] .ts-card-label { background: rgba(255,255,255,0.04); }
         [data-theme="dark"] .ts-era-tag { background: rgba(0,0,0,0.5); }
 >>>>>>> 6b2f1ba0448ee9588afe74a1a545c0a3c2d34db1
+>>>>>>> fb7517debbbc1001df9862caba74ce09496dfd94
 
         /* 暗色模式 Dock */
         [data-theme="dark"] .dock-bar {
@@ -3163,6 +3169,9 @@
 
         <div class="dock-panel" id="panelAi">
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> fb7517debbbc1001df9862caba74ce09496dfd94
             <div class="vocab-container" id="vocabContainer">
                 <div class="vocab-header">
                     <div class="vocab-title">IELTS 核心词汇</div>
@@ -3182,6 +3191,11 @@
                     <div style="font-weight: 700; margin-bottom: 8px;" id="vocabFeedbackMean"></div>
                     <div class="vocab-example" id="vocabExample"></div>
                     <div class="vocab-example-trans" id="vocabExampleTrans"></div>
+<<<<<<< HEAD
+                </div>
+
+                <button class="vocab-next-btn" id="vocabNextBtn" onclick="nextVocabQuestion()">下一个 ➔</button>
+=======
                 </div>
 
                 <button class="vocab-next-btn" id="vocabNextBtn" onclick="nextVocabQuestion()">下一个 ➔</button>
@@ -3255,6 +3269,7 @@
                 </div>
                 <div class="ts-footer">🦋 Long live all the magic we made · Taylor Swift 🦋</div>
 >>>>>>> 6b2f1ba0448ee9588afe74a1a545c0a3c2d34db1
+>>>>>>> fb7517debbbc1001df9862caba74ce09496dfd94
             </div>
         </div>
 
@@ -5624,9 +5639,14 @@
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         }
                     } else if (tab === 'ai') {
+<<<<<<< HEAD
+                        const vocabPage = document.querySelector('.vocab-container');
+                        if (vocabPage) vocabPage.scrollTo({ top: 0, behavior: 'smooth' });
+=======
                         // TS专题：回到顶部
                         const tsContainer = document.querySelector('.ts-container');
                         if (tsContainer) tsContainer.scrollTo({ top: 0, behavior: 'smooth' });
+>>>>>>> fb7517debbbc1001df9862caba74ce09496dfd94
                     } else if (tab === 'profile') {
                         // 我的页：回到顶部
                         const panel = document.getElementById('panelProfile');
@@ -6357,6 +6377,9 @@
             const changelogData = [
                 {
 <<<<<<< HEAD
+=======
+<<<<<<< HEAD
+>>>>>>> fb7517debbbc1001df9862caba74ce09496dfd94
                     version: 'v0.0.32',
                     date: '2026-05-12',
                     content: `
