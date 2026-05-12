@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
@@ -1444,6 +1444,87 @@
         .dock-chat-container .chat-view.hidden { display: none; }
         .dock-chat-container .chat-list-item { border-bottom-color: rgba(0,0,0,0.04); }
 
+<<<<<<< HEAD
+        /* Dock面板: 雅思单词专题 */
+        .vocab-container {
+            display: flex; flex-direction: column; height: 100%;
+            background: transparent;
+            overflow-y: auto; -webkit-overflow-scrolling: touch;
+            padding: 16px;
+        }
+        .vocab-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; flex-shrink: 0;
+        }
+        .vocab-title {
+            font-size: 18px; font-weight: 800;
+            background: linear-gradient(135deg, #059669, #34d399);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .vocab-mode-btn {
+            background: rgba(255,255,255,0.4); border: 1px solid rgba(255,255,255,0.6);
+            padding: 6px 14px; border-radius: 99px; font-size: 13px; font-weight: 600;
+            cursor: pointer; transition: var(--trans-smooth); color: var(--text-main);
+        }
+        .vocab-mode-btn:hover { background: rgba(255,255,255,0.7); }
+        
+        .vocab-card {
+            background: rgba(255,255,255,0.85); border: 1px solid rgba(0,0,0,0.06);
+            border-radius: 24px; padding: 30px 20px; text-align: center;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+            transition: var(--trans-smooth); margin-bottom: 24px;
+            position: relative; overflow: hidden;
+        }
+        .vocab-word { font-size: 32px; font-weight: 800; color: var(--text-main); margin-bottom: 8px; word-break: break-word; }
+        .vocab-phonetic { font-size: 15px; color: var(--text-muted); font-family: "Georgia", serif; margin-bottom: 16px; }
+        .vocab-play-btn {
+            background: rgba(5, 150, 105, 0.1); border: 1px solid rgba(5, 150, 105, 0.2);
+            width: 44px; height: 44px; border-radius: 50%; font-size: 20px;
+            display: inline-flex; align-items: center; justify-content: center;
+            cursor: pointer; transition: var(--trans-spring); color: var(--primary);
+        }
+        .vocab-play-btn:hover { transform: scale(1.1); background: rgba(5, 150, 105, 0.2); }
+        .vocab-play-btn.playing { animation: pulseAudio 1.5s infinite; }
+        @keyframes pulseAudio { 0% { box-shadow: 0 0 0 0 rgba(5,150,105,0.4); } 70% { box-shadow: 0 0 0 10px rgba(5,150,105,0); } 100% { box-shadow: 0 0 0 0 rgba(5,150,105,0); } }
+
+        .vocab-options { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 24px; }
+        .vocab-option {
+            background: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.8);
+            padding: 16px; border-radius: 16px; font-size: 15px; font-weight: 600;
+            color: var(--text-main); cursor: pointer; transition: var(--trans-smooth);
+            text-align: left; box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+            display: flex; align-items: center;
+        }
+        .vocab-option:hover { background: rgba(255,255,255,0.9); transform: translateY(-2px); }
+        .vocab-option.correct { background: rgba(5, 150, 105, 0.15); border-color: var(--primary); color: var(--primary); box-shadow: 0 4px 12px rgba(5,150,105,0.1); }
+        .vocab-option.wrong { background: rgba(255, 59, 96, 0.1); border-color: #ff3b60; color: #ff3b60; animation: shake 0.4s; }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+
+        .vocab-feedback {
+            background: rgba(255,255,255,0.5); border-radius: 16px; padding: 16px;
+            text-align: left; margin-bottom: 24px; display: none; opacity: 0;
+            transform: translateY(10px); transition: all 0.4s ease;
+        }
+        .vocab-feedback.show { display: block; opacity: 1; transform: translateY(0); }
+        .vocab-feedback-title { font-size: 14px; font-weight: 700; color: var(--primary); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+        .vocab-example { font-size: 15px; color: var(--text-main); margin-bottom: 4px; line-height: 1.5; }
+        .vocab-example-trans { font-size: 13px; color: var(--text-muted); }
+
+        .vocab-next-btn {
+            width: 100%; padding: 16px; border-radius: 16px; font-size: 16px; font-weight: 700;
+            background: linear-gradient(135deg, var(--primary), #10b981); color: white;
+            border: none; cursor: pointer; transition: var(--trans-spring); box-shadow: 0 4px 12px rgba(5,150,105,0.25);
+            display: none;
+        }
+        .vocab-next-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(5,150,105,0.35); }
+
+        [data-theme="dark"] .vocab-mode-btn { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.15); }
+        [data-theme="dark"] .vocab-mode-btn:hover { background: rgba(255,255,255,0.2); }
+        [data-theme="dark"] .vocab-card { background: rgba(30,30,40,0.85); border-color: rgba(255,255,255,0.1); }
+        [data-theme="dark"] .vocab-option { background: rgba(30,30,40,0.6); border-color: rgba(255,255,255,0.1); }
+        [data-theme="dark"] .vocab-option:hover { background: rgba(40,40,50,0.9); }
+        [data-theme="dark"] .vocab-feedback { background: rgba(255,255,255,0.05); }
+=======
         /* Dock面板: Taylor Swift 专题 */
         .ts-container {
             display: flex; flex-direction: column; height: 100%;
@@ -1524,6 +1605,7 @@
         [data-theme="dark"] .ts-card { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.06); }
         [data-theme="dark"] .ts-card-label { background: rgba(255,255,255,0.04); }
         [data-theme="dark"] .ts-era-tag { background: rgba(0,0,0,0.5); }
+>>>>>>> 6b2f1ba0448ee9588afe74a1a545c0a3c2d34db1
 
         /* 暗色模式 Dock */
         [data-theme="dark"] .dock-bar {
@@ -3080,6 +3162,30 @@
         </div>
 
         <div class="dock-panel" id="panelAi">
+<<<<<<< HEAD
+            <div class="vocab-container" id="vocabContainer">
+                <div class="vocab-header">
+                    <div class="vocab-title">IELTS 核心词汇</div>
+                    <button class="vocab-mode-btn" id="vocabModeBtn" onclick="toggleVocabMode()">中译英模式</button>
+                </div>
+                
+                <div class="vocab-card" id="vocabCard">
+                    <div class="vocab-word" id="vocabWord">单词加载中</div>
+                    <div class="vocab-phonetic" id="vocabPhonetic"></div>
+                    <button class="vocab-play-btn" id="vocabPlayBtn" onclick="playVocabAudio()" title="朗读 (单词->释义->例句->翻译)">🔊</button>
+                </div>
+
+                <div class="vocab-options" id="vocabOptions"></div>
+
+                <div class="vocab-feedback" id="vocabFeedback">
+                    <div class="vocab-feedback-title">💡 详细解析</div>
+                    <div style="font-weight: 700; margin-bottom: 8px;" id="vocabFeedbackMean"></div>
+                    <div class="vocab-example" id="vocabExample"></div>
+                    <div class="vocab-example-trans" id="vocabExampleTrans"></div>
+                </div>
+
+                <button class="vocab-next-btn" id="vocabNextBtn" onclick="nextVocabQuestion()">下一个 ➔</button>
+=======
             <div class="ts-container">
                 <div class="ts-signature">
                     <svg viewBox="0 0 400 80" class="ts-sig-svg">
@@ -3148,6 +3254,7 @@
                     </div>
                 </div>
                 <div class="ts-footer">🦋 Long live all the magic we made · Taylor Swift 🦋</div>
+>>>>>>> 6b2f1ba0448ee9588afe74a1a545c0a3c2d34db1
             </div>
         </div>
 
@@ -6249,6 +6356,114 @@
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
+<<<<<<< HEAD
+                    version: 'v0.0.32',
+                    date: '2026-05-12',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li><strong>雅思词汇库全面升级</strong>
+                                <ul>
+                                    <li>将原有初中水平基础词汇全面替换为雅思高频考点单词</li>
+                                    <li>词库扩充至200+个真正的雅思核心词汇</li>
+                                    <li>词汇涵盖 abandon 到 yield 等雅思必备词汇</li>
+                                    <li>每个单词均包含标准音标、英文例句及中文翻译</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.31',
+                    date: '2026-05-12',
+                    content: `
+                        &lt;h4&gt;更新内容&lt;/h4&gt;
+                        &lt;ul&gt;
+                            &lt;li&gt;&lt;strong&gt;Taylor Swift &amp; Jennie专题画廊替换为雅思单词学习系统&lt;/strong&gt;
+                                &lt;ul&gt;
+                                    &lt;li&gt;删除所有原专题页的CSS样式（.idol-、.ts-开头样式）&lt;/li&gt;
+                                    &lt;li&gt;新增雅思单词学习系统完整样式（.vocab-命名空间）&lt;/li&gt;
+                                    &lt;li&gt;替换panelAi面板HTML结构为单词学习界面&lt;/li&gt;
+                                    &lt;li&gt;新增200个雅思核心词库，包含单词、音标、释义、例句&lt;/li&gt;
+                                &lt;/ul&gt;
+                            &lt;/li&gt;
+                            &lt;li&gt;&lt;strong&gt;雅思单词学习系统功能&lt;/strong&gt;
+                                &lt;ul&gt;
+                                    &lt;li&gt;双模式学习：英译中模式、中译英模式&lt;/li&gt;
+                                    &lt;li&gt;点击🔊按钮可朗读英文单词&lt;/li&gt;
+                                    &lt;li&gt;答完题自动朗读单词和英文例句&lt;/li&gt;
+                                    &lt;li&gt;每次随机生成4个选项供选择&lt;/li&gt;
+                                    &lt;li&gt;正确答案绿色高亮，错误答案红色抖动&lt;/li&gt;
+                                    &lt;li&gt;答题后显示详细解析和例句&lt;/li&gt;
+                                    &lt;li&gt;完全支持深色/浅色主题自动适配&lt;/li&gt;
+                                &lt;/ul&gt;
+                            &lt;/li&gt;
+                        &lt;/ul&gt;
+                    `
+                },
+                {
+                    version: 'v0.0.30',
+                    date: '2026-05-03 16:00',
+                    content: `
+                        &lt;h4&gt;更新内容&lt;/h4&gt;
+                        &lt;ul&gt;
+                            &lt;li&gt;&lt;strong&gt;Taylor Swift专题页视觉与架构全面重构&lt;/strong&gt;
+                                &lt;ul&gt;
+                                    &lt;li&gt;删除所有旧的 .ts- 开头CSS样式&lt;/li&gt;
+                                    &lt;li&gt;新增双人专辑展示墙样式（.idol- 命名空间）&lt;/li&gt;
+                                    &lt;li&gt;引入Google Fonts Great Vibes手写体&lt;/li&gt;
+                                    &lt;li&gt;专辑卡片hover时缩放+磨砂玻璃遮罩效果&lt;/li&gt;
+                                    &lt;li&gt;SVG签名描边动画+实心填充淡入&lt;/li&gt;
+                                &lt;/ul&gt;
+                            &lt;/li&gt;
+                            &lt;li&gt;&lt;strong&gt;代码清理优化&lt;/strong&gt;
+                                &lt;ul&gt;
+                                    &lt;li&gt;删除全部Taylor Swift画廊JavaScript代码&lt;/li&gt;
+                                    &lt;li&gt;移除二级菜单相关废弃函数调用&lt;/li&gt;
+                                    &lt;li&gt;替换干净的switchDockTab函数&lt;/li&gt;
+                                    &lt;li&gt;代码架构更加清晰&lt;/li&gt;
+                                &lt;/ul&gt;
+                            &lt;/li&gt;
+                        &lt;/ul&gt;
+                    `
+                },
+                {
+                    version: 'v0.0.29',
+                    date: '2026-05-03 15:30',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>Taylor Swift专题页交互升级</li>
+                            <ul>
+                                <li>签名手写动画进入专题页时重新播放，并每隔数秒循环播放</li>
+                                <li>12张专辑海报改为按时间倒序展示（最新专辑在前）</li>
+                                <li>每张专辑支持点击进入详情页</li>
+                                <li>专辑详情页新增专辑封面、时期照片、专辑故事、歌曲列表、背景故事</li>
+                                <li>专辑封面和详情照片加入动态漂移动画</li>
+                            </ul>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.28',
+                    date: '2026-05-03 15:00',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>Taylor Swift专题页升级为完整12张录音室专辑海报墙</li>
+                            <ul>
+                                <li>新增evermore、Midnights、The Tortured Poets Department、The Life of a Showgirl</li>
+                                <li>顶部Taylor Swift签名改为模拟真实手写描边动画</li>
+                                <li>专辑卡片加入真实封面图、海报式排版、渐入和悬停过渡</li>
+                                <li>新增公开现场照片区域，增强专题页视觉层次</li>
+                            </ul>
+                            <li>更新“我的”页面版本号为v0.0.28</li>
+                        </ul>
+                    `
+                },
+                {
+=======
+>>>>>>> 6b2f1ba0448ee9588afe74a1a545c0a3c2d34db1
                     version: 'v0.0.27',
                     date: '2026-05-03 14:00',
                     content: `
@@ -6808,8 +7023,542 @@
         })();
     </script>
 
+    <!-- IELTS Vocabulary Learning System -->
     <script>
         (function() {
+            let vocabMode = 'en2zh';
+            let currentVocabIndex = 0;
+            let currentVocabObj = null;
+            let currentOptions = [];
+            let isAnswered = false;
+
+            const vocabList = [
+                {w: "abandon", p: "/əˈbændən/", m: "放弃，抛弃", e: "She had to abandon her car in the flood.", et: "她不得不在洪水中放弃她的车。"},
+                {w: "abstract", p: "/ˈæbstrækt/", m: "抽象的，摘要", e: "The concept is too abstract for beginners.", et: "这个概念对初学者来说太抽象了。"},
+                {w: "academic", p: "/ˌækəˈdemɪk/", m: "学术的，学业的", e: "Her academic performance is outstanding.", et: "她的学业表现非常出色。"},
+                {w: "access", p: "/ˈækses/", m: "进入，使用权", e: "Students have access to the library.", et: "学生可以使用图书馆。"},
+                {w: "accommodate", p: "/əˈkɒmədeɪt/", m: "容纳，提供住宿", e: "The hotel can accommodate 500 guests.", et: "这家酒店可以容纳500位客人。"},
+                {w: "accompany", p: "/əˈkʌmpəni/", m: "陪伴，伴随", e: "A strong wind accompanied the rain.", et: "大雨伴随着强风。"},
+                {w: "accomplish", p: "/əˈkʌmplɪʃ/", m: "完成，实现", e: "We accomplished our goal ahead of schedule.", et: "我们提前完成了目标。"},
+                {w: "account", p: "/əˈkaʊnt/", m: "账户，说明", e: "Please give a detailed account of the incident.", et: "请详细说明事件经过。"},
+                {w: "accumulate", p: "/əˈkjuːmjəleɪt/", m: "积累，积聚", e: "Dust accumulates quickly on the surface.", et: "灰尘很快在表面积聚。"},
+                {w: "accurate", p: "/ˈækjərət/", m: "准确的，精确的", e: "The data must be accurate.", et: "数据必须准确。"},
+                {w: "achieve", p: "/əˈtʃiːv/", m: "实现，达到", e: "She achieved her dream of becoming a doctor.", et: "她实现了成为医生的梦想。"},
+                {w: "acknowledge", p: "/əkˈnɒlɪdʒ/", m: "承认，致谢", e: "He acknowledged his mistake publicly.", et: "他公开承认了自己的错误。"},
+                {w: "acquire", p: "/əˈkwaɪər/", m: "获得，习得", e: "It takes time to acquire a new language.", et: "习得一门新语言需要时间。"},
+                {w: "adapt", p: "/əˈdæpt/", m: "适应，改编", e: "Animals must adapt to climate change.", et: "动物必须适应气候变化。"},
+                {w: "adequate", p: "/ˈædɪkwət/", m: "足够的，适当的", e: "The supply is not adequate for the demand.", et: "供应不足以满足需求。"},
+                {w: "adjust", p: "/əˈdʒʌst/", m: "调整，适应", e: "You need to adjust to the new environment.", et: "你需要适应新环境。"},
+                {w: "administration", p: "/ədˌmɪnɪˈstreɪʃən/", m: "管理，行政", e: "The university administration made a decision.", et: "大学行政部门做出了决定。"},
+                {w: "admission", p: "/ədˈmɪʃən/", m: "录取，入场费", e: "Admission to the museum is free.", et: "博物馆免费入场。"},
+                {w: "adopt", p: "/əˈdɒpt/", m: "采用，收养", e: "The company adopted a new strategy.", et: "公司采用了一项新策略。"},
+                {w: "advance", p: "/ədˈvɑːns/", m: "前进，进步", e: "Technology has advanced rapidly.", et: "技术进步迅速。"},
+                {w: "advantage", p: "/ədˈvɑːntɪdʒ/", m: "优势，有利条件", e: "Being bilingual is a great advantage.", et: "会双语是一个很大的优势。"},
+                {w: "advertise", p: "/ˈædvətaɪz/", m: "做广告，宣传", e: "Companies advertise their products online.", et: "公司在网上宣传他们的产品。"},
+                {w: "affect", p: "/əˈfekt/", m: "影响，感动", e: "The recession affected many families.", et: "经济衰退影响了许多家庭。"},
+                {w: "afford", p: "/əˈfɔːd/", m: "负担得起", e: "I can't afford to waste time.", et: "我浪费不起时间。"},
+                {w: "agenda", p: "/əˈdʒendə/", m: "议程，日程", e: "The agenda for the meeting is set.", et: "会议议程已确定。"},
+                {w: "aggressive", p: "/əˈɡresɪv/", m: "好斗的，有进取心的", e: "The company adopted an aggressive marketing strategy.", et: "公司采取了激进的营销策略。"},
+                {w: "agriculture", p: "/ˈæɡrɪkʌltʃər/", m: "农业", e: "Agriculture is the backbone of the economy.", et: "农业是经济的支柱。"},
+                {w: "allocate", p: "/ˈæləkeɪt/", m: "分配，拨出", e: "The government allocated funds for education.", et: "政府拨出资金用于教育。"},
+                {w: "alternative", p: "/ɔːlˈtɜːnətɪv/", m: "替代的，选择", e: "We need to find an alternative solution.", et: "我们需要找到替代方案。"},
+                {w: "ambassador", p: "/æmˈbæsədər/", m: "大使，使者", e: "She served as an ambassador for peace.", et: "她担任和平大使。"},
+                {w: "ambition", p: "/æmˈbɪʃən/", m: "雄心，抱负", e: "His ambition is to start his own business.", et: "他的抱负是创办自己的企业。"},
+                {w: "analysis", p: "/əˈnæləsɪs/", m: "分析，解析", e: "The analysis of the data took weeks.", et: "数据分析花了数周时间。"},
+                {w: "announce", p: "/əˈnaʊns/", m: "宣布，通告", e: "The results will be announced tomorrow.", et: "结果将于明天公布。"},
+                {w: "annual", p: "/ˈænjuəl/", m: "每年的，年度的", e: "The annual conference attracts thousands.", et: "年度会议吸引了数千人。"},
+                {w: "anticipate", p: "/ænˈtɪsɪpeɪt/", m: "预期，预料", e: "We anticipate a rise in demand.", et: "我们预计需求会上升。"},
+                {w: "anxiety", p: "/æŋˈzaɪəti/", m: "焦虑，忧虑", e: "Exam anxiety is common among students.", et: "考试焦虑在学生中很常见。"},
+                {w: "apparent", p: "/əˈpærənt/", m: "明显的，表面上的", e: "It became apparent that he was lying.", et: "很明显他在撒谎。"},
+                {w: "appeal", p: "/əˈpiːl/", m: "呼吁，吸引", e: "The idea appeals to young people.", et: "这个想法吸引年轻人。"},
+                {w: "application", p: "/ˌæplɪˈkeɪʃən/", m: "申请，应用", e: "I submitted my application for the scholarship.", et: "我提交了奖学金申请。"},
+                {w: "appreciate", p: "/əˈpriːʃieɪt/", m: "欣赏，感激", e: "I really appreciate your support.", et: "我非常感激你的支持。"},
+                {w: "approach", p: "/əˈprəʊtʃ/", m: "接近，方法", e: "We need a new approach to the problem.", et: "我们需要一种新方法来解决这个问题。"},
+                {w: "appropriate", p: "/əˈprəʊpriət/", m: "适当的，合适的", e: "This is not appropriate for children.", et: "这不适合儿童。"},
+                {w: "approve", p: "/əˈpruːv/", m: "批准，赞成", e: "The committee approved the proposal.", et: "委员会批准了该提案。"},
+                {w: "artificial", p: "/ˌɑːtɪˈfɪʃəl/", m: "人工的，人造的", e: "Artificial intelligence is transforming industries.", et: "人工智能正在改变各行各业。"},
+                {w: "aspect", p: "/ˈæspekt/", m: "方面，层面", e: "We must consider every aspect of the issue.", et: "我们必须考虑问题的每个方面。"},
+                {w: "assess", p: "/əˈses/", m: "评估，评定", e: "Teachers assess students' progress regularly.", et: "老师定期评估学生的进步。"},
+                {w: "assign", p: "/əˈsaɪn/", m: "分配，指派", e: "The teacher assigned a challenging project.", et: "老师分配了一个有挑战性的项目。"},
+                {w: "assist", p: "/əˈsɪst/", m: "帮助，协助", e: "The software assists in data analysis.", et: "该软件协助数据分析。"},
+                {w: "associate", p: "/əˈsəʊʃiət/", m: "联系，联想", e: "We associate this brand with quality.", et: "我们将这个品牌与质量联系在一起。"},
+                {w: "assume", p: "/əˈsjuːm/", m: "假定，承担", e: "I assume you have read the instructions.", et: "我假定你已经阅读了说明。"},
+                {w: "atmosphere", p: "/ˈætməsfɪər/", m: "大气，气氛", e: "The atmosphere in the room was tense.", et: "房间里的气氛很紧张。"},
+                {w: "attach", p: "/əˈtætʃ/", m: "附上，连接", e: "Please attach your resume to the email.", et: "请将简历附在邮件中。"},
+                {w: "attempt", p: "/əˈtempt/", m: "尝试，企图", e: "She made an attempt to solve the puzzle.", et: "她尝试解开这个谜题。"},
+                {w: "attend", p: "/əˈtend/", m: "出席，参加", e: "All students are required to attend the lecture.", et: "所有学生都必须参加讲座。"},
+                {w: "attitude", p: "/ˈætɪtjuːd/", m: "态度，看法", e: "A positive attitude leads to success.", et: "积极的态度带来成功。"},
+                {w: "attract", p: "/əˈtrækt/", m: "吸引，引起", e: "The exhibition attracted many visitors.", et: "展览吸引了许多参观者。"},
+                {w: "authority", p: "/ɔːˈθɒrəti/", m: "权威，当局", e: "The local authorities are investigating.", et: "地方当局正在调查。"},
+                {w: "available", p: "/əˈveɪləbəl/", m: "可获得的，有空的", e: "Tickets are available online.", et: "门票可以在网上买到。"},
+                {w: "average", p: "/ˈævərɪdʒ/", m: "平均的，普通的", e: "The average score was 75.", et: "平均分是75分。"},
+                {w: "avoid", p: "/əˈvɔɪd/", m: "避免，避开", e: "You should avoid making the same mistake.", et: "你应该避免犯同样的错误。"},
+                {w: "aware", p: "/əˈweər/", m: "意识到的，知道的", e: "Are you aware of the consequences?", et: "你意识到后果了吗？"},
+                {w: "background", p: "/ˈbækɡraʊnd/", m: "背景，出身", e: "His educational background is impressive.", et: "他的教育背景令人印象深刻。"},
+                {w: "balance", p: "/ˈbæləns/", m: "平衡，余额", e: "It's important to maintain a work-life balance.", et: "保持工作与生活的平衡很重要。"},
+                {w: "barrier", p: "/ˈbæriər/", m: "障碍，屏障", e: "Language can be a barrier to communication.", et: "语言可能成为沟通的障碍。"},
+                {w: "behalf", p: "/bɪˈhɑːf/", m: "代表，利益", e: "I'm writing on behalf of my company.", et: "我代表我的公司写信。"},
+                {w: "behave", p: "/bɪˈheɪv/", m: "表现，行为", e: "Children should behave well in public.", et: "孩子们在公共场合应该表现良好。"},
+                {w: "benefit", p: "/ˈbenɪfɪt/", m: "利益，好处", e: "Regular exercise has many health benefits.", et: "定期锻炼对健康有很多好处。"},
+                {w: "budget", p: "/ˈbʌdʒɪt/", m: "预算，经费", e: "We need to stick to the budget.", et: "我们需要坚持预算。"},
+                {w: "capable", p: "/ˈkeɪpəbəl/", m: "有能力的", e: "She is capable of handling the task.", et: "她有能力处理这项任务。"},
+                {w: "capacity", p: "/kəˈpæsəti/", m: "容量，能力", e: "The hall has a seating capacity of 1000.", et: "大厅可容纳1000人。"},
+                {w: "category", p: "/ˈkætəɡəri/", m: "类别，种类", e: "The entries are divided into three categories.", et: "参赛作品分为三类。"},
+                {w: "celebrate", p: "/ˈselɪbreɪt/", m: "庆祝，颂扬", e: "We celebrate the festival with family.", et: "我们和家人一起庆祝节日。"},
+                {w: "challenge", p: "/ˈtʃælɪndʒ/", m: "挑战，质疑", e: "Learning a new language is a challenge.", et: "学习一门新语言是一个挑战。"},
+                {w: "characteristic", p: "/ˌkærəktəˈrɪstɪk/", m: "特征，特点", e: "Honesty is a characteristic of a good leader.", et: "诚实是好领导的特征。"},
+                {w: "circumstance", p: "/ˈsɜːkəmstæns/", m: "环境，情况", e: "Under no circumstances should you lie.", et: "在任何情况下你都不应该撒谎。"},
+                {w: "claim", p: "/kleɪm/", m: "声称，要求", e: "He claims to have seen the accident.", et: "他声称目睹了事故。"},
+                {w: "climate", p: "/ˈklaɪmət/", m: "气候，风气", e: "Climate change is a global issue.", et: "气候变化是一个全球性问题。"},
+                {w: "collapse", p: "/kəˈlæps/", m: "倒塌，崩溃", e: "The building collapsed after the earthquake.", et: "地震后建筑物倒塌了。"},
+                {w: "colleague", p: "/ˈkɒliːɡ/", m: "同事，同僚", e: "I discussed the project with my colleagues.", et: "我和同事们讨论了项目。"},
+                {w: "combine", p: "/kəmˈbaɪn/", m: "结合，联合", e: "We need to combine theory with practice.", et: "我们需要把理论和实践结合起来。"},
+                {w: "communicate", p: "/kəˈmjuːnɪkeɪt/", m: "交流，沟通", e: "It's important to communicate clearly.", et: "清晰地沟通很重要。"},
+                {w: "community", p: "/kəˈmjuːnəti/", m: "社区，团体", e: "The local community supports the project.", et: "当地社区支持这个项目。"},
+                {w: "compare", p: "/kəmˈpeər/", m: "比较，对比", e: "Compare the two options before deciding.", et: "在决定之前比较两个选项。"},
+                {w: "compete", p: "/kəmˈpiːt/", m: "竞争，比赛", e: "Companies compete for market share.", et: "公司竞争市场份额。"},
+                {w: "complain", p: "/kəmˈpleɪn/", m: "抱怨，投诉", e: "Customers complained about the service.", et: "顾客投诉了服务。"},
+                {w: "complex", p: "/ˈkɒmpleks/", m: "复杂的，综合的", e: "The problem is more complex than it seems.", et: "这个问题比看起来更复杂。"},
+                {w: "component", p: "/kəmˈpəʊnənt/", m: "成分，组件", e: "Each component plays a vital role.", et: "每个组件都起着至关重要的作用。"},
+                {w: "concentrate", p: "/ˈkɒnsəntreɪt/", m: "集中，专注", e: "I need to concentrate on my studies.", et: "我需要专注于学习。"},
+                {w: "concept", p: "/ˈkɒnsept/", m: "概念，观念", e: "The concept of freedom is universal.", et: "自由的概念是普遍的。"},
+                {w: "concern", p: "/kənˈsɜːn/", m: "关心，担忧", e: "Environmental concerns are growing.", et: "环境问题日益受到关注。"},
+                {w: "conclude", p: "/kənˈkluːd/", m: "总结，得出结论", e: "What can you conclude from the data?", et: "你能从数据中得出什么结论？"},
+                {w: "conduct", p: "/kənˈdʌkt/", m: "进行，引导", e: "The experiment was conducted in a lab.", et: "实验在实验室进行。"},
+                {w: "conference", p: "/ˈkɒnfərəns/", m: "会议，讨论会", e: "The conference will be held in July.", et: "会议将于七月举行。"},
+                {w: "confidence", p: "/ˈkɒnfɪdəns/", m: "信心，自信", e: "She has confidence in her abilities.", et: "她对自己的能力有信心。"},
+                {w: "confirm", p: "/kənˈfɜːm/", m: "确认，证实", e: "Please confirm your attendance.", et: "请确认你是否出席。"},
+                {w: "conflict", p: "/ˈkɒnflɪkt/", m: "冲突，矛盾", e: "The conflict between the two sides continues.", et: "双方之间的冲突仍在继续。"},
+                {w: "consequence", p: "/ˈkɒnsɪkwəns/", m: "结果，后果", e: "Every action has consequences.", et: "每个行动都有后果。"},
+                {w: "conservation", p: "/ˌkɒnsəˈveɪʃən/", m: "保护，保存", e: "Wildlife conservation is crucial.", et: "野生动物保护至关重要。"},
+                {w: "consider", p: "/kənˈsɪdər/", m: "考虑，认为", e: "We need to consider all options.", et: "我们需要考虑所有选项。"},
+                {w: "consistent", p: "/kənˈsɪstənt/", m: "一致的，稳定的", e: "Her performance has been consistent.", et: "她的表现一直很稳定。"},
+                {w: "contribute", p: "/kənˈtrɪbjuːt/", m: "贡献，捐献", e: "Everyone can contribute to the project.", et: "每个人都可以为项目做出贡献。"},
+                {w: "controversy", p: "/ˈkɒntrəvɜːsi/", m: "争议，争论", e: "The decision caused controversy.", et: "这个决定引起了争议。"},
+                {w: "convention", p: "/kənˈvenʃən/", m: "惯例，大会", e: "The convention is held annually.", et: "大会每年举行一次。"},
+                {w: "convince", p: "/kənˈvɪns/", m: "说服，使确信", e: "She convinced me to join the team.", et: "她说服我加入了团队。"},
+                {w: "cooperate", p: "/kəʊˈɒpəreɪt/", m: "合作，配合", e: "The two companies decided to cooperate.", et: "两家公司决定合作。"},
+                {w: "correspond", p: "/ˌkɒrɪˈspɒnd/", m: "对应，通信", e: "The numbers correspond to different items.", et: "这些数字对应不同的项目。"},
+                {w: "creative", p: "/kriˈeɪtɪv/", m: "创造性的", e: "We need a creative solution.", et: "我们需要一个有创意的解决方案。"},
+                {w: "criteria", p: "/kraɪˈtɪəriə/", m: "标准，准则", e: "What are the criteria for selection?", et: "选拔的标准是什么？"},
+                {w: "crucial", p: "/ˈkruːʃəl/", m: "关键的，决定性的", e: "This step is crucial to success.", et: "这一步对成功至关重要。"},
+                {w: "curriculum", p: "/kəˈrɪkjʊləm/", m: "课程，教学大纲", e: "The curriculum has been updated.", et: "课程大纲已经更新。"},
+                {w: "debate", p: "/dɪˈbeɪt/", m: "辩论，讨论", e: "There is an ongoing debate about the issue.", et: "关于这个问题正在进行辩论。"},
+                {w: "decade", p: "/ˈdekeɪd/", m: "十年", e: "The technology has advanced over the past decade.", et: "过去十年技术进步很大。"},
+                {w: "decline", p: "/dɪˈklaɪn/", m: "下降，衰退", e: "The population of the village is declining.", et: "村庄的人口正在下降。"},
+                {w: "demonstrate", p: "/ˈdemənstreɪt/", m: "展示，证明", e: "The experiment demonstrates the principle.", et: "实验展示了这个原理。"},
+                {w: "departure", p: "/dɪˈpɑːtʃər/", m: "出发，离开", e: "The departure time is 8 AM.", et: "出发时间是早上8点。"},
+                {w: "deposit", p: "/dɪˈpɒzɪt/", m: "押金，存款", e: "You need to pay a deposit.", et: "你需要付押金。"},
+                {w: "deserve", p: "/dɪˈzɜːv/", m: "值得，应得", e: "She deserves recognition for her work.", et: "她的工作值得认可。"},
+                {w: "destination", p: "/ˌdestɪˈneɪʃən/", m: "目的地", e: "Our destination is Paris.", et: "我们的目的地是巴黎。"},
+                {w: "determine", p: "/dɪˈtɜːmɪn/", m: "决定，确定", e: "We need to determine the cause.", et: "我们需要确定原因。"},
+                {w: "develop", p: "/dɪˈveləp/", m: "发展，开发", e: "The city has developed rapidly.", et: "这座城市发展迅速。"},
+                {w: "device", p: "/dɪˈvaɪs/", m: "设备，装置", e: "This device measures temperature.", et: "这个设备测量温度。"},
+                {w: "discipline", p: "/ˈdɪsɪplɪn/", m: "纪律，学科", e: "Self-discipline is key to success.", et: "自律是成功的关键。"},
+                {w: "discrimination", p: "/dɪˌskrɪmɪˈneɪʃən/", m: "歧视，辨别", e: "Discrimination based on race is illegal.", et: "基于种族的歧视是非法的。"},
+                {w: "domestic", p: "/dəˈmestɪk/", m: "国内的，家庭的", e: "The domestic market is growing.", et: "国内市场正在增长。"},
+                {w: "dominate", p: "/ˈdɒmɪneɪt/", m: "主导，支配", e: "The company dominates the market.", et: "这家公司主导市场。"},
+                {w: "dramatic", p: "/drəˈmætɪk/", m: "戏剧性的，巨大的", e: "There has been a dramatic change.", et: "发生了巨大的变化。"},
+                {w: "duration", p: "/djuˈreɪʃən/", m: "持续时间", e: "The duration of the course is 6 months.", et: "课程持续时间为6个月。"},
+                {w: "dynamic", p: "/daɪˈnæmɪk/", m: "动态的，有活力的", e: "The market is dynamic and changing.", et: "市场是动态变化的。"},
+                {w: "economy", p: "/ɪˈkɒnəmi/", m: "经济，节约", e: "The economy is recovering slowly.", et: "经济正在缓慢复苏。"},
+                {w: "education", p: "/ˌedjʊˈkeɪʃən/", m: "教育", e: "Education is the key to development.", et: "教育是发展的关键。"},
+                {w: "efficient", p: "/ɪˈfɪʃənt/", m: "高效的", e: "We need a more efficient system.", et: "我们需要一个更高效的体系。"},
+                {w: "eliminate", p: "/ɪˈlɪmɪneɪt/", m: "消除，淘汰", e: "We must eliminate waste.", et: "我们必须消除浪费。"},
+                {w: "emerge", p: "/ɪˈmɜːdʒ/", m: "出现，浮现", e: "New technologies emerge every day.", et: "新技术每天都在涌现。"},
+                {w: "emphasis", p: "/ˈemfəsɪs/", m: "强调，重点", e: "The emphasis is on quality.", et: "重点是质量。"},
+                {w: "employ", p: "/ɪmˈplɔɪ/", m: "雇用，使用", e: "The company employs 500 people.", et: "这家公司雇用了500人。"},
+                {w: "encounter", p: "/ɪnˈkaʊntər/", m: "遇到，遭遇", e: "We encountered some difficulties.", et: "我们遇到了一些困难。"},
+                {w: "encourage", p: "/ɪnˈkʌrɪdʒ/", m: "鼓励，激励", e: "Teachers should encourage students.", et: "老师应该鼓励学生。"},
+                {w: "engage", p: "/ɪnˈɡeɪdʒ/", m: "参与，吸引", e: "Students must engage in discussions.", et: "学生必须参与讨论。"},
+                {w: "enormous", p: "/ɪˈnɔːməs/", m: "巨大的，庞大的", e: "The project requires an enormous investment.", et: "该项目需要巨大的投资。"},
+                {w: "environment", p: "/ɪnˈvaɪrənmənt/", m: "环境", e: "We must protect the environment.", et: "我们必须保护环境。"},
+                {w: "establish", p: "/ɪˈstæblɪʃ/", m: "建立，确立", e: "The company was established in 2000.", et: "这家公司成立于2000年。"},
+                {w: "evaluate", p: "/ɪˈvæljueɪt/", m: "评估，评价", e: "We need to evaluate the results.", et: "我们需要评估结果。"},
+                {w: "evidence", p: "/ˈevɪdəns/", m: "证据，迹象", e: "There is evidence of climate change.", et: "有证据表明气候变化。"},
+                {w: "evolve", p: "/ɪˈvɒlv/", m: "进化，发展", e: "The company evolved over time.", et: "这家公司随着时间的推移而发展。"},
+                {w: "examine", p: "/ɪɡˈzæmɪn/", m: "检查，考试", e: "The doctor examined the patient.", et: "医生检查了病人。"},
+                {w: "exception", p: "/ɪkˈsepʃən/", m: "例外", e: "Everyone must attend, with no exceptions.", et: "每个人都必须参加，没有例外。"},
+                {w: "exchange", p: "/ɪksˈtʃeɪndʒ/", m: "交换，交流", e: "We exchanged ideas during the meeting.", et: "我们在会议期间交换了想法。"},
+                {w: "exclude", p: "/ɪkˈskluːd/", m: "排除，排斥", e: "Some items are excluded from the offer.", et: "有些项目不包括在优惠中。"},
+                {w: "exhibit", p: "/ɪɡˈzɪbɪt/", m: "展览，展示", e: "The museum exhibits ancient artifacts.", et: "博物馆展出古代文物。"},
+                {w: "expand", p: "/ɪkˈspænd/", m: "扩展，膨胀", e: "The company plans to expand overseas.", et: "公司计划向海外扩张。"},
+                {w: "expect", p: "/ɪkˈspekt/", m: "期望，预期", e: "We expect the results soon.", et: "我们预计很快会有结果。"},
+                {w: "expense", p: "/ɪkˈspens/", m: "费用，开支", e: "Travel expenses will be reimbursed.", et: "旅行费用将报销。"},
+                {w: "experiment", p: "/ɪkˈsperɪmənt/", m: "实验，试验", e: "The experiment produced interesting results.", et: "实验产生了有趣的结果。"},
+                {w: "expert", p: "/ˈekspɜːt/", m: "专家，行家", e: "She is an expert in the field.", et: "她是该领域的专家。"},
+                {w: "explore", p: "/ɪkˈsplɔːr/", m: "探索，考察", e: "We need to explore all possibilities.", et: "我们需要探索所有可能性。"},
+                {w: "export", p: "/ˈekspɔːt/", m: "出口，输出", e: "The country exports oil.", et: "这个国家出口石油。"},
+                {w: "expose", p: "/ɪkˈspəʊz/", m: "暴露，揭露", e: "The report exposed the truth.", et: "报告揭露了真相。"},
+                {w: "extend", p: "/ɪkˈstend/", m: "延长，扩展", e: "We extended the deadline by a week.", et: "我们将截止日期延长了一周。"},
+                {w: "extensive", p: "/ɪkˈstensɪv/", m: "广泛的，大量的", e: "The research involved extensive fieldwork.", et: "这项研究涉及大量的实地考察。"},
+                {w: "external", p: "/ɪkˈstɜːnəl/", m: "外部的，外用的", e: "The external factors influenced the result.", et: "外部因素影响了结果。"},
+                {w: "facility", p: "/fəˈsɪləti/", m: "设施，设备", e: "The sports facility is world-class.", et: "这个体育设施是世界级的。"},
+                {w: "factor", p: "/ˈfæktər/", m: "因素，要素", e: "Cost is a major factor in our decision.", et: "成本是我们决策的主要因素。"},
+                {w: "familiar", p: "/fəˈmɪliər/", m: "熟悉的，常见的", e: "I'm not familiar with this software.", et: "我不熟悉这个软件。"},
+                {w: "feature", p: "/ˈfiːtʃər/", m: "特征，特色", e: "The new phone has many advanced features.", et: "这款新手机有许多先进功能。"},
+                {w: "finance", p: "/ˈfaɪnæns/", m: "财务，金融", e: "She works in the finance department.", et: "她在财务部门工作。"},
+                {w: "flexible", p: "/ˈfleksəbəl/", m: "灵活的，柔韧的", e: "We need a flexible approach.", et: "我们需要灵活的方法。"},
+                {w: "forecast", p: "/ˈfɔːkɑːst/", m: "预测，预报", e: "The weather forecast predicts rain.", et: "天气预报预测有雨。"},
+                {w: "foundation", p: "/faʊnˈdeɪʃən/", m: "基础，基金会", e: "The foundation of a good education is reading.", et: "良好教育的基础是阅读。"},
+                {w: "frequent", p: "/ˈfriːkwənt/", m: "频繁的，经常的", e: "There are frequent flights to London.", et: "有频繁的航班飞往伦敦。"},
+                {w: "function", p: "/ˈfʌŋkʃən/", m: "功能，作用", e: "The function of the heart is to pump blood.", et: "心脏的功能是泵血。"},
+                {w: "fundamental", p: "/ˌfʌndəˈmentəl/", m: "基本的，根本的", e: "There is a fundamental difference between them.", et: "他们之间有根本的区别。"},
+                {w: "generate", p: "/ˈdʒenəreɪt/", m: "产生，生成", e: "The wind turbines generate electricity.", et: "风力涡轮机发电。"},
+                {w: "global", p: "/ˈɡləʊbəl/", m: "全球的，全面的", e: "Global warming is a serious issue.", et: "全球变暖是一个严重的问题。"},
+                {w: "guarantee", p: "/ˌɡærənˈtiː/", m: "保证，担保", e: "We guarantee the quality of our products.", et: "我们保证产品的质量。"},
+                {w: "identify", p: "/aɪˈdentɪfaɪ/", m: "识别，确认", e: "The police identified the suspect.", et: "警方确认了嫌疑人。"},
+                {w: "ignore", p: "/ɪɡˈnɔːr/", m: "忽视，忽略", e: "You can't ignore the problem.", et: "你不能忽视这个问题。"},
+                {w: "illustrate", p: "/ˈɪləstreɪt/", m: "说明，阐明", e: "The diagram illustrates the process.", et: "图表说明了这个过程。"},
+                {w: "immigrant", p: "/ˈɪmɪɡrənt/", m: "移民", e: "The city has a large immigrant population.", et: "这个城市有大量的移民人口。"},
+                {w: "impact", p: "/ˈɪmpækt/", m: "影响，冲击", e: "The new policy had a significant impact.", et: "新政策产生了重大影响。"},
+                {w: "implement", p: "/ˈɪmplɪment/", m: "实施，执行", e: "We need to implement the changes.", et: "我们需要实施这些改变。"},
+                {w: "implication", p: "/ˌɪmplɪˈkeɪʃən/", m: "含义，暗示", e: "What are the implications of this decision?", et: "这个决定的含义是什么？"},
+                {w: "impose", p: "/ɪmˈpəʊz/", m: "强加，征收", e: "The government imposed new taxes.", et: "政府征收了新税。"},
+                {w: "impression", p: "/ɪmˈpreʃən/", m: "印象，感想", e: "First impressions are important.", et: "第一印象很重要。"},
+                {w: "improve", p: "/ɪmˈpruːv/", m: "改善，提高", e: "We need to improve our service.", et: "我们需要改善服务。"},
+                {w: "incentive", p: "/ɪnˈsentɪv/", m: "激励，奖励", e: "The company offers incentives for good performance.", et: "公司为表现优秀者提供奖励。"},
+                {w: "incident", p: "/ˈɪnsɪdənt/", m: "事件，事故", e: "The incident was reported to the police.", et: "事件已向警方报告。"},
+                {w: "income", p: "/ˈɪnkʌm/", m: "收入，收益", e: "Her annual income is over $50,000.", et: "她的年收入超过5万美元。"},
+                {w: "indicate", p: "/ˈɪndɪkeɪt/", m: "表明，指示", e: "The results indicate a positive trend.", et: "结果表明了一个积极的趋势。"},
+                {w: "individual", p: "/ˌɪndɪˈvɪdʒuəl/", m: "个人的，个体", e: "Each individual has unique talents.", et: "每个人都有独特的才能。"},
+                {w: "industry", p: "/ˈɪndəstri/", m: "工业，行业", e: "The tourism industry is growing.", et: "旅游业正在增长。"},
+                {w: "inevitable", p: "/ɪnˈevɪtəbəl/", m: "不可避免的", e: "Change is inevitable.", et: "变化是不可避免的。"},
+                {w: "influence", p: "/ˈɪnfluəns/", m: "影响，势力", e: "Social media has a huge influence on young people.", et: "社交媒体对年轻人有巨大影响。"},
+                {w: "inform", p: "/ɪnˈfɔːm/", m: "通知，告知", e: "Please inform us of any changes.", et: "如有任何变化请通知我们。"},
+                {w: "initiative", p: "/ɪˈnɪʃətɪv/", m: "倡议，主动性", e: "She took the initiative to start the project.", et: "她主动启动了项目。"},
+                {w: "innovation", p: "/ˌɪnəˈveɪʃən/", m: "创新，革新", e: "Innovation drives economic growth.", et: "创新推动经济增长。"},
+                {w: "inspect", p: "/ɪnˈspekt/", m: "检查，视察", e: "The building was inspected for safety.", et: "大楼进行了安全检查。"},
+                {w: "inspiration", p: "/ˌɪnspəˈreɪʃən/", m: "灵感，鼓舞", e: "Nature is a great source of inspiration.", et: "大自然是灵感的巨大源泉。"},
+                {w: "institution", p: "/ˌɪnstɪˈtjuːʃən/", m: "机构，制度", e: "The institution was founded in 1900.", et: "该机构成立于1900年。"},
+                {w: "integrate", p: "/ˈɪntɪɡreɪt/", m: "整合，融入", e: "We need to integrate new technology.", et: "我们需要整合新技术。"},
+                {w: "intellectual", p: "/ˌɪntəˈlektʃuəl/", m: "智力的，知识分子", e: "Reading stimulates intellectual growth.", et: "阅读促进智力发展。"},
+                {w: "intelligent", p: "/ɪnˈtelɪdʒənt/", m: "聪明的，智能的", e: "She is highly intelligent.", et: "她非常聪明。"},
+                {w: "interact", p: "/ˌɪntərˈækt/", m: "互动，相互作用", e: "Students should interact with each other.", et: "学生应该互相交流。"},
+                {w: "interpret", p: "/ɪnˈtɜːprɪt/", m: "解释，口译", e: "How do you interpret the data?", et: "你如何解释这些数据？"},
+                {w: "investigate", p: "/ɪnˈvestɪɡeɪt/", m: "调查，研究", e: "The police are investigating the case.", et: "警方正在调查此案。"},
+                {w: "involve", p: "/ɪnˈvɒlv/", m: "涉及，包含", e: "The project involves many people.", et: "这个项目涉及很多人。"},
+                {w: "isolate", p: "/ˈaɪsəleɪt/", m: "隔离，孤立", e: "The patient was isolated to prevent infection.", et: "病人被隔离以防止感染。"},
+                {w: "issue", p: "/ˈɪʃuː/", m: "问题，议题", e: "We need to address this issue.", et: "我们需要解决这个问题。"},
+                {w: "justify", p: "/ˈdʒʌstɪfaɪ/", m: "证明...正当", e: "How can you justify your actions?", et: "你如何证明你的行为是正当的？"},
+                {w: "laboratory", p: "/ləˈbɒrətəri/", m: "实验室", e: "The laboratory is equipped with modern devices.", et: "实验室配备了现代化设备。"},
+                {w: "landscape", p: "/ˈlændskeɪp/", m: "风景，景观", e: "The landscape is breathtaking.", et: "风景令人叹为观止。"},
+                {w: "launch", p: "/lɔːntʃ/", m: "发射，启动", e: "The company launched a new product.", et: "公司推出了一款新产品。"},
+                {w: "legislation", p: "/ˌledʒɪsˈleɪʃən/", m: "立法，法规", e: "New legislation was passed by parliament.", et: "议会通过了新立法。"},
+                {w: "legitimate", p: "/lɪˈdʒɪtɪmət/", m: "合法的，正当的", e: "Is this a legitimate concern?", et: "这是一个合理的担忧吗？"},
+                {w: "liberal", p: "/ˈlɪbərəl/", m: "自由的，开明的", e: "She has liberal views on education.", et: "她对教育持有开明的观点。"},
+                {w: "maintain", p: "/meɪnˈteɪn/", m: "维持，保养", e: "We need to maintain good relationships.", et: "我们需要维持良好的关系。"},
+                {w: "manufacture", p: "/ˌmænjʊˈfæktʃər/", m: "制造，生产", e: "The company manufactures cars.", et: "这家公司制造汽车。"},
+                {w: "massive", p: "/ˈmæsɪv/", m: "大量的，巨大的", e: "There was a massive increase in sales.", et: "销售额大幅增长。"},
+                {w: "mature", p: "/məˈtʃʊər/", m: "成熟的，成年", e: "She is very mature for her age.", et: "她比同龄人成熟得多。"},
+                {w: "maximum", p: "/ˈmæksɪməm/", m: "最大的，最大值", e: "The maximum speed is 120 km/h.", et: "最高速度是120公里/小时。"},
+                {w: "mechanism", p: "/ˈmekənɪzəm/", m: "机制，机理", e: "The mechanism needs to be repaired.", et: "这个机制需要修理。"},
+                {w: "medium", p: "/ˈmiːdiəm/", m: "媒介，中等的", e: "English is the medium of instruction.", et: "英语是教学媒介。"},
+                {w: "mental", p: "/ˈmentəl/", m: "精神的，心理的", e: "Mental health is as important as physical health.", et: "心理健康和身体健康一样重要。"},
+                {w: "method", p: "/ˈmeθəd/", m: "方法，方式", e: "We need to find a better method.", et: "我们需要找到更好的方法。"},
+                {w: "migrate", p: "/maɪˈɡreɪt/", m: "迁移，迁徙", e: "Birds migrate south in winter.", et: "鸟类冬天迁徙到南方。"},
+                {w: "minimum", p: "/ˈmɪnɪməm/", m: "最小的，最小值", e: "The minimum age for driving is 18.", et: "驾驶的最低年龄是18岁。"},
+                {w: "modify", p: "/ˈmɒdɪfaɪ/", m: "修改，调整", e: "We need to modify the plan.", et: "我们需要修改计划。"},
+                {w: "monitor", p: "/ˈmɒnɪtər/", m: "监控，监测", e: "The doctor monitored his condition.", et: "医生监测他的状况。"},
+                {w: "motivate", p: "/ˈməʊtɪveɪt/", m: "激励，激发", e: "Good teachers motivate their students.", et: "好老师激励他们的学生。"},
+                {w: "negotiate", p: "/nɪˈɡəʊʃieɪt/", m: "谈判，协商", e: "They are negotiating a new contract.", et: "他们正在谈判一份新合同。"},
+                {w: "network", p: "/ˈnetwɜːk/", m: "网络，关系网", e: "Building a professional network is important.", et: "建立专业人脉网络很重要。"},
+                {w: "nevertheless", p: "/ˌnevəðəˈles/", m: "然而，不过", e: "It was difficult; nevertheless, we succeeded.", et: "这很困难，然而我们成功了。"},
+                {w: "normal", p: "/ˈnɔːməl/", m: "正常的，标准的", e: "It's normal to feel nervous.", et: "感到紧张是正常的。"},
+                {w: "numerous", p: "/ˈnjuːmərəs/", m: "许多的，大量的", e: "There are numerous reasons for this.", et: "这有很多原因。"},
+                {w: "obtain", p: "/əbˈteɪn/", m: "获得，得到", e: "She obtained a degree in economics.", et: "她获得了经济学学位。"},
+                {w: "obvious", p: "/ˈɒbviəs/", m: "明显的，显然的", e: "The answer is obvious.", et: "答案很明显。"},
+                {w: "occupy", p: "/ˈɒkjʊpaɪ/", m: "占据，使忙碌", e: "The building occupies a whole block.", et: "这栋建筑占据了整个街区。"},
+                {w: "opponent", p: "/əˈpəʊnənt/", m: "对手，反对者", e: "She defeated her opponent in the debate.", et: "她在辩论中击败了对手。"},
+                {w: "opportunity", p: "/ˌɒpəˈtjuːnəti/", m: "机会，机遇", e: "This is a great opportunity for you.", et: "这对你来说是一个很好的机会。"},
+                {w: "oppose", p: "/əˈpəʊz/", m: "反对，对抗", e: "Many people oppose the new policy.", et: "许多人反对新政策。"},
+                {w: "organize", p: "/ˈɔːɡənaɪz/", m: "组织，安排", e: "We need to organize the event carefully.", et: "我们需要仔细组织这次活动。"},
+                {w: "original", p: "/əˈrɪdʒɪnəl/", m: "原始的，独创的", e: "The original plan was better.", et: "最初的计划更好。"},
+                {w: "outcome", p: "/ˈaʊtkʌm/", m: "结果，成果", e: "The outcome of the election was surprising.", et: "选举结果令人惊讶。"},
+                {w: "overall", p: "/ˌəʊvərˈɔːl/", m: "总体的，全面的", e: "The overall situation is improving.", et: "总体情况正在改善。"},
+                {w: "participate", p: "/pɑːˈtɪsɪpeɪt/", m: "参与，参加", e: "Everyone is encouraged to participate.", et: "鼓励每个人参与。"},
+                {w: "particular", p: "/pəˈtɪkjʊlər/", m: "特定的，特别的", e: "Is there a particular reason?", et: "有特定的原因吗？"},
+                {w: "passion", p: "/ˈpæʃən/", m: "热情，激情", e: "She has a passion for music.", et: "她对音乐充满热情。"},
+                {w: "perceive", p: "/pəˈsiːv/", m: "感知，认为", e: "How do you perceive the situation?", et: "你如何看待这个情况？"},
+                {w: "perform", p: "/pəˈfɔːm/", m: "执行，表演", e: "The team performed well.", et: "团队表现良好。"},
+                {w: "permanent", p: "/ˈpɜːmənənt/", m: "永久的，固定的", e: "She found a permanent job.", et: "她找到了一份固定工作。"},
+                {w: "permit", p: "/pəˈmɪt/", m: "允许，许可", e: "Smoking is not permitted here.", et: "这里不允许吸烟。"},
+                {w: "persist", p: "/pəˈsɪst/", m: "坚持，持续", e: "If you persist, you will succeed.", et: "如果你坚持，你会成功的。"},
+                {w: "phenomenon", p: "/fɪˈnɒmɪnən/", m: "现象", e: "This is a natural phenomenon.", et: "这是一种自然现象。"},
+                {w: "philosophy", p: "/fɪˈlɒsəfi/", m: "哲学，理念", e: "What is your philosophy of life?", et: "你的人生哲学是什么？"},
+                {w: "policy", p: "/ˈpɒləsi/", m: "政策，方针", e: "The government introduced a new policy.", et: "政府推出了一项新政策。"},
+                {w: "pollution", p: "/pəˈluːʃən/", m: "污染", e: "Air pollution is a major concern.", et: "空气污染是一个主要问题。"},
+                {w: "population", p: "/ˌpɒpjʊˈleɪʃən/", m: "人口", e: "The population of the city is growing.", et: "这个城市的人口在增长。"},
+                {w: "portion", p: "/ˈpɔːʃən/", m: "部分，一份", e: "A large portion of the budget is for education.", et: "预算的很大一部分用于教育。"},
+                {w: "possess", p: "/pəˈzes/", m: "拥有，具有", e: "She possesses great talent.", et: "她拥有巨大的天赋。"},
+                {w: "potential", p: "/pəˈtenʃəl/", m: "潜力，潜在的", e: "He has the potential to be a leader.", et: "他有成为领导者的潜力。"},
+                {w: "poverty", p: "/ˈpɒvəti/", m: "贫困，贫穷", e: "The government is fighting poverty.", et: "政府正在与贫困作斗争。"},
+                {w: "practical", p: "/ˈpræktɪkəl/", m: "实际的，实用的", e: "We need practical solutions.", et: "我们需要实用的解决方案。"},
+                {w: "precede", p: "/prɪˈsiːd/", m: "先于，在...之前", e: "The meeting was preceded by a lunch.", et: "会议之前有午餐。"},
+                {w: "predict", p: "/prɪˈdɪkt/", m: "预测，预言", e: "It's hard to predict the future.", et: "很难预测未来。"},
+                {w: "prefer", p: "/prɪˈfɜːr/", m: "更喜欢，偏好", e: "I prefer coffee to tea.", et: "比起茶我更喜欢咖啡。"},
+                {w: "prejudice", p: "/ˈpredʒʊdɪs/", m: "偏见，歧视", e: "We must overcome prejudice.", et: "我们必须克服偏见。"},
+                {w: "preserve", p: "/prɪˈzɜːv/", m: "保护，保存", e: "We need to preserve the environment.", et: "我们需要保护环境。"},
+                {w: "pressure", p: "/ˈpreʃər/", m: "压力", e: "He is under a lot of pressure.", et: "他承受着很大的压力。"},
+                {w: "previous", p: "/ˈpriːviəs/", m: "先前的，以前的", e: "In the previous chapter, we discussed this.", et: "在上一章中，我们讨论了这个。"},
+                {w: "principle", p: "/ˈprɪnsəpəl/", m: "原则，原理", e: "We must stick to our principles.", et: "我们必须坚持原则。"},
+                {w: "priority", p: "/praɪˈɒrəti/", m: "优先，重点", e: "Safety is our top priority.", et: "安全是我们的首要任务。"},
+                {w: "procedure", p: "/prəˈsiːdʒər/", m: "程序，步骤", e: "Follow the standard procedure.", et: "遵循标准程序。"},
+                {w: "process", p: "/ˈprəʊses/", m: "过程，处理", e: "The application process takes time.", et: "申请过程需要时间。"},
+                {w: "profession", p: "/prəˈfeʃən/", m: "职业，专业", e: "Teaching is a noble profession.", et: "教学是一项崇高的职业。"},
+                {w: "profit", p: "/ˈprɒfɪt/", m: "利润，收益", e: "The company made a good profit.", et: "公司获得了可观的利润。"},
+                {w: "progress", p: "/ˈprəʊɡres/", m: "进步，进展", e: "We have made significant progress.", et: "我们取得了重大进展。"},
+                {w: "promote", p: "/prəˈməʊt/", m: "促进，提升", e: "The campaign promotes healthy eating.", et: "这个活动促进健康饮食。"},
+                {w: "proportion", p: "/prəˈpɔːʃən/", m: "比例，部分", e: "A large proportion of students passed.", et: "很大比例的学生通过了。"},
+                {w: "prospect", p: "/ˈprɒspekt/", m: "前景，展望", e: "The job prospects are excellent.", et: "就业前景非常好。"},
+                {w: "protest", p: "/ˈprəʊtest/", m: "抗议，反对", e: "They protested against the decision.", et: "他们抗议这个决定。"},
+                {w: "provide", p: "/prəˈvaɪd/", m: "提供，供应", e: "The school provides free lunch.", et: "学校提供免费午餐。"},
+                {w: "publish", p: "/ˈpʌblɪʃ/", m: "出版，发表", e: "She published her first novel.", et: "她出版了她的第一部小说。"},
+                {w: "purchase", p: "/ˈpɜːtʃəs/", m: "购买", e: "We purchased a new house.", et: "我们购买了一所新房子。"},
+                {w: "pursue", p: "/pəˈsjuː/", m: "追求，追赶", e: "She decided to pursue a career in medicine.", et: "她决定从事医学事业。"},
+                {w: "qualify", p: "/ˈkwɒlɪfaɪ/", m: "有资格，合格", e: "She qualified as a lawyer.", et: "她取得了律师资格。"},
+                {w: "quantity", p: "/ˈkwɒntəti/", m: "数量，大量", e: "A large quantity of food was wasted.", et: "大量的食物被浪费了。"},
+                {w: "range", p: "/reɪndʒ/", m: "范围，幅度", e: "The price range is from $10 to $50.", et: "价格范围从10美元到50美元。"},
+                {w: "rapid", p: "/ˈræpɪd/", m: "迅速的，快速的", e: "There has been rapid growth.", et: "出现了快速增长。"},
+                {w: "reality", p: "/riˈæləti/", m: "现实，实际", e: "We must face reality.", et: "我们必须面对现实。"},
+                {w: "reasonable", p: "/ˈriːzənəbəl/", m: "合理的，适度的", e: "The price is reasonable.", et: "价格合理。"},
+                {w: "recognize", p: "/ˈrekəɡnaɪz/", m: "认出，承认", e: "I recognized her immediately.", et: "我立刻认出了她。"},
+                {w: "recommend", p: "/ˌrekəˈmend/", m: "推荐，建议", e: "I recommend this book.", et: "我推荐这本书。"},
+                {w: "recover", p: "/rɪˈkʌvər/", m: "恢复，康复", e: "She recovered from the illness.", et: "她从疾病中康复了。"},
+                {w: "reduce", p: "/rɪˈdjuːs/", m: "减少，降低", e: "We need to reduce costs.", et: "我们需要降低成本。"},
+                {w: "reflect", p: "/rɪˈflekt/", m: "反映，反射", e: "The results reflect the team's hard work.", et: "结果反映了团队的努力。"},
+                {w: "reform", p: "/rɪˈfɔːm/", m: "改革，革新", e: "The education system needs reform.", et: "教育体系需要改革。"},
+                {w: "regulate", p: "/ˈreɡjʊleɪt/", m: "调节，管理", e: "The government regulates the industry.", et: "政府监管这个行业。"},
+                {w: "reject", p: "/rɪˈdʒekt/", m: "拒绝，排斥", e: "She rejected his offer.", et: "她拒绝了他的提议。"},
+                {w: "relate", p: "/rɪˈleɪt/", m: "关联，叙述", e: "These findings relate to our research.", et: "这些发现与我们的研究相关。"},
+                {w: "release", p: "/rɪˈliːs/", m: "释放，发布", e: "The new film will be released soon.", et: "新电影即将上映。"},
+                {w: "relevant", p: "/ˈreləvənt/", m: "相关的，切题的", e: "Is this information relevant?", et: "这个信息相关吗？"},
+                {w: "relief", p: "/rɪˈliːf/", m: "缓解，救济", e: "The medicine brought relief.", et: "药物缓解了症状。"},
+                {w: "rely", p: "/rɪˈlaɪ/", m: "依赖，信赖", e: "You can rely on me.", et: "你可以信赖我。"},
+                {w: "remain", p: "/rɪˈmeɪn/", m: "保持，剩余", e: "Please remain seated.", et: "请保持坐姿。"},
+                {w: "remarkable", p: "/rɪˈmɑːkəbəl/", m: "显著的，非凡的", e: "She made remarkable progress.", et: "她取得了显著的进步。"},
+                {w: "remedy", p: "/ˈremədi/", m: "补救，治疗", e: "We need a remedy for the problem.", et: "我们需要解决问题的补救措施。"},
+                {w: "remote", p: "/rɪˈməʊt/", m: "遥远的，偏僻的", e: "He lives in a remote village.", et: "他住在一个偏远的村庄。"},
+                {w: "remove", p: "/rɪˈmuːv/", m: "移除，消除", e: "Please remove your shoes.", et: "请脱鞋。"},
+                {w: "replace", p: "/rɪˈpleɪs/", m: "替换，取代", e: "We need to replace the old equipment.", et: "我们需要更换旧设备。"},
+                {w: "represent", p: "/ˌreprɪˈzent/", m: "代表，表示", e: "She represents the company.", et: "她代表公司。"},
+                {w: "reputation", p: "/ˌrepjʊˈteɪʃən/", m: "声誉，名声", e: "The company has a good reputation.", et: "这家公司声誉良好。"},
+                {w: "require", p: "/rɪˈkwaɪər/", m: "需要，要求", e: "This job requires patience.", et: "这份工作需要耐心。"},
+                {w: "research", p: "/rɪˈsɜːtʃ/", m: "研究，调查", e: "She is doing research on climate change.", et: "她正在研究气候变化。"},
+                {w: "reserve", p: "/rɪˈzɜːv/", m: "保留，预订", e: "I reserved a table for two.", et: "我预订了一张两人桌。"},
+                {w: "resident", p: "/ˈrezɪdənt/", m: "居民，住户", e: "The local residents are concerned.", et: "当地居民很担忧。"},
+                {w: "resist", p: "/rɪˈzɪst/", m: "抵抗，抵制", e: "She couldn't resist the temptation.", et: "她无法抵抗诱惑。"},
+                {w: "resolve", p: "/rɪˈzɒlv/", m: "解决，决心", e: "We need to resolve this conflict.", et: "我们需要解决这个冲突。"},
+                {w: "resource", p: "/rɪˈsɔːs/", m: "资源", e: "Natural resources are limited.", et: "自然资源是有限的。"},
+                {w: "respond", p: "/rɪˈspɒnd/", m: "回应，响应", e: "Please respond to the invitation.", et: "请回复邀请。"},
+                {w: "responsible", p: "/rɪˈspɒnsəbəl/", m: "负责的，有责任的", e: "Who is responsible for this?", et: "谁对此负责？"},
+                {w: "restore", p: "/rɪˈstɔːr/", m: "恢复，修复", e: "The building was restored.", et: "这座建筑被修复了。"},
+                {w: "restrict", p: "/rɪˈstrɪkt/", m: "限制，约束", e: "The new law restricts smoking.", et: "新法律限制吸烟。"},
+                {w: "reveal", p: "/rɪˈviːl/", m: "揭示，透露", e: "The investigation revealed the truth.", et: "调查揭示了真相。"},
+                {w: "revenue", p: "/ˈrevənjuː/", m: "收入，税收", e: "The company's revenue increased.", et: "公司的收入增加了。"},
+                {w: "revolution", p: "/ˌrevəˈluːʃən/", m: "革命，变革", e: "The industrial revolution changed the world.", et: "工业革命改变了世界。"},
+                {w: "sacrifice", p: "/ˈsækrɪfaɪs/", m: "牺牲，献祭", e: "She made many sacrifices for her family.", et: "她为家庭做出了很多牺牲。"},
+                {w: "satisfy", p: "/ˈsætɪsfaɪ/", m: "满足，使满意", e: "We must satisfy our customers.", et: "我们必须让顾客满意。"},
+                {w: "schedule", p: "/ˈʃedjuːl/", m: "时间表，日程", e: "The schedule has been changed.", et: "时间表已经更改。"},
+                {w: "scheme", p: "/skiːm/", m: "方案，计划", e: "They proposed a new scheme.", et: "他们提出了一个新方案。"},
+                {w: "section", p: "/ˈsekʃən/", m: "部分，区域", e: "Read the first section of the book.", et: "阅读书的第一部分。"},
+                {w: "secure", p: "/sɪˈkjʊər/", m: "安全的，获得", e: "We need to secure the building.", et: "我们需要确保大楼的安全。"},
+                {w: "significant", p: "/sɪɡˈnɪfɪkənt/", m: "重要的，显著的", e: "This is a significant achievement.", et: "这是一项重要的成就。"},
+                {w: "similar", p: "/ˈsɪmɪlər/", m: "相似的，类似的", e: "The two designs are very similar.", et: "这两个设计非常相似。"},
+                {w: "source", p: "/sɔːs/", m: "来源，出处", e: "We need to find the source of the problem.", et: "我们需要找到问题的根源。"},
+                {w: "specific", p: "/spəˈsɪfɪk/", m: "具体的，特定的", e: "Can you be more specific?", et: "你能说得更具体吗？"},
+                {w: "stable", p: "/ˈsteɪbəl/", m: "稳定的，稳固的", e: "The economy is stable.", et: "经济稳定。"},
+                {w: "standard", p: "/ˈstændəd/", m: "标准，规范", e: "We must maintain high standards.", et: "我们必须保持高标准。"},
+                {w: "status", p: "/ˈsteɪtəs/", m: "地位，状态", e: "What is the status of the project?", et: "项目的状态如何？"},
+                {w: "strategy", p: "/ˈstrætədʒi/", m: "策略，战略", e: "We need a new strategy.", et: "我们需要一个新策略。"},
+                {w: "structure", p: "/ˈstrʌktʃər/", m: "结构，构造", e: "The building has a modern structure.", et: "这座建筑有现代结构。"},
+                {w: "substitute", p: "/ˈsʌbstɪtjuːt/", m: "替代品，代替", e: "There is no substitute for hard work.", et: "没有什么可以替代努力工作。"},
+                {w: "sufficient", p: "/səˈfɪʃənt/", m: "足够的，充分的", e: "The evidence is sufficient.", et: "证据是充分的。"},
+                {w: "suggest", p: "/səˈdʒest/", m: "建议，暗示", e: "I suggest we take a break.", et: "我建议我们休息一下。"},
+                {w: "summary", p: "/ˈsʌməri/", m: "总结，摘要", e: "Please write a summary of the report.", et: "请写一份报告摘要。"},
+                {w: "supply", p: "/səˈplaɪ/", m: "供应，提供", e: "The water supply was cut off.", et: "供水被切断了。"},
+                {w: "support", p: "/səˈpɔːt/", m: "支持，援助", e: "Thank you for your support.", et: "谢谢你的支持。"},
+                {w: "suppose", p: "/səˈpəʊz/", m: "假设，认为", e: "I suppose you are right.", et: "我认为你是对的。"},
+                {w: "survey", p: "/ˈsɜːveɪ/", m: "调查，测量", e: "We conducted a survey.", et: "我们进行了一项调查。"},
+                {w: "survive", p: "/səˈvaɪv/", m: "幸存，生存", e: "Only a few survived the accident.", et: "只有少数人在事故中幸存。"},
+                {w: "suspect", p: "/səˈspekt/", m: "怀疑，嫌疑犯", e: "The police suspect him.", et: "警方怀疑他。"},
+                {w: "sustain", p: "/səˈsteɪn/", m: "维持，支撑", e: "We need to sustain economic growth.", et: "我们需要维持经济增长。"},
+                {w: "symbol", p: "/ˈsɪmbəl/", m: "象征，符号", e: "The dove is a symbol of peace.", et: "鸽子是和平的象征。"},
+                {w: "target", p: "/ˈtɑːɡɪt/", m: "目标，对象", e: "We achieved our sales target.", et: "我们实现了销售目标。"},
+                {w: "technique", p: "/tekˈniːk/", m: "技术，技巧", e: "She has excellent technique.", et: "她有出色的技巧。"},
+                {w: "technology", p: "/tekˈnɒlədʒi/", m: "技术，科技", e: "Technology is changing rapidly.", et: "技术正在迅速变化。"},
+                {w: "temporary", p: "/ˈtempərəri/", m: "暂时的，临时的", e: "This is a temporary solution.", et: "这是一个临时解决方案。"},
+                {w: "tendency", p: "/ˈtendənsi/", m: "趋势，倾向", e: "There is a growing tendency to work from home.", et: "在家工作的趋势日益增长。"},
+                {w: "threat", p: "/θret/", m: "威胁，恐吓", e: "Pollution poses a threat to health.", et: "污染对健康构成威胁。"},
+                {w: "tolerate", p: "/ˈtɒləreɪt/", m: "容忍，忍受", e: "We cannot tolerate such behavior.", et: "我们不能容忍这种行为。"},
+                {w: "tradition", p: "/trəˈdɪʃən/", m: "传统，惯例", e: "It's a tradition to celebrate with family.", et: "和家人一起庆祝是一个传统。"},
+                {w: "transfer", p: "/trænsˈfɜːr/", m: "转移，调动", e: "She transferred to a new school.", et: "她转学到了新学校。"},
+                {w: "transform", p: "/trænsˈfɔːm/", m: "转变，改造", e: "The city has been transformed.", et: "这座城市已经发生了转变。"},
+                {w: "trend", p: "/trend/", m: "趋势，潮流", e: "The trend is towards online shopping.", et: "趋势是向网上购物发展。"},
+                {w: "typical", p: "/ˈtɪpɪkəl/", m: "典型的，有代表性的", e: "This is a typical example.", et: "这是一个典型的例子。"},
+                {w: "ultimate", p: "/ˈʌltɪmət/", m: "最终的，根本的", e: "The ultimate goal is world peace.", et: "最终目标是世界和平。"},
+                {w: "undergo", p: "/ˌʌndəˈɡəʊ/", m: "经历，遭受", e: "The city underwent major changes.", et: "这座城市经历了重大变化。"},
+                {w: "unique", p: "/juːˈniːk/", m: "独特的，唯一的", e: "Everyone is unique.", et: "每个人都是独一无二的。"},
+                {w: "universal", p: "/ˌjuːnɪˈvɜːsəl/", m: "普遍的，全体的", e: "Education is a universal right.", et: "教育是一项普遍权利。"},
+                {w: "valid", p: "/ˈvælɪd/", m: "有效的，合理的", e: "The ticket is valid for one month.", et: "这张票有效期为一个月。"},
+                {w: "value", p: "/ˈvæljuː/", m: "价值，重视", e: "We value your opinion.", et: "我们重视你的意见。"},
+                {w: "variety", p: "/vəˈraɪəti/", m: "多样性，种类", e: "There is a wide variety of options.", et: "有各种各样的选择。"},
+                {w: "version", p: "/ˈvɜːʃən/", m: "版本，说法", e: "This is the latest version.", et: "这是最新版本。"},
+                {w: "virtual", p: "/ˈvɜːtʃuəl/", m: "虚拟的，实质上的", e: "Virtual reality is becoming popular.", et: "虚拟现实正在变得流行。"},
+                {w: "visible", p: "/ˈvɪzəbəl/", m: "可见的，明显的", e: "The stars are visible at night.", et: "星星在夜晚可见。"},
+                {w: "vision", p: "/ˈvɪʒən/", m: "愿景，视力", e: "She has a clear vision for the future.", et: "她对未来有清晰的愿景。"},
+                {w: "vital", p: "/ˈvaɪtəl/", m: "至关重要的", e: "Exercise is vital for health.", et: "锻炼对健康至关重要。"},
+                {w: "volume", p: "/ˈvɒljuːm/", m: "音量，体积，卷", e: "The volume of sales increased.", et: "销售量增加了。"},
+                {w: "voluntary", p: "/ˈvɒləntəri/", m: "自愿的，志愿的", e: "She does voluntary work.", et: "她做志愿工作。"},
+                {w: "welfare", p: "/ˈwelfeər/", m: "福利，幸福", e: "The government provides welfare.", et: "政府提供福利。"},
+                {w: "widespread", p: "/ˈwaɪdspred/", m: "广泛的，普遍的", e: "The disease is widespread.", et: "这种疾病很普遍。"},
+                {w: "witness", p: "/ˈwɪtnəs/", m: "目击者，证人", e: "He was a witness to the accident.", et: "他是事故的目击者。"},
+                {w: "workforce", p: "/ˈwɜːkfɔːs/", m: "劳动力，职工", e: "The workforce is highly skilled.", et: "劳动力技能高超。"},
+                {w: "yield", p: "/jiːld/", m: "产出，屈服", e: "The farm yielded a good harvest.", et: "农场获得了丰收。"}
+            ];
+
+            function shuffleArray(array) {
+                for (let i = array.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1));
+                    [array[i], array[j]] = [array[j], array[i]];
+                }
+            }
+
+            function getRandomOptions(correctIndex) {
+                let opts = [vocabList[correctIndex]];
+                let copyList = vocabList.map((item, index) => ({...item, originalIndex: index}));
+                copyList.splice(correctIndex, 1);
+                shuffleArray(copyList);
+                for (let i = 0; i < 3 && i < copyList.length; i++) {
+                    opts.push(copyList[i]);
+                }
+                shuffleArray(opts);
+                return opts;
+            }
+
+            window.toggleVocabMode = function() {
+                vocabMode = vocabMode === 'en2zh' ? 'zh2en' : 'en2zh';
+                document.getElementById('vocabModeBtn').textContent = vocabMode === 'en2zh' ? '中译英模式' : '英译中模式';
+                nextVocabQuestion();
+            };
+
+            function renderVocabQuestion() {
+                isAnswered = false;
+                document.getElementById('vocabNextBtn').style.display = 'none';
+                document.getElementById('vocabFeedback').classList.remove('show');
+
+                currentVocabIndex = Math.floor(Math.random() * vocabList.length);
+                currentVocabObj = vocabList[currentVocabIndex];
+                currentOptions = getRandomOptions(currentVocabIndex);
+
+                const wordEl = document.getElementById('vocabWord');
+                const phoneticEl = document.getElementById('vocabPhonetic');
+
+                if (vocabMode === 'en2zh') {
+                    wordEl.textContent = currentVocabObj.w;
+                    phoneticEl.textContent = currentVocabObj.p;
+                } else {
+                    wordEl.textContent = currentVocabObj.m.split('，')[0];
+                    phoneticEl.textContent = '请选择对应的英文单词';
+                }
+
+                const optionsContainer = document.getElementById('vocabOptions');
+                optionsContainer.innerHTML = '';
+                
+                currentOptions.forEach((opt, idx) => {
+                    const btn = document.createElement('div');
+                    btn.className = 'vocab-option';
+                    btn.textContent = vocabMode === 'en2zh' ? opt.m : opt.w;
+                    btn.onclick = () => checkVocabAnswer(idx, btn);
+                    optionsContainer.appendChild(btn);
+                });
+            }
+
+            window.checkVocabAnswer = function(idx, btnEl) {
+                if (isAnswered) return;
+                isAnswered = true;
+                
+                const selectedOpt = currentOptions[idx];
+                const isCorrect = selectedOpt.w === currentVocabObj.w;
+                
+                const allOptionEls = document.getElementById('vocabOptions').children;
+                for (let i = 0; i < allOptionEls.length; i++) {
+                    if (currentOptions[i].w === currentVocabObj.w) {
+                        allOptionEls[i].classList.add('correct');
+                    }
+                }
+
+                if (!isCorrect) {
+                    btnEl.classList.add('wrong');
+                }
+
+                showFeedback();
+            };
+
+            function showFeedback() {
+                const fb = document.getElementById('vocabFeedback');
+                document.getElementById('vocabFeedbackMean').textContent = currentVocabObj.w + ' ' + currentVocabObj.p + ' - ' + currentVocabObj.m;
+                document.getElementById('vocabExample').textContent = currentVocabObj.e;
+                document.getElementById('vocabExampleTrans').textContent = currentVocabObj.et;
+                
+                fb.classList.add('show');
+                document.getElementById('vocabNextBtn').style.display = 'block';
+
+                playVocabAudio(true);
+            }
+
+            window.nextVocabQuestion = function() {
+                window.speechSynthesis.cancel();
+                renderVocabQuestion();
+            };
+
+            let ttsUtterance = null;
+            window.playVocabAudio = function(fullSequence = false) {
+                if (!currentVocabObj) return;
+                const btn = document.getElementById('vocabPlayBtn');
+                window.speechSynthesis.cancel();
+                btn.classList.add('playing');
+
+                let sequence = [];
+                if (fullSequence) {
+                    sequence = [
+                        { text: currentVocabObj.w, lang: 'en-US' },
+                        { text: currentVocabObj.e, lang: 'en-US' }
+                    ];
+                } else {
+                    sequence = [
+                        { text: currentVocabObj.w, lang: 'en-US' }
+                    ];
+                }
+
+                let step = 0;
+                function speakNext() {
+                    if (step >= sequence.length) {
+                        btn.classList.remove('playing');
+                        return;
+                    }
+                    ttsUtterance = new SpeechSynthesisUtterance(sequence[step].text);
+                    ttsUtterance.lang = sequence[step].lang;
+                    ttsUtterance.rate = 0.85;
+                    ttsUtterance.onend = speakNext;
+                    ttsUtterance.onerror = () => btn.classList.remove('playing');
+                    window.speechSynthesis.speak(ttsUtterance);
+                    step++;
+                }
+                speakNext();
+            };
+
+            function initVocabQuiz() {
+                renderVocabQuestion();
+            }
+            window.initVocabQuiz = initVocabQuiz;
+            
+            document.addEventListener('DOMContentLoaded', function() {
+                if (document.getElementById('vocabContainer')) {
+                    initVocabQuiz();
+                }
+            });
+
             window.toggleAIChat = function() { switchDockTab('ai'); };
         })();
     </script>
