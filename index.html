@@ -1342,6 +1342,11 @@
             padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
             will-change: opacity, transform;
         }
+        /* 雅思单词页面面板单独样式 - 禁用外层面板滚动 */
+        .dock-panel#panelAi {
+            overflow: hidden;
+            padding: 0;
+        }
         .dock-panel::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
         .dock-panel::-webkit-scrollbar-track { display: none !important; }
         .dock-panel::-webkit-scrollbar-thumb { display: none !important; background: transparent !important; }
@@ -1450,11 +1455,35 @@
             background: transparent;
             overflow: hidden;
             padding: 12px 16px 16px;
+            position: relative;
+        }
+        /* 复杂纹理背景 - 让 backdrop-filter 能看出效果 */
+        .vocab-container::before {
+            content: '';
+            position: absolute; inset: 0;
+            z-index: 0;
+            background: 
+                radial-gradient(circle at 20% 10%, rgba(255, 214, 170, 0.6) 0%, transparent 40%),
+                radial-gradient(circle at 80% 80%, rgba(179, 229, 252, 0.7) 0%, transparent 45%),
+                radial-gradient(circle at 50% 50%, rgba(200, 230, 201, 0.5) 0%, transparent 50%),
+                linear-gradient(135deg, #d4f8e8 0%, #e0f7fa 50%, #f0fdf4 100%);
+            background-size: 200% 200%, 180% 180%, 150% 150%, 100% 100%;
+            animation: bgMove 30s ease-in-out infinite;
+        }
+        @keyframes bgMove {
+            0%, 100% { background-position: 0% 0%, 100% 100%, 50% 50%, 0% 0%; }
+            25% { background-position: 100% 0%, 0% 100%, 25% 25%, 50% 50%; }
+            50% { background-position: 100% 100%, 0% 0%, 75% 75%, 100% 100%; }
+            75% { background-position: 0% 100%, 100% 0%, 100% 0%, 25% 75%; }
+        }
+        .vocab-scroll, .vocab-header, .vocab-score, .vocab-progress-bar, .vocab-bottom {
+            position: relative;
+            z-index: 1;
         }
         .vocab-scroll {
             flex: 1;
             overflow-y: auto; -webkit-overflow-scrolling: touch;
-            padding: 0 0 20px;
+            padding: 0 0 24px;
             margin: 0 -16px;
         }
         .vocab-scroll > * {
@@ -1506,16 +1535,34 @@
         }
         .vocab-score-num.bump { transform: scale(1.35); }
 
-        /* 增强液态玻璃卡片 */
+        /* 增强液态玻璃卡片 - 极致玻璃质感 */
         .vocab-card {
-            background: rgba(255,255,255,0.85);
-            backdrop-filter: blur(32px) saturate(220%);
-            -webkit-backdrop-filter: blur(32px) saturate(220%);
-            border: 1px solid rgba(255,255,255,0.8);
-            border-radius: 24px; padding: 40px 28px 32px; text-align: center;
-            margin-bottom: 16px; position: relative;
-            box-shadow: 0 8px 40px rgba(0,0,0,0.06), inset 0 1.5px 0 rgba(255,255,255,0.95);
+            background: rgba(255, 255, 255, 0.72);
+            backdrop-filter: blur(40px) saturate(240%) contrast(1.05);
+            -webkit-backdrop-filter: blur(40px) saturate(240%) contrast(1.05);
+            border: 1px solid rgba(255,255,255,0.85);
+            border-top: 1.5px solid rgba(255,255,255,0.95);
+            border-bottom: 1.5px solid rgba(255,255,255,0.6);
+            border-radius: 28px;
+            padding: 44px 28px 34px;
+            text-align: center;
+            margin-bottom: 18px;
+            position: relative;
+            box-shadow: 
+                0 12px 48px rgba(0, 0, 0, 0.08),
+                0 4px 16px rgba(0, 0, 0, 0.04),
+                inset 0 1px 0 rgba(255, 255, 255, 1),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.03);
             will-change: transform, opacity;
+        }
+        /* 玻璃高光层 */
+        .vocab-card::before {
+            content: '';
+            position: absolute; top: 0; left: 12%; right: 12%;
+            height: 35%;
+            background: linear-gradient(to bottom, rgba(255,255,255,0.85), rgba(255,255,255,0));
+            border-radius: 28px 28px 50% 50%;
+            pointer-events: none;
         }
         .vocab-card.slide-out {
             animation: cardExit 0.28s cubic-bezier(0.4,0,0.6,1) forwards;
@@ -1594,16 +1641,27 @@
         /* 增强液态玻璃选项网格 */
         .vocab-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 0; }
         .vocab-option {
-            background: rgba(255,255,255,0.72);
-            backdrop-filter: blur(16px) saturate(180%);
-            -webkit-backdrop-filter: blur(16px) saturate(180%);
-            border: 1.5px solid rgba(255,255,255,0.7);
-            padding: 16px 12px; border-radius: 16px; font-size: 14px; font-weight: 600;
-            color: var(--text-main); cursor: pointer; text-align: center;
+            background: rgba(255, 255, 255, 0.68);
+            backdrop-filter: blur(22px) saturate(200%);
+            -webkit-backdrop-filter: blur(22px) saturate(200%);
+            border: 1.5px solid rgba(255, 255, 255, 0.78);
+            border-top: 1.8px solid rgba(255, 255, 255, 0.92);
+            padding: 18px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-main);
+            cursor: pointer;
+            text-align: center;
             transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
-            line-height: 1.35; word-break: break-word;
-            position: relative; overflow: hidden;
-            box-shadow: 0 2px 14px rgba(0,0,0,0.04);
+            line-height: 1.35;
+            word-break: break-word;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 
+                0 6px 24px rgba(0,0,0,0.06),
+                0 2px 8px rgba(0,0,0,0.03),
+                inset 0 1px 0 rgba(255,255,255,0.95);
         }
         .vocab-option:active {
             transform: scale(0.95);
@@ -1650,16 +1708,34 @@
             90% { transform: translateX(3px); }
         }
 
-        /* 不背单词风格反馈面板 - 置于底部 */
+        /* 不背单词风格反馈面板 - 极致玻璃质感 */
         .vocab-feedback {
-            background: rgba(255,255,255,0.82);
-            backdrop-filter: blur(30px) saturate(220%);
-            -webkit-backdrop-filter: blur(30px) saturate(220%);
-            border: 1px solid rgba(255,255,255,0.75);
-            border-radius: 18px; padding: 18px 20px;
-            text-align: left; display: none;
-            box-shadow: 0 8px 36px rgba(0,0,0,0.07), inset 0 1.5px 0 rgba(255,255,255,0.85);
-            margin-bottom: 0;
+            background: rgba(255, 255, 255, 0.75);
+            backdrop-filter: blur(36px) saturate(230%);
+            -webkit-backdrop-filter: blur(36px) saturate(230%);
+            border: 1px solid rgba(255, 255, 255, 0.82);
+            border-top: 1.8px solid rgba(255, 255, 255, 0.96);
+            border-bottom: 1.8px solid rgba(255, 255, 255, 0.55);
+            border-radius: 24px;
+            padding: 20px 22px;
+            text-align: left;
+            display: none;
+            box-shadow: 
+                0 14px 56px rgba(0, 0, 0, 0.08),
+                0 6px 20px rgba(0, 0, 0, 0.04),
+                inset 0 1px 0 rgba(255, 255, 255, 1),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.03);
+            margin-bottom: 16px;
+            position: relative;
+        }
+        /* 反馈面板高光 */
+        .vocab-feedback::before {
+            content: '';
+            position: absolute; top: 0; left: 10%; right: 10%;
+            height: 30%;
+            background: linear-gradient(to bottom, rgba(255,255,255,0.8), rgba(255,255,255,0));
+            border-radius: 24px 24px 60% 60%;
+            pointer-events: none;
         }
         .vocab-feedback.show {
             display: block;
@@ -1753,46 +1829,85 @@
             background: rgba(255,255,255,0.75);
         }
 
-        /* 暗色模式 */
-        [data-theme="dark"] .vocab-mode-btn {
-            background: rgba(40,40,55,0.7);
-            border-color: rgba(255,255,255,0.12);
-            color: #d0d0d0;
+        /* 暗色模式 - 极致玻璃质感 */
+        [data-theme="dark"] .vocab-container::before {
+            background: 
+                radial-gradient(circle at 20% 10%, rgba(79, 70, 229, 0.35) 0%, transparent 40%),
+                radial-gradient(circle at 80% 80%, rgba(236, 72, 153, 0.25) 0%, transparent 45%),
+                radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.2) 0%, transparent 50%),
+                linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
         }
-        [data-theme="dark"] .vocab-mode-btn:active { background: rgba(50,50,65,0.8); }
-        [data-theme="dark"] .vocab-progress-bar { background: rgba(255,255,255,0.08); }
+        [data-theme="dark"] .vocab-mode-btn {
+            background: rgba(40, 40, 65, 0.75);
+            border-color: rgba(255, 255, 255, 0.15);
+            color: #d0d0d0;
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+        }
+        [data-theme="dark"] .vocab-mode-btn:active { background: rgba(60, 60, 85, 0.85); }
+        [data-theme="dark"] .vocab-progress-bar { background: rgba(255, 255, 255, 0.08); }
         [data-theme="dark"] .vocab-card {
-            background: rgba(30,30,45,0.82);
-            border-color: rgba(255,255,255,0.1);
-            box-shadow: 0 8px 40px rgba(0,0,0,0.3), inset 0 1.5px 0 rgba(255,255,255,0.06);
+            background: rgba(30, 30, 55, 0.78);
+            backdrop-filter: blur(40px) saturate(220%) contrast(1.1);
+            -webkit-backdrop-filter: blur(40px) saturate(220%) contrast(1.1);
+            border-color: rgba(255, 255, 255, 0.12);
+            border-top: 1.8px solid rgba(255, 255, 255, 0.22);
+            border-bottom: 1.8px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 
+                0 12px 48px rgba(0, 0, 0, 0.45),
+                0 4px 16px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.35);
+        }
+        [data-theme="dark"] .vocab-card::before {
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0));
         }
         [data-theme="dark"] .vocab-option {
-            background: rgba(30,30,45,0.7);
-            border-color: rgba(255,255,255,0.1);
+            background: rgba(30, 30, 55, 0.72);
+            backdrop-filter: blur(22px) saturate(200%);
+            -webkit-backdrop-filter: blur(22px) saturate(200%);
+            border-color: rgba(255, 255, 255, 0.14);
+            border-top: 1.8px solid rgba(255, 255, 255, 0.22);
             color: #d0d0d0;
-            box-shadow: 0 2px 14px rgba(0,0,0,0.2);
+            box-shadow: 
+                0 6px 24px rgba(0, 0, 0, 0.35),
+                0 2px 8px rgba(0, 0, 0, 0.2),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
         }
-        [data-theme="dark"] .vocab-option:active { background: rgba(40,40,55,0.75); }
-        [data-theme="dark"] .vocab-option.correct { background: rgba(5,150,105,0.2); border-color: rgba(5,150,105,0.5); color: #6ee7b7; }
-        [data-theme="dark"] .vocab-option.wrong { background: rgba(255,59,96,0.18); border-color: rgba(255,59,96,0.45); color: #fca5a5; }
+        [data-theme="dark"] .vocab-option:active { background: rgba(50, 50, 75, 0.82); }
+        [data-theme="dark"] .vocab-option.correct { background: rgba(5, 150, 105, 0.22); border-color: rgba(5, 150, 105, 0.55); color: #6ee7b7; }
+        [data-theme="dark"] .vocab-option.wrong { background: rgba(255, 59, 96, 0.2); border-color: rgba(255, 59, 96, 0.5); color: #fca5a5; }
         [data-theme="dark"] .vocab-feedback {
-            background: rgba(30,30,45,0.82);
-            border-color: rgba(255,255,255,0.1);
-            box-shadow: 0 8px 36px rgba(0,0,0,0.35), inset 0 1.5px 0 rgba(255,255,255,0.06);
+            background: rgba(30, 30, 55, 0.76);
+            backdrop-filter: blur(36px) saturate(220%);
+            -webkit-backdrop-filter: blur(36px) saturate(220%);
+            border-color: rgba(255, 255, 255, 0.14);
+            border-top: 1.8px solid rgba(255, 255, 255, 0.24);
+            border-bottom: 1.8px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 
+                0 14px 56px rgba(0, 0, 0, 0.5),
+                0 6px 20px rgba(0, 0, 0, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.12),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.35);
         }
-        [data-theme="dark"] .vocab-feedback-icon.is-correct { background: rgba(5,150,105,0.2); }
-        [data-theme="dark"] .vocab-feedback-icon.is-wrong { background: rgba(255,59,96,0.18); }
+        [data-theme="dark"] .vocab-feedback::before {
+            background: linear-gradient(to bottom, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0));
+        }
+        [data-theme="dark"] .vocab-feedback-icon.is-correct { background: rgba(5, 150, 105, 0.22); }
+        [data-theme="dark"] .vocab-feedback-icon.is-wrong { background: rgba(255, 59, 96, 0.2); }
         [data-theme="dark"] .vocab-reset-btn {
-            background: rgba(40,40,55,0.55);
-            border-color: rgba(255,255,255,0.08);
-            color: #999;
+            background: rgba(40, 40, 65, 0.62);
+            border-color: rgba(255, 255, 255, 0.12);
+            color: #a0a0b5;
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
         }
-        [data-theme="dark"] .vocab-reset-btn:active { background: rgba(50,50,65,0.65); }
+        [data-theme="dark"] .vocab-reset-btn:active { background: rgba(60, 60, 85, 0.72); }
         [data-theme="dark"] .vocab-score { color: #ccc; }
         [data-theme="dark"] .vocab-next-btn {
-            background: rgba(5,150,105,0.78);
-            border-color: rgba(255,255,255,0.15);
-            box-shadow: 0 3px 16px rgba(5,150,105,0.25);
+            background: rgba(5, 150, 105, 0.85);
+            border-color: rgba(255, 255, 255, 0.18);
+            box-shadow: 0 3px 16px rgba(5, 150, 105, 0.35);
         }
 
         /* 暗色模式 Dock */
@@ -3369,9 +3484,7 @@
                     </div>
 
                     <div class="vocab-options" id="vocabOptions"></div>
-                </div>
 
-                <div class="vocab-bottom">
                     <div class="vocab-feedback" id="vocabFeedback">
                         <div class="vocab-feedback-header">
                             <div class="vocab-feedback-icon" id="vocabFeedbackIcon"></div>
@@ -3385,6 +3498,9 @@
                             <div class="vocab-example-trans" id="vocabExampleTrans"></div>
                         </div>
                     </div>
+                </div>
+
+                <div class="vocab-bottom">
                     <div class="vocab-bottom-row">
                         <button class="vocab-next-btn" id="vocabNextBtn" onclick="nextVocabQuestion()">继续</button>
                         <button class="vocab-reset-btn" id="vocabResetBtn" onclick="resetVocabScore()" title="重置计数">↺</button>
@@ -6476,6 +6592,25 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.36',
+                    date: '2026-05-13',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li><strong>彻底修复所有问题，实现极致的液态玻璃效果</strong>
+                                <ul>
+                                    <li>给单词页面添加复杂渐变纹理背景，让backdrop-filter能真正发挥出玻璃效果</li>
+                                    <li>把dock-panel的滚动禁用，让单词页面自己管理滚动，解决排版混乱问题</li>
+                                    <li>卡片、选项、反馈面板都添加极致的玻璃质感：多层边框、内高光、外阴影、高强度blur</li>
+                                    <li>所有元素加伪元素高光层，增强玻璃的通透和立体感</li>
+                                    <li>反馈面板移回vocab-scroll里，解决遮挡选项的问题</li>
+                                    <li>暗色模式同步升级，背景用深色渐变+玻璃元素</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.35',
                     date: '2026-05-13',
