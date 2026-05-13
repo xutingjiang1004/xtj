@@ -13,6 +13,16 @@
   - 删除所有旧AI模板相关的翻译键（aiWelcome、enterYourQuestion、send）
   - 删除旧AI气泡CSS样式（.ai-msg）
   - 删除Taylor Swift画廊旧代码（initTSGallery）
+- 修复Git合并冲突导致网站崩溃
+  - 修复4处残留的合并冲突标记（CSS/HTML/JS），页面恢复正常
+- 雅思单词页面液态玻璃风格重做
+  - 发音按钮从emoji改为SVG喇叭图标+声波动画+液态玻璃容器
+  - TTS语音优选12种自然语音（Google UK Female/Microsoft Zira等），语速0.85音调1.05
+  - 去掉例句朗读，只朗读单词本身
+  - 卡片/选项/反馈面板全部改为液态玻璃效果（backdrop-filter毛玻璃）
+  - 选项点击水波纹动画+正确弹性弹跳+错误抖动反馈
+  - 对错反馈标题区分显示（✅正确/❌答案是）
+  - 分数数字点击弹性放大动画
 
 ## v0.0.32 - 2026-05-12
 ### 更新内容
