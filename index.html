@@ -1636,12 +1636,12 @@
         }
         .vocab-option .vocab-ripple {
             position: absolute; border-radius: 50%;
-            background: rgba(5,150,105,0.28);
-            transform: scale(0); animation: vocabRipple 0.6s ease-out forwards;
+            background: rgba(5,150,105,0.25);
+            transform: scale(0); animation: vocabRipple 0.35s ease-out forwards;
             pointer-events: none;
         }
         @keyframes vocabRipple {
-            to { transform: scale(4); opacity: 0; }
+            to { transform: scale(2.2); opacity: 0; }
         }
         .vocab-option.correct {
             background: rgba(5,150,105,0.15);
@@ -3409,7 +3409,9 @@
                     </div>
 
                     <div class="vocab-options" id="vocabOptions"></div>
+                </div>
 
+                <div class="vocab-bottom">
                     <div class="vocab-feedback" id="vocabFeedback">
                         <div class="vocab-feedback-header">
                             <div class="vocab-feedback-icon" id="vocabFeedbackIcon"></div>
@@ -3423,9 +3425,6 @@
                             <div class="vocab-example-trans" id="vocabExampleTrans"></div>
                         </div>
                     </div>
-                </div>
-
-                <div class="vocab-bottom">
                     <div class="vocab-bottom-row">
                         <button class="vocab-next-btn" id="vocabNextBtn" onclick="nextVocabQuestion()">继续</button>
                         <button class="vocab-reset-btn" id="vocabResetBtn" onclick="resetVocabScore()" title="重置计数">↺</button>
