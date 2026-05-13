@@ -1444,17 +1444,17 @@
         .dock-chat-container .chat-view.hidden { display: none; }
         .dock-chat-container .chat-list-item { border-bottom-color: rgba(0,0,0,0.04); }
 
-        /* ========== 雅思单词专题 - 液态玻璃风格 ========== */
+        /* ========== 雅思单词专题 - 增强液态玻璃风格 ========== */
         .vocab-container {
             display: flex; flex-direction: column; height: 100%;
             background: transparent;
             overflow: hidden;
-            padding: 16px 16px 0;
+            padding: 12px 16px 0;
         }
         .vocab-scroll {
             flex: 1;
             overflow-y: auto; -webkit-overflow-scrolling: touch;
-            padding: 0 0 16px;
+            padding: 0 0 8px;
             margin: 0 -16px;
         }
         .vocab-scroll > * {
@@ -1463,28 +1463,28 @@
         }
         .vocab-header {
             display: flex; justify-content: space-between; align-items: center;
-            margin-bottom: 6px; flex-shrink: 0;
+            margin-bottom: 4px; flex-shrink: 0;
         }
         .vocab-title {
             font-size: 17px; font-weight: 700; color: var(--text-main);
         }
         .vocab-mode-btn {
-            background: rgba(255,255,255,0.55);
-            backdrop-filter: blur(12px) saturate(160%);
-            -webkit-backdrop-filter: blur(12px) saturate(160%);
-            border: 1px solid rgba(255,255,255,0.6);
+            background: rgba(255,255,255,0.6);
+            backdrop-filter: blur(14px) saturate(180%);
+            -webkit-backdrop-filter: blur(14px) saturate(180%);
+            border: 1px solid rgba(255,255,255,0.65);
             padding: 6px 14px; border-radius: 99px; font-size: 12px; font-weight: 600;
             cursor: pointer; color: var(--text-main);
             transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
         }
         .vocab-mode-btn:active {
             transform: scale(0.94);
-            background: rgba(255,255,255,0.75);
+            background: rgba(255,255,255,0.8);
         }
 
         .vocab-progress-bar {
             width: 100%; height: 4px; background: rgba(0,0,0,0.06); border-radius: 99px;
-            margin: 12px 0 20px; overflow: hidden; flex-shrink: 0;
+            margin: 8px 0 14px; overflow: hidden; flex-shrink: 0;
         }
         .vocab-progress-fill {
             height: 100%; width: 0%; background: linear-gradient(90deg, #059669, #10b981, #34d399);
@@ -1493,7 +1493,7 @@
 
         .vocab-score {
             display: flex; align-items: center; gap: 16px;
-            margin-bottom: 16px; flex-shrink: 0; font-size: 13px; font-weight: 600;
+            margin-bottom: 0; flex-shrink: 0; font-size: 13px; font-weight: 600;
         }
         .vocab-score-item {
             display: flex; align-items: center; gap: 5px;
@@ -1506,45 +1506,49 @@
         }
         .vocab-score-num.bump { transform: scale(1.35); }
 
-        /* 液态玻璃卡片 */
+        /* 增强液态玻璃卡片 */
         .vocab-card {
-            background: rgba(255,255,255,0.72);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid rgba(255,255,255,0.7);
-            border-radius: 24px; padding: 38px 28px 32px; text-align: center;
-            margin-bottom: 20px; position: relative;
-            transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-            box-shadow: 0 2px 20px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.8);
+            background: rgba(255,255,255,0.78);
+            backdrop-filter: blur(26px) saturate(200%);
+            -webkit-backdrop-filter: blur(26px) saturate(200%);
+            border: 1px solid rgba(255,255,255,0.75);
+            border-radius: 24px; padding: 40px 28px 32px; text-align: center;
+            margin-bottom: 16px; position: relative;
+            box-shadow: 0 4px 28px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.9);
+            will-change: transform, opacity;
         }
         .vocab-card.slide-out {
-            opacity: 0; transform: translateX(-30px) scale(0.97);
+            animation: cardExit 0.28s cubic-bezier(0.4,0,0.6,1) forwards;
         }
         .vocab-card.slide-in {
-            animation: cardSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+            animation: cardEnter 0.38s cubic-bezier(0.34,1.56,0.64,1) forwards;
         }
-        @keyframes cardSlideIn {
-            0% { opacity: 0; transform: translateX(30px) scale(0.97); }
-            100% { opacity: 1; transform: translateX(0) scale(1); }
+        @keyframes cardExit {
+            0% { opacity: 1; transform: scale(1) translateY(0); }
+            100% { opacity: 0; transform: scale(0.92) translateY(-12px); }
+        }
+        @keyframes cardEnter {
+            0% { opacity: 0; transform: scale(0.92) translateY(16px); }
+            100% { opacity: 1; transform: scale(1) translateY(0); }
         }
         .vocab-word {
-            font-size: 38px; font-weight: 800; color: var(--text-main);
+            font-size: 40px; font-weight: 800; color: var(--text-main);
             margin-bottom: 6px; word-break: break-word; letter-spacing: -0.5px;
             line-height: 1.15;
         }
         .vocab-phonetic {
             font-size: 15px; color: var(--text-muted);
-            margin-bottom: 24px; letter-spacing: 0.4px;
+            margin-bottom: 22px; letter-spacing: 0.4px;
             font-family: "Georgia", "Times New Roman", serif;
         }
 
         /* 液态玻璃喇叭按钮 */
         .vocab-play-btn {
             width: 56px; height: 56px; border-radius: 50%;
-            background: rgba(5,150,105,0.12);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            border: 1.5px solid rgba(5,150,105,0.25);
+            background: rgba(5,150,105,0.14);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1.5px solid rgba(5,150,105,0.28);
             display: inline-flex; align-items: center; justify-content: center;
             cursor: pointer; transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
             position: relative; outline: none;
@@ -1555,14 +1559,12 @@
         }
         .vocab-play-btn:active {
             transform: scale(0.9);
-            background: rgba(5,150,105,0.22);
+            background: rgba(5,150,105,0.25);
         }
-        .vocab-play-btn:active svg {
-            transform: scale(1.1);
-        }
+        .vocab-play-btn:active svg { transform: scale(1.1); }
         .vocab-play-btn.playing {
-            background: rgba(5,150,105,0.18);
-            border-color: rgba(5,150,105,0.4);
+            background: rgba(5,150,105,0.2);
+            border-color: rgba(5,150,105,0.45);
         }
         .vocab-play-btn.playing::before {
             content: '';
@@ -1580,10 +1582,7 @@
             0% { transform: scale(0.85); opacity: 1; }
             100% { transform: scale(1.4); opacity: 0; }
         }
-        .vocab-play-btn .wave-1, .vocab-play-btn .wave-2, .vocab-play-btn .wave-3 {
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
+        .vocab-play-btn .wave-1, .vocab-play-btn .wave-2, .vocab-play-btn .wave-3 { opacity: 0; transition: opacity 0.2s; }
         .vocab-play-btn.playing .wave-1 { opacity: 1; animation: waveBounce 0.8s ease-in-out infinite; }
         .vocab-play-btn.playing .wave-2 { opacity: 1; animation: waveBounce 0.8s ease-in-out infinite 0.15s; }
         .vocab-play-btn.playing .wave-3 { opacity: 1; animation: waveBounce 0.8s ease-in-out infinite 0.3s; }
@@ -1592,28 +1591,27 @@
             50% { transform: scaleY(1); }
         }
 
-        /* 液态玻璃选项网格 */
-        .vocab-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+        /* 增强液态玻璃选项网格 */
+        .vocab-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 0; }
         .vocab-option {
-            background: rgba(255,255,255,0.55);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border: 1.5px solid rgba(255,255,255,0.6);
+            background: rgba(255,255,255,0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1.5px solid rgba(255,255,255,0.65);
             padding: 16px 12px; border-radius: 16px; font-size: 14px; font-weight: 600;
             color: var(--text-main); cursor: pointer; text-align: center;
             transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
             line-height: 1.35; word-break: break-word;
             position: relative; overflow: hidden;
-            box-shadow: 0 1px 8px rgba(0,0,0,0.03);
+            box-shadow: 0 1px 10px rgba(0,0,0,0.035);
         }
         .vocab-option:active {
             transform: scale(0.95);
-            background: rgba(255,255,255,0.75);
+            background: rgba(255,255,255,0.8);
         }
-        /* 点击水波纹 */
         .vocab-option .vocab-ripple {
             position: absolute; border-radius: 50%;
-            background: rgba(5,150,105,0.25);
+            background: rgba(5,150,105,0.28);
             transform: scale(0); animation: vocabRipple 0.6s ease-out forwards;
             pointer-events: none;
         }
@@ -1621,12 +1619,12 @@
             to { transform: scale(4); opacity: 0; }
         }
         .vocab-option.correct {
-            background: rgba(5,150,105,0.12);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border-color: rgba(5,150,105,0.45);
+            background: rgba(5,150,105,0.15);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-color: rgba(5,150,105,0.5);
             color: #047857;
-            box-shadow: 0 0 20px rgba(5,150,105,0.12);
+            box-shadow: 0 0 24px rgba(5,150,105,0.15);
             animation: correctPop 0.4s cubic-bezier(0.34,1.56,0.64,1);
         }
         @keyframes correctPop {
@@ -1635,10 +1633,10 @@
             100% { transform: scale(1); }
         }
         .vocab-option.wrong {
-            background: rgba(255,59,96,0.1);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border-color: rgba(255,59,96,0.45);
+            background: rgba(255,59,96,0.12);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border-color: rgba(255,59,96,0.5);
             color: #dc143c;
             animation: optionShake 0.45s ease;
         }
@@ -1652,73 +1650,98 @@
             90% { transform: translateX(3px); }
         }
 
-        /* 液态玻璃反馈面板 */
+        /* 不背单词风格反馈面板 - 置于底部 */
         .vocab-feedback {
-            background: rgba(255,255,255,0.6);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid rgba(255,255,255,0.6);
-            border-radius: 20px; padding: 20px 22px;
-            text-align: left; margin-bottom: 20px; display: none;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.7);
+            background: rgba(255,255,255,0.65);
+            backdrop-filter: blur(24px) saturate(200%);
+            -webkit-backdrop-filter: blur(24px) saturate(200%);
+            border: 1px solid rgba(255,255,255,0.65);
+            border-radius: 18px; padding: 18px 20px;
+            text-align: left; display: none;
+            box-shadow: 0 4px 28px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.75);
+            margin-bottom: 0;
         }
         .vocab-feedback.show {
             display: block;
-            animation: fbGlassIn 0.4s cubic-bezier(0.34,1.56,0.64,1) forwards;
+            animation: fbGlassIn 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards;
         }
         @keyframes fbGlassIn {
-            0% { opacity: 0; transform: translateY(12px) scale(0.96); }
+            0% { opacity: 0; transform: translateY(10px) scale(0.97); }
             100% { opacity: 1; transform: translateY(0) scale(1); }
         }
-        .vocab-feedback-title {
-            font-size: 13px; font-weight: 700; color: #059669;
-            margin-bottom: 8px; display: flex; align-items: center; gap: 6px;
-            text-transform: uppercase; letter-spacing: 0.5px;
+        .vocab-feedback-header {
+            display: flex; align-items: center; gap: 14px;
+            margin-bottom: 12px;
         }
+        .vocab-feedback-icon {
+            width: 40px; height: 40px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 20px; flex-shrink: 0;
+        }
+        .vocab-feedback-icon.is-correct {
+            background: rgba(5,150,105,0.15);
+        }
+        .vocab-feedback-icon.is-wrong {
+            background: rgba(255,59,96,0.12);
+        }
+        .vocab-feedback-info { flex: 1; min-width: 0; }
         .vocab-feedback-word {
             font-size: 20px; font-weight: 800; color: var(--text-main);
-            margin-bottom: 4px;
+            line-height: 1.3;
+        }
+        .vocab-feedback-word .phonetic {
+            font-size: 14px; font-weight: 400; color: var(--text-muted);
+            margin-left: 6px; font-family: "Georgia", serif;
         }
         .vocab-feedback-mean {
-            font-size: 14px; color: var(--text-muted); margin-bottom: 12px;
+            font-size: 15px; color: var(--text-muted);
+            margin-top: 1px;
+        }
+        .vocab-feedback-example {
+            padding: 12px 0 0; margin-top: 8px;
+            border-top: 1px solid rgba(0,0,0,0.05);
         }
         .vocab-example {
             font-size: 14px; color: var(--text-main); line-height: 1.65;
-            margin-bottom: 4px; font-style: italic;
-            padding-left: 12px; border-left: 3px solid rgba(5,150,105,0.3);
+            font-style: italic;
         }
         .vocab-example-trans {
             font-size: 13px; color: var(--text-muted);
-            padding-left: 12px; border-left: 3px solid transparent;
+            margin-top: 3px;
         }
 
+        /* 底部区域 - 反馈 + 按钮 */
         .vocab-bottom {
+            flex-shrink: 0;
+            padding: 8px 0 12px;
+            display: flex; flex-direction: column; gap: 10px;
+        }
+        .vocab-bottom-row {
             display: flex; align-items: center; gap: 12px;
-            padding: 4px 0 8px; flex-shrink: 0;
         }
         .vocab-next-btn {
-            flex: 1; padding: 15px; border-radius: 16px; font-size: 15px; font-weight: 700;
-            background: rgba(5,150,105,0.9);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
+            flex: 1; padding: 16px; border-radius: 16px; font-size: 16px; font-weight: 700;
+            background: rgba(5,150,105,0.92);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             border: 1px solid rgba(255,255,255,0.3);
             color: #fff; cursor: pointer;
             transition: all 0.25s cubic-bezier(0.4,0,0.2,1); display: none;
-            box-shadow: 0 2px 12px rgba(5,150,105,0.25);
+            box-shadow: 0 3px 16px rgba(5,150,105,0.3);
             letter-spacing: 0.5px;
         }
         .vocab-next-btn:active {
             transform: scale(0.96);
             background: rgba(5,150,105,1);
-            box-shadow: 0 1px 6px rgba(5,150,105,0.2);
+            box-shadow: 0 1px 8px rgba(5,150,105,0.2);
         }
 
         .vocab-reset-btn {
             width: 50px; height: 50px; border-radius: 16px; font-size: 20px;
-            background: rgba(255,255,255,0.5);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            border: 1px solid rgba(255,255,255,0.5);
+            background: rgba(255,255,255,0.55);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.55);
             cursor: pointer; flex-shrink: 0;
             transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
             display: flex; align-items: center; justify-content: center;
@@ -1726,47 +1749,49 @@
         }
         .vocab-reset-btn:active {
             transform: scale(0.9) rotate(-90deg);
-            background: rgba(255,255,255,0.7);
+            background: rgba(255,255,255,0.75);
         }
 
         /* 暗色模式 */
         [data-theme="dark"] .vocab-mode-btn {
-            background: rgba(40,40,55,0.65);
+            background: rgba(40,40,55,0.7);
             border-color: rgba(255,255,255,0.12);
             color: #d0d0d0;
         }
-        [data-theme="dark"] .vocab-mode-btn:active { background: rgba(50,50,65,0.75); }
+        [data-theme="dark"] .vocab-mode-btn:active { background: rgba(50,50,65,0.8); }
         [data-theme="dark"] .vocab-progress-bar { background: rgba(255,255,255,0.08); }
         [data-theme="dark"] .vocab-card {
-            background: rgba(30,30,45,0.7);
+            background: rgba(30,30,45,0.75);
             border-color: rgba(255,255,255,0.08);
-            box-shadow: 0 2px 20px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05);
+            box-shadow: 0 4px 28px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05);
         }
         [data-theme="dark"] .vocab-option {
-            background: rgba(30,30,45,0.55);
+            background: rgba(30,30,45,0.6);
             border-color: rgba(255,255,255,0.08);
             color: #d0d0d0;
-            box-shadow: 0 1px 8px rgba(0,0,0,0.15);
+            box-shadow: 0 1px 10px rgba(0,0,0,0.18);
         }
-        [data-theme="dark"] .vocab-option:active { background: rgba(40,40,55,0.7); }
-        [data-theme="dark"] .vocab-option.correct { background: rgba(5,150,105,0.18); border-color: rgba(5,150,105,0.45); color: #6ee7b7; }
-        [data-theme="dark"] .vocab-option.wrong { background: rgba(255,59,96,0.16); border-color: rgba(255,59,96,0.4); color: #fca5a5; }
+        [data-theme="dark"] .vocab-option:active { background: rgba(40,40,55,0.75); }
+        [data-theme="dark"] .vocab-option.correct { background: rgba(5,150,105,0.2); border-color: rgba(5,150,105,0.5); color: #6ee7b7; }
+        [data-theme="dark"] .vocab-option.wrong { background: rgba(255,59,96,0.18); border-color: rgba(255,59,96,0.45); color: #fca5a5; }
         [data-theme="dark"] .vocab-feedback {
-            background: rgba(30,30,45,0.55);
+            background: rgba(30,30,45,0.6);
             border-color: rgba(255,255,255,0.06);
-            box-shadow: 0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.04);
+            box-shadow: 0 4px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
         }
+        [data-theme="dark"] .vocab-feedback-icon.is-correct { background: rgba(5,150,105,0.2); }
+        [data-theme="dark"] .vocab-feedback-icon.is-wrong { background: rgba(255,59,96,0.18); }
         [data-theme="dark"] .vocab-reset-btn {
-            background: rgba(40,40,55,0.5);
+            background: rgba(40,40,55,0.55);
             border-color: rgba(255,255,255,0.08);
             color: #999;
         }
-        [data-theme="dark"] .vocab-reset-btn:active { background: rgba(50,50,65,0.6); }
+        [data-theme="dark"] .vocab-reset-btn:active { background: rgba(50,50,65,0.65); }
         [data-theme="dark"] .vocab-score { color: #ccc; }
         [data-theme="dark"] .vocab-next-btn {
-            background: rgba(5,150,105,0.75);
+            background: rgba(5,150,105,0.78);
             border-color: rgba(255,255,255,0.15);
-            box-shadow: 0 2px 12px rgba(5,150,105,0.2);
+            box-shadow: 0 3px 16px rgba(5,150,105,0.25);
         }
 
         /* 暗色模式 Dock */
@@ -3343,19 +3368,26 @@
                     </div>
 
                     <div class="vocab-options" id="vocabOptions"></div>
-
-                    <div class="vocab-feedback" id="vocabFeedback">
-                        <div class="vocab-feedback-title">📖 解析</div>
-                        <div class="vocab-feedback-word" id="vocabFeedbackWord"></div>
-                        <div class="vocab-feedback-mean" id="vocabFeedbackMean"></div>
-                        <div class="vocab-example" id="vocabExample"></div>
-                        <div class="vocab-example-trans" id="vocabExampleTrans"></div>
-                    </div>
                 </div>
 
                 <div class="vocab-bottom">
-                    <button class="vocab-next-btn" id="vocabNextBtn" onclick="nextVocabQuestion()">继续</button>
-                    <button class="vocab-reset-btn" id="vocabResetBtn" onclick="resetVocabScore()" title="重置计数">↺</button>
+                    <div class="vocab-feedback" id="vocabFeedback">
+                        <div class="vocab-feedback-header">
+                            <div class="vocab-feedback-icon" id="vocabFeedbackIcon"></div>
+                            <div class="vocab-feedback-info">
+                                <div class="vocab-feedback-word" id="vocabFeedbackWord"></div>
+                                <div class="vocab-feedback-mean" id="vocabFeedbackMean"></div>
+                            </div>
+                        </div>
+                        <div class="vocab-feedback-example" id="vocabFeedbackExample">
+                            <div class="vocab-example" id="vocabExample"></div>
+                            <div class="vocab-example-trans" id="vocabExampleTrans"></div>
+                        </div>
+                    </div>
+                    <div class="vocab-bottom-row">
+                        <button class="vocab-next-btn" id="vocabNextBtn" onclick="nextVocabQuestion()">继续</button>
+                        <button class="vocab-reset-btn" id="vocabResetBtn" onclick="resetVocabScore()" title="重置计数">↺</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -6444,6 +6476,32 @@
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
+                    version: 'v0.0.34',
+                    date: '2026-05-13',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li><strong>雅思单词页面全面重构优化</strong>
+                                <ul>
+                                    <li>修复继续按钮位置靠上问题，反馈面板移至底部紧邻继续按钮</li>
+                                    <li>对错反馈仿不背单词风格重做：大图标+单词音标+释义+例句独立展示</li>
+                                    <li>增加对错音效（Web Audio API 生成短促提示音，正确升调/错误降调）</li>
+                                    <li>替换切换动画为缩放+淡入淡出组合，更加流畅自然</li>
+                                    <li>增强液态玻璃效果：背景透明度提高至0.78，模糊提升至26px</li>
+                                    <li>修复单词重复问题：改为随机队列洗牌算法，确保200词全部轮完才重复</li>
+                                </ul>
+                            </li>
+                            <li><strong>TTS语音进一步优化</strong>
+                                <ul>
+                                    <li>优先选择Google在线语音（最自然），其次回退到系统语音</li>
+                                    <li>Google语音速率0.9/音调1.0，非Google语音速率0.95/音调1.1减少机械感</li>
+                                    <li>语音选择结果localStorage持久化，避免重复查找</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.0.33',
                     date: '2026-05-13',
                     content: `
@@ -7548,7 +7606,6 @@
             let vocabCorrect = parseInt(localStorage.getItem('vocabCorrect') || '0');
             let vocabWrong = parseInt(localStorage.getItem('vocabWrong') || '0');
             let vocabTotalAnswered = vocabCorrect + vocabWrong;
-            let usedIndices = [];
 
             function shuffleArray(array) {
                 for (let i = array.length - 1; i > 0; i--) {
@@ -7569,21 +7626,20 @@
                 return opts;
             }
 
+            var vocabQueue = [];
+            var vocabQueueIndex = 0;
+
+            function initVocabQueue() {
+                vocabQueue = vocabList.map(function(_, i) { return i; });
+                shuffleArray(vocabQueue);
+                vocabQueueIndex = 0;
+            }
+
             function getNextVocabIndex() {
-                if (usedIndices.length >= vocabList.length) {
-                    usedIndices = [];
+                if (vocabQueue.length === 0 || vocabQueueIndex >= vocabQueue.length) {
+                    initVocabQueue();
                 }
-                let available = [];
-                for (let i = 0; i < vocabList.length; i++) {
-                    if (!usedIndices.includes(i)) available.push(i);
-                }
-                if (available.length === 0) {
-                    usedIndices = [];
-                    available = vocabList.map((_, i) => i);
-                }
-                const idx = available[Math.floor(Math.random() * available.length)];
-                usedIndices.push(idx);
-                return idx;
+                return vocabQueue[vocabQueueIndex++];
             }
 
             function updateScoreUI() {
@@ -7600,7 +7656,8 @@
                 vocabCorrect = 0;
                 vocabWrong = 0;
                 vocabTotalAnswered = 0;
-                usedIndices = [];
+                vocabQueue = [];
+                vocabQueueIndex = 0;
                 localStorage.setItem('vocabCorrect', '0');
                 localStorage.setItem('vocabWrong', '0');
                 updateScoreUI();
@@ -7656,6 +7713,42 @@
                 });
             }
 
+            var audioCtx = null;
+            function getAudioCtx() {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                return audioCtx;
+            }
+            function playSoundEffect(type) {
+                try {
+                    var ctx = getAudioCtx();
+                    var osc = ctx.createOscillator();
+                    var gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    gain.gain.value = 0.1;
+
+                    if (type === 'correct') {
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(660, ctx.currentTime);
+                        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.06);
+                        osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.12);
+                        gain.gain.setValueAtTime(0.12, ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+                        osc.start(ctx.currentTime);
+                        osc.stop(ctx.currentTime + 0.28);
+                    } else {
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(440, ctx.currentTime);
+                        osc.frequency.setValueAtTime(330, ctx.currentTime + 0.1);
+                        osc.frequency.setValueAtTime(280, ctx.currentTime + 0.18);
+                        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+                        osc.start(ctx.currentTime);
+                        osc.stop(ctx.currentTime + 0.35);
+                    }
+                } catch(e) {}
+            }
+
             window.checkVocabAnswer = function(idx, btnEl) {
                 if (isAnswered) return;
                 isAnswered = true;
@@ -7678,6 +7771,9 @@
                 } else {
                     vocabCorrect++;
                 }
+
+                playSoundEffect(isCorrect ? 'correct' : 'wrong');
+
                 vocabTotalAnswered = vocabCorrect + vocabWrong;
                 localStorage.setItem('vocabCorrect', String(vocabCorrect));
                 localStorage.setItem('vocabWrong', String(vocabWrong));
@@ -7705,16 +7801,20 @@
 
             function showFeedback(isCorrect) {
                 const fb = document.getElementById('vocabFeedback');
-                var titleEl = fb.querySelector('.vocab-feedback-title');
+                var iconEl = document.getElementById('vocabFeedbackIcon');
+                var wordEl = document.getElementById('vocabFeedbackWord');
+                var meanEl = document.getElementById('vocabFeedbackMean');
 
                 if (isCorrect) {
-                    titleEl.innerHTML = '\u2705 \u6b63\u786e\uff01';
+                    iconEl.textContent = '\u2705';
+                    iconEl.className = 'vocab-feedback-icon is-correct';
                 } else {
-                    titleEl.innerHTML = '\u274c \u7b54\u6848\u662f\uff1a';
+                    iconEl.textContent = '\u274c';
+                    iconEl.className = 'vocab-feedback-icon is-wrong';
                 }
 
-                document.getElementById('vocabFeedbackWord').textContent = currentVocabObj.w + ' ' + currentVocabObj.p;
-                document.getElementById('vocabFeedbackMean').textContent = currentVocabObj.m;
+                wordEl.innerHTML = currentVocabObj.w + ' <span class="phonetic">' + currentVocabObj.p + '</span>';
+                meanEl.textContent = currentVocabObj.m;
                 document.getElementById('vocabExample').textContent = '\u201c' + currentVocabObj.e + '\u201d';
                 document.getElementById('vocabExampleTrans').textContent = currentVocabObj.et;
 
@@ -7731,41 +7831,78 @@
                 });
             };
 
-            // --- TTS 优化: 精选最自然英文语音 ---
-            let preferredVoice = null;
-            let voicesLoaded = false;
+            // --- TTS 优化: 极致自然语音 ---
+            var preferredVoice = null;
+            var isGoogleVoice = false;
+            var voicesLoaded = false;
 
             function findBestVoice() {
                 if (preferredVoice) return preferredVoice;
                 var voices = window.speechSynthesis.getVoices();
                 if (!voices || voices.length === 0) return null;
 
+                var savedName = localStorage.getItem('vocabVoice');
+                if (savedName) {
+                    var saved = voices.find(function(v) { return v.name === savedName; });
+                    if (saved) {
+                        preferredVoice = saved;
+                        isGoogleVoice = saved.name.indexOf('Google') !== -1;
+                        return saved;
+                    }
+                }
+
                 var namePrefs = [
                     'Google UK English Female',
-                    'Microsoft Zira',
                     'Google US English',
-                    'Microsoft David',
-                    'Samantha',
                     'Google UK English Male',
-                    'Karen',
-                    'Microsoft Mark',
-                    'Alex',
-                    'Moira',
-                    'Fiona',
-                    'Daniel'
+                    'Google français',
+                    'Google Deutsch'
                 ];
                 for (var n = 0; n < namePrefs.length; n++) {
                     var found = voices.find(function(v) { return v.name === namePrefs[n]; });
                     if (found) {
                         preferredVoice = found;
-                        voicesLoaded = true;
+                        isGoogleVoice = true;
+                        localStorage.setItem('vocabVoice', found.name);
                         return found;
                     }
                 }
-                var enVoice = voices.find(function(v) { return v.lang === 'en-US' || v.lang === 'en-GB'; });
+
+                var googleVoice = voices.find(function(v) { return v.name.indexOf('Google') !== -1 && v.lang.startsWith('en-'); });
+                if (googleVoice) {
+                    preferredVoice = googleVoice;
+                    isGoogleVoice = true;
+                    localStorage.setItem('vocabVoice', googleVoice.name);
+                    return googleVoice;
+                }
+
+                var fallbacks = [
+                    'Microsoft Zira',
+                    'Microsoft David',
+                    'Samantha',
+                    'Karen',
+                    'Alex',
+                    'Moira',
+                    'Fiona',
+                    'Daniel',
+                    'Microsoft Mark',
+                    'Microsoft Susan',
+                    'Microsoft Hazel'
+                ];
+                for (var f = 0; f < fallbacks.length; f++) {
+                    var fb = voices.find(function(v) { return v.name === fallbacks[f]; });
+                    if (fb) {
+                        preferredVoice = fb;
+                        isGoogleVoice = false;
+                        localStorage.setItem('vocabVoice', fb.name);
+                        return fb;
+                    }
+                }
+
+                var enVoice = voices.find(function(v) { return v.lang.startsWith('en-'); });
                 if (enVoice) {
                     preferredVoice = enVoice;
-                    voicesLoaded = true;
+                    isGoogleVoice = enVoice.name.indexOf('Google') !== -1;
                     return enVoice;
                 }
                 return null;
@@ -7784,10 +7921,23 @@
                 function speakWord() {
                     ttsUtterance = new SpeechSynthesisUtterance(currentVocabObj.w);
                     ttsUtterance.lang = 'en-US';
-                    ttsUtterance.rate = 0.85;
-                    ttsUtterance.pitch = 1.05;
                     ttsUtterance.volume = 1;
-                    if (voice) ttsUtterance.voice = voice;
+
+                    if (voice) {
+                        ttsUtterance.voice = voice;
+                        if (isGoogleVoice) {
+                            ttsUtterance.rate = 0.9;
+                            ttsUtterance.pitch = 1.0;
+                        } else {
+                            ttsUtterance.rate = 0.95;
+                            ttsUtterance.pitch = 1.1;
+                        }
+                    } else {
+                        ttsUtterance.rate = 0.85;
+                        ttsUtterance.pitch = 1.05;
+                    }
+
+                    ttsUtterance.text = currentVocabObj.w;
 
                     ttsUtterance.onend = function() {
                         btn.classList.remove('playing');
@@ -7802,20 +7952,21 @@
                     speakWord();
                 } else if (!voicesLoaded) {
                     window.speechSynthesis.onvoiceschanged = function() {
-                        findBestVoice();
+                        voice = findBestVoice();
                         voicesLoaded = true;
                         speakWord();
                         window.speechSynthesis.onvoiceschanged = null;
                     };
                     setTimeout(function() {
                         if (!voicesLoaded) { voicesLoaded = true; speakWord(); }
-                    }, 300);
+                    }, 600);
                 } else {
                     speakWord();
                 }
             };
 
             function initVocabQuiz() {
+                initVocabQueue();
                 findBestVoice();
                 if (window.speechSynthesis) {
                     window.speechSynthesis.onvoiceschanged = function() {
