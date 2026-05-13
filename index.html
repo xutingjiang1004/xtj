@@ -7,8 +7,6 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>xtj</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap');
-
         html, body {
             touch-action: manipulation;
             overscroll-behavior: none;
@@ -3002,7 +3000,7 @@
             <nav>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <h1>xtj</h1>
-                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题">??</button>
+                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
                 </div>
                 <div id="announcement-btn-wrapper" style="display:none; margin-right: 8px;">
                     <button class="announcement-btn" id="announcementBtn" title="公告">
@@ -3031,7 +3029,7 @@
                 <div class="publish-box glass" id="publishBox">
                     <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
                     <div class="publish-footer">
-                        <label for="fileInp" class="file-label">?? 选取照片或视频</label>
+                        <label for="fileInp" class="file-label">📷 选取照片或视频</label>
                         <input type="file" id="fileInp" accept="image/*,video/*" style="display:none" />
                         <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
                     </div>
@@ -3052,7 +3050,7 @@
         <div class="dock-panel" id="panelChat">
             <div class="dock-chat-container" id="dockChatContainer">
                 <div class="chat-header">
-                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">?</button>
+                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">‹</button>
                     <h3 id="dockChatTitle">消息</h3>
                 </div>
                 <div id="dockChatListView" class="chat-view">
@@ -3066,13 +3064,13 @@
                                 <input id="dockChatInput" placeholder="输入消息..." maxlength="500" />
                                 <div id="dockChatFilePreview" class="chat-file-preview hidden">
                                     <div class="cfp-thumb" id="dockCfpThumb">
-                                        <button class="cfp-x" id="dockCfpRemove" title="移除">?</button>
+                                        <button class="cfp-x" id="dockCfpRemove" title="移除">✕</button>
                                     </div>
                                     <span class="cfp-name" id="dockCfpName"></span>
                                 </div>
                             </div>
-                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送图片">??</button>
-                            <button class="send-btn" id="dockChatSendBtn">?</button>
+                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送图片">📷</button>
+                            <button class="send-btn" id="dockChatSendBtn">➤</button>
                         </div>
                     </div>
                     <input type="file" id="dockChatFileInp" accept="image/*,video/*" style="display:none" />
@@ -3080,17 +3078,6 @@
             </div>
         </div>
 
-        
-           
-                            <div class="ts-detail-section">
-                                <h4>Background</h4>
-                                <p id="tsDetailBackground"></p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
         <div class="dock-panel" id="panelAi">
             <div class="vocab-container" id="vocabContainer">
                 <div class="vocab-header">
@@ -3142,12 +3129,12 @@
                         <div class="profile-lang-tabs">
                             <button class="profile-lang-tab" data-lang="zh" onclick="setProfileLang('zh')">中文</button>
                             <button class="profile-lang-tab" data-lang="en" onclick="setProfileLang('en')">English</button>
-                            <button class="profile-lang-tab" data-lang="ko" onclick="setProfileLang('ko')">???</button>
+                            <button class="profile-lang-tab" data-lang="ko" onclick="setProfileLang('ko')">한국어</button>
                         </div>
                         <select id="profileLang" style="display:none;">
                             <option value="zh">中文</option>
                             <option value="en">English</option>
-                            <option value="ko">???</option>
+                            <option value="ko">한국어</option>
                         </select>
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(0,0,0,0.05);">
@@ -3159,7 +3146,7 @@
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding: 14px 0;">
                         <span>关于</span>
-                        <span style="color:var(--text-muted);">xtj v0.0.30</span>
+                        <span style="color:var(--text-muted);">xtj v0.0.27</span>
                     </div>
                 </div>
             </div>
@@ -3360,7 +3347,7 @@
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
                 <h3 id="statModalTitle">统计详情</h3>
-                <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">?</button>
+                <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="stat-detail-body" id="statModalBody">
                 加载中...
@@ -3372,7 +3359,7 @@
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
                 <h3 id="postDetailTitle">帖子详情</h3>
-                <button class="btn btn-ghost" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;">?</button>
+                <button class="btn btn-ghost" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="stat-detail-body" id="postDetailBody">
                 加载中...
@@ -3385,14 +3372,14 @@
         <div class="modal-box glass profile-detail-modal" onclick="event.stopPropagation()">
             <div class="profile-detail-header">
                 <h3>个人资料</h3>
-                <button class="btn btn-ghost" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;">?</button>
+                <button class="btn btn-ghost" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="profile-detail-body">
                 <div class="profile-detail-avatar-wrapper">
                     <div class="profile-detail-avatar" id="profileDetailAvatar" onclick="triggerAvatarUpload()">
                         <span id="profileDetailAvatarText">?</span>
                     </div>
-                    <div class="profile-detail-avatar-edit" onclick="triggerAvatarUpload()" title="更换头像">??</div>
+                    <div class="profile-detail-avatar-edit" onclick="triggerAvatarUpload()" title="更换头像">📷</div>
                     <input type="file" id="avatarUploadInput" accept="image/*" style="display:none;" onchange="handleAvatarUpload(event)">
                 </div>
                 <div class="profile-detail-info">
@@ -3419,7 +3406,7 @@
         <div class="modal-box glass user-profile-card-modal" onclick="event.stopPropagation()">
             <div class="upc-header">
                 <h3>用户资料</h3>
-                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;">?</button>
+                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="upc-body">
                 <div class="upc-avatar" id="upcAvatar">
@@ -3427,7 +3414,7 @@
                 </div>
                 <div class="upc-name" id="upcName">-</div>
                 <div class="upc-login" id="upcLogin">最近登录：加载中...</div>
-                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">?? 发消息</button>
+                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">💬 发消息</button>
             </div>
         </div>
     </div>
@@ -3437,14 +3424,14 @@
         <div class="announcement-modal" onclick="event.stopPropagation()">
             <div class="announcement-header">
                 <div class="announcement-tab-bar">
-                    <button class="announcement-tab active" data-tab="announcements">?? 公告</button>
-                    <button class="announcement-tab" data-tab="changelog">?? 更新日志</button>
+                    <button class="announcement-tab active" data-tab="announcements">🔔 公告</button>
+                    <button class="announcement-tab" data-tab="changelog">📝 更新日志</button>
                 </div>
-                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">?</button>
+                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="announcement-content">
                 <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
-                    <div class="announcement-admin-title">?? 发布新公告</div>
+                    <div class="announcement-admin-title">📢 发布新公告</div>
                     <input type="text" id="announcementAdminTitle" class="announcement-admin-title-input" placeholder="输入公告标题（可选）">
                     <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="输入公告内容（可选）"></textarea>
                     <div class="announcement-admin-row">
@@ -3593,7 +3580,7 @@
                                 .eq("id", latest.data[0].id);
                             if (!updRes.error) {
                                 updated = true;
-                                console.log("saveUserInfo ? " + name + " 登录时间已更新(UPDATE): " + userInfo.last_login);
+                                console.log("saveUserInfo ✓ " + name + " 登录时间已更新(UPDATE): " + userInfo.last_login);
                             }
                         }
                     } catch(e) {}
@@ -3609,7 +3596,7 @@
                         if (insertRes.error) {
                             console.error("saveUserInfo insert失败:", insertRes.error.message);
                         } else {
-                            console.log("saveUserInfo ? " + name + " 登录时间已更新(INSERT): " + userInfo.last_login);
+                            console.log("saveUserInfo ✓ " + name + " 登录时间已更新(INSERT): " + userInfo.last_login);
                         }
                     }
                 } catch(e) {
@@ -3781,7 +3768,7 @@
                     msgBtn.disabled = true;
                     msgBtn.style.opacity = '0.5';
                 } else {
-                    msgBtn.textContent = '?? 发消息';
+                    msgBtn.textContent = '💬 发消息';
                     msgBtn.disabled = false;
                     msgBtn.style.opacity = '1';
                 }
@@ -4328,7 +4315,7 @@
                     btn.classList.add("liked");
                     createHeartParticles(btn);
                 }
-                btn.textContent = isLiked ? "点赞" : "??";
+                btn.textContent = isLiked ? "点赞" : "❤️";
 
                 try {
                     if (isLiked) {
@@ -4350,7 +4337,7 @@
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
-                const emojis = ["??","??","??","?","??","??"];
+                const emojis = ["❤️","💕","💗","✨","💖","💓"];
                 for (let i=0; i<8; i++) {
                     const heart = document.createElement('div');
                     heart.className = 'heart-particle';
@@ -4866,7 +4853,7 @@
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${p.media_url}" controls preload="none">`:`<img src="${p.media_url}" loading="lazy" onclick="openImageViewer('${p.media_url}')">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">${isLiked?'??':'点赞'}</button>
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${p.id}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${p.id}')">评论</button>
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${p.id}', '${p.actor_key}')">删除</button>`:''}
                   </div>
@@ -5067,7 +5054,7 @@
                     <div class="post-detail-stats">浏览 ${vc} · 点赞 ${likes.length} · 评论 ${comments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
-                            <div class="stat-section-title">?? 点赞用户（${likes.length}）</div>
+                            <div class="stat-section-title">❤️ 点赞用户（${likes.length}）</div>
                             ${likes.length ? likes.map(l => `
                                 <div class="stat-like-item">
                                     <div class="sli-info">
@@ -5078,7 +5065,7 @@
                             `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
                         </div>
                         <div class="stat-col">
-                            <div class="stat-section-title">?? 评论列表（${comments.length}）</div>
+                            <div class="stat-section-title">💬 评论列表（${comments.length}）</div>
                             ${comments.length ? comments.map(c => `
                                 <div class="stat-comment-item">
                                     <div class="sci-info">
@@ -5099,8 +5086,8 @@
                 const hasImg = p.media_url && p.media_type === 'image';
                 const hasVid = p.media_url && p.media_type === 'video';
                 let tag = '';
-                if (hasImg) tag = '<span class="spi-img-tag">?? 图片</span>';
-                if (hasVid) tag = '<span class="spi-img-tag">?? 视频</span>';
+                if (hasImg) tag = '<span class="spi-img-tag">🖼 图片</span>';
+                if (hasVid) tag = '<span class="spi-img-tag">🎬 视频</span>';
                 const summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
                 const display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
                 return { display, tag, hasImg, hasVid, thumbUrl: hasImg ? p.media_url : null };
@@ -5180,7 +5167,7 @@
                 if (!history.length) {
                     body.innerHTML = `
                         <div class="stat-empty">
-                            <div style="font-size:16px; margin-bottom:8px;">?? 浏览记录</div>
+                            <div style="font-size:16px; margin-bottom:8px;">📊 浏览记录</div>
                             <div style="font-size:13px;">暂无浏览详情数据</div>
                             <div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>
                             <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
@@ -5208,7 +5195,7 @@
                 statAllPosts.forEach(p => { postMap[p.id] = p; });
 
                 function buildLikesCol() {
-                    let h = '<div class="stat-section-title">?? 点赞记录</div>';
+                    let h = '<div class="stat-section-title">❤️ 点赞记录</div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(l => {
                             const post = postMap[l.post_id];
@@ -5230,7 +5217,7 @@
                 }
 
                 function buildCommentsCol() {
-                    let h = '<div class="stat-section-title">?? 评论记录</div>';
+                    let h = '<div class="stat-section-title">💬 评论记录</div>';
                     if (statAllComments.length) {
                         h += [...statAllComments].reverse().slice(0, 200).map(c => {
                             const post = postMap[c.post_id];
@@ -5469,12 +5456,16 @@
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
                 const now = Date.now();
                 if (tab === currentDockTab && !skipReturn) {
+                    // 已经在当前tab，单击执行返回操作
                     if (tab === 'posts') {
+                        // 帖子页：回到顶部
                         const panel = document.getElementById('panelPosts');
                         if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                     } else if (tab === 'chat') {
-                        if (dockChatActiveUser) dockChatGoBack();
-                        else {
+                        // 聊天页：如果在对话中，返回聊天列表；否则回到顶部
+                        if (dockChatActiveUser) {
+                            dockChatGoBack();
+                        } else {
                             const panel = document.getElementById('panelChat');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         }
@@ -5482,6 +5473,7 @@
                         const vocabPage = document.querySelector('.vocab-container');
                         if (vocabPage) vocabPage.scrollTo({ top: 0, behavior: 'smooth' });
                     } else if (tab === 'profile') {
+                        // 我的页：回到顶部
                         const panel = document.getElementById('panelProfile');
                         if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                     }
@@ -5497,6 +5489,7 @@
                 const tabBtn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
                 if (tabBtn) tabBtn.classList.add('active');
                 if (tab === 'chat') { loadDockChatList(); startDMPolling(30000); }
+                if (tab === 'ai') { initVocabQuiz(); }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); }
             };
 
@@ -5567,7 +5560,7 @@
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
-                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">??</div><div>加载中...</div></div>';
+                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中...</div></div>';
                 document.getElementById('dockChatListView').classList.add('hidden');
                 document.getElementById('dockChatDetailView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'flex';
@@ -5582,7 +5575,7 @@
                 if (!el) return;
                 if (Date.now() - dockChatListCacheTime < DOCK_CHAT_CACHE_DURATION) return;
                 dockChatListCacheTime = Date.now();
-                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">?</div><div>加载中...</div></div>';
+                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">⏳</div><div>加载中...</div></div>';
                 try {
                     const { data: allMsgs, error } = await sb.from("posts")
                         .select("id, user_name, media_url, content, created_at")
@@ -5592,7 +5585,7 @@
                         .limit(200);
                     if (error) throw error;
                     if (!allMsgs || !allMsgs.length) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">??</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像开始聊天</div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像开始聊天</div></div>';
                         updateUnreadBadge();
                         return;
                     }
@@ -5644,7 +5637,7 @@
                     }).join('');
                     updateUnreadBadge();
                 } catch(e) {
-                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">??</div><div>' + (e.message || '加载失败') + '</div></div>';
+                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">⚠️</div><div>' + (e.message || '加载失败') + '</div></div>';
                 }
             }
 
@@ -5706,7 +5699,7 @@
                     renderDockMessages(msgs || [], forceScroll);
                 } catch(e) {
                     if (!_chatCache[cacheKey]) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">??</div><div>' + (e.message || '加载失败') + '</div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">⚠️</div><div>' + (e.message || '加载失败') + '</div></div>';
                     }
                 } finally {
                     dockChatMsgsBusy = false;
@@ -5716,7 +5709,7 @@
 
             function renderDockMessages(msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
-                if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">??</div><div>发送第一条消息吧</div></div>'; return; }
+                if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>'; return; }
                 // 检测用户是否在查看历史记录（离底部超过100px视为在看历史）
                 var isNearBottom = !el.scrollHeight || (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
                 var shouldAutoScroll = forceScroll || isNearBottom;
@@ -5801,7 +5794,7 @@
                 const thumb = document.getElementById('dockCfpThumb'), name = document.getElementById('dockCfpName');
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
                 const xBtn = thumb.querySelector('.cfp-x'); thumb.innerHTML = '';
-                if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">??</span>'; }
+                if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">🎬</span>'; }
                 else { const img = document.createElement('img'); _dockPreviewUrl = URL.createObjectURL(file); img.src = _dockPreviewUrl; thumb.appendChild(img); }
                 if (xBtn) thumb.appendChild(xBtn);
                 name.textContent = file.name; input.classList.add('hidden'); preview.classList.remove('hidden');
@@ -5820,7 +5813,18 @@
             document.getElementById('dockChatFileInp').addEventListener('change', function() { if (this.files.length) showDockChatFilePreview(this.files[0]); });
             document.getElementById('dockCfpRemove').addEventListener('click', clearDockChatFilePreview);
 
+            // ========== Taylor Swift 画廊 ==========
+            function initTSGallery() {
+                var cards = document.querySelectorAll('.ts-card');
+                cards.forEach(function(card, i) {
+                    card.addEventListener('click', function() {
+                        var era = card.dataset.era;
+                        if (era) showToast('Taylor Swift · ' + era);
+                    });
+                });
+            }
 
+            window.initTSGallery = initTSGallery;
 
             window.addEventListener('DOMContentLoaded', async function() {
                 // iOS 键盘弹出修复: 避免 dock-bar 被键盘顶上去
@@ -5891,11 +5895,11 @@
             function applyTheme(isDark) {
                 if (isDark) {
                     htmlEl.setAttribute('data-theme', 'dark');
-                    if (themeBtn) themeBtn.textContent = '??';
+                    if (themeBtn) themeBtn.textContent = '☀️';
                     localStorage.setItem('xtj-theme', 'dark');
                 } else {
                     htmlEl.removeAttribute('data-theme');
-                    if (themeBtn) themeBtn.textContent = '??';
+                    if (themeBtn) themeBtn.textContent = '🌙';
                     localStorage.setItem('xtj-theme', 'light');
                 }
             }
@@ -6083,7 +6087,7 @@
                 if (!listEl) return;
 
                 if (!announcements.length) {
-                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">??</div><div>暂无公告</div></div>';
+                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">📭</div><div>暂无公告</div></div>';
                     return;
                 }
 
@@ -6813,7 +6817,7 @@
                     div.className = 'changelog-item';
                     div.innerHTML = `
                         <div class="changelog-header">
-                            <div class="changelog-version">?? ${item.version}</div>
+                            <div class="changelog-version">🚀 ${item.version}</div>
                             <div class="changelog-date">${item.date}</div>
                         </div>
                         <div class="changelog-content">
@@ -7510,46 +7514,46 @@
                     'updateContent': 'Update Content'
                 },
                 ko: {
-                    'posts': '???',
-                    'chat': '??',
-                    'my': '? ??',
-                    'darkMode': '?? ??',
-                    'language': '??',
-                    'notifications': '??',
-                    'about': '??',
-                    'notLoggedIn': '??? ? ?',
-                    'clickToLogin': '???? ???',
-                    'langChanged': '??? ???? ???????',
-                    'announcement': '????',
-                    'changelog': '???? ??',
-                    'view': '??',
-                    'back': '????',
-                    'publish': '??',
-                    'delete': '??',
-                    'deleteConfirm': '?? ?????????',
-                    'deleteSuccess': '?? ??',
-                    'publishSuccess': '?? ??',
-                    'title': '??',
-                    'content': '??',
-                    'publisher': '???',
-                    'totalViews': '? ???',
-                    'totalPosts': '? ???',
-                    'enterYourQuestion': '??? ?????...',
-                    'send': '???',
-                    'aiWelcome': '?????! AI ????????. ??? ???????',
-                    'login': '???',
-                    'register': '????',
-                    'username': '????',
-                    'password': '????',
-                    'loginSuccess': '??? ??',
-                    'registerSuccess': '???? ??',
-                    'logout': '????',
-                    'logoutSuccess': '???? ??',
-                    'noAnnouncements': '????? ????',
-                    'noChangelog': '???? ??? ????',
-                    'version': '??',
-                    'date': '??',
-                    'updateContent': '???? ??'
+                    'posts': '게시물',
+                    'chat': '채팅',
+                    'my': '내 정보',
+                    'darkMode': '다크 모드',
+                    'language': '언어',
+                    'notifications': '알림',
+                    'about': '정보',
+                    'notLoggedIn': '로그인 안 됨',
+                    'clickToLogin': '클릭하여 로그인',
+                    'langChanged': '언어가 한국어로 전환되었습니다',
+                    'announcement': '공지사항',
+                    'changelog': '업데이트 기록',
+                    'view': '보기',
+                    'back': '돌아가기',
+                    'publish': '게시',
+                    'delete': '삭제',
+                    'deleteConfirm': '정말 삭제하시겠습니까?',
+                    'deleteSuccess': '삭제 완료',
+                    'publishSuccess': '게시 완료',
+                    'title': '제목',
+                    'content': '내용',
+                    'publisher': '게시자',
+                    'totalViews': '총 조회수',
+                    'totalPosts': '총 게시물',
+                    'enterYourQuestion': '질문을 입력하세요...',
+                    'send': '보내기',
+                    'aiWelcome': '안녕하세요! AI 어시스턴트입니다. 어떻게 도와드릴까요?',
+                    'login': '로그인',
+                    'register': '회원가입',
+                    'username': '사용자명',
+                    'password': '비밀번호',
+                    'loginSuccess': '로그인 성공',
+                    'registerSuccess': '회원가입 성공',
+                    'logout': '로그아웃',
+                    'logoutSuccess': '로그아웃 완료',
+                    'noAnnouncements': '공지사항이 없습니다',
+                    'noChangelog': '업데이트 기록이 없습니다',
+                    'version': '버전',
+                    'date': '날짜',
+                    'updateContent': '업데이트 내용'
                 }
             };
 
@@ -7624,7 +7628,7 @@
                     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
                     localStorage.setItem('xtj-theme', isDark ? 'dark' : 'light');
                     var topToggle = document.getElementById('themeToggle');
-                    if (topToggle) topToggle.textContent = isDark ? '??' : '??';
+                    if (topToggle) topToggle.textContent = isDark ? '🌙' : '☀️';
                 });
             }
 
