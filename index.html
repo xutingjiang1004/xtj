@@ -1449,12 +1449,12 @@
             display: flex; flex-direction: column; height: 100%;
             background: transparent;
             overflow: hidden;
-            padding: 12px 16px 0;
+            padding: 12px 16px 16px;
         }
         .vocab-scroll {
             flex: 1;
             overflow-y: auto; -webkit-overflow-scrolling: touch;
-            padding: 0 0 8px;
+            padding: 0 0 20px;
             margin: 0 -16px;
         }
         .vocab-scroll > * {
@@ -1508,13 +1508,13 @@
 
         /* 增强液态玻璃卡片 */
         .vocab-card {
-            background: rgba(255,255,255,0.78);
-            backdrop-filter: blur(26px) saturate(200%);
-            -webkit-backdrop-filter: blur(26px) saturate(200%);
-            border: 1px solid rgba(255,255,255,0.75);
+            background: rgba(255,255,255,0.85);
+            backdrop-filter: blur(32px) saturate(220%);
+            -webkit-backdrop-filter: blur(32px) saturate(220%);
+            border: 1px solid rgba(255,255,255,0.8);
             border-radius: 24px; padding: 40px 28px 32px; text-align: center;
             margin-bottom: 16px; position: relative;
-            box-shadow: 0 4px 28px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.9);
+            box-shadow: 0 8px 40px rgba(0,0,0,0.06), inset 0 1.5px 0 rgba(255,255,255,0.95);
             will-change: transform, opacity;
         }
         .vocab-card.slide-out {
@@ -1594,16 +1594,16 @@
         /* 增强液态玻璃选项网格 */
         .vocab-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 0; }
         .vocab-option {
-            background: rgba(255,255,255,0.6);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border: 1.5px solid rgba(255,255,255,0.65);
+            background: rgba(255,255,255,0.72);
+            backdrop-filter: blur(16px) saturate(180%);
+            -webkit-backdrop-filter: blur(16px) saturate(180%);
+            border: 1.5px solid rgba(255,255,255,0.7);
             padding: 16px 12px; border-radius: 16px; font-size: 14px; font-weight: 600;
             color: var(--text-main); cursor: pointer; text-align: center;
             transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
             line-height: 1.35; word-break: break-word;
             position: relative; overflow: hidden;
-            box-shadow: 0 1px 10px rgba(0,0,0,0.035);
+            box-shadow: 0 2px 14px rgba(0,0,0,0.04);
         }
         .vocab-option:active {
             transform: scale(0.95);
@@ -1652,13 +1652,13 @@
 
         /* 不背单词风格反馈面板 - 置于底部 */
         .vocab-feedback {
-            background: rgba(255,255,255,0.65);
-            backdrop-filter: blur(24px) saturate(200%);
-            -webkit-backdrop-filter: blur(24px) saturate(200%);
-            border: 1px solid rgba(255,255,255,0.65);
+            background: rgba(255,255,255,0.82);
+            backdrop-filter: blur(30px) saturate(220%);
+            -webkit-backdrop-filter: blur(30px) saturate(220%);
+            border: 1px solid rgba(255,255,255,0.75);
             border-radius: 18px; padding: 18px 20px;
             text-align: left; display: none;
-            box-shadow: 0 4px 28px rgba(0,0,0,0.06), inset 0 1px 0 rgba(255,255,255,0.75);
+            box-shadow: 0 8px 36px rgba(0,0,0,0.07), inset 0 1.5px 0 rgba(255,255,255,0.85);
             margin-bottom: 0;
         }
         .vocab-feedback.show {
@@ -1714,10 +1714,11 @@
         .vocab-bottom {
             flex-shrink: 0;
             padding: 8px 0 12px;
-            display: flex; flex-direction: column; gap: 10px;
+            display: flex; flex-direction: column; gap: 16px;
         }
         .vocab-bottom-row {
             display: flex; align-items: center; gap: 12px;
+            padding-top: 4px;
         }
         .vocab-next-btn {
             flex: 1; padding: 16px; border-radius: 16px; font-size: 16px; font-weight: 700;
@@ -1761,23 +1762,23 @@
         [data-theme="dark"] .vocab-mode-btn:active { background: rgba(50,50,65,0.8); }
         [data-theme="dark"] .vocab-progress-bar { background: rgba(255,255,255,0.08); }
         [data-theme="dark"] .vocab-card {
-            background: rgba(30,30,45,0.75);
-            border-color: rgba(255,255,255,0.08);
-            box-shadow: 0 4px 28px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05);
+            background: rgba(30,30,45,0.82);
+            border-color: rgba(255,255,255,0.1);
+            box-shadow: 0 8px 40px rgba(0,0,0,0.3), inset 0 1.5px 0 rgba(255,255,255,0.06);
         }
         [data-theme="dark"] .vocab-option {
-            background: rgba(30,30,45,0.6);
-            border-color: rgba(255,255,255,0.08);
+            background: rgba(30,30,45,0.7);
+            border-color: rgba(255,255,255,0.1);
             color: #d0d0d0;
-            box-shadow: 0 1px 10px rgba(0,0,0,0.18);
+            box-shadow: 0 2px 14px rgba(0,0,0,0.2);
         }
         [data-theme="dark"] .vocab-option:active { background: rgba(40,40,55,0.75); }
         [data-theme="dark"] .vocab-option.correct { background: rgba(5,150,105,0.2); border-color: rgba(5,150,105,0.5); color: #6ee7b7; }
         [data-theme="dark"] .vocab-option.wrong { background: rgba(255,59,96,0.18); border-color: rgba(255,59,96,0.45); color: #fca5a5; }
         [data-theme="dark"] .vocab-feedback {
-            background: rgba(30,30,45,0.6);
-            border-color: rgba(255,255,255,0.06);
-            box-shadow: 0 4px 28px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04);
+            background: rgba(30,30,45,0.82);
+            border-color: rgba(255,255,255,0.1);
+            box-shadow: 0 8px 36px rgba(0,0,0,0.35), inset 0 1.5px 0 rgba(255,255,255,0.06);
         }
         [data-theme="dark"] .vocab-feedback-icon.is-correct { background: rgba(5,150,105,0.2); }
         [data-theme="dark"] .vocab-feedback-icon.is-wrong { background: rgba(255,59,96,0.18); }
@@ -7714,40 +7715,51 @@
             }
 
             var audioCtx = null;
-            function getAudioCtx() {
-                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            var audioCtxReady = false;
+            function ensureAudioCtx() {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+                audioCtxReady = true;
                 return audioCtx;
             }
             function playSoundEffect(type) {
                 try {
-                    var ctx = getAudioCtx();
+                    var ctx = ensureAudioCtx();
+                    if (!ctx) return;
                     var osc = ctx.createOscillator();
                     var gain = ctx.createGain();
                     osc.connect(gain);
                     gain.connect(ctx.destination);
-                    gain.gain.value = 0.1;
 
                     if (type === 'correct') {
                         osc.type = 'sine';
                         osc.frequency.setValueAtTime(660, ctx.currentTime);
-                        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.06);
-                        osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.12);
-                        gain.gain.setValueAtTime(0.12, ctx.currentTime);
-                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+                        osc.frequency.setValueAtTime(880, ctx.currentTime + 0.07);
+                        osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.14);
+                        gain.gain.setValueAtTime(0.18, ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.32);
                         osc.start(ctx.currentTime);
-                        osc.stop(ctx.currentTime + 0.28);
+                        osc.stop(ctx.currentTime + 0.32);
                     } else {
-                        osc.type = 'sine';
-                        osc.frequency.setValueAtTime(440, ctx.currentTime);
-                        osc.frequency.setValueAtTime(330, ctx.currentTime + 0.1);
-                        osc.frequency.setValueAtTime(280, ctx.currentTime + 0.18);
-                        gain.gain.setValueAtTime(0.1, ctx.currentTime);
-                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+                        osc.type = 'triangle';
+                        osc.frequency.setValueAtTime(400, ctx.currentTime);
+                        osc.frequency.setValueAtTime(320, ctx.currentTime + 0.08);
+                        osc.frequency.setValueAtTime(260, ctx.currentTime + 0.16);
+                        gain.gain.setValueAtTime(0.16, ctx.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.38);
                         osc.start(ctx.currentTime);
-                        osc.stop(ctx.currentTime + 0.35);
+                        osc.stop(ctx.currentTime + 0.38);
                     }
                 } catch(e) {}
             }
+
+            document.addEventListener('click', function() {
+                ensureAudioCtx();
+            }, { once: true });
 
             window.checkVocabAnswer = function(idx, btnEl) {
                 if (isAnswered) return;
