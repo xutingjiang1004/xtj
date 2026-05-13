@@ -6477,6 +6477,36 @@
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
+                    version: 'v0.0.35',
+                    date: '2026-05-13',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li><strong>修复对错音效不生效问题</strong>
+                                <ul>
+                                    <li>修复AudioContext被浏览器挂起导致无声（增加resume()唤醒）</li>
+                                    <li>提高音效音量（gain从0.1提升至0.18），错误音改用triangle波更清晰</li>
+                                    <li>页面首次点击自动解锁音频上下文</li>
+                                </ul>
+                            </li>
+                            <li><strong>修复继续按钮位置靠上</strong>
+                                <ul>
+                                    <li>容器底部内边距增加至16px，选项区底部间隙增加至20px</li>
+                                    <li>底部flex间隙从10px提升至16px，按钮行增加上边距</li>
+                                </ul>
+                            </li>
+                            <li><strong>液态玻璃效果大幅增强</strong>
+                                <ul>
+                                    <li>卡片：rgba 0.85 + blur(32px) saturate(220%)，阴影翻倍</li>
+                                    <li>选项：rgba 0.72 + blur(16px) saturate(180%)</li>
+                                    <li>反馈面板：rgba 0.82 + blur(30px) saturate(220%)</li>
+                                    <li>暗色模式同步增强</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.0.34',
                     date: '2026-05-13',
                     content: `
