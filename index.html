@@ -358,7 +358,6 @@
 
         nav {
             padding: 16px 4px 8px;
-            padding-top: calc(16px + env(safe-area-inset-top, 0px));
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1337,6 +1336,7 @@
             transform: translateY(10px);
             transition: opacity 0.25s ease-out, transform 0.25s ease-out;
             padding: 16px 16px 72px;
+            padding-top: calc(16px + env(safe-area-inset-top, 0px));
             padding-left: calc(16px + env(safe-area-inset-left, 0px));
             padding-right: calc(16px + env(safe-area-inset-right, 0px));
             padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
@@ -1345,7 +1345,9 @@
         /* 照片墙页面面板样式 */
         .dock-panel#panelAi {
             overflow: hidden;
+            overflow-y: auto;
             padding: 0;
+            padding-top: calc(0px + env(safe-area-inset-top, 0px));
         }
         .dock-panel::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
         .dock-panel::-webkit-scrollbar-track { display: none !important; }
@@ -2894,7 +2896,7 @@
             display: flex;
             flex-direction: column;
             height: 100%;
-            padding: 12px 0;
+            padding: 16px 0;
         }
         .photo-wall-header {
             display: flex;
@@ -3203,6 +3205,7 @@
                     </div>
                 </div>
             </div>
+        </div>
         <div class="dock-panel" id="panelProfile">
             <div class="dock-profile-container" style="display:flex;flex-direction:column;height:100%;background:transparent;padding:0 16px;">
                 <div style="padding:12px 0;margin-bottom:8px;border-bottom:1px solid rgba(0,0,0,0.06);flex-shrink:0;">
