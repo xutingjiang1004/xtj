@@ -1342,7 +1342,113 @@
             padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
             will-change: opacity, transform;
         }
-        
+        /* 照片墙页面面板样式 */
+        .dock-panel#panelAi {
+            overflow: hidden;
+            padding: 0;
+        }
+        .dock-panel::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
+        .dock-panel::-webkit-scrollbar-track { display: none !important; }
+        .dock-panel::-webkit-scrollbar-thumb { display: none !important; background: transparent !important; }
+        .dock-panel.active {
+            opacity: 1; pointer-events: all;
+            transform: translateY(0);
+        }
+        .dock-bar {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            display: flex; justify-content: center; align-items: center;
+            gap: 3px; padding: 4px 12px 10px;
+            padding-left: calc(12px + env(safe-area-inset-left, 0px));
+            padding-right: calc(12px + env(safe-area-inset-right, 0px));
+            padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            z-index: 100;
+            pointer-events: none;
+            touch-action: none;
+            max-width: 640px;
+            margin: 0 auto;
+        }
+        .dock-tab {
+            flex: 1; max-width: 80px;
+            display: flex; flex-direction: column; align-items: center; gap: 1px;
+            padding: 4px 10px; border-radius: 14px;
+            border: none; background: transparent;
+            cursor: pointer; font-family: inherit;
+            transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
+            color: var(--text-muted); font-size: 9px;
+            position: relative;
+            -webkit-tap-highlight-color: transparent;
+            pointer-events: auto;
+            touch-action: manipulation;
+            outline: none !important;
+            box-shadow: none !important;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-focus-ring-color: transparent;
+        }
+        .dock-tab .dt-icon {
+            font-size: 20px; line-height: 1;
+            position: relative; z-index: 1;
+        }
+        .dock-tab .dt-label {
+            font-weight: 500; letter-spacing: 0.3px;
+            transition: all 0.3s;
+        }
+        .dock-tab.active {
+            color: #059669;
+            transform: translateY(-4px);
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(6px) saturate(140%);
+            -webkit-backdrop-filter: blur(6px) saturate(140%);
+            border: 1px solid rgba(255,255,255,0.35);
+        }
+        .dock-tab.active .dt-icon {
+            filter: drop-shadow(0 4px 8px rgba(5,150,105,0.25));
+        }
+        .dock-tab.active .dt-label { font-weight: 700; }
+        .dock-tab:active { transform: scale(0.9); }
+        .dock-tab:focus,
+        .dock-tab:focus-visible,
+        .dock-tab:focus-within,
+        .dock-tab:active,
+        .dock-tab:hover {
+            outline: none !important;
+            box-shadow: none !important;
+            -webkit-box-shadow: none !important;
+            border-color: transparent !important;
+            background: transparent !important;
+        }
+        .dock-tab:focus-visible {
+            outline: none !important;
+            box-shadow: none !important;
+            -webkit-box-shadow: none !important;
+        }
+        .dock-tab::-moz-focus-inner {
+            border: 0 !important;
+        }
+        .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
+        .dock-tab .dt-icon { transition: none; }
+        /* AI花朵按钮：图标更大(28x28)无文字标签，垂直居中保持和其他按钮等高 */
+        .dock-tab[data-tab="ai"] {
+            justify-content: center;
+        }
+        .dock-tab[data-tab="ai"] .dt-label { display: none; }
+        /* Dock面板: 聊天 (复用聊天样式，去掉overlay固定定位) */
+        .dock-chat-container {
+            display: flex; flex-direction: column; height: 100%;
+        }
+        .dock-chat-container .chat-header {
+            padding: 12px 0; margin-bottom: 8px;
+            border-bottom: 1px solid rgba(0,0,0,0.06);
+            background: transparent; flex-shrink: 0;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .dock-chat-container .chat-view { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+        .dock-chat-container .chat-view.hidden { display: none; }
+        .dock-chat-container .chat-list-item { border-bottom-color: rgba(0,0,0,0.04); }
+
         /* 暗色模式 Dock */
         [data-theme="dark"] .dock-bar {
             background: transparent;
@@ -2891,6 +2997,10 @@
         }
 
         /* 全屏预览 */
+        @keyframes fadeIn {
+            0% { opacity: 0; }
+            100% { opacity: 1; }
+        }
         .photo-preview-overlay {
             position: fixed;
             inset: 0;
