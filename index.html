@@ -1365,6 +1365,39 @@
             padding-top: calc(24px + env(safe-area-inset-top, 0px));
             background: var(--panel-bg);
         }
+        .dock-panel#panelAi::before,
+        .dock-panel#panelAi::after {
+            content: "";
+            position: sticky;
+            left: 0;
+            right: 0;
+            display: block;
+            height: 62px;
+            pointer-events: none;
+            z-index: 8;
+            backdrop-filter: blur(18px) saturate(150%);
+            -webkit-backdrop-filter: blur(18px) saturate(150%);
+        }
+        .dock-panel#panelAi::before {
+            top: 0;
+            margin-bottom: -62px;
+            background: linear-gradient(to bottom, rgba(248, 250, 252, 0.74), rgba(248, 250, 252, 0.34), rgba(248, 250, 252, 0));
+            border-bottom: 1px solid rgba(255, 255, 255, 0.34);
+        }
+        .dock-panel#panelAi::after {
+            bottom: 0;
+            margin-top: -62px;
+            background: linear-gradient(to top, rgba(248, 250, 252, 0.78), rgba(248, 250, 252, 0.34), rgba(248, 250, 252, 0));
+            border-top: 1px solid rgba(255, 255, 255, 0.34);
+        }
+        [data-theme="dark"] .dock-panel#panelAi::before {
+            background: linear-gradient(to bottom, rgba(12, 13, 18, 0.74), rgba(12, 13, 18, 0.34), rgba(12, 13, 18, 0));
+            border-bottom-color: rgba(255, 255, 255, 0.1);
+        }
+        [data-theme="dark"] .dock-panel#panelAi::after {
+            background: linear-gradient(to top, rgba(12, 13, 18, 0.78), rgba(12, 13, 18, 0.34), rgba(12, 13, 18, 0));
+            border-top-color: rgba(255, 255, 255, 0.1);
+        }
         .dock-panel::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
         .dock-panel::-webkit-scrollbar-track { display: none !important; }
         .dock-panel::-webkit-scrollbar-thumb { display: none !important; background: transparent !important; }
@@ -2895,15 +2928,22 @@
         .photo-wall-container {
             display: flex;
             flex-direction: column;
-            height: 100%;
-            padding: 16px 0;
+            min-height: 100%;
+            padding: 16px 16px 92px;
+            position: relative;
         }
         .photo-wall-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 8px 4px 16px;
+            padding: 8px 4px 18px;
             flex-shrink: 0;
+            position: sticky;
+            top: 0;
+            z-index: 9;
+            background: linear-gradient(to bottom, var(--panel-bg) 0%, rgba(248, 250, 252, 0.82) 72%, rgba(248, 250, 252, 0));
+            backdrop-filter: blur(16px) saturate(150%);
+            -webkit-backdrop-filter: blur(16px) saturate(150%);
         }
         .photo-wall-title {
             font-size: 18px;
@@ -2931,38 +2971,79 @@
         }
         .photo-wall-grid {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
-            gap: 4px;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
             flex: 1;
             align-content: start;
         }
         @media (max-width: 768px) {
             .photo-wall-grid {
-                grid-template-columns: repeat(4, 1fr);
+                gap: 14px;
             }
         }
         @media (max-width: 480px) {
             .photo-wall-grid {
-                grid-template-columns: repeat(3, 1fr);
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 12px;
             }
         }
         @media (max-width: 320px) {
             .photo-wall-grid {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: 1fr;
             }
         }
         .photo-wall-item {
             position: relative;
-            aspect-ratio: 1;
+            aspect-ratio: 4 / 5;
             overflow: hidden;
-            border-radius: 6px;
+            border-radius: 18px;
             cursor: pointer;
-            background: rgba(255,255,255,0.05);
-            transition: transform 0.2s ease;
+            isolation: isolate;
+            padding: 8px;
+            background:
+                radial-gradient(circle at 16% 8%, rgba(255, 255, 255, 0.86), transparent 22%),
+                radial-gradient(circle at 86% 18%, rgba(52, 211, 153, 0.22), transparent 28%),
+                radial-gradient(circle at 80% 86%, rgba(14, 165, 233, 0.18), transparent 32%),
+                linear-gradient(135deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.18));
+            border: 1px solid rgba(255, 255, 255, 0.7);
+            box-shadow:
+                0 18px 42px rgba(15, 23, 42, 0.13),
+                inset 0 1px 0 rgba(255, 255, 255, 0.78),
+                inset 0 -18px 46px rgba(255, 255, 255, 0.12);
+            backdrop-filter: blur(28px) saturate(170%);
+            -webkit-backdrop-filter: blur(28px) saturate(170%);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .photo-wall-item::before,
+        .photo-wall-item::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .photo-wall-item::before {
+            background:
+                linear-gradient(115deg, transparent 0 18%, rgba(255,255,255,0.38) 24%, transparent 34%),
+                radial-gradient(ellipse at 22% 0%, rgba(255,255,255,0.62), transparent 34%),
+                linear-gradient(to bottom, rgba(255,255,255,0.24), transparent 38%, rgba(255,255,255,0.18));
+            mix-blend-mode: screen;
+        }
+        .photo-wall-item::after {
+            inset: 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.52);
+            box-shadow:
+                inset 0 0 0 1px rgba(255,255,255,0.18),
+                inset 0 12px 30px rgba(255,255,255,0.18);
         }
         .photo-wall-item:hover {
-            transform: scale(1.03);
+            transform: translateY(-3px) scale(1.015);
             z-index: 2;
+            box-shadow:
+                0 24px 54px rgba(15, 23, 42, 0.18),
+                inset 0 1px 0 rgba(255, 255, 255, 0.82),
+                inset 0 -18px 46px rgba(255, 255, 255, 0.14);
         }
         .photo-wall-item:active {
             transform: scale(0.97);
@@ -2971,15 +3052,21 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
+            border-radius: 12px;
             display: block;
+            position: relative;
+            z-index: 0;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
         }
         .photo-wall-item .pw-item-info {
             position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 20px 6px 6px;
-            background: linear-gradient(transparent, rgba(0,0,0,0.7));
+            bottom: 8px;
+            left: 8px;
+            right: 8px;
+            z-index: 3;
+            padding: 34px 10px 10px;
+            border-radius: 0 0 12px 12px;
+            background: linear-gradient(transparent, rgba(0,0,0,0.72));
             opacity: 0;
             transition: opacity 0.25s ease;
         }
@@ -3099,7 +3186,19 @@
         }
 
         [data-theme="dark"] .photo-wall-item {
-            background: rgba(255,255,255,0.03);
+            background:
+                radial-gradient(circle at 18% 8%, rgba(255, 255, 255, 0.25), transparent 24%),
+                radial-gradient(circle at 82% 16%, rgba(52, 211, 153, 0.16), transparent 30%),
+                radial-gradient(circle at 76% 88%, rgba(14, 165, 233, 0.14), transparent 34%),
+                linear-gradient(135deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.04));
+            border-color: rgba(255,255,255,0.16);
+            box-shadow:
+                0 18px 42px rgba(0, 0, 0, 0.36),
+                inset 0 1px 0 rgba(255, 255, 255, 0.22),
+                inset 0 -18px 46px rgba(255, 255, 255, 0.04);
+        }
+        [data-theme="dark"] .photo-wall-header {
+            background: linear-gradient(to bottom, var(--panel-bg) 0%, rgba(12, 13, 18, 0.82) 72%, rgba(12, 13, 18, 0));
         }
 
     </style>
