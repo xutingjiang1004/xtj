@@ -3583,6 +3583,7 @@
                 return;
             }
             const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            window.sb = sb;
 
             const ADMIN_NAME = "xxz";
             const AVATAR_CACHE_KEY = "xtj_avatars";
@@ -5463,6 +5464,7 @@
                 d.textContent = str;
                 return d.innerHTML;
             }
+            window.escapeHtml = escapeHtml;
 
             function formatMsgTime(dateStr) {
                 var d = new Date(dateStr);
@@ -7150,6 +7152,18 @@
                 try {
                     var saved = localStorage.getItem(photoWallKey);
                     photoWallData = saved ? JSON.parse(saved) : [];
+                    // 兼容旧数据：清理已损坏的 base64 条目（现已改用 Supabase 存储）
+                    var needsSave = false;
+                    for (var i = photoWallData.length - 1; i >= 0; i--) {
+                        var p = photoWallData[i];
+                        if (p.imageUrl && p.imageUrl.indexOf('data:') === 0) {
+                            photoWallData.splice(i, 1);
+                            needsSave = true;
+                        }
+                    }
+                    if (needsSave) {
+                        localStorage.setItem(photoWallKey, JSON.stringify(photoWallData));
+                    }
                 } catch(e) {
                     photoWallData = [];
                 }
@@ -7157,30 +7171,14 @@
 
             function savePhotoWallData() {
                 try {
-                    const MAX_PHOTOS = 50;
+                    const MAX_PHOTOS = 100;
                     if (photoWallData.length > MAX_PHOTOS) {
                         photoWallData = photoWallData.slice(-MAX_PHOTOS);
                     }
-                    
-                    let dataStr = JSON.stringify(photoWallData);
-                    let dataSize = new Blob([dataStr]).size;
-                    
-                    if (dataSize > 4 * 1024 * 1024) {
-                        while (dataSize > 4 * 1024 * 1024 && photoWallData.length > 0) {
-                            photoWallData.shift();
-                            dataStr = JSON.stringify(photoWallData);
-                            dataSize = new Blob([dataStr]).size;
-                        }
-                    }
-                    
-                    localStorage.setItem(photoWallKey, dataStr);
+                    localStorage.setItem(photoWallKey, JSON.stringify(photoWallData));
                 } catch (e) {
-                    console.error('保存照片墙数据失败:', e);
-                    if (e.name === 'QuotaExceededError') {
-                        showToast('存储空间不足，已清理部分旧照片');
-                        photoWallData = photoWallData.slice(-20);
-                        localStorage.setItem(photoWallKey, JSON.stringify(photoWallData));
-                    }
+                    console.error('保存照片墙元数据失败:', e);
+                    showToast('存储空间不足，请清理部分旧照片');
                 }
             }
 
@@ -7231,25 +7229,33 @@
                 document.getElementById('photoFileInput').click();
             };
 
-            window.handlePhotoUpload = function(e) {
+            window.handlePhotoUpload = async function(e) {
                 var file = e.target.files && e.target.files[0];
                 if (!file) return;
                 if (!window.currentUser) {
                     showToast('请先登录');
                     return;
                 }
-                if (file.size > 20 * 1024 * 1024) {
-                    showToast('图片超过 20MB 限制');
+                if (file.size > 50 * 1024 * 1024) {
+                    showToast('图片超过 50MB 限制');
                     return;
                 }
-                var reader = new FileReader();
-                reader.onload = function(ev) {
-                    var dataUrl = ev.target.result;
+                // 上传到 Supabase Storage（和发帖机制完全一致）
+                try {
+                    var path = 'photos/' + Date.now() + '_' + file.name;
+                    var sb = window.sb;
+                    var { error: uploadErr } = await sb.storage.from('uploads').upload(path, file);
+                    if (uploadErr) {
+                        showToast('上传失败: ' + (uploadErr.message || '未知错误'));
+                        e.target.value = '';
+                        return;
+                    }
+                    var imageUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
                     loadPhotoWallData();
                     var photo = {
                         id: Date.now(),
                         username: window.currentUser,
-                        imageUrl: dataUrl,
+                        imageUrl: imageUrl,
                         timestamp: Date.now(),
                         views: 0
                     };
@@ -7257,8 +7263,9 @@
                     savePhotoWallData();
                     renderPhotoWall();
                     showToast('上传成功');
-                };
-                reader.readAsDataURL(file);
+                } catch (err) {
+                    showToast('上传失败: ' + (err.message || '网络错误'));
+                }
                 e.target.value = '';
             };
 
