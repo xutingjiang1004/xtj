@@ -1370,33 +1370,17 @@
         }
         .dock-panel#panelAi::before {
             content: "";
-            position: sticky;
-            left: 0;
-            right: 0;
             display: block;
             height: 62px;
             pointer-events: none;
-            z-index: 8;
             backdrop-filter: blur(18px) saturate(150%);
             -webkit-backdrop-filter: blur(18px) saturate(150%);
-        }
-        .dock-panel#panelAi::before {
-            top: 0;
-            margin-bottom: -62px;
             background: linear-gradient(to bottom, rgba(248, 250, 252, 0.74), rgba(248, 250, 252, 0.34), rgba(248, 250, 252, 0));
             border-bottom: 1px solid rgba(255, 255, 255, 0.34);
-        }
-        .dock-panel#panelAi::after {
-            display: none !important;
-            content: none !important;
         }
         [data-theme="dark"] .dock-panel#panelAi::before {
             background: linear-gradient(to bottom, rgba(12, 13, 18, 0.74), rgba(12, 13, 18, 0.34), rgba(12, 13, 18, 0));
             border-bottom-color: rgba(255, 255, 255, 0.1);
-        }
-        [data-theme="dark"] .dock-panel#panelAi::after {
-            display: none !important;
-            content: none !important;
         }
         .dock-panel::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
         .dock-panel::-webkit-scrollbar-track { display: none !important; }
