@@ -7397,11 +7397,21 @@
                 var img = document.getElementById('photoPreviewImage');
                 if (!img) return;
                 img.classList.toggle('zoomed', ppZoom.scale > 1.01);
-                if (instant) img.classList.add('dragging');
+                if (instant) {
+                    img.classList.add('dragging');
+                    img.style.transition = 'none';
+                    img.style.webkitTransition = 'none';
+                }
                 var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
                 img.style.transform = t;
                 img.style.webkitTransform = t;
-                if (instant) requestAnimationFrame(function() { img.classList.remove('dragging'); });
+                if (instant) {
+                    requestAnimationFrame(function() {
+                        img.classList.remove('dragging');
+                        img.style.transition = '';
+                        img.style.webkitTransition = '';
+                    });
+                }
             }
 
             function ppResetZoom(instant) {
@@ -7423,9 +7433,15 @@
                     ppResetZoom(false);
                     return;
                 }
-                ppZoom.scale = 2.6;
-                ppZoom.tx = 0;
-                ppZoom.ty = 0;
+                var newScale = 2.6;
+                // 计算双击点相对于屏幕中心的偏移，作为缩放后要移动的距离
+                var centerX = window.innerWidth / 2;
+                var centerY = window.innerHeight / 2;
+                // 缩放比例因子
+                var ratio = newScale / 1;
+                ppZoom.scale = newScale;
+                ppZoom.tx = (clientX - centerX) * (1 - ratio);
+                ppZoom.ty = (clientY - centerY) * (1 - ratio);
                 ppApplyTransform(false);
             }
 
