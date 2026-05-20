@@ -1412,16 +1412,22 @@
             padding-left: calc(12px + env(safe-area-inset-left, 0px));
             padding-right: calc(12px + env(safe-area-inset-right, 0px));
             padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-            background: var(--dock-bg);
-            backdrop-filter: blur(24px) saturate(180%);
-            -webkit-backdrop-filter: blur(24px) saturate(180%);
-            border-top: 1px solid var(--dock-border);
-            box-shadow: var(--dock-shadow);
+            background: transparent;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+            border: none;
+            box-shadow: none;
             z-index: 100;
             pointer-events: none;
             touch-action: none;
             max-width: 640px;
             margin: 0 auto;
+        }
+        body.photo-previewing .dock-bar {
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(22px);
+            pointer-events: none;
         }
         .dock-tab {
             flex: 1; max-width: 80px;
@@ -1452,10 +1458,11 @@
         .dock-tab.active {
             color: #059669;
             transform: translateY(-4px);
-            background: rgba(255,255,255,0.85);
-            backdrop-filter: blur(8px) saturate(140%);
-            -webkit-backdrop-filter: blur(8px) saturate(140%);
-            box-shadow: 0 4px 16px rgba(5,150,105,0.15), 0 1px 3px rgba(0,0,0,0.04);
+            background: rgba(255,255,255,0.72);
+            backdrop-filter: blur(14px) saturate(160%);
+            -webkit-backdrop-filter: blur(14px) saturate(160%);
+            border: 1px solid rgba(255,255,255,0.74);
+            box-shadow: 0 8px 22px rgba(5,150,105,0.14), inset 0 1px 0 rgba(255,255,255,0.72);
         }
         .dock-tab.active .dt-icon {
             filter: drop-shadow(0 4px 8px rgba(5,150,105,0.25));
@@ -2996,22 +3003,20 @@
             position: relative;
             aspect-ratio: 4 / 5;
             overflow: hidden;
-            border-radius: 18px;
+            border-radius: 20px;
             cursor: pointer;
             isolation: isolate;
-            padding: 8px;
+            padding: 7px;
             background:
-                radial-gradient(circle at 16% 8%, rgba(255, 255, 255, 0.86), transparent 22%),
-                radial-gradient(circle at 86% 18%, rgba(52, 211, 153, 0.22), transparent 28%),
-                radial-gradient(circle at 80% 86%, rgba(14, 165, 233, 0.18), transparent 32%),
-                linear-gradient(135deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.18));
-            border: 1px solid rgba(255, 255, 255, 0.7);
+                linear-gradient(145deg, rgba(255,255,255,0.68), rgba(255,255,255,0.16) 46%, rgba(255,255,255,0.36)),
+                linear-gradient(315deg, rgba(255,255,255,0.18), rgba(16,185,129,0.08) 48%, rgba(59,130,246,0.08));
+            border: 1px solid rgba(255, 255, 255, 0.76);
             box-shadow:
-                0 18px 42px rgba(15, 23, 42, 0.13),
-                inset 0 1px 0 rgba(255, 255, 255, 0.78),
-                inset 0 -18px 46px rgba(255, 255, 255, 0.12);
-            backdrop-filter: blur(28px) saturate(170%);
-            -webkit-backdrop-filter: blur(28px) saturate(170%);
+                0 16px 38px rgba(15, 23, 42, 0.12),
+                inset 0 1px 0 rgba(255, 255, 255, 0.82),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.34);
+            backdrop-filter: blur(22px) saturate(155%);
+            -webkit-backdrop-filter: blur(22px) saturate(155%);
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         .photo-wall-item::before,
@@ -3024,26 +3029,25 @@
         }
         .photo-wall-item::before {
             background:
-                linear-gradient(115deg, transparent 0 18%, rgba(255,255,255,0.38) 24%, transparent 34%),
-                radial-gradient(ellipse at 22% 0%, rgba(255,255,255,0.62), transparent 34%),
-                linear-gradient(to bottom, rgba(255,255,255,0.24), transparent 38%, rgba(255,255,255,0.18));
+                linear-gradient(120deg, rgba(255,255,255,0.58), rgba(255,255,255,0.16) 22%, transparent 42%),
+                linear-gradient(to bottom, rgba(255,255,255,0.18), transparent 34%, rgba(255,255,255,0.1));
             mix-blend-mode: screen;
         }
         .photo-wall-item::after {
-            inset: 8px;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.52);
+            inset: 7px;
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,0.5);
             box-shadow:
-                inset 0 0 0 1px rgba(255,255,255,0.18),
-                inset 0 12px 30px rgba(255,255,255,0.18);
+                inset 0 0 0 1px rgba(255,255,255,0.14),
+                inset 0 10px 26px rgba(255,255,255,0.12);
         }
         .photo-wall-item:hover {
             transform: translateY(-3px) scale(1.015);
             z-index: 2;
             box-shadow:
-                0 24px 54px rgba(15, 23, 42, 0.18),
+                0 22px 48px rgba(15, 23, 42, 0.16),
                 inset 0 1px 0 rgba(255, 255, 255, 0.82),
-                inset 0 -18px 46px rgba(255, 255, 255, 0.14);
+                inset 0 -1px 0 rgba(255, 255, 255, 0.38);
         }
         .photo-wall-item:active {
             transform: scale(0.97);
@@ -3052,7 +3056,7 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
-            border-radius: 12px;
+            border-radius: 14px;
             display: block;
             position: relative;
             z-index: 0;
@@ -3060,12 +3064,12 @@
         }
         .photo-wall-item .pw-item-info {
             position: absolute;
-            bottom: 8px;
-            left: 8px;
-            right: 8px;
+            bottom: 7px;
+            left: 7px;
+            right: 7px;
             z-index: 3;
             padding: 34px 10px 10px;
-            border-radius: 0 0 12px 12px;
+            border-radius: 0 0 14px 14px;
             background: linear-gradient(transparent, rgba(0,0,0,0.72));
             opacity: 0;
             transition: opacity 0.25s ease;
@@ -3109,12 +3113,12 @@
             position: fixed;
             inset: 0;
             z-index: 10000;
-            background: rgba(0, 0, 0, 0.95);
+            background: rgba(0, 0, 0, 0.96);
             display: none;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 20px 20px calc(22px + env(safe-area-inset-bottom, 0px));
             animation: fadeIn 0.2s ease;
         }
         .photo-preview-overlay.active {
@@ -3149,7 +3153,7 @@
             justify-content: center;
             overflow: hidden;
             width: 100%;
-            max-height: calc(100vh - 100px);
+            max-height: calc(100vh - 78px);
         }
         .photo-preview-image-wrapper img {
             max-width: 100%;
@@ -3161,8 +3165,8 @@
         .photo-preview-info {
             display: flex;
             align-items: center;
-            gap: 20px;
-            padding: 16px 0 0;
+            gap: 10px;
+            padding: 14px 14px 0;
             color: rgba(255,255,255,0.8);
             font-size: 14px;
             flex-shrink: 0;
@@ -3178,24 +3182,37 @@
             font-size: 13px;
         }
         .photo-preview-info .pp-views {
-            color: rgba(255,255,255,0.5);
-            font-size: 13px;
-            display: flex;
+            color: rgba(255,255,255,0.76);
+            font-size: 12px;
+            display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: 5px;
+            height: 26px;
+            padding: 0 10px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.18);
+            backdrop-filter: blur(12px) saturate(150%);
+            -webkit-backdrop-filter: blur(12px) saturate(150%);
+        }
+        .photo-preview-info .pp-views svg {
+            width: 15px;
+            height: 15px;
+            stroke: currentColor;
+            stroke-width: 1.9;
+            fill: none;
+            flex: 0 0 auto;
         }
 
         [data-theme="dark"] .photo-wall-item {
             background:
-                radial-gradient(circle at 18% 8%, rgba(255, 255, 255, 0.25), transparent 24%),
-                radial-gradient(circle at 82% 16%, rgba(52, 211, 153, 0.16), transparent 30%),
-                radial-gradient(circle at 76% 88%, rgba(14, 165, 233, 0.14), transparent 34%),
-                linear-gradient(135deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.04));
-            border-color: rgba(255,255,255,0.16);
+                linear-gradient(145deg, rgba(255,255,255,0.2), rgba(255,255,255,0.05) 48%, rgba(255,255,255,0.12)),
+                linear-gradient(315deg, rgba(255,255,255,0.06), rgba(16,185,129,0.06) 48%, rgba(59,130,246,0.06));
+            border-color: rgba(255,255,255,0.18);
             box-shadow:
                 0 18px 42px rgba(0, 0, 0, 0.36),
                 inset 0 1px 0 rgba(255, 255, 255, 0.22),
-                inset 0 -18px 46px rgba(255, 255, 255, 0.04);
+                inset 0 -1px 0 rgba(255, 255, 255, 0.08);
         }
         [data-theme="dark"] .photo-wall-header {
             background: linear-gradient(to bottom, var(--panel-bg) 0%, rgba(12, 13, 18, 0.82) 72%, rgba(12, 13, 18, 0));
@@ -3315,7 +3332,7 @@
                     <div class="photo-preview-info">
                         <span class="pp-user" id="photoPreviewUser"></span>
                         <span class="pp-time" id="photoPreviewTime"></span>
-                        <span class="pp-views" id="photoPreviewViews">👁 <span id="photoPreviewViewsCount">0</span></span>
+                        <span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg><span id="photoPreviewViewsCount">0</span></span>
                     </div>
                 </div>
             </div>
@@ -7394,6 +7411,7 @@
                 // Use history to allow back navigation
                 var overlay = document.getElementById('photoPreviewOverlay');
                 overlay.classList.add('active');
+                document.body.classList.add('photo-previewing');
                 document.body.style.overflow = 'hidden';
 
                 // Update the rendered grid to reflect view count
@@ -7403,6 +7421,7 @@
             window.closePhotoPreview = function() {
                 var overlay = document.getElementById('photoPreviewOverlay');
                 overlay.classList.remove('active');
+                document.body.classList.remove('photo-previewing');
                 document.body.style.overflow = '';
             };
 
