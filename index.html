@@ -1412,18 +1412,25 @@
             padding-left: calc(12px + env(safe-area-inset-left, 0px));
             padding-right: calc(12px + env(safe-area-inset-right, 0px));
             padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-            background: transparent;
-            backdrop-filter: none;
-            -webkit-backdrop-filter: none;
-            border: none;
-            box-shadow: none;
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            border: none !important;
+            box-shadow: none !important;
             z-index: 100;
             pointer-events: none;
             touch-action: none;
             max-width: 640px;
             margin: 0 auto;
         }
-        body.photo-previewing .dock-bar {
+        .dock-bar::before,
+        .dock-bar::after {
+            display: none !important;
+            content: none !important;
+        }
+        body.photo-previewing .dock-bar,
+        body.photo-previewing #dockBar {
+            display: none !important;
             opacity: 0;
             visibility: hidden;
             transform: translateY(22px);
@@ -3112,6 +3119,9 @@
         .photo-preview-overlay {
             position: fixed;
             inset: 0;
+            width: 100vw;
+            height: 100vh;
+            height: 100dvh;
             z-index: 10000;
             background: rgba(0, 0, 0, 0.96);
             display: none;
@@ -3126,7 +3136,7 @@
         }
         .photo-preview-close {
             position: absolute;
-            top: calc(20px + env(safe-area-inset-top, 0px));
+            top: calc(48px + env(safe-area-inset-top, 0px));
             right: calc(20px + env(safe-area-inset-right, 0px));
             width: 40px;
             height: 40px;
@@ -4952,7 +4962,7 @@
                 if (!forceRefresh) feed.innerHTML = `<div class="loading">加载中...</div>`;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
                     ]);
@@ -4963,7 +4973,7 @@
                     }
                     const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
                     // 缓存时排除头像和用户信息记录，防止base64大图撑爆localStorage
-                    const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__');
+                    const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__');
                     localStorage.setItem(CACHE_KEY, JSON.stringify({ data: { posts: cachePosts, comments: data.comments, likes: data.likes }, timestamp: now }));
                     await renderFeed(data);
                 } catch(e) {
@@ -4973,7 +4983,7 @@
             }
 
             async function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__');
+                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__');
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length + comments.length;
@@ -5178,11 +5188,11 @@
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
+                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__');
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
                     statCacheTime = Date.now();
@@ -5214,11 +5224,11 @@
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER);
+                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__');
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
                     statCacheTime = Date.now();
@@ -5497,12 +5507,12 @@
                 var type = statCurrentType;
                 if (!type) return;
                 Promise.all([
-                    sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").order("created_at", { ascending: false }),
+                    sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
                     var postRes = results[0], commRes = results[1], likeRes = results[2];
-                    statAllPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER; });
+                    statAllPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__'; });
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
                     var body = document.getElementById('statModalBody');
@@ -7263,45 +7273,104 @@
             // ========== 照片墙功能 ==========
             var photoWallData = [];
             var photoWallKey = 'xtj_photos';
+            var PHOTO_WALL_MARKER = '__photo_wall__';
+            var photoWallMigrating = false;
+            var photoWallRealtime = null;
 
-            function loadPhotoWallData() {
+            function loadLocalPhotoWallData() {
                 try {
                     var saved = localStorage.getItem(photoWallKey);
-                    photoWallData = saved ? JSON.parse(saved) : [];
-                    // 兼容旧数据：清理已损坏的 base64 条目（现已改用 Supabase 存储）
-                    var needsSave = false;
-                    for (var i = photoWallData.length - 1; i >= 0; i--) {
-                        var p = photoWallData[i];
-                        if (p.imageUrl && p.imageUrl.indexOf('data:') === 0) {
-                            photoWallData.splice(i, 1);
-                            needsSave = true;
-                        }
-                    }
-                    if (needsSave) {
-                        localStorage.setItem(photoWallKey, JSON.stringify(photoWallData));
-                    }
+                    var localData = saved ? JSON.parse(saved) : [];
+                    return localData.filter(function(p) {
+                        return p && p.imageUrl && p.imageUrl.indexOf('data:') !== 0;
+                    });
                 } catch(e) {
-                    photoWallData = [];
+                    return [];
                 }
             }
 
-            function savePhotoWallData() {
+            function normalizePhotoWallRow(row) {
+                var extra = {};
+                try { extra = row.content ? JSON.parse(row.content) : {}; } catch(e) {}
+                return {
+                    id: row.id,
+                    cloudId: row.id,
+                    username: row.user_name || extra.username || '未知用户',
+                    imageUrl: row.media_url || extra.imageUrl || '',
+                    timestamp: row.created_at ? Date.parse(row.created_at) : (extra.timestamp || Date.now()),
+                    views: row.views || extra.views || 0
+                };
+            }
+
+            async function migrateLocalPhotosToCloud(localData) {
+                if (photoWallMigrating || !window.sb || !window.currentUser || !localData.length) return;
+                if (localStorage.getItem('xtj_photos_migrated_v1') === '1') return;
+                var candidates = localData.filter(function(p) {
+                    return p && p.imageUrl && p.imageUrl.indexOf('http') === 0 && !p.cloudId;
+                });
+                if (!candidates.length) return;
+                photoWallMigrating = true;
+                var migratedOk = false;
                 try {
-                    const MAX_PHOTOS = 100;
-                    if (photoWallData.length > MAX_PHOTOS) {
-                        photoWallData = photoWallData.slice(-MAX_PHOTOS);
+                    for (var i = 0; i < candidates.length; i++) {
+                        var p = candidates[i];
+                        var exists = await window.sb.from('posts')
+                            .select('id')
+                            .eq('media_type', PHOTO_WALL_MARKER)
+                            .eq('media_url', p.imageUrl)
+                            .limit(1);
+                        if (exists.data && exists.data.length) continue;
+                        await window.sb.from('posts').insert([{
+                            user_name: p.username || window.currentUser,
+                            content: JSON.stringify({ type: 'photo_wall', migrated: true, timestamp: p.timestamp || Date.now() }),
+                            media_url: p.imageUrl,
+                            media_type: PHOTO_WALL_MARKER,
+                            actor_key: window.deviceId || 'photo_wall_migrated'
+                        }]);
                     }
-                    localStorage.setItem(photoWallKey, JSON.stringify(photoWallData));
-                } catch (e) {
-                    console.error('保存照片墙元数据失败:', e);
-                    showToast('存储空间不足，请清理部分旧照片');
+                    migratedOk = true;
+                } catch(e) {
+                    console.error('迁移本地照片墙失败:', e);
+                } finally {
+                    if (migratedOk) localStorage.setItem('xtj_photos_migrated_v1', '1');
+                    photoWallMigrating = false;
                 }
             }
 
-            function renderPhotoWall() {
+            async function loadPhotoWallData() {
+                var localData = loadLocalPhotoWallData();
+                if (!window.sb) {
+                    photoWallData = localData;
+                    return photoWallData;
+                }
+                try {
+                    await migrateLocalPhotosToCloud(localData);
+                    var res = await window.sb.from('posts')
+                        .select('id,user_name,media_url,content,created_at,views')
+                        .eq('media_type', PHOTO_WALL_MARKER)
+                        .order('created_at', { ascending: false })
+                        .limit(500);
+                    if (res.error) throw res.error;
+                    photoWallData = (res.data || []).map(normalizePhotoWallRow).filter(function(p) { return !!p.imageUrl; });
+                    if (!photoWallData.length && localData.length) photoWallData = localData;
+                    return photoWallData;
+                } catch(e) {
+                    console.error('加载云端照片墙失败:', e);
+                    photoWallData = localData;
+                    return photoWallData;
+                }
+            }
+
+            function saveLocalPhotoWallData() {
+                try {
+                    localStorage.setItem(photoWallKey, JSON.stringify(photoWallData.slice(0, 100)));
+                } catch (e) {}
+            }
+
+            async function renderPhotoWall() {
                 var grid = document.getElementById('photoGrid');
                 if (!grid) return;
-                loadPhotoWallData();
+                await loadPhotoWallData();
 
                 if (photoWallData.length === 0) {
                     grid.innerHTML = '<div class="photo-wall-empty"><div class="photo-wall-empty-icon">📷</div>还没有照片，快来上传第一张吧</div>';
@@ -7322,7 +7391,7 @@
                     html += '<img src="' + p.imageUrl + '" alt="photo" loading="lazy">';
                     html += '<div class="pw-item-info">';
                     html += '<div class="pw-item-name">' + escapeHtml(name) + '</div>';
-                    html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>👁 ' + p.views + '</span></div>';
+                    html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 ' + (p.views || 0) + '</span></div>';
                     html += '</div></div>';
                 }
                 grid.innerHTML = html;
@@ -7367,17 +7436,21 @@
                         return;
                     }
                     var imageUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
-                    loadPhotoWallData();
-                    var photo = {
-                        id: Date.now(),
-                        username: window.currentUser,
-                        imageUrl: imageUrl,
-                        timestamp: Date.now(),
-                        views: 0
-                    };
-                    photoWallData.push(photo);
-                    savePhotoWallData();
-                    renderPhotoWall();
+                    var insertRes = await sb.from('posts').insert([{
+                        user_name: window.currentUser,
+                        content: JSON.stringify({ type: 'photo_wall' }),
+                        media_url: imageUrl,
+                        media_type: PHOTO_WALL_MARKER,
+                        actor_key: window.deviceId || 'photo_wall'
+                    }]).select('id,user_name,media_url,content,created_at,views').single();
+                    if (insertRes.error) {
+                        showToast('照片已上传，但发布到照片墙失败: ' + (insertRes.error.message || '未知错误'));
+                        e.target.value = '';
+                        return;
+                    }
+                    photoWallData.unshift(normalizePhotoWallRow(insertRes.data));
+                    saveLocalPhotoWallData();
+                    await renderPhotoWall();
                     showToast('上传成功');
                 } catch (err) {
                     showToast('上传失败: ' + (err.message || '网络错误'));
@@ -7392,7 +7465,7 @@
                 return sorted[idx];
             }
 
-            window.openPhotoPreview = function(sortedIdx) {
+            window.openPhotoPreview = async function(sortedIdx) {
                 var sorted = photoWallData.slice().sort(function(a, b) {
                     return b.timestamp - a.timestamp;
                 });
@@ -7401,7 +7474,10 @@
 
                 // Increment view count
                 photo.views = (photo.views || 0) + 1;
-                savePhotoWallData();
+                saveLocalPhotoWallData();
+                if (photo.cloudId && window.sb) {
+                    try { await window.sb.rpc('increment_post_views', { p_post_id: photo.cloudId }); } catch(e) {}
+                }
 
                 document.getElementById('photoPreviewImage').src = photo.imageUrl;
                 document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
@@ -7410,7 +7486,10 @@
 
                 // Use history to allow back navigation
                 var overlay = document.getElementById('photoPreviewOverlay');
+                if (overlay && overlay.parentElement !== document.body) document.body.appendChild(overlay);
                 overlay.classList.add('active');
+                var dock = document.getElementById('dockBar');
+                if (dock) dock.style.display = 'none';
                 document.body.classList.add('photo-previewing');
                 document.body.style.overflow = 'hidden';
 
@@ -7421,6 +7500,8 @@
             window.closePhotoPreview = function() {
                 var overlay = document.getElementById('photoPreviewOverlay');
                 overlay.classList.remove('active');
+                var dock = document.getElementById('dockBar');
+                if (dock) dock.style.display = '';
                 document.body.classList.remove('photo-previewing');
                 document.body.style.overflow = '';
             };
@@ -7436,7 +7517,18 @@
             });
 
             function initPhotoWall() {
-                loadPhotoWallData();
+                if (!photoWallRealtime && window.sb) {
+                    photoWallRealtime = window.sb.channel('photo-wall')
+                        .on('postgres_changes', {
+                            event: '*',
+                            schema: 'public',
+                            table: 'posts',
+                            filter: 'media_type=eq.' + PHOTO_WALL_MARKER
+                        }, function() {
+                            renderPhotoWall();
+                        })
+                        .subscribe();
+                }
                 renderPhotoWall();
             }
             window.initPhotoWall = initPhotoWall;
