@@ -3166,6 +3166,21 @@
             object-fit: contain;
             border-radius: 8px;
             box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+            transform-origin: center center;
+            transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+            will-change: transform;
+            cursor: zoom-in;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-user-drag: none;
+            touch-action: none;
+        }
+        .photo-preview-image-wrapper img.zoomed {
+            cursor: grab;
+        }
+        .photo-preview-image-wrapper img.dragging {
+            cursor: grabbing;
+            transition: none;
         }
         .photo-preview-info {
             display: flex;
@@ -7269,6 +7284,14 @@
             var photoWallMigrating = false;
             var photoWallRealtime = null;
             var photoPreviewActive = false;
+            var photoPreviewClosedAt = 0;
+            var photoPreviewCurrent = null;
+            var ppZoom = { scale: 1, tx: 0, ty: 0 };
+            var ppPointers = new Map();
+            var ppStart = null;
+            var ppLastTap = 0;
+            var ppTapTimer = null;
+            var ppMoved = false;
 
             function loadLocalPhotoWallData() {
                 try {
@@ -7360,6 +7383,69 @@
                 } catch (e) {}
             }
 
+            function updatePhotoViewDisplays(photo) {
+                if (!photo) return;
+                var previewCount = document.getElementById('photoPreviewViewsCount');
+                if (previewCount && photoPreviewCurrent && photoPreviewCurrent.id === photo.id) {
+                    previewCount.textContent = photo.views || 0;
+                }
+                var item = document.querySelector('.photo-wall-item[data-photo-id="' + String(photo.id).replace(/"/g, '\\"') + '"] .pw-view-count');
+                if (item) item.textContent = photo.views || 0;
+            }
+
+            function ppApplyTransform(instant) {
+                var img = document.getElementById('photoPreviewImage');
+                if (!img) return;
+                img.classList.toggle('zoomed', ppZoom.scale > 1.01);
+                if (instant) img.classList.add('dragging');
+                var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
+                img.style.transform = t;
+                img.style.webkitTransform = t;
+                if (instant) requestAnimationFrame(function() { img.classList.remove('dragging'); });
+            }
+
+            function ppResetZoom(instant) {
+                var img = document.getElementById('photoPreviewImage');
+                ppZoom = { scale: 1, tx: 0, ty: 0 };
+                ppPointers.clear();
+                ppStart = null;
+                if (img) {
+                    img.classList.remove('zoomed', 'dragging');
+                    if (instant) img.classList.add('dragging');
+                    img.style.transform = '';
+                    img.style.webkitTransform = '';
+                    if (instant) requestAnimationFrame(function() { img.classList.remove('dragging'); });
+                }
+            }
+
+            function ppToggleZoom(clientX, clientY) {
+                if (ppZoom.scale > 1.05) {
+                    ppResetZoom(false);
+                    return;
+                }
+                ppZoom.scale = 2.6;
+                ppZoom.tx = 0;
+                ppZoom.ty = 0;
+                ppApplyTransform(false);
+            }
+
+            async function syncPhotoViewCount(photo) {
+                if (!photo || !photo.cloudId || !window.sb) return;
+                try {
+                    await window.sb.rpc('increment_post_views', { p_post_id: photo.cloudId });
+                    var res = await window.sb.from('posts').select('views').eq('id', photo.cloudId).maybeSingle();
+                    if (res && res.data && typeof res.data.views === 'number') {
+                        photo.views = res.data.views;
+                        var cached = photoWallData.find(function(p) { return p.id === photo.id || p.cloudId === photo.cloudId; });
+                        if (cached) cached.views = photo.views;
+                        saveLocalPhotoWallData();
+                        updatePhotoViewDisplays(photo);
+                    }
+                } catch(e) {
+                    updatePhotoViewDisplays(photo);
+                }
+            }
+
             async function renderPhotoWall() {
                 var grid = document.getElementById('photoGrid');
                 if (!grid) return;
@@ -7380,11 +7466,11 @@
                     var p = sorted[i];
                     var timeStr = formatPhotoTime(p.timestamp);
                     var name = p.username || '未知用户';
-                    html += '<div class="photo-wall-item" onclick="openPhotoPreview(' + i + ')">';
+                    html += '<div class="photo-wall-item" data-photo-id="' + escapeHtml(p.id) + '" onclick="openPhotoPreview(' + i + ')">';
                     html += '<img src="' + p.imageUrl + '" alt="photo" loading="lazy">';
                     html += '<div class="pw-item-info">';
                     html += '<div class="pw-item-name">' + escapeHtml(name) + '</div>';
-                    html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 ' + (p.views || 0) + '</span></div>';
+                    html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
                     html += '</div></div>';
                 }
                 grid.innerHTML = html;
@@ -7467,9 +7553,13 @@
 
                 // Increment view count
                 photo.views = (photo.views || 0) + 1;
+                photoPreviewCurrent = photo;
                 saveLocalPhotoWallData();
+                updatePhotoViewDisplays(photo);
 
-                document.getElementById('photoPreviewImage').src = photo.imageUrl;
+                ppResetZoom(true);
+                var previewImg = document.getElementById('photoPreviewImage');
+                previewImg.src = photo.imageUrl;
                 document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
                 document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
                 document.getElementById('photoPreviewViewsCount').textContent = photo.views;
@@ -7484,23 +7574,21 @@
                 document.documentElement.classList.add('photo-previewing');
                 document.body.classList.add('photo-previewing');
                 document.body.style.overflow = 'hidden';
-                if (photo.cloudId && window.sb) {
-                    setTimeout(function() {
-                        window.sb.rpc('increment_post_views', { p_post_id: photo.cloudId }).catch(function() {});
-                    }, 300);
-                }
+                syncPhotoViewCount(photo);
             };
 
             window.closePhotoPreview = function() {
                 var overlay = document.getElementById('photoPreviewOverlay');
                 overlay.classList.remove('active');
                 photoPreviewActive = false;
+                photoPreviewClosedAt = Date.now();
+                photoPreviewCurrent = null;
+                ppResetZoom(true);
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = '';
                 document.documentElement.classList.remove('photo-previewing');
                 document.body.classList.remove('photo-previewing');
                 document.body.style.overflow = '';
-                renderPhotoWall();
             };
 
             // Click outside image to close
@@ -7513,6 +7601,122 @@
                 }
             });
 
+            (function bindPhotoPreviewGestures() {
+                var img = document.getElementById('photoPreviewImage');
+                var wrapper = document.querySelector('.photo-preview-image-wrapper');
+                if (!img || !wrapper) return;
+
+                function dist(a, b) {
+                    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+                }
+
+                function center(a, b) {
+                    return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+                }
+
+                img.addEventListener('pointerdown', function(e) {
+                    if (!photoPreviewActive) return;
+                    e.preventDefault();
+                    img.setPointerCapture && img.setPointerCapture(e.pointerId);
+                    ppPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+                    ppMoved = false;
+                    img.classList.add('dragging');
+                    if (ppPointers.size === 2) {
+                        var pts = Array.from(ppPointers.values());
+                        ppStart = {
+                            mode: 'pinch',
+                            dist: dist(pts[0], pts[1]),
+                            scale: ppZoom.scale,
+                            tx: ppZoom.tx,
+                            ty: ppZoom.ty,
+                            center: center(pts[0], pts[1])
+                        };
+                    } else if (ppPointers.size === 1) {
+                        ppStart = {
+                            mode: 'pan',
+                            x: e.clientX,
+                            y: e.clientY,
+                            tx: ppZoom.tx,
+                            ty: ppZoom.ty
+                        };
+                    }
+                }, { passive: false });
+
+                img.addEventListener('pointermove', function(e) {
+                    if (!photoPreviewActive || !ppPointers.has(e.pointerId)) return;
+                    e.preventDefault();
+                    ppPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+                    if (!ppStart) return;
+                    if (ppPointers.size >= 2 && ppStart.mode === 'pinch') {
+                        var pts = Array.from(ppPointers.values()).slice(0, 2);
+                        var d = Math.max(1, dist(pts[0], pts[1]));
+                        var c = center(pts[0], pts[1]);
+                        var nextScale = Math.max(1, Math.min(5, ppStart.scale * (d / Math.max(1, ppStart.dist))));
+                        var ratio = nextScale / Math.max(1, ppStart.scale);
+                        ppZoom.scale = nextScale;
+                        ppZoom.tx = ppStart.tx + (c.x - ppStart.center.x) + (1 - ratio) * (c.x - window.innerWidth / 2);
+                        ppZoom.ty = ppStart.ty + (c.y - ppStart.center.y) + (1 - ratio) * (c.y - window.innerHeight / 2);
+                        ppMoved = true;
+                        ppApplyTransform(true);
+                    } else if (ppPointers.size === 1 && ppStart.mode === 'pan' && ppZoom.scale > 1.01) {
+                        var dx = e.clientX - ppStart.x;
+                        var dy = e.clientY - ppStart.y;
+                        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) ppMoved = true;
+                        ppZoom.tx = ppStart.tx + dx;
+                        ppZoom.ty = ppStart.ty + dy;
+                        ppApplyTransform(true);
+                    }
+                }, { passive: false });
+
+                function endPointer(e) {
+                    if (!ppPointers.has(e.pointerId)) return;
+                    ppPointers.delete(e.pointerId);
+                    img.releasePointerCapture && img.releasePointerCapture(e.pointerId);
+                    img.classList.remove('dragging');
+
+                    if (ppPointers.size === 1) {
+                        var p = Array.from(ppPointers.values())[0];
+                        ppStart = { mode: 'pan', x: p.clientX, y: p.clientY, tx: ppZoom.tx, ty: ppZoom.ty };
+                        return;
+                    }
+                    ppStart = null;
+
+                    if (ppMoved) return;
+                    var now = Date.now();
+                    if (now - ppLastTap < 280) {
+                        clearTimeout(ppTapTimer);
+                        ppLastTap = 0;
+                        ppToggleZoom(e.clientX, e.clientY);
+                    } else {
+                        ppLastTap = now;
+                        clearTimeout(ppTapTimer);
+                        ppTapTimer = setTimeout(function() {
+                            ppLastTap = 0;
+                            if (photoPreviewActive) closePhotoPreview();
+                        }, 260);
+                    }
+                }
+
+                img.addEventListener('pointerup', endPointer);
+                img.addEventListener('pointercancel', function(e) {
+                    ppPointers.delete(e.pointerId);
+                    img.classList.remove('dragging');
+                    ppStart = null;
+                });
+
+                img.addEventListener('wheel', function(e) {
+                    if (!photoPreviewActive) return;
+                    e.preventDefault();
+                    var next = Math.max(1, Math.min(5, ppZoom.scale * (1 - e.deltaY * 0.002)));
+                    ppZoom.scale = next;
+                    if (next <= 1.01) {
+                        ppResetZoom(false);
+                    } else {
+                        ppApplyTransform(false);
+                    }
+                }, { passive: false });
+            })();
+
             function initPhotoWall() {
                 if (!photoWallRealtime && window.sb) {
                     photoWallRealtime = window.sb.channel('photo-wall')
@@ -7523,6 +7727,7 @@
                             filter: 'media_type=eq.' + PHOTO_WALL_MARKER
                         }, function() {
                             if (photoPreviewActive || document.body.classList.contains('photo-previewing')) return;
+                            if (Date.now() - photoPreviewClosedAt < 1000) return;
                             renderPhotoWall();
                         })
                         .subscribe();
