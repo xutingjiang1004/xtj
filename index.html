@@ -10,6 +10,9 @@
         html, body {
             touch-action: manipulation;
             overscroll-behavior: none;
+            width: 100%;
+            max-width: 100%;
+            overflow-x: hidden;
         }
         * {
             -webkit-tap-highlight-color: transparent;
@@ -1435,6 +1438,13 @@
             visibility: hidden;
             transform: translateY(22px);
             pointer-events: none;
+        }
+        html.photo-previewing,
+        body.photo-previewing {
+            overflow: hidden !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            background: #000 !important;
         }
         .dock-tab {
             flex: 1; max-width: 80px;
@@ -2952,12 +2962,11 @@
             justify-content: space-between;
             padding: 8px 4px 18px;
             flex-shrink: 0;
-            position: sticky;
-            top: 0;
-            z-index: 9;
-            background: linear-gradient(to bottom, var(--panel-bg) 0%, rgba(248, 250, 252, 0.82) 72%, rgba(248, 250, 252, 0));
-            backdrop-filter: blur(16px) saturate(150%);
-            -webkit-backdrop-filter: blur(16px) saturate(150%);
+            position: relative;
+            z-index: 1;
+            background: transparent;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
         }
         .photo-wall-title {
             font-size: 18px;
@@ -3023,8 +3032,25 @@
         }
         .photo-wall-item::before,
         .photo-wall-item::after {
-            display: none;
-            content: none;
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: 14px;
+            pointer-events: none;
+        }
+        .photo-wall-item::before {
+            z-index: 1;
+            background:
+                linear-gradient(135deg, rgba(255,255,255,0.32), rgba(255,255,255,0.06) 28%, transparent 52%),
+                linear-gradient(to bottom, rgba(255,255,255,0.12), transparent 36%);
+            mix-blend-mode: screen;
+        }
+        .photo-wall-item::after {
+            z-index: 2;
+            border: 1px solid rgba(255,255,255,0.42);
+            box-shadow:
+                inset 0 1px 0 rgba(255,255,255,0.44),
+                inset 0 -1px 0 rgba(255,255,255,0.12);
         }
         .photo-wall-item:hover {
             z-index: 2;
@@ -3095,16 +3121,22 @@
         }
         .photo-preview-overlay {
             position: fixed;
-            inset: 0;
-            width: 100vw;
-            height: 100vh;
-            height: 100dvh;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            left: 0;
             z-index: 10000;
-            background: rgba(0, 0, 0, 0.96);
+            background: #000;
             display: none;
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            box-sizing: border-box;
+            max-width: 100%;
+            overflow: hidden;
+            overscroll-behavior: none;
+            touch-action: none;
+            contain: layout paint;
             padding: 20px 20px calc(22px + env(safe-area-inset-bottom, 0px));
             animation: fadeIn 0.2s ease;
         }
@@ -3140,7 +3172,9 @@
             justify-content: center;
             overflow: hidden;
             width: 100%;
-            max-height: calc(100vh - 78px);
+            min-width: 0;
+            max-height: calc(100% - 78px);
+            touch-action: none;
         }
         .photo-preview-image-wrapper img {
             max-width: 100%;
@@ -3198,7 +3232,7 @@
                 0 4px 14px rgba(0, 0, 0, 0.24);
         }
         [data-theme="dark"] .photo-wall-header {
-            background: linear-gradient(to bottom, var(--panel-bg) 0%, rgba(12, 13, 18, 0.82) 72%, rgba(12, 13, 18, 0));
+            background: transparent;
         }
 
     </style>
@@ -7463,6 +7497,7 @@
                 photoPreviewActive = true;
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = 'none';
+                document.documentElement.classList.add('photo-previewing');
                 document.body.classList.add('photo-previewing');
                 document.body.style.overflow = 'hidden';
                 if (photo.cloudId && window.sb) {
@@ -7478,6 +7513,7 @@
                 photoPreviewActive = false;
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = '';
+                document.documentElement.classList.remove('photo-previewing');
                 document.body.classList.remove('photo-previewing');
                 document.body.style.overflow = '';
                 renderPhotoWall();
