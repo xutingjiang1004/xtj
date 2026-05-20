@@ -2944,7 +2944,7 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 2px 4px 20px;
+            padding: 2px 4px 14px;
             flex-shrink: 0;
             position: relative;
             z-index: 1;
@@ -3144,7 +3144,6 @@
             transition: all 0.2s ease;
             border: none;
             line-height: 1;
-            z-index: 20;
         }
         .photo-preview-close:hover {
             background: rgba(255,255,255,0.25);
@@ -3159,19 +3158,14 @@
             width: 100%;
             min-width: 0;
             max-height: calc(100% - 78px);
-            cursor: grab;
-        }
-        .photo-preview-image-wrapper.preview-zoomed {
-            cursor: move;
+            touch-action: none;
         }
         .photo-preview-image-wrapper img {
             max-width: 100%;
             max-height: 100%;
             object-fit: contain;
-            border-radius: 0;
+            border-radius: 8px;
             box-shadow: 0 8px 40px rgba(0,0,0,0.5);
-            transition: transform 0.3s ease;
-            transform-origin: center center;
         }
         .photo-preview-info {
             display: flex;
@@ -7457,7 +7451,12 @@
                 e.target.value = '';
             };
 
-            var _previewSortedIdx = -1;
+            function getPhotoIndexInSorted(idx) {
+                var sorted = photoWallData.slice().sort(function(a, b) {
+                    return b.timestamp - a.timestamp;
+                });
+                return sorted[idx];
+            }
 
             window.openPhotoPreview = async function(sortedIdx) {
                 var sorted = photoWallData.slice().sort(function(a, b) {
@@ -7470,20 +7469,12 @@
                 photo.views = (photo.views || 0) + 1;
                 saveLocalPhotoWallData();
 
-                // Save index for in-place update after close
-                _previewSortedIdx = sortedIdx;
-
-                var img = document.getElementById('photoPreviewImage');
-                img.src = photo.imageUrl;
-                img.style.transform = 'scale(1)';
-                img.style.transition = 'none';
-                var wrapper = document.querySelector('.photo-preview-image-wrapper');
-                if (wrapper) wrapper.classList.remove('preview-zoomed');
-
+                document.getElementById('photoPreviewImage').src = photo.imageUrl;
                 document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
                 document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
                 document.getElementById('photoPreviewViewsCount').textContent = photo.views;
 
+                // Use history to allow back navigation
                 var overlay = document.getElementById('photoPreviewOverlay');
                 if (overlay && overlay.parentElement !== document.body) document.body.appendChild(overlay);
                 overlay.classList.add('active');
@@ -7493,7 +7484,6 @@
                 document.documentElement.classList.add('photo-previewing');
                 document.body.classList.add('photo-previewing');
                 document.body.style.overflow = 'hidden';
-
                 if (photo.cloudId && window.sb) {
                     setTimeout(function() {
                         window.sb.rpc('increment_post_views', { p_post_id: photo.cloudId }).catch(function() {});
@@ -7503,7 +7493,6 @@
 
             window.closePhotoPreview = function() {
                 var overlay = document.getElementById('photoPreviewOverlay');
-                if (!overlay) return;
                 overlay.classList.remove('active');
                 photoPreviewActive = false;
                 var dock = document.getElementById('dockBar');
@@ -7511,147 +7500,18 @@
                 document.documentElement.classList.remove('photo-previewing');
                 document.body.classList.remove('photo-previewing');
                 document.body.style.overflow = '';
-
-                // Reset zoom state
-                var img = document.getElementById('photoPreviewImage');
-                if (img) { img.style.transform = 'scale(1)'; img.style.transition = 'none'; }
-                var wrapper = document.querySelector('.photo-preview-image-wrapper');
-                if (wrapper) wrapper.classList.remove('preview-zoomed');
-
-                // Update view count in-place - no full re-render (avoids flash)
-                if (_previewSortedIdx >= 0) {
-                    var items = document.querySelectorAll('.photo-wall-item');
-                    if (items[_previewSortedIdx]) {
-                        var meta = items[_previewSortedIdx].querySelector('.pw-item-meta span:last-child');
-                        var photo = photoWallData.slice().sort(function(a, b) { return b.timestamp - a.timestamp; })[_previewSortedIdx];
-                        if (meta && photo) meta.textContent = '浏览 ' + (photo.views || 0);
-                    }
-                    _previewSortedIdx = -1;
-                }
+                renderPhotoWall();
             };
 
-            // Close by clicking background
+            // Click outside image to close
             document.addEventListener('click', function(e) {
                 var overlay = document.getElementById('photoPreviewOverlay');
-                if (overlay && overlay.classList.contains('active') && e.target === overlay) {
-                    closePhotoPreview();
+                if (overlay && overlay.classList.contains('active')) {
+                    if (e.target === overlay || e.target.classList.contains('photo-preview-image-wrapper')) {
+                        closePhotoPreview();
+                    }
                 }
             });
-
-            // ===== 双击放大 / 双指捏合缩放 =====
-            (function setupPreviewZoom() {
-                var zoomed = false;
-                var currentScale = 1;
-                var startDist = 0;
-                var startScale = 1;
-                var lastTapTime = 0;
-
-                function toggleZoom(clientX, clientY) {
-                    var wrapper = document.querySelector('.photo-preview-image-wrapper');
-                    var img = document.getElementById('photoPreviewImage');
-                    var overlay = document.getElementById('photoPreviewOverlay');
-                    if (!wrapper || !img || !overlay || !overlay.classList.contains('active')) return;
-
-                    zoomed = !zoomed;
-                    if (zoomed) {
-                        var rect = wrapper.getBoundingClientRect();
-                        var ox = ((clientX - rect.left) / rect.width) * 100;
-                        var oy = ((clientY - rect.top) / rect.height) * 100;
-                        img.style.transition = 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
-                        img.style.transformOrigin = ox + '% ' + oy + '%';
-                        img.style.transform = 'scale(2.5)';
-                        currentScale = 2.5;
-                        wrapper.classList.add('preview-zoomed');
-                    } else {
-                        img.style.transition = 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
-                        img.style.transformOrigin = 'center center';
-                        img.style.transform = 'scale(1)';
-                        currentScale = 1;
-                        wrapper.classList.remove('preview-zoomed');
-                    }
-                }
-
-                // Desktop: native dblclick
-                document.addEventListener('dblclick', function(e) {
-                    var overlay = document.getElementById('photoPreviewOverlay');
-                    if (!overlay || !overlay.classList.contains('active')) return;
-                    if (e.target.closest('.photo-preview-close') || e.target.closest('.photo-preview-info')) return;
-                    toggleZoom(e.clientX, e.clientY);
-                });
-
-                // Mobile: manual double-tap detection
-                document.addEventListener('touchend', function(e) {
-                    var overlay = document.getElementById('photoPreviewOverlay');
-                    if (!overlay || !overlay.classList.contains('active')) return;
-                    if (e.target.closest('.photo-preview-close') || e.target.closest('.photo-preview-info')) return;
-                    // Ignore if pinch was active (more than 1 touch ended)
-                    if (e.touches.length > 0 || e.changedTouches.length > 1) return;
-
-                    var now = Date.now();
-                    if (now - lastTapTime < 300 && lastTapTime > 0) {
-                        var touch = e.changedTouches[0];
-                        toggleZoom(touch.clientX, touch.clientY);
-                        lastTapTime = 0;
-                    } else {
-                        lastTapTime = now;
-                    }
-                });
-
-                document.addEventListener('touchstart', function(e) {
-                    var wrapper = document.querySelector('.photo-preview-image-wrapper');
-                    var overlay = document.getElementById('photoPreviewOverlay');
-                    if (!wrapper || !overlay || !overlay.classList.contains('active')) return;
-                    if (e.touches.length === 2) {
-                        startDist = Math.hypot(
-                            e.touches[0].clientX - e.touches[1].clientX,
-                            e.touches[0].clientY - e.touches[1].clientY
-                        );
-                        startScale = currentScale;
-                        var img = document.getElementById('photoPreviewImage');
-                        if (img) img.style.transition = 'none';
-                    }
-                }, { passive: false });
-
-                document.addEventListener('touchmove', function(e) {
-                    var wrapper = document.querySelector('.photo-preview-image-wrapper');
-                    var overlay = document.getElementById('photoPreviewOverlay');
-                    if (!wrapper || !overlay || !overlay.classList.contains('active')) return;
-                    if (e.touches.length === 2) {
-                        e.preventDefault();
-                        var dist = Math.hypot(
-                            e.touches[0].clientX - e.touches[1].clientX,
-                            e.touches[0].clientY - e.touches[1].clientY
-                        );
-                        var scale = startScale * (dist / startDist);
-                        scale = Math.max(0.5, Math.min(5, scale));
-                        var img = document.getElementById('photoPreviewImage');
-                        if (img) img.style.transform = 'scale(' + scale + ')';
-                        currentScale = scale;
-                        zoomed = scale > 1.05;
-                        if (zoomed) {
-                            wrapper.classList.add('preview-zoomed');
-                        } else {
-                            wrapper.classList.remove('preview-zoomed');
-                        }
-                    }
-                }, { passive: false });
-
-                document.addEventListener('touchend', function(e) {
-                    var wrapper = document.querySelector('.photo-preview-image-wrapper');
-                    var overlay = document.getElementById('photoPreviewOverlay');
-                    if (!wrapper || !overlay || !overlay.classList.contains('active')) return;
-                    if (currentScale < 1) {
-                        var img = document.getElementById('photoPreviewImage');
-                        if (img) {
-                            img.style.transition = 'transform 0.3s ease';
-                            img.style.transform = 'scale(1)';
-                        }
-                        currentScale = 1;
-                        zoomed = false;
-                        wrapper.classList.remove('preview-zoomed');
-                    }
-                });
-            })();
 
             function initPhotoWall() {
                 if (!photoWallRealtime && window.sb) {
