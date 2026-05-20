@@ -3112,26 +3112,29 @@
             z-index: 10000;
             background: #000;
             display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
             box-sizing: border-box;
             max-width: 100%;
             overflow: hidden;
             overscroll-behavior: none;
             touch-action: none;
             contain: layout paint;
-            padding: 0;
+            padding: 20px 20px calc(22px + env(safe-area-inset-bottom, 0px));
             animation: fadeIn 0.2s ease;
         }
         .photo-preview-overlay.active {
-            display: block;
+            display: flex;
         }
         .photo-preview-close {
             position: absolute;
-            top: calc(12px + env(safe-area-inset-top, 0px));
-            right: calc(12px + env(safe-area-inset-right, 0px));
+            top: calc(48px + env(safe-area-inset-top, 0px));
+            right: calc(20px + env(safe-area-inset-right, 0px));
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background: rgba(0,0,0,0.4);
+            background: rgba(255,255,255,0.15);
             color: white;
             font-size: 28px;
             display: flex;
@@ -3141,31 +3144,30 @@
             transition: all 0.2s ease;
             border: none;
             line-height: 1;
-            z-index: 10;
         }
         .photo-preview-close:hover {
             background: rgba(255,255,255,0.25);
             transform: rotate(90deg);
         }
         .photo-preview-image-wrapper {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
+            flex: 1;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
+            width: 100%;
+            min-width: 0;
+            max-height: calc(100% - 78px);
             touch-action: none;
         }
         .photo-preview-image-wrapper img {
             max-width: 100%;
             max-height: 100%;
-            width: 100%;
-            height: 100%;
             object-fit: contain;
+            border-radius: 8px;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.5);
             transform-origin: center center;
+            transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
             will-change: transform;
             cursor: zoom-in;
             user-select: none;
@@ -3178,29 +3180,18 @@
         }
         .photo-preview-image-wrapper img.dragging {
             cursor: grabbing;
-            transition: none !important;
-            -webkit-transition: none !important;
-        }
-        .photo-preview-image-wrapper img.animated {
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-            -webkit-transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: none;
         }
         .photo-preview-info {
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
             display: flex;
             align-items: center;
             gap: 10px;
-            padding: 40px 16px 12px;
-            background: linear-gradient(transparent, rgba(0,0,0,0.6));
+            padding: 14px 14px 0;
             color: rgba(255,255,255,0.8);
-            font-size: 13px;
+            font-size: 14px;
+            flex-shrink: 0;
             flex-wrap: wrap;
             justify-content: center;
-            pointer-events: none;
-            z-index: 5;
         }
         .photo-preview-info .pp-user {
             font-weight: 600;
@@ -7408,14 +7399,17 @@
                 img.classList.toggle('zoomed', ppZoom.scale > 1.01);
                 if (instant) {
                     img.classList.add('dragging');
+                    img.style.transition = 'none';
+                    img.style.webkitTransition = 'none';
                 }
-                img.classList.remove('animated');
                 var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
                 img.style.transform = t;
                 img.style.webkitTransform = t;
                 if (instant) {
                     requestAnimationFrame(function() {
                         img.classList.remove('dragging');
+                        img.style.transition = '';
+                        img.style.webkitTransition = '';
                     });
                 }
             }
@@ -7427,11 +7421,7 @@
                 ppStart = null;
                 if (img) {
                     img.classList.remove('zoomed', 'dragging');
-                    if (instant) {
-                        img.classList.add('dragging');
-                    } else {
-                        img.classList.add('animated');
-                    }
+                    if (instant) img.classList.add('dragging');
                     img.style.transform = '';
                     img.style.webkitTransform = '';
                     if (instant) requestAnimationFrame(function() { img.classList.remove('dragging'); });
@@ -7452,8 +7442,6 @@
                 ppZoom.scale = newScale;
                 ppZoom.tx = (clientX - centerX) * (1 - ratio);
                 ppZoom.ty = (clientY - centerY) * (1 - ratio);
-                var img = document.getElementById('photoPreviewImage');
-                if (img) img.classList.add('animated');
                 ppApplyTransform(false);
             }
 
@@ -7680,11 +7668,10 @@
                         var d = Math.max(1, dist(pts[0], pts[1]));
                         var c = center(pts[0], pts[1]);
                         var nextScale = Math.max(1, Math.min(5, ppStart.scale * (d / Math.max(1, ppStart.dist))));
-                        var ratio = nextScale / ppStart.scale;
+                        var ratio = nextScale / Math.max(1, ppStart.scale);
                         ppZoom.scale = nextScale;
-                        var w2 = window.innerWidth / 2, h2 = window.innerHeight / 2;
-                        ppZoom.tx = ppStart.tx * ratio + (c.x - ppStart.center.x * ratio) + w2 * (ratio - 1);
-                        ppZoom.ty = ppStart.ty * ratio + (c.y - ppStart.center.y * ratio) + h2 * (ratio - 1);
+                        ppZoom.tx = ppStart.tx + (c.x - ppStart.center.x) + (1 - ratio) * (c.x - window.innerWidth / 2);
+                        ppZoom.ty = ppStart.ty + (c.y - ppStart.center.y) + (1 - ratio) * (c.y - window.innerHeight / 2);
                         ppMoved = true;
                         ppApplyTransform(true);
                     } else if (ppPointers.size === 1 && ppStart.mode === 'pan' && ppZoom.scale > 1.01) {
@@ -7736,14 +7723,11 @@
                 img.addEventListener('wheel', function(e) {
                     if (!photoPreviewActive) return;
                     e.preventDefault();
-                    var imgEl = document.getElementById('photoPreviewImage');
                     var next = Math.max(1, Math.min(5, ppZoom.scale * (1 - e.deltaY * 0.002)));
                     ppZoom.scale = next;
                     if (next <= 1.01) {
-                        if (imgEl) imgEl.classList.add('animated');
                         ppResetZoom(false);
                     } else {
-                        if (imgEl) imgEl.classList.add('animated');
                         ppApplyTransform(false);
                     }
                 }, { passive: false });
