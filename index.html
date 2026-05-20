@@ -3588,6 +3588,7 @@
             const AVATAR_CACHE_KEY = "xtj_avatars";
 
             let currentUser = localStorage.getItem("xtj_user") || "";
+            window.currentUser = currentUser;
             let dockChatListCacheTime = 0;
             const DOCK_CHAT_CACHE_DURATION = 120000;
             let deviceId = localStorage.getItem("xtj_device_id");
@@ -3767,6 +3768,7 @@
                     }
 
                     currentUser = name;
+                    window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
                     showToast("登录成功，欢迎回来 " + name);
                     closeModal('loginModal');
@@ -4231,6 +4233,7 @@
 
             window.doLogout = async function () {
                 currentUser = "";
+                window.currentUser = currentUser;
                 localStorage.removeItem("xtj_user");
                 localStorage.removeItem(CACHE_KEY);
                 document.getElementById("loginNickInp").value = "";
@@ -5579,6 +5582,9 @@
             let lastTabTapTime = {};
             window.switchDockTab = function(tab, skipReturn) {
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
+                // 先触发点击动画（即使已经在当前tab也要播放）
+                var btn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
+                if (btn) triggerTabAnimation(btn, tab);
                 const now = Date.now();
                 if (tab === currentDockTab && !skipReturn) {
                     // 已经在当前tab，单击执行返回操作
@@ -5644,7 +5650,6 @@
                 btn.addEventListener('click', function() {
                     var tab = this.dataset.tab;
                     switchDockTab(tab);
-                    triggerTabAnimation(this, tab);
                 });
             });
             // ========== Dock 聊天 ==========
@@ -7219,7 +7224,7 @@
             }
 
             window.triggerPhotoUpload = function() {
-                if (!currentUser) {
+                if (!window.currentUser) {
                     showToast('请先登录');
                     return;
                 }
@@ -7229,7 +7234,7 @@
             window.handlePhotoUpload = function(e) {
                 var file = e.target.files && e.target.files[0];
                 if (!file) return;
-                if (!currentUser) {
+                if (!window.currentUser) {
                     showToast('请先登录');
                     return;
                 }
@@ -7243,7 +7248,7 @@
                     loadPhotoWallData();
                     var photo = {
                         id: Date.now(),
-                        username: currentUser,
+                        username: window.currentUser,
                         imageUrl: dataUrl,
                         timestamp: Date.now(),
                         views: 0
