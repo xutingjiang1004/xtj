@@ -1354,7 +1354,7 @@
             padding-top: calc(24px + env(safe-area-inset-top, 0px));
             padding-left: calc(16px + env(safe-area-inset-left, 0px));
             padding-right: calc(16px + env(safe-area-inset-right, 0px));
-            padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+            padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
             background: var(--panel-bg);
         }
         .dock-panel.active { will-change: opacity, transform; }
@@ -1422,6 +1422,9 @@
             touch-action: none;
             max-width: 640px;
             margin: 0 auto;
+        }
+        .dock-bar > * {
+            background-clip: padding-box;
         }
         .dock-bar::before,
         .dock-bar::after {
@@ -2943,7 +2946,7 @@
             display: flex;
             flex-direction: column;
             min-height: 100%;
-            padding: 16px 16px 92px;
+            padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
             position: relative;
         }
         .photo-wall-header {
@@ -3010,51 +3013,24 @@
             position: relative;
             aspect-ratio: 4 / 5;
             overflow: hidden;
-            border-radius: 20px;
+            border-radius: 14px;
             cursor: pointer;
-            isolation: isolate;
-            padding: 7px;
-            background:
-                linear-gradient(145deg, rgba(255,255,255,0.68), rgba(255,255,255,0.16) 46%, rgba(255,255,255,0.36)),
-                linear-gradient(315deg, rgba(255,255,255,0.18), rgba(16,185,129,0.08) 48%, rgba(59,130,246,0.08));
-            border: 1px solid rgba(255, 255, 255, 0.76);
-            box-shadow:
-                0 16px 38px rgba(15, 23, 42, 0.12),
-                inset 0 1px 0 rgba(255, 255, 255, 0.82),
-                inset 0 -1px 0 rgba(255, 255, 255, 0.34);
-            backdrop-filter: blur(22px) saturate(155%);
-            -webkit-backdrop-filter: blur(22px) saturate(155%);
+            background: rgba(0,0,0,0.04);
+            border: none;
+            box-shadow: 0 10px 26px rgba(15, 23, 42, 0.1);
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         .photo-wall-item::before,
         .photo-wall-item::after {
-            content: "";
-            position: absolute;
-            inset: 0;
-            pointer-events: none;
-            z-index: 1;
-        }
-        .photo-wall-item::before {
-            background:
-                linear-gradient(120deg, rgba(255,255,255,0.58), rgba(255,255,255,0.16) 22%, transparent 42%),
-                linear-gradient(to bottom, rgba(255,255,255,0.18), transparent 34%, rgba(255,255,255,0.1));
-            mix-blend-mode: screen;
-        }
-        .photo-wall-item::after {
-            inset: 7px;
-            border-radius: 14px;
-            border: 1px solid rgba(255,255,255,0.5);
-            box-shadow:
-                inset 0 0 0 1px rgba(255,255,255,0.14),
-                inset 0 10px 26px rgba(255,255,255,0.12);
+            display: none;
+            content: none;
         }
         .photo-wall-item:hover {
             transform: translateY(-3px) scale(1.015);
             z-index: 2;
-            box-shadow:
-                0 22px 48px rgba(15, 23, 42, 0.16),
-                inset 0 1px 0 rgba(255, 255, 255, 0.82),
-                inset 0 -1px 0 rgba(255, 255, 255, 0.38);
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.14);
         }
         .photo-wall-item:active {
             transform: scale(0.97);
@@ -3067,13 +3043,13 @@
             display: block;
             position: relative;
             z-index: 0;
-            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.16);
+            box-shadow: none;
         }
         .photo-wall-item .pw-item-info {
             position: absolute;
-            bottom: 7px;
-            left: 7px;
-            right: 7px;
+            bottom: 0;
+            left: 0;
+            right: 0;
             z-index: 3;
             padding: 34px 10px 10px;
             border-radius: 0 0 14px 14px;
@@ -3215,14 +3191,8 @@
         }
 
         [data-theme="dark"] .photo-wall-item {
-            background:
-                linear-gradient(145deg, rgba(255,255,255,0.2), rgba(255,255,255,0.05) 48%, rgba(255,255,255,0.12)),
-                linear-gradient(315deg, rgba(255,255,255,0.06), rgba(16,185,129,0.06) 48%, rgba(59,130,246,0.06));
-            border-color: rgba(255,255,255,0.18);
-            box-shadow:
-                0 18px 42px rgba(0, 0, 0, 0.36),
-                inset 0 1px 0 rgba(255, 255, 255, 0.22),
-                inset 0 -1px 0 rgba(255, 255, 255, 0.08);
+            background: rgba(255,255,255,0.04);
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
         }
         [data-theme="dark"] .photo-wall-header {
             background: linear-gradient(to bottom, var(--panel-bg) 0%, rgba(12, 13, 18, 0.82) 72%, rgba(12, 13, 18, 0));
@@ -6097,6 +6067,7 @@
                     }
 
                     function handleBlur() {
+                        if (document.body.classList.contains('photo-previewing')) return;
                         if (dockBar) dockBar.style.display = 'flex';
                         keyboardOpen = false;
                     }
@@ -7276,6 +7247,7 @@
             var PHOTO_WALL_MARKER = '__photo_wall__';
             var photoWallMigrating = false;
             var photoWallRealtime = null;
+            var photoPreviewActive = false;
 
             function loadLocalPhotoWallData() {
                 try {
@@ -7475,9 +7447,6 @@
                 // Increment view count
                 photo.views = (photo.views || 0) + 1;
                 saveLocalPhotoWallData();
-                if (photo.cloudId && window.sb) {
-                    try { await window.sb.rpc('increment_post_views', { p_post_id: photo.cloudId }); } catch(e) {}
-                }
 
                 document.getElementById('photoPreviewImage').src = photo.imageUrl;
                 document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
@@ -7488,22 +7457,27 @@
                 var overlay = document.getElementById('photoPreviewOverlay');
                 if (overlay && overlay.parentElement !== document.body) document.body.appendChild(overlay);
                 overlay.classList.add('active');
+                photoPreviewActive = true;
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = 'none';
                 document.body.classList.add('photo-previewing');
                 document.body.style.overflow = 'hidden';
-
-                // Update the rendered grid to reflect view count
-                renderPhotoWall();
+                if (photo.cloudId && window.sb) {
+                    setTimeout(function() {
+                        window.sb.rpc('increment_post_views', { p_post_id: photo.cloudId }).catch(function() {});
+                    }, 300);
+                }
             };
 
             window.closePhotoPreview = function() {
                 var overlay = document.getElementById('photoPreviewOverlay');
                 overlay.classList.remove('active');
+                photoPreviewActive = false;
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = '';
                 document.body.classList.remove('photo-previewing');
                 document.body.style.overflow = '';
+                renderPhotoWall();
             };
 
             // Click outside image to close
@@ -7525,6 +7499,7 @@
                             table: 'posts',
                             filter: 'media_type=eq.' + PHOTO_WALL_MARKER
                         }, function() {
+                            if (photoPreviewActive || document.body.classList.contains('photo-previewing')) return;
                             renderPhotoWall();
                         })
                         .subscribe();
