@@ -3112,25 +3112,20 @@
             z-index: 10000;
             background: #000;
             display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
             box-sizing: border-box;
-            max-width: 100%;
             overflow: hidden;
             overscroll-behavior: none;
             touch-action: none;
-            contain: layout paint;
-            padding: 20px 20px calc(22px + env(safe-area-inset-bottom, 0px));
+            padding: 0;
             animation: fadeIn 0.2s ease;
         }
         .photo-preview-overlay.active {
-            display: flex;
+            display: block;
         }
         .photo-preview-close {
             position: absolute;
-            top: calc(48px + env(safe-area-inset-top, 0px));
-            right: calc(20px + env(safe-area-inset-right, 0px));
+            top: calc(16px + env(safe-area-inset-top, 0px));
+            right: calc(12px + env(safe-area-inset-right, 0px));
             width: 40px;
             height: 40px;
             border-radius: 50%;
@@ -3144,28 +3139,31 @@
             transition: all 0.2s ease;
             border: none;
             line-height: 1;
+            z-index: 10;
         }
         .photo-preview-close:hover {
             background: rgba(255,255,255,0.25);
             transform: rotate(90deg);
         }
         .photo-preview-image-wrapper {
-            flex: 1;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
             display: flex;
             align-items: center;
             justify-content: center;
             overflow: hidden;
-            width: 100%;
-            min-width: 0;
-            max-height: calc(100% - 78px);
             touch-action: none;
         }
         .photo-preview-image-wrapper img {
-            max-width: 100%;
-            max-height: 100%;
+            max-width: 100vw;
+            max-height: 100vh;
+            width: auto;
+            height: auto;
             object-fit: contain;
-            border-radius: 8px;
-            box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+            box-shadow: none;
             transform-origin: center center;
             transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
             will-change: transform;
@@ -3180,18 +3178,24 @@
         }
         .photo-preview-image-wrapper img.dragging {
             cursor: grabbing;
-            transition: none;
+            transition: none !important;
         }
         .photo-preview-info {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 5;
             display: flex;
             align-items: center;
             gap: 10px;
-            padding: 14px 14px 0;
+            padding: 36px 16px calc(14px + env(safe-area-inset-bottom, 0px));
             color: rgba(255,255,255,0.8);
             font-size: 14px;
-            flex-shrink: 0;
             flex-wrap: wrap;
             justify-content: center;
+            background: linear-gradient(transparent, rgba(0,0,0,0.65));
+            pointer-events: none;
         }
         .photo-preview-info .pp-user {
             font-weight: 600;
@@ -7393,56 +7397,40 @@
                 if (item) item.textContent = photo.views || 0;
             }
 
-            function ppApplyTransform(instant) {
+            function ppApplyTransform() {
                 var img = document.getElementById('photoPreviewImage');
                 if (!img) return;
                 img.classList.toggle('zoomed', ppZoom.scale > 1.01);
-                if (instant) {
-                    img.classList.add('dragging');
-                    img.style.transition = 'none';
-                    img.style.webkitTransition = 'none';
-                }
                 var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
                 img.style.transform = t;
                 img.style.webkitTransform = t;
-                if (instant) {
-                    requestAnimationFrame(function() {
-                        img.classList.remove('dragging');
-                        img.style.transition = '';
-                        img.style.webkitTransition = '';
-                    });
-                }
             }
 
-            function ppResetZoom(instant) {
-                var img = document.getElementById('photoPreviewImage');
+            function ppResetZoom() {
                 ppZoom = { scale: 1, tx: 0, ty: 0 };
                 ppPointers.clear();
                 ppStart = null;
+                var img = document.getElementById('photoPreviewImage');
                 if (img) {
                     img.classList.remove('zoomed', 'dragging');
-                    if (instant) img.classList.add('dragging');
                     img.style.transform = '';
                     img.style.webkitTransform = '';
-                    if (instant) requestAnimationFrame(function() { img.classList.remove('dragging'); });
                 }
             }
 
             function ppToggleZoom(clientX, clientY) {
                 if (ppZoom.scale > 1.05) {
-                    ppResetZoom(false);
+                    ppResetZoom();
                     return;
                 }
                 var newScale = 2.6;
-                // 计算双击点相对于屏幕中心的偏移，作为缩放后要移动的距离
                 var centerX = window.innerWidth / 2;
                 var centerY = window.innerHeight / 2;
-                // 缩放比例因子
                 var ratio = newScale / 1;
                 ppZoom.scale = newScale;
                 ppZoom.tx = (clientX - centerX) * (1 - ratio);
                 ppZoom.ty = (clientY - centerY) * (1 - ratio);
-                ppApplyTransform(false);
+                ppApplyTransform();
             }
 
             async function syncPhotoViewCount(photo) {
@@ -7573,7 +7561,7 @@
                 saveLocalPhotoWallData();
                 updatePhotoViewDisplays(photo);
 
-                ppResetZoom(true);
+                ppResetZoom();
                 var previewImg = document.getElementById('photoPreviewImage');
                 previewImg.src = photo.imageUrl;
                 document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
@@ -7599,7 +7587,7 @@
                 photoPreviewActive = false;
                 photoPreviewClosedAt = Date.now();
                 photoPreviewCurrent = null;
-                ppResetZoom(true);
+                ppResetZoom();
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = '';
                 document.documentElement.classList.remove('photo-previewing');
@@ -7673,14 +7661,14 @@
                         ppZoom.tx = ppStart.tx + (c.x - ppStart.center.x) + (1 - ratio) * (c.x - window.innerWidth / 2);
                         ppZoom.ty = ppStart.ty + (c.y - ppStart.center.y) + (1 - ratio) * (c.y - window.innerHeight / 2);
                         ppMoved = true;
-                        ppApplyTransform(true);
+                        ppApplyTransform();
                     } else if (ppPointers.size === 1 && ppStart.mode === 'pan' && ppZoom.scale > 1.01) {
                         var dx = e.clientX - ppStart.x;
                         var dy = e.clientY - ppStart.y;
                         if (Math.abs(dx) > 4 || Math.abs(dy) > 4) ppMoved = true;
                         ppZoom.tx = ppStart.tx + dx;
                         ppZoom.ty = ppStart.ty + dy;
-                        ppApplyTransform(true);
+                        ppApplyTransform();
                     }
                 }, { passive: false });
 
@@ -7688,36 +7676,41 @@
                     if (!ppPointers.has(e.pointerId)) return;
                     ppPointers.delete(e.pointerId);
                     img.releasePointerCapture && img.releasePointerCapture(e.pointerId);
-                    img.classList.remove('dragging');
+
+                    if (ppPointers.size === 0) {
+                        img.classList.remove('dragging');
+                        ppStart = null;
+                        if (!ppMoved) {
+                            var now = Date.now();
+                            if (now - ppLastTap < 280) {
+                                clearTimeout(ppTapTimer);
+                                ppLastTap = 0;
+                                ppToggleZoom(e.clientX, e.clientY);
+                            } else {
+                                ppLastTap = now;
+                                clearTimeout(ppTapTimer);
+                                ppTapTimer = setTimeout(function() {
+                                    ppLastTap = 0;
+                                    if (photoPreviewActive) closePhotoPreview();
+                                }, 260);
+                            }
+                        }
+                        return;
+                    }
 
                     if (ppPointers.size === 1) {
                         var p = Array.from(ppPointers.values())[0];
                         ppStart = { mode: 'pan', x: p.clientX, y: p.clientY, tx: ppZoom.tx, ty: ppZoom.ty };
-                        return;
-                    }
-                    ppStart = null;
-
-                    if (ppMoved) return;
-                    var now = Date.now();
-                    if (now - ppLastTap < 280) {
-                        clearTimeout(ppTapTimer);
-                        ppLastTap = 0;
-                        ppToggleZoom(e.clientX, e.clientY);
-                    } else {
-                        ppLastTap = now;
-                        clearTimeout(ppTapTimer);
-                        ppTapTimer = setTimeout(function() {
-                            ppLastTap = 0;
-                            if (photoPreviewActive) closePhotoPreview();
-                        }, 260);
                     }
                 }
 
                 img.addEventListener('pointerup', endPointer);
                 img.addEventListener('pointercancel', function(e) {
                     ppPointers.delete(e.pointerId);
-                    img.classList.remove('dragging');
-                    ppStart = null;
+                    if (ppPointers.size === 0) {
+                        img.classList.remove('dragging');
+                        ppStart = null;
+                    }
                 });
 
                 img.addEventListener('wheel', function(e) {
@@ -7726,9 +7719,9 @@
                     var next = Math.max(1, Math.min(5, ppZoom.scale * (1 - e.deltaY * 0.002)));
                     ppZoom.scale = next;
                     if (next <= 1.01) {
-                        ppResetZoom(false);
+                        ppResetZoom();
                     } else {
-                        ppApplyTransform(false);
+                        ppApplyTransform();
                     }
                 }, { passive: false });
             })();
