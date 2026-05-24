@@ -1539,6 +1539,14 @@
             .post-detail-media img, .post-detail-media video { max-height: 420px; }
         }
 
+        /* ========== iPad 横屏专项优化 ========== */
+        @media (min-width: 1024px) and (orientation: landscape) {
+            .app-container { max-width: 1024px; }
+            .dock-panel { padding: 28px 44px 110px; padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
+            .photo-wall-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
+            .post { max-width: 760px; }
+        }
+
         @media (min-width: 1280px) {
             .app-container { max-width: 1120px; }
             .dock-panel { padding: 28px 48px 120px; padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }
@@ -1547,6 +1555,21 @@
             .photo-wall-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
             .post { max-width: 760px; padding: 34px; }
             .publish-box { padding: 34px; }
+        }
+
+        /* ========== 超宽屏/大屏显示器适配 ========== */
+        @media (min-width: 1440px) {
+            .app-container { max-width: 1280px; }
+            .dock-panel { padding: 32px 64px 130px; padding-bottom: calc(130px + env(safe-area-inset-bottom, 0px)); }
+            .photo-wall-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; }
+            .post { max-width: 840px; padding: 38px; }
+            .content { font-size: 17px; line-height: 1.8; }
+        }
+
+        @media (min-width: 1920px) {
+            .app-container { max-width: 1440px; }
+            .photo-wall-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 26px; }
+            .post { max-width: 900px; }
         }
 
         /* 横屏手机/平板优化 */
@@ -3192,8 +3215,8 @@
             object-fit: contain;
             box-shadow: none;
             transform-origin: center center;
-            transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.12s ease-out;
-            will-change: transform, opacity;
+            transition: transform 0.18s ease-out; /* 只用于边界回弹等非交互场景 */
+            will-change: transform;
             cursor: zoom-in;
             user-select: none;
             -webkit-user-select: none;
@@ -3743,7 +3766,35 @@
             const ADMIN_NAME = "xxz";
             const AVATAR_CACHE_KEY = "xtj_avatars";
 
-            let currentUser = localStorage.getItem("xtj_user") || "";
+            function safeLocalStorageGet(key, defaultValue) {
+            try {
+                var value = localStorage.getItem(key);
+                return value !== null ? value : defaultValue;
+            } catch(e) {
+                console.warn('localStorage get failed:', key, e);
+                return defaultValue;
+            }
+        }
+
+        function safeLocalStorageSet(key, value) {
+            try {
+                localStorage.setItem(key, value);
+                return true;
+            } catch(e) {
+                console.warn('localStorage set failed:', key, e);
+                return false;
+            }
+        }
+
+        function safeLocalStorageRemove(key) {
+            try {
+                localStorage.removeItem(key);
+                return true;
+            } catch(e) {
+                console.warn('localStorage remove failed:', key, e);
+                return false;
+            }
+        }
             window.currentUser = currentUser;
             let dockChatListCacheTime = 0;
             const DOCK_CHAT_CACHE_DURATION = 120000;
@@ -7488,18 +7539,27 @@
             }
 
             function ppToggleZoom(clientX, clientY) {
+                var img = document.getElementById('photoPreviewImage');
+                if (!img) return;
+                // 双击时禁用过渡，直接跳变
+                img.style.transition = 'none';
                 if (ppZoom.scale > 1.05) {
                     ppResetZoom();
-                    return;
+                } else {
+                    var newScale = 2.6;
+                    var centerX = window.innerWidth / 2;
+                    var centerY = window.innerHeight / 2;
+                    var ratio = newScale / 1;
+                    ppZoom.scale = newScale;
+                    ppZoom.tx = (clientX - centerX) * (1 - ratio);
+                    ppZoom.ty = (clientY - centerY) * (1 - ratio);
+                    ppApplyTransform();
                 }
-                var newScale = 2.6;
-                var centerX = window.innerWidth / 2;
-                var centerY = window.innerHeight / 2;
-                var ratio = newScale / 1;
-                ppZoom.scale = newScale;
-                ppZoom.tx = (clientX - centerX) * (1 - ratio);
-                ppZoom.ty = (clientY - centerY) * (1 - ratio);
-                ppApplyTransform();
+                // 恢复过渡
+                setTimeout(function() {
+                    var img2 = document.getElementById('photoPreviewImage');
+                    if (img2) img2.style.transition = 'transform 0.18s ease-out';
+                }, 50);
             }
 
             function ppNavigatePhoto(direction) {
@@ -7517,7 +7577,7 @@
                     ppSwipeDx = 0;
                     setTimeout(function() {
                         var img2 = document.getElementById('photoPreviewImage');
-                        if (img2) { img2.style.transition = ''; }
+                        if (img2) { img2.style.transition = 'transform 0.18s ease-out'; }
                     }, 220);
                     return;
                 }
@@ -7529,38 +7589,27 @@
                 saveLocalPhotoWallData();
                 updatePhotoViewDisplays(photo);
 
-                // 先无动画回正位置，再淡出换图
+                // 直接重置状态并换图，无任何闪烁
                 var previewImg = document.getElementById('photoPreviewImage');
                 ppSwipeDx = 0;
                 ppZoom = { scale: 1, tx: 0, ty: 0 };
-                previewImg.classList.remove('zoomed');
+                previewImg.classList.remove('zoomed', 'dragging');
                 previewImg.style.transition = 'none';
                 previewImg.style.transform = '';
                 previewImg.style.webkitTransform = '';
+                previewImg.src = photo.imageUrl;
+                document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
+                document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
+                document.getElementById('photoPreviewViewsCount').textContent = photo.views;
 
-                // 立即开始淡出
-                previewImg.offsetHeight; // 强制重排，确保transition:none生效
-                previewImg.style.transition = 'opacity 0.1s ease-out';
-                previewImg.style.opacity = '0';
-
+                // 恢复默认过渡
                 setTimeout(function() {
-                    if (!photoPreviewActive) return;
                     var img = document.getElementById('photoPreviewImage');
-                    if (!img) return;
-                    img.src = photo.imageUrl;
-                    document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
-                    document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
-                    document.getElementById('photoPreviewViewsCount').textContent = photo.views;
-                    img.style.opacity = '1';
-                    setTimeout(function() {
-                        var img2 = document.getElementById('photoPreviewImage');
-                        if (img2) {
-                            img2.style.transition = '';
-                            img2.style.opacity = '';
-                        }
-                        ppSwipeLock = 0;
-                    }, 120);
-                }, 110);
+                    if (img) {
+                        img.style.transition = 'transform 0.18s ease-out';
+                    }
+                    ppSwipeLock = 0;
+                }, 10);
 
                 syncPhotoViewCount(photo);
             }
@@ -7765,6 +7814,8 @@
                     ppPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
                     ppMoved = false;
                     img.classList.add('dragging');
+                    // 立即禁用所有过渡，保证原生跟手感
+                    img.style.transition = 'none';
                     if (ppPointers.size === 2) {
                         var pts = Array.from(ppPointers.values());
                         ppStart = {
@@ -7856,6 +7907,8 @@
                                 }, 260);
                             }
                             ppSwipeDx = 0;
+                            // 恢复默认过渡
+                            img.style.transition = 'transform 0.18s ease-out';
                             return;
                         }
                         // 滑动结束：判断是否触发左右切换
@@ -7863,7 +7916,7 @@
                             ppNavigatePhoto(ppSwipeDx > 0 ? -1 : 1);
                         }
                         // 弹回原位
-                        if (ppSwipeDx !== 0) {
+                        else if (ppSwipeDx !== 0) {
                             var imgS = document.getElementById('photoPreviewImage');
                             if (imgS) {
                                 imgS.style.transition = 'transform 0.25s cubic-bezier(0.25,0.1,0.25,1)';
@@ -7872,9 +7925,12 @@
                                 imgS.style.webkitTransform = 'translate3d(0px,0px,0) scale(' + ppZoom.scale + ')';
                                 setTimeout(function() {
                                     var imgS2 = document.getElementById('photoPreviewImage');
-                                    if (imgS2) imgS2.style.transition = '';
+                                    if (imgS2) imgS2.style.transition = 'transform 0.18s ease-out';
                                 }, 260);
                             }
+                        } else {
+                            // 恢复默认过渡
+                            img.style.transition = 'transform 0.18s ease-out';
                         }
                         return;
                     }
@@ -7891,12 +7947,16 @@
                     if (ppPointers.size === 0) {
                         img.classList.remove('dragging');
                         ppStart = null;
+                        // 恢复默认过渡
+                        img.style.transition = 'transform 0.18s ease-out';
                     }
                 });
 
                 img.addEventListener('wheel', function(e) {
                     if (!photoPreviewActive) return;
                     e.preventDefault();
+                    // 滚轮缩放时也禁用过渡
+                    img.style.transition = 'none';
                     var next = Math.max(1, Math.min(5, ppZoom.scale * (1 - e.deltaY * 0.002)));
                     ppZoom.scale = next;
                     if (next <= 1.01) {
@@ -7904,6 +7964,11 @@
                     } else {
                         ppApplyTransform();
                     }
+                    // 恢复过渡
+                    setTimeout(function() {
+                        var imgW = document.getElementById('photoPreviewImage');
+                        if (imgW) imgW.style.transition = 'transform 0.18s ease-out';
+                    }, 50);
                 }, { passive: false });
             })();
 
