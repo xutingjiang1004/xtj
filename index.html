@@ -3766,64 +3766,38 @@
             const ADMIN_NAME = "xxz";
             const AVATAR_CACHE_KEY = "xtj_avatars";
 
-            function safeLocalStorageGet(key, defaultValue) {
-            try {
-                var value = localStorage.getItem(key);
-                return value !== null ? value : defaultValue;
-            } catch(e) {
-                console.warn('localStorage get failed:', key, e);
-                return defaultValue;
-            }
+        let currentUser;
+        try { currentUser = localStorage.getItem("xtj_user") || ""; } catch(e) { currentUser = ""; }
+        window.currentUser = currentUser;
+        let dockChatListCacheTime = 0;
+        const DOCK_CHAT_CACHE_DURATION = 120000;
+        let deviceId;
+        try { deviceId = localStorage.getItem("xtj_device_id"); } catch(e) { deviceId = null; }
+        if (!deviceId) {
+            try { deviceId = crypto.randomUUID(); } catch(e) { deviceId = 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2,9); }
+            localStorage.setItem("xtj_device_id", deviceId);
         }
 
-        function safeLocalStorageSet(key, value) {
-            try {
-                localStorage.setItem(key, value);
-                return true;
-            } catch(e) {
-                console.warn('localStorage set failed:', key, e);
-                return false;
-            }
+        let delPostId = null, delOwnerKey = null;
+        let activePostId = null;
+        const viewTracked = new Set();
+        const CACHE_KEY = "xtj_feed_cache";
+        const CACHE_DURATION = 5 * 60 * 1000; // 缓存5分钟
+
+        function isAdmin() { return currentUser === ADMIN_NAME; }
+
+        function showToast(message) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.animation = 'toastFade 0.3s ease-out forwards';
+                setTimeout(() => toast.remove(), 300);
+            }, 2500);
         }
-
-        function safeLocalStorageRemove(key) {
-            try {
-                localStorage.removeItem(key);
-                return true;
-            } catch(e) {
-                console.warn('localStorage remove failed:', key, e);
-                return false;
-            }
-        }
-            window.currentUser = currentUser;
-            let dockChatListCacheTime = 0;
-            const DOCK_CHAT_CACHE_DURATION = 120000;
-            let deviceId = localStorage.getItem("xtj_device_id");
-            if (!deviceId) {
-                try { deviceId = crypto.randomUUID(); } catch(e) { deviceId = 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2,9); }
-                localStorage.setItem("xtj_device_id", deviceId);
-            }
-
-            let delPostId = null, delOwnerKey = null;
-            let activePostId = null;
-            const viewTracked = new Set();
-            const CACHE_KEY = "xtj_feed_cache";
-            const CACHE_DURATION = 5 * 60 * 1000; // 缓存5分钟
-
-            function isAdmin() { return currentUser === ADMIN_NAME; }
-
-            function showToast(message) {
-                const container = document.getElementById('toastContainer');
-                const toast = document.createElement('div');
-                toast.className = 'toast';
-                toast.textContent = message;
-                container.appendChild(toast);
-                setTimeout(() => {
-                    toast.style.animation = 'toastFade 0.3s ease-out forwards';
-                    setTimeout(() => toast.remove(), 300);
-                }, 2500);
-            }
-            window.showToast = showToast;
+        window.showToast = showToast;
 
             // ===================== 密码哈希 =====================
             async function hashPassword(password) {
