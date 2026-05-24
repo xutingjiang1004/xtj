@@ -1353,11 +1353,11 @@
             opacity: 0; pointer-events: none;
             transform: translateY(10px);
             transition: opacity 0.25s ease-out, transform 0.25s ease-out;
-            padding: 16px 16px 72px;
+            padding: 16px 16px 100px;
             padding-top: calc(24px + env(safe-area-inset-top, 0px));
             padding-left: calc(16px + env(safe-area-inset-left, 0px));
             padding-right: calc(16px + env(safe-area-inset-right, 0px));
-            padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+            padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
             background: var(--panel-bg);
         }
         .dock-panel.active { will-change: opacity, transform; }
@@ -1396,16 +1396,12 @@
             padding-left: calc(12px + env(safe-area-inset-left, 0px));
             padding-right: calc(12px + env(safe-area-inset-right, 0px));
             padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-            background: transparent !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-            border: none !important;
-            box-shadow: none !important;
+            background: #fff;
+            border-top: 1px solid rgba(0,0,0,0.06);
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.06);
             z-index: 100;
             pointer-events: none;
             touch-action: none;
-            max-width: 640px;
-            margin: 0 auto;
         }
         .dock-bar > * {
             background-clip: padding-box;
@@ -1512,9 +1508,9 @@
 
         /* 暗色模式 Dock */
         [data-theme="dark"] .dock-bar {
-            background: transparent;
-            border: none;
-            box-shadow: none;
+            background: #111;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
         }
         [data-theme="dark"] .dock-tab { color: #9e9eb0; }
         [data-theme="dark"] .dock-tab.active { color: #34d399; background: rgba(255,255,255,0.06); backdrop-filter: blur(6px) saturate(140%); -webkit-backdrop-filter: blur(6px) saturate(140%); border: 1px solid rgba(255,255,255,0.12); }
@@ -7296,6 +7292,7 @@
             var ppLastTap = 0;
             var ppTapTimer = null;
             var ppMoved = false;
+            var ppRaf = 0;
 
             function loadLocalPhotoWallData() {
                 try {
@@ -7397,16 +7394,30 @@
                 if (item) item.textContent = photo.views || 0;
             }
 
-            function ppApplyTransform() {
+            function ppApplyTransform(noRaf) {
                 var img = document.getElementById('photoPreviewImage');
                 if (!img) return;
                 img.classList.toggle('zoomed', ppZoom.scale > 1.01);
                 var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
-                img.style.transform = t;
-                img.style.webkitTransform = t;
+                if (noRaf) {
+                    img.style.transform = t;
+                    img.style.webkitTransform = t;
+                    return;
+                }
+                if (ppRaf) return;
+                ppRaf = requestAnimationFrame(function() {
+                    ppRaf = 0;
+                    var img2 = document.getElementById('photoPreviewImage');
+                    if (!img2) return;
+                    img2.classList.toggle('zoomed', ppZoom.scale > 1.01);
+                    var t2 = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
+                    img2.style.transform = t2;
+                    img2.style.webkitTransform = t2;
+                });
             }
 
             function ppResetZoom() {
+                if (ppRaf) { cancelAnimationFrame(ppRaf); ppRaf = 0; }
                 ppZoom = { scale: 1, tx: 0, ty: 0 };
                 ppPointers.clear();
                 ppStart = null;
@@ -7430,7 +7441,7 @@
                 ppZoom.scale = newScale;
                 ppZoom.tx = (clientX - centerX) * (1 - ratio);
                 ppZoom.ty = (clientY - centerY) * (1 - ratio);
-                ppApplyTransform();
+                ppApplyTransform(true);
             }
 
             async function syncPhotoViewCount(photo) {
@@ -7633,7 +7644,9 @@
                             scale: ppZoom.scale,
                             tx: ppZoom.tx,
                             ty: ppZoom.ty,
-                            center: center(pts[0], pts[1])
+                            center: center(pts[0], pts[1]),
+                            vcx: window.innerWidth / 2,
+                            vcy: window.innerHeight / 2
                         };
                     } else if (ppPointers.size === 1) {
                         ppStart = {
@@ -7658,8 +7671,9 @@
                         var nextScale = Math.max(1, Math.min(5, ppStart.scale * (d / Math.max(1, ppStart.dist))));
                         var ratio = nextScale / Math.max(1, ppStart.scale);
                         ppZoom.scale = nextScale;
-                        ppZoom.tx = ppStart.tx + (c.x - ppStart.center.x) + (1 - ratio) * (c.x - window.innerWidth / 2);
-                        ppZoom.ty = ppStart.ty + (c.y - ppStart.center.y) + (1 - ratio) * (c.y - window.innerHeight / 2);
+                        // 保持双指中心锚点不动（补偿 transform-origin: center center 的偏移）
+                        ppZoom.tx = c.x - ratio * (ppStart.center.x - ppStart.tx) + ppStart.vcx * (ratio - 1);
+                        ppZoom.ty = c.y - ratio * (ppStart.center.y - ppStart.ty) + ppStart.vcy * (ratio - 1);
                         ppMoved = true;
                         ppApplyTransform();
                     } else if (ppPointers.size === 1 && ppStart.mode === 'pan' && ppZoom.scale > 1.01) {
@@ -7678,6 +7692,9 @@
                     img.releasePointerCapture && img.releasePointerCapture(e.pointerId);
 
                     if (ppPointers.size === 0) {
+                        // 取消待处理的RAF，同步刷新最终位置
+                        if (ppRaf) { cancelAnimationFrame(ppRaf); ppRaf = 0; }
+                        ppApplyTransform(true);
                         img.classList.remove('dragging');
                         ppStart = null;
                         if (!ppMoved) {
@@ -7708,6 +7725,7 @@
                 img.addEventListener('pointercancel', function(e) {
                     ppPointers.delete(e.pointerId);
                     if (ppPointers.size === 0) {
+                        if (ppRaf) { cancelAnimationFrame(ppRaf); ppRaf = 0; }
                         img.classList.remove('dragging');
                         ppStart = null;
                     }
@@ -7721,7 +7739,7 @@
                     if (next <= 1.01) {
                         ppResetZoom();
                     } else {
-                        ppApplyTransform();
+                        ppApplyTransform(true);
                     }
                 }, { passive: false });
             })();
