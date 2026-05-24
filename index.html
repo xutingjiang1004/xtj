@@ -19,7 +19,7 @@
             -webkit-touch-callout: none;
         }
         :root {
-            --bg-color: #ecfdf5;
+            --bg-color: #f0f2f5;
             --glass-bg: rgba(255, 255, 255, 0.18);
             --glass-border: rgba(255, 255, 255, 0.72);
             --glass-shadow: 0 18px 50px rgba(0, 0, 0, 0.04);
@@ -35,7 +35,7 @@
             --trans-smooth: all 0.32s cubic-bezier(0.25, 1, 0.3, 1);
             --trans-spring: all 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             --trans-ppt: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            --panel-bg: rgba(255,255,255,0.62);
+            --panel-bg: rgba(255,255,255,0.95);
             --dock-bg: rgba(255,255,255,0.68);
             --dock-border: rgba(255,255,255,0.8);
             --dock-shadow: 0 -2px 20px rgba(0,0,0,0.06);
@@ -44,15 +44,15 @@
         [data-theme="dark"] {
             --text-main: #e4e4ec;
             --text-muted: #9e9eb0;
-            --panel-bg: rgba(15,23,20,0.78);
-            --dock-bg: rgba(20,25,30,0.78);
+            --panel-bg: rgba(18,18,24,0.96);
+            --dock-bg: rgba(18,18,24,0.96);
             --dock-border: rgba(255,255,255,0.08);
             --dock-shadow: 0 -2px 20px rgba(0,0,0,0.3);
         }
 
         /* ========== 黑暗模式覆盖 ========== */
         [data-theme="dark"] .rain-bg-container {
-            background: linear-gradient(135deg, #022c22 0%, #064e3b 50%, #0d5e42 100%);
+            background: linear-gradient(135deg, #0d0d12 0%, #121218 50%, #16161d 100%);
         }
         [data-theme="dark"] .rain-glass-layer {
             background: rgba(0,0,0,0.2);
@@ -297,7 +297,7 @@
             z-index: -999;
             overflow: hidden;
             pointer-events: none;
-            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #bbf7d0 100%);
+            background: linear-gradient(135deg, #f0f2f5 0%, #e8ecf1 50%, #e2e5eb 100%);
         }
 
         #rainCanvas {
@@ -1492,6 +1492,72 @@
             justify-content: center;
         }
         .dock-tab[data-tab="ai"] .dt-label { display: none; }
+
+        /* ========== 响应式适配：平板/桌面 ========== */
+        @media (min-width: 768px) {
+            .app-container { max-width: 100%; }
+            .dock-panel { padding: 20px 24px 100px; padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)); }
+            .dock-bar { gap: 16px; padding: 8px 20px 12px; }
+            .dock-tab { max-width: 90px; padding: 6px 14px; font-size: 10px; }
+            .dock-tab .dt-icon { font-size: 22px; }
+            .dock-tab .dt-label { font-size: 10px; }
+            .publish-box { padding: 26px; }
+            .publish-box textarea { font-size: 17px; min-height: 90px; }
+            .post { padding: 26px; max-width: 640px; margin-left: auto; margin-right: auto; }
+            .content { font-size: 15px; }
+            .photo-wall-grid { gap: 18px; }
+            .stats { gap: 14px; }
+            .stat-card { padding: 18px; }
+            .stat-card b { font-size: 24px; }
+            .feed { gap: 18px; }
+            .post-header { gap: 14px; }
+            .avatar { width: 44px; height: 44px; font-size: 17px; }
+        }
+
+        @media (min-width: 1024px) {
+            .app-container { max-width: 960px; }
+            .dock-panel { padding: 24px 36px 110px; padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
+            .dock-bar { gap: 20px; padding: 10px 24px 14px; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+            .dock-tab { max-width: 100px; padding: 8px 16px; font-size: 11px; border-radius: 16px; }
+            .dock-tab .dt-icon { font-size: 24px; }
+            .dock-tab .dt-label { font-size: 11px; }
+            .publish-box { padding: 30px; }
+            .publish-box textarea { font-size: 18px; min-height: 100px; }
+            .publish-footer .btn-primary { padding: 10px 26px; font-size: 15px; }
+            .post { max-width: 720px; padding: 30px; }
+            .content { font-size: 16px; line-height: 1.7; }
+            .media img, .media video { max-height: 500px; }
+            .photo-wall-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+            .stats { gap: 16px; }
+            .feed { gap: 22px; }
+            .post-header { gap: 16px; }
+            .avatar { width: 48px; height: 48px; font-size: 18px; }
+            .user-name { font-size: 16px; }
+            .dock-chat-container .chat-messages { padding: 0 12px; }
+            .chat-bubble { max-width: 70%; }
+            .post-detail-content { font-size: 16px; line-height: 1.7; }
+            .post-detail-media img, .post-detail-media video { max-height: 420px; }
+        }
+
+        @media (min-width: 1280px) {
+            .app-container { max-width: 1120px; }
+            .dock-panel { padding: 28px 48px 120px; padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px)); }
+            .dock-bar { gap: 24px; padding: 10px 32px 16px; }
+            .dock-tab { max-width: 110px; }
+            .photo-wall-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
+            .post { max-width: 760px; padding: 34px; }
+            .publish-box { padding: 34px; }
+        }
+
+        /* 横屏手机/平板优化 */
+        @media (max-height: 600px) and (orientation: landscape) {
+            .dock-bar { gap: 8px; padding: 4px 12px 6px; }
+            .dock-tab { padding: 2px 8px; font-size: 8px; border-radius: 10px; }
+            .dock-tab .dt-icon { font-size: 18px; }
+            .dock-tab .dt-label { font-size: 8px; }
+            .dock-panel { padding-top: 12px; padding-bottom: 60px; }
+        }
+
         /* Dock面板: 聊天 (复用聊天样式，去掉overlay固定定位) */
         .dock-chat-container {
             display: flex; flex-direction: column; height: 100%;
@@ -2146,40 +2212,6 @@
             background: linear-gradient(135deg, rgba(5,150,105,0.95), rgba(16,185,129,0.95));
             border-color: rgba(16,185,129,0.3);
         }
-        .profile-lang-tabs {
-            display: flex;
-            gap: 8px;
-        }
-        .profile-lang-tab {
-            padding: 6px 14px;
-            border-radius: 999px;
-            border: 1px solid rgba(255,255,255,0.4);
-            background: rgba(255,255,255,0.2);
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 600;
-            color: var(--text-main);
-            transition: var(--trans-smooth);
-        }
-        .profile-lang-tab:hover {
-            background: rgba(255,255,255,0.4);
-        }
-        .profile-lang-tab.active {
-            background: linear-gradient(135deg, rgba(5,150,105,0.9), rgba(16,185,129,0.9));
-            border-color: rgba(5,150,105,0.5);
-            color: white;
-        }
-        [data-theme="dark"] .profile-lang-tab {
-            border-color: rgba(255,255,255,0.15);
-            background: rgba(255,255,255,0.08);
-        }
-        [data-theme="dark"] .profile-lang-tab:hover {
-            background: rgba(255,255,255,0.15);
-        }
-        [data-theme="dark"] .profile-lang-tab.active {
-            background: linear-gradient(135deg, rgba(5,150,105,0.95), rgba(16,185,129,0.95));
-            border-color: rgba(16,185,129,0.3);
-        }
         .changelog-list {
             display: flex;
             flex-direction: column;
@@ -2626,7 +2658,6 @@
         [data-theme="dark"] .dock-profile-container { background: transparent !important; }
         [data-theme="dark"] .profile-user-card { background: rgba(30,30,40,0.92) !important; border-color: rgba(255,255,255,0.1) !important; }
         [data-theme="dark"] .profile-setting-item { border-bottom-color: rgba(255,255,255,0.06) !important; }
-        [data-theme="dark"] #profileLang { background: rgba(25,25,42,0.2); border-color: rgba(255,255,255,0.12); color: #e5e5e5; }
         [data-theme="dark"] .profile-slider { background: #4a4a5a !important; }
 
         /* 开关滑块样式 */
@@ -3373,15 +3404,6 @@
                             <input type="checkbox" id="profileThemeToggle" style="opacity:0;width:0;height:0;">
                             <span class="profile-slider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:24px;transition:0.3s;"></span>
                         </label>
-                    </div>
-                    <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(0,0,0,0.05);">
-                        <span>语言</span>
-                        <div class="profile-lang-tabs">
-                            <button class="profile-lang-tab active" data-lang="zh" onclick="setProfileLang('zh')">中文</button>
-                        </div>
-                        <select id="profileLang" style="display:none;">
-                            <option value="zh">中文</option>
-                        </select>
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-bottom:1px solid rgba(0,0,0,0.05);">
                         <span>通知</span>
@@ -4969,7 +4991,7 @@
                 if (!forceRefresh) feed.innerHTML = `<div class="loading">加载中...</div>`;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
                     ]);
@@ -5195,7 +5217,7 @@
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
@@ -5231,7 +5253,7 @@
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
@@ -5514,7 +5536,7 @@
                 var type = statCurrentType;
                 if (!type) return;
                 Promise.all([
-                    sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").order("created_at", { ascending: false }),
+                    sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
@@ -6456,6 +6478,50 @@
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
+                    version: 'v0.0.40',
+                    date: '2026-05-24',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li><strong>UI视觉优化</strong>
+                                <ul>
+                                    <li>底部导航栏去框融合：移除背景、边框、阴影，仅保留四个按钮可见，按钮间区域可穿透点击</li>
+                                    <li>统一面板/页面背景为中性色（浅灰/深灰），移除绿色色调，解决iOS底部绿色透显问题</li>
+                                </ul>
+                            </li>
+                            <li><strong>照片墙功能增强</strong>
+                                <ul>
+                                    <li>新增全屏浏览左右滑动切换图片功能，支持手势拖拽导航</li>
+                                    <li>首尾边界处理：第一张不能左滑，最后一张不能右滑，带阻力反馈和弹回动画</li>
+                                    <li>取消过渡闪烁：修复切换图片时的位置跳跃和闪白bug</li>
+                                    <li>双指缩放优化：移除RAF批处理延迟，直接应用transform实现原生级跟手流畅度</li>
+                                    <li>整体滑动流畅度优化：will-change、transition精细化控制</li>
+                                </ul>
+                            </li>
+                            <li><strong>响应式适配</strong>
+                                <ul>
+                                    <li>平板（768px+）：容器满宽、更大的间距和字体、文章卡片居中</li>
+                                    <li>桌面（1024px+）：照片墙3列、文章卡片更宽、字体更大</li>
+                                    <li>宽屏（1280px+）：照片墙4列、更多留白</li>
+                                    <li>横屏手机优化：缩小底部导航栏占用空间</li>
+                                </ul>
+                            </li>
+                            <li><strong>代码清理</strong>
+                                <ul>
+                                    <li>删除遗留的i18n翻译代码（translations字典、translatePage函数、语言选择UI）</li>
+                                    <li>精简syncProfileUser等函数，移除对翻译字典的依赖</li>
+                                    <li>移除profile-lang-tabs相关CSS样式</li>
+                                </ul>
+                            </li>
+                            <li><strong>Bug修复</strong>
+                                <ul>
+                                    <li>修复管理员发公告时在帖子流中自动创建帖子的bug（feed查询未过滤ANN_MARKER）</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.0.38',
                     date: '2026-05-18',
                     content: `
@@ -7293,12 +7359,10 @@
             var ppLastTap = 0;
             var ppTapTimer = null;
             var ppMoved = false;
-            var ppRaf = 0;
             var ppPhotoIdx = -1;
             var ppSwipeLock = 0;
             var ppSortedPhotos = [];
             var ppSwipeDx = 0;
-            var ppSwipeMoved = false;
 
             function loadLocalPhotoWallData() {
                 try {
@@ -7400,35 +7464,19 @@
                 if (item) item.textContent = photo.views || 0;
             }
 
-            function ppApplyTransform(noRaf) {
+            function ppApplyTransform() {
                 var img = document.getElementById('photoPreviewImage');
                 if (!img) return;
                 img.classList.toggle('zoomed', ppZoom.scale > 1.01);
                 var swTx = ppSwipeDx || 0;
                 var t = 'translate3d(' + (ppZoom.tx + swTx) + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
-                if (noRaf) {
-                    img.style.transform = t;
-                    img.style.webkitTransform = t;
-                    return;
-                }
-                if (ppRaf) return;
-                ppRaf = requestAnimationFrame(function() {
-                    ppRaf = 0;
-                    var img2 = document.getElementById('photoPreviewImage');
-                    if (!img2) return;
-                    img2.classList.toggle('zoomed', ppZoom.scale > 1.01);
-                    var swTx2 = ppSwipeDx || 0;
-                    var t2 = 'translate3d(' + (ppZoom.tx + swTx2) + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
-                    img2.style.transform = t2;
-                    img2.style.webkitTransform = t2;
-                });
+                img.style.transform = t;
+                img.style.webkitTransform = t;
             }
 
             function ppResetZoom() {
-                if (ppRaf) { cancelAnimationFrame(ppRaf); ppRaf = 0; }
                 ppZoom = { scale: 1, tx: 0, ty: 0 };
                 ppSwipeDx = 0;
-                ppSwipeMoved = false;
                 ppPointers.clear();
                 ppStart = null;
                 var img = document.getElementById('photoPreviewImage');
@@ -7451,7 +7499,7 @@
                 ppZoom.scale = newScale;
                 ppZoom.tx = (clientX - centerX) * (1 - ratio);
                 ppZoom.ty = (clientY - centerY) * (1 - ratio);
-                ppApplyTransform(true);
+                ppApplyTransform();
             }
 
             function ppNavigatePhoto(direction) {
@@ -7480,22 +7528,40 @@
                 photoPreviewCurrent = photo;
                 saveLocalPhotoWallData();
                 updatePhotoViewDisplays(photo);
-                ppResetZoom();
-                ppSwipeDx = 0;
+
+                // 先无动画回正位置，再淡出换图
                 var previewImg = document.getElementById('photoPreviewImage');
+                ppSwipeDx = 0;
+                ppZoom = { scale: 1, tx: 0, ty: 0 };
+                previewImg.classList.remove('zoomed');
+                previewImg.style.transition = 'none';
+                previewImg.style.transform = '';
+                previewImg.style.webkitTransform = '';
+
+                // 立即开始淡出
+                previewImg.offsetHeight; // 强制重排，确保transition:none生效
+                previewImg.style.transition = 'opacity 0.1s ease-out';
                 previewImg.style.opacity = '0';
-                previewImg.style.transition = 'opacity 0.12s ease-out';
+
                 setTimeout(function() {
-                    previewImg.src = photo.imageUrl;
+                    if (!photoPreviewActive) return;
+                    var img = document.getElementById('photoPreviewImage');
+                    if (!img) return;
+                    img.src = photo.imageUrl;
                     document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
                     document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
                     document.getElementById('photoPreviewViewsCount').textContent = photo.views;
-                    previewImg.style.opacity = '1';
+                    img.style.opacity = '1';
                     setTimeout(function() {
-                        previewImg.style.transition = '';
+                        var img2 = document.getElementById('photoPreviewImage');
+                        if (img2) {
+                            img2.style.transition = '';
+                            img2.style.opacity = '';
+                        }
                         ppSwipeLock = 0;
-                    }, 130);
-                }, 130);
+                    }, 120);
+                }, 110);
+
                 syncPhotoViewCount(photo);
             }
 
@@ -7728,7 +7794,6 @@
                     ppPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
                     if (!ppStart) return;
                     if (ppPointers.size >= 2 && ppStart.mode === 'pinch') {
-                        ppSwipeMoved = false;
                         ppSwipeDx = 0;
                         var pts = Array.from(ppPointers.values()).slice(0, 2);
                         var d = Math.max(1, dist(pts[0], pts[1]));
@@ -7749,7 +7814,6 @@
                             // 已放大：平移
                             ppZoom.tx = ppStart.tx + dx;
                             ppZoom.ty = ppStart.ty + dy;
-                            ppSwipeMoved = false;
                             ppSwipeDx = 0;
                             ppApplyTransform();
                         } else {
@@ -7762,7 +7826,7 @@
                             } else {
                                 ppSwipeDx = dx;
                             }
-                            ppApplyTransform(true);
+                            ppApplyTransform();
                         }
                     }
                 }, { passive: false });
@@ -7773,9 +7837,8 @@
                     img.releasePointerCapture && img.releasePointerCapture(e.pointerId);
 
                     if (ppPointers.size === 0) {
-                        // 取消待处理的RAF，同步刷新最终位置
-                        if (ppRaf) { cancelAnimationFrame(ppRaf); ppRaf = 0; }
-                        ppApplyTransform(true);
+                        // 同步刷新最终位置
+                        ppApplyTransform();
                         img.classList.remove('dragging');
                         ppStart = null;
                         if (!ppMoved) {
@@ -7826,7 +7889,6 @@
                 img.addEventListener('pointercancel', function(e) {
                     ppPointers.delete(e.pointerId);
                     if (ppPointers.size === 0) {
-                        if (ppRaf) { cancelAnimationFrame(ppRaf); ppRaf = 0; }
                         img.classList.remove('dragging');
                         ppStart = null;
                     }
@@ -7840,7 +7902,7 @@
                     if (next <= 1.01) {
                         ppResetZoom();
                     } else {
-                        ppApplyTransform(true);
+                        ppApplyTransform();
                     }
                 }, { passive: false });
             })();
@@ -7897,108 +7959,14 @@
     <!-- Profile Page Logic -->
     <script>
         (function() {
-            // 语言字典
-            const translations = {
-                zh: {
-                    'posts': '帖子',
-                    'chat': '聊天',
-                    'my': '我的',
-                    'darkMode': '深色模式',
-                    'language': '语言',
-                    'notifications': '通知',
-                    'about': '关于',
-                    'notLoggedIn': '未登录',
-                    'clickToLogin': '点击登录',
-                    'langChanged': '语言已切换为中文',
-                    'announcement': '公告',
-                    'changelog': '更新日志',
-                    'view': '查看',
-                    'back': '返回',
-                    'publish': '发布',
-                    'delete': '删除',
-                    'deleteConfirm': '确定要删除吗？',
-                    'deleteSuccess': '删除成功',
-                    'publishSuccess': '发布成功',
-                    'title': '标题',
-                    'content': '内容',
-                    'publisher': '发布者',
-                    'totalViews': '总浏览',
-                    'totalPosts': '总动态',
-
-                    'login': '登录',
-                    'register': '注册',
-                    'username': '用户名',
-                    'password': '密码',
-                    'loginSuccess': '登录成功',
-                    'registerSuccess': '注册成功',
-                    'logout': '退出登录',
-                    'logoutSuccess': '已退出登录',
-                    'noAnnouncements': '暂无公告',
-                    'noChangelog': '暂无更新记录',
-                    'version': '版本',
-                    'date': '日期',
-                    'updateContent': '更新内容'
-                },
-                }
-                
-            };
-
-            // 需要翻译的元素列表 (带有data-i18n属性)
-            const elementsToTranslate = [
-                { selector: '.dock-tab[data-tab="posts"] .dt-label', key: 'posts' },
-                { selector: '.dock-tab[data-tab="chat"] .dt-label', key: 'chat' },
-                { selector: '.dock-tab[data-tab="profile"] .dt-label', key: 'my' },
-                { selector: '#panelProfile > div > div:first-child > span', key: 'my' },
-                { selector: '.profile-setting-item:nth-child(1) > span:first-child', key: 'darkMode' },
-                { selector: '.profile-setting-item:nth-child(2) > span:first-child', key: 'language' },
-                { selector: '.profile-setting-item:nth-child(3) > span:first-child', key: 'notifications' },
-                { selector: '.profile-setting-item:nth-child(4) > span:first-child', key: 'about' },
-                { selector: '#profileName + div', key: 'clickToLogin' },
-                { selector: '.announcement-admin-title', key: 'publish' },
-                { selector: '#announcementAdminTitle', key: 'title', attr: 'placeholder' },
-                { selector: '#announcementAdminInput', key: 'content', attr: 'placeholder' },
-                { selector: '.announcement-admin-btn.primary', key: 'publish' }
-            ];
-
-            // 翻译函数
-            window.translatePage = function(lang) {
-                const dict = translations[lang] || translations['zh'];
-                
-                // 翻译固定元素
-                elementsToTranslate.forEach(item => {
-                    const el = document.querySelector(item.selector);
-                    if (el) {
-                        if (item.attr) {
-                            el.setAttribute(item.attr, dict[item.key] || item.key);
-                        } else {
-                            // 检查是否是用户名字等需要保持不变的内容
-                            if (!el.classList.contains('keep-original')) {
-                                el.textContent = dict[item.key] || item.key;
-                            }
-                        }
-                    }
-                });
-
-                // 翻译公告标签
-                const announcementTab = document.querySelector('.announcement-tab[data-tab="announcements"]');
-                if (announcementTab) announcementTab.textContent = dict['announcement'];
-                const changelogTab = document.querySelector('.announcement-tab[data-tab="changelog"]');
-                if (changelogTab) changelogTab.textContent = dict['changelog'];
-
-                // 保存语言偏好
-                localStorage.setItem('xtj-lang', lang);
-            };
-
             // 同步用户信息到我的页面
             window.syncProfileUser = function() {
                 var nameEl = document.getElementById('profileName');
                 var avatarEl = document.getElementById('profileAvatar');
                 var nameSpan = document.getElementById('myName');
                 var avatarSpan = document.getElementById('myAvatar');
-                var lang = localStorage.getItem('xtj-lang') || 'zh';
-                var dict = translations[lang] || translations['zh'];
                 if (nameSpan && nameEl) {
-                    nameEl.textContent = nameSpan.textContent || dict['notLoggedIn'];
+                    nameEl.textContent = nameSpan.textContent || '未登录';
                 }
                 if (avatarSpan && avatarEl) {
                     avatarEl.innerHTML = avatarSpan.innerHTML || '?';
@@ -8015,48 +7983,6 @@
                     localStorage.setItem('xtj-theme', isDark ? 'dark' : 'light');
                     var topToggle = document.getElementById('themeToggle');
                     if (topToggle) topToggle.textContent = isDark ? '🌙' : '☀️';
-                });
-            }
-
-            // 设置语言函数
-            window.setProfileLang = function(lang) {
-                localStorage.setItem('xtj-lang', lang);
-                window.translatePage(lang);
-                // 更新胶囊按钮的状态
-                var tabs = document.querySelectorAll('.profile-lang-tab');
-                tabs.forEach(function(tab) {
-                    if (tab.dataset.lang === lang) {
-                        tab.classList.add('active');
-                    } else {
-                        tab.classList.remove('active');
-                    }
-                });
-                // 同时更新原始的select（向后兼容）
-                var langSelect = document.getElementById('profileLang');
-                if (langSelect) langSelect.value = lang;
-                var dict = translations[lang] || translations['zh'];
-                showToast(dict['langChanged']);
-            };
-
-            // 初始化语言选择
-            var langSelect = document.getElementById('profileLang');
-            if (langSelect) {
-                var savedLang = localStorage.getItem('xtj-lang') || 'zh';
-                langSelect.value = savedLang;
-                // 初始化页面翻译
-                window.translatePage(savedLang);
-                // 初始化胶囊按钮的状态
-                var tabs = document.querySelectorAll('.profile-lang-tab');
-                tabs.forEach(function(tab) {
-                    if (tab.dataset.lang === savedLang) {
-                        tab.classList.add('active');
-                    } else {
-                        tab.classList.remove('active');
-                    }
-                });
-                langSelect.addEventListener('change', function() {
-                    var newLang = this.value;
-                    window.setProfileLang(newLang);
                 });
             }
 
