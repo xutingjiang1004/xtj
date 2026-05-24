@@ -1396,9 +1396,9 @@
             padding-left: calc(12px + env(safe-area-inset-left, 0px));
             padding-right: calc(12px + env(safe-area-inset-right, 0px));
             padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-            background: #fff;
-            border-top: 1px solid rgba(0,0,0,0.06);
-            box-shadow: 0 -4px 20px rgba(0,0,0,0.06);
+            background: none;
+            border: none;
+            box-shadow: none;
             z-index: 100;
             pointer-events: none;
             touch-action: none;
@@ -1508,9 +1508,9 @@
 
         /* 暗色模式 Dock */
         [data-theme="dark"] .dock-bar {
-            background: #111;
-            border-top: 1px solid rgba(255,255,255,0.08);
-            box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+            background: none;
+            border: none;
+            box-shadow: none;
         }
         [data-theme="dark"] .dock-tab { color: #9e9eb0; }
         [data-theme="dark"] .dock-tab.active { color: #34d399; background: rgba(255,255,255,0.06); backdrop-filter: blur(6px) saturate(140%); -webkit-backdrop-filter: blur(6px) saturate(140%); border: 1px solid rgba(255,255,255,0.12); }
@@ -3161,8 +3161,8 @@
             object-fit: contain;
             box-shadow: none;
             transform-origin: center center;
-            transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-            will-change: transform;
+            transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.12s ease-out;
+            will-change: transform, opacity;
             cursor: zoom-in;
             user-select: none;
             -webkit-user-select: none;
@@ -3175,6 +3175,7 @@
         .photo-preview-image-wrapper img.dragging {
             cursor: grabbing;
             transition: none !important;
+            transition-duration: 0s !important;
         }
         .photo-preview-info {
             position: absolute;
@@ -7293,6 +7294,11 @@
             var ppTapTimer = null;
             var ppMoved = false;
             var ppRaf = 0;
+            var ppPhotoIdx = -1;
+            var ppSwipeLock = 0;
+            var ppSortedPhotos = [];
+            var ppSwipeDx = 0;
+            var ppSwipeMoved = false;
 
             function loadLocalPhotoWallData() {
                 try {
@@ -7398,7 +7404,8 @@
                 var img = document.getElementById('photoPreviewImage');
                 if (!img) return;
                 img.classList.toggle('zoomed', ppZoom.scale > 1.01);
-                var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
+                var swTx = ppSwipeDx || 0;
+                var t = 'translate3d(' + (ppZoom.tx + swTx) + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
                 if (noRaf) {
                     img.style.transform = t;
                     img.style.webkitTransform = t;
@@ -7410,7 +7417,8 @@
                     var img2 = document.getElementById('photoPreviewImage');
                     if (!img2) return;
                     img2.classList.toggle('zoomed', ppZoom.scale > 1.01);
-                    var t2 = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
+                    var swTx2 = ppSwipeDx || 0;
+                    var t2 = 'translate3d(' + (ppZoom.tx + swTx2) + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
                     img2.style.transform = t2;
                     img2.style.webkitTransform = t2;
                 });
@@ -7419,6 +7427,8 @@
             function ppResetZoom() {
                 if (ppRaf) { cancelAnimationFrame(ppRaf); ppRaf = 0; }
                 ppZoom = { scale: 1, tx: 0, ty: 0 };
+                ppSwipeDx = 0;
+                ppSwipeMoved = false;
                 ppPointers.clear();
                 ppStart = null;
                 var img = document.getElementById('photoPreviewImage');
@@ -7442,6 +7452,51 @@
                 ppZoom.tx = (clientX - centerX) * (1 - ratio);
                 ppZoom.ty = (clientY - centerY) * (1 - ratio);
                 ppApplyTransform(true);
+            }
+
+            function ppNavigatePhoto(direction) {
+                // direction: -1 = 前一张, 1 = 后一张
+                if (ppSwipeLock) return;
+                var newIdx = ppPhotoIdx + direction;
+                if (newIdx < 0 || newIdx >= ppSortedPhotos.length) {
+                    // 边界：弹回原位
+                    var img = document.getElementById('photoPreviewImage');
+                    if (img) {
+                        img.style.transition = 'transform 0.2s ease-out';
+                        img.style.transform = '';
+                        img.style.webkitTransform = '';
+                    }
+                    ppSwipeDx = 0;
+                    setTimeout(function() {
+                        var img2 = document.getElementById('photoPreviewImage');
+                        if (img2) { img2.style.transition = ''; }
+                    }, 220);
+                    return;
+                }
+                ppSwipeLock = 1;
+                var photo = ppSortedPhotos[newIdx];
+                photo.views = (photo.views || 0) + 1;
+                ppPhotoIdx = newIdx;
+                photoPreviewCurrent = photo;
+                saveLocalPhotoWallData();
+                updatePhotoViewDisplays(photo);
+                ppResetZoom();
+                ppSwipeDx = 0;
+                var previewImg = document.getElementById('photoPreviewImage');
+                previewImg.style.opacity = '0';
+                previewImg.style.transition = 'opacity 0.12s ease-out';
+                setTimeout(function() {
+                    previewImg.src = photo.imageUrl;
+                    document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
+                    document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
+                    document.getElementById('photoPreviewViewsCount').textContent = photo.views;
+                    previewImg.style.opacity = '1';
+                    setTimeout(function() {
+                        previewImg.style.transition = '';
+                        ppSwipeLock = 0;
+                    }, 130);
+                }, 130);
+                syncPhotoViewCount(photo);
             }
 
             async function syncPhotoViewCount(photo) {
@@ -7566,6 +7621,10 @@
                 var photo = sorted[sortedIdx];
                 if (!photo) return;
 
+                ppPhotoIdx = sortedIdx;
+                ppSortedPhotos = sorted;
+                ppSwipeLock = 0;
+
                 // Increment view count
                 photo.views = (photo.views || 0) + 1;
                 photoPreviewCurrent = photo;
@@ -7598,6 +7657,10 @@
                 photoPreviewActive = false;
                 photoPreviewClosedAt = Date.now();
                 photoPreviewCurrent = null;
+                ppPhotoIdx = -1;
+                ppSortedPhotos = [];
+                ppSwipeDx = 0;
+                ppSwipeLock = 0;
                 ppResetZoom();
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = '';
@@ -7665,6 +7728,8 @@
                     ppPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
                     if (!ppStart) return;
                     if (ppPointers.size >= 2 && ppStart.mode === 'pinch') {
+                        ppSwipeMoved = false;
+                        ppSwipeDx = 0;
                         var pts = Array.from(ppPointers.values()).slice(0, 2);
                         var d = Math.max(1, dist(pts[0], pts[1]));
                         var c = center(pts[0], pts[1]);
@@ -7676,13 +7741,29 @@
                         ppZoom.ty = c.y - ratio * (ppStart.center.y - ppStart.ty) + ppStart.vcy * (ratio - 1);
                         ppMoved = true;
                         ppApplyTransform();
-                    } else if (ppPointers.size === 1 && ppStart.mode === 'pan' && ppZoom.scale > 1.01) {
+                    } else if (ppPointers.size === 1 && ppStart.mode === 'pan') {
                         var dx = e.clientX - ppStart.x;
                         var dy = e.clientY - ppStart.y;
                         if (Math.abs(dx) > 4 || Math.abs(dy) > 4) ppMoved = true;
-                        ppZoom.tx = ppStart.tx + dx;
-                        ppZoom.ty = ppStart.ty + dy;
-                        ppApplyTransform();
+                        if (ppZoom.scale > 1.01) {
+                            // 已放大：平移
+                            ppZoom.tx = ppStart.tx + dx;
+                            ppZoom.ty = ppStart.ty + dy;
+                            ppSwipeMoved = false;
+                            ppSwipeDx = 0;
+                            ppApplyTransform();
+                        } else {
+                            // 未放大：水平滑动切换图片
+                            var canPrev = ppPhotoIdx > 0;
+                            var canNext = ppPhotoIdx < ppSortedPhotos.length - 1;
+                            if ((!canPrev && dx > 0) || (!canNext && dx < 0)) {
+                                // 边界阻力：压缩位移
+                                ppSwipeDx = (dx > 0 ? 1 : -1) * Math.log(1 + Math.abs(dx)) * 30;
+                            } else {
+                                ppSwipeDx = dx;
+                            }
+                            ppApplyTransform(true);
+                        }
                     }
                 }, { passive: false });
 
@@ -7709,6 +7790,26 @@
                                 ppTapTimer = setTimeout(function() {
                                     ppLastTap = 0;
                                     if (photoPreviewActive) closePhotoPreview();
+                                }, 260);
+                            }
+                            ppSwipeDx = 0;
+                            return;
+                        }
+                        // 滑动结束：判断是否触发左右切换
+                        if (ppZoom.scale <= 1.01 && Math.abs(ppSwipeDx) > 80) {
+                            ppNavigatePhoto(ppSwipeDx > 0 ? -1 : 1);
+                        }
+                        // 弹回原位
+                        if (ppSwipeDx !== 0) {
+                            var imgS = document.getElementById('photoPreviewImage');
+                            if (imgS) {
+                                imgS.style.transition = 'transform 0.25s cubic-bezier(0.25,0.1,0.25,1)';
+                                ppSwipeDx = 0;
+                                imgS.style.transform = 'translate3d(0px,0px,0) scale(' + ppZoom.scale + ')';
+                                imgS.style.webkitTransform = 'translate3d(0px,0px,0) scale(' + ppZoom.scale + ')';
+                                setTimeout(function() {
+                                    var imgS2 = document.getElementById('photoPreviewImage');
+                                    if (imgS2) imgS2.style.transition = '';
                                 }, 260);
                             }
                         }
