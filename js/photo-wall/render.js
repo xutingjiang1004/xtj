@@ -9,6 +9,8 @@
     }
     window.formatPhotoTime = formatPhotoTime;
 
+    var pwPlaceholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
     function sortPhotoWallData(data, sortKey) {
         var sorted = data.slice();
         switch(sortKey) {
@@ -33,6 +35,23 @@
         return sorted;
     }
 
+    function renderPhotoWallHtml(sorted) {
+        var html = '';
+        for (var i = 0; i < sorted.length; i++) {
+            var p = sorted[i];
+            var timeStr = formatPhotoTime(p.timestamp);
+            var name = p.username || '未知用户';
+            var gridSrc = p.thumbUrl || p.imageUrl;
+            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(String(p.id)) + '" style="animation-delay:' + (i * 50 < 500 ? i * 50 : 0) + 'ms" onclick="openPhotoPreview(' + i + ')">';
+            html += '<img src="' + pwPlaceholder + '" alt="photo" class="pw-blur-in" data-src="' + gridSrc + '">';
+            html += '<div class="pw-item-info">';
+            html += '<div class="pw-item-name">' + window.escapeHtml(name) + '</div>';
+            html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
+            html += '</div></div>';
+        }
+        return html;
+    }
+
     async function renderPhotoWall() {
         var grid = document.getElementById('photoGrid');
         if (!grid) return;
@@ -55,31 +74,15 @@
         }
 
         var sortKey = window.pwSortKey || 'date_desc';
-        var sorted = window.photoWallData.slice();
-        sorted = sortPhotoWallData(sorted, sortKey);
-
-        var html = '';
-        for (var i = 0; i < sorted.length; i++) {
-            var p = sorted[i];
-            var timeStr = formatPhotoTime(p.timestamp);
-            var name = p.username || '未知用户';
-            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(String(p.id)) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
-            var gridSrc = p.thumbUrl || p.imageUrl;
-            html += '<img src="' + gridSrc + '" alt="photo" class="pw-blur-in" data-src="' + gridSrc + '">';
-            html += '<div class="pw-item-info">';
-            html += '<div class="pw-item-name">' + window.escapeHtml(name) + '</div>';
-            html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
-            html += '</div></div>';
-        }
+        var sorted = sortPhotoWallData(window.photoWallData, sortKey);
+        var html = renderPhotoWallHtml(sorted);
         grid.innerHTML = html;
 
         requestAnimationFrame(function() {
             var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
-            items.forEach(function(item, idx) {
-                setTimeout(function() {
-                    item.classList.add('pw-stagger-done');
-                    item.classList.remove('pw-stagger-enter');
-                }, idx * 50);
+            items.forEach(function(item) {
+                item.classList.add('pw-stagger-done');
+                item.classList.remove('pw-stagger-enter');
             });
         });
 
@@ -102,29 +105,14 @@
 
         var sortKey = window.pwSortKey || 'date_desc';
         var sorted = sortPhotoWallData(window.photoWallData, sortKey);
-
-        var html = '';
-        for (var i = 0; i < sorted.length; i++) {
-            var p = sorted[i];
-            var timeStr = formatPhotoTime(p.timestamp);
-            var name = p.username || '未知用户';
-            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(String(p.id)) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
-            var gridSrc = p.thumbUrl || p.imageUrl;
-            html += '<img src="' + gridSrc + '" alt="photo" class="pw-blur-in" data-src="' + gridSrc + '">';
-            html += '<div class="pw-item-info">';
-            html += '<div class="pw-item-name">' + window.escapeHtml(name) + '</div>';
-            html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
-            html += '</div></div>';
-        }
+        var html = renderPhotoWallHtml(sorted);
         grid.innerHTML = html;
 
         requestAnimationFrame(function() {
             var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
-            items.forEach(function(item, idx) {
-                setTimeout(function() {
-                    item.classList.add('pw-stagger-done');
-                    item.classList.remove('pw-stagger-enter');
-                }, 0);
+            items.forEach(function(item) {
+                item.classList.add('pw-stagger-done');
+                item.classList.remove('pw-stagger-enter');
             });
         });
 
@@ -138,21 +126,29 @@
         if (!window.IntersectionObserver) {
             var imgs = grid.querySelectorAll('.pw-blur-in');
             for (var i = 0; i < imgs.length; i++) {
-                imgs[i].classList.remove('pw-blur-in');
-                imgs[i].classList.add('pw-blur-done');
+                var img = imgs[i];
+                if (img.dataset.src) img.src = img.dataset.src;
+                img.classList.remove('pw-blur-in');
+                img.classList.add('pw-blur-done');
             }
             return;
         }
         pwLazyObserver = new IntersectionObserver(function(entries) {
-            entries.forEach(function(entry) {
+            for (var e = 0; e < entries.length; e++) {
+                var entry = entries[e];
                 if (entry.isIntersecting) {
                     var img = entry.target;
+                    var realSrc = img.getAttribute('data-src');
+                    if (realSrc) {
+                        img.src = realSrc;
+                        img.removeAttribute('data-src');
+                    }
                     img.classList.remove('pw-blur-in');
                     img.classList.add('pw-blur-done');
                     pwLazyObserver.unobserve(img);
                 }
-            });
-        }, { rootMargin: '200px' });
+            }
+        }, { rootMargin: '200px 0px' });
         var imgs = grid.querySelectorAll('.pw-blur-in');
         for (var j = 0; j < imgs.length; j++) {
             pwLazyObserver.observe(imgs[j]);

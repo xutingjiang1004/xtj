@@ -126,6 +126,17 @@
             btn.textContent = '提交举报';
         };
 
+        document.addEventListener('click', function(e) {
+            var btn = e.target.closest('.report-btn');
+            if (btn) {
+                var postId = btn.getAttribute('data-id');
+                var userName = btn.getAttribute('data-user');
+                if (window.openReport && postId) {
+                    window.openReport('post', postId, userName || '');
+                }
+            }
+        });
+
         // ---------- 封禁/黑名单检查 ----------
         async function checkUserBanStatus(userName) {
             try {
