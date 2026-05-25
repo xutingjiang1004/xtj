@@ -135,6 +135,9 @@
         }
         ppTrackDrag = 0;
         ppTrackSnapping = false;
+        ppTrack.classList.remove('snapping');
+        ppTrack.style.transition = '';
+        ppTrack.style.webkitTransition = '';
         ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
         ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
         if (photos[idx]) window.updateAmbientBackground(photos[idx].imageUrl);
@@ -243,23 +246,24 @@
         if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
         ppTrackSnapping = true;
 
-        var absDiff = Math.abs(ppTrackDrag - targetOffset);
-        var duration = Math.min(400, Math.max(200, absDiff / ppVw * 400));
-
         function onSnapEnd(ev) {
             if (ev && ev.propertyName !== 'transform' && ev.propertyName !== '-webkit-transform') return;
             ppTrack.removeEventListener('transitionend', onSnapEnd);
-            ppTrack.style.transition = '';
-            ppTrack.style.webkitTransition = '';
+            ppTrack.classList.remove('snapping');
             ppTrackSnapping = false;
             ppSwipeLock = 0;
             if (ppRafId) { clearTimeout(ppRafId); ppRafId = null; }
             if (callback) callback();
         }
 
-        ppTrack.addEventListener('transitionend', onSnapEnd);
-        ppTrack.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+        var absDiff = Math.abs(ppTrackDrag - targetOffset);
+        var duration = Math.min(320, Math.max(160, absDiff / ppVw * 320));
+
+        ppTrack.classList.add('snapping');
+        var transitionStr = 'transform ' + duration + 'ms cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+        ppTrack.style.transition = transitionStr;
         ppTrack.style.webkitTransition = '-webkit-transform ' + duration + 'ms cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+        ppTrack.addEventListener('transitionend', onSnapEnd);
 
         var finalOffset = -ppVw + targetOffset;
         ppTrack.style.transform = 'translate3d(' + finalOffset + 'px, 0, 0)';
@@ -283,10 +287,24 @@
         var photo = ppSortedPhotos[newIdx];
         var targetDrag = direction > 0 ? -ppVw : ppVw;
         window.updateAmbientBackground(photo.imageUrl);
-        var curImg = document.getElementById('photoPreviewImage');
-        if (curImg) {
-            ppSwapImage(curImg, photo.imageUrl);
+
+        var prevImg = document.getElementById('ppPrevImg');
+        var nextImg = document.getElementById('ppNextImg');
+
+        if (direction > 0) {
+            if (newIdx + 1 < ppSortedPhotos.length) {
+                ppSwapImage(nextImg, ppSortedPhotos[newIdx + 1].imageUrl);
+            } else {
+                ppSwapImage(nextImg, null);
+            }
+        } else {
+            if (newIdx - 1 >= 0) {
+                ppSwapImage(prevImg, ppSortedPhotos[newIdx - 1].imageUrl);
+            } else {
+                ppSwapImage(prevImg, null);
+            }
         }
+
         ppSnapTo(targetDrag, function() {
             photo.views = (photo.views || 0) + 1;
             ppPhotoIdx = newIdx;
@@ -563,11 +581,11 @@
                     if (dt > 5) vx = (last.x - first.x) / dt;
                 }
             }
-            var threshold = ppVw * 0.25;
+            var threshold = ppVw * 0.18;
             var absDx = Math.abs(dx);
             var absVx = Math.abs(vx);
             var targetDir = 0;
-            if (absDx > threshold || absVx > 0.5) {
+            if (absDx > threshold || absVx > 0.3) {
                 targetDir = dx > 0 ? 1 : (dx < 0 ? -1 : 0);
             }
             ppStart = null;
