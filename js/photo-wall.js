@@ -1,6 +1,7 @@
 (function() {
             // ========== 照片墙功能 ==========
             var photoWallData = [];
+            window.photoWallData = photoWallData;
             var photoWallKey = 'xtj_photos';
             var photoWallDeletedKey = 'xtj_photos_deleted';
 
@@ -44,6 +45,7 @@
             var ppPhotoIdx = -1;
             var ppSwipeLock = 0;
             var ppSortedPhotos = [];
+            window.ppSortedPhotos = ppSortedPhotos;
             // 滑动轨道变量
             var ppTrack = null;
             var ppTrackDrag = 0;
@@ -455,7 +457,8 @@
                     imageUrl: row.media_url || extra.imageUrl || '',
                     thumbUrl: extra.thumb || '',
                     timestamp: row.created_at ? Date.parse(row.created_at) : (extra.timestamp || Date.now()),
-                    views: row.views || extra.views || 0
+                    views: row.views || extra.views || 0,
+                    fileSize: extra.fileSize || null
                 };
             }
 
@@ -692,7 +695,7 @@
                     if (thumbErr) {
                         // 缩略图上传失败不阻塞主流程，只用原图
                         var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
-                        var contentJson = JSON.stringify({ type: 'photo_wall' });
+                        var contentJson = JSON.stringify({ type: 'photo_wall', fileSize: file.size });
                         var insertRes = await sb.from('posts').insert([{
                             user_name: window.currentUser,
                             content: contentJson,
@@ -713,7 +716,7 @@
                     var thumbUrl = sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl;
 
                     // 将缩略图 URL 存入 content 字段
-                    var contentJson = JSON.stringify({ type: 'photo_wall', thumb: thumbUrl });
+                    var contentJson = JSON.stringify({ type: 'photo_wall', thumb: thumbUrl, fileSize: file.size });
                     var insertRes = await sb.from('posts').insert([{
                         user_name: window.currentUser,
                         content: contentJson,
@@ -1266,6 +1269,63 @@
                     document.body.removeChild(ta);
                     showToast('链接已复制');
                 }
+            };
+
+            // ========== 显示照片信息 ==========
+            window.showPhotoInfo = function() {
+                var photo = ppSortedPhotos[ppPhotoIdx];
+                if (!photo) return;
+
+                var modal = document.getElementById('ppInfoModal');
+                var body = document.getElementById('ppInfoModalBody');
+
+                // 格式化文件大小
+                function formatSize(bytes) {
+                    if (!bytes) return '未知';
+                    var sizes = ['B', 'KB', 'MB', 'GB'];
+                    var i = 0;
+                    var b = parseInt(bytes, 10);
+                    while (b >= 1024 && i < sizes.length - 1) { b /= 1024; i++; }
+                    return b.toFixed(2) + ' ' + sizes[i];
+                }
+
+                // 格式化日期
+                function formatFullDate(ts) {
+                    var d = new Date(ts || Date.now());
+                    var y = d.getFullYear();
+                    var m = String(d.getMonth() + 1).padStart(2, '0');
+                    var da = String(d.getDate()).padStart(2, '0');
+                    var h = String(d.getHours()).padStart(2, '0');
+                    var mi = String(d.getMinutes()).padStart(2, '0');
+                    var s = String(d.getSeconds()).padStart(2, '0');
+                    return y + '-' + m + '-' + da + ' ' + h + ':' + mi + ':' + s;
+                }
+
+                body.innerHTML = '';
+
+                // 添加信息项
+                var items = [
+                    { label: '发布人', value: photo.username || '未知用户' },
+                    { label: '发布时间', value: formatFullDate(photo.timestamp) },
+                    { label: '文件大小', value: formatSize(photo.fileSize) },
+                    { label: '浏览次数', value: (photo.views || 0) + ' 次' },
+                    { label: '照片ID', value: photo.id || '未知' }
+                ];
+
+                items.forEach(function(item) {
+                    var div = document.createElement('div');
+                    div.className = 'pp-info-item';
+                    div.innerHTML = '<div class="pp-info-label">' + escapeHtml(item.label) + '</div><div class="pp-info-value">' + escapeHtml(item.value) + '</div>';
+                    body.appendChild(div);
+                });
+
+                modal.style.display = 'flex';
+            };
+
+            // ========== 关闭照片信息 ==========
+            window.closePhotoInfo = function() {
+                var modal = document.getElementById('ppInfoModal');
+                if (modal) modal.style.display = 'none';
             };
 
             // ========== 删除确认弹窗 ==========
