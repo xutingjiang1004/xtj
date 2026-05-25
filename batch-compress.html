@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>批量图片压缩工具</title>
+    <style>
+        :root {
+            --bg: #f5f5f7;
+            --card: #ffffff;
+            --text: #1d1d24;
+            --muted: #8e8e93;
+            --primary: #059669;
+            --danger: #ff3b60;
+            --border: #e5e5ea;
+            --radius: 16px;
+            --shadow: 0 2px 16px rgba(0,0,0,0.06);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 24px;
+        }
+        .container { max-width: 960px; margin: 0 auto; }
+        .header {
+            text-align: center;
+            padding: 32px 0;
+        }
+        .header h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .header p { color: var(--muted); font-size: 14px; }
+        .card {
+            background: var(--card);
+            border-radius: var(--radius);
+            padding: 24px;
+            margin-bottom: 16px;
+            box-shadow: var(--shadow);
+        }
+        .stats-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .stat-box {
+            flex: 1;
+            min-width: 120px;
+            padding: 16px;
+            border-radius: 12px;
+            background: rgba(5,150,105,0.06);
+            text-align: center;
+        }
+        .stat-box.danger { background: rgba(255,59,96,0.06); }
+        .stat-box .val { font-size: 24px; font-weight: 700; }
+        .stat-box .lbl { font-size: 12px; color: var(--muted); margin-top: 4px; }
+        .progress-bar {
+            height: 8px;
+            border-radius: 4px;
+            background: #e5e5ea;
+            overflow: hidden;
+            margin: 12px 0;
+        }
+        .progress-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, #059669, #06b6d4);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 12px 24px;
+            border-radius: 12px;
+            border: none;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+        .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+        .btn-ghost:hover { background: rgba(0,0,0,0.04); }
+        .btn-danger { background: var(--danger); color: #fff; }
+        .btn-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+        thead th {
+            text-align: left;
+            padding: 10px 12px;
+            border-bottom: 2px solid var(--border);
+            color: var(--muted);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        tbody td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+        .tag-skip { background: #e5e5ea; color: #8e8e93; }
+        .tag-ok { background: rgba(5,150,105,0.12); color: #059669; }
+        .tag-fail { background: rgba(255,59,96,0.12); color: #ff3b60; }
+        .log-area {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            font-family: 'SF Mono', 'Consolas', monospace;
+            font-size: 12px;
+            color: var(--muted);
+            background: rgba(0,0,0,0.02);
+            margin-top: 12px;
+        }
+        .log-area .log-line { padding: 2px 0; }
+        .log-area .log-error { color: var(--danger); }
+        .log-area .log-ok { color: var(--primary); }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>🗜️ 批量图片压缩工具</h1>
+        <p>扫描照片墙所有图片，将超过 1MB 的图片统一压缩至 1MB 以内</p>
+    </div>
+
+    <div class="card">
+        <div id="statusMsg" style="text-align:center;padding:8px;color:var(--muted);">正在初始化...</div>
+        <div class="stats-row" id="statsRow" style="display:none;">
+            <div class="stat-box"><div class="val" id="statTotal">-</div><div class="lbl">照片总数</div></div>
+            <div class="stat-box"><div class="val" id="statOversized">-</div><div class="lbl">需压缩（&gt;1MB）</div></div>
+            <div class="stat-box"><div class="val" id="statDone">0</div><div class="lbl">已处理</div></div>
+            <div class="stat-box"><div class="val" id="statSkipped">0</div><div class="lbl">已跳过</div></div>
+            <div class="stat-box danger"><div class="val" id="statFailed">0</div><div class="lbl">失败</div></div>
+            <div class="stat-box"><div class="val" id="statSaved">-</div><div class="lbl">节省空间</div></div>
+        </div>
+        <div class="progress-bar" id="progressBar" style="display:none;"><div class="fill" id="progressFill" style="width:0%"></div></div>
+
+        <div class="btn-row" id="btnRow" style="display:none;">
+            <button class="btn btn-primary" id="btnStart" onclick="startCompress()">🚀 开始批量压缩</button>
+            <button class="btn btn-danger" id="btnStop" style="display:none;" onclick="stopCompress()">⏹ 停止</button>
+        </div>
+    </div>
+
+    <div class="card" id="reportCard" style="display:none;">
+        <h3 style="margin-bottom:16px;">📊 压缩报告</h3>
+        <div style="overflow-x:auto;">
+            <table><thead><tr>
+                <th>#</th><th>照片</th><th>原始大小</th><th>压缩后</th><th>节省</th><th>状态</th><th>校验</th>
+            </tr></thead><tbody id="reportBody"></tbody></table>
+        </div>
+        <div class="log-area" id="logArea"></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(function() {
+    var SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
+    var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ1Mjk1NzQsImV4cCI6MjA2MDEwNTU3NH0.luWmEfuihvYpmdyBjbjGzFxumgFnZIlM5CIOQGwFjq4";
+    var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    var PHOTO_WALL_MARKER = '__photo_wall__';
+    var MAX_BYTES = 1 * 1024 * 1024;
+
+    var allPhotos = [];
+    var toCompress = [];
+    var reportRows = [];
+    var totalSaved = 0;
+    var doneCount = 0;
+    var skipCount = 0;
+    var failCount = 0;
+    var isRunning = false;
+    var stopRequested = false;
+
+    function $(id) { return document.getElementById(id); }
+    function setMsg(text, color) {
+        var m = $('statusMsg');
+        m.textContent = text;
+        m.style.color = color || 'var(--muted)';
+    }
+    function log(msg, cls) {
+        var area = $('logArea');
+        var div = document.createElement('div');
+        div.className = 'log-line' + (cls ? ' ' + cls : '');
+        div.textContent = new Date().toLocaleTimeString() + ' ' + msg;
+        area.appendChild(div);
+        area.scrollTop = area.scrollHeight;
+    }
+    function updateStats() {
+        $('statDone').textContent = doneCount;
+        $('statSkipped').textContent = skipCount;
+        $('statFailed').textContent = failCount;
+        $('statSaved').textContent = formatBytes(totalSaved);
+        var total = toCompress.length || 1;
+        var pct = Math.round((doneCount + skipCount + failCount) / total * 100);
+        $('progressFill').style.width = pct + '%';
+        $('statusMsg').textContent = '\u8FDB\u5EA6: ' + (doneCount + skipCount + failCount) + ' / ' + toCompress.length;
+    }
+    function formatBytes(bytes) {
+        if (!bytes) return '0 B';
+        if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB';
+        if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return bytes + ' B';
+    }
+
+    function extractStoragePath(url) {
+        if (!url) return null;
+        var match = url.match(/\/uploads\/(.+?)(?:\?|$)/);
+        return match ? decodeURIComponent(match[1]) : null;
+    }
+
+    async function init() {
+        try {
+            setMsg('正在查询照片墙数据...');
+            var res = await sb.from('posts')
+                .select('id,user_name,media_url,content,created_at')
+                .eq('media_type', PHOTO_WALL_MARKER)
+                .order('created_at', { ascending: false })
+                .limit(500);
+
+            if (res.error) throw res.error;
+            if (!res.data || !res.data.length) {
+                setMsg('未找到任何照片墙图片', '#ff3b60');
+                return;
+            }
+
+            allPhotos = res.data;
+            toCompress = [];
+            for (var i = 0; i < allPhotos.length; i++) {
+                var p = allPhotos[i];
+                if (p.media_url) {
+                    toCompress.push(p);
+                }
+            }
+
+            $('statTotal').textContent = allPhotos.length;
+            $('statOversized').textContent = toCompress.length;
+            $('statSaved').textContent = '0 B';
+            $('statsRow').style.display = 'flex';
+            $('btnRow').style.display = 'flex';
+            $('progressBar').style.display = 'block';
+            $('reportCard').style.display = 'block';
+
+            if (toCompress.length === 0) {
+                setMsg('✅ 所有图片均无 media_url，无需处理', '#059669');
+            } else {
+                setMsg('就绪，共 ' + toCompress.length + ' 张图片待检查压缩');
+            }
+        } catch(e) {
+            setMsg('初始化失败: ' + (e.message || '未知错误'), '#ff3b60');
+            console.error(e);
+        }
+    }
+
+    async function downloadAndMeasure(url) {
+        try {
+            var resp = await fetch(url);
+            if (!resp.ok) return null;
+            var blob = await resp.blob();
+            return { blob: blob, size: blob.size };
+        } catch(e) {
+            return null;
+        }
+    }
+
+    function compressBlob(blob, targetBytes) {
+        return new Promise(function(resolve) {
+            if (blob.size <= targetBytes) { resolve({ blob: blob, size: blob.size, compressed: false }); return; }
+            var img = new Image();
+            var url = URL.createObjectURL(blob);
+            img.onload = function() {
+                URL.revokeObjectURL(url);
+                var canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                var ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                var q = 0.85;
+                function tryQ() {
+                    canvas.toBlob(function(outBlob) {
+                        if (!outBlob) { resolve({ blob: blob, size: blob.size, compressed: false }); return; }
+                        if (outBlob.size <= targetBytes || q <= 0.15) {
+                            resolve({ blob: outBlob, size: outBlob.size, compressed: outBlob.size < blob.size });
+                            return;
+                        }
+                        q -= 0.12;
+                        tryQ();
+                    }, 'image/jpeg', q);
+                }
+                tryQ();
+            };
+            img.onerror = function() { URL.revokeObjectURL(url); resolve({ blob: blob, size: blob.size, compressed: false }); };
+            img.src = url;
+        });
+    }
+
+    async function validateImage(url) {
+        try {
+            var resp = await fetch(url);
+            if (!resp.ok) return { ok: false, reason: 'HTTP ' + resp.status };
+            var blob = await resp.blob();
+            if (!blob || blob.size < 100) return { ok: false, reason: '文件过小(' + (blob.size || 0) + 'B)' };
+            var img = new Image();
+            return new Promise(function(resolve) {
+                img.onload = function() {
+                    if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                        resolve({ ok: true, w: img.naturalWidth, h: img.naturalHeight, size: blob.size });
+                    } else {
+                        resolve({ ok: false, reason: '尺寸异常' });
+                    }
+                };
+                img.onerror = function() { resolve({ ok: false, reason: '无法解码' }); };
+                img.src = url;
+            });
+        } catch(e) {
+            return { ok: false, reason: e.message };
+        }
+    }
+
+    async function compressOne(photo, index) {
+        var row = { index: index + 1, user: photo.user_name || '-', id: photo.id, beforeSize: 0, afterSize: 0, saved: 0, status: 'pending', validate: '' };
+
+        try {
+            var path = extractStoragePath(photo.media_url);
+            if (!path) { row.status = 'skip'; row.validate = '无有效路径'; skipCount++; updateStats(); return row; }
+
+            var dl = await downloadAndMeasure(photo.media_url);
+            if (!dl) { row.status = 'fail'; row.validate = '下载失败'; failCount++; updateStats(); return row; }
+
+            row.beforeSize = dl.size;
+            var beforeMB = dl.size / 1048576;
+            if (dl.size <= MAX_BYTES) {
+                row.status = 'skip';
+                row.afterSize = dl.size;
+                row.validate = '已 ≤1MB (' + beforeMB.toFixed(2) + 'MB)';
+                skipCount++;
+                updateStats();
+                return row;
+            }
+
+            log('压缩: ' + beforeMB.toFixed(2) + 'MB | ' + path.substring(0, 50), 'log-ok');
+
+            var comp = await compressBlob(dl.blob, MAX_BYTES);
+            row.afterSize = comp.size;
+            row.saved = row.beforeSize - row.afterSize;
+            totalSaved += row.saved;
+
+            var uploadRes = await sb.storage.from('uploads').upload(path, comp.blob, { upsert: true, contentType: 'image/jpeg' });
+            if (uploadRes.error) {
+                row.status = 'fail';
+                row.validate = '上传失败: ' + uploadRes.error.message;
+                failCount++;
+                updateStats();
+                return row;
+            }
+
+            var val = await validateImage(photo.media_url);
+            row.validate = val.ok ? ('✅ ' + val.w + '×' + val.h + ' ' + formatBytes(val.size)) : ('⚠ ' + val.reason);
+
+            var extra = {};
+            try { extra = photo.content ? JSON.parse(photo.content) : {}; } catch(e) {}
+            extra.fileSize = comp.size;
+            var newContent = JSON.stringify(extra);
+            var dbRes = await sb.from('posts').update({ content: newContent }).eq('id', photo.id);
+            if (dbRes.error) {
+                row.status = 'fail';
+                row.validate = 'DB更新失败: ' + dbRes.error.message;
+                failCount++;
+                updateStats();
+                return row;
+            }
+
+            row.status = 'ok';
+            doneCount++;
+            updateStats();
+        } catch(e) {
+            row.status = 'fail';
+            row.validate = '异常: ' + e.message;
+            failCount++;
+            updateStats();
+        }
+        return row;
+    }
+
+    async function startCompress() {
+        if (isRunning) return;
+        if (toCompress.length === 0) { setMsg('无图片可处理'); return; }
+
+        isRunning = true;
+        stopRequested = false;
+        doneCount = 0; skipCount = 0; failCount = 0; totalSaved = 0;
+        reportRows = [];
+        $('reportBody').innerHTML = '';
+        $('logArea').innerHTML = '';
+        $('btnStart').style.display = 'none';
+        $('btnStop').style.display = 'inline-flex';
+        setMsg('正在处理第 1 / ' + toCompress.length + ' 张...');
+
+        for (var i = 0; i < toCompress.length; i++) {
+            if (stopRequested) { log('用户中止操作', 'log-error'); break; }
+            setMsg('正在处理第 ' + (i + 1) + ' / ' + toCompress.length + ' 张...');
+            var row = await compressOne(toCompress[i], i);
+            reportRows.push(row);
+            renderRow(row);
+        }
+
+        $('btnStart').style.display = 'inline-flex';
+        $('btnStop').style.display = 'none';
+        isRunning = false;
+        setMsg('✅ 完成！共处理 ' + (doneCount + skipCount + failCount) + ' 张，成功 ' + doneCount + '，跳过 ' + skipCount + '，失败 ' + failCount + '，节省 ' + formatBytes(totalSaved), '#059669');
+        log('====== 批量压缩完成 ======', 'log-ok');
+        log('成功: ' + doneCount + ' | 跳过: ' + skipCount + ' | 失败: ' + failCount, 'log-ok');
+        log('总节省空间: ' + formatBytes(totalSaved), 'log-ok');
+    }
+
+    function stopCompress() {
+        stopRequested = true;
+        log('正在停止...', 'log-error');
+        $('btnStop').style.display = 'none';
+        $('btnStart').style.display = 'inline-flex';
+    }
+
+    function renderRow(row) {
+        var tbody = $('reportBody');
+        var tr = document.createElement('tr');
+        var tagClass = row.status === 'ok' ? 'tag-ok' : (row.status === 'fail' ? 'tag-fail' : 'tag-skip');
+        var tagText = row.status === 'ok' ? '已压缩' : (row.status === 'fail' ? '失败' : '跳过');
+        var savedStr = row.saved > 0 ? formatBytes(row.saved) : '-';
+        tr.innerHTML = '<td>' + row.index + '</td>' +
+            '<td>' + escapeHtml(row.user.substring(0, 12)) + '</td>' +
+            '<td>' + formatBytes(row.beforeSize) + '</td>' +
+            '<td>' + formatBytes(row.afterSize) + '</td>' +
+            '<td>' + savedStr + '</td>' +
+            '<td><span class="tag ' + tagClass + '">' + tagText + '</span></td>' +
+            '<td style="font-size:11px;">' + escapeHtml(row.validate || '') + '</td>';
+        tbody.appendChild(tr);
+    }
+
+    function escapeHtml(str) {
+        var div = document.createElement('div');
+        div.textContent = str || '';
+        return div.innerHTML;
+    }
+
+    window.startCompress = startCompress;
+    window.stopCompress = stopCompress;
+
+    init();
+})();
+</script>
+</body>
+</html>
