@@ -1,12 +1,12 @@
 # 更新日志
 
 ## v0.0.44 - 2026-05-25
-### Bug 修复
-- 修复照片左右滑动黑屏：重构 ppSetTrackImages 同步重置轨道位置，不再等待 curImg.onload；ppNavigatePhoto 提前预加载目标图片；pp-slide-slot 添加背景色防止图片加载间隙露出黑底
-- 修复照片全屏预览重叠显示：移除导致UI渲染层级重叠的 View Transitions API 调用（startViewTransition），去除 grid items 的 view-transition-name，仅保留 CSS fadeIn 动画实现平滑过渡
-- 修复照片删除后刷新重新出现：新增本地删除ID追踪机制（photoWallDeletedKey），loadPhotoWallData 加载时过滤已删除ID；doDeletePhoto 同步删除云端 posts 记录、Storage 文件、本地数据，三重保障；自动清理已生效的删除记录防止数据膨胀
-- 新增 null 安全检查：openPhotoPreview / closePhotoPreview 增加 overlay 空值守卫
-- 优化 uploads Storage 文件清理：doDeletePhoto 额外删除 Supabase Storage 中的照片源文件
+### 修复
+- 彻底修复照片左右滑动黑屏问题：重构 `ppNavigatePhoto` 逻辑，在滑动动画开始前先正确重新排布三个槽的图片，确保用户在滑动过程中看到连续的图片而非黑屏
+- 修复放大图片后无法单击返回的问题：修改 `document.addEventListener('click')` 回调，现在点击图片区域时，如果图片已放大则先缩小到 1 倍，未放大则直接关闭预览
+- 修复照片全屏预览重叠显示问题：移除导致重叠的 View Transitions API 相关代码，仅保留 CSS 淡入动画
+- 修复照片删除后刷新重新出现的问题：新增 `photoWallDeletedKey` 本地删除 ID 追踪机制，加载时自动过滤已删除照片；删除时同步删除云端记录和 Storage 文件
+- 增强健壮性：添加 overlay 空值守卫，清理无效删除记录等
 
 ## v0.0.43 - 2026-05-25
 ### 性能与体验优化

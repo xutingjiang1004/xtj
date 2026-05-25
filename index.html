@@ -7916,14 +7916,60 @@
                 updatePhotoViewDisplays(photo);
                 ppResetZoom();
 
-                // 预加载目标图片，确保滑动到位时图片已在缓存中
-                var preloadImg = new Image();
-                preloadImg.src = photo.imageUrl;
+                // ===== 完整滑动逻辑：重新排布三个槽的图片，让用户看到动画 =====
+                var prevImg = document.getElementById('ppPrevImg');
+                var curImg = document.getElementById('photoPreviewImage');
+                var nextImg = document.getElementById('ppNextImg');
+                var photos = ppSortedPhotos;
+
+                // 禁用轨道动画
+                ppTrack.style.transition = 'none';
+
+                if (direction > 0) {
+                    // 向右滑：
+                    // 1. 把当前图片放左槽，下一张放中槽，下下张放右槽
+                    prevImg.src = curImg.src;
+                    curImg.src = nextImg.src;
+                    if (newIdx + 1 < photos.length) {
+                        nextImg.src = photos[newIdx + 1].imageUrl;
+                    } else {
+                        nextImg.removeAttribute('src');
+                    }
+                    // 2. 把轨道跳到最右边 (-2*ppVw)，这样中槽（下一张）正好在屏幕右边
+                    ppTrack.style.transform = 'translate3d(' + (-2 * ppVw) + 'px, 0, 0)';
+                    ppTrack.style.webkitTransform = 'translate3d(' + (-2 * ppVw) + 'px, 0, 0)';
+                    ppTrackDrag = -ppVw;
+                } else {
+                    // 向左滑：
+                    // 1. 把上上张放左槽，上一张放中槽，当前图片放右槽
+                    if (newIdx - 1 >= 0) {
+                        prevImg.src = photos[newIdx - 1].imageUrl;
+                    } else {
+                        prevImg.removeAttribute('src');
+                    }
+                    nextImg.src = curImg.src;
+                    curImg.src = photos[newIdx].imageUrl;
+                    // 2. 把轨道跳到最左边 (0)，这样中槽（上一张）正好在屏幕左边
+                    ppTrack.style.transform = 'translate3d(0px, 0, 0)';
+                    ppTrack.style.webkitTransform = 'translate3d(0px, 0, 0)';
+                    ppTrackDrag = ppVw;
+                }
+
+                // 强制 reflow
+                ppTrack.offsetHeight;
+
+                // 更新环境光和信息
+                updateAmbientBackground(photo.imageUrl);
+                document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
+                document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
+                document.getElementById('photoPreviewViewsCount').textContent = photo.views;
+
+                // 预加载相邻图片
                 ppPreloadAdjacent(newIdx);
 
-                // 滑动到目标位置后重排轨道
-                var targetDrag = direction > 0 ? -ppVw : ppVw;
-                ppSnapTo(targetDrag, function() {
+                // 现在把轨道滑回中间 (-ppVw)，这样看起来像是新图片从对应方向滑进来
+                ppSnapTo(0, function() {
+                    // 滑动完成后，重置轨道上的三个槽图片，为下一次滑动做准备
                     ppSetTrackImages(newIdx);
                     ppSwipeLock = 0;
                     ppUpdateDots();
@@ -7932,9 +7978,6 @@
                         delBtn2.style.display = (window.currentUser && photo.username === window.currentUser) ? 'flex' : 'none';
                     }
                 });
-                document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
-                document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
-                document.getElementById('photoPreviewViewsCount').textContent = photo.views;
                 syncPhotoViewCount(photo);
             }
 
@@ -8312,8 +8355,14 @@
 
             document.addEventListener('click', function(e) {
                 var overlay = document.getElementById('photoPreviewOverlay');
-                if (overlay && overlay.classList.contains('active')) {
-                    if (e.target === overlay || e.target.classList.contains('photo-preview-image-wrapper')) {
+                if (!overlay || !overlay.classList.contains('active')) return;
+                // 如果点击的是关闭按钮、分享按钮、删除按钮，不处理
+                if (e.target.closest('.photo-preview-close') || e.target.closest('.pp-share-btn') || e.target.closest('.pp-delete-btn')) return;
+                // 如果是在图片wrapper上点击，且图片已放大，只缩小；未放大才关闭
+                if (e.target === overlay || e.target.closest('#ppImageWrapper')) {
+                    if (ppZoom.scale > 1.01) {
+                        ppResetZoom();
+                    } else {
                         closePhotoPreview();
                     }
                 }
