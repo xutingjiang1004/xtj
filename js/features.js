@@ -679,32 +679,7 @@
 
         // ---------- 懒加载统计页面 ----------
         window.loadStatsLazy = function() {
-            var statsEl = document.getElementById('panelProfile');
-            if (!statsEl || statsEl.classList.contains('stats-loaded')) return;
-            statsEl.classList.add('stats-loaded');
-            // Stats are loaded only when profile tab becomes active
-            var profileObserver = new MutationObserver(function() {
-                if (statsEl.classList.contains('active') && !statsEl.querySelector('.stats-content')) {
-                    var statsDiv = document.createElement('div');
-                    statsDiv.className = 'stats-content';
-                    statsDiv.style.padding = '12px';
-                    // Compute stats from local data
-                    var posts = window.allPosts || [];
-                    var likes = window.allLikes || [];
-                    var comments = window.allComments || [];
-                    var users = window.allUsers || [];
-                    statsDiv.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">' +
-                        '<div style="padding:16px;border-radius:12px;background:rgba(5,150,105,0.08);text-align:center;"><div style="font-size:24px;font-weight:700;">' + posts.length + '</div><div style="font-size:13px;color:var(--text-muted);">帖子</div></div>' +
-                        '<div style="padding:16px;border-radius:12px;background:rgba(59,130,246,0.08);text-align:center;"><div style="font-size:24px;font-weight:700;">' + users.length + '</div><div style="font-size:13px;color:var(--text-muted);">用户</div></div>' +
-                        '<div style="padding:16px;border-radius:12px;background:rgba(239,68,68,0.08);text-align:center;"><div style="font-size:24px;font-weight:700;">' + likes.length + '</div><div style="font-size:13px;color:var(--text-muted);">点赞</div></div>' +
-                        '<div style="padding:16px;border-radius:12px;background:rgba(168,85,247,0.08);text-align:center;"><div style="font-size:24px;font-weight:700;">' + comments.length + '</div><div style="font-size:13px;color:var(--text-muted);">评论</div></div>' +
-                        '</div>';
-                    var existing = statsEl.querySelector('.stats-content');
-                    if (existing) existing.remove();
-                    statsEl.insertBefore(statsDiv, statsEl.firstChild);
-                }
-            });
-            profileObserver.observe(statsEl, { attributes: true, attributeFilter: ['class'] });
+            // 已移除，不再显示统计卡片
         };
 
         // Init lazy stats
