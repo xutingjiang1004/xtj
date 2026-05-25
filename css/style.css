@@ -3394,6 +3394,9 @@
             box-shadow: none;
             transform-origin: center center;
             will-change: transform;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+            transform: translateZ(0);
             cursor: zoom-in;
             user-select: none;
             -webkit-user-select: none;

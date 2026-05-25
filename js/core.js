@@ -535,6 +535,7 @@
                 ctx.drawImage(img, 0, 0, w, h);
                 resolve(canvas.toDataURL('image/jpeg', quality));
             }
+            window.compressImage = compressImage;
 
             window.triggerAvatarUpload = function() {
                 document.getElementById('avatarUploadInput').click();
@@ -1445,6 +1446,7 @@
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
+                    <button class="action-btn report-btn" style="margin-left:auto;" onclick="window.openReport&&window.openReport('post','${escapeHtml(p.id).replace(/'/g, "\\'")}','${escapeHtml(p.user_name).replace(/'/g, "\\'")}')">举报</button>
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -1618,6 +1620,7 @@
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
+                    <button class="action-btn report-btn" style="margin-left:auto;" onclick="window.openReport&&window.openReport('post','${escapeHtml(p.id).replace(/'/g, "\\'")}','${escapeHtml(p.user_name).replace(/'/g, "\\'")}')">举报</button>
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -2958,6 +2961,39 @@
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.51',
+                    date: '2026-05-25',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li><strong>举报按钮修复</strong>
+                                <ul>
+                                    <li>将举报按钮直接嵌入帖子模板HTML（renderFeedWithAvatars 和 appendMorePosts），替代脆弱的DOM打补丁方式</li>
+                                    <li>移除features.js中的MutationObserver补丁代码，按钮随帖子初始加载一并渲染，杜绝消失问题</li>
+                                    <li>举报按钮右对齐置底，通过inline onclick调用window.openReport，兼容所有设备和屏幕尺寸</li>
+                                </ul>
+                            </li>
+                            <li><strong>照片全屏预览双指放大性能优化</strong>
+                                <ul>
+                                    <li>CSS层面启用GPU硬件加速：backface-visibility: hidden + transform: translateZ(0) + will-change: transform</li>
+                                    <li>手势系统重构：预分配PinchPre对象避免每帧Array.from分配，降低GC压力</li>
+                                    <li>新增屏幕刷新率自动检测（rAF中值法），自适应120Hz/90Hz/60Hz帧预算</li>
+                                    <li>viewport中心点预计算缓存，减少每帧布局查询</li>
+                                </ul>
+                            </li>
+                            <li><strong>照片上传自动压缩</strong>
+                                <ul>
+                                    <li>新增compressToMaxSize函数：文件>10MB时自动压缩至~10MB，多级降级策略（2560→2048→1920→1280→800像素）</li>
+                                    <li>100MB超大型照片也能自动压缩后上传，不再直接拒绝</li>
+                                    <li>压缩失败时回退策略：≤50MB直接上传原文件，>50MB且压缩失败则跳过</li>
+                                    <li>压缩前后尺寸均记录（fileSize + originalSize），数据透明可追溯</li>
+                                    <li>Supabase免费版限制已确认：文件存储1GB，单文件50MB，月带宽5GB</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.50',
                     date: '2026-05-25',

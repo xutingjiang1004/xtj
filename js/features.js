@@ -189,86 +189,6 @@
             };
         }
 
-        // ---------- 为帖子添加举报按钮 ----------
-        // Patch renderFeed to add report button to each post
-        var _origRenderFeed = window.renderFeed;
-        if (_origRenderFeed) {
-            window.renderFeed = async function() {
-                await _origRenderFeed.apply(this, arguments);
-                // Add report buttons to post actions
-                var actionBars = document.querySelectorAll('.post .actions');
-                actionBars.forEach(function(bar) {
-                    if (bar.querySelector('.report-btn')) return;
-                    var postEl = bar.closest('.post');
-                    var postId = postEl ? postEl.getAttribute('data-post-id') : '';
-                    var reportBtn = document.createElement('button');
-                    reportBtn.className = 'action-btn report-btn';
-                    reportBtn.textContent = '举报';
-                    reportBtn.style.marginLeft = 'auto';
-                    reportBtn.onclick = function(e) {
-                        e.stopPropagation();
-                        if (!window.currentUser) { showToast('请先登录'); return; }
-                        var pid = postId || '';
-                        var userEl = postEl ? postEl.querySelector('.user-name') : null;
-                        var pUser = userEl ? userEl.textContent : '';
-                        window.openReport('post', pid, pUser);
-                    };
-                    bar.appendChild(reportBtn);
-                });
-            };
-        } else {
-            // If renderFeed not found, we patch the feed rendering via mutation observer
-            document.addEventListener('DOMContentLoaded', function() {
-                var feedEl = document.getElementById('feed');
-                if (!feedEl) return;
-
-                // Process existing posts immediately
-                document.querySelectorAll('.post .actions:not(.patched)').forEach(function(bar) {
-                    bar.classList.add('patched');
-                    if (bar.querySelector('.report-btn')) return;
-                    var postEl = bar.closest('.post');
-                    var postId = postEl ? postEl.getAttribute('data-post-id') : '';
-                    var reportBtn = document.createElement('button');
-                    reportBtn.className = 'action-btn report-btn';
-                    reportBtn.textContent = '举报';
-                    reportBtn.style.marginLeft = 'auto';
-                    reportBtn.onclick = function(e) {
-                        e.stopPropagation();
-                        if (!window.currentUser) { showToast('请先登录'); return; }
-                        var pid = postId || '';
-                        var userEl = postEl ? postEl.querySelector('.user-name') : null;
-                        var pUser = userEl ? userEl.textContent : '';
-                        window.openReport('post', pid, pUser);
-                    };
-                    bar.appendChild(reportBtn);
-                });
-
-                // Set up observer for future posts
-                var observer = new MutationObserver(function() {
-                    document.querySelectorAll('.post .actions:not(.patched)').forEach(function(bar) {
-                        bar.classList.add('patched');
-                        if (bar.querySelector('.report-btn')) return;
-                        var postEl = bar.closest('.post');
-                        var postId = postEl ? postEl.getAttribute('data-post-id') : '';
-                        var reportBtn = document.createElement('button');
-                        reportBtn.className = 'action-btn report-btn';
-                        reportBtn.textContent = '举报';
-                        reportBtn.style.marginLeft = 'auto';
-                        reportBtn.onclick = function(e) {
-                            e.stopPropagation();
-                            if (!window.currentUser) { showToast('请先登录'); return; }
-                            var pid = postId || '';
-                            var userEl = postEl ? postEl.querySelector('.user-name') : null;
-                            var pUser = userEl ? userEl.textContent : '';
-                            window.openReport('post', pid, pUser);
-                        };
-                        bar.appendChild(reportBtn);
-                    });
-                });
-                observer.observe(feedEl, { childList: true, subtree: true });
-            });
-        }
-
         // ================================================================
         // 模块2：照片墙功能增强
         // ================================================================
@@ -413,7 +333,40 @@
             if (!files || files.length === 0) return;
             if (!window.currentUser) { showToast('请先登录'); return; }
 
-            // Single file - use original handler
+            // ---------- 智能压缩：将图片压缩至目标大小 ----------
+        async function compressToMaxSize(file, maxBytes) {
+            // 策略：根据文件大小估算合适的压缩参数，逐步降级
+            var quality = file.size > 50 * 1024 * 1024 ? 0.5 : (file.size > 20 * 1024 * 1024 ? 0.6 : 0.7);
+            var maxDim = file.size > 50 * 1024 * 1024 ? 2560 : 2048;
+
+            // 第一轮压缩
+            var dataUrl = await compressImage(file, maxDim, maxDim, quality);
+            var blob = await fetch(dataUrl).then(function(r) { return r.blob(); });
+
+            // 如果仍然超过限制，降低分辨率和质量
+            if (blob.size > maxBytes) {
+                dataUrl = await compressImage(file, 2048, 1536, 0.5);
+                blob = await fetch(dataUrl).then(function(r) { return r.blob(); });
+            }
+            if (blob.size > maxBytes) {
+                dataUrl = await compressImage(file, 1920, 1080, 0.4);
+                blob = await fetch(dataUrl).then(function(r) { return r.blob(); });
+            }
+            if (blob.size > maxBytes) {
+                dataUrl = await compressImage(file, 1280, 720, 0.3);
+                blob = await fetch(dataUrl).then(function(r) { return r.blob(); });
+            }
+            if (blob.size > maxBytes) {
+                // 最终手段：强制 target 不要太小
+                dataUrl = await compressImage(file, 800, 600, 0.2);
+                blob = await fetch(dataUrl).then(function(r) { return r.blob(); });
+            }
+
+            console.log('[compressToMaxSize] ' + file.name + ': ' + (file.size/1048576).toFixed(1) + 'MB → ' + (blob.size/1048576).toFixed(1) + 'MB');
+            return blob;
+        }
+
+        // Single file - use original handler
             if (files.length === 1 && _origHandleUpload) {
                 _origHandleUpload(e);
                 return;
@@ -429,20 +382,39 @@
 
             for (var i = 0; i < total; i++) {
                 var file = files[i];
-                if (file.size > 50 * 1024 * 1024) {
-                    failed++;
-                    addProgressItem(progressEl, file.name, '过大跳过');
-                    continue;
-                }
+                var itemDiv = addProgressItem(progressEl, file.name, '准备中...', 0);
+                var fileToUpload = file;
+                var fileOriginalSize = file.size;
+                var wasCompressed = false;
 
-                var itemDiv = addProgressItem(progressEl, file.name, '上传中...', 0);
                 try {
+                    // 超过10MB自动压缩
+                    if (file.size > 10 * 1024 * 1024) {
+                        updateProgressItem(itemDiv, '压缩中 (' + (file.size/1048576).toFixed(1) + 'MB → ~10MB)...', 5);
+                        try {
+                            var compressed = await compressToMaxSize(file, 10 * 1024 * 1024);
+                            fileToUpload = compressed;
+                            wasCompressed = true;
+                            updateProgressItem(itemDiv, '已压缩至 ' + (compressed.size/1048576).toFixed(1) + 'MB', 25);
+                        } catch (compErr) {
+                            // 压缩失败：如果原文件 ≤ 50MB 则直接上传，否则跳过
+                            console.warn('[压缩失败] ' + file.name + ': ' + compErr.message);
+                            if (file.size > 50 * 1024 * 1024) {
+                                updateProgressItem(itemDiv, '过大且压缩失败', 0);
+                                failed++;
+                                continue;
+                            }
+                            updateProgressItem(itemDiv, '压缩失败，直接上传 (' + (file.size/1048576).toFixed(1) + 'MB)', 20);
+                        }
+                    }
+                    updateProgressItem(itemDiv, '上传中...', 30);
+
                     var sb = window.sb;
                     var ts = Date.now() + '_' + i;
                     var baseName = ts + '_' + file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
                     var origPath = 'photos/' + baseName;
 
-                    var { error: upErr } = await sb.storage.from('uploads').upload(origPath, file);
+                    var { error: upErr } = await sb.storage.from('uploads').upload(origPath, fileToUpload);
                     if (upErr) {
                         updateProgressItem(itemDiv, '失败', 0);
                         failed++;
@@ -459,7 +431,7 @@
                     var thumbUrl = sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl;
 
                     // Save to posts table
-                    var contentJson = JSON.stringify({ type: 'photo_wall', originalName: file.name, fileSize: file.size });
+                    var contentJson = JSON.stringify({ type: 'photo_wall', originalName: file.name, fileSize: fileToUpload.size, originalSize: fileOriginalSize });
                     var insertRes = await sb.from('posts').insert([{
                         user_name: window.currentUser,
                         content: contentJson,
@@ -480,7 +452,7 @@
                         storage_path: origPath,
                         public_url: imageUrl,
                         original_name: file.name,
-                        file_size: file.size,
+                        file_size: fileToUpload.size,
                         mime_type: file.type || 'image/jpeg',
                         album_date: new Date().toISOString().slice(0, 10),
                         is_cover: false
@@ -498,7 +470,7 @@
                         timestamp: Date.now(),
                         views: 0,
                         originalName: file.name,
-                        fileSize: file.size
+                        fileSize: fileToUpload.size
                     });
                     if (typeof saveLocalPhotoWallData === 'function') saveLocalPhotoWallData();
 
