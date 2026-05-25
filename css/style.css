@@ -3540,11 +3540,11 @@
             100% { opacity: 0; }
         }
         .photo-preview-overlay.active .pp-slide-track {
-            animation: ppTrackEnter 0.4s cubic-bezier(0.16,1,0.3,1);
+            animation: ppTrackEnter 0.4s cubic-bezier(0.16,1,0.3,1) forwards;
         }
         @keyframes ppTrackEnter {
             0% {
-                opacity: 0;
+                opacity: 0.5;
                 transform: translate3d(-100vw, 0, 0) scale(0.95);
             }
             100% {
@@ -3692,7 +3692,6 @@
             -webkit-touch-callout: none;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
-            contain: layout paint style;
             transform-style: preserve-3d;
             -webkit-transform-style: preserve-3d;
         }
@@ -3748,7 +3747,6 @@
             -webkit-user-drag: none;
             touch-action: none;
             transition: opacity 0.35s ease;
-            contain: layout paint style;
             -webkit-font-smoothing: antialiased;
             image-rendering: -webkit-optimize-contrast;
         }
