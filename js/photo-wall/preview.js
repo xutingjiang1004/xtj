@@ -152,8 +152,10 @@
     function ppPreloadAdjacent(idx) {
         var photos = ppSortedPhotos;
         var urls = [];
-        for (var d = -1; d <= 1; d++) {
-            var i = idx + d;
+        var offsets = [-2, -1, 1, 2, -3, 3];
+        for (var o = 0; o < offsets.length; o++) {
+            if (urls.length >= 3) break;
+            var i = idx + offsets[o];
             if (i >= 0 && i < photos.length && photos[i] && photos[i].imageUrl) {
                 urls.push(photos[i].imageUrl);
             }
@@ -314,23 +316,6 @@
         var targetDrag = direction > 0 ? -ppVw : ppVw;
         window.updateAmbientBackground(photo.imageUrl);
 
-        var prevImg = document.getElementById('ppPrevImg');
-        var nextImg = document.getElementById('ppNextImg');
-
-        if (direction > 0) {
-            if (newIdx + 1 < ppSortedPhotos.length) {
-                ppSwapImage(nextImg, ppSortedPhotos[newIdx + 1].imageUrl);
-            } else {
-                ppSwapImage(nextImg, null);
-            }
-        } else {
-            if (newIdx - 1 >= 0) {
-                ppSwapImage(prevImg, ppSortedPhotos[newIdx - 1].imageUrl);
-            } else {
-                ppSwapImage(prevImg, null);
-            }
-        }
-
         ppSnapTo(targetDrag, function() {
                 photo.views = (photo.views || 0) + 1;
                 ppPhotoIdx = newIdx;
@@ -350,9 +335,6 @@
                     delBtn2.style.display = (window.currentUser && photo.username === window.currentUser) ? 'flex' : 'none';
                 }
                 window.syncPhotoViewCount(photo);
-                requestAnimationFrame(function() {
-                    ppPreloadAdjacent(newIdx);
-                });
             });
     }
 

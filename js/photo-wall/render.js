@@ -42,8 +42,10 @@
             var timeStr = formatPhotoTime(p.timestamp);
             var name = p.username || '未知用户';
             var gridSrc = p.thumbUrl || p.imageUrl;
+            if (!gridSrc) gridSrc = '';
+            var escapedGridSrc = gridSrc.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(String(p.id)) + '" style="animation-delay:' + (i * 50 < 500 ? i * 50 : 0) + 'ms" onclick="openPhotoPreview(' + i + ')">';
-            html += '<img src="' + pwPlaceholder + '" alt="photo" class="pw-blur-in" data-src="' + gridSrc + '">';
+            html += '<img src="' + pwPlaceholder + '" alt="photo" class="pw-blur-in" data-src="' + escapedGridSrc + '">';
             html += '<div class="pw-item-info">';
             html += '<div class="pw-item-name">' + window.escapeHtml(name) + '</div>';
             html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
@@ -146,12 +148,14 @@
                             img.classList.remove('pw-blur-in');
                             img.classList.add('pw-blur-done');
                         } else {
-                            var loadedFn = function() {
-                                img.classList.remove('pw-blur-in');
-                                img.classList.add('pw-blur-done');
-                            };
-                            img.addEventListener('load', loadedFn, { once: true });
-                            img.addEventListener('error', loadedFn, { once: true });
+                            (function(imgEl) {
+                                var loadedFn = function() {
+                                    imgEl.classList.remove('pw-blur-in');
+                                    imgEl.classList.add('pw-blur-done');
+                                };
+                                imgEl.addEventListener('load', loadedFn, { once: true });
+                                imgEl.addEventListener('error', loadedFn, { once: true });
+                            })(img);
                         }
                     } else {
                         img.classList.remove('pw-blur-in');
