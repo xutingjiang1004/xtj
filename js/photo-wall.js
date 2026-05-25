@@ -54,6 +54,8 @@
             var ppLastMoveT = 0;
             var ppRafId = null;
             var ppPreloadCache = {};
+            var ppImageCache = {};
+            var ppPreloadQueue = [];
             // 陀螺仪视差（Gyroscope Parallax）变量
             var ppGyroTargetX = 0;
             var ppGyroTargetY = 0;
@@ -63,6 +65,7 @@
             var ppGyroActive = false;
             var ppGyroPermGranted = false;
             var ppDeviceOrientationHandler = null;
+            var ppTapHandled = false;
 
             function ppInitTrack() {
                 ppTrack = document.getElementById('ppSlideTrack');
@@ -77,33 +80,76 @@
                 var curImg = document.getElementById('photoPreviewImage');
                 var nextImg = document.getElementById('ppNextImg');
 
-                // 先设置所有图片源（异步加载，不等onload）
-                if (idx > 0 && photos[idx - 1]) prevImg.src = photos[idx - 1].imageUrl;
-                else prevImg.removeAttribute('src');
-                if (idx < photos.length - 1 && photos[idx + 1]) nextImg.src = photos[idx + 1].imageUrl;
-                else nextImg.removeAttribute('src');
-                if (photos[idx]) curImg.src = photos[idx].imageUrl;
+                // 预加载邻接图片（更新缓存）
+                ppPreloadAdjacent(idx);
+
+                // 先设置当前图片（优先级最高），使用缓存确保即时显示
+                if (photos[idx]) {
+                    var curUrl = photos[idx].imageUrl;
+                    if (ppImageCache[curUrl] && ppImageCache[curUrl] !== 'loading') {
+                        curImg.src = curUrl;
+                    } else {
+                        curImg.src = curUrl;
+                        ppPreloadImage(curUrl);
+                    }
+                }
+
+                // 延迟设置前后图片，避免与当前图片竞争带宽
+                setTimeout(function() {
+                    if (idx > 0 && photos[idx - 1]) {
+                        var prevUrl = photos[idx - 1].imageUrl;
+                        prevImg.src = prevUrl;
+                        ppPreloadImage(prevUrl);
+                    } else {
+                        prevImg.removeAttribute('src');
+                    }
+                    if (idx < photos.length - 1 && photos[idx + 1]) {
+                        var nextUrl = photos[idx + 1].imageUrl;
+                        nextImg.src = nextUrl;
+                        ppPreloadImage(nextUrl);
+                    } else {
+                        nextImg.removeAttribute('src');
+                    }
+                }, 50);
 
                 // 同步重置轨道位置 — 不等图片加载，消除黑屏
                 ppTrackDrag = 0;
                 ppTrackSnapping = false;
                 ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
                 ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
-                ppPreloadAdjacent(idx);
                 if (photos[idx]) updateAmbientBackground(photos[idx].imageUrl);
+            }
+
+            function ppPreloadImage(url) {
+                if (!url || ppImageCache[url]) return Promise.resolve();
+                return new Promise(function(resolve) {
+                    ppImageCache[url] = 'loading';
+                    var pre = new Image();
+                    pre.onload = function() {
+                        ppImageCache[url] = pre;
+                        resolve();
+                    };
+                    pre.onerror = function() {
+                        ppImageCache[url] = null;
+                        resolve();
+                    };
+                    pre.src = url;
+                });
             }
 
             function ppPreloadAdjacent(idx) {
                 var photos = ppSortedPhotos;
-                // 预加载前后各2张，确保滑动时图片已就绪
-                [idx - 1, idx + 1, idx - 2, idx + 2].forEach(function(i) {
+                var urls = [];
+                for (var d = -3; d <= 3; d++) {
+                    var i = idx + d;
                     if (i >= 0 && i < photos.length && photos[i] && photos[i].imageUrl) {
-                        var url = photos[i].imageUrl;
-                        if (!ppPreloadCache[url]) {
-                            ppPreloadCache[url] = true;
-                            var pre = new Image();
-                            pre.src = url;
-                        }
+                        urls.push(photos[i].imageUrl);
+                    }
+                }
+                urls.forEach(function(url) {
+                    if (!ppPreloadCache[url]) {
+                        ppPreloadCache[url] = true;
+                        ppPreloadImage(url);
                     }
                 });
             }
@@ -550,9 +596,12 @@
                     return;
                 }
 
-                var sorted = photoWallData.slice().sort(function(a, b) {
-                    return b.timestamp - a.timestamp;
-                });
+                var sorted = photoWallData.slice();
+                if (typeof window.pwApplySort === 'function') {
+                    sorted = window.pwApplySort(sorted, window.pwSortKey || 'date_desc');
+                } else {
+                    sorted.sort(function(a, b) { return b.timestamp - a.timestamp; });
+                }
 
                 var html = '';
                 for (var i = 0; i < sorted.length; i++) {
@@ -732,9 +781,12 @@
             }
 
             window.openPhotoPreview = async function(sortedIdx) {
-                var sorted = photoWallData.slice().sort(function(a, b) {
-                    return b.timestamp - a.timestamp;
-                });
+                var sorted = photoWallData.slice();
+                if (typeof window.pwApplySort === 'function') {
+                    sorted = window.pwApplySort(sorted, window.pwSortKey || 'date_desc');
+                } else {
+                    sorted.sort(function(a, b) { return b.timestamp - a.timestamp; });
+                }
                 var photo = sorted[sortedIdx];
                 if (!photo) return;
 
@@ -800,6 +852,7 @@
                 ppResetZoom();
                 // 停止陀螺仪视差，释放监听器和 rAF
                 ppStopGyro();
+                ppTapHandled = false;
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = '';
                 document.documentElement.classList.remove('photo-previewing');
@@ -811,6 +864,8 @@
             document.addEventListener('click', function(e) {
                 var overlay = document.getElementById('photoPreviewOverlay');
                 if (!overlay || !overlay.classList.contains('active')) return;
+                // If a pointer tap was just handled, skip click handler to avoid conflict
+                if (ppTapHandled) { ppTapHandled = false; return; }
                 // 如果点击的是关闭按钮、分享按钮、删除按钮，不处理
                 if (e.target.closest('.photo-preview-close') || e.target.closest('.pp-share-btn') || e.target.closest('.pp-delete-btn')) return;
                 // 如果是在图片wrapper上点击，且图片已放大，只缩小；未放大才关闭
@@ -995,7 +1050,6 @@
                         img.classList.remove('dragging');
                         ppStart = null;
                         if (!ppMoved) {
-                            // 如果弹簧动画正在运行，立即取消
                             if (ppTrackSnapping) {
                                 ppTrackSnapping = false;
                                 ppSwipeLock = 0;
@@ -1014,6 +1068,7 @@
                                     if (photoPreviewActive && ppZoom.scale <= 1.01) closePhotoPreview();
                                 }, 260);
                             }
+                            ppTapHandled = true;
                             ppTrackDrag = 0;
                             ppApplySlideTrack();
                             return;
@@ -1074,6 +1129,30 @@
                         })
                         .subscribe();
                 }
+
+                // 照片墙导航栏滚动自动隐藏/显示
+                var panelAi = document.getElementById('panelAi');
+                if (panelAi) {
+                    var pwLastScroll = 0;
+                    var pwScrollThreshold = 20;
+                    panelAi.addEventListener('scroll', function() {
+                        var header = document.querySelector('.photo-wall-header');
+                        if (!header) return;
+                        var currentScroll = panelAi.scrollTop;
+                        var diff = currentScroll - pwLastScroll;
+                        if (Math.abs(diff) < 5) { pwLastScroll = currentScroll; return; }
+                        if (diff > 0 && currentScroll > pwScrollThreshold) {
+                            header.classList.add('pw-header-hidden');
+                        } else if (diff < 0) {
+                            header.classList.remove('pw-header-hidden');
+                        }
+                        if (currentScroll <= pwScrollThreshold) {
+                            header.classList.remove('pw-header-hidden');
+                        }
+                        pwLastScroll = currentScroll;
+                    }, { passive: true });
+                }
+
                 renderPhotoWall();
             }
             window.initPhotoWall = initPhotoWall;
