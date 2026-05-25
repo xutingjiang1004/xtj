@@ -19,7 +19,7 @@
             -webkit-touch-callout: none;
         }
         :root {
-            --bg-color: #f0f2f5;
+            --bg-color: #eaf7ee;
             --glass-bg: rgba(255, 255, 255, 0.18);
             --glass-border: rgba(255, 255, 255, 0.72);
             --glass-shadow: 0 18px 50px rgba(0, 0, 0, 0.04);
@@ -35,8 +35,8 @@
             --trans-smooth: all 0.32s cubic-bezier(0.25, 1, 0.3, 1);
             --trans-spring: all 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             --trans-ppt: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            --panel-bg: rgba(255,255,255,0.95);
-            --dock-bg: rgba(255,255,255,0.68);
+            --panel-bg: rgba(233, 248, 237, 0.96);
+            --dock-bg: rgba(223, 244, 229, 0.75);
             --dock-border: rgba(255,255,255,0.8);
             --dock-shadow: 0 -2px 20px rgba(0,0,0,0.06);
         }
@@ -1396,12 +1396,7 @@
             padding-left: calc(12px + env(safe-area-inset-left, 0px));
             padding-right: calc(12px + env(safe-area-inset-right, 0px));
             padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
-            background: var(--dock-bg);
-            backdrop-filter: blur(22px) saturate(160%);
-            -webkit-backdrop-filter: blur(22px) saturate(160%);
-            border-top: 1px solid var(--dock-border);
-            border-radius: 20px 20px 0 0;
-            box-shadow: var(--dock-shadow);
+            background: transparent;
             z-index: 100;
             pointer-events: none;
             touch-action: none;
@@ -1433,7 +1428,10 @@
             flex: 1; max-width: 80px;
             display: flex; flex-direction: column; align-items: center; gap: 1px;
             padding: 4px 10px; border-radius: 14px;
-            border: none; background: transparent;
+            border: 1px solid rgba(255,255,255,0.5);
+            background: rgba(255,255,255,0.38);
+            backdrop-filter: blur(10px) saturate(140%);
+            -webkit-backdrop-filter: blur(10px) saturate(140%);
             cursor: pointer; font-family: inherit;
             transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
             color: var(--text-muted); font-size: 9px;
@@ -1477,8 +1475,6 @@
             outline: none !important;
             box-shadow: none !important;
             -webkit-box-shadow: none !important;
-            border-color: transparent !important;
-            background: transparent !important;
         }
         .dock-tab:focus-visible {
             outline: none !important;
@@ -1599,15 +1595,20 @@
         .dock-chat-container .chat-list-item { border-bottom-color: rgba(0,0,0,0.04); }
 
         /* 暗色模式 Dock */
-        [data-theme="dark"] .dock-bar {
-            background: var(--dock-bg);
-            backdrop-filter: blur(22px) saturate(120%);
-            -webkit-backdrop-filter: blur(22px) saturate(120%);
-            border-top: 1px solid rgba(255,255,255,0.08);
-            box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
+        [data-theme="dark"] .dock-tab {
+            color: #9e9eb0;
+            background: rgba(24,24,30,0.55);
+            backdrop-filter: blur(12px) saturate(140%);
+            -webkit-backdrop-filter: blur(12px) saturate(140%);
+            border: 1px solid rgba(255,255,255,0.06);
         }
-        [data-theme="dark"] .dock-tab { color: #9e9eb0; }
-        [data-theme="dark"] .dock-tab.active { color: #34d399; background: rgba(255,255,255,0.06); backdrop-filter: blur(6px) saturate(140%); -webkit-backdrop-filter: blur(6px) saturate(140%); border: 1px solid rgba(255,255,255,0.12); }
+        [data-theme="dark"] .dock-tab.active {
+            color: #34d399;
+            background: rgba(255,255,255,0.08);
+            backdrop-filter: blur(14px) saturate(160%);
+            -webkit-backdrop-filter: blur(14px) saturate(160%);
+            border: 1px solid rgba(255,255,255,0.14);
+        }
         [data-theme="dark"] .dock-indicator { background: linear-gradient(90deg, #059669, #34d399); box-shadow: 0 0 10px rgba(52,211,153,0.5); }
         [data-theme="dark"] .dock-chat-container .chat-header { border-bottom-color: rgba(255,255,255,0.06); }
         [data-theme="dark"] .dock-chat-container .chat-list-item { border-bottom-color: rgba(255,255,255,0.03); }
@@ -3082,7 +3083,17 @@
                 0 4px 12px rgba(15, 23, 42, 0.08);
             backdrop-filter: none;
             -webkit-backdrop-filter: none;
-            transition: none;
+            transition: transform 0.35s cubic-bezier(0.16,1,0.3,1), box-shadow 0.35s cubic-bezier(0.16,1,0.3,1);
+            will-change: transform;
+        }
+        .photo-wall-item.pw-stagger-enter {
+            opacity: 0;
+            transform: translateY(30px) scale(0.94);
+        }
+        .photo-wall-item.pw-stagger-done {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.16,1,0.3,1);
         }
         .photo-wall-item::before,
         .photo-wall-item::after {
@@ -3108,13 +3119,13 @@
         }
         .photo-wall-item:hover {
             z-index: 2;
-            transform: none;
+            transform: translateY(-4px) scale(1.02);
             box-shadow:
-                0 18px 38px rgba(15, 23, 42, 0.16),
-                0 4px 12px rgba(15, 23, 42, 0.08);
+                0 24px 48px rgba(15, 23, 42, 0.22),
+                0 6px 16px rgba(15, 23, 42, 0.12);
         }
         .photo-wall-item:active {
-            transform: none;
+            transform: translateY(-2px) scale(0.98);
         }
         .photo-wall-item img {
             width: 100%;
@@ -3125,6 +3136,16 @@
             position: relative;
             z-index: 0;
             box-shadow: none;
+            transition: filter 0.5s ease, transform 0.5s ease;
+            filter: blur(0px);
+        }
+        .photo-wall-item img.pw-blur-in {
+            filter: blur(20px);
+            transform: scale(1.08);
+        }
+        .photo-wall-item img.pw-blur-done {
+            filter: blur(0px);
+            transform: scale(1);
         }
         .photo-wall-item .pw-item-info {
             position: absolute;
@@ -3166,6 +3187,77 @@
             font-size: 48px;
             margin-bottom: 12px;
             opacity: 0.5;
+        }
+        .photo-wall-empty-cta {
+            display: inline-block;
+            margin-top: 18px;
+            padding: 12px 28px;
+            border-radius: 999px;
+            border: 1px solid rgba(5,150,105,0.3);
+            background: rgba(5,150,105,0.08);
+            backdrop-filter: blur(12px) saturate(160%);
+            -webkit-backdrop-filter: blur(12px) saturate(160%);
+            color: #059669;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            box-shadow: 0 2px 12px rgba(5,150,105,0.12);
+        }
+        .photo-wall-empty-cta:hover {
+            background: rgba(5,150,105,0.14);
+            border-color: rgba(5,150,105,0.5);
+            transform: scale(1.03);
+        }
+        /* 骨架屏加载 */
+        .pw-skeleton {
+            position: relative;
+            aspect-ratio: 4 / 5;
+            border-radius: 14px;
+            overflow: hidden;
+            background: rgba(0,0,0,0.06);
+        }
+        .pw-skeleton::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            animation: pwSkelShimmer 1.6s infinite;
+        }
+        @keyframes pwSkelShimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+        .pw-delete-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            z-index: 10;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(0,0,0,0.45);
+            backdrop-filter: blur(8px) saturate(120%);
+            -webkit-backdrop-filter: blur(8px) saturate(120%);
+            color: rgba(255,255,255,0.9);
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            opacity: 0;
+            transform: scale(0.8);
+            transition: all 0.25s cubic-bezier(0.16,1,0.3,1);
+        }
+        .photo-wall-item:hover .pw-delete-btn,
+        .photo-wall-item:active .pw-delete-btn {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .pw-delete-btn:hover {
+            background: rgba(220,38,38,0.75);
+            border-color: rgba(255,255,255,0.6);
         }
 
         /* 全屏预览 */
@@ -3310,6 +3402,149 @@
             fill: none;
             flex: 0 0 auto;
         }
+        /* 预览页面指示点 */
+        .pp-dots {
+            position: absolute;
+            top: calc(14px + env(safe-area-inset-top, 0px));
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 11;
+            display: flex;
+            gap: 6px;
+            pointer-events: none;
+        }
+        .pp-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.35);
+            transition: all 0.3s ease;
+        }
+        .pp-dot.active {
+            background: rgba(255,255,255,0.9);
+            box-shadow: 0 0 6px rgba(255,255,255,0.5);
+            transform: scale(1.35);
+        }
+        /* 预览分享按钮 */
+        .pp-share-btn {
+            position: absolute;
+            bottom: calc(50px + env(safe-area-inset-bottom, 0px));
+            right: calc(16px + env(safe-area-inset-right, 0px));
+            z-index: 15;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(12px) saturate(140%);
+            -webkit-backdrop-filter: blur(12px) saturate(140%);
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.25s ease;
+            pointer-events: auto;
+        }
+        .pp-share-btn:hover {
+            background: rgba(255,255,255,0.2);
+            border-color: rgba(255,255,255,0.5);
+            transform: scale(1.08);
+        }
+        .pp-share-btn:active {
+            transform: scale(0.95);
+        }
+        /* 预览删除按钮 */
+        .pp-delete-btn {
+            position: absolute;
+            bottom: calc(50px + env(safe-area-inset-bottom, 0px));
+            left: calc(16px + env(safe-area-inset-right, 0px));
+            z-index: 15;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,80,80,0.3);
+            background: rgba(0,0,0,0.4);
+            backdrop-filter: blur(12px) saturate(140%);
+            -webkit-backdrop-filter: blur(12px) saturate(140%);
+            color: rgba(255,255,255,0.85);
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.25s ease;
+            pointer-events: auto;
+        }
+        .pp-delete-btn:hover {
+            background: rgba(220,38,38,0.6);
+            border-color: rgba(255,80,80,0.6);
+            transform: scale(1.08);
+        }
+        .pp-delete-btn:active {
+            transform: scale(0.95);
+        }
+        /* 删除确认弹窗 */
+        .pw-confirm-dialog {
+            position: fixed;
+            inset: 0;
+            z-index: 11000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            animation: fadeIn 0.2s ease;
+        }
+        .pw-confirm-card {
+            background: rgba(255,255,255,0.9);
+            backdrop-filter: blur(20px) saturate(160%);
+            -webkit-backdrop-filter: blur(20px) saturate(160%);
+            border-radius: 20px;
+            padding: 28px 24px 20px;
+            max-width: 320px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.6);
+        }
+        .pw-confirm-title {
+            font-weight: 700;
+            font-size: 17px;
+            color: var(--text-main);
+            margin-bottom: 8px;
+        }
+        .pw-confirm-text {
+            font-size: 14px;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+        }
+        .pw-confirm-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        .pw-confirm-actions button {
+            padding: 10px 24px;
+            border-radius: 999px;
+            border: none;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .pw-confirm-cancel {
+            background: rgba(0,0,0,0.08);
+            color: var(--text-main);
+        }
+        .pw-confirm-cancel:hover { background: rgba(0,0,0,0.14); }
+        .pw-confirm-danger {
+            background: #dc2626;
+            color: white;
+        }
+        .pw-confirm-danger:hover { background: #b91c1c; }
 
         [data-theme="dark"] .photo-wall-item {
             background: rgba(255,255,255,0.04);
@@ -3443,6 +3678,7 @@
                 <input type="file" id="photoFileInput" accept="image/*" style="position:fixed;top:-100px;left:-100px;width:1px;height:1px;opacity:0;pointer-events:none;">
 
                 <div class="photo-preview-overlay" id="photoPreviewOverlay">
+                    <div class="pp-dots" id="ppDots"></div>
                     <button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>
                     <div class="photo-preview-image-wrapper" id="ppImageWrapper">
                         <div class="pp-slide-track" id="ppSlideTrack">
@@ -3451,6 +3687,8 @@
                             <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false"></div>
                         </div>
                     </div>
+                    <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="shareCurrentPhoto()">&#x1F517;</button>
+                    <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="deleteCurrentPhoto()">&#x1F5D1;</button>
                     <div class="photo-preview-info">
                         <span class="pp-user" id="photoPreviewUser"></span>
                         <span class="pp-time" id="photoPreviewTime"></span>
@@ -5668,9 +5906,11 @@
 
                 container.appendChild(bubble);
 
-                requestAnimationFrame(() => {
+                // 强制浏览器完成布局后再添加show类，确保CSS transition正确触发
+                bubble.offsetHeight; // force reflow
+                setTimeout(function() {
                     bubble.classList.add('show');
-                });
+                }, 16);
 
                 const notifId = Date.now() + Math.random();
                 activeNotifications.push({ id: notifId, element: bubble });
@@ -7572,6 +7812,11 @@
                 document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
                 document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
                 document.getElementById('photoPreviewViewsCount').textContent = photo.views;
+                ppUpdateDots();
+                var delBtn2 = document.getElementById('ppDeleteBtn');
+                if (delBtn2) {
+                    delBtn2.style.display = (window.currentUser && photo.username === window.currentUser) ? 'flex' : 'none';
+                }
                 ppPreloadAdjacent(newIdx);
                 syncPhotoViewCount(photo);
             }
@@ -7696,10 +7941,22 @@
             async function renderPhotoWall() {
                 var grid = document.getElementById('photoGrid');
                 if (!grid) return;
+
+                // 先显示骨架屏
+                var skeletonHtml = '';
+                for (var s = 0; s < 6; s++) {
+                    skeletonHtml += '<div class="pw-skeleton"></div>';
+                }
+                grid.innerHTML = skeletonHtml;
+
                 await loadPhotoWallData();
 
                 if (photoWallData.length === 0) {
-                    grid.innerHTML = '<div class="photo-wall-empty"><div class="photo-wall-empty-icon">📷</div>还没有照片，快来上传第一张吧</div>';
+                    grid.innerHTML = '<div class="photo-wall-empty">' +
+                        '<div class="photo-wall-empty-icon">📷</div>' +
+                        '<div>还没有照片</div>' +
+                        '<div class="photo-wall-empty-cta" onclick="triggerPhotoUpload()">📤 成为第一个分享照片的人</div>' +
+                        '</div>';
                     return;
                 }
 
@@ -7712,14 +7969,32 @@
                     var p = sorted[i];
                     var timeStr = formatPhotoTime(p.timestamp);
                     var name = p.username || '未知用户';
-                    html += '<div class="photo-wall-item" data-photo-id="' + escapeHtml(p.id) + '" onclick="openPhotoPreview(' + i + ')">';
-                    html += '<img src="' + p.imageUrl + '" alt="photo" loading="lazy">';
+                    var isOwner = window.currentUser && p.username === window.currentUser;
+                    html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
+                    html += '<img src="' + p.imageUrl + '" alt="photo" class="pw-blur-in" data-src="' + p.imageUrl + '">';
+                    if (isOwner) {
+                        html += '<button class="pw-delete-btn" title="删除" onclick="event.stopPropagation();confirmDeletePhoto(\'' + escapeHtml(p.id) + '\')">🗑</button>';
+                    }
                     html += '<div class="pw-item-info">';
                     html += '<div class="pw-item-name">' + escapeHtml(name) + '</div>';
                     html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
                     html += '</div></div>';
                 }
                 grid.innerHTML = html;
+
+                // 交错入场动画
+                requestAnimationFrame(function() {
+                    var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
+                    items.forEach(function(item, idx) {
+                        setTimeout(function() {
+                            item.classList.add('pw-stagger-done');
+                            item.classList.remove('pw-stagger-enter');
+                        }, idx * 50);
+                    });
+                });
+
+                // 懒加载观察器：blur → sharp
+                pwObserveLazyImages(grid);
             }
 
             function formatPhotoTime(ts) {
@@ -7814,6 +8089,16 @@
                 document.documentElement.classList.add('photo-previewing');
                 document.body.classList.add('photo-previewing');
                 document.body.style.overflow = 'hidden';
+
+                // 更新指示点（必须在overlay激活后，避免DOM reflow干扰滑动轨道渲染）
+                ppUpdateDots();
+
+                // 显示/隐藏删除按钮（只有自己的照片可见）
+                var delBtn = document.getElementById('ppDeleteBtn');
+                if (delBtn) {
+                    delBtn.style.display = (window.currentUser && photo.username === window.currentUser) ? 'flex' : 'none';
+                }
+
                 syncPhotoViewCount(photo);
             };
 
@@ -8079,6 +8364,131 @@
                 renderPhotoWall();
             }
             window.initPhotoWall = initPhotoWall;
+
+            // ========== 懒加载观察器：blur-in → sharp ==========
+            var pwLazyObserver = null;
+            function pwObserveLazyImages(grid) {
+                if (pwLazyObserver) pwLazyObserver.disconnect();
+                if (!window.IntersectionObserver) {
+                    // fallback: 直接触发所有图片
+                    var imgs = grid.querySelectorAll('.pw-blur-in');
+                    for (var i = 0; i < imgs.length; i++) {
+                        imgs[i].classList.remove('pw-blur-in');
+                        imgs[i].classList.add('pw-blur-done');
+                    }
+                    return;
+                }
+                pwLazyObserver = new IntersectionObserver(function(entries) {
+                    entries.forEach(function(entry) {
+                        if (entry.isIntersecting) {
+                            var img = entry.target;
+                            img.classList.remove('pw-blur-in');
+                            img.classList.add('pw-blur-done');
+                            pwLazyObserver.unobserve(img);
+                        }
+                    });
+                }, { rootMargin: '200px' });
+                var imgs = grid.querySelectorAll('.pw-blur-in');
+                for (var j = 0; j < imgs.length; j++) {
+                    pwLazyObserver.observe(imgs[j]);
+                }
+            }
+
+            // ========== 预览指示点更新 ==========
+            function ppUpdateDots() {
+                var dots = document.getElementById('ppDots');
+                if (!dots) return;
+                var total = ppSortedPhotos.length;
+                if (total <= 1) { dots.innerHTML = ''; return; }
+                var html = '';
+                for (var i = 0; i < total; i++) {
+                    html += '<span class="pp-dot' + (i === ppPhotoIdx ? ' active' : '') + '"></span>';
+                }
+                dots.innerHTML = html;
+            }
+
+            // ========== 分享当前照片 ==========
+            window.shareCurrentPhoto = function() {
+                var photo = ppSortedPhotos[ppPhotoIdx];
+                if (!photo) return;
+                var url = photo.imageUrl;
+                if (navigator.share) {
+                    navigator.share({ title: '分享照片', text: '来自 xtj 照片墙', url: url }).catch(function() {});
+                } else if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(url).then(function() {
+                        showToast('链接已复制到剪贴板');
+                    }).catch(function() {
+                        showToast('链接：' + url);
+                    });
+                } else {
+                    var ta = document.createElement('textarea');
+                    ta.value = url;
+                    ta.style.position = 'fixed';
+                    ta.style.opacity = '0';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    showToast('链接已复制');
+                }
+            };
+
+            // ========== 删除确认弹窗 ==========
+            window.confirmDeletePhoto = function(photoId) {
+                var existing = document.querySelector('.pw-confirm-dialog');
+                if (existing) existing.remove();
+
+                var dialog = document.createElement('div');
+                dialog.className = 'pw-confirm-dialog';
+                dialog.innerHTML = '<div class="pw-confirm-card">' +
+                    '<div class="pw-confirm-title">删除照片</div>' +
+                    '<div class="pw-confirm-text">确定要删除这张照片吗？此操作不可撤销。</div>' +
+                    '<div class="pw-confirm-actions">' +
+                    '<button class="pw-confirm-cancel">取消</button>' +
+                    '<button class="pw-confirm-danger">确认删除</button>' +
+                    '</div></div>';
+                dialog.querySelector('.pw-confirm-cancel').onclick = function() { dialog.remove(); };
+                dialog.querySelector('.pw-confirm-danger').onclick = function() { dialog.remove(); window.doDeletePhoto(photoId); };
+                dialog.onclick = function(e) { if (e.target === dialog) dialog.remove(); };
+                document.body.appendChild(dialog);
+            };
+
+            // ========== 执行删除照片 ==========
+            window.doDeletePhoto = async function(photoId) {
+                var idx = -1;
+                for (var i = 0; i < photoWallData.length; i++) {
+                    if (photoWallData[i].id === photoId) { idx = i; break; }
+                }
+                if (idx < 0) { showToast('照片不存在'); return; }
+                var photo = photoWallData[idx];
+
+                // 如果正在预览该照片，先关闭
+                if (photoPreviewActive && photoPreviewCurrent && photoPreviewCurrent.id === photoId) {
+                    closePhotoPreview();
+                }
+
+                // 删除云端数据
+                if (photo.cloudId && window.sb) {
+                    try {
+                        await window.sb.from('posts').delete().eq('id', photo.cloudId);
+                    } catch(e) { console.error('删除云端照片失败:', e); }
+                }
+
+                // 删除本地数据
+                photoWallData.splice(idx, 1);
+                saveLocalPhotoWallData();
+
+                // 重新渲染
+                await renderPhotoWall();
+                showToast('照片已删除');
+            };
+
+            // ========== 预览中删除 ==========
+            window.deleteCurrentPhoto = function() {
+                var photo = ppSortedPhotos[ppPhotoIdx];
+                if (!photo) return;
+                confirmDeletePhoto(photo.id);
+            };
 
             // Listen for file input changes
             document.addEventListener('change', function(e) {
