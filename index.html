@@ -1592,7 +1592,13 @@
         [data-theme="dark"] .dock-tab.active {
             color: #34d399;
         }
-        [data-theme="dark"] .dock-indicator { background: linear-gradient(90deg, #059669, #34d399); box-shadow: 0 0 10px rgba(52,211,153,0.5); }
+        /* 移除dock-indicator的液态玻璃效果，保持无背景无边框 */
+        .dock-indicator {
+            background: transparent !important;
+            box-shadow: none !important;
+            border: none !important;
+        }
+        [data-theme="dark"] .dock-indicator { background: transparent !important; box-shadow: none !important; }
         [data-theme="dark"] .dock-chat-container .chat-header { border-bottom-color: rgba(255,255,255,0.06); }
         [data-theme="dark"] .dock-chat-container .chat-list-item { border-bottom-color: rgba(255,255,255,0.03); }
 
@@ -3236,6 +3242,14 @@
         .photo-preview-overlay.active {
             display: block;
         }
+        .pp-ambient-bg {
+            position: absolute;
+            top: 0; right: 0; bottom: 0; left: 0;
+            background: #000;
+            transition: background 0.8s ease;
+            z-index: 0;
+            pointer-events: none;
+        }
         .photo-preview-close {
             position: absolute;
             top: calc(16px + env(safe-area-inset-top, 0px));
@@ -3523,6 +3537,38 @@
             box-shadow: 0 4px 20px rgba(52, 211, 153, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08);
         }
 
+        /* ========== 移动端 GPU 渲染降级 ========== */
+        @media (hover: none) and (pointer: coarse) {
+            .glass, .publish-box, .post, .modal-box, .chat-panel,
+            .chat-entry-bar, .photo-wall-header,
+            .rain-glass-layer, .stat-detail-header,
+            .profile-user-card {
+                backdrop-filter: blur(12px) saturate(120%) !important;
+                -webkit-backdrop-filter: blur(12px) saturate(120%) !important;
+            }
+            .dock-bar {
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+            }
+            .dock-panel {
+                backdrop-filter: blur(8px) !important;
+                -webkit-backdrop-filter: blur(8px) !important;
+            }
+            .photo-preview-overlay.active {
+                backdrop-filter: blur(4px) !important;
+                -webkit-backdrop-filter: blur(4px) !important;
+            }
+        }
+
+        /* ========== View Transitions API ========== */
+        @supports (view-transition-name: none) {
+            ::view-transition-old(photo-preview),
+            ::view-transition-new(photo-preview) {
+                height: auto;
+                object-fit: contain;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -3630,6 +3676,7 @@
                 <input type="file" id="photoFileInput" accept="image/*" style="position:fixed;top:-100px;left:-100px;width:1px;height:1px;opacity:0;pointer-events:none;">
 
                 <div class="photo-preview-overlay" id="photoPreviewOverlay">
+                    <div class="pp-ambient-bg" id="ppAmbientBg"></div>
                     <div class="pp-dots" id="ppDots"></div>
                     <button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>
                     <div class="photo-preview-image-wrapper" id="ppImageWrapper">
@@ -3678,7 +3725,7 @@
                     </div>
                     <div class="profile-setting-item" style="display:flex;align-items:center;justify-content:space-between;padding: 14px 0;">
                         <span>关于</span>
-                        <span style="color:var(--text-muted);">xtj v0.0.39</span>
+                        <span style="color:var(--text-muted);">xtj v0.0.43</span>
                     </div>
                 </div>
             </div>
@@ -4026,6 +4073,20 @@
         const CACHE_DURATION = 5 * 60 * 1000; // 缓存5分钟
 
         function isAdmin() { return currentUser === ADMIN_NAME; }
+
+        // ========== 状态管理命名空间（向后兼容） ==========
+        window.appState = {
+            get currentUser() { return window.currentUser; },
+            set currentUser(v) { window.currentUser = v; },
+            get photoWallData() { return photoWallData; },
+            set photoWallData(v) { photoWallData = v; },
+            get deviceId() { return window.deviceId; },
+            _listeners: {}
+        };
+        function safeText(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+        window.safeText = safeText;
 
         function showToast(message) {
             const container = document.getElementById('toastContainer');
@@ -4481,16 +4542,39 @@
                             w = Math.round(w * ratio);
                             h = Math.round(h * ratio);
                         }
-                        var canvas = document.createElement('canvas');
-                        canvas.width = w;
-                        canvas.height = h;
-                        var ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, w, h);
-                        resolve(canvas.toDataURL('image/jpeg', quality));
+                        // 使用 createImageBitmap 将图片解码/缩放出主线程
+                        if (window.createImageBitmap) {
+                            createImageBitmap(img, {
+                                resizeWidth: w,
+                                resizeHeight: h,
+                                resizeQuality: 'high'
+                            }).then(function(bitmap) {
+                                var canvas = document.createElement('canvas');
+                                canvas.width = bitmap.width;
+                                canvas.height = bitmap.height;
+                                var ctx = canvas.getContext('2d');
+                                ctx.drawImage(bitmap, 0, 0);
+                                bitmap.close();
+                                resolve(canvas.toDataURL('image/jpeg', quality));
+                            }).catch(function() {
+                                // fallback: 回退到 canvas 缩放
+                                fallbackCompress(img, w, h, quality, resolve);
+                            });
+                        } else {
+                            fallbackCompress(img, w, h, quality, resolve);
+                        }
                     };
                     img.onerror = function() { URL.revokeObjectURL(url); reject(new Error('图片加载失败')); };
                     img.src = url;
                 });
+            }
+            function fallbackCompress(img, w, h, quality, resolve) {
+                var canvas = document.createElement('canvas');
+                canvas.width = w;
+                canvas.height = h;
+                var ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, w, h);
+                resolve(canvas.toDataURL('image/jpeg', quality));
             }
 
             window.triggerAvatarUpload = function() {
@@ -4832,10 +4916,12 @@
             // ===================== 发布动态 =====================
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
-                const content = document.getElementById("postInp").value.trim();
-                const file = document.getElementById("fileInp").files[0];
+                var content = document.getElementById("postInp").value.trim();
+                var file = document.getElementById("fileInp").files[0];
                 if (!content && !file) { showToast("请输入内容"); return; }
-                const btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中...";
+                // 输入校验：限制长度、去除危险内容
+                if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
+                var btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中...";
                 try {
                     let media_url = "", media_type = "";
                     if (file) {
@@ -4844,7 +4930,7 @@
                         media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
                         media_type = file.type.startsWith("image") ? "image" : "video";
                     }
-                    var { error: insertErr } = await sb.from("posts").insert([{ user_name: currentUser, content, media_url, media_type, actor_key: deviceId }]);
+                    var { error: insertErr } = await sb.from("posts").insert([{ user_name: currentUser, content: safeText(content).slice(0, 2000), media_url, media_type, actor_key: deviceId }]);
                     if (insertErr) { showToast("发布失败: " + (insertErr.message || "未知错误")); btn.disabled = false; btn.textContent = "发布动态"; return; }
                     document.getElementById("postInp").value = "";
                     document.getElementById("fileInp").value = "";
@@ -5278,6 +5364,11 @@
             }
 
             async function renderFeed({ posts, comments, likes }) {
+                // TODO: 虚拟滚动（Virtual Scrolling）方案规划
+                // 当帖子超过30条时，使用 IntersectionObserver + 固定容器高度
+                // 仅渲染可视区域的帖子，回收不可见区域的 DOM 节点
+                // 配合 content-visibility: auto CSS 属性优先实现
+
                 const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__');
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
@@ -7673,6 +7764,8 @@
                     ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
                     ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
                     ppPreloadAdjacent(idx);
+                    // 切换照片时更新环境光背景
+                    if (photos[idx]) updateAmbientBackground(photos[idx].imageUrl);
                 }
 
                 if (photos[idx]) curImg.src = photos[idx].imageUrl;
@@ -7914,6 +8007,11 @@
                 var grid = document.getElementById('photoGrid');
                 if (!grid) return;
 
+                // TODO: 虚拟滚动（Virtual Scrolling）方案规划
+                // 当照片超过50张时，仅渲染可视区域±2屏的DOM节点
+                // 使用 IntersectionObserver 回收不可见节点内存
+                // 预估节省 70-90% DOM节点数，显著降低内存占用
+
                 // 先显示骨架屏
                 var skeletonHtml = '';
                 for (var s = 0; s < 6; s++) {
@@ -7941,7 +8039,7 @@
                     var p = sorted[i];
                     var timeStr = formatPhotoTime(p.timestamp);
                     var name = p.username || '未知用户';
-                    html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
+                    html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="view-transition-name:photo-' + escapeHtml(String(p.id)) + ';animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
                     html += '<img src="' + p.imageUrl + '" alt="photo" class="pw-blur-in" data-src="' + p.imageUrl + '">';
                     html += '<div class="pw-item-info">';
                     html += '<div class="pw-item-name">' + escapeHtml(name) + '</div>';
@@ -8025,6 +8123,51 @@
                 e.target.value = '';
             };
 
+            // ========== 环境光背景：提取照片主色调 ==========
+            function extractDominantColor(imgSrc, callback) {
+                var img = new Image();
+                img.crossOrigin = 'anonymous';
+                img.onload = function() {
+                    try {
+                        var canvas = document.createElement('canvas');
+                        canvas.width = 32;
+                        canvas.height = 32;
+                        var ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, 32, 32);
+                        var data = ctx.getImageData(0, 0, 32, 32).data;
+                        var colorCounts = {};
+                        for (var i = 0; i < data.length; i += 16) {
+                            var r = Math.round(data[i] / 48) * 48;
+                            var g = Math.round(data[i + 1] / 48) * 48;
+                            var b = Math.round(data[i + 2] / 48) * 48;
+                            var key = r + ',' + g + ',' + b;
+                            colorCounts[key] = (colorCounts[key] || 0) + 1;
+                        }
+                        var maxCount = 0;
+                        var dominantKey = '0,0,0';
+                        for (var key in colorCounts) {
+                            if (colorCounts[key] > maxCount) {
+                                maxCount = colorCounts[key];
+                                dominantKey = key;
+                            }
+                        }
+                        callback(dominantKey);
+                    } catch(e) {
+                        callback('0,0,0');
+                    }
+                };
+                img.onerror = function() { callback('0,0,0'); };
+                img.src = imgSrc;
+            }
+
+            function updateAmbientBackground(imgSrc) {
+                var bg = document.getElementById('ppAmbientBg');
+                if (!bg) return;
+                extractDominantColor(imgSrc, function(color) {
+                    bg.style.background = 'radial-gradient(ellipse at center, rgba(' + color + ',0.35) 0%, rgba(' + color + ',0.08) 50%, transparent 80%)';
+                });
+            }
+
             window.openPhotoPreview = async function(sortedIdx) {
                 var sorted = photoWallData.slice().sort(function(a, b) {
                     return b.timestamp - a.timestamp;
@@ -8050,7 +8193,18 @@
 
                 var overlay = document.getElementById('photoPreviewOverlay');
                 if (overlay && overlay.parentElement !== document.body) document.body.appendChild(overlay);
-                overlay.classList.add('active');
+                // 使用 View Transitions API 实现平滑过渡
+                if (document.startViewTransition) {
+                    document.startViewTransition(function() {
+                        overlay.classList.add('active');
+                    });
+                } else {
+                    overlay.classList.add('active');
+                }
+
+                // 设置环境光背景
+                updateAmbientBackground(photo.imageUrl);
+
                 photoPreviewActive = true;
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = 'none';
@@ -8072,7 +8226,14 @@
 
             window.closePhotoPreview = function() {
                 var overlay = document.getElementById('photoPreviewOverlay');
-                overlay.classList.remove('active');
+                // 使用 View Transitions API 实现平滑过渡
+                if (document.startViewTransition) {
+                    document.startViewTransition(function() {
+                        overlay.classList.remove('active');
+                    });
+                } else {
+                    overlay.classList.remove('active');
+                }
                 photoPreviewActive = false;
                 photoPreviewClosedAt = Date.now();
                 photoPreviewCurrent = null;
@@ -8450,10 +8611,59 @@
                     }
                 }
 
-                // 重新渲染
-                await renderPhotoWall();
+                // 重新渲染 - 不重新从云端加载数据
+                renderPhotoWallWithoutReload();
                 showToast('照片已删除');
             };
+
+            // 渲染照片墙但不重新从云端加载数据
+            function renderPhotoWallWithoutReload() {
+                var grid = document.getElementById('photoGrid');
+                if (!grid) return;
+
+                // TODO: 虚拟滚动 - 与 renderPhotoWall 共用同一套虚拟滚动逻辑
+
+                if (photoWallData.length === 0) {
+                    grid.innerHTML = '<div class="photo-wall-empty">' +
+                        '<div class="photo-wall-empty-icon">📷</div>' +
+                        '<div>还没有照片</div>' +
+                        '<div class="photo-wall-empty-cta" onclick="triggerPhotoUpload()">📤 成为第一个分享照片的人</div>' +
+                        '</div>';
+                    return;
+                }
+
+                var sorted = photoWallData.slice().sort(function(a, b) {
+                    return b.timestamp - a.timestamp;
+                });
+
+                var html = '';
+                for (var i = 0; i < sorted.length; i++) {
+                    var p = sorted[i];
+                    var timeStr = formatPhotoTime(p.timestamp);
+                    var name = p.username || '未知用户';
+                    html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="view-transition-name:photo-' + escapeHtml(String(p.id)) + ';animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
+                    html += '<img src="' + p.imageUrl + '" alt="photo" class="pw-blur-in" data-src="' + p.imageUrl + '">';
+                    html += '<div class="pw-item-info">';
+                    html += '<div class="pw-item-name">' + escapeHtml(name) + '</div>';
+                    html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
+                    html += '</div></div>';
+                }
+                grid.innerHTML = html;
+
+                // 交错入场动画
+                requestAnimationFrame(function() {
+                    var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
+                    items.forEach(function(item, idx) {
+                        setTimeout(function() {
+                            item.classList.add('pw-stagger-done');
+                            item.classList.remove('pw-stagger-enter');
+                        }, 0);
+                    });
+                });
+
+                // 初始化懒加载
+                pwObserveLazyImages(grid);
+            }
 
             // ========== 预览中删除 ==========
             window.deleteCurrentPhoto = function() {
