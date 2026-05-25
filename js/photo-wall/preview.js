@@ -13,29 +13,19 @@
     var ppTrackDrag = 0;
     var ppTrackSnapping = false;
     var ppVw = 0;
-    var ppVelocitySamples = [];
+    var ppVelocitySamples = new Array(8);
+    var ppVelIdx = 0;
+    var ppVelCount = 0;
     var ppLastMoveX = 0;
     var ppLastMoveT = 0;
     var ppRafId = null;
     var ppPreloadCache = {};
     var ppImageCache = {};
     var ppDecodeQueue = {};
-    var ppGyroTargetX = 0;
-    var ppGyroTargetY = 0;
-    var ppGyroCurrentX = 0;
-    var ppGyroCurrentY = 0;
-    var ppGyroRafId = null;
-    var ppGyroActive = false;
-    var ppGyroPermGranted = false;
-    var ppDeviceOrientationHandler = null;
     var ppTapHandled = false;
     var ppTrackRaf = null;
     var ppTransformRaf = null;
     var ppPinchPre = { pts: [null, null], d: 0, c: { x: 0, y: 0 } };
-    var ppGyroMaxOffset = 15;
-    var ppGyroLerpSpeed = 0.1;
-    var ppSpringTension = 180;
-    var ppSpringFriction = 18;
     var ppRefreshRate = 60;
     var ppFrameBudget = 16;
     var photoPreviewActive = false;
@@ -185,6 +175,13 @@
         }
     }
 
+    function ppApplySlideTrackImmediate() {
+        if (!ppTrack || ppTrackSnapping) return;
+        var offset = -ppVw + ppTrackDrag;
+        ppTrack.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
+        ppTrack.style.webkitTransform = 'translate3d(' + offset + 'px, 0, 0)';
+    }
+
     function ppApplyImageTransform() {
         var img = document.getElementById('photoPreviewImage');
         if (!img) return;
@@ -194,9 +191,7 @@
         }
         if (ppTransformRaf) return;
         ppTransformRaf = requestAnimationFrame(function() {
-            var tx = ppZoom.tx + ppGyroCurrentX;
-            var ty = ppZoom.ty + ppGyroCurrentY;
-            var t = 'translate3d(' + tx + 'px,' + ty + 'px,0) scale(' + ppZoom.scale + ')';
+            var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
             img.style.transform = t;
             img.style.webkitTransform = t;
             ppTransformRaf = null;
@@ -210,89 +205,9 @@
         if (isZoomed !== img.classList.contains('zoomed')) {
             img.classList.toggle('zoomed', isZoomed);
         }
-        var tx = ppZoom.tx + ppGyroCurrentX;
-        var ty = ppZoom.ty + ppGyroCurrentY;
-        var t = 'translate3d(' + tx + 'px,' + ty + 'px,0) scale(' + ppZoom.scale + ')';
+        var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
         img.style.transform = t;
         img.style.webkitTransform = t;
-    }
-
-    function ppGyroOnOrientation(e) {
-        var beta = e.beta;
-        var gamma = e.gamma;
-        if (beta === null || gamma === null) {
-            ppGyroTargetX = 0;
-            ppGyroTargetY = 0;
-            return;
-        }
-        ppGyroTargetX = Math.max(-ppGyroMaxOffset, Math.min(ppGyroMaxOffset, gamma * 0.25));
-        ppGyroTargetY = Math.max(-ppGyroMaxOffset, Math.min(ppGyroMaxOffset, beta * -0.15));
-    }
-
-    function ppStartGyro() {
-        if (ppGyroActive) return;
-        ppGyroActive = true;
-        ppGyroTargetX = 0;
-        ppGyroTargetY = 0;
-        ppGyroCurrentX = 0;
-        ppGyroCurrentY = 0;
-        ppDeviceOrientationHandler = ppGyroOnOrientation;
-        window.addEventListener('deviceorientation', ppDeviceOrientationHandler);
-        ppGyroRafId = requestAnimationFrame(ppGyroRenderLoop);
-    }
-
-    function ppStopGyro() {
-        ppGyroActive = false;
-        ppGyroTargetX = 0;
-        ppGyroTargetY = 0;
-        if (ppGyroRafId) {
-            cancelAnimationFrame(ppGyroRafId);
-            ppGyroRafId = null;
-        }
-        if (ppDeviceOrientationHandler) {
-            window.removeEventListener('deviceorientation', ppDeviceOrientationHandler);
-            ppDeviceOrientationHandler = null;
-        }
-        ppGyroCurrentX = 0;
-        ppGyroCurrentY = 0;
-        var img = document.getElementById('photoPreviewImage');
-        if (img) {
-            img.style.transform = '';
-            img.style.webkitTransform = '';
-        }
-        var info = document.querySelector('.photo-preview-info');
-        if (info) info.style.transform = '';
-    }
-
-    function ppGyroRenderLoop() {
-        if (!ppGyroActive) return;
-        ppGyroCurrentX += (ppGyroTargetX - ppGyroCurrentX) * ppGyroLerpSpeed;
-        ppGyroCurrentY += (ppGyroTargetY - ppGyroCurrentY) * ppGyroLerpSpeed;
-        ppApplyImageTransform();
-        var info = document.querySelector('.photo-preview-info');
-        if (info) {
-            var invX = -ppGyroCurrentX * 0.35;
-            var invY = -ppGyroCurrentY * 0.35;
-            info.style.transform = 'translate3d(' + invX + 'px,' + invY + 'px,0)';
-        }
-        ppGyroRafId = requestAnimationFrame(ppGyroRenderLoop);
-    }
-
-    function ppRequestGyroPermission(triggerEl) {
-        if (ppGyroPermGranted) {
-            ppStartGyro();
-            return;
-        }
-        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-            DeviceOrientationEvent.requestPermission().then(function(state) {
-                if (state === 'granted') {
-                    ppGyroPermGranted = true;
-                    ppStartGyro();
-                }
-            }).catch(function() {});
-        } else {
-            ppStartGyro();
-        }
     }
 
     function ppResetZoom() {
@@ -326,41 +241,35 @@
 
     function ppSnapTo(targetOffset, callback) {
         if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
-        var position = ppTrackDrag;
-        var velocity = 0;
-        var tension = ppSpringTension;
-        var friction = ppSpringFriction;
         ppTrackSnapping = true;
-        var dt = ppFrameBudget / 1000;
-        function ppSpringStep() {
-            if (!ppTrackSnapping) {
-                ppSwipeLock = 0;
-                ppRafId = null;
-                return;
-            }
-            var displacement = targetOffset - position;
-            var springForce = tension * displacement;
-            var dampingForce = friction * velocity;
-            var acceleration = springForce - dampingForce;
-            velocity += acceleration * dt;
-            position += velocity * dt;
-            ppTrackDrag = position;
-            var offset = -ppVw + position;
-            ppTrack.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
-            ppTrack.style.webkitTransform = 'translate3d(' + offset + 'px, 0, 0)';
-            if (Math.abs(displacement) < 0.5 && Math.abs(velocity) < 0.5) {
-                ppTrackDrag = targetOffset;
-                var finalOffset = -ppVw + targetOffset;
-                ppTrack.style.transform = 'translate3d(' + finalOffset + 'px, 0, 0)';
-                ppTrack.style.webkitTransform = 'translate3d(' + finalOffset + 'px, 0, 0)';
-                ppTrackSnapping = false;
-                ppRafId = null;
-                if (callback) callback();
-                return;
-            }
-            ppRafId = requestAnimationFrame(ppSpringStep);
+
+        var absDiff = Math.abs(ppTrackDrag - targetOffset);
+        var duration = Math.min(400, Math.max(200, absDiff / ppVw * 400));
+
+        function onSnapEnd(ev) {
+            if (ev && ev.propertyName !== 'transform' && ev.propertyName !== '-webkit-transform') return;
+            ppTrack.removeEventListener('transitionend', onSnapEnd);
+            ppTrack.style.transition = '';
+            ppTrack.style.webkitTransition = '';
+            ppTrackSnapping = false;
+            ppSwipeLock = 0;
+            if (ppRafId) { clearTimeout(ppRafId); ppRafId = null; }
+            if (callback) callback();
         }
-        ppRafId = requestAnimationFrame(ppSpringStep);
+
+        ppTrack.addEventListener('transitionend', onSnapEnd);
+        ppTrack.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+        ppTrack.style.webkitTransition = '-webkit-transform ' + duration + 'ms cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+
+        var finalOffset = -ppVw + targetOffset;
+        ppTrack.style.transform = 'translate3d(' + finalOffset + 'px, 0, 0)';
+        ppTrack.style.webkitTransform = 'translate3d(' + finalOffset + 'px, 0, 0)';
+
+        var safeTimer = setTimeout(function() {
+            ppTrack.removeEventListener('transitionend', onSnapEnd);
+            onSnapEnd();
+        }, duration + 150);
+        ppRafId = safeTimer;
     }
 
     function ppNavigatePhoto(direction) {
@@ -466,7 +375,6 @@
             window.updateAmbientBackground(photoPreviewCurrent.imageUrl);
             window.syncPhotoViewCount(photoPreviewCurrent);
         }
-        ppRequestGyroPermission();
     }
     window.openPhotoPreview = openPhotoPreview;
 
@@ -475,7 +383,6 @@
         if (!overlay) return;
         photoPreviewActive = false;
         photoPreviewClosedAt = Date.now();
-        ppStopGyro();
         ppResetZoom();
         if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
         ppTrackSnapping = false;
@@ -554,6 +461,13 @@
     window.deletePhotoFromPreview = deletePhotoFromPreview;
 
     function bindPreviewEvents(overlay) {
+        var interactiveElements = overlay.querySelectorAll('.photo-preview-close, .pp-info-btn, .pp-share-btn, .pp-delete-btn, .photo-preview-info, .pp-info-modal, .pp-info-modal-close, .pp-dots');
+        for (var ie = 0; ie < interactiveElements.length; ie++) {
+            interactiveElements[ie].addEventListener('pointerdown', function(ev) {
+                ev.stopPropagation();
+            });
+        }
+
         overlay.addEventListener('pointerdown', function(e) {
             ppMoved = false;
             ppTapHandled = false;
@@ -612,12 +526,13 @@
                 var dx2 = e.clientX - ppStart.x;
                 if (Math.abs(dx2) > 5) ppMoved = true;
                 var now = performance.now();
-                ppVelocitySamples.push({ x: e.clientX, t: now });
-                if (ppVelocitySamples.length > 8) ppVelocitySamples.shift();
+                ppVelocitySamples[ppVelIdx] = { x: e.clientX, t: now };
+                ppVelIdx = (ppVelIdx + 1) % 8;
+                if (ppVelCount < 8) ppVelCount++;
                 ppLastMoveX = e.clientX;
                 ppLastMoveT = now;
                 ppTrackDrag = dx2;
-                ppApplySlideTrack();
+                ppApplySlideTrackImmediate();
             }
         });
 
@@ -638,11 +553,15 @@
             var dx = ppTrackDrag;
             var now = performance.now();
             var vx = 0;
-            if (ppVelocitySamples.length >= 2) {
-                var last = ppVelocitySamples[ppVelocitySamples.length - 1];
-                var first = ppVelocitySamples[0];
-                var dt = last.t - first.t;
-                if (dt > 0) vx = (last.x - first.x) / dt;
+            if (ppVelCount >= 2) {
+                var lastIdx = (ppVelIdx - 1 + 8) % 8;
+                var firstIdx = (ppVelIdx - ppVelCount + 8) % 8;
+                var last = ppVelocitySamples[lastIdx];
+                var first = ppVelocitySamples[firstIdx];
+                if (last && first) {
+                    var dt = last.t - first.t;
+                    if (dt > 5) vx = (last.x - first.x) / dt;
+                }
             }
             var threshold = ppVw * 0.25;
             var absDx = Math.abs(dx);
@@ -698,4 +617,44 @@
             }
         });
     }
+
+    window.showPhotoInfo = function() {
+        var photo = photoPreviewCurrent;
+        if (!photo) return;
+        var modal = document.getElementById('ppInfoModal');
+        var body = document.getElementById('ppInfoModalBody');
+        if (!modal || !body) return;
+        var d = photo.timestamp ? new Date(photo.timestamp) : null;
+        var dateStr = d ? d.toLocaleString() : '未知';
+        var sizeStr = photo.fileSize ? (photo.fileSize > 1048576 ? (photo.fileSize / 1048576).toFixed(1) + ' MB' : (photo.fileSize > 1024 ? (photo.fileSize / 1024).toFixed(1) + ' KB' : photo.fileSize + ' B')) : '未知';
+        body.innerHTML =
+            '<div class="pp-info-row"><span class="pp-info-label">上传者</span><span class="pp-info-value">' + window.escapeHtml(photo.username || '未知用户') + '</span></div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">上传时间</span><span class="pp-info-value">' + dateStr + '</span></div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">浏览</span><span class="pp-info-value">' + (photo.views || 0) + ' 次</span></div>' +
+            (sizeStr !== '未知' ? '<div class="pp-info-row"><span class="pp-info-label">文件大小</span><span class="pp-info-value">' + sizeStr + '</span></div>' : '');
+        modal.style.display = 'flex';
+    };
+
+    window.closePhotoInfo = function() {
+        var modal = document.getElementById('ppInfoModal');
+        if (modal) modal.style.display = 'none';
+    };
+
+    window.shareCurrentPhoto = function() {
+        var photo = photoPreviewCurrent;
+        if (!photo || !photo.imageUrl) return;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(photo.imageUrl).then(function() {
+                window.showToast && window.showToast('图片链接已复制到剪贴板');
+            }).catch(function() {
+                window.showToast && window.showToast('复制失败');
+            });
+        } else {
+            window.showToast && window.showToast(photo.imageUrl);
+        }
+    };
+
+    window.deleteCurrentPhoto = function() {
+        window.deletePhotoFromPreview();
+    };
 })();

@@ -27,18 +27,14 @@
         let delPostId = null, delOwnerKey = null;
         let activePostId = null;
         
-        if (!window.openReport) {
-            window.openReport = function(targetType, targetId, targetUser) {
-                const checkAndRun = () => {
-                    if (typeof window.openReport === 'function' && window.openReport !== arguments.callee) {
-                        window.openReport(targetType, targetId, targetUser);
-                    } else if (!document.getElementById('reportModal')) {
-                        setTimeout(checkAndRun, 100);
-                    }
-                };
-                checkAndRun();
-            };
-        }
+        var _openReportOrigStub = function(targetType, targetId, targetUser) {
+            if (window.openReport !== _openReportOrigStub) {
+                window.openReport(targetType, targetId, targetUser);
+            } else {
+                setTimeout(function() { _openReportOrigStub(targetType, targetId, targetUser); }, 200);
+            }
+        };
+        if (!window.openReport) window.openReport = _openReportOrigStub;
         const viewTracked = new Set();
         const CACHE_KEY = "xtj_feed_cache";
         const CACHE_DURATION = 5 * 60 * 1000; // 缓存5分钟
@@ -1459,7 +1455,7 @@
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
-                    <button class="action-btn report-btn" style="margin-left:auto;" onclick="window.openReport&&window.openReport('post','${escapeHtml(p.id).replace(/'/g, "\\'")}','${escapeHtml(p.user_name).replace(/'/g, "\\'")}')">举报</button>
+                    <button class="action-btn report-btn" style="margin-left:auto;" data-id="${escapeHtml(p.id)}" data-user="${escapeHtml(p.user_name)}">举报</button>
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -1633,7 +1629,7 @@
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
-                    <button class="action-btn report-btn" style="margin-left:auto;" onclick="window.openReport&&window.openReport('post','${escapeHtml(p.id).replace(/'/g, "\\'")}','${escapeHtml(p.user_name).replace(/'/g, "\\'")}')">举报</button>
+                    <button class="action-btn report-btn" style="margin-left:auto;" data-id="${escapeHtml(p.id)}" data-user="${escapeHtml(p.user_name)}">举报</button>
                   </div>
                   ${pComms.length?`
                   <div class="comments">
