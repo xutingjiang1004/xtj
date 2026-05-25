@@ -94,11 +94,11 @@
 
     function ppSwapImage(imgEl, url) {
         if (!imgEl) return;
-        if (!url) { imgEl.removeAttribute('src'); imgEl.style.opacity = '0'; return; }
+        if (!url) { imgEl.src = ''; imgEl.style.opacity = '0'; return; }
         var cached = ppImageCache[url];
         if (cached && cached !== 'loading') {
-            if (imgEl.src !== url) {
-                imgEl.src = url;
+            if (imgEl.src !== cached.src) {
+                imgEl.src = cached.src;
             }
             imgEl.style.opacity = '1';
             return;
@@ -106,10 +106,15 @@
         imgEl.style.opacity = '0.3';
         imgEl.src = url;
         ppDecodeImage(url).then(function() {
-            if (imgEl.src === url) {
+            if (imgEl.src === url || imgEl.src === (ppImageCache[url] && ppImageCache[url].src)) {
                 imgEl.style.opacity = '1';
             }
         });
+        setTimeout(function() {
+            if (imgEl.src && imgEl.style.opacity !== '1') {
+                imgEl.style.opacity = '1';
+            }
+        }, 5000);
     }
 
     function ppSetTrackImages(idx) {
@@ -152,7 +157,7 @@
     function ppPreloadAdjacent(idx) {
         var photos = ppSortedPhotos;
         var urls = [];
-        var offsets = [-2, -1, 1, 2, -3, 3];
+        var offsets = [0, -1, 1, -2, 2, -3, 3];
         for (var o = 0; o < offsets.length; o++) {
             if (urls.length >= 3) break;
             var i = idx + offsets[o];

@@ -3748,7 +3748,7 @@
             -webkit-user-drag: none;
             touch-action: none;
             transition: opacity 0.35s ease;
-            contain: strict;
+            contain: layout paint style;
             -webkit-font-smoothing: antialiased;
             image-rendering: -webkit-optimize-contrast;
         }
