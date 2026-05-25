@@ -1392,13 +1392,16 @@
         .dock-bar {
             position: fixed; bottom: 0; left: 0; right: 0;
             display: flex; justify-content: center; align-items: center;
-            gap: 3px; padding: 6px 12px 10px;
+            gap: 3px; padding: 10px 12px 14px;
             padding-left: calc(12px + env(safe-area-inset-left, 0px));
             padding-right: calc(12px + env(safe-area-inset-right, 0px));
-            padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
-            background: none;
-            border: none;
-            box-shadow: none;
+            padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+            background: var(--dock-bg);
+            backdrop-filter: blur(22px) saturate(160%);
+            -webkit-backdrop-filter: blur(22px) saturate(160%);
+            border-top: 1px solid var(--dock-border);
+            border-radius: 20px 20px 0 0;
+            box-shadow: var(--dock-shadow);
             z-index: 100;
             pointer-events: none;
             touch-action: none;
@@ -1597,9 +1600,11 @@
 
         /* 暗色模式 Dock */
         [data-theme="dark"] .dock-bar {
-            background: none;
-            border: none;
-            box-shadow: none;
+            background: var(--dock-bg);
+            backdrop-filter: blur(22px) saturate(120%);
+            -webkit-backdrop-filter: blur(22px) saturate(120%);
+            border-top: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 -4px 24px rgba(0,0,0,0.4);
         }
         [data-theme="dark"] .dock-tab { color: #9e9eb0; }
         [data-theme="dark"] .dock-tab.active { color: #34d399; background: rgba(255,255,255,0.06); backdrop-filter: blur(6px) saturate(140%); -webkit-backdrop-filter: blur(6px) saturate(140%); border: 1px solid rgba(255,255,255,0.12); }
@@ -2880,63 +2885,66 @@
         /* ========== 通知系统 ========== */
         .notification-container {
             position: fixed;
-            top: calc(20px + env(safe-area-inset-top, 0px));
-            right: calc(20px + env(safe-area-inset-right, 0px));
-            z-index: 9999;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10000;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            align-items: center;
+            gap: 8px;
+            padding: calc(12px + env(safe-area-inset-top, 0px)) 16px 0;
             pointer-events: none;
         }
         .notification-bubble {
             pointer-events: auto;
-            background: rgba(255, 255, 255, 0.75);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border-radius: 16px;
-            padding: 14px 16px;
+            width: 100%;
+            max-width: 420px;
+            background: rgba(255, 255, 255, 0.55);
+            backdrop-filter: blur(28px) saturate(200%);
+            -webkit-backdrop-filter: blur(28px) saturate(200%);
+            border-radius: 20px;
+            padding: 14px 18px;
             display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            min-width: 300px;
-            max-width: 400px;
+            align-items: center;
+            gap: 14px;
             box-shadow: 
-                0 8px 32px rgba(0, 0, 0, 0.12),
-                0 2px 8px rgba(0, 0, 0, 0.08),
-                inset 0 1px 0 rgba(255, 255, 255, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.5);
-            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            transform: translateX(120%) scale(0.9);
+                0 12px 40px rgba(0, 0, 0, 0.14),
+                0 3px 10px rgba(0, 0, 0, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.7),
+                inset 0 -1px 0 rgba(255, 255, 255, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.55);
+            transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            transform: translateY(-120%) scale(0.92);
             opacity: 0;
             cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
         .notification-bubble.show {
-            transform: translateX(0) scale(1);
+            transform: translateY(0) scale(1);
             opacity: 1;
         }
         .notification-bubble.hide {
-            transform: translateX(120%) scale(0.9);
+            transform: translateY(-120%) scale(0.92);
             opacity: 0;
         }
-        .notification-bubble:hover {
-            box-shadow: 
-                0 12px 40px rgba(0, 0, 0, 0.15),
-                0 4px 12px rgba(0, 0, 0, 0.1),
-                inset 0 1px 0 rgba(255, 255, 255, 0.7);
+        .notification-bubble:active {
+            transform: scale(0.97);
         }
         .notification-avatar {
-            width: 44px;
-            height: 44px;
+            width: 48px;
+            height: 48px;
             border-radius: 50%;
             flex-shrink: 0;
             display: flex;
             align-items: center;
             justify-content: center;
             font-weight: 700;
-            font-size: 18px;
+            font-size: 20px;
             background: linear-gradient(135deg, #059669, #34d399);
             color: white;
-            box-shadow: 0 2px 8px rgba(5, 150, 105, 0.3);
+            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
             overflow: hidden;
         }
         .notification-avatar img {
@@ -2950,36 +2958,39 @@
             min-width: 0;
         }
         .notification-name {
-            font-weight: 600;
+            font-weight: 700;
             font-size: 15px;
             color: var(--text-main);
-            margin-bottom: 4px;
+            margin-bottom: 3px;
             line-height: 1.2;
         }
         .notification-text {
-            font-size: 14px;
+            font-size: 13px;
             color: var(--text-muted);
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
             line-height: 1.4;
+            max-width: 260px;
         }
 
         [data-theme="dark"] .notification-bubble {
-            background: rgba(30, 30, 45, 0.75);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border-color: rgba(255, 255, 255, 0.15);
-            box-shadow: 
-                0 8px 32px rgba(0, 0, 0, 0.4),
-                0 2px 8px rgba(0, 0, 0, 0.3),
-                inset 0 1px 0 rgba(255, 255, 255, 0.1);
-        }
-        [data-theme="dark"] .notification-bubble:hover {
+            background: rgba(24, 26, 38, 0.72);
+            backdrop-filter: blur(28px) saturate(160%);
+            -webkit-backdrop-filter: blur(28px) saturate(160%);
+            border-color: rgba(255, 255, 255, 0.12);
             box-shadow: 
                 0 12px 40px rgba(0, 0, 0, 0.5),
-                0 4px 12px rgba(0, 0, 0, 0.4),
-                inset 0 1px 0 rgba(255, 255, 255, 0.15);
+                0 3px 10px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+        }
+        [data-theme="dark"] .notification-bubble:active {
+            box-shadow: 
+                0 12px 40px rgba(0, 0, 0, 0.5),
+                0 3px 10px rgba(0, 0, 0, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.08),
+                inset 0 -1px 0 rgba(0, 0, 0, 0.2);
         }
     
         /* ========== 照片墙样式 ========== */
@@ -2994,13 +3005,18 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 2px 4px 14px;
+            padding: 14px 18px;
+            margin: 0 0 12px;
             flex-shrink: 0;
-            position: relative;
-            z-index: 1;
-            background: transparent;
-            backdrop-filter: none;
-            -webkit-backdrop-filter: none;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: rgba(255, 255, 255, 0.45);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            border: 1px solid rgba(255, 255, 255, 0.7);
+            border-radius: 20px;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.6);
         }
         .photo-wall-title {
             font-size: 18px;
@@ -3010,18 +3026,22 @@
         .photo-wall-upload-btn {
             padding: 8px 20px;
             border-radius: 999px;
-            border: none;
-            background: linear-gradient(135deg, #059669, #34d399);
-            color: white;
+            border: 1px solid rgba(5, 150, 105, 0.3);
+            background: rgba(5, 150, 105, 0.08);
+            backdrop-filter: blur(12px) saturate(160%);
+            -webkit-backdrop-filter: blur(12px) saturate(160%);
+            color: #059669;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.25s ease;
-            box-shadow: 0 2px 12px rgba(5, 150, 105, 0.3);
+            box-shadow: 0 2px 12px rgba(5, 150, 105, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.4);
         }
         .photo-wall-upload-btn:hover {
             transform: scale(1.03);
-            box-shadow: 0 4px 16px rgba(5, 150, 105, 0.4);
+            background: rgba(5, 150, 105, 0.14);
+            border-color: rgba(5, 150, 105, 0.5);
+            box-shadow: 0 4px 20px rgba(5, 150, 105, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.5);
         }
         .photo-wall-upload-btn:active {
             transform: scale(0.97);
@@ -3201,13 +3221,28 @@
             left: 0;
             right: 0;
             bottom: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
             overflow: hidden;
             touch-action: none;
         }
-        .photo-preview-image-wrapper img {
+        /* 滑动轨道：承载3张图的水平滑动容器 */
+        .pp-slide-track {
+            display: flex;
+            align-items: center;
+            height: 100%;
+            will-change: transform;
+        }
+        /* 每张图的槽位：占满一屏宽 */
+        .pp-slide-slot {
+            min-width: 100vw;
+            max-width: 100vw;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        /* 预览图片通用样式 */
+        .pp-slide-img {
             max-width: 100vw;
             max-height: 100vh;
             width: auto;
@@ -3215,7 +3250,6 @@
             object-fit: contain;
             box-shadow: none;
             transform-origin: center center;
-            transition: transform 0.18s ease-out; /* 只用于边界回弹等非交互场景 */
             will-change: transform;
             cursor: zoom-in;
             user-select: none;
@@ -3223,13 +3257,11 @@
             -webkit-user-drag: none;
             touch-action: none;
         }
-        .photo-preview-image-wrapper img.zoomed {
+        .pp-slide-img.zoomed {
             cursor: grab;
         }
-        .photo-preview-image-wrapper img.dragging {
+        .pp-slide-img.dragging {
             cursor: grabbing;
-            transition: none !important;
-            transition-duration: 0s !important;
         }
         .photo-preview-info {
             position: absolute;
@@ -3286,7 +3318,22 @@
                 0 4px 14px rgba(0, 0, 0, 0.24);
         }
         [data-theme="dark"] .photo-wall-header {
-            background: transparent;
+            background: rgba(20, 22, 30, 0.5);
+            backdrop-filter: blur(18px) saturate(120%);
+            -webkit-backdrop-filter: blur(18px) saturate(120%);
+            border-color: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        }
+        [data-theme="dark"] .photo-wall-upload-btn {
+            background: rgba(52, 211, 153, 0.08);
+            border-color: rgba(52, 211, 153, 0.25);
+            color: #34d399;
+            box-shadow: 0 2px 12px rgba(52, 211, 153, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        }
+        [data-theme="dark"] .photo-wall-upload-btn:hover {
+            background: rgba(52, 211, 153, 0.14);
+            border-color: rgba(52, 211, 153, 0.4);
+            box-shadow: 0 4px 20px rgba(52, 211, 153, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08);
         }
 
     </style>
@@ -3397,8 +3444,12 @@
 
                 <div class="photo-preview-overlay" id="photoPreviewOverlay">
                     <button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>
-                    <div class="photo-preview-image-wrapper">
-                        <img id="photoPreviewImage" src="" alt="preview">
+                    <div class="photo-preview-image-wrapper" id="ppImageWrapper">
+                        <div class="pp-slide-track" id="ppSlideTrack">
+                            <div class="pp-slide-slot"><img class="pp-slide-img" id="ppPrevImg" src="" alt="" draggable="false"></div>
+                            <div class="pp-slide-slot"><img class="pp-slide-img" id="photoPreviewImage" src="" alt="preview" draggable="false"></div>
+                            <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false"></div>
+                        </div>
                     </div>
                     <div class="photo-preview-info">
                         <span class="pp-user" id="photoPreviewUser"></span>
@@ -7387,7 +7438,143 @@
             var ppPhotoIdx = -1;
             var ppSwipeLock = 0;
             var ppSortedPhotos = [];
-            var ppSwipeDx = 0;
+            // 滑动轨道变量
+            var ppTrack = null;
+            var ppTrackDrag = 0;
+            var ppTrackSnapping = false;
+            var ppVw = 0;
+            var ppVelocitySamples = [];
+            var ppLastMoveX = 0;
+            var ppLastMoveT = 0;
+            var ppRafId = null;
+            var ppPreloadCache = {};
+
+            function ppInitTrack() {
+                ppTrack = document.getElementById('ppSlideTrack');
+                ppVw = window.innerWidth;
+            }
+
+            function ppSetTrackImages(idx) {
+                ppInitTrack();
+                if (!ppTrack) return;
+                var photos = ppSortedPhotos;
+                var prevImg = document.getElementById('ppPrevImg');
+                var curImg = document.getElementById('photoPreviewImage');
+                var nextImg = document.getElementById('ppNextImg');
+                if (photos[idx]) curImg.src = photos[idx].imageUrl;
+                if (idx > 0 && photos[idx - 1]) prevImg.src = photos[idx - 1].imageUrl;
+                else prevImg.src = '';
+                if (idx < photos.length - 1 && photos[idx + 1]) nextImg.src = photos[idx + 1].imageUrl;
+                else nextImg.src = '';
+                ppTrackDrag = 0;
+                ppTrackSnapping = false;
+                ppTrack.style.transition = 'none';
+                ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+                ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+                ppPreloadAdjacent(idx);
+            }
+
+            function ppPreloadAdjacent(idx) {
+                var photos = ppSortedPhotos;
+                [idx - 2, idx + 2].forEach(function(i) {
+                    if (i >= 0 && i < photos.length && photos[i] && photos[i].imageUrl) {
+                        var url = photos[i].imageUrl;
+                        if (!ppPreloadCache[url]) {
+                            ppPreloadCache[url] = true;
+                            var pre = new Image();
+                            pre.src = url;
+                        }
+                    }
+                });
+            }
+
+            function ppApplySlideTrack() {
+                if (!ppTrack || ppTrackSnapping) return;
+                var offset = -ppVw + ppTrackDrag;
+                ppTrack.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
+                ppTrack.style.webkitTransform = 'translate3d(' + offset + 'px, 0, 0)';
+            }
+
+            function ppApplyImageTransform() {
+                var img = document.getElementById('photoPreviewImage');
+                if (!img) return;
+                img.classList.toggle('zoomed', ppZoom.scale > 1.01);
+                var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
+                img.style.transform = t;
+                img.style.webkitTransform = t;
+            }
+
+            function ppResetZoom() {
+                ppZoom = { scale: 1, tx: 0, ty: 0 };
+                ppPointers.clear();
+                ppStart = null;
+                var img = document.getElementById('photoPreviewImage');
+                if (img) {
+                    img.classList.remove('zoomed', 'dragging');
+                    img.style.transform = '';
+                    img.style.webkitTransform = '';
+                }
+            }
+
+            function ppToggleZoom(clientX, clientY) {
+                var img = document.getElementById('photoPreviewImage');
+                if (!img) return;
+                if (ppZoom.scale > 1.05) {
+                    ppResetZoom();
+                } else {
+                    var newScale = 2.6;
+                    var centerX = window.innerWidth / 2;
+                    var centerY = window.innerHeight / 2;
+                    var ratio = newScale / 1;
+                    ppZoom.scale = newScale;
+                    ppZoom.tx = (clientX - centerX) * (1 - ratio);
+                    ppZoom.ty = (clientY - centerY) * (1 - ratio);
+                    ppApplyImageTransform();
+                }
+            }
+
+            function ppSnapTo(targetOffset, callback) {
+                ppTrackSnapping = true;
+                ppTrackDrag = targetOffset;
+                ppTrack.style.transition = 'transform 0.28s cubic-bezier(0.25, 0.1, 0.25, 1)';
+                var finalOffset = -ppVw + targetOffset;
+                ppTrack.style.transform = 'translate3d(' + finalOffset + 'px, 0, 0)';
+                ppTrack.style.webkitTransform = 'translate3d(' + finalOffset + 'px, 0, 0)';
+                setTimeout(function() {
+                    ppTrackSnapping = false;
+                    ppTrack.style.transition = 'none';
+                    if (callback) callback();
+                }, 300);
+            }
+
+            function ppNavigatePhoto(direction) {
+                if (ppSwipeLock) return;
+                var newIdx = ppPhotoIdx + direction;
+                if (newIdx < 0 || newIdx >= ppSortedPhotos.length) {
+                    // 边界弹回
+                    ppSnapTo(0);
+                    return;
+                }
+                ppSwipeLock = 1;
+                var photo = ppSortedPhotos[newIdx];
+                photo.views = (photo.views || 0) + 1;
+                ppPhotoIdx = newIdx;
+                photoPreviewCurrent = photo;
+                saveLocalPhotoWallData();
+                updatePhotoViewDisplays(photo);
+                ppResetZoom();
+                // 滑动到目标位置后重排轨道
+                var targetDrag = direction > 0 ? -ppVw : ppVw;
+                ppSnapTo(targetDrag, function() {
+                    ppSetTrackImages(newIdx);
+                    ppSwipeLock = 0;
+                });
+                document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
+                document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
+                document.getElementById('photoPreviewViewsCount').textContent = photo.views;
+                ppPreloadAdjacent(newIdx);
+                syncPhotoViewCount(photo);
+            }
 
             function loadLocalPhotoWallData() {
                 try {
@@ -7489,105 +7676,6 @@
                 if (item) item.textContent = photo.views || 0;
             }
 
-            function ppApplyTransform() {
-                var img = document.getElementById('photoPreviewImage');
-                if (!img) return;
-                img.classList.toggle('zoomed', ppZoom.scale > 1.01);
-                var swTx = ppSwipeDx || 0;
-                var t = 'translate3d(' + (ppZoom.tx + swTx) + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
-                img.style.transform = t;
-                img.style.webkitTransform = t;
-            }
-
-            function ppResetZoom() {
-                ppZoom = { scale: 1, tx: 0, ty: 0 };
-                ppSwipeDx = 0;
-                ppPointers.clear();
-                ppStart = null;
-                var img = document.getElementById('photoPreviewImage');
-                if (img) {
-                    img.classList.remove('zoomed', 'dragging');
-                    img.style.transform = '';
-                    img.style.webkitTransform = '';
-                }
-            }
-
-            function ppToggleZoom(clientX, clientY) {
-                var img = document.getElementById('photoPreviewImage');
-                if (!img) return;
-                // 双击时禁用过渡，直接跳变
-                img.style.transition = 'none';
-                if (ppZoom.scale > 1.05) {
-                    ppResetZoom();
-                } else {
-                    var newScale = 2.6;
-                    var centerX = window.innerWidth / 2;
-                    var centerY = window.innerHeight / 2;
-                    var ratio = newScale / 1;
-                    ppZoom.scale = newScale;
-                    ppZoom.tx = (clientX - centerX) * (1 - ratio);
-                    ppZoom.ty = (clientY - centerY) * (1 - ratio);
-                    ppApplyTransform();
-                }
-                // 恢复过渡
-                setTimeout(function() {
-                    var img2 = document.getElementById('photoPreviewImage');
-                    if (img2) img2.style.transition = 'transform 0.18s ease-out';
-                }, 50);
-            }
-
-            function ppNavigatePhoto(direction) {
-                // direction: -1 = 前一张, 1 = 后一张
-                if (ppSwipeLock) return;
-                var newIdx = ppPhotoIdx + direction;
-                if (newIdx < 0 || newIdx >= ppSortedPhotos.length) {
-                    // 边界：弹回原位
-                    var img = document.getElementById('photoPreviewImage');
-                    if (img) {
-                        img.style.transition = 'transform 0.2s ease-out';
-                        img.style.transform = '';
-                        img.style.webkitTransform = '';
-                    }
-                    ppSwipeDx = 0;
-                    setTimeout(function() {
-                        var img2 = document.getElementById('photoPreviewImage');
-                        if (img2) { img2.style.transition = 'transform 0.18s ease-out'; }
-                    }, 220);
-                    return;
-                }
-                ppSwipeLock = 1;
-                var photo = ppSortedPhotos[newIdx];
-                photo.views = (photo.views || 0) + 1;
-                ppPhotoIdx = newIdx;
-                photoPreviewCurrent = photo;
-                saveLocalPhotoWallData();
-                updatePhotoViewDisplays(photo);
-
-                // 直接重置状态并换图，无任何闪烁
-                var previewImg = document.getElementById('photoPreviewImage');
-                ppSwipeDx = 0;
-                ppZoom = { scale: 1, tx: 0, ty: 0 };
-                previewImg.classList.remove('zoomed', 'dragging');
-                previewImg.style.transition = 'none';
-                previewImg.style.transform = '';
-                previewImg.style.webkitTransform = '';
-                previewImg.src = photo.imageUrl;
-                document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
-                document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
-                document.getElementById('photoPreviewViewsCount').textContent = photo.views;
-
-                // 恢复默认过渡
-                setTimeout(function() {
-                    var img = document.getElementById('photoPreviewImage');
-                    if (img) {
-                        img.style.transition = 'transform 0.18s ease-out';
-                    }
-                    ppSwipeLock = 0;
-                }, 10);
-
-                syncPhotoViewCount(photo);
-            }
-
             async function syncPhotoViewCount(photo) {
                 if (!photo || !photo.cloudId || !window.sb) return;
                 try {
@@ -7615,7 +7703,6 @@
                     return;
                 }
 
-                // Sort by time descending (newest first)
                 var sorted = photoWallData.slice().sort(function(a, b) {
                     return b.timestamp - a.timestamp;
                 });
@@ -7663,7 +7750,6 @@
                     showToast('图片超过 50MB 限制');
                     return;
                 }
-                // 上传到 Supabase Storage（和发帖机制完全一致）
                 try {
                     var path = 'photos/' + Date.now() + '_' + file.name;
                     var sb = window.sb;
@@ -7696,13 +7782,6 @@
                 e.target.value = '';
             };
 
-            function getPhotoIndexInSorted(idx) {
-                var sorted = photoWallData.slice().sort(function(a, b) {
-                    return b.timestamp - a.timestamp;
-                });
-                return sorted[idx];
-            }
-
             window.openPhotoPreview = async function(sortedIdx) {
                 var sorted = photoWallData.slice().sort(function(a, b) {
                     return b.timestamp - a.timestamp;
@@ -7714,20 +7793,18 @@
                 ppSortedPhotos = sorted;
                 ppSwipeLock = 0;
 
-                // Increment view count
                 photo.views = (photo.views || 0) + 1;
                 photoPreviewCurrent = photo;
                 saveLocalPhotoWallData();
                 updatePhotoViewDisplays(photo);
 
                 ppResetZoom();
-                var previewImg = document.getElementById('photoPreviewImage');
-                previewImg.src = photo.imageUrl;
+                ppInitTrack();
+                ppSetTrackImages(sortedIdx);
                 document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
                 document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
                 document.getElementById('photoPreviewViewsCount').textContent = photo.views;
 
-                // Use history to allow back navigation
                 var overlay = document.getElementById('photoPreviewOverlay');
                 if (overlay && overlay.parentElement !== document.body) document.body.appendChild(overlay);
                 overlay.classList.add('active');
@@ -7748,7 +7825,8 @@
                 photoPreviewCurrent = null;
                 ppPhotoIdx = -1;
                 ppSortedPhotos = [];
-                ppSwipeDx = 0;
+                ppTrackDrag = 0;
+                ppTrackSnapping = false;
                 ppSwipeLock = 0;
                 ppResetZoom();
                 var dock = document.getElementById('dockBar');
@@ -7756,9 +7834,9 @@
                 document.documentElement.classList.remove('photo-previewing');
                 document.body.classList.remove('photo-previewing');
                 document.body.style.overflow = '';
+                if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
             };
 
-            // Click outside image to close
             document.addEventListener('click', function(e) {
                 var overlay = document.getElementById('photoPreviewOverlay');
                 if (overlay && overlay.classList.contains('active')) {
@@ -7768,9 +7846,10 @@
                 }
             });
 
+            // ========== 手势系统：rAF驱动 + 速度追踪 + 动量惯性 ==========
             (function bindPhotoPreviewGestures() {
                 var img = document.getElementById('photoPreviewImage');
-                var wrapper = document.querySelector('.photo-preview-image-wrapper');
+                var wrapper = document.getElementById('ppImageWrapper');
                 if (!img || !wrapper) return;
 
                 function dist(a, b) {
@@ -7781,15 +7860,79 @@
                     return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
                 }
 
-                img.addEventListener('pointerdown', function(e) {
+                function trackVelocity(clientX) {
+                    var now = performance.now();
+                    if (ppLastMoveT > 0 && now - ppLastMoveT < 80) {
+                        var v = (clientX - ppLastMoveX) / Math.max(1, now - ppLastMoveT);
+                        ppVelocitySamples.push(v);
+                        if (ppVelocitySamples.length > 5) ppVelocitySamples.shift();
+                    }
+                    ppLastMoveX = clientX;
+                    ppLastMoveT = now;
+                }
+
+                function avgVelocity() {
+                    if (!ppVelocitySamples.length) return 0;
+                    var sum = 0;
+                    for (var i = 0; i < ppVelocitySamples.length; i++) sum += ppVelocitySamples[i];
+                    return sum / ppVelocitySamples.length;
+                }
+
+                function startMomentum() {
+                    if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
+                    var v = avgVelocity() * 1000; // px/s
+                    var friction = 0.92;
+                    var minV = 0.3;
+
+                    function step() {
+                        v *= friction;
+                        if (Math.abs(v) < minV) {
+                            ppRafId = null;
+                            settleSnap();
+                            return;
+                        }
+                        // 边界阻力
+                        var canPrev = ppPhotoIdx > 0;
+                        var canNext = ppPhotoIdx < ppSortedPhotos.length - 1;
+                        if ((!canPrev && ppTrackDrag + v > 0) || (!canNext && ppTrackDrag + v < 0)) {
+                            v *= 0.55;
+                        }
+                        ppTrackDrag += v;
+                        ppApplySlideTrack();
+                        ppRafId = requestAnimationFrame(step);
+                    }
+
+                    ppRafId = requestAnimationFrame(step);
+                }
+
+                function settleSnap() {
+                    var threshold = ppVw * 0.3;
+                    if (ppTrackDrag > threshold && ppPhotoIdx > 0) {
+                        ppNavigatePhoto(-1);
+                    } else if (ppTrackDrag < -threshold && ppPhotoIdx < ppSortedPhotos.length - 1) {
+                        ppNavigatePhoto(1);
+                    } else {
+                        ppSnapTo(0);
+                    }
+                }
+
+                wrapper.addEventListener('pointerdown', function(e) {
                     if (!photoPreviewActive) return;
                     e.preventDefault();
                     img.setPointerCapture && img.setPointerCapture(e.pointerId);
                     ppPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
                     ppMoved = false;
                     img.classList.add('dragging');
-                    // 立即禁用所有过渡，保证原生跟手感
-                    img.style.transition = 'none';
+                    // 中断进行中的动量/吸附动画
+                    if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
+                    if (ppTrackSnapping) {
+                        ppTrackSnapping = false;
+                        ppTrack.style.transition = 'none';
+                    }
+                    ppVelocitySamples = [];
+                    ppLastMoveX = e.clientX;
+                    ppLastMoveT = performance.now();
+
                     if (ppPointers.size === 2) {
                         var pts = Array.from(ppPointers.values());
                         ppStart = {
@@ -7807,51 +7950,51 @@
                             mode: 'pan',
                             x: e.clientX,
                             y: e.clientY,
+                            trackDrag: ppTrackDrag,
                             tx: ppZoom.tx,
                             ty: ppZoom.ty
                         };
                     }
                 }, { passive: false });
 
-                img.addEventListener('pointermove', function(e) {
+                wrapper.addEventListener('pointermove', function(e) {
                     if (!photoPreviewActive || !ppPointers.has(e.pointerId)) return;
                     e.preventDefault();
                     ppPointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
                     if (!ppStart) return;
+
                     if (ppPointers.size >= 2 && ppStart.mode === 'pinch') {
-                        ppSwipeDx = 0;
+                        ppTrackDrag = 0;
                         var pts = Array.from(ppPointers.values()).slice(0, 2);
                         var d = Math.max(1, dist(pts[0], pts[1]));
                         var c = center(pts[0], pts[1]);
                         var nextScale = Math.max(1, Math.min(5, ppStart.scale * (d / Math.max(1, ppStart.dist))));
                         var ratio = nextScale / Math.max(1, ppStart.scale);
                         ppZoom.scale = nextScale;
-                        // 保持双指中心锚点不动（补偿 transform-origin: center center 的偏移）
                         ppZoom.tx = c.x - ratio * (ppStart.center.x - ppStart.tx) + ppStart.vcx * (ratio - 1);
                         ppZoom.ty = c.y - ratio * (ppStart.center.y - ppStart.ty) + ppStart.vcy * (ratio - 1);
                         ppMoved = true;
-                        ppApplyTransform();
+                        ppApplyImageTransform();
                     } else if (ppPointers.size === 1 && ppStart.mode === 'pan') {
                         var dx = e.clientX - ppStart.x;
                         var dy = e.clientY - ppStart.y;
-                        if (Math.abs(dx) > 4 || Math.abs(dy) > 4) ppMoved = true;
+                        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) ppMoved = true;
                         if (ppZoom.scale > 1.01) {
-                            // 已放大：平移
                             ppZoom.tx = ppStart.tx + dx;
                             ppZoom.ty = ppStart.ty + dy;
-                            ppSwipeDx = 0;
-                            ppApplyTransform();
+                            ppTrackDrag = 0;
+                            ppApplyImageTransform();
                         } else {
-                            // 未放大：水平滑动切换图片
+                            trackVelocity(e.clientX);
                             var canPrev = ppPhotoIdx > 0;
                             var canNext = ppPhotoIdx < ppSortedPhotos.length - 1;
-                            if ((!canPrev && dx > 0) || (!canNext && dx < 0)) {
-                                // 边界阻力：压缩位移
-                                ppSwipeDx = (dx > 0 ? 1 : -1) * Math.log(1 + Math.abs(dx)) * 30;
+                            var rawDrag = ppStart.trackDrag + dx;
+                            if ((!canPrev && rawDrag > 0) || (!canNext && rawDrag < 0)) {
+                                ppTrackDrag = (rawDrag > 0 ? 1 : -1) * Math.log(1 + Math.abs(rawDrag)) * 20;
                             } else {
-                                ppSwipeDx = dx;
+                                ppTrackDrag = rawDrag;
                             }
-                            ppApplyTransform();
+                            ppApplySlideTrack();
                         }
                     }
                 }, { passive: false });
@@ -7862,8 +8005,6 @@
                     img.releasePointerCapture && img.releasePointerCapture(e.pointerId);
 
                     if (ppPointers.size === 0) {
-                        // 同步刷新最终位置
-                        ppApplyTransform();
                         img.classList.remove('dragging');
                         ppStart = null;
                         if (!ppMoved) {
@@ -7877,72 +8018,46 @@
                                 clearTimeout(ppTapTimer);
                                 ppTapTimer = setTimeout(function() {
                                     ppLastTap = 0;
-                                    if (photoPreviewActive) closePhotoPreview();
+                                    if (photoPreviewActive && ppZoom.scale <= 1.01) closePhotoPreview();
                                 }, 260);
                             }
-                            ppSwipeDx = 0;
-                            // 恢复默认过渡
-                            img.style.transition = 'transform 0.18s ease-out';
+                            ppTrackDrag = 0;
+                            ppApplySlideTrack();
                             return;
                         }
-                        // 滑动结束：判断是否触发左右切换
-                        if (ppZoom.scale <= 1.01 && Math.abs(ppSwipeDx) > 80) {
-                            ppNavigatePhoto(ppSwipeDx > 0 ? -1 : 1);
-                        }
-                        // 弹回原位
-                        else if (ppSwipeDx !== 0) {
-                            var imgS = document.getElementById('photoPreviewImage');
-                            if (imgS) {
-                                imgS.style.transition = 'transform 0.25s cubic-bezier(0.25,0.1,0.25,1)';
-                                ppSwipeDx = 0;
-                                imgS.style.transform = 'translate3d(0px,0px,0) scale(' + ppZoom.scale + ')';
-                                imgS.style.webkitTransform = 'translate3d(0px,0px,0) scale(' + ppZoom.scale + ')';
-                                setTimeout(function() {
-                                    var imgS2 = document.getElementById('photoPreviewImage');
-                                    if (imgS2) imgS2.style.transition = 'transform 0.18s ease-out';
-                                }, 260);
-                            }
-                        } else {
-                            // 恢复默认过渡
-                            img.style.transition = 'transform 0.18s ease-out';
+                        if (ppZoom.scale <= 1.01) {
+                            startMomentum();
                         }
                         return;
                     }
 
                     if (ppPointers.size === 1) {
                         var p = Array.from(ppPointers.values())[0];
-                        ppStart = { mode: 'pan', x: p.clientX, y: p.clientY, tx: ppZoom.tx, ty: ppZoom.ty };
+                        ppStart = { mode: 'pan', x: p.clientX, y: p.clientY, trackDrag: ppTrackDrag, tx: ppZoom.tx, ty: ppZoom.ty };
                     }
                 }
 
-                img.addEventListener('pointerup', endPointer);
-                img.addEventListener('pointercancel', function(e) {
+                wrapper.addEventListener('pointerup', endPointer);
+                wrapper.addEventListener('pointercancel', function(e) {
                     ppPointers.delete(e.pointerId);
                     if (ppPointers.size === 0) {
                         img.classList.remove('dragging');
                         ppStart = null;
-                        // 恢复默认过渡
-                        img.style.transition = 'transform 0.18s ease-out';
+                        ppTrackDrag = 0;
+                        ppApplySlideTrack();
                     }
                 });
 
-                img.addEventListener('wheel', function(e) {
+                wrapper.addEventListener('wheel', function(e) {
                     if (!photoPreviewActive) return;
                     e.preventDefault();
-                    // 滚轮缩放时也禁用过渡
-                    img.style.transition = 'none';
                     var next = Math.max(1, Math.min(5, ppZoom.scale * (1 - e.deltaY * 0.002)));
                     ppZoom.scale = next;
                     if (next <= 1.01) {
                         ppResetZoom();
                     } else {
-                        ppApplyTransform();
+                        ppApplyImageTransform();
                     }
-                    // 恢复过渡
-                    setTimeout(function() {
-                        var imgW = document.getElementById('photoPreviewImage');
-                        if (imgW) imgW.style.transition = 'transform 0.18s ease-out';
-                    }, 50);
                 }, { passive: false });
             })();
 
