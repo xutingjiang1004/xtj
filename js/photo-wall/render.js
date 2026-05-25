@@ -142,9 +142,21 @@
                     if (realSrc) {
                         img.src = realSrc;
                         img.removeAttribute('data-src');
+                        if (img.complete && img.naturalWidth > 0) {
+                            img.classList.remove('pw-blur-in');
+                            img.classList.add('pw-blur-done');
+                        } else {
+                            var loadedFn = function() {
+                                img.classList.remove('pw-blur-in');
+                                img.classList.add('pw-blur-done');
+                            };
+                            img.addEventListener('load', loadedFn, { once: true });
+                            img.addEventListener('error', loadedFn, { once: true });
+                        }
+                    } else {
+                        img.classList.remove('pw-blur-in');
+                        img.classList.add('pw-blur-done');
                     }
-                    img.classList.remove('pw-blur-in');
-                    img.classList.add('pw-blur-done');
                     pwLazyObserver.unobserve(img);
                 }
             }
