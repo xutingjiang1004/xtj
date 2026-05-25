@@ -3333,6 +3333,7 @@
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
+            background: #0a0a0a;
         }
         /* 预览图片通用样式 */
         .pp-slide-img {
@@ -3596,15 +3597,7 @@
         }
 
         /* ========== View Transitions API ========== */
-        @supports (view-transition-name: none) {
-            ::view-transition-old(photo-preview),
-            ::view-transition-new(photo-preview) {
-                height: auto;
-                object-fit: contain;
-            }
-        }
-
-    </style>
+        </style>
 </head>
 <body>
     <div class="rain-bg-container">
@@ -7749,6 +7742,33 @@
             // ========== 照片墙功能 ==========
             var photoWallData = [];
             var photoWallKey = 'xtj_photos';
+            var photoWallDeletedKey = 'xtj_photos_deleted';
+
+            /* ========== 本地删除追踪 ========== */
+            function getDeletedPhotoIds() {
+                try {
+                    return JSON.parse(localStorage.getItem(photoWallDeletedKey)) || [];
+                } catch(e) {
+                    return [];
+                }
+            }
+
+            function addDeletedPhotoId(id) {
+                var ids = getDeletedPhotoIds();
+                var sid = String(id);
+                if (ids.indexOf(sid) < 0) {
+                    ids.push(sid);
+                    try {
+                        localStorage.setItem(photoWallDeletedKey, JSON.stringify(ids));
+                    } catch(e) {}
+                }
+            }
+
+            function cleanDeletedIds() {
+                try {
+                    localStorage.removeItem(photoWallDeletedKey);
+                } catch(e) {}
+            }
             var PHOTO_WALL_MARKER = '__photo_wall__';
             var photoWallMigrating = false;
             var photoWallRealtime = null;
@@ -7788,28 +7808,21 @@
                 var curImg = document.getElementById('photoPreviewImage');
                 var nextImg = document.getElementById('ppNextImg');
 
-                function finishReset() {
-                    if (idx > 0 && photos[idx - 1]) prevImg.src = photos[idx - 1].imageUrl;
-                    else prevImg.src = '';
-                    if (idx < photos.length - 1 && photos[idx + 1]) nextImg.src = photos[idx + 1].imageUrl;
-                    else nextImg.src = '';
-                    ppTrackDrag = 0;
-                    ppTrackSnapping = false;
-                    ppTrack.style.transition = 'none';
-                    ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
-                    ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
-                    ppPreloadAdjacent(idx);
-                    // 切换照片时更新环境光背景
-                    if (photos[idx]) updateAmbientBackground(photos[idx].imageUrl);
-                }
-
+                // 先设置所有图片源（异步加载，不等onload）
+                if (idx > 0 && photos[idx - 1]) prevImg.src = photos[idx - 1].imageUrl;
+                else prevImg.removeAttribute('src');
+                if (idx < photos.length - 1 && photos[idx + 1]) nextImg.src = photos[idx + 1].imageUrl;
+                else nextImg.removeAttribute('src');
                 if (photos[idx]) curImg.src = photos[idx].imageUrl;
-                if (curImg.complete && curImg.naturalWidth > 0) {
-                    finishReset();
-                } else {
-                    curImg.onload = finishReset;
-                    curImg.onerror = finishReset;
-                }
+
+                // 同步重置轨道位置 — 不等图片加载，消除黑屏
+                ppTrackDrag = 0;
+                ppTrackSnapping = false;
+                ppTrack.style.transition = 'none';
+                ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+                ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+                ppPreloadAdjacent(idx);
+                if (photos[idx]) updateAmbientBackground(photos[idx].imageUrl);
             }
 
             function ppPreloadAdjacent(idx) {
@@ -7902,12 +7915,17 @@
                 saveLocalPhotoWallData();
                 updatePhotoViewDisplays(photo);
                 ppResetZoom();
+
+                // 预加载目标图片，确保滑动到位时图片已在缓存中
+                var preloadImg = new Image();
+                preloadImg.src = photo.imageUrl;
+                ppPreloadAdjacent(newIdx);
+
                 // 滑动到目标位置后重排轨道
                 var targetDrag = direction > 0 ? -ppVw : ppVw;
                 ppSnapTo(targetDrag, function() {
                     ppSetTrackImages(newIdx);
                     ppSwipeLock = 0;
-                    // DOM操作在轨道重置后执行，避免reflow干扰CSS transition
                     ppUpdateDots();
                     var delBtn2 = document.getElementById('ppDeleteBtn');
                     if (delBtn2) {
@@ -7917,7 +7935,6 @@
                 document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
                 document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
                 document.getElementById('photoPreviewViewsCount').textContent = photo.views;
-                ppPreloadAdjacent(newIdx);
                 syncPhotoViewCount(photo);
             }
 
@@ -7995,7 +8012,26 @@
                         .order('created_at', { ascending: false })
                         .limit(500);
                     if (res.error) throw res.error;
+                    var deletedIds = getDeletedPhotoIds();
                     photoWallData = (res.data || []).map(normalizePhotoWallRow).filter(function(p) { return !!p.imageUrl; });
+                    // 过滤掉已删除的照片（云端同步延迟时的兜底保障）
+                    if (deletedIds.length > 0) {
+                        // 收集当前云端所有照片的ID
+                        var cloudIds = {};
+                        photoWallData.forEach(function(p) { cloudIds[String(p.id)] = true; });
+                        // 清理已不在云端的删除记录（说明云端删除已生效）
+                        var cleaned = deletedIds.filter(function(id) { return cloudIds[id]; });
+                        if (cleaned.length !== deletedIds.length) {
+                            try { localStorage.setItem(photoWallDeletedKey, JSON.stringify(cleaned)); } catch(e) {}
+                            deletedIds = cleaned;
+                        }
+                        // 过滤掉仍在云端但用户已标记删除的
+                        if (deletedIds.length > 0) {
+                            photoWallData = photoWallData.filter(function(p) {
+                                return deletedIds.indexOf(String(p.id)) < 0;
+                            });
+                        }
+                    }
                     if (!photoWallData.length && localData.length) photoWallData = localData;
                     return photoWallData;
                 } catch(e) {
@@ -8074,7 +8110,7 @@
                     var p = sorted[i];
                     var timeStr = formatPhotoTime(p.timestamp);
                     var name = p.username || '未知用户';
-                    html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="view-transition-name:photo-' + escapeHtml(String(p.id)) + ';animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
+                    html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
                     html += '<img src="' + p.imageUrl + '" alt="photo" class="pw-blur-in" data-src="' + p.imageUrl + '">';
                     html += '<div class="pw-item-info">';
                     html += '<div class="pw-item-name">' + escapeHtml(name) + '</div>';
@@ -8227,15 +8263,9 @@
                 document.getElementById('photoPreviewViewsCount').textContent = photo.views;
 
                 var overlay = document.getElementById('photoPreviewOverlay');
-                if (overlay && overlay.parentElement !== document.body) document.body.appendChild(overlay);
-                // 使用 View Transitions API 实现平滑过渡
-                if (document.startViewTransition) {
-                    document.startViewTransition(function() {
-                        overlay.classList.add('active');
-                    });
-                } else {
-                    overlay.classList.add('active');
-                }
+                if (!overlay) return;
+                if (overlay.parentElement !== document.body) document.body.appendChild(overlay);
+                overlay.classList.add('active');
 
                 // 设置环境光背景
                 updateAmbientBackground(photo.imageUrl);
@@ -8261,14 +8291,8 @@
 
             window.closePhotoPreview = function() {
                 var overlay = document.getElementById('photoPreviewOverlay');
-                // 使用 View Transitions API 实现平滑过渡
-                if (document.startViewTransition) {
-                    document.startViewTransition(function() {
-                        overlay.classList.remove('active');
-                    });
-                } else {
-                    overlay.classList.remove('active');
-                }
+                if (!overlay) return;
+                overlay.classList.remove('active');
                 photoPreviewActive = false;
                 photoPreviewClosedAt = Date.now();
                 photoPreviewCurrent = null;
@@ -8628,11 +8652,24 @@
                 if (idx < 0) { showToast('照片不存在'); return; }
                 var photo = photoWallData[idx];
 
-                // 删除云端数据（先删云端，再删本地）
+                // 记录已删除ID（防止云端同步延迟导致刷新后重新出现）
+                addDeletedPhotoId(targetId);
+
+                // 删除云端数据：posts记录 + Storage文件
                 if (photo.cloudId && window.sb) {
                     try {
-                        await window.sb.from('posts').delete().eq('id', photo.cloudId);
-                    } catch(e) { console.error('删除云端照片失败:', e); }
+                        var { error: deleteDbErr } = await window.sb.from('posts').delete().eq('id', photo.cloudId);
+                        if (deleteDbErr) console.error('删除云端记录失败:', deleteDbErr);
+                    } catch(e) { console.error('删除云端记录异常:', e); }
+
+                    // 尝试删除 Storage 中的照片文件
+                    try {
+                        var storagePath = extractStoragePath(photo.imageUrl);
+                        if (storagePath) {
+                            var { error: removeErr } = await window.sb.storage.from('uploads').remove([storagePath]);
+                            if (removeErr) console.error('删除云端文件失败:', removeErr);
+                        }
+                    } catch(e) { console.error('删除云端文件异常:', e); }
                 }
 
                 // 删除本地数据
@@ -8650,6 +8687,14 @@
                 renderPhotoWallWithoutReload();
                 showToast('照片已删除');
             };
+
+            // 从 Supabase public URL 提取 Storage 路径
+            function extractStoragePath(url) {
+                if (!url) return null;
+                // URL 格式: https://xxx.supabase.co/storage/v1/object/public/uploads/photos/xxx
+                var match = url.match(/\/uploads\/(.+?)(?:\?|$)/);
+                return match ? decodeURIComponent(match[1]) : null;
+            }
 
             // 渲染照片墙但不重新从云端加载数据
             function renderPhotoWallWithoutReload() {
@@ -8676,7 +8721,7 @@
                     var p = sorted[i];
                     var timeStr = formatPhotoTime(p.timestamp);
                     var name = p.username || '未知用户';
-                    html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="view-transition-name:photo-' + escapeHtml(String(p.id)) + ';animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
+                    html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
                     html += '<img src="' + p.imageUrl + '" alt="photo" class="pw-blur-in" data-src="' + p.imageUrl + '">';
                     html += '<div class="pw-item-info">';
                     html += '<div class="pw-item-name">' + escapeHtml(name) + '</div>';
