@@ -302,6 +302,8 @@
         window.switchPhotoWallView = function() {
             var sel = document.getElementById('pwAlbumSort');
             pwCurrentSort = sel ? sel.value : 'date_desc';
+            window.pwSortKey = pwCurrentSort;
+            window.pwApplySort = sortPhotoWallData;
             if (pwAlbumViewActive) {
                 renderAlbumView();
             } else {
@@ -319,12 +321,12 @@
                     sorted.sort(function(a, b) { return (a.timestamp || 0) - (b.timestamp || 0); }); break;
                 case 'name':
                     sorted.sort(function(a, b) {
-                        var na = (a.originalName || a.id || '').toLowerCase();
-                        var nb = (b.originalName || b.id || '').toLowerCase();
+                        var na = (a.username || a.id || '').toLowerCase();
+                        var nb = (b.username || b.id || '').toLowerCase();
                         return na.localeCompare(nb);
                     }); break;
                 case 'size':
-                    sorted.sort(function(a, b) { return (b.fileSize || 0) - (a.fileSize || 0); }); break;
+                    sorted.sort(function(a, b) { return (b.views || 0) - (a.views || 0); }); break;
                 case 'views':
                     sorted.sort(function(a, b) { return (b.views || 0) - (a.views || 0); }); break;
                 default:
@@ -391,13 +393,10 @@
 
         // ---------- 打开指定照片列表预览 ----------
         window.openPhotoPreviewForList = function(photoList) {
-            if (typeof window.photoWallData !== 'undefined') {
-                // Temporarily replace sorted photos and open
-                var sorted = window.photoWallData.slice();
-                ppSortedPhotos = sorted;
-                ppPhotoIdx = sorted.indexOf(photoList[0]);
-                if (ppPhotoIdx < 0) ppPhotoIdx = 0;
-                openPhotoPreview(ppPhotoIdx);
+            if (typeof window.photoWallData !== 'undefined' && photoList && photoList.length > 0) {
+                ppSortedPhotos = photoList;
+                ppPhotoIdx = 0;
+                openPhotoPreview(0);
             }
         };
 
