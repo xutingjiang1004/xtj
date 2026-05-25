@@ -94,26 +94,36 @@
 
     function ppSwapImage(imgEl, url) {
         if (!imgEl) return;
-        if (!url) { imgEl.src = ''; imgEl.style.opacity = '0'; return; }
-        var cached = ppImageCache[url];
-        if (cached && cached !== 'loading') {
-            if (imgEl.src !== cached.src) {
-                imgEl.src = cached.src;
-            }
-            imgEl.style.opacity = '1';
+        if (!url) {
+            imgEl.src = '';
+            imgEl.style.opacity = '0';
             return;
         }
-        imgEl.style.opacity = '0.3';
-        imgEl.src = url;
-        ppDecodeImage(url).then(function() {
-            if (imgEl.src === url || imgEl.src === (ppImageCache[url] && ppImageCache[url].src)) {
-                imgEl.style.opacity = '1';
+        imgEl.style.opacity = '0';
+        var loadDone = false;
+        function show() {
+            if (loadDone) return;
+            loadDone = true;
+            imgEl.style.opacity = '1';
+            imgEl.removeEventListener('load', show);
+            imgEl.removeEventListener('error', show);
+        }
+        imgEl.addEventListener('load', show);
+        imgEl.addEventListener('error', show);
+        var cached = ppImageCache[url];
+        if (cached && cached !== 'loading' && cached.complete && cached.naturalWidth > 0) {
+            imgEl.src = cached.src;
+            if (imgEl.complete && imgEl.naturalWidth > 0) {
+                show();
             }
-        });
+        } else {
+            imgEl.src = url;
+            if (imgEl.complete && imgEl.naturalWidth > 0) {
+                show();
+            }
+        }
         setTimeout(function() {
-            if (imgEl.src && imgEl.style.opacity !== '1') {
-                imgEl.style.opacity = '1';
-            }
+            if (!loadDone) show();
         }, 5000);
     }
 
@@ -146,6 +156,15 @@
         ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
         ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
         if (photos[idx]) window.updateAmbientBackground(photos[idx].imageUrl);
+
+        setTimeout(function() {
+            var imgs = [curImg, prevImg, nextImg];
+            for (var k = 0; k < imgs.length; k++) {
+                if (imgs[k] && imgs[k].src && imgs[k].src !== window.location.href && imgs[k].style.opacity === '0') {
+                    imgs[k].style.opacity = '1';
+                }
+            }
+        }, 1000);
     }
 
     function ppPreloadImage(url) {
