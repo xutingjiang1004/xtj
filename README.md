@@ -1,6 +1,29 @@
 # 更新日志
 
-## v0.0.48 - 2026-05-25
+## v0.0.49 - 2026-05-25
+### 功能模块全面升级：用户管理 & 内容安全 + 照片墙增强 + 性能优化
+
+#### 1. 用户管理与内容安全模块
+- 举报功能：新增完整举报系统，支持8种举报类型分类（垃圾广告/骚扰/不雅内容/虚假信息/暴力/仇恨言论/版权/其他），用户可填写举报理由并上传证据截图，举报数据存储至 Supabase reports 表
+- 封禁机制：构建用户封禁系统，管理员可在后台对用户执行临时封禁（设置时长小时数）或永久封禁，被封禁用户登录时自动拦截并提示原因，过期封禁自动失效
+- 黑名单管理：建立黑名单系统，管理员可在后台添加/移除黑名单用户，黑名单用户无法登录系统
+- 管理后台同步：admin.html 新增"举报管理"、"封禁管理"、"黑名单"、"照片管理"四个选项卡，所有操作实时同步至 Supabase 数据库
+- 数据库扩展：新增 reports、bans、blacklist、photos 四张数据表及 RLS 策略，含 is_user_banned()、is_user_blacklisted()、auto_expire_bans() 实用函数
+
+#### 2. 照片墙功能增强
+- 批量上传：支持同时选择多张图片上传（multiple 属性），实时显示每张图片的上传进度条与状态（上传中→完成/失败），自动生成缩略图并保存至 posts 表和 photos 表
+- 按日期自动分类相册：新增相册视图模式，按上传日期自动分组整理照片，每个相册显示封面图、日期（含星期）、照片数量，点击相册卡片进入该日期照片预览
+- 自动生成封面：自动选取最佳照片作为相册封面（综合浏览数 + 上传时间评分）
+- 多种排序方式：支持下拉选择器切换排序方式（按日期↓ / 按日期↑ / 按名称 / 按大小 / 按热度），排序同时影响网格视图和相册视图
+
+#### 3. 系统性能优化升级
+- 虚拟滚动列表：照片墙照片超过30张时自动启用虚拟滚动，仅渲染可视区域内（含上下缓冲4行）的图片，使用 position: absolute + requestAnimationFrame 节流，大幅降低DOM节点数
+- 服务端分页功能：帖子流使用 Supabase .range() 分页查询（每页20条），IntersectionObserver 监听哨兵元素自动加载下一页，API 端点 GET /posts/page
+- 懒加载策略：统计页面仅在 Profile 选项卡激活时通过 MutationObserver 懒加载注入数据，避免首屏加载不必要的统计计算
+- 数据获取重构：初始加载仅拉取第一页帖子（20条）+ 点赞/评论，2秒后在后台静默拉取剩余数据（上限200条），避免一次性加载全量数据
+
+#### 4. 后端 API 接口
+- render-api/server.js 新增完整 REST API：举报提交/查询/处理（POST/GET/PUT /report）、封禁管理（POST /ban、GET /ban/check/:user_name、PUT /ban/:id/unban）、黑名单管理（POST/DELETE /blacklist）、照片管理（GET/POST/DELETE /photos）、分页帖子（GET /posts/page）
 ### 双分辨率策略（Thumbnail + Full Resolution）
 - 重构 handlePhotoUpload：上传原图的同时，利用 compressImage 生成 400x400 极度压缩的 JPEG 缩略图，并上传至 Supabase Storage 的 thumbs/ 目录
 - 缩略图 URL 存入 posts 表的 content JSON 字段 `{ type: 'photo_wall', thumb: '...' }`，normalizePhotoWallRow 新增 thumbUrl 字段解析
