@@ -1,4 +1,4 @@
-(function() {
+﻿(function() {
     var delPostId = null, delOwnerKey = null;
     var activePostId = null;
     var viewTracked = new Set();
@@ -27,7 +27,7 @@
 
     function getViewHistory() {
         try {
-            return JSON.parse(localStorage.getItem(VIEW_HISTORY_KEY) || '[]');
+            return window.safeLocalStorageGetJSON(VIEW_HISTORY_KEY, []);
         } catch(e) { return []; }
     }
 
@@ -476,7 +476,7 @@
                 });
                 if (window.currentUser) {
                     try {
-                        var cachedAvatars = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}');
+                        var cachedAvatars = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {});
                         if (cachedAvatars[window.currentUser]) {
                             window.avatarCache[window.currentUser] = cachedAvatars[window.currentUser];
                         }
@@ -494,7 +494,7 @@
         if (!avatarUrl) {
             if (username === window.currentUser) {
                 try {
-                    var cachedAvatars = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}');
+                    var cachedAvatars = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {});
                     avatarUrl = cachedAvatars[username];
                     if (avatarUrl) window.avatarCache[username] = avatarUrl;
                 } catch(e) {}

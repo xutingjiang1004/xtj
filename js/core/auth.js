@@ -1,4 +1,4 @@
-(function() {
+﻿(function() {
     var avatarCache = {};
     window.avatarCache = avatarCache;
 
@@ -132,7 +132,7 @@
         var showAvatar = avatarCache[userName];
         if (!showAvatar && userName === window.currentUser) {
             try {
-                var ca = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}');
+                var ca = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {});
                 if (ca[window.currentUser]) { showAvatar = ca[window.currentUser]; avatarCache[window.currentUser] = ca[window.currentUser]; }
             } catch(e) {}
         }
@@ -148,7 +148,7 @@
         window.openModal('userProfileModal');
         try {
             if (userName === window.currentUser) {
-                try { var cv = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}'); if (cv[window.currentUser]) { avatarCache[window.currentUser] = cv[window.currentUser]; if (document.getElementById('userProfileModal').classList.contains('active')) avatarEl.innerHTML = '<img src="' + cv[window.currentUser] + '" alt="头像">'; } } catch(e) {}
+                try { var cv = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {}); if (cv[window.currentUser]) { avatarCache[window.currentUser] = cv[window.currentUser]; if (document.getElementById('userProfileModal').classList.contains('active')) avatarEl.innerHTML = '<img src="' + cv[window.currentUser] + '" alt="头像">'; } } catch(e) {}
             }
             var sb = window.sb;
             var avatarRes = await sb.from("posts").select("media_url").eq("user_name", userName).eq("media_type", "__avatar__").eq("actor_key", "__avatar__").order("created_at", { ascending: false }).limit(1);
@@ -194,7 +194,7 @@
     async function loadProfileAvatar() {
         var avatarEl = document.getElementById('profileDetailAvatar');
         try {
-            var ca = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}');
+            var ca = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {});
             if (ca[window.currentUser]) { avatarCache[window.currentUser] = ca[window.currentUser]; avatarEl.innerHTML = '<img src="' + ca[window.currentUser] + '" alt="头像">'; return; }
         } catch(e) {}
         if (avatarCache[window.currentUser]) avatarEl.innerHTML = '<img src="' + avatarCache[window.currentUser] + '" alt="头像">';
@@ -204,7 +204,7 @@
             if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
                 avatarEl.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" alt="头像">';
                 avatarCache[window.currentUser] = avatarRes.data[0].media_url;
-                try { var cv = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}'); cv[window.currentUser] = avatarRes.data[0].media_url; localStorage.setItem(window.AVATAR_CACHE_KEY, JSON.stringify(cv)); } catch(e) {}
+                try { var cv = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {}); cv[window.currentUser] = avatarRes.data[0].media_url; localStorage.setItem(window.AVATAR_CACHE_KEY, JSON.stringify(cv)); } catch(e) {}
             } else if (!avatarCache[window.currentUser]) {
                 avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (window.currentUser ? window.currentUser[0].toUpperCase() : '?') + '</span>';
             }
@@ -270,7 +270,7 @@
             }
             await sb.from("posts").insert([{ user_name: window.currentUser, content: "用户头像", media_url: avatarUrl, media_type: "__avatar__", actor_key: "__avatar__" }]);
             avatarCache[window.currentUser] = avatarUrl;
-            try { var ca = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}'); ca[window.currentUser] = avatarUrl; localStorage.setItem(window.AVATAR_CACHE_KEY, JSON.stringify(ca)); } catch(e) {}
+            try { var ca = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {}); ca[window.currentUser] = avatarUrl; localStorage.setItem(window.AVATAR_CACHE_KEY, JSON.stringify(ca)); } catch(e) {}
             updateAllAvatarElements(avatarUrl);
             window.showToast('头像更新成功');
             localStorage.removeItem(window.CACHE_KEY);
@@ -307,7 +307,7 @@
 
     async function updateAllAvatars() {
         try {
-            var ca = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}');
+            var ca = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {});
             if (ca[window.currentUser]) {
                 avatarCache[window.currentUser] = ca[window.currentUser];
                 var pa = document.getElementById('profileAvatar');
@@ -323,7 +323,7 @@
                 if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
                     pa.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                     avatarCache[window.currentUser] = avatarRes.data[0].media_url;
-                    try { var cv = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}'); cv[window.currentUser] = avatarRes.data[0].media_url; localStorage.setItem(window.AVATAR_CACHE_KEY, JSON.stringify(cv)); } catch(e) {}
+                    try { var cv = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {}); cv[window.currentUser] = avatarRes.data[0].media_url; localStorage.setItem(window.AVATAR_CACHE_KEY, JSON.stringify(cv)); } catch(e) {}
                 } else { pa.innerHTML = window.currentUser ? window.currentUser[0].toUpperCase() : '?'; }
             }
         } catch(e) { console.error("更新头像显示失败:", e); }
@@ -395,7 +395,7 @@
 
     async function loadUserAvatar() {
         try {
-            var ca = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}');
+            var ca = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {});
             if (ca[window.currentUser]) {
                 avatarCache[window.currentUser] = ca[window.currentUser];
                 updateAllAvatarElements(ca[window.currentUser]);

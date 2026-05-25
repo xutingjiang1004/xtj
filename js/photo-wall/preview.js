@@ -28,6 +28,8 @@
     var ppTransformRaf = null;
     var ppPinchPre = { pts: [null, null], d: 0, c: { x: 0, y: 0 } };
     var ppPinchStart = { dist: 0, scale: 1, ax: 0, ay: 0 };
+    var ppPinchMinDist = 0;
+    var ppPinchMaxDist = 0;
     var ppRefreshRate = 60;
     var ppFrameBudget = 16;
     var photoPreviewActive = false;
@@ -239,6 +241,8 @@
         ppZoom = { scale: 1, tx: 0, ty: 0 };
         ppPointers.clear();
         ppStart = null;
+        ppPinchPre = { pts: [null, null], d: 0, c: { x: 0, y: 0 } };
+        ppPinchStart = { dist: 0, scale: 1, ax: 0, ay: 0 };
         var img = document.getElementById('photoPreviewImage');
         if (img) {
             img.classList.remove('zoomed', 'dragging');
@@ -547,6 +551,8 @@
                         ax: (cx - vw2) / s - ppZoom.tx,
                         ay: (cy - vh2) / s - ppZoom.ty
                     };
+                    ppPinchMinDist = d;
+                    ppPinchMaxDist = d;
                     ppStart = { x: cx, y: cy, zx: ppZoom.tx, zy: ppZoom.ty, pointers: 2 };
                 }
                 if (ppTrackSnapping) {
@@ -597,6 +603,9 @@
                 }
                 if (ppPinchPre.d === 0 || d === 0) { ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } }; return; }
 
+                if (d < ppPinchMinDist) ppPinchMinDist = d;
+                if (d > ppPinchMaxDist) ppPinchMaxDist = d;
+
                 var sNew = Math.max(1, Math.min(6, ppPinchStart.scale * (d / ppPinchStart.dist)));
                 var vw2 = ppVw / 2, vh2 = window.innerHeight / 2;
                 ppZoom.scale = sNew;
@@ -638,7 +647,11 @@
 
             if (ppStart.pointers >= 2) {
                 ppStart = null;
-                if (ppPointers.size === 0 && ppZoom.scale < 1.02) ppResetZoom();
+                if (ppPinchMaxDist - ppPinchMinDist < 10) {
+                    ppResetZoom();
+                } else if (ppPointers.size === 0 && ppZoom.scale < 1.02) {
+                    ppResetZoom();
+                }
                 return;
             }
 
@@ -769,14 +782,65 @@
     window.shareCurrentPhoto = function() {
         var photo = photoPreviewCurrent;
         if (!photo || !photo.imageUrl) return;
+        var btn = document.getElementById('ppShareBtn');
+        if (!btn) return;
+        if (btn._copying) return;
+
+        btn._copying = true;
+        btn._origHTML = btn.innerHTML;
+        btn.textContent = '✓';
+        btn.classList.add('copied');
+
+        function restoreBtn() {
+            if (!btn) return;
+            btn.innerHTML = btn._origHTML || '🔗';
+            btn.classList.remove('copied');
+            btn.style.transform = '';
+            btn._copying = false;
+        }
+
+        function copySuccess() {
+            window.showToast && window.showToast('图片链接已复制到剪贴板');
+            setTimeout(restoreBtn, 1500);
+        }
+
+        function copyFail() {
+            restoreBtn();
+            window.showToast && window.showToast('复制失败，请重试');
+        }
+
+        var url = photo.imageUrl;
+
+        try {
+            var ta = document.createElement('textarea');
+            ta.value = url;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            ta.style.top = '-9999px';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            var ok = document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (ok) { copySuccess(); return; }
+        } catch(e) {}
+
         if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(photo.imageUrl).then(function() {
-                window.showToast && window.showToast('图片链接已复制到剪贴板');
+            navigator.clipboard.writeText(url).then(function() {
+                copySuccess();
             }).catch(function() {
-                window.showToast && window.showToast('复制失败');
+                copyFail();
             });
         } else {
-            window.showToast && window.showToast(photo.imageUrl);
+            var ta2 = document.createElement('textarea');
+            ta2.value = url;
+            ta2.style.position = 'fixed';
+            ta2.style.left = '-9999px';
+            document.body.appendChild(ta2);
+            ta2.focus();
+            ta2.select();
+            document.body.removeChild(ta2);
+            copyFail();
         }
     };
 
