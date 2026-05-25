@@ -575,8 +575,9 @@
                     var dx = e.clientX - ppStart.x;
                     var dy = e.clientY - ppStart.y;
                     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) ppMoved = true;
-                    ppZoom.tx = ppStart.zx + dx;
-                    ppZoom.ty = ppStart.zy + dy;
+                    var s = ppZoom.scale || 1;
+                    ppZoom.tx = ppStart.zx + dx / s;
+                    ppZoom.ty = ppStart.zy + dy / s;
                     ppApplyPinchTransformImmediate();
                     return;
                 }
@@ -589,11 +590,13 @@
                 }
                 if (ppPinchPre.d === 0 || d === 0) { ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } }; return; }
                 var scaleDelta = d / ppPinchPre.d;
-                var newScale = Math.max(1, Math.min(6, (ppStart.scale || 1) * scaleDelta));
+                var sOld = ppZoom.scale || 1;
+                var sNew = Math.max(1, Math.min(6, (ppStart.scale || 1) * scaleDelta));
                 var dcx = cx - ppPinchPre.c.x, dcy = cy - ppPinchPre.c.y;
-                ppZoom.scale = newScale;
-                ppZoom.tx = dcx + ppZoom.tx;
-                ppZoom.ty = dcy + ppZoom.ty;
+                var vw2 = ppVw / 2, vh2 = window.innerHeight / 2;
+                ppZoom.tx = ppZoom.tx + (cx - vw2) * (1 / sNew - 1 / sOld) + dcx / sNew;
+                ppZoom.ty = ppZoom.ty + (cy - vh2) * (1 / sNew - 1 / sOld) + dcy / sNew;
+                ppZoom.scale = sNew;
                 ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } };
                 ppApplyPinchTransformImmediate();
                 return;
@@ -603,8 +606,9 @@
                 var dx1 = e.clientX - ppStart.x;
                 var dy1 = e.clientY - ppStart.y;
                 if (Math.abs(dx1) > 3 || Math.abs(dy1) > 3) ppMoved = true;
-                ppZoom.tx = ppStart.zx + dx1;
-                ppZoom.ty = ppStart.zy + dy1;
+                var s = ppZoom.scale;
+                ppZoom.tx = ppStart.zx + dx1 / s;
+                ppZoom.ty = ppStart.zy + dy1 / s;
                 ppApplyPinchTransformImmediate();
             } else {
                 var dx2 = e.clientX - ppStart.x;
