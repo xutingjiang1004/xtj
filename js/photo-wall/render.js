@@ -9,6 +9,30 @@
     }
     window.formatPhotoTime = formatPhotoTime;
 
+    function sortPhotoWallData(data, sortKey) {
+        var sorted = data.slice();
+        switch(sortKey) {
+            case 'date_asc':
+                sorted.sort(function(a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+                break;
+            case 'name':
+                sorted.sort(function(a, b) {
+                    var na = (a.username || a.id || '').toLowerCase();
+                    var nb = (b.username || b.id || '').toLowerCase();
+                    return na.localeCompare(nb);
+                });
+                break;
+            case 'size':
+            case 'views':
+                sorted.sort(function(a, b) { return (b.views || 0) - (a.views || 0); });
+                break;
+            case 'date_desc':
+            default:
+                sorted.sort(function(a, b) { return (b.timestamp || 0) - (a.timestamp || 0); });
+        }
+        return sorted;
+    }
+
     async function renderPhotoWall() {
         var grid = document.getElementById('photoGrid');
         if (!grid) return;
@@ -30,19 +54,16 @@
             return;
         }
 
+        var sortKey = window.pwSortKey || 'date_desc';
         var sorted = window.photoWallData.slice();
-        if (typeof window.pwApplySort === 'function') {
-            sorted = window.pwApplySort(sorted, window.pwSortKey || 'date_desc');
-        } else {
-            sorted.sort(function(a, b) { return b.timestamp - a.timestamp; });
-        }
+        sorted = sortPhotoWallData(sorted, sortKey);
 
         var html = '';
         for (var i = 0; i < sorted.length; i++) {
             var p = sorted[i];
             var timeStr = formatPhotoTime(p.timestamp);
             var name = p.username || '未知用户';
-            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(p.id) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
+            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(String(p.id)) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
             var gridSrc = p.thumbUrl || p.imageUrl;
             html += '<img src="' + gridSrc + '" alt="photo" class="pw-blur-in" data-src="' + gridSrc + '">';
             html += '<div class="pw-item-info">';
@@ -79,16 +100,15 @@
             return;
         }
 
-        var sorted = window.photoWallData.slice().sort(function(a, b) {
-            return b.timestamp - a.timestamp;
-        });
+        var sortKey = window.pwSortKey || 'date_desc';
+        var sorted = sortPhotoWallData(window.photoWallData, sortKey);
 
         var html = '';
         for (var i = 0; i < sorted.length; i++) {
             var p = sorted[i];
             var timeStr = formatPhotoTime(p.timestamp);
             var name = p.username || '未知用户';
-            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(p.id) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
+            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(String(p.id)) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
             var gridSrc = p.thumbUrl || p.imageUrl;
             html += '<img src="' + gridSrc + '" alt="photo" class="pw-blur-in" data-src="' + gridSrc + '">';
             html += '<div class="pw-item-info">';

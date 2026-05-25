@@ -1,21 +1,19 @@
 (function() {
-    function initPhotoWallTab() {
-        var pwTab = document.getElementById('tabPhotoWall');
-        if (!pwTab) return;
-        pwTab.addEventListener('click', async function() {
-            if (!photoPreviewActive || (Date.now() - (photoPreviewClosedAt || 0) > 500)) {
-                await window.renderPhotoWall();
-            }
-            window.bindPhotoWallScroll();
-        });
-    }
+    var photoWallInitialized = false;
+
+    window.initPhotoWall = async function() {
+        if (photoWallInitialized) return;
+        photoWallInitialized = true;
+        await window.renderPhotoWall();
+        window.bindPhotoWallScroll();
+    };
 
     function initPhotoWallHash() {
         function checkHash() {
             var hash = window.location.hash;
             if (hash === '#photo-wall' || hash === '#photos') {
-                var pwTab = document.getElementById('tabPhotoWall');
-                if (pwTab) pwTab.click();
+                var aiTab = document.querySelector('.dock-tab[data-tab="ai"]');
+                if (aiTab) aiTab.click();
             }
         }
         checkHash();
@@ -23,12 +21,8 @@
     }
 
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            initPhotoWallTab();
-            initPhotoWallHash();
-        });
+        document.addEventListener('DOMContentLoaded', initPhotoWallHash);
     } else {
-        initPhotoWallTab();
         initPhotoWallHash();
     }
 })();
