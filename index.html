@@ -5925,6 +5925,14 @@
                 }, 3000);
             }
 
+            // ==== 测试通知横幅（控制台调用：testNotification()） ====
+            window.testNotification = function() {
+                showNotification('张三', '你好！这是一条测试消息～看看液态玻璃效果如何？');
+            };
+            window.testNotificationLong = function() {
+                showNotification('李四', '这是一条非常非常长的测试消息用来检查文本截断效果到底怎么样超出50个字符');
+            };
+
             // ===================== 聊天系统 (Dock 兼容版) =====================
             let chatRealtime = null;
             let dmpollTimer = null;
