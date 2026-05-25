@@ -172,6 +172,7 @@
 
             // --- 新增：图像变换的 requestAnimationFrame 缓存变量 ---
             var ppTransformRaf = null;
+            var ppPinchPre = { pts: [null, null], d: 0, c: { x: 0, y: 0 } };
 
             function ppApplyImageTransform() {
                 var img = document.getElementById('photoPreviewImage');
@@ -878,11 +879,43 @@
                 }
             });
 
+            // ========== 刷新率检测 + 自适应帧预算 ==========
+            var ppRefreshRate = 60;
+            var ppFrameBudget = 16.67;
+            (function detectRefreshRate() {
+                var samples = [];
+                var lastTime = performance.now();
+                var count = 0;
+                function sample() {
+                    var now = performance.now();
+                    var delta = now - lastTime;
+                    lastTime = now;
+                    if (delta > 5 && delta < 100) samples.push(delta);
+                    count++;
+                    if (count < 30) {
+                        requestAnimationFrame(sample);
+                    } else if (samples.length > 0) {
+                        samples.sort(function(a, b) { return a - b; });
+                        var median = samples[Math.floor(samples.length / 2)];
+                        ppRefreshRate = Math.round(1000 / median);
+                        ppFrameBudget = 1000 / ppRefreshRate;
+                        if (ppRefreshRate >= 120) ppFrameBudget = 8.33;
+                        else if (ppRefreshRate >= 90) ppFrameBudget = 11.11;
+                        else ppFrameBudget = 16.67;
+                        console.log('[照片预览] 检测到屏幕刷新率: ' + ppRefreshRate + 'Hz, 帧预算: ' + ppFrameBudget.toFixed(2) + 'ms');
+                    }
+                }
+                requestAnimationFrame(sample);
+            })();
+
             // ========== 手势系统：rAF驱动 + 速度追踪 + 动量惯性 ==========
             (function bindPhotoPreviewGestures() {
                 var img = document.getElementById('photoPreviewImage');
                 var wrapper = document.getElementById('ppImageWrapper');
                 if (!img || !wrapper) return;
+
+                var ppVwCenterX = window.innerWidth / 2;
+                var ppVwCenterY = window.innerHeight / 2;
 
                 function dist(a, b) {
                     return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -966,16 +999,21 @@
                     ppLastMoveT = performance.now();
 
                     if (ppPointers.size === 2) {
-                        var pts = Array.from(ppPointers.values());
+                        var ptrIter = ppPointers.values();
+                        ppPinchPre.pts[0] = ptrIter.next().value;
+                        ppPinchPre.pts[1] = ptrIter.next().value;
+                        var pdx = ppPinchPre.pts[0].clientX - ppPinchPre.pts[1].clientX;
+                        var pdy = ppPinchPre.pts[0].clientY - ppPinchPre.pts[1].clientY;
                         ppStart = {
                             mode: 'pinch',
-                            dist: dist(pts[0], pts[1]),
+                            dist: Math.sqrt(pdx * pdx + pdy * pdy) || 1,
                             scale: ppZoom.scale,
                             tx: ppZoom.tx,
                             ty: ppZoom.ty,
-                            center: center(pts[0], pts[1]),
-                            vcx: window.innerWidth / 2,
-                            vcy: window.innerHeight / 2
+                            centerX: (ppPinchPre.pts[0].clientX + ppPinchPre.pts[1].clientX) / 2,
+                            centerY: (ppPinchPre.pts[0].clientY + ppPinchPre.pts[1].clientY) / 2,
+                            vcx: ppVwCenterX,
+                            vcy: ppVwCenterY
                         };
                     } else if (ppPointers.size === 1) {
                         ppStart = {
@@ -997,14 +1035,19 @@
 
                     if (ppPointers.size >= 2 && ppStart.mode === 'pinch') {
                         ppTrackDrag = 0;
-                        var pts = Array.from(ppPointers.values()).slice(0, 2);
-                        var d = Math.max(1, dist(pts[0], pts[1]));
-                        var c = center(pts[0], pts[1]);
-                        var nextScale = Math.max(1, Math.min(5, ppStart.scale * (d / Math.max(1, ppStart.dist))));
+                        var pi = ppPointers.values();
+                        ppPinchPre.pts[0] = pi.next().value;
+                        ppPinchPre.pts[1] = pi.next().value;
+                        var dx = ppPinchPre.pts[0].clientX - ppPinchPre.pts[1].clientX;
+                        var dy = ppPinchPre.pts[0].clientY - ppPinchPre.pts[1].clientY;
+                        var d = Math.sqrt(dx * dx + dy * dy) || 1;
+                        var cx = (ppPinchPre.pts[0].clientX + ppPinchPre.pts[1].clientX) / 2;
+                        var cy = (ppPinchPre.pts[0].clientY + ppPinchPre.pts[1].clientY) / 2;
+                        var nextScale = Math.max(1, Math.min(5, ppStart.scale * (d / ppStart.dist)));
                         var ratio = nextScale / Math.max(1, ppStart.scale);
                         ppZoom.scale = nextScale;
-                        ppZoom.tx = c.x - ratio * (ppStart.center.x - ppStart.tx) + ppStart.vcx * (ratio - 1);
-                        ppZoom.ty = c.y - ratio * (ppStart.center.y - ppStart.ty) + ppStart.vcy * (ratio - 1);
+                        ppZoom.tx = cx - ratio * (ppStart.centerX - ppStart.tx) + ppStart.vcx * (ratio - 1);
+                        ppZoom.ty = cy - ratio * (ppStart.centerY - ppStart.ty) + ppStart.vcy * (ratio - 1);
                         ppMoved = true;
                         ppApplyImageTransform();
                     } else if (ppPointers.size === 1 && ppStart.mode === 'pan') {
