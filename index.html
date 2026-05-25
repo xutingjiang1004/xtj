@@ -1338,7 +1338,7 @@
         /* ========== App容器 / Dock / 面板 ========== */
         .app-container {
             display: flex; flex-direction: column;
-            height: 100vh;
+            height: 100dvh;
             overflow: hidden;
             max-width: 640px; margin: 0 auto;
             position: relative;
@@ -4626,9 +4626,19 @@
                 showToast('正在压缩并上传头像...');
                 
                 try {
-                    const compressedBase64 = await compressImage(file, 80, 80, 0.4);
+                    // 任务2：重构为上传到 Supabase Storage 的 avatars/ 目录
+                    const timestamp = Date.now();
+                    const random = Math.floor(Math.random() * 1000);
+                    const path = `avatars/${timestamp}_${random}_${file.name}`;
                     
-                    // 删除所有旧头像记录（保证库中只留一条最新）
+                    // 上传到 Supabase Storage
+                    const { error: uploadErr } = await sb.storage.from('uploads').upload(path, file);
+                    if (uploadErr) throw uploadErr;
+                    
+                    // 获取 Public URL
+                    const avatarUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
+                    
+                    // 删除所有旧头像记录
                     var oldIds = await sb.from("posts")
                         .select("id")
                         .eq("user_name", currentUser)
@@ -4648,7 +4658,7 @@
                     var { error } = await sb.from("posts").insert([{
                         user_name: currentUser,
                         content: "用户头像",
-                        media_url: compressedBase64,
+                        media_url: avatarUrl,
                         media_type: "__avatar__",
                         actor_key: "__avatar__"
                     }]);
@@ -4658,20 +4668,20 @@
                         return;
                     }
                     
-                    avatarCache[currentUser] = compressedBase64;
+                    avatarCache[currentUser] = avatarUrl;
                     // 保存到localStorage持久化
                     try {
                         var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
-                        cachedAvatars[currentUser] = compressedBase64;
+                        cachedAvatars[currentUser] = avatarUrl;
                         localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
                     } catch(e) {}
-                    updateAllAvatarElements(compressedBase64);
+                    updateAllAvatarElements(avatarUrl);
                     
                     showToast('头像更新成功');
                     localStorage.removeItem(CACHE_KEY);
                     await loadFeed(true);
-                    avatarCache[currentUser] = compressedBase64;
-                    updateAllAvatarElements(compressedBase64);
+                    avatarCache[currentUser] = avatarUrl;
+                    updateAllAvatarElements(avatarUrl);
                 } catch(e) {
                     console.error("上传头像失败:", e);
                     showToast('上传失败，请重试');
@@ -5354,15 +5364,39 @@
             }
 
             // ===================== 加载动态 =====================
+            // 任务5：分页加载相关变量
+            let feedPage = 0;
+            const FEED_PAGE_SIZE = 20;
+            let feedEndReached = false;
+            let feedAllPosts = [];
+            let feedAllComments = [];
+            let feedAllLikes = [];
+            let feedScrollObserver = null;
+
             async function loadFeed(forceRefresh = false) {
                 const now = Date.now();
+                if (forceRefresh) {
+                    // 重置分页状态
+                    feedPage = 0;
+                    feedEndReached = false;
+                    feedAllPosts = [];
+                    feedAllComments = [];
+                    feedAllLikes = [];
+                }
                 if (!forceRefresh) {
                     const cached = localStorage.getItem(CACHE_KEY);
                     if (cached) {
                         try {
                             const parsed = JSON.parse(cached);
                             if (parsed?.data && now - parsed.timestamp < CACHE_DURATION) {
-                                await renderFeed(parsed.data); return;
+                                // 缓存加载，同时初始化分页状态
+                                feedAllPosts = parsed.data.posts || [];
+                                feedAllComments = parsed.data.comments || [];
+                                feedAllLikes = parsed.data.likes || [];
+                                await renderFeed(parsed.data);
+                                // 启动无限滚动观察
+                                setupFeedInfiniteScroll();
+                                return;
                             }
                         } catch(e){}
                     }
@@ -5381,22 +5415,144 @@
                         return;
                     }
                     const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
+                    // 保存完整数据供分页使用
+                    feedAllPosts = data.posts;
+                    feedAllComments = data.comments;
+                    feedAllLikes = data.likes;
                     // 缓存时排除头像和用户信息记录，防止base64大图撑爆localStorage
                     const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__');
                     localStorage.setItem(CACHE_KEY, JSON.stringify({ data: { posts: cachePosts, comments: data.comments, likes: data.likes }, timestamp: now }));
                     await renderFeed(data);
+                    // 启动无限滚动观察
+                    setupFeedInfiniteScroll();
                 } catch(e) {
                     feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，刷新重试</div>`;
                     console.error(e);
                 }
             }
 
-            async function renderFeed({ posts, comments, likes }) {
-                // TODO: 虚拟滚动（Virtual Scrolling）方案规划
-                // 当帖子超过30条时，使用 IntersectionObserver + 固定容器高度
-                // 仅渲染可视区域的帖子，回收不可见区域的 DOM 节点
-                // 配合 content-visibility: auto CSS 属性优先实现
+            // 任务5：设置无限滚动观察器
+            function setupFeedInfiniteScroll() {
+                if (feedScrollObserver) feedScrollObserver.disconnect();
+                
+                const feed = document.getElementById('feed');
+                const observer = new IntersectionObserver((entries) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting && !feedEndReached) {
+                            loadMoreFeedPosts();
+                        }
+                    });
+                }, { rootMargin: '200px' });
+                
+                // 在 feed 底部添加一个 sentinel 元素
+                let sentinel = document.getElementById('feedSentinel');
+                if (!sentinel) {
+                    sentinel = document.createElement('div');
+                    sentinel.id = 'feedSentinel';
+                    sentinel.style.height = '1px';
+                    feed.appendChild(sentinel);
+                }
+                observer.observe(sentinel);
+                feedScrollObserver = observer;
+            }
 
+            // 任务5：加载更多帖子
+            function loadMoreFeedPosts() {
+                if (feedEndReached) return;
+                
+                const feed = document.getElementById('feed');
+                const visiblePosts = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__');
+                
+                const startIdx = feedPage * FEED_PAGE_SIZE;
+                const endIdx = startIdx + FEED_PAGE_SIZE;
+                
+                if (startIdx >= visiblePosts.length) {
+                    feedEndReached = true;
+                    // 显示没有更多了
+                    let noMore = document.getElementById('feedNoMore');
+                    if (!noMore) {
+                        noMore = document.createElement('div');
+                        noMore.id = 'feedNoMore';
+                        noMore.className = 'loading';
+                        noMore.textContent = '没有更多了';
+                        noMore.style.padding = '30px';
+                        noMore.style.textAlign = 'center';
+                        feed.appendChild(noMore);
+                    }
+                    return;
+                }
+                
+                const nextPosts = visiblePosts.slice(startIdx, endIdx);
+                appendMorePosts(nextPosts, feedAllComments, feedAllLikes);
+                feedPage++;
+            }
+
+            // 任务5：追加更多帖子到 feed
+            function appendMorePosts(posts, comments, likes) {
+                const feed = document.getElementById('feed');
+                const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
+                
+                const postsHtml = posts.map(p => {
+                    const pLikes = likeMap[p.id] || [];
+                    const pComms = commentMap[p.id] || [];
+                    const isLiked = likeUserMap[p.id + '|' + deviceId];
+                    const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
+                    trackView(p.id);
+                    return `
+                <div class="post glass" data-post-id="${escapeHtml(p.id)}">
+                  <div class="post-header">
+                    ${getAvatarHtml(p.user_name)}
+                    <div class="user-info">
+                      <span class="user-name">${escapeHtml(p.user_name)}</span>
+                      <span class="post-time">${new Date(p.created_at).toLocaleString()}</span>
+                    </div>
+                  </div>
+                  <div class="content">${escapeHtml(p.content)}</div>
+                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(p.media_url).replace(/'/g, "\\'")}')">`}</div>`:''}
+                  <div class="post-stats-text">浏览 ${p.views||0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
+                  <div class="actions">
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
+                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
+                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
+                  </div>
+                  ${pComms.length?`
+                  <div class="comments">
+                    ${pComms.map(c=>`
+                    <div class="comment-item" data-comment-id="${escapeHtml(c.id)}">
+                      <div><b>${escapeHtml(c.user_name)}:</b> ${escapeHtml(c.content)}</div>
+                    </div>
+                    `).join('')}
+                  </div>
+                  `:''}
+                </div>
+              `;
+                }).join('');
+                
+                // 在 sentinel 之前插入新帖子
+                const sentinel = document.getElementById('feedSentinel');
+                const tempContainer = document.createElement('div');
+                tempContainer.innerHTML = postsHtml;
+                
+                while (tempContainer.firstChild) {
+                    feed.insertBefore(tempContainer.firstChild, sentinel);
+                }
+                
+                // 为新帖子添加进入动画观察
+                const newPosts = feed.querySelectorAll('.post:not(.visible)');
+                const observer = new IntersectionObserver(e => {
+                    e.forEach(i => {
+                        if (i.isIntersecting) {
+                            i.target.classList.add('visible');
+                        }
+                    });
+                }, { threshold: 0.05 });
+                newPosts.forEach(p => observer.observe(p));
+                
+                // 更新统计
+                updateFeedStats();
+            }
+
+            async function renderFeed({ posts, comments, likes }) {
                 const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__');
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
@@ -5414,7 +5570,12 @@
 
                 // 等待头像加载完成后再渲染
                 await loadAvatarsForUsers(Array.from(allUsers));
-                renderFeedWithAvatars(visiblePosts, comments, likes);
+                
+                // 任务5：只渲染第一页的内容，后续通过无限滚动加载
+                const firstPage = visiblePosts.slice(0, FEED_PAGE_SIZE);
+                feedPage = 1;
+                renderFeedWithAvatars(firstPage, comments, likes);
+                
                 // 后台预加载统计数据
                 setTimeout(function() { prefetchStatData(); }, 1000);
             }
@@ -6071,7 +6232,8 @@
             }
 
             function startDMPolling(interval) {
-                interval = interval || 60000;
+                // 任务3：默认间隔 5 分钟（300000ms），降低数据库请求压力
+                interval = interval || 300000;
                 if (dmpollTimer) {
                     if (dmpollInterval === interval) return;
                     clearInterval(dmpollTimer); dmpollTimer = null;
@@ -6173,7 +6335,7 @@
                 if (tabBtn) tabBtn.classList.add('active');
                 if (tab === 'posts') { if (window._rainResume) window._rainResume(); }
                 else { if (window._rainPause) window._rainPause(); }
-                if (tab === 'chat') { loadDockChatList(); startDMPolling(60000); }
+                if (tab === 'chat') { loadDockChatList(); startDMPolling(300000); }
                 if (tab === 'ai') { initPhotoWall(); }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); }
             };
@@ -6219,7 +6381,7 @@
                 document.getElementById('dockChatBackBtn').style.display = 'none';
                 document.getElementById('dockChatTitle').textContent = '消息';
                 loadDockChatList();
-                startDMPolling(60000);
+                startDMPolling(300000);
                 if (restorePostsScroll !== null) {
                     switchDockTab('posts');
                     requestAnimationFrame(() => {
@@ -6251,7 +6413,7 @@
                 document.getElementById('dockChatTitle').textContent = userName;
                 switchDockTab('chat', true);
                 loadDockChatMessages(userName);
-                startDMPolling(15000);
+                startDMPolling(60000);
             };
 
             async function loadDockChatList() {
@@ -6534,24 +6696,16 @@
                         }
                     });
 
-                    window.addEventListener('resize', function() {
-                        if (!keyboardOpen) adjustIOSHeight();
-                    });
+                    // 任务4：使用 100dvh 替代 --vh 方案，移除 resize 回调中的 adjustIOSHeight
+                    // window.addEventListener('resize', function() {
+                    //     if (!keyboardOpen) adjustIOSHeight();
+                    // });
                 })();
 
-                // iOS viewport height fix: 动态调整容器高度适配 Safari 工具栏
-                function adjustIOSHeight() {
-                    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-                    if (isIOS) {
-                        var vh = window.innerHeight * 0.01;
-                        document.documentElement.style.setProperty('--vh', vh + 'px');
-                        var app = document.querySelector('.app-container');
-                        if (app) app.style.height = 'calc(var(--vh, 1vh) * 100)';
-                    }
-                }
-                adjustIOSHeight();
-                window.addEventListener('resize', adjustIOSHeight);
-                window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
+                // 任务4：使用 100dvh 替代 --vh 方案，移除旧的 iOS 调整代码
+                // adjustIOSHeight();
+                // window.addEventListener('resize', adjustIOSHeight);
+                // window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
 
                 await initUI(); initRainAnimation(); initialLoad();
                 // 恢复上次保存的标签页
@@ -7794,6 +7948,15 @@
             var ppLastMoveT = 0;
             var ppRafId = null;
             var ppPreloadCache = {};
+            // 陀螺仪视差（Gyroscope Parallax）变量
+            var ppGyroTargetX = 0;
+            var ppGyroTargetY = 0;
+            var ppGyroCurrentX = 0;
+            var ppGyroCurrentY = 0;
+            var ppGyroRafId = null;
+            var ppGyroActive = false;
+            var ppGyroPermGranted = false;
+            var ppDeviceOrientationHandler = null;
 
             function ppInitTrack() {
                 ppTrack = document.getElementById('ppSlideTrack');
@@ -7818,7 +7981,6 @@
                 // 同步重置轨道位置 — 不等图片加载，消除黑屏
                 ppTrackDrag = 0;
                 ppTrackSnapping = false;
-                ppTrack.style.transition = 'none';
                 ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
                 ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
                 ppPreloadAdjacent(idx);
@@ -7872,11 +8034,115 @@
                 // 使用 requestAnimationFrame 把变换交给 GPU 批量渲染，实现原生级顺滑
                 if (!ppTransformRaf) {
                     ppTransformRaf = requestAnimationFrame(function() {
-                        var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
+                        var tx = ppZoom.tx + ppGyroCurrentX;
+                        var ty = ppZoom.ty + ppGyroCurrentY;
+                        var t = 'translate3d(' + tx + 'px,' + ty + 'px,0) scale(' + ppZoom.scale + ')';
                         img.style.transform = t;
                         img.style.webkitTransform = t;
                         ppTransformRaf = null;
                     });
+                }
+            }
+
+            // ========== 陀螺仪视差引擎（Gyroscope Parallax）==========
+            var ppGyroMaxOffset = 15;
+            var ppGyroLerpSpeed = 0.1;
+
+            function ppGyroOnOrientation(e) {
+                var beta = e.beta;
+                var gamma = e.gamma;
+                if (beta === null || gamma === null) {
+                    ppGyroTargetX = 0;
+                    ppGyroTargetY = 0;
+                    return;
+                }
+                // gamma: 左右倾斜（-180~180），beta: 前后倾斜（-180~180）
+                // 将角度映射为 ±ppGyroMaxOffset 像素偏移
+                ppGyroTargetX = Math.max(-ppGyroMaxOffset, Math.min(ppGyroMaxOffset, gamma * 0.25));
+                ppGyroTargetY = Math.max(-ppGyroMaxOffset, Math.min(ppGyroMaxOffset, beta * -0.15));
+            }
+
+            function ppStartGyro() {
+                if (ppGyroActive) return;
+                ppGyroActive = true;
+                ppGyroTargetX = 0;
+                ppGyroTargetY = 0;
+                ppGyroCurrentX = 0;
+                ppGyroCurrentY = 0;
+
+                // 注册 deviceorientation 监听器（存储在变量中以供移除）
+                ppDeviceOrientationHandler = ppGyroOnOrientation;
+                window.addEventListener('deviceorientation', ppDeviceOrientationHandler);
+
+                // 启动 rAF 渲染循环
+                ppGyroRafId = requestAnimationFrame(ppGyroRenderLoop);
+            }
+
+            function ppStopGyro() {
+                ppGyroActive = false;
+                ppGyroTargetX = 0;
+                ppGyroTargetY = 0;
+
+                if (ppGyroRafId) {
+                    cancelAnimationFrame(ppGyroRafId);
+                    ppGyroRafId = null;
+                }
+                if (ppDeviceOrientationHandler) {
+                    window.removeEventListener('deviceorientation', ppDeviceOrientationHandler);
+                    ppDeviceOrientationHandler = null;
+                }
+
+                // 复位 gyro 偏移到零（由 rAF 最后一帧完成平滑归位）
+                ppGyroCurrentX = 0;
+                ppGyroCurrentY = 0;
+                var img = document.getElementById('photoPreviewImage');
+                if (img) {
+                    img.style.transform = '';
+                    img.style.webkitTransform = '';
+                }
+                var info = document.querySelector('.photo-preview-info');
+                if (info) info.style.transform = '';
+            }
+
+            function ppGyroRenderLoop() {
+                if (!ppGyroActive) return;
+
+                // Lerp 线性插值：current += (target - current) * speed
+                ppGyroCurrentX += (ppGyroTargetX - ppGyroCurrentX) * ppGyroLerpSpeed;
+                ppGyroCurrentY += (ppGyroTargetY - ppGyroCurrentY) * ppGyroLerpSpeed;
+
+                // 让 ppApplyImageTransform 在下一个 RAF 中拾取最新的 gyro 值
+                ppApplyImageTransform();
+
+                // 对底部的照片信息（用户名、浏览量）应用反向小幅度偏移，形成视差层次
+                var info = document.querySelector('.photo-preview-info');
+                if (info) {
+                    var invX = -ppGyroCurrentX * 0.35;
+                    var invY = -ppGyroCurrentY * 0.35;
+                    info.style.transform = 'translate3d(' + invX + 'px,' + invY + 'px,0)';
+                }
+
+                ppGyroRafId = requestAnimationFrame(ppGyroRenderLoop);
+            }
+
+            function ppRequestGyroPermission(triggerEl) {
+                if (ppGyroPermGranted) {
+                    ppStartGyro();
+                    return;
+                }
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    // iOS 13+ 需要请求权限
+                    DeviceOrientationEvent.requestPermission().then(function(state) {
+                        if (state === 'granted') {
+                            ppGyroPermGranted = true;
+                            ppStartGyro();
+                        }
+                    }).catch(function() {
+                        // 静默失败，不使用陀螺仪
+                    });
+                } else {
+                    // 非 iOS 或不需要权限的设备，直接启动
+                    ppStartGyro();
                 }
             }
 
@@ -7909,18 +8175,61 @@
                 }
             }
 
+            // 120Hz 弹簧物理引擎：基于胡克定律的无 transition 动画
+            var ppSpringTension = 180;
+            var ppSpringFriction = 18;
+
             function ppSnapTo(targetOffset, callback) {
+                if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
+
+                var position = ppTrackDrag;
+                var velocity = 0;
+                var tension = ppSpringTension;
+                var friction = ppSpringFriction;
                 ppTrackSnapping = true;
-                ppTrackDrag = targetOffset;
-                ppTrack.style.transition = 'transform 0.28s cubic-bezier(0.25, 0.1, 0.25, 1)';
-                var finalOffset = -ppVw + targetOffset;
-                ppTrack.style.transform = 'translate3d(' + finalOffset + 'px, 0, 0)';
-                ppTrack.style.webkitTransform = 'translate3d(' + finalOffset + 'px, 0, 0)';
-                setTimeout(function() {
-                    ppTrackSnapping = false;
-                    ppTrack.style.transition = 'none';
-                    if (callback) callback();
-                }, 300);
+
+                function ppSpringStep() {
+                    if (!ppTrackSnapping) {
+                        // 被拖拽手势中断：释放导航锁即可
+                        ppSwipeLock = 0;
+                        ppRafId = null;
+                        return;
+                    }
+
+                    // 胡克定律：F_spring = -k * displacement（弹簧力）
+                    // F_damping = -c * velocity（阻尼力）
+                    // a = (F_spring - F_damping) / mass
+                    var displacement = targetOffset - position;
+                    var springForce = tension * displacement;
+                    var dampingForce = friction * velocity;
+                    var acceleration = springForce - dampingForce;
+
+                    // 固定时间步长 16ms（~60fps），Euler 积分
+                    velocity += acceleration * 0.016;
+                    position += velocity * 0.016;
+
+                    ppTrackDrag = position;
+                    var offset = -ppVw + position;
+                    ppTrack.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
+                    ppTrack.style.webkitTransform = 'translate3d(' + offset + 'px, 0, 0)';
+
+                    // 判断是否稳定（接近静止）
+                    if (Math.abs(displacement) < 0.5 && Math.abs(velocity) < 0.5) {
+                        // 锁定到精确目标值，消除亚像素误差
+                        ppTrackDrag = targetOffset;
+                        var finalOffset = -ppVw + targetOffset;
+                        ppTrack.style.transform = 'translate3d(' + finalOffset + 'px, 0, 0)';
+                        ppTrack.style.webkitTransform = 'translate3d(' + finalOffset + 'px, 0, 0)';
+                        ppTrackSnapping = false;
+                        ppRafId = null;
+                        if (callback) callback();
+                        return;
+                    }
+
+                    ppRafId = requestAnimationFrame(ppSpringStep);
+                }
+
+                ppRafId = requestAnimationFrame(ppSpringStep);
             }
 
             function ppNavigatePhoto(direction) {
@@ -7991,6 +8300,7 @@
                     cloudId: row.id,
                     username: row.user_name || extra.username || '未知用户',
                     imageUrl: row.media_url || extra.imageUrl || '',
+                    thumbUrl: extra.thumb || '',
                     timestamp: row.created_at ? Date.parse(row.created_at) : (extra.timestamp || Date.now()),
                     views: row.views || extra.views || 0
                 };
@@ -8144,7 +8454,8 @@
                     var timeStr = formatPhotoTime(p.timestamp);
                     var name = p.username || '未知用户';
                     html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
-                    html += '<img src="' + p.imageUrl + '" alt="photo" class="pw-blur-in" data-src="' + p.imageUrl + '">';
+                    var gridSrc = p.thumbUrl || p.imageUrl;
+                    html += '<img src="' + gridSrc + '" alt="photo" class="pw-blur-in" data-src="' + gridSrc + '">';
                     html += '<div class="pw-item-info">';
                     html += '<div class="pw-item-name">' + escapeHtml(name) + '</div>';
                     html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
@@ -8196,18 +8507,60 @@
                     return;
                 }
                 try {
-                    var path = 'photos/' + Date.now() + '_' + file.name;
                     var sb = window.sb;
-                    var { error: uploadErr } = await sb.storage.from('uploads').upload(path, file);
+                    var ts = Date.now();
+                    var baseName = ts + '_' + file.name;
+
+                    // 并行执行：上传原图 + 生成缩略图
+                    var origPath = 'photos/' + baseName;
+                    var thumbPromise = compressImage(file, 400, 400, 0.6).then(function(thumbDataUrl) {
+                        // 将 data URL 转换为 Blob
+                        return fetch(thumbDataUrl).then(function(r) { return r.blob(); });
+                    });
+                    var [thumbBlob, { error: uploadErr }] = await Promise.all([
+                        thumbPromise,
+                        sb.storage.from('uploads').upload(origPath, file)
+                    ]);
                     if (uploadErr) {
                         showToast('上传失败: ' + (uploadErr.message || '未知错误'));
                         e.target.value = '';
                         return;
                     }
-                    var imageUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
+
+                    // 上传缩略图
+                    var thumbPath = 'thumbs/' + baseName;
+                    var { error: thumbErr } = await sb.storage.from('uploads').upload(thumbPath, thumbBlob, {
+                        contentType: 'image/jpeg',
+                        cacheControl: '31536000'
+                    });
+                    if (thumbErr) {
+                        // 缩略图上传失败不阻塞主流程，只用原图
+                        var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
+                        var contentJson = JSON.stringify({ type: 'photo_wall' });
+                        var insertRes = await sb.from('posts').insert([{
+                            user_name: window.currentUser,
+                            content: contentJson,
+                            media_url: imageUrl,
+                            media_type: PHOTO_WALL_MARKER,
+                            actor_key: window.deviceId || 'photo_wall'
+                        }]).select('id,user_name,media_url,content,created_at,views').single();
+                        if (insertRes.error) throw insertRes.error;
+                        photoWallData.unshift(normalizePhotoWallRow(insertRes.data));
+                        saveLocalPhotoWallData();
+                        await renderPhotoWall();
+                        showToast('上传成功（无缩略图）');
+                        e.target.value = '';
+                        return;
+                    }
+
+                    var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
+                    var thumbUrl = sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl;
+
+                    // 将缩略图 URL 存入 content 字段
+                    var contentJson = JSON.stringify({ type: 'photo_wall', thumb: thumbUrl });
                     var insertRes = await sb.from('posts').insert([{
                         user_name: window.currentUser,
-                        content: JSON.stringify({ type: 'photo_wall' }),
+                        content: contentJson,
                         media_url: imageUrl,
                         media_type: PHOTO_WALL_MARKER,
                         actor_key: window.deviceId || 'photo_wall'
@@ -8304,6 +8657,10 @@
                 updateAmbientBackground(photo.imageUrl);
 
                 photoPreviewActive = true;
+
+                // 启动陀螺仪视差（请求权限 + 开始监听）
+                ppRequestGyroPermission();
+
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = 'none';
                 document.documentElement.classList.add('photo-previewing');
@@ -8335,6 +8692,8 @@
                 ppTrackSnapping = false;
                 ppSwipeLock = 0;
                 ppResetZoom();
+                // 停止陀螺仪视差，释放监听器和 rAF
+                ppStopGyro();
                 var dock = document.getElementById('dockBar');
                 if (dock) dock.style.display = '';
                 document.documentElement.classList.remove('photo-previewing');
@@ -8439,7 +8798,7 @@
                     if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
                     if (ppTrackSnapping) {
                         ppTrackSnapping = false;
-                        ppTrack.style.transition = 'none';
+                        ppSwipeLock = 0;
                     }
                     ppVelocitySamples = [];
                     ppLastMoveX = e.clientX;
@@ -8492,8 +8851,18 @@
                         var dy = e.clientY - ppStart.y;
                         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) ppMoved = true;
                         if (ppZoom.scale > 1.01) {
-                            ppZoom.tx = ppStart.tx + dx;
-                            ppZoom.ty = ppStart.ty + dy;
+                            // 任务1：计算边界并钳制 tx/ty，防止图片拖出屏幕
+                            var rawTx = ppStart.tx + dx;
+                            var rawTy = ppStart.ty + dy;
+                            
+                            // 计算溢出范围：(scale-1)/2 * viewport 尺寸
+                            var maxOverflowX = (ppZoom.scale - 1) * window.innerWidth / 2;
+                            var maxOverflowY = (ppZoom.scale - 1) * window.innerHeight / 2;
+                            
+                            // 钳制 tx 和 ty
+                            ppZoom.tx = Math.max(-maxOverflowX, Math.min(maxOverflowX, rawTx));
+                            ppZoom.ty = Math.max(-maxOverflowY, Math.min(maxOverflowY, rawTy));
+                            
                             ppTrackDrag = 0;
                             ppApplyImageTransform();
                         } else {
@@ -8520,6 +8889,12 @@
                         img.classList.remove('dragging');
                         ppStart = null;
                         if (!ppMoved) {
+                            // 如果弹簧动画正在运行，立即取消
+                            if (ppTrackSnapping) {
+                                ppTrackSnapping = false;
+                                ppSwipeLock = 0;
+                                if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
+                            }
                             var now = Date.now();
                             if (now - ppLastTap < 280) {
                                 clearTimeout(ppTapTimer);
@@ -8555,6 +8930,11 @@
                     if (ppPointers.size === 0) {
                         img.classList.remove('dragging');
                         ppStart = null;
+                        if (ppTrackSnapping) {
+                            ppTrackSnapping = false;
+                            ppSwipeLock = 0;
+                            if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
+                        }
                         ppTrackDrag = 0;
                         ppApplySlideTrack();
                     }
@@ -8761,7 +9141,8 @@
                     var timeStr = formatPhotoTime(p.timestamp);
                     var name = p.username || '未知用户';
                     html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
-                    html += '<img src="' + p.imageUrl + '" alt="photo" class="pw-blur-in" data-src="' + p.imageUrl + '">';
+                    var gridSrc = p.thumbUrl || p.imageUrl;
+                    html += '<img src="' + gridSrc + '" alt="photo" class="pw-blur-in" data-src="' + gridSrc + '">';
                     html += '<div class="pw-item-info">';
                     html += '<div class="pw-item-name">' + escapeHtml(name) + '</div>';
                     html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';

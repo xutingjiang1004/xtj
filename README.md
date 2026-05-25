@@ -1,11 +1,44 @@
 # 更新日志
 
+## v0.0.48 - 2026-05-25
+### 双分辨率策略（Thumbnail + Full Resolution）
+- 重构 handlePhotoUpload：上传原图的同时，利用 compressImage 生成 400x400 极度压缩的 JPEG 缩略图，并上传至 Supabase Storage 的 thumbs/ 目录
+- 缩略图 URL 存入 posts 表的 content JSON 字段 `{ type: 'photo_wall', thumb: '...' }`，normalizePhotoWallRow 新增 thumbUrl 字段解析
+- 网格渲染（renderPhotoWall / renderPhotoWallWithoutReload）img src 优先使用缩略图 thumbUrl，无缩略图的旧照片自动回退到原图 imageUrl
+- 全屏预览（ppSetTrackImages / openPhotoPreview）始终加载高清原图 imageUrl，点击进入时瞬间加载高分辨率
+- 缩略图上传失败不阻塞主流程：自动降级为纯原图模式，用户无感知
+
+## v0.0.47 - 2026-05-25
+### 陀螺仪视差效果（Gyroscope Parallax）
+- 全屏照片预览中新增 deviceorientation 监听，倾斜手机/平板时照片和遮罩产生轻微 3D 悬浮错位感
+- 处理 iOS 13+ 权限问题：在 ppOpenPreview 中通过 DeviceOrientationEvent.requestPermission 请求授权
+- 视差算法：beta（前后倾斜）和 gamma（左右倾斜）映射为 ±15px 像素偏移
+- 关键性能点：deviceorientation 事件只更新 target 变量，在专用 rAF 循环中使用 Lerp 插值（speed=0.1）平滑更新 DOM
+- 视觉层次：照片应用正向 translate3d，底部信息栏（用户名/浏览量）应用反向 0.35 倍偏移，形成景深感
+- 关闭预览时 cleanStopGyro：移除 deviceorientation 监听器、取消 rAF 循环、复位所有偏移，杜绝后台耗电
+
+## v0.0.46 - 2026-05-25
+### 120Hz 弹簧物理引擎（Spring Physics）
+- 移除照片墙轨道 ppTrack 所有 CSS transition，将动画控制权完全交给 JS，匹配 120Hz 刷新率
+- 实现轻量级弹簧动画循环，基于胡克定律（F_spring = -k * x）与阻尼力（F_damping = -c * v）
+- 重写 ppSnapTo 函数：使用 requestAnimationFrame 循环 + Euler 积分，每帧通过弹簧算法计算新的 ppTrackDrag 并应用到 transform
+- 物理参数 Tension=180, Friction=18（接近临界阻尼），提供 iOS UIScrollView 级别的"干脆、跟手、丝滑"手感
+- 处理所有边角情况：拖拽手势中断弹簧时释放导航锁、轻触弹簧中时立即取消防止跳动、pointercancel 时清理弹簧状态
+
 ## v0.0.45 - 2026-05-25
-### 深度修复
-- 采用 Gemini 的专业修复方案，完全重写了 ppNavigatePhoto、ppApplyImageTransform 和 ppApplySlideTrack 三个核心函数：
-  - 彻底消除照片左右滑动黑屏：核心思路是先执行物理滑动动画（利用已经提前预加载在左右槽的图片），等 300ms 动画结束后再悄悄重新排布三个槽位并拉回轨道，视觉上完全无缝
-  - 优化缩放卡顿：新增 ppTransformRaf 缓存变量，使用 requestAnimationFrame 把图像变换交给 GPU 批量渲染；优化 classList 更新逻辑，避免手指微动时频繁触发重排
-  - 解决单指滑动拖影：新增 ppTrackRaf 缓存变量，使用 requestAnimationFrame 把轨道拖拽也加入 GPU 渲染队列，保证单指左右拖轨道时同样丝滑
+### 深度修复与优化
+采用 Gemini 的专业修复方案，完全重写了多个核心功能：
+
+1. 彻底消除照片左右滑动黑屏：核心思路是先执行物理滑动动画（利用已经提前预加载在左右槽的图片），等 300ms 动画结束后再悄悄重新排布三个槽位并拉回轨道，视觉上完全无缝
+2. 优化缩放卡顿：新增 requestAnimationFrame 把图像变换交给 GPU 批量渲染；优化 classList 更新逻辑，避免手指微动时频繁触发重排
+3. 解决单指滑动拖影：新增 requestAnimationFrame 把轨道拖拽也加入 GPU 渲染队列，保证单指左右拖轨道时同样丝滑
+
+### 额外 5 项优化任务
+- 任务1：修复全屏图片放大后的无边界拖拽 Bug：计算真实溢出宽高，利用 Math.min 和 Math.max 将图片的 tx 和 ty 钳制在可视视口范围内
+- 任务2：修复头像存储的性能隐患（Base64 反模式）：重构 handleAvatarUpload，将头像文件上传到 Supabase Storage 的 avatars/ 目录，只保存 URL 到数据库和 localStorage
+- 任务3：优化 WebSocket 与长轮询的资源消耗：将默认轮询间隔拉长到 5 分钟（300000ms），聊天对话时为 60000ms，大幅降低数据库请求压力
+- 任务4：彻底修复 iOS 键盘弹出的遮挡与跳动：使用 100dvh 替代旧的 --vh 计算方案，移除旧的 iOS 调整代码，让浏览器原生处理键盘高度变化
+- 任务5：为 Feed 流增加基础的分页加载：设置每页 20 条，使用 IntersectionObserver 实现触底自动加载下一页的无限滚动
 
 ## v0.0.44 - 2026-05-25
 ### 修复
