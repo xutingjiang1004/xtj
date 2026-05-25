@@ -152,7 +152,7 @@
     function ppPreloadAdjacent(idx) {
         var photos = ppSortedPhotos;
         var urls = [];
-        for (var d = -3; d <= 3; d++) {
+        for (var d = -1; d <= 1; d++) {
             var i = idx + d;
             if (i >= 0 && i < photos.length && photos[i] && photos[i].imageUrl) {
                 urls.push(photos[i].imageUrl);
@@ -168,14 +168,15 @@
 
     function ppApplySlideTrack() {
         if (!ppTrack || ppTrackSnapping) return;
-        if (!ppTrackRaf) {
-            ppTrackRaf = requestAnimationFrame(function() {
-                var offset = -ppVw + ppTrackDrag;
-                ppTrack.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
-                ppTrack.style.webkitTransform = 'translate3d(' + offset + 'px, 0, 0)';
-                ppTrackRaf = null;
-            });
+        if (ppTrackRaf) {
+            cancelAnimationFrame(ppTrackRaf);
         }
+        ppTrackRaf = requestAnimationFrame(function() {
+            var offset = -ppVw + ppTrackDrag;
+            ppTrack.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
+            ppTrack.style.webkitTransform = 'translate3d(' + offset + 'px, 0, 0)';
+            ppTrackRaf = null;
+        });
     }
 
     function ppApplySlideTrackImmediate() {
@@ -192,7 +193,9 @@
         if (isZoomed !== img.classList.contains('zoomed')) {
             img.classList.toggle('zoomed', isZoomed);
         }
-        if (ppTransformRaf) return;
+        if (ppTransformRaf) {
+            cancelAnimationFrame(ppTransformRaf);
+        }
         ppTransformRaf = requestAnimationFrame(function() {
             var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
             img.style.transform = t;
@@ -329,25 +332,28 @@
         }
 
         ppSnapTo(targetDrag, function() {
-            photo.views = (photo.views || 0) + 1;
-            ppPhotoIdx = newIdx;
-            photoPreviewCurrent = photo;
-            window.saveLocalPhotoWallData();
-            window.updatePhotoViewDisplays(photo);
-            ppResetZoom();
-            ppSetTrackImages(newIdx);
-            document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
-            document.getElementById('photoPreviewTime').textContent = window.formatPhotoTime(photo.timestamp);
-            document.getElementById('photoPreviewViewsCount').textContent = photo.views;
-            ppSwipeLock = 0;
-            ppUpdateDots();
-            ppUpdateNavArrows();
-            var delBtn2 = document.getElementById('ppDeleteBtn');
-            if (delBtn2) {
-                delBtn2.style.display = (window.currentUser && photo.username === window.currentUser) ? 'flex' : 'none';
-            }
-            window.syncPhotoViewCount(photo);
-        });
+                photo.views = (photo.views || 0) + 1;
+                ppPhotoIdx = newIdx;
+                photoPreviewCurrent = photo;
+                window.saveLocalPhotoWallData();
+                window.updatePhotoViewDisplays(photo);
+                ppResetZoom();
+                ppSetTrackImages(newIdx);
+                document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
+                document.getElementById('photoPreviewTime').textContent = window.formatPhotoTime(photo.timestamp);
+                document.getElementById('photoPreviewViewsCount').textContent = photo.views;
+                ppSwipeLock = 0;
+                ppUpdateDots();
+                ppUpdateNavArrows();
+                var delBtn2 = document.getElementById('ppDeleteBtn');
+                if (delBtn2) {
+                    delBtn2.style.display = (window.currentUser && photo.username === window.currentUser) ? 'flex' : 'none';
+                }
+                window.syncPhotoViewCount(photo);
+                requestAnimationFrame(function() {
+                    ppPreloadAdjacent(newIdx);
+                });
+            });
     }
 
     function ppUpdateDots() {
