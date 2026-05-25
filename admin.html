@@ -232,6 +232,10 @@
             <button id="tabPostsBtn" onclick="switchTab('posts')">📝 帖子管理</button>
             <button id="tabLikesBtn" onclick="switchTab('likes')">❤️ 点赞数据</button>
             <button id="tabCommentsBtn" onclick="switchTab('comments')">💬 评论数据</button>
+            <button id="tabReportsBtn" onclick="switchTab('reports')">🚨 举报管理</button>
+            <button id="tabBansBtn" onclick="switchTab('bans')">🔒 封禁管理</button>
+            <button id="tabBlacklistBtn" onclick="switchTab('blacklist')">⛔ 黑名单</button>
+            <button id="tabPhotosBtn" onclick="switchTab('photos')">📷 照片管理</button>
             <button onclick="toggleTheme()" title="切换主题">🌓</button>
             <button class="danger" onclick="doAdminLogout()">退出</button>
         </div>
@@ -242,6 +246,10 @@
         <div class="tab-panel" id="tabPosts"></div>
         <div class="tab-panel" id="tabLikes"></div>
         <div class="tab-panel" id="tabComments"></div>
+        <div class="tab-panel" id="tabReports"></div>
+        <div class="tab-panel" id="tabBans"></div>
+        <div class="tab-panel" id="tabBlacklist"></div>
+        <div class="tab-panel" id="tabPhotos"></div>
     </div>
 </div>
 
@@ -714,7 +722,383 @@
             initAdminClient();
         }
     })();
-})();
+
+// =============================================
+// 举报管理
+// =============================================
+var reportsData = [];
+
+async function loadReportsData() {
+    try {
+        var res = await sb.from('reports').select('*').order('created_at', { ascending: false }).limit(500);
+        reportsData = res.data || [];
+    } catch(e) {
+        reportsData = [];
+    }
+}
+
+function renderReportsTab(el) {
+    var h = '<div class="stats-row">';
+    var pending = reportsData.filter(function(r) { return r.status === 'pending'; }).length;
+    h += '<div class="stat-box"><div class="val">' + reportsData.length + '</div><div class="lbl">总举报数</div></div>';
+    h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + pending + '</div><div class="lbl">待处理</div></div>';
+    h += '<div class="stat-box"><div class="val" style="color:var(--primary)">' + reportsData.filter(function(r) { return r.status === 'actioned'; }).length + '</div><div class="lbl">已处理</div></div>';
+    h += '</div>';
+    
+    h += '<div class="card"><h3>🚨 举报列表</h3>';
+    if (!reportsData.length) {
+        h += '<div class="empty">暂无举报</div>';
+    } else {
+        h += '<div class="table-wrap"><table><thead><tr><th>举报人</th><th>类型</th><th>目标</th><th>分类</th><th>原因</th><th>时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+        reportsData.forEach(function(r) {
+            var statusBadge = r.status === 'pending' ? '<span class="badge badge-red">待处理</span>' :
+                             r.status === 'reviewed' ? '<span class="badge badge-green">已审阅</span>' :
+                             r.status === 'dismissed' ? '<span class="badge" style="background:rgba(128,128,128,0.15);color:var(--text-muted)">已驳回</span>' :
+                             '<span class="badge badge-green">已处理</span>';
+            h += '<tr><td>' + escapeHtml(r.reporter_name) + '</td>';
+            h += '<td>' + r.target_type + '</td>';
+            h += '<td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.target_id) + '</td>';
+            h += '<td>' + r.report_category + '</td>';
+            h += '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.report_reason || '-') + '</td>';
+            h += '<td>' + formatTime(r.created_at) + '</td>';
+            h += '<td>' + statusBadge + '</td>';
+            h += '<td style="white-space:nowrap;">';
+            if (r.status === 'pending') {
+                h += '<button class="btn-sm primary" onclick="approveReport(\'' + r.id + '\')">处理</button> ';
+                h += '<button class="btn-sm" onclick="dismissReport(\'' + r.id + '\')">驳回</button>';
+            } else {
+                h += '<button class="btn-sm" onclick="viewReportDetail(\'' + r.id + '\')">详情</button>';
+            }
+            h += '</td></tr>';
+        });
+        h += '</tbody></table></div>';
+    }
+    h += '</div>';
+    el.innerHTML = h;
+}
+
+window.approveReport = function(id) {
+    var r = reportsData.find(function(x) { return x.id === id; });
+    showConfirm('处理举报', '确认将此举报标记为"已处理"？\n\n目标：' + (r ? r.target_id : '') + '\n分类：' + (r ? r.report_category : ''), '确认处理', async function() {
+        try {
+            await sb.from('reports').update({ status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN }).eq('id', id);
+            await loadReportsData();
+            renderTab('reports');
+            showToast('举报已处理', 'success');
+        } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+    });
+};
+
+window.dismissReport = function(id) {
+    showConfirm('驳回举报', '确认将此举报标记为"已驳回"？', '确认驳回', async function() {
+        try {
+            await sb.from('reports').update({ status: 'dismissed', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN }).eq('id', id);
+            await loadReportsData();
+            renderTab('reports');
+            showToast('举报已驳回', 'success');
+        } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+    });
+};
+
+window.viewReportDetail = function(id) {
+    var r = reportsData.find(function(x) { return x.id === id; });
+    if (!r) return;
+    var detail = '举报人：' + r.reporter_name + '\n类型：' + r.target_type + '\n目标ID：' + r.target_id + '\n目标用户：' + (r.target_user || '-') + '\n分类：' + r.report_category + '\n原因：' + (r.report_reason || '-') + '\n证据：' + (r.evidence_url || '-') + '\n状态：' + r.status + '\n时间：' + formatTime(r.created_at) + '\n处理人：' + (r.reviewed_by || '-');
+    alert(detail);
+};
+
+// =============================================
+// 封禁管理
+// =============================================
+var bansData = [];
+
+async function loadBansData() {
+    try {
+        var res = await sb.from('bans').select('*').order('banned_at', { ascending: false }).limit(500);
+        bansData = res.data || [];
+    } catch(e) {
+        bansData = [];
+    }
+}
+
+function renderBansTab(el) {
+    var active = bansData.filter(function(b) { return b.is_active; }).length;
+    var h = '<div class="stats-row">';
+    h += '<div class="stat-box"><div class="val">' + bansData.length + '</div><div class="lbl">总封禁记录</div></div>';
+    h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前封禁</div></div>';
+    h += '</div>';
+
+    h += '<div class="card"><h3>🔒 添加封禁</h3>';
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
+    h += '<input id="banUserName" placeholder="用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
+    h += '<select id="banType" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);"><option value="temporary">临时封禁</option><option value="permanent">永久封禁</option></select>';
+    h += '<input id="banDuration" type="number" placeholder="时长(小时)" value="24" style="width:100px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
+    h += '<input id="banReason" placeholder="封禁原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);"></div>';
+    h += '<button class="btn-sm primary" onclick="addBan()" style="margin-top:8px;">执行封禁</button>';
+    h += '</div>';
+
+    h += '<div class="card"><h3>🔒 封禁列表</h3>';
+    if (!bansData.length) {
+        h += '<div class="empty">暂无封禁记录</div>';
+    } else {
+        h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>类型</th><th>原因</th><th>封禁人</th><th>封禁时间</th><th>过期时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+        bansData.forEach(function(b) {
+            var statusBadge = b.is_active ? '<span class="badge badge-red">封禁中</span>' : '<span class="badge badge-green">已解封</span>';
+            h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td>';
+            h += '<td>' + (b.ban_type === 'permanent' ? '永久' : '临时') + '</td>';
+            h += '<td style="max-width:150px;">' + escapeHtml(b.ban_reason || '-') + '</td>';
+            h += '<td>' + escapeHtml(b.banned_by || '-') + '</td>';
+            h += '<td>' + formatTime(b.banned_at) + '</td>';
+            h += '<td>' + (b.expires_at ? formatTime(b.expires_at) : '-') + '</td>';
+            h += '<td>' + statusBadge + '</td>';
+            h += '<td>' + (b.is_active ? '<button class="btn-sm" onclick="liftBan(\'' + b.id + '\')">解封</button>' : '-') + '</td></tr>';
+        });
+        h += '</tbody></table></div>';
+    }
+    h += '</div>';
+    el.innerHTML = h;
+}
+
+window.addBan = async function() {
+    var userName = document.getElementById('banUserName').value.trim();
+    var banType = document.getElementById('banType').value;
+    var duration = parseInt(document.getElementById('banDuration').value) || 24;
+    var reason = document.getElementById('banReason').value.trim();
+    if (!userName) { showToast('请输入用户名', 'error'); return; }
+    var expiresAt = null;
+    if (banType === 'temporary') {
+        var d = new Date();
+        d.setHours(d.getHours() + duration);
+        expiresAt = d.toISOString();
+    }
+    try {
+        var { error } = await sb.from('bans').insert([{
+            user_name: userName, ban_type: banType, ban_reason: reason || '违反社区规定',
+            ban_duration_hours: banType === 'temporary' ? duration : 0,
+            banned_by: ADMIN, expires_at: expiresAt, is_active: true
+        }]);
+        if (error) {
+            if (error.code === '23505') { showToast('该用户已被封禁', 'error'); return; }
+            showToast('封禁失败: ' + error.message, 'error'); return;
+        }
+        document.getElementById('banUserName').value = '';
+        document.getElementById('banReason').value = '';
+        await loadBansData();
+        renderTab('bans');
+        showToast('✅ 已封禁 ' + userName, 'success');
+    } catch(e) { showToast('封禁失败: ' + e.message, 'error'); }
+};
+
+window.liftBan = function(id) {
+    showConfirm('解封用户', '确认解封该用户？', '确认解封', async function() {
+        try {
+            await sb.from('bans').update({ is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN }).eq('id', id);
+            await loadBansData();
+            renderTab('bans');
+            showToast('✅ 已解封', 'success');
+        } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+    });
+};
+
+// =============================================
+// 黑名单管理
+// =============================================
+var blacklistData = [];
+
+async function loadBlacklistData() {
+    try {
+        var res = await sb.from('blacklist').select('*').order('created_at', { ascending: false }).limit(500);
+        blacklistData = res.data || [];
+    } catch(e) {
+        blacklistData = [];
+    }
+}
+
+function renderBlacklistTab(el) {
+    var h = '<div class="card"><h3>⛔ 添加黑名单</h3>';
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
+    h += '<input id="blUserName" placeholder="用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
+    h += '<input id="blReason" placeholder="拉黑原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);"></div>';
+    h += '<button class="btn-sm primary" onclick="addBlacklist()" style="margin-top:8px;">加入黑名单</button>';
+    h += '</div>';
+
+    h += '<div class="card"><h3>⛔ 黑名单列表（' + blacklistData.length + '人）</h3>';
+    if (!blacklistData.length) {
+        h += '<div class="empty">黑名单为空</div>';
+    } else {
+        h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>原因</th><th>添加人</th><th>时间</th><th>操作</th></tr></thead><tbody>';
+        blacklistData.forEach(function(b) {
+            h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td>';
+            h += '<td>' + escapeHtml(b.reason || '-') + '</td>';
+            h += '<td>' + escapeHtml(b.added_by || '-') + '</td>';
+            h += '<td>' + formatTime(b.created_at) + '</td>';
+            h += '<td><button class="btn-sm del" onclick="removeBlacklist(\'' + b.id + '\', \'' + escapeHtml(b.user_name) + '\')">移除</button></td></tr>';
+        });
+        h += '</tbody></table></div>';
+    }
+    h += '</div>';
+    el.innerHTML = h;
+}
+
+window.addBlacklist = async function() {
+    var userName = document.getElementById('blUserName').value.trim();
+    var reason = document.getElementById('blReason').value.trim();
+    if (!userName) { showToast('请输入用户名', 'error'); return; }
+    try {
+        var { error } = await sb.from('blacklist').insert([{ user_name: userName, reason: reason || '管理员操作', added_by: ADMIN }]);
+        if (error) {
+            if (error.code === '23505') { showToast('该用户已在黑名单中', 'error'); return; }
+            showToast('操作失败: ' + error.message, 'error'); return;
+        }
+        document.getElementById('blUserName').value = '';
+        document.getElementById('blReason').value = '';
+        await loadBlacklistData();
+        renderTab('blacklist');
+        showToast('✅ 已加入黑名单', 'success');
+    } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+};
+
+window.removeBlacklist = function(id, userName) {
+    showConfirm('移出黑名单', '确认将 ' + userName + ' 移出黑名单？', '确认移除', async function() {
+        try {
+            await sb.from('blacklist').delete().eq('id', id);
+            await loadBlacklistData();
+            renderTab('blacklist');
+            showToast('✅ 已移出黑名单', 'success');
+        } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+    });
+};
+
+// =============================================
+// 照片管理
+// =============================================
+var photosAdminData = [];
+
+async function loadPhotosAdminData() {
+    try {
+        var res = await sb.from('photos').select('*').order('created_at', { ascending: false }).limit(500);
+        photosAdminData = res.data || [];
+    } catch(e) {
+        photosAdminData = [];
+    }
+}
+
+function renderPhotosTab(el) {
+    var h = '<div class="stats-row">';
+    h += '<div class="stat-box"><div class="val">' + photosAdminData.length + '</div><div class="lbl">总照片数</div></div>';
+    h += '</div>';
+
+    h += '<div class="card"><h3>📷 照片管理</h3>';
+    if (!photosAdminData.length) {
+        h += '<div class="empty">暂无照片数据</div>';
+    } else {
+        h += '<div class="table-wrap"><table><thead><tr><th>缩略图</th><th>用户</th><th>相册日期</th><th>封面</th><th>大小</th><th>浏览</th><th>上传时间</th><th>操作</th></tr></thead><tbody>';
+        photosAdminData.forEach(function(p) {
+            var thumbHtml = p.public_url ? '<img src="' + p.public_url + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px;">' : '-';
+            h += '<tr><td>' + thumbHtml + '</td>';
+            h += '<td>' + escapeHtml(p.user_name) + '</td>';
+            h += '<td>' + (p.album_date || '-') + '</td>';
+            h += '<td>' + (p.is_cover ? '⭐' : '-') + '</td>';
+            h += '<td>' + (p.file_size ? (p.file_size / 1024).toFixed(0) + 'KB' : '-') + '</td>';
+            h += '<td>' + (p.views || 0) + '</td>';
+            h += '<td>' + formatTime(p.created_at) + '</td>';
+            h += '<td><button class="btn-sm del" onclick="deleteAdminPhoto(\'' + p.id + '\')">删除</button></td></tr>';
+        });
+        h += '</tbody></table></div>';
+    }
+    h += '</div>';
+    el.innerHTML = h;
+}
+
+window.deleteAdminPhoto = function(id) {
+    showConfirm('删除照片', '确认删除此照片？此操作不可恢复。', '确认删除', async function() {
+        try {
+            await sb.from('photos').delete().eq('id', id);
+            await loadPhotosAdminData();
+            renderTab('photos');
+            showToast('照片已删除', 'success');
+        } catch(e) { showToast('删除失败: ' + e.message, 'error'); }
+    });
+};
+
+// =============================================
+// 扩展 switchTab / renderTab / loadAllData
+// =============================================
+var _origSwitchTab = window.switchTab;
+window.switchTab = function(tab) {
+    currentTab = tab;
+    saveCurrentTab();
+    ['ann','users','posts','likes','comments','reports','bans','blacklist','photos'].forEach(function(t) {
+        var panel = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
+        var btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn');
+        if (panel) panel.classList.remove('active');
+        if (btn) btn.classList.remove('active');
+    });
+    var panel = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+    var btn = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1) + 'Btn');
+    if (panel) panel.classList.add('active');
+    if (btn) btn.classList.add('active');
+    renderTab(tab);
+};
+
+var _origRenderTab = window.renderTab;
+window.renderTab = function(tab) {
+    var el = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+    if (!el) return;
+    switch(tab) {
+        case 'ann': renderAnnTab(el); break;
+        case 'users': renderUsersTab(el); break;
+        case 'posts': renderPostsTab(el); break;
+        case 'likes': renderLikesTab(el); break;
+        case 'comments': renderCommentsTab(el); break;
+        case 'reports': renderReportsTab(el); break;
+        case 'bans': renderBansTab(el); break;
+        case 'blacklist': renderBlacklistTab(el); break;
+        case 'photos': renderPhotosTab(el); break;
+    }
+};
+
+var _origLoadAllData = window.loadAllData;
+window.loadAllData = async function(keepTab) {
+    try {
+        var postRes = await sb.from('posts').select('*').neq('media_type', '__avatar__').order('created_at', {ascending: false}).limit(5000);
+        var likeRes = await sb.from('likes').select('*').order('created_at', {ascending: false}).limit(5000);
+        var commRes = await sb.from('comments').select('*').order('created_at', {ascending: false}).limit(5000);
+
+        allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__user_info__'; });
+        annList = (postRes.data || []).filter(function(p) { return p.media_type === ANN_MARKER; });
+        allLikes = likeRes.data || [];
+        allComments = commRes.data || [];
+
+        var userMap = {};
+        allPosts.forEach(function(p) { userMap[p.user_name] = true; });
+        allLikes.forEach(function(l) { userMap[l.user_name] = true; });
+        allComments.forEach(function(c) { userMap[c.user_name] = true; });
+
+        var userInfoList = (postRes.data || []).filter(function(p) { return p.media_type === '__user_info__'; });
+        var userInfoMap = {};
+        userInfoList.forEach(function(ui) {
+            try { var info = JSON.parse(ui.content); userInfoMap[ui.user_name] = info; userMap[ui.user_name] = true; } catch(e) {}
+        });
+
+        allUsers = Object.keys(userMap).sort().map(function(u) {
+            return { name: u, info: userInfoMap[u] || null };
+        });
+
+        await loadReportsData();
+        await loadBansData();
+        await loadBlacklistData();
+        await loadPhotosAdminData();
+
+        if (!keepTab) { switchTab('ann'); }
+        else { renderTab(currentTab); }
+    } catch(e) {
+        console.error(e);
+        showToast('数据加载失败，请刷新重试', 'error');
+    }
+};
+
+    })();
 </script>
 </body>
 </html>
