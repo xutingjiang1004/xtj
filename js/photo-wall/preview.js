@@ -594,6 +594,7 @@
                 ppZoom.scale = newScale;
                 ppZoom.tx = dcx + ppZoom.tx;
                 ppZoom.ty = dcy + ppZoom.ty;
+                ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } };
                 ppApplyPinchTransformImmediate();
                 return;
             }
@@ -632,7 +633,7 @@
                 return;
             }
 
-            if (ppStart.pointers >= 2) {
+            if (ppStart && ppStart.pointers >= 2) {
                 ppStart = null;
                 if (ppPointers.size === 0 && ppZoom.scale < 1.02) {
                     ppResetZoom();
@@ -640,11 +641,31 @@
                 return;
             }
 
-            if (ppZoom.scale > 1.01) {
-                ppStart = null;
-                if (ppPointers.size === 0 && ppZoom.scale < 1.02) {
+            var wasMoved = ppMoved;
+            var zoomed = ppZoom.scale > 1.01;
+
+            if (zoomed && !wasMoved) {
+                var nowTap = Date.now();
+                if (nowTap - ppLastTap < 300 && !ppTapHandled) {
+                    ppTapHandled = true;
                     ppResetZoom();
+                    ppStart = null;
+                    ppLastTap = 0;
+                    return;
                 }
+                ppLastTap = nowTap;
+                clearTimeout(ppTapTimer);
+                ppTapTimer = setTimeout(function() {
+                    if (!ppTapHandled) {
+                        ppTapHandled = true;
+                    }
+                }, 300);
+                ppStart = null;
+                return;
+            }
+
+            if (zoomed) {
+                ppStart = null;
                 return;
             }
 
@@ -685,16 +706,16 @@
                 ppApplySlideTrackImmediate();
             }
 
-            if (!ppMoved) {
+            if (!wasMoved && !ppNavBusy) {
                 var now2 = Date.now();
-                if (now2 - ppLastTap < 300 && !ppTapHandled && !ppNavBusy) {
+                if (now2 - ppLastTap < 300 && !ppTapHandled) {
                     ppTapHandled = true;
                     ppToggleZoom(e.clientX, e.clientY);
                 }
                 ppLastTap = now2;
                 clearTimeout(ppTapTimer);
                 ppTapTimer = setTimeout(function() {
-                    if (!ppTapHandled && !ppMoved && ppZoom.scale <= 1.01 && !ppNavBusy) {
+                    if (!ppTapHandled && !wasMoved && ppZoom.scale <= 1.01 && !ppNavBusy) {
                         ppTapHandled = true;
                         closePhotoPreview();
                     }

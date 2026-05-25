@@ -278,7 +278,7 @@
             }
         }
         var feed = document.getElementById("feed");
-        if (!forceRefresh) feed.innerHTML = '<div class="loading">加载中...</div>';
+        if (!forceRefresh) feed.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
         try {
             var results = await Promise.all([
                 window.sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -632,7 +632,7 @@
             return;
         }
 
-        document.getElementById('statModalBody').innerHTML = '<div class="loading">加载中...</div>';
+        document.getElementById('statModalBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
 
         try {
             var results = await Promise.all([
@@ -683,7 +683,7 @@
 
     window.openPostDetail = async function(postId) {
         document.getElementById('postDetailTitle').textContent = '帖子详情';
-        document.getElementById('postDetailBody').innerHTML = '<div class="loading">加载中...</div>';
+        document.getElementById('postDetailBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
         document.getElementById('postDetailModal').classList.add('active');
 
         try {

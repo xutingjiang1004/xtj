@@ -57,11 +57,11 @@
             var baseName = ts + '_' + file.name.replace(/\.[^.]+$/, '.jpg');
 
             var origPath = 'photos/' + baseName;
-            var needCompress = file.size > 2 * 1024 * 1024;
+            var needCompress = file.size > 1 * 1024 * 1024;
             if (needCompress) {
                 window.showToast('正在压缩图片...');
             }
-            var compressed = await compressToTargetBlob(file, 2 * 1024 * 1024);
+            var compressed = await compressToTargetBlob(file, 1 * 1024 * 1024);
             var finalSize = compressed.size;
 
             var thumbPromise = window.compressImage(compressed, 400, 400, 0.6).then(function(thumbDataUrl) {

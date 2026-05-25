@@ -61,13 +61,15 @@
         var reportTarget = null;
 
         window.openReport = function(targetType, targetId, targetUser) {
-            if (!window.currentUser) { showToast('请先登录'); return; }
+            if (!window.currentUser) { window.showToast('请先登录'); return; }
             reportTarget = { targetType: targetType, targetId: targetId, targetUser: targetUser || '' };
             document.getElementById('reportCategory').value = 'spam';
             document.getElementById('reportReason').value = '';
             document.getElementById('reportEvidenceInput').value = '';
             document.getElementById('reportEvidencePreview').textContent = '';
-            document.getElementById('reportModal').style.display = 'flex';
+            var modal = document.getElementById('reportModal');
+            modal.style.display = 'flex';
+            modal.classList.add('active');
         };
 
         document.getElementById('reportEvidenceInput').addEventListener('change', function(e) {
@@ -81,11 +83,11 @@
         });
 
         window.submitReport = async function() {
-            if (!reportTarget) { showToast('举报目标丢失，请重试'); return; }
-            if (!window.currentUser) { showToast('请先登录'); return; }
+            if (!reportTarget) { window.showToast('举报目标丢失，请重试'); return; }
+            if (!window.currentUser) { window.showToast('请先登录'); return; }
             var category = document.getElementById('reportCategory').value;
             var reason = document.getElementById('reportReason').value.trim();
-            if (!reason) { showToast('请填写举报理由'); return; }
+            if (!reason) { window.showToast('请填写举报理由'); return; }
 
             var evidenceUrl = '';
             var evidenceFile = document.getElementById('reportEvidenceInput').files && document.getElementById('reportEvidenceInput').files[0];
@@ -107,7 +109,7 @@
             btn.textContent = '提交中...';
             try {
                 var sb = window.sb;
-                if (!sb) { showToast('系统未就绪'); btn.disabled = false; btn.textContent = '提交举报'; return; }
+                if (!sb) { window.showToast('系统未就绪'); btn.disabled = false; btn.textContent = '提交举报'; return; }
                 var { error } = await sb.from('reports').insert([{
                     reporter_name: window.currentUser,
                     target_type: reportTarget.targetType,
@@ -118,10 +120,10 @@
                     evidence_url: evidenceUrl,
                     status: 'pending'
                 }]);
-                if (error) { showToast('举报提交失败: ' + error.message); btn.disabled = false; btn.textContent = '提交举报'; return; }
-                showToast('举报已提交，管理员会尽快处理');
-                closeModal('reportModal');
-            } catch(e) { showToast('举报提交失败'); }
+                if (error) { window.showToast('举报提交失败: ' + error.message); btn.disabled = false; btn.textContent = '提交举报'; return; }
+                window.showToast('举报已提交，管理员会尽快处理');
+                window.closeModal('reportModal');
+            } catch(e) { window.showToast('举报提交失败'); }
             btn.disabled = false;
             btn.textContent = '提交举报';
         };
