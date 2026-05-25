@@ -26,6 +26,19 @@
 
         let delPostId = null, delOwnerKey = null;
         let activePostId = null;
+        
+        if (!window.openReport) {
+            window.openReport = function(targetType, targetId, targetUser) {
+                const checkAndRun = () => {
+                    if (typeof window.openReport === 'function' && window.openReport !== arguments.callee) {
+                        window.openReport(targetType, targetId, targetUser);
+                    } else if (!document.getElementById('reportModal')) {
+                        setTimeout(checkAndRun, 100);
+                    }
+                };
+                checkAndRun();
+            };
+        }
         const viewTracked = new Set();
         const CACHE_KEY = "xtj_feed_cache";
         const CACHE_DURATION = 5 * 60 * 1000; // 缓存5分钟
