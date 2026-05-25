@@ -276,6 +276,29 @@
         ppRafId = safeTimer;
     }
 
+    function ppUpdateNavArrows() {
+        var prevBtn = document.getElementById('ppPrevBtn');
+        var nextBtn = document.getElementById('ppNextBtn');
+        if (prevBtn) {
+            prevBtn.classList.toggle('pp-nav-hidden', ppPhotoIdx <= 0);
+        }
+        if (nextBtn) {
+            nextBtn.classList.toggle('pp-nav-hidden', ppPhotoIdx >= ppSortedPhotos.length - 1);
+        }
+    }
+
+    function ppPrevPhoto() {
+        if (ppSwipeLock || ppPhotoIdx <= 0) return;
+        ppNavigatePhoto(-1);
+    }
+    window.ppPrevPhoto = ppPrevPhoto;
+
+    function ppNextPhoto() {
+        if (ppSwipeLock || ppPhotoIdx >= ppSortedPhotos.length - 1) return;
+        ppNavigatePhoto(1);
+    }
+    window.ppNextPhoto = ppNextPhoto;
+
     function ppNavigatePhoto(direction) {
         if (ppSwipeLock) return;
         var newIdx = ppPhotoIdx + direction;
@@ -318,6 +341,7 @@
             document.getElementById('photoPreviewViewsCount').textContent = photo.views;
             ppSwipeLock = 0;
             ppUpdateDots();
+            ppUpdateNavArrows();
             var delBtn2 = document.getElementById('ppDeleteBtn');
             if (delBtn2) {
                 delBtn2.style.display = (window.currentUser && photo.username === window.currentUser) ? 'flex' : 'none';
@@ -353,6 +377,12 @@
             container.className = 'photo-preview-overlay';
             container.innerHTML = '<div id="ppAmbientBg" class="pp-ambient-bg"></div>' +
                 '<button id="ppCloseBtn" class="pp-close-btn" onclick="window.closePhotoPreview()">✕</button>' +
+                '<button id="ppPrevBtn" class="pp-nav-arrow pp-nav-prev" onclick="window.ppPrevPhoto()" aria-label="上一张">' +
+                '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+                '</button>' +
+                '<button id="ppNextBtn" class="pp-nav-arrow pp-nav-next" onclick="window.ppNextPhoto()" aria-label="下一张">' +
+                '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+                '</button>' +
                 '<div id="ppSlideTrack" class="pp-slide-track">' +
                 '<div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"></div>' +
                 '<div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"></div>' +
@@ -389,6 +419,7 @@
         ppInitTrack();
         ppSetTrackImages(index);
         ppUpdateDots();
+        ppUpdateNavArrows();
         if (photoPreviewCurrent) {
             window.updateAmbientBackground(photoPreviewCurrent.imageUrl);
             window.syncPhotoViewCount(photoPreviewCurrent);
@@ -474,12 +505,13 @@
         }
         ppSetTrackImages(idx);
         ppUpdateDots();
+        ppUpdateNavArrows();
         window.updateAmbientBackground(photoPreviewCurrent.imageUrl);
     }
     window.deletePhotoFromPreview = deletePhotoFromPreview;
 
     function bindPreviewEvents(overlay) {
-        var interactiveElements = overlay.querySelectorAll('.photo-preview-close, .pp-info-btn, .pp-share-btn, .pp-delete-btn, .photo-preview-info, .pp-info-modal, .pp-info-modal-close, .pp-dots');
+        var interactiveElements = overlay.querySelectorAll('.photo-preview-close, .pp-info-btn, .pp-share-btn, .pp-delete-btn, .photo-preview-info, .pp-info-modal, .pp-info-modal-close, .pp-dots, .pp-nav-arrow');
         for (var ie = 0; ie < interactiveElements.length; ie++) {
             interactiveElements[ie].addEventListener('pointerdown', function(ev) {
                 ev.stopPropagation();
