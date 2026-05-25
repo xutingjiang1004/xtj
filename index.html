@@ -1427,11 +1427,7 @@
         .dock-tab {
             flex: 1; max-width: 80px;
             display: flex; flex-direction: column; align-items: center; gap: 1px;
-            padding: 4px 10px; border-radius: 14px;
-            border: 1px solid rgba(255,255,255,0.5);
-            background: rgba(255,255,255,0.38);
-            backdrop-filter: blur(10px) saturate(140%);
-            -webkit-backdrop-filter: blur(10px) saturate(140%);
+            padding: 4px 10px;
             cursor: pointer; font-family: inherit;
             transition: all 0.35s cubic-bezier(0.16,1,0.3,1);
             color: var(--text-muted); font-size: 9px;
@@ -1456,11 +1452,6 @@
         .dock-tab.active {
             color: #059669;
             transform: translateY(-4px);
-            background: rgba(255,255,255,0.72);
-            backdrop-filter: blur(14px) saturate(160%);
-            -webkit-backdrop-filter: blur(14px) saturate(160%);
-            border: 1px solid rgba(255,255,255,0.74);
-            box-shadow: 0 8px 22px rgba(5,150,105,0.14), inset 0 1px 0 rgba(255,255,255,0.72);
         }
         .dock-tab.active .dt-icon {
             filter: drop-shadow(0 4px 8px rgba(5,150,105,0.25));
@@ -1517,7 +1508,7 @@
             .app-container { max-width: 960px; }
             .dock-panel { padding: 24px 36px 110px; padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
             .dock-bar { gap: 20px; padding: 10px 24px 14px; padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
-            .dock-tab { max-width: 100px; padding: 8px 16px; font-size: 11px; border-radius: 16px; }
+            .dock-tab { max-width: 100px; padding: 8px 16px; font-size: 11px; }
             .dock-tab .dt-icon { font-size: 24px; }
             .dock-tab .dt-label { font-size: 11px; }
             .publish-box { padding: 30px; }
@@ -1574,7 +1565,7 @@
         /* 横屏手机/平板优化 */
         @media (max-height: 600px) and (orientation: landscape) {
             .dock-bar { gap: 8px; padding: 4px 12px 6px; }
-            .dock-tab { padding: 2px 8px; font-size: 8px; border-radius: 10px; }
+            .dock-tab { padding: 2px 8px; font-size: 8px; }
             .dock-tab .dt-icon { font-size: 18px; }
             .dock-tab .dt-label { font-size: 8px; }
             .dock-panel { padding-top: 12px; padding-bottom: 60px; }
@@ -1597,17 +1588,9 @@
         /* 暗色模式 Dock */
         [data-theme="dark"] .dock-tab {
             color: #9e9eb0;
-            background: rgba(24,24,30,0.55);
-            backdrop-filter: blur(12px) saturate(140%);
-            -webkit-backdrop-filter: blur(12px) saturate(140%);
-            border: 1px solid rgba(255,255,255,0.06);
         }
         [data-theme="dark"] .dock-tab.active {
             color: #34d399;
-            background: rgba(255,255,255,0.08);
-            backdrop-filter: blur(14px) saturate(160%);
-            -webkit-backdrop-filter: blur(14px) saturate(160%);
-            border: 1px solid rgba(255,255,255,0.14);
         }
         [data-theme="dark"] .dock-indicator { background: linear-gradient(90deg, #059669, #34d399); box-shadow: 0 0 10px rgba(52,211,153,0.5); }
         [data-theme="dark"] .dock-chat-container .chat-header { border-bottom-color: rgba(255,255,255,0.06); }
@@ -3228,37 +3211,6 @@
             0% { transform: translateX(-100%); }
             100% { transform: translateX(100%); }
         }
-        .pw-delete-btn {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            z-index: 10;
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            border: 1px solid rgba(255,255,255,0.4);
-            background: rgba(0,0,0,0.45);
-            backdrop-filter: blur(8px) saturate(120%);
-            -webkit-backdrop-filter: blur(8px) saturate(120%);
-            color: rgba(255,255,255,0.9);
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            opacity: 0;
-            transform: scale(0.8);
-            transition: all 0.25s cubic-bezier(0.16,1,0.3,1);
-        }
-        .photo-wall-item:hover .pw-delete-btn,
-        .photo-wall-item:active .pw-delete-btn {
-            opacity: 1;
-            transform: scale(1);
-        }
-        .pw-delete-btn:hover {
-            background: rgba(220,38,38,0.75);
-            border-color: rgba(255,255,255,0.6);
-        }
 
         /* 全屏预览 */
         @keyframes fadeIn {
@@ -3682,13 +3634,13 @@
                     <button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>
                     <div class="photo-preview-image-wrapper" id="ppImageWrapper">
                         <div class="pp-slide-track" id="ppSlideTrack">
-                            <div class="pp-slide-slot"><img class="pp-slide-img" id="ppPrevImg" src="" alt="" draggable="false"></div>
-                            <div class="pp-slide-slot"><img class="pp-slide-img" id="photoPreviewImage" src="" alt="preview" draggable="false"></div>
-                            <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false"></div>
+                            <div class="pp-slide-slot"><img class="pp-slide-img" id="ppPrevImg" src="" alt="" draggable="false" loading="eager"></div>
+                            <div class="pp-slide-slot"><img class="pp-slide-img" id="photoPreviewImage" src="" alt="preview" draggable="false" loading="eager"></div>
+                            <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false" loading="eager"></div>
                         </div>
                     </div>
                     <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="shareCurrentPhoto()">&#x1F517;</button>
-                    <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="deleteCurrentPhoto()">&#x1F5D1;</button>
+                    <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="deleteCurrentPhoto()">&times;</button>
                     <div class="photo-preview-info">
                         <span class="pp-user" id="photoPreviewUser"></span>
                         <span class="pp-time" id="photoPreviewTime"></span>
@@ -7709,22 +7661,33 @@
                 var prevImg = document.getElementById('ppPrevImg');
                 var curImg = document.getElementById('photoPreviewImage');
                 var nextImg = document.getElementById('ppNextImg');
+
+                function finishReset() {
+                    if (idx > 0 && photos[idx - 1]) prevImg.src = photos[idx - 1].imageUrl;
+                    else prevImg.src = '';
+                    if (idx < photos.length - 1 && photos[idx + 1]) nextImg.src = photos[idx + 1].imageUrl;
+                    else nextImg.src = '';
+                    ppTrackDrag = 0;
+                    ppTrackSnapping = false;
+                    ppTrack.style.transition = 'none';
+                    ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+                    ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+                    ppPreloadAdjacent(idx);
+                }
+
                 if (photos[idx]) curImg.src = photos[idx].imageUrl;
-                if (idx > 0 && photos[idx - 1]) prevImg.src = photos[idx - 1].imageUrl;
-                else prevImg.src = '';
-                if (idx < photos.length - 1 && photos[idx + 1]) nextImg.src = photos[idx + 1].imageUrl;
-                else nextImg.src = '';
-                ppTrackDrag = 0;
-                ppTrackSnapping = false;
-                ppTrack.style.transition = 'none';
-                ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
-                ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
-                ppPreloadAdjacent(idx);
+                if (curImg.complete && curImg.naturalWidth > 0) {
+                    finishReset();
+                } else {
+                    curImg.onload = finishReset;
+                    curImg.onerror = finishReset;
+                }
             }
 
             function ppPreloadAdjacent(idx) {
                 var photos = ppSortedPhotos;
-                [idx - 2, idx + 2].forEach(function(i) {
+                // 预加载前后各2张，确保滑动时图片已就绪
+                [idx - 1, idx + 1, idx - 2, idx + 2].forEach(function(i) {
                     if (i >= 0 && i < photos.length && photos[i] && photos[i].imageUrl) {
                         var url = photos[i].imageUrl;
                         if (!ppPreloadCache[url]) {
@@ -7816,15 +7779,16 @@
                 ppSnapTo(targetDrag, function() {
                     ppSetTrackImages(newIdx);
                     ppSwipeLock = 0;
+                    // DOM操作在轨道重置后执行，避免reflow干扰CSS transition
+                    ppUpdateDots();
+                    var delBtn2 = document.getElementById('ppDeleteBtn');
+                    if (delBtn2) {
+                        delBtn2.style.display = (window.currentUser && photo.username === window.currentUser) ? 'flex' : 'none';
+                    }
                 });
                 document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
                 document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
                 document.getElementById('photoPreviewViewsCount').textContent = photo.views;
-                ppUpdateDots();
-                var delBtn2 = document.getElementById('ppDeleteBtn');
-                if (delBtn2) {
-                    delBtn2.style.display = (window.currentUser && photo.username === window.currentUser) ? 'flex' : 'none';
-                }
                 ppPreloadAdjacent(newIdx);
                 syncPhotoViewCount(photo);
             }
@@ -7977,12 +7941,8 @@
                     var p = sorted[i];
                     var timeStr = formatPhotoTime(p.timestamp);
                     var name = p.username || '未知用户';
-                    var isOwner = window.currentUser && p.username === window.currentUser;
                     html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="animation-delay:' + (i * 50) + 'ms" onclick="openPhotoPreview(' + i + ')">';
                     html += '<img src="' + p.imageUrl + '" alt="photo" class="pw-blur-in" data-src="' + p.imageUrl + '">';
-                    if (isOwner) {
-                        html += '<button class="pw-delete-btn" title="删除" onclick="event.stopPropagation();confirmDeletePhoto(\'' + escapeHtml(p.id) + '\')">🗑</button>';
-                    }
                     html += '<div class="pw-item-info">';
                     html += '<div class="pw-item-name">' + escapeHtml(name) + '</div>';
                     html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
@@ -8463,19 +8423,16 @@
 
             // ========== 执行删除照片 ==========
             window.doDeletePhoto = async function(photoId) {
+                // 统一转换为字符串比较，兼容 Supabase 数字 ID
+                var targetId = String(photoId);
                 var idx = -1;
                 for (var i = 0; i < photoWallData.length; i++) {
-                    if (photoWallData[i].id === photoId) { idx = i; break; }
+                    if (String(photoWallData[i].id) === targetId) { idx = i; break; }
                 }
                 if (idx < 0) { showToast('照片不存在'); return; }
                 var photo = photoWallData[idx];
 
-                // 如果正在预览该照片，先关闭
-                if (photoPreviewActive && photoPreviewCurrent && photoPreviewCurrent.id === photoId) {
-                    closePhotoPreview();
-                }
-
-                // 删除云端数据
+                // 删除云端数据（先删云端，再删本地）
                 if (photo.cloudId && window.sb) {
                     try {
                         await window.sb.from('posts').delete().eq('id', photo.cloudId);
@@ -8485,6 +8442,13 @@
                 // 删除本地数据
                 photoWallData.splice(idx, 1);
                 saveLocalPhotoWallData();
+
+                // 如果正在预览该照片，先关闭预览再刷新
+                if (photoPreviewActive && photoPreviewCurrent) {
+                    if (String(photoPreviewCurrent.id) === targetId || String(photoPreviewCurrent.cloudId) === targetId) {
+                        closePhotoPreview();
+                    }
+                }
 
                 // 重新渲染
                 await renderPhotoWall();
