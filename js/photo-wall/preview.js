@@ -404,9 +404,8 @@
                 '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">🗑️</button>';
             document.body.appendChild(container);
             overlay = container;
-            bindPreviewEvents(overlay);
-            ppEventsBound = true;
-        } else if (!ppEventsBound) {
+        }
+        if (!ppEventsBound) {
             bindPreviewEvents(overlay);
             ppEventsBound = true;
         }
