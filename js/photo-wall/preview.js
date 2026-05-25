@@ -7,6 +7,7 @@
     var ppMoved = false;
     var ppPhotoIdx = -1;
     var ppSwipeLock = 0;
+    var ppNavBusy = false;
     var ppSortedPhotos = [];
     window.ppSortedPhotos = ppSortedPhotos;
     var ppTrack = null;
@@ -274,6 +275,7 @@
             if (ppRafId) { clearTimeout(ppRafId); ppRafId = null; }
             if (callback) callback();
             ppSwipeLock = 0;
+            ppNavBusy = false;
         }
 
         var absDiff = Math.abs(ppTrackDrag - targetOffset);
@@ -308,24 +310,25 @@
     }
 
     function ppPrevPhoto() {
-        if (ppSwipeLock || ppPhotoIdx <= 0) return;
+        if (ppNavBusy || ppPhotoIdx <= 0) return;
         ppNavigatePhoto(-1);
     }
     window.ppPrevPhoto = ppPrevPhoto;
 
     function ppNextPhoto() {
-        if (ppSwipeLock || ppPhotoIdx >= ppSortedPhotos.length - 1) return;
+        if (ppNavBusy || ppPhotoIdx >= ppSortedPhotos.length - 1) return;
         ppNavigatePhoto(1);
     }
     window.ppNextPhoto = ppNextPhoto;
 
     function ppNavigatePhoto(direction) {
-        if (ppSwipeLock) return;
+        if (ppNavBusy) return;
         var newIdx = ppPhotoIdx + direction;
         if (newIdx < 0 || newIdx >= ppSortedPhotos.length) {
-            ppSnapTo(0);
+            if (Math.abs(ppTrackDrag) > 2) ppSnapTo(0);
             return;
         }
+        ppNavBusy = true;
         ppSwipeLock = 1;
         var photo = ppSortedPhotos[newIdx];
         var targetDrag = direction > 0 ? -ppVw : ppVw;
@@ -551,7 +554,6 @@
                 ppStart = { x: e.clientX, y: e.clientY, zx: ppZoom.tx, zy: ppZoom.ty, scale: ppZoom.scale, pointers: 1 };
             } else {
                 ppStart = { x: e.clientX, y: e.clientY, pointers: 1 };
-                ppSwipeLock = 0;
                 ppVelocitySamples = [];
                 ppVelCount = 0;
                 ppLastMoveX = e.clientX;
@@ -590,8 +592,8 @@
                 var newScale = Math.max(1, Math.min(6, (ppStart.scale || 1) * scaleDelta));
                 var dcx = cx - ppPinchPre.c.x, dcy = cy - ppPinchPre.c.y;
                 ppZoom.scale = newScale;
-                ppZoom.tx = dcx + ppStart.zx;
-                ppZoom.ty = dcy + ppStart.zy;
+                ppZoom.tx = dcx + ppZoom.tx;
+                ppZoom.ty = dcy + ppZoom.ty;
                 ppApplyPinchTransformImmediate();
                 return;
             }
@@ -677,7 +679,7 @@
             }
 
             if (Math.abs(ppTrackDrag) > 2) {
-                ppSnapTo(0);
+                if (!ppNavBusy) ppSnapTo(0);
             } else {
                 ppTrackDrag = 0;
                 ppApplySlideTrackImmediate();
@@ -685,14 +687,14 @@
 
             if (!ppMoved) {
                 var now2 = Date.now();
-                if (now2 - ppLastTap < 300 && !ppTapHandled) {
+                if (now2 - ppLastTap < 300 && !ppTapHandled && !ppNavBusy) {
                     ppTapHandled = true;
                     ppToggleZoom(e.clientX, e.clientY);
                 }
                 ppLastTap = now2;
                 clearTimeout(ppTapTimer);
                 ppTapTimer = setTimeout(function() {
-                    if (!ppTapHandled && !ppMoved && ppZoom.scale <= 1.01) {
+                    if (!ppTapHandled && !ppMoved && ppZoom.scale <= 1.01 && !ppNavBusy) {
                         ppTapHandled = true;
                         closePhotoPreview();
                     }

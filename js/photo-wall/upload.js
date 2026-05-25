@@ -1,4 +1,37 @@
 (function() {
+    function compressToTargetBlob(file, maxBytes) {
+        return new Promise(function(resolve, reject) {
+            if (file.size <= maxBytes) {
+                resolve(file);
+                return;
+            }
+            var img = new Image();
+            var url = URL.createObjectURL(file);
+            img.onload = function() {
+                URL.revokeObjectURL(url);
+                var canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                var ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                var quality = 0.9;
+                function tryQuality() {
+                    canvas.toBlob(function(blob) {
+                        if (!blob || blob.size <= maxBytes || quality <= 0.1) {
+                            resolve(blob || file);
+                            return;
+                        }
+                        quality -= 0.15;
+                        tryQuality();
+                    }, 'image/jpeg', quality);
+                }
+                tryQuality();
+            };
+            img.onerror = function() { URL.revokeObjectURL(url); resolve(file); };
+            img.src = url;
+        });
+    }
+
     window.triggerPhotoUpload = function() {
         if (!window.currentUser) {
             window.showToast('请先登录');
@@ -21,15 +54,22 @@
         try {
             var sb = window.sb;
             var ts = Date.now();
-            var baseName = ts + '_' + file.name;
+            var baseName = ts + '_' + file.name.replace(/\.[^.]+$/, '.jpg');
 
             var origPath = 'photos/' + baseName;
-            var thumbPromise = window.compressImage(file, 400, 400, 0.6).then(function(thumbDataUrl) {
+            var needCompress = file.size > 2 * 1024 * 1024;
+            if (needCompress) {
+                window.showToast('正在压缩图片...');
+            }
+            var compressed = await compressToTargetBlob(file, 2 * 1024 * 1024);
+            var finalSize = compressed.size;
+
+            var thumbPromise = window.compressImage(compressed, 400, 400, 0.6).then(function(thumbDataUrl) {
                 return fetch(thumbDataUrl).then(function(r) { return r.blob(); });
             });
             var [thumbBlob, { error: uploadErr }] = await Promise.all([
                 thumbPromise,
-                sb.storage.from('uploads').upload(origPath, file)
+                sb.storage.from('uploads').upload(origPath, compressed)
             ]);
             if (uploadErr) {
                 window.showToast('上传失败: ' + (uploadErr.message || '未知错误'));
@@ -44,7 +84,7 @@
             });
             if (thumbErr) {
                 var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
-                var contentJson = JSON.stringify({ type: 'photo_wall', fileSize: file.size });
+                var contentJson = JSON.stringify({ type: 'photo_wall', fileSize: finalSize });
                 var insertRes = await sb.from('posts').insert([{
                     user_name: window.currentUser,
                     content: contentJson,
@@ -64,7 +104,7 @@
             var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
             var thumbUrl = sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl;
 
-            var contentJson = JSON.stringify({ type: 'photo_wall', thumb: thumbUrl, fileSize: file.size });
+            var contentJson = JSON.stringify({ type: 'photo_wall', thumb: thumbUrl, fileSize: finalSize });
             var insertRes = await sb.from('posts').insert([{
                 user_name: window.currentUser,
                 content: contentJson,

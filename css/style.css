@@ -3554,7 +3554,7 @@
         }
         .photo-preview-overlay .pp-slide-img {
             will-change: transform;
-            transition: transform 0.15s ease, opacity 0.2s ease;
+            transition: opacity 0.2s ease;
         }
         .pp-ambient-bg {
             position: absolute;
@@ -3951,6 +3951,8 @@
         }
         .pp-info-modal-content {
             background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(1.6px);
+            -webkit-backdrop-filter: blur(1.6px);
             border-radius: 24px;
             padding: 0;
             max-width: 360px;
