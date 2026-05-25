@@ -7840,20 +7840,44 @@
                 });
             }
 
+            // --- 新增：轨道滑动的 requestAnimationFrame 缓存变量 ---
+            var ppTrackRaf = null;
+
             function ppApplySlideTrack() {
                 if (!ppTrack || ppTrackSnapping) return;
-                var offset = -ppVw + ppTrackDrag;
-                ppTrack.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
-                ppTrack.style.webkitTransform = 'translate3d(' + offset + 'px, 0, 0)';
+                
+                if (!ppTrackRaf) {
+                    ppTrackRaf = requestAnimationFrame(function() {
+                        var offset = -ppVw + ppTrackDrag;
+                        ppTrack.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
+                        ppTrack.style.webkitTransform = 'translate3d(' + offset + 'px, 0, 0)';
+                        ppTrackRaf = null;
+                    });
+                }
             }
+
+            // --- 新增：图像变换的 requestAnimationFrame 缓存变量 ---
+            var ppTransformRaf = null;
 
             function ppApplyImageTransform() {
                 var img = document.getElementById('photoPreviewImage');
                 if (!img) return;
-                img.classList.toggle('zoomed', ppZoom.scale > 1.01);
-                var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
-                img.style.transform = t;
-                img.style.webkitTransform = t;
+
+                // 性能瓶颈修复：避免在每一次手指微动时都无脑触发 classList 重排
+                var isZoomed = ppZoom.scale > 1.01;
+                if (isZoomed !== img.classList.contains('zoomed')) {
+                    img.classList.toggle('zoomed', isZoomed);
+                }
+
+                // 使用 requestAnimationFrame 把变换交给 GPU 批量渲染，实现原生级顺滑
+                if (!ppTransformRaf) {
+                    ppTransformRaf = requestAnimationFrame(function() {
+                        var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
+                        img.style.transform = t;
+                        img.style.webkitTransform = t;
+                        ppTransformRaf = null;
+                    });
+                }
             }
 
             function ppResetZoom() {
@@ -7903,82 +7927,48 @@
                 if (ppSwipeLock) return;
                 var newIdx = ppPhotoIdx + direction;
                 if (newIdx < 0 || newIdx >= ppSortedPhotos.length) {
-                    // 边界弹回
+                    // 到达边界，弹回
                     ppSnapTo(0);
                     return;
                 }
                 ppSwipeLock = 1;
                 var photo = ppSortedPhotos[newIdx];
-                photo.views = (photo.views || 0) + 1;
-                ppPhotoIdx = newIdx;
-                photoPreviewCurrent = photo;
-                saveLocalPhotoWallData();
-                updatePhotoViewDisplays(photo);
-                ppResetZoom();
 
-                // ===== 完整滑动逻辑：重新排布三个槽的图片，让用户看到动画 =====
-                var prevImg = document.getElementById('ppPrevImg');
-                var curImg = document.getElementById('photoPreviewImage');
-                var nextImg = document.getElementById('ppNextImg');
-                var photos = ppSortedPhotos;
+                // 计算目标偏移量：右滑展示右槽(-ppVw)，左滑展示左槽(ppVw)
+                var targetDrag = direction > 0 ? -ppVw : ppVw;
 
-                // 禁用轨道动画
-                ppTrack.style.transition = 'none';
-
-                if (direction > 0) {
-                    // 向右滑：
-                    // 1. 把当前图片放左槽，下一张放中槽，下下张放右槽
-                    prevImg.src = curImg.src;
-                    curImg.src = nextImg.src;
-                    if (newIdx + 1 < photos.length) {
-                        nextImg.src = photos[newIdx + 1].imageUrl;
-                    } else {
-                        nextImg.removeAttribute('src');
-                    }
-                    // 2. 把轨道跳到最右边 (-2*ppVw)，这样中槽（下一张）正好在屏幕右边
-                    ppTrack.style.transform = 'translate3d(' + (-2 * ppVw) + 'px, 0, 0)';
-                    ppTrack.style.webkitTransform = 'translate3d(' + (-2 * ppVw) + 'px, 0, 0)';
-                    ppTrackDrag = -ppVw;
-                } else {
-                    // 向左滑：
-                    // 1. 把上上张放左槽，上一张放中槽，当前图片放右槽
-                    if (newIdx - 1 >= 0) {
-                        prevImg.src = photos[newIdx - 1].imageUrl;
-                    } else {
-                        prevImg.removeAttribute('src');
-                    }
-                    nextImg.src = curImg.src;
-                    curImg.src = photos[newIdx].imageUrl;
-                    // 2. 把轨道跳到最左边 (0)，这样中槽（上一张）正好在屏幕左边
-                    ppTrack.style.transform = 'translate3d(0px, 0, 0)';
-                    ppTrack.style.webkitTransform = 'translate3d(0px, 0, 0)';
-                    ppTrackDrag = ppVw;
-                }
-
-                // 强制 reflow
-                ppTrack.offsetHeight;
-
-                // 更新环境光和信息
+                // 动画前先更新背景环境光，让视觉过度更连贯
                 updateAmbientBackground(photo.imageUrl);
-                document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
-                document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
-                document.getElementById('photoPreviewViewsCount').textContent = photo.views;
 
-                // 预加载相邻图片
-                ppPreloadAdjacent(newIdx);
+                // 核心修复：先执行物理滑动动画，等 300ms 动画结束后再执行数据替换
+                ppSnapTo(targetDrag, function() {
+                    // --- 此时用户已经看到了左/右侧已经预加载好的图片 ---
+                    photo.views = (photo.views || 0) + 1;
+                    ppPhotoIdx = newIdx;
+                    photoPreviewCurrent = photo;
 
-                // 现在把轨道滑回中间 (-ppVw)，这样看起来像是新图片从对应方向滑进来
-                ppSnapTo(0, function() {
-                    // 滑动完成后，重置轨道上的三个槽图片，为下一次滑动做准备
+                    saveLocalPhotoWallData();
+                    updatePhotoViewDisplays(photo);
+                    ppResetZoom();
+
+                    // 瞬间重新排布 3 个槽位的图片，并把轨道悄悄拉回正中间 (-ppVw)
+                    // 因为中间的图已经被换成了刚刚滑进来的图，视觉上完全无缝，彻底消灭黑屏！
                     ppSetTrackImages(newIdx);
+
+                    document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
+                    document.getElementById('photoPreviewTime').textContent = formatPhotoTime(photo.timestamp);
+                    document.getElementById('photoPreviewViewsCount').textContent = photo.views;
+
                     ppSwipeLock = 0;
                     ppUpdateDots();
+
                     var delBtn2 = document.getElementById('ppDeleteBtn');
                     if (delBtn2) {
                         delBtn2.style.display = (window.currentUser && photo.username === window.currentUser) ? 'flex' : 'none';
                     }
+
+                    syncPhotoViewCount(photo);
                 });
-                syncPhotoViewCount(photo);
             }
 
             function loadLocalPhotoWallData() {

@@ -1,11 +1,18 @@
 # 更新日志
 
+## v0.0.45 - 2026-05-25
+### 深度修复
+- 采用 Gemini 的专业修复方案，完全重写了 ppNavigatePhoto、ppApplyImageTransform 和 ppApplySlideTrack 三个核心函数：
+  - 彻底消除照片左右滑动黑屏：核心思路是先执行物理滑动动画（利用已经提前预加载在左右槽的图片），等 300ms 动画结束后再悄悄重新排布三个槽位并拉回轨道，视觉上完全无缝
+  - 优化缩放卡顿：新增 ppTransformRaf 缓存变量，使用 requestAnimationFrame 把图像变换交给 GPU 批量渲染；优化 classList 更新逻辑，避免手指微动时频繁触发重排
+  - 解决单指滑动拖影：新增 ppTrackRaf 缓存变量，使用 requestAnimationFrame 把轨道拖拽也加入 GPU 渲染队列，保证单指左右拖轨道时同样丝滑
+
 ## v0.0.44 - 2026-05-25
 ### 修复
-- 彻底修复照片左右滑动黑屏问题：重构 `ppNavigatePhoto` 逻辑，在滑动动画开始前先正确重新排布三个槽的图片，确保用户在滑动过程中看到连续的图片而非黑屏
-- 修复放大图片后无法单击返回的问题：修改 `document.addEventListener('click')` 回调，现在点击图片区域时，如果图片已放大则先缩小到 1 倍，未放大则直接关闭预览
+- 彻底修复照片左右滑动黑屏问题：重构 ppNavigatePhoto 逻辑，在滑动动画开始前先正确重新排布三个槽的图片，确保用户在滑动过程中看到连续的图片而非黑屏
+- 修复放大图片后无法单击返回的问题：修改 document.addEventListener('click') 回调，现在点击图片区域时，如果图片已放大则先缩小到 1 倍，未放大则直接关闭预览
 - 修复照片全屏预览重叠显示问题：移除导致重叠的 View Transitions API 相关代码，仅保留 CSS 淡入动画
-- 修复照片删除后刷新重新出现的问题：新增 `photoWallDeletedKey` 本地删除 ID 追踪机制，加载时自动过滤已删除照片；删除时同步删除云端记录和 Storage 文件
+- 修复照片删除后刷新重新出现的问题：新增 photoWallDeletedKey 本地删除 ID 追踪机制，加载时自动过滤已删除照片；删除时同步删除云端记录和 Storage 文件
 - 增强健壮性：添加 overlay 空值守卫，清理无效删除记录等
 
 ## v0.0.43 - 2026-05-25
