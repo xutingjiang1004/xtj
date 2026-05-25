@@ -3902,6 +3902,12 @@
         .pp-share-btn:active {
             transform: scale(0.95);
         }
+        .pp-share-btn.copied {
+            color: #059669;
+            background: rgba(5,150,105,0.35);
+            border-color: rgba(5,150,105,0.7);
+            transform: scale(1.12);
+        }
         /* 预览删除按钮 */
         .pp-delete-btn {
             position: absolute;
