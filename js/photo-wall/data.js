@@ -1,4 +1,4 @@
-(function() {
+﻿(function() {
     window.photoWallData = [];
 
     var photoWallKey = 'xtj_photos';
@@ -10,7 +10,7 @@
 
     function getDeletedPhotoIds() {
         try {
-            return JSON.parse(localStorage.getItem(photoWallDeletedKey)) || [];
+            return window.safeLocalStorageGetJSON(photoWallDeletedKey, []);
         } catch(e) {
             return [];
         }

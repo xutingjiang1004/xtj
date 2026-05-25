@@ -68,7 +68,7 @@
             document.getElementById('reportEvidenceInput').value = '';
             document.getElementById('reportEvidencePreview').textContent = '';
             var modal = document.getElementById('reportModal');
-            modal.style.display = 'flex';
+            modal.style.display = '';
             modal.classList.add('active');
         };
 

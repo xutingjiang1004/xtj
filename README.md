@@ -1,5 +1,29 @@
 # 更新日志
 
+## v0.0.54 - 2026-05-25
+### 照片预览体验全面修复 + 链接复制即时响应
+
+#### 1. 链接复制按钮交互优化
+- 重写 `shareCurrentPhoto` 复制逻辑：优先使用 `document.execCommand('copy')` 同步 API（<10ms 响应），`navigator.clipboard` 作为异步 fallback
+- 点击后即时视觉反馈：按钮瞬间变为绿色 ✓ 图标 + scale(1.12) 弹性放大 + `.copied` CSS 状态类，1.5 秒后自动恢复原始状态
+- 关闭重复点击保护：`btn._copying` 标志位防止并发复制
+- 失败兜底：异步 fallback 仍失败时创建 textarea 手动选中并提示用户
+
+#### 2. 缩放状态跨图切换残留修复
+- `ppResetZoom` 新增 `ppPinchPre` 和 `ppPinchStart` 完整重置，确保第 N 张的缩放/锚点状态不会泄漏到第 N+1 张
+
+#### 3. 双指缩放误识别防护
+- 新增 `ppPinchMinDist` / `ppPinchMaxDist` 距离追踪
+- pointerup 中判断双指间距变化 < 10px 则自动回退缩放，将误触的 pinch 手势正确识别为无效
+
+#### 4. localStorage 崩溃保护
+- 新增全局 `window.safeLocalStorageGetJSON(key, fallback)` 函数，try-catch 包裹 `JSON.parse`，损坏时自动清除存储并返回 fallback
+- 全项目 25 处 `JSON.parse(localStorage.getItem(...))` 替换为安全版本，杜绝因存储损坏导致的页面崩溃
+
+#### 5. 举报弹窗 display 属性冲突修复
+- `reportModal` 移除内联 `display:none`，统一依赖 `.modal-overlay` 的 `opacity:0; pointer-events:none` CSS 机制
+- `openReport` 改用 `style.display = ''` + `classList.add('active')`，与 `closeModal` 的 `style.display = 'none'` + `classList.remove('active')` 配对
+
 ## v0.0.53 - 2026-05-25
 ### 照片墙封面修复 + 滑动性能深度优化
 

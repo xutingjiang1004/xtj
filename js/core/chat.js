@@ -1,4 +1,4 @@
-(function() {
+﻿(function() {
     // ===================== 聊天系统 (Dock 兼容版) =====================
     var chatRealtime = null;
     window.chatRealtime = chatRealtime;
@@ -334,7 +334,7 @@
         // 当前用户优先使用localStorage权威缓存
         if (window.currentUser) {
             try {
-                var cachedAvatars = JSON.parse(localStorage.getItem(window.AVATAR_CACHE_KEY) || '{}');
+                var cachedAvatars = window.safeLocalStorageGetJSON(window.AVATAR_CACHE_KEY, {});
                 if (cachedAvatars[window.currentUser]) {
                     window.avatarCache[window.currentUser] = cachedAvatars[window.currentUser];
                 }

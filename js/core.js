@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
             const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
             if (typeof window.supabase === 'undefined') {
@@ -7,7 +7,18 @@
                 return;
             }
             const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            window.sb = sb;
+window.sb = sb;
+
+window.safeLocalStorageGetJSON = function(key, fallback) {
+    try {
+        var v = localStorage.getItem(key);
+        if (v === null) return fallback;
+        return JSON.parse(v);
+    } catch(e) {
+        localStorage.removeItem(key);
+        return fallback;
+    }
+};
 
             const ADMIN_NAME = "xxz";
             const AVATAR_CACHE_KEY = "xtj_avatars";
@@ -324,7 +335,7 @@
                 var showAvatar = avatarCache[userName];
                 if (!showAvatar && userName === currentUser) {
                     try {
-                        var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                        var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                         if (cachedAvatars[currentUser]) {
                             showAvatar = cachedAvatars[currentUser];
                             avatarCache[currentUser] = cachedAvatars[currentUser];
@@ -359,7 +370,7 @@
                     // 当前用户优先使用localStorage权威缓存
                     if (userName === currentUser) {
                         try {
-                            var cv = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                            var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                             if (cv[currentUser]) {
                                 avatarCache[currentUser] = cv[currentUser];
                                 if (document.getElementById('userProfileModal').classList.contains('active')) {
@@ -472,7 +483,7 @@
                 
                 // localStorage权威优先：先检查本地缓存
                 try {
-                    var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                     if (cachedAvatars[currentUser]) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
                         avatarEl.innerHTML = '<img src="' + cachedAvatars[currentUser] + '" alt="头像">';
@@ -499,7 +510,7 @@
                         avatarCache[currentUser] = avatarRes.data[0].media_url;
                         // 同步到localStorage
                         try {
-                            var cv = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                            var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                             cv[currentUser] = avatarRes.data[0].media_url;
                             localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cv));
                         } catch(e) {}
@@ -625,7 +636,7 @@
                     avatarCache[currentUser] = avatarUrl;
                     // 保存到localStorage持久化
                     try {
-                        var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                        var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                         cachedAvatars[currentUser] = avatarUrl;
                         localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cachedAvatars));
                     } catch(e) {}
@@ -684,7 +695,7 @@
             async function updateAllAvatars() {
                 // 更新我的页面的头像（localStorage权威优先）
                 try {
-                    var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                     if (cachedAvatars[currentUser]) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
                         const profileAvatar = document.getElementById('profileAvatar');
@@ -711,7 +722,7 @@
                             avatarCache[currentUser] = avatarRes.data[0].media_url;
                             // 同步到localStorage
                             try {
-                                var cv = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                                var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                                 cv[currentUser] = avatarRes.data[0].media_url;
                                 localStorage.setItem(AVATAR_CACHE_KEY, JSON.stringify(cv));
                             } catch(e) {}
@@ -816,7 +827,7 @@
 
             async function loadUserAvatar() {
                 try {
-                    var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                    var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                     if (cachedAvatars[currentUser]) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
                         updateAllAvatarElements(cachedAvatars[currentUser]);
@@ -1269,7 +1280,7 @@
 
             function getViewHistory() {
                 try {
-                    return JSON.parse(localStorage.getItem(VIEW_HISTORY_KEY) || '[]');
+                    return window.safeLocalStorageGetJSON(VIEW_HISTORY_KEY, []);
                 } catch(e) { return []; }
             }
 
@@ -1581,7 +1592,7 @@
                         });
                         if (currentUser) {
                             try {
-                                var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                                var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                                 if (cachedAvatars[currentUser]) {
                                     avatarCache[currentUser] = cachedAvatars[currentUser];
                                 }
@@ -1599,7 +1610,7 @@
                     if (username === currentUser) {
                         // 只从localStorage里拿当前用户自己的头像
                         try {
-                            var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                            var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                             avatarUrl = cachedAvatars[username];
                             if (avatarUrl) avatarCache[username] = avatarUrl;
                         } catch(e) {}
@@ -2465,7 +2476,7 @@
                 // 当前用户优先使用localStorage权威缓存
                 if (currentUser) {
                     try {
-                        var cachedAvatars = JSON.parse(localStorage.getItem(AVATAR_CACHE_KEY) || '{}');
+                        var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                         if (cachedAvatars[currentUser]) {
                             avatarCache[currentUser] = cachedAvatars[currentUser];
                         }
