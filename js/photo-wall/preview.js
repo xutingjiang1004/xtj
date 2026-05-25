@@ -99,7 +99,6 @@
             imgEl.style.opacity = '0';
             return;
         }
-        imgEl.style.opacity = '0';
         var loadDone = false;
         function show() {
             if (loadDone) return;
@@ -110,17 +109,9 @@
         }
         imgEl.addEventListener('load', show);
         imgEl.addEventListener('error', show);
-        var cached = ppImageCache[url];
-        if (cached && cached !== 'loading' && cached.complete && cached.naturalWidth > 0) {
-            imgEl.src = cached.src;
-            if (imgEl.complete && imgEl.naturalWidth > 0) {
-                show();
-            }
-        } else {
-            imgEl.src = url;
-            if (imgEl.complete && imgEl.naturalWidth > 0) {
-                show();
-            }
+        imgEl.src = url;
+        if (imgEl.complete && imgEl.naturalWidth > 0) {
+            show();
         }
         setTimeout(function() {
             if (!loadDone) show();
@@ -280,9 +271,9 @@
             ppTrack.removeEventListener('transitionend', onSnapEnd);
             ppTrack.classList.remove('snapping');
             ppTrackSnapping = false;
-            ppSwipeLock = 0;
             if (ppRafId) { clearTimeout(ppRafId); ppRafId = null; }
             if (callback) callback();
+            ppSwipeLock = 0;
         }
 
         var absDiff = Math.abs(ppTrackDrag - targetOffset);
@@ -351,7 +342,6 @@
                 document.getElementById('photoPreviewUser').textContent = photo.username || '未知用户';
                 document.getElementById('photoPreviewTime').textContent = window.formatPhotoTime(photo.timestamp);
                 document.getElementById('photoPreviewViewsCount').textContent = photo.views;
-                ppSwipeLock = 0;
                 ppUpdateDots();
                 ppUpdateNavArrows();
                 var delBtn2 = document.getElementById('ppDeleteBtn');
@@ -521,6 +511,12 @@
     }
     window.deletePhotoFromPreview = deletePhotoFromPreview;
 
+    function ppGetPointerPoints() {
+        var pts = [];
+        ppPointers.forEach(function(v) { pts.push(v); });
+        return pts;
+    }
+
     function bindPreviewEvents(overlay) {
         var interactiveElements = overlay.querySelectorAll('.photo-preview-close, .pp-info-btn, .pp-share-btn, .pp-delete-btn, .photo-preview-info, .pp-info-modal, .pp-info-modal-close, .pp-dots, .pp-nav-arrow');
         for (var ie = 0; ie < interactiveElements.length; ie++) {
@@ -530,18 +526,34 @@
         }
 
         overlay.addEventListener('pointerdown', function(e) {
-            ppMoved = false;
             ppTapHandled = false;
+            ppPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+            if (ppPointers.size >= 2) {
+                ppMoved = true;
+                var pts = ppGetPointerPoints();
+                if (pts.length >= 2) {
+                    var c0 = pts[0], c1 = pts[1];
+                    var d = Math.sqrt(Math.pow(c1.x - c0.x, 2) + Math.pow(c1.y - c0.y, 2));
+                    var cx = (c0.x + c1.x) / 2, cy = (c0.y + c1.y) / 2;
+                    ppStart = { x: cx, y: cy, zx: ppZoom.tx, zy: ppZoom.ty, scale: ppZoom.scale || 1, pointers: 2 };
+                    ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } };
+                }
+                if (ppTrackSnapping) {
+                    ppTrackSnapping = false;
+                    if (ppRafId) { cancelAnimationFrame(ppRafId); ppRafId = null; }
+                }
+                return;
+            }
+
+            ppMoved = false;
             if (ppZoom.scale > 1.01) {
                 ppStart = { x: e.clientX, y: e.clientY, zx: ppZoom.tx, zy: ppZoom.ty, scale: ppZoom.scale, pointers: 1 };
-                ppPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-                if (ppPointers.size >= 2) {
-                    ppStart = null;
-                }
             } else {
-                ppStart = { x: e.clientX, y: e.clientY };
+                ppStart = { x: e.clientX, y: e.clientY, pointers: 1 };
                 ppSwipeLock = 0;
                 ppVelocitySamples = [];
+                ppVelCount = 0;
                 ppLastMoveX = e.clientX;
                 ppLastMoveT = performance.now();
                 if (ppTrackSnapping) {
@@ -553,35 +565,43 @@
 
         overlay.addEventListener('pointermove', function(e) {
             if (!ppStart) return;
-            if (ppZoom.scale > 1.01) {
-                ppPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-                if (ppPointers.size >= 2) {
-                    var pts = [];
-                    ppPointers.forEach(function(v) { pts.push(v); });
-                    if (pts.length < 2) return;
-                    var c0 = pts[0], c1 = pts[1];
-                    var dx = c1.x - c0.x, dy = c1.y - c0.y;
-                    var d = Math.sqrt(dx * dx + dy * dy);
-                    var cx = (c0.x + c1.x) / 2, cy = (c0.y + c1.y) / 2;
-                    if (!ppPinchPre.pts[0] || ppPinchPre.d === 0) {
-                        ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } };
-                        return;
-                    }
-                    if (ppPinchPre.d === 0 || d === 0) { ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } }; return; }
-                    var scaleDelta = d / ppPinchPre.d;
-                    var newScale = Math.max(1, Math.min(6, (ppStart.scale || 1) * scaleDelta));
-                    var dcx = cx - ppPinchPre.c.x, dcy = cy - ppPinchPre.c.y;
-                    ppZoom.scale = newScale;
-                    ppZoom.tx = dcx + (ppZoom.scale > 1 ? ppZoom.tx : 0);
-                    ppZoom.ty = dcy + (ppZoom.scale > 1 ? ppZoom.ty : 0);
+            ppPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+            if (ppStart.pointers >= 2 || ppPointers.size >= 2) {
+                var pts = ppGetPointerPoints();
+                if (pts.length < 2) {
+                    var dx = e.clientX - ppStart.x;
+                    var dy = e.clientY - ppStart.y;
+                    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) ppMoved = true;
+                    ppZoom.tx = ppStart.zx + dx;
+                    ppZoom.ty = ppStart.zy + dy;
                     ppApplyPinchTransformImmediate();
                     return;
                 }
-                var dx = e.clientX - ppStart.x;
-                var dy = e.clientY - ppStart.y;
-                if (Math.abs(dx) > 3 || Math.abs(dy) > 3) ppMoved = true;
-                ppZoom.tx = ppStart.zx + dx;
-                ppZoom.ty = ppStart.zy + dy;
+                var c0 = pts[0], c1 = pts[1];
+                var d = Math.sqrt(Math.pow(c1.x - c0.x, 2) + Math.pow(c1.y - c0.y, 2));
+                var cx = (c0.x + c1.x) / 2, cy = (c0.y + c1.y) / 2;
+                if (!ppPinchPre.pts[0] || ppPinchPre.d === 0) {
+                    ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } };
+                    return;
+                }
+                if (ppPinchPre.d === 0 || d === 0) { ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } }; return; }
+                var scaleDelta = d / ppPinchPre.d;
+                var newScale = Math.max(1, Math.min(6, (ppStart.scale || 1) * scaleDelta));
+                var dcx = cx - ppPinchPre.c.x, dcy = cy - ppPinchPre.c.y;
+                ppZoom.scale = newScale;
+                ppZoom.tx = dcx + ppStart.zx;
+                ppZoom.ty = dcy + ppStart.zy;
+                ppApplyPinchTransformImmediate();
+                return;
+            }
+
+            if (ppZoom.scale > 1.01) {
+                var dx1 = e.clientX - ppStart.x;
+                var dy1 = e.clientY - ppStart.y;
+                if (Math.abs(dx1) > 3 || Math.abs(dy1) > 3) ppMoved = true;
+                ppZoom.tx = ppStart.zx + dx1;
+                ppZoom.ty = ppStart.zy + dy1;
                 ppApplyPinchTransformImmediate();
             } else {
                 var dx2 = e.clientX - ppStart.x;
@@ -602,15 +622,32 @@
             if (ppPointers.size < 2) {
                 ppPinchPre = { pts: [null, null], d: 0, c: { x: 0, y: 0 } };
             }
-            if (!ppStart) return;
-            if (ppZoom.scale > 1.01) {
-                ppStart = null;
-                if (ppPointers.size === 0) {
-                    if (ppZoom.scale < 1.02) ppResetZoom();
+
+            if (!ppStart) {
+                if (ppPointers.size === 0 && ppZoom.scale > 1.01 && ppZoom.scale < 1.02) {
+                    ppResetZoom();
                 }
                 return;
             }
+
+            if (ppStart.pointers >= 2) {
+                ppStart = null;
+                if (ppPointers.size === 0 && ppZoom.scale < 1.02) {
+                    ppResetZoom();
+                }
+                return;
+            }
+
+            if (ppZoom.scale > 1.01) {
+                ppStart = null;
+                if (ppPointers.size === 0 && ppZoom.scale < 1.02) {
+                    ppResetZoom();
+                }
+                return;
+            }
+
             if (ppTrackSnapping) { ppStart = null; return; }
+
             var dx = ppTrackDrag;
             var now = performance.now();
             var vx = 0;
@@ -633,11 +670,19 @@
             }
             ppStart = null;
             ppVelocitySamples = [];
+
             if (targetDir !== 0) {
                 ppNavigatePhoto(targetDir);
-            } else {
-                ppSnapTo(0);
+                return;
             }
+
+            if (Math.abs(ppTrackDrag) > 2) {
+                ppSnapTo(0);
+            } else {
+                ppTrackDrag = 0;
+                ppApplySlideTrackImmediate();
+            }
+
             if (!ppMoved) {
                 var now2 = Date.now();
                 if (now2 - ppLastTap < 300 && !ppTapHandled) {
@@ -647,7 +692,7 @@
                 ppLastTap = now2;
                 clearTimeout(ppTapTimer);
                 ppTapTimer = setTimeout(function() {
-                    if (!ppTapHandled && !ppMoved) {
+                    if (!ppTapHandled && !ppMoved && ppZoom.scale <= 1.01) {
                         ppTapHandled = true;
                         closePhotoPreview();
                     }
@@ -660,7 +705,13 @@
             if (ppPointers.size < 2) {
                 ppPinchPre = { pts: [null, null], d: 0, c: { x: 0, y: 0 } };
             }
+        });
+
+        overlay.addEventListener('pointercancel', function(e) {
+            ppPointers.delete(e.pointerId);
             ppStart = null;
+            ppPinchPre = { pts: [null, null], d: 0, c: { x: 0, y: 0 } };
+            ppVelocitySamples = [];
         });
 
         overlay.addEventListener('gesturestart', function(e) { e.preventDefault(); });
