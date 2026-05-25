@@ -126,45 +126,6 @@
 
             </div>
         </div>
-        <!-- photoPreviewOverlay 必须在 body 直接子级，避免父级 transform 破坏 position:fixed -->
-        <div class="photo-preview-overlay" id="photoPreviewOverlay">
-            <div class="pp-ambient-bg" id="ppAmbientBg"></div>
-            <div class="pp-dots" id="ppDots"></div>
-            <button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>
-            <button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张">
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张">
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-            <div class="photo-preview-image-wrapper" id="ppImageWrapper">
-                <div class="pp-slide-track" id="ppSlideTrack">
-                    <div class="pp-slide-slot"><img class="pp-slide-img" id="ppPrevImg" src="" alt="" draggable="false" loading="eager"></div>
-                    <div class="pp-slide-slot"><img class="pp-slide-img" id="photoPreviewImage" src="" alt="preview" draggable="false" loading="eager"></div>
-                    <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false" loading="eager"></div>
-                </div>
-            </div>
-            <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>
-            <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="shareCurrentPhoto()">&#x1F517;</button>
-            <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="deleteCurrentPhoto()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
-            
-            <!-- 照片信息弹窗 -->
-            <div class="pp-info-modal" id="ppInfoModal" style="display:none;">
-                <div class="pp-info-modal-content">
-                    <div class="pp-info-modal-header">
-                        <span class="pp-info-modal-title">照片详情</span>
-                        <button class="pp-info-modal-close" onclick="closePhotoInfo()">×</button>
-                    </div>
-                    <div class="pp-info-modal-body" id="ppInfoModalBody">
-                    </div>
-                </div>
-            </div>
-            <div class="photo-preview-info">
-                <span class="pp-user" id="photoPreviewUser"></span>
-                <span class="pp-time" id="photoPreviewTime"></span>
-                <span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg><span id="photoPreviewViewsCount">0</span></span>
-            </div>
-        </div>
         <div class="dock-panel" id="panelProfile">
             <div class="dock-profile-container">
                 <div class="profile-header">
@@ -344,6 +305,46 @@
             </svg>
         </button>
     </div>
+    </div>
+
+    <!-- 照片墙全屏预览 - 必须在 body 直接子级，避免父级 transform 破坏 position:fixed -->
+    <div class="photo-preview-overlay" id="photoPreviewOverlay">
+        <div class="pp-ambient-bg" id="ppAmbientBg"></div>
+        <div class="pp-dots" id="ppDots"></div>
+        <button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>
+        <button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="photo-preview-image-wrapper" id="ppImageWrapper">
+            <div class="pp-slide-track" id="ppSlideTrack">
+                <div class="pp-slide-slot"><img class="pp-slide-img" id="ppPrevImg" src="" alt="" draggable="false" loading="eager"></div>
+                <div class="pp-slide-slot"><img class="pp-slide-img" id="photoPreviewImage" src="" alt="preview" draggable="false" loading="eager"></div>
+                <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false" loading="eager"></div>
+            </div>
+        </div>
+        <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>
+        <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="shareCurrentPhoto()">&#x1F517;</button>
+        <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="deleteCurrentPhoto()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
+        
+        <!-- 照片信息弹窗 -->
+        <div class="pp-info-modal" id="ppInfoModal" style="display:none;">
+            <div class="pp-info-modal-content">
+                <div class="pp-info-modal-header">
+                    <span class="pp-info-modal-title">照片详情</span>
+                    <button class="pp-info-modal-close" onclick="closePhotoInfo()">×</button>
+                </div>
+                <div class="pp-info-modal-body" id="ppInfoModalBody">
+                </div>
+            </div>
+        </div>
+        <div class="photo-preview-info">
+            <span class="pp-user" id="photoPreviewUser"></span>
+            <span class="pp-time" id="photoPreviewTime"></span>
+            <span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg><span id="photoPreviewViewsCount">0</span></span>
+        </div>
     </div>
 
     <!-- ========== 模态框(保留) ========== -->

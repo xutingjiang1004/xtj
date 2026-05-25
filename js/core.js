@@ -36,6 +36,19 @@
         };
         if (!window.openReport) window.openReport = _openReportOrigStub;
         const viewTracked = new Set();
+        let postVisibilityObserver = null;
+        function getPostVisibilityObserver() {
+            if (!postVisibilityObserver) {
+                postVisibilityObserver = new IntersectionObserver(e => {
+                    e.forEach(i => {
+                        if (i.isIntersecting) {
+                            i.target.classList.add('visible');
+                        }
+                    });
+                }, { threshold: 0.05 });
+            }
+            return postVisibilityObserver;
+        }
         const CACHE_KEY = "xtj_feed_cache";
         const CACHE_DURATION = 5 * 60 * 1000; // 缓存5分钟
 
@@ -852,7 +865,7 @@
                 window.addEventListener('resize', () => {
                     if (resizeTimeout) clearTimeout(resizeTimeout);
                     resizeTimeout = setTimeout(resize, 100);
-                });
+                }, { passive: true });
                 resize();
 
                 for (let i = 0; i < 40; i++) drops.push({ 
@@ -1479,16 +1492,9 @@
                     feed.insertBefore(tempContainer.firstChild, sentinel);
                 }
                 
-                // 为新帖子添加进入动画观察
+                // 为新帖子添加进入动画观察（复用全局观察器）
                 const newPosts = feed.querySelectorAll('.post:not(.visible)');
-                const observer = new IntersectionObserver(e => {
-                    e.forEach(i => {
-                        if (i.isIntersecting) {
-                            i.target.classList.add('visible');
-                        }
-                    });
-                }, { threshold: 0.05 });
-                newPosts.forEach(p => observer.observe(p));
+                newPosts.forEach(p => getPostVisibilityObserver().observe(p));
                 
                 // 更新统计
                 updateFeedStats();
@@ -1648,16 +1654,10 @@
             }
 
             function initPostScrollAnimation() {
-                const observer = new IntersectionObserver(e => {
-                    e.forEach(i => {
-                        if (i.isIntersecting) {
-                            i.target.classList.add('visible');
-                        }
-                    });
-                }, { threshold: 0.05 });
-                document.querySelectorAll('.post').forEach(p => observer.observe(p));
+                document.querySelectorAll('.post').forEach(p => getPostVisibilityObserver().observe(p));
             }
 
+            let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
             function updateFeedStats() {
                 var posts = document.querySelectorAll('.post');
                 var totalLikes = 0, totalComments = 0, totalViews = 0;
@@ -1670,9 +1670,9 @@
                     if (lm) totalLikes += parseInt(lm[1]);
                     if (cm) totalComments += parseInt(cm[1]);
                 });
-                var sPosts = document.getElementById('sPosts');
-                var sViews = document.getElementById('sViews');
-                var sLikes = document.getElementById('sLikes');
+                var sPosts = _cachedSPosts || (_cachedSPosts = document.getElementById('sPosts'));
+                var sViews = _cachedSViews || (_cachedSViews = document.getElementById('sViews'));
+                var sLikes = _cachedSLikes || (_cachedSLikes = document.getElementById('sLikes'));
                 if (sPosts) sPosts.textContent = posts.length;
                 if (sViews) sViews.textContent = totalViews;
                 if (sLikes) sLikes.textContent = totalLikes + totalComments;
@@ -2484,7 +2484,8 @@
                     // 缓存消息
                     _chatCache[cacheKey] = msgs || [];
                     const toMark = (msgs || []).filter(m => m.user_name === userName && m.media_url === currentUser && (m.views || 0) === 0);
-                    for (const m of toMark) { try { await sb.rpc("increment_post_views", { p_post_id: m.id }); m.views = 1; } catch(e) {} }
+                    await Promise.all(toMark.map(m => sb.rpc("increment_post_views", { p_post_id: m.id }).catch(() => {})));
+                    toMark.forEach(m => { m.views = 1; });
                     markMessagesRead(userName);
                     renderDockMessages(msgs || [], forceScroll);
                 } catch(e) {
