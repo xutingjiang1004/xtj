@@ -3522,10 +3522,10 @@
         }
         .photo-preview-overlay.active {
             display: flex;
-            animation: ppFadeIn 0.2s ease;
+            animation: ppFadeIn 0.35s cubic-bezier(0.16,1,0.3,1);
         }
         .photo-preview-overlay.pp-closing {
-            animation: ppFadeOut 0.25s ease forwards;
+            animation: ppFadeOut 0.3s cubic-bezier(0.4,0,0.2,1) forwards;
         }
         @keyframes ppFadeIn {
             0% { opacity: 0; }
@@ -3534,6 +3534,19 @@
         @keyframes ppFadeOut {
             0% { opacity: 1; }
             100% { opacity: 0; }
+        }
+        .photo-preview-overlay.active .pp-slide-track {
+            animation: ppTrackEnter 0.4s cubic-bezier(0.16,1,0.3,1);
+        }
+        @keyframes ppTrackEnter {
+            0% {
+                opacity: 0;
+                transform: translate3d(-100vw, 0, 0) scale(0.95);
+            }
+            100% {
+                opacity: 1;
+                transform: translate3d(-100vw, 0, 0) scale(1);
+            }
         }
         .photo-preview-overlay .pp-slide-img {
             will-change: transform;
@@ -3565,6 +3578,21 @@
             border: none;
             line-height: 1;
             z-index: 10;
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+        .photo-preview-overlay.active .photo-preview-close {
+            animation: ppCloseEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.1s forwards;
+        }
+        @keyframes ppCloseEnter {
+            0% {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
         .photo-preview-close:hover {
             background: rgba(255,255,255,0.25);
@@ -3590,8 +3618,21 @@
             transition: all 0.3s cubic-bezier(0.16,1,0.3,1);
             pointer-events: auto;
             transform: translateY(-50%);
-            opacity: 1;
+            opacity: 0;
             box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+        }
+        .photo-preview-overlay.active .pp-nav-arrow {
+            animation: ppNavEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.15s forwards;
+        }
+        @keyframes ppNavEnter {
+            0% {
+                opacity: 0;
+                transform: translateY(-50%) scale(0.8);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(-50%) scale(1);
+            }
         }
         .pp-nav-prev {
             left: calc(12px + env(safe-area-inset-left, 0px));
@@ -3647,6 +3688,9 @@
             -webkit-touch-callout: none;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
+            contain: layout paint style;
+            transform-style: preserve-3d;
+            -webkit-transform-style: preserve-3d;
         }
         .pp-slide-track.snapping {
             transition: transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -3661,6 +3705,9 @@
             justify-content: center;
             flex-shrink: 0;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0a0a0a 100%);
+            will-change: transform;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
         }
         .pp-slide-slot::before {
             content: '';
@@ -3690,12 +3737,16 @@
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
             transform: translateZ(0);
+            -webkit-transform: translateZ(0);
             cursor: zoom-in;
             user-select: none;
             -webkit-user-select: none;
             -webkit-user-drag: none;
             touch-action: none;
             transition: opacity 0.35s ease;
+            contain: strict;
+            -webkit-font-smoothing: antialiased;
+            image-rendering: -webkit-optimize-contrast;
         }
         .pp-slide-img[src=""] { opacity: 0; }
         .pp-slide-img.zoomed {
@@ -3723,6 +3774,21 @@
             -webkit-backdrop-filter: blur(4px);
             pointer-events: none;
             transition: opacity 0.35s ease;
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        .photo-preview-overlay.active .photo-preview-info {
+            animation: ppInfoEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.2s forwards;
+        }
+        @keyframes ppInfoEnter {
+            0% {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
         .photo-preview-overlay.pp-info-hidden .photo-preview-info {
             opacity: 0;
