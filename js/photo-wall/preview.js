@@ -27,6 +27,7 @@
     var ppTrackRaf = null;
     var ppTransformRaf = null;
     var ppPinchPre = { pts: [null, null], d: 0, c: { x: 0, y: 0 } };
+    var ppPinchStart = { dist: 0, scale: 1, ax: 0, ay: 0 };
     var ppRefreshRate = 60;
     var ppFrameBudget = 16;
     var photoPreviewActive = false;
@@ -533,14 +534,20 @@
             ppPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
             if (ppPointers.size >= 2) {
-                ppMoved = true;
                 var pts = ppGetPointerPoints();
                 if (pts.length >= 2) {
                     var c0 = pts[0], c1 = pts[1];
                     var d = Math.sqrt(Math.pow(c1.x - c0.x, 2) + Math.pow(c1.y - c0.y, 2));
                     var cx = (c0.x + c1.x) / 2, cy = (c0.y + c1.y) / 2;
-                    ppStart = { x: cx, y: cy, zx: ppZoom.tx, zy: ppZoom.ty, scale: ppZoom.scale || 1, pointers: 2 };
-                    ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } };
+                    var vw2 = ppVw / 2, vh2 = window.innerHeight / 2;
+                    var s = ppZoom.scale || 1;
+                    ppPinchStart = {
+                        dist: d,
+                        scale: s,
+                        ax: (cx - vw2) / s - ppZoom.tx,
+                        ay: (cy - vh2) / s - ppZoom.ty
+                    };
+                    ppStart = { x: cx, y: cy, zx: ppZoom.tx, zy: ppZoom.ty, pointers: 2 };
                 }
                 if (ppTrackSnapping) {
                     ppTrackSnapping = false;
@@ -551,7 +558,7 @@
 
             ppMoved = false;
             if (ppZoom.scale > 1.01) {
-                ppStart = { x: e.clientX, y: e.clientY, zx: ppZoom.tx, zy: ppZoom.ty, scale: ppZoom.scale, pointers: 1 };
+                ppStart = { x: e.clientX, y: e.clientY, zx: ppZoom.tx, zy: ppZoom.ty, pointers: 1 };
             } else {
                 ppStart = { x: e.clientX, y: e.clientY, pointers: 1 };
                 ppVelocitySamples = [];
@@ -575,28 +582,26 @@
                     var dx = e.clientX - ppStart.x;
                     var dy = e.clientY - ppStart.y;
                     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) ppMoved = true;
-                    var s = ppZoom.scale || 1;
-                    ppZoom.tx = ppStart.zx + dx / s;
-                    ppZoom.ty = ppStart.zy + dy / s;
+                    ppZoom.tx = ppStart.zx + dx;
+                    ppZoom.ty = ppStart.zy + dy;
                     ppApplyPinchTransformImmediate();
                     return;
                 }
                 var c0 = pts[0], c1 = pts[1];
                 var d = Math.sqrt(Math.pow(c1.x - c0.x, 2) + Math.pow(c1.y - c0.y, 2));
                 var cx = (c0.x + c1.x) / 2, cy = (c0.y + c1.y) / 2;
+
                 if (!ppPinchPre.pts[0] || ppPinchPre.d === 0) {
                     ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } };
                     return;
                 }
                 if (ppPinchPre.d === 0 || d === 0) { ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } }; return; }
-                var scaleDelta = d / ppPinchPre.d;
-                var sOld = ppZoom.scale || 1;
-                var sNew = Math.max(1, Math.min(6, (ppStart.scale || 1) * scaleDelta));
-                var dcx = cx - ppPinchPre.c.x, dcy = cy - ppPinchPre.c.y;
+
+                var sNew = Math.max(1, Math.min(6, ppPinchStart.scale * (d / ppPinchStart.dist)));
                 var vw2 = ppVw / 2, vh2 = window.innerHeight / 2;
-                ppZoom.tx = ppZoom.tx + (cx - vw2) * (1 / sNew - 1 / sOld) + dcx / sNew;
-                ppZoom.ty = ppZoom.ty + (cy - vh2) * (1 / sNew - 1 / sOld) + dcy / sNew;
                 ppZoom.scale = sNew;
+                ppZoom.tx = cx - vw2 - ppPinchStart.ax * sNew;
+                ppZoom.ty = cy - vh2 - ppPinchStart.ay * sNew;
                 ppPinchPre = { pts: [c0, c1], d: d, c: { x: cx, y: cy } };
                 ppApplyPinchTransformImmediate();
                 return;
@@ -606,9 +611,8 @@
                 var dx1 = e.clientX - ppStart.x;
                 var dy1 = e.clientY - ppStart.y;
                 if (Math.abs(dx1) > 3 || Math.abs(dy1) > 3) ppMoved = true;
-                var s = ppZoom.scale;
-                ppZoom.tx = ppStart.zx + dx1 / s;
-                ppZoom.ty = ppStart.zy + dy1 / s;
+                ppZoom.tx = ppStart.zx + dx1;
+                ppZoom.ty = ppStart.zy + dy1;
                 ppApplyPinchTransformImmediate();
             } else {
                 var dx2 = e.clientX - ppStart.x;
@@ -630,18 +634,11 @@
                 ppPinchPre = { pts: [null, null], d: 0, c: { x: 0, y: 0 } };
             }
 
-            if (!ppStart) {
-                if (ppPointers.size === 0 && ppZoom.scale > 1.01 && ppZoom.scale < 1.02) {
-                    ppResetZoom();
-                }
-                return;
-            }
+            if (!ppStart) return;
 
-            if (ppStart && ppStart.pointers >= 2) {
+            if (ppStart.pointers >= 2) {
                 ppStart = null;
-                if (ppPointers.size === 0 && ppZoom.scale < 1.02) {
-                    ppResetZoom();
-                }
+                if (ppPointers.size === 0 && ppZoom.scale < 1.02) ppResetZoom();
                 return;
             }
 
@@ -658,21 +655,11 @@
                     return;
                 }
                 ppLastTap = nowTap;
-                clearTimeout(ppTapTimer);
-                ppTapTimer = setTimeout(function() {
-                    if (!ppTapHandled) {
-                        ppTapHandled = true;
-                    }
-                }, 300);
                 ppStart = null;
                 return;
             }
 
-            if (zoomed) {
-                ppStart = null;
-                return;
-            }
-
+            if (zoomed) { ppStart = null; return; }
             if (ppTrackSnapping) { ppStart = null; return; }
 
             var dx = ppTrackDrag;
@@ -712,7 +699,7 @@
 
             if (!wasMoved && !ppNavBusy) {
                 var now2 = Date.now();
-                if (now2 - ppLastTap < 300 && !ppTapHandled) {
+                if (now2 - ppLastTap < 300 && !ppTapHandled && ppZoom.scale <= 1.01) {
                     ppTapHandled = true;
                     ppToggleZoom(e.clientX, e.clientY);
                 }
