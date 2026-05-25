@@ -1,6 +1,6 @@
 (function() {
-    var photoWallData = [];
-    window.photoWallData = photoWallData;
+    window.photoWallData = [];
+
     var photoWallKey = 'xtj_photos';
     var photoWallDeletedKey = 'xtj_photos_deleted';
 
@@ -100,8 +100,8 @@
     async function loadPhotoWallData() {
         var localData = loadLocalPhotoWallData();
         if (!window.sb) {
-            photoWallData = localData;
-            return photoWallData;
+            window.photoWallData = localData;
+            return window.photoWallData;
         }
         try {
             await migrateLocalPhotosToCloud(localData);
@@ -112,34 +112,34 @@
                 .limit(500);
             if (res.error) throw res.error;
             var deletedIds = getDeletedPhotoIds();
-            photoWallData = (res.data || []).map(normalizePhotoWallRow).filter(function(p) { return !!p.imageUrl; });
+            window.photoWallData = (res.data || []).map(normalizePhotoWallRow).filter(function(p) { return !!p.imageUrl; });
             if (deletedIds.length > 0) {
                 var cloudIds = {};
-                photoWallData.forEach(function(p) { cloudIds[String(p.id)] = true; });
+                window.photoWallData.forEach(function(p) { cloudIds[String(p.id)] = true; });
                 var cleaned = deletedIds.filter(function(id) { return cloudIds[id]; });
                 if (cleaned.length !== deletedIds.length) {
                     try { localStorage.setItem(photoWallDeletedKey, JSON.stringify(cleaned)); } catch(e) {}
                     deletedIds = cleaned;
                 }
                 if (deletedIds.length > 0) {
-                    photoWallData = photoWallData.filter(function(p) {
+                    window.photoWallData = window.photoWallData.filter(function(p) {
                         return deletedIds.indexOf(String(p.id)) < 0;
                     });
                 }
             }
-            if (!photoWallData.length && localData.length) photoWallData = localData;
-            return photoWallData;
+            if (!window.photoWallData.length && localData.length) window.photoWallData = localData;
+            return window.photoWallData;
         } catch(e) {
             console.error('加载云端照片墙失败:', e);
-            photoWallData = localData;
-            return photoWallData;
+            window.photoWallData = localData;
+            return window.photoWallData;
         }
     }
     window.loadPhotoWallData = loadPhotoWallData;
 
     function saveLocalPhotoWallData() {
         try {
-            localStorage.setItem(photoWallKey, JSON.stringify(photoWallData.slice(0, 100)));
+            localStorage.setItem(photoWallKey, JSON.stringify(window.photoWallData.slice(0, 100)));
         } catch (e) {}
     }
     window.saveLocalPhotoWallData = saveLocalPhotoWallData;
@@ -162,7 +162,7 @@
             var res = await window.sb.from('posts').select('views').eq('id', photo.cloudId).maybeSingle();
             if (res && res.data && typeof res.data.views === 'number') {
                 photo.views = res.data.views;
-                var cached = photoWallData.find(function(p) { return p.id === photo.id || p.cloudId === photo.cloudId; });
+                var cached = window.photoWallData.find(function(p) { return p.id === photo.id || p.cloudId === photo.cloudId; });
                 if (cached) cached.views = photo.views;
                 saveLocalPhotoWallData();
                 updatePhotoViewDisplays(photo);

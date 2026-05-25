@@ -2284,7 +2284,7 @@
                 if (tab === 'posts') { if (window._rainResume) window._rainResume(); }
                 else { if (window._rainPause) window._rainPause(); }
                 if (tab === 'chat') { loadDockChatList(); startDMPolling(300000); }
-                if (tab === 'ai') { initPhotoWall(); }
+                if (tab === 'ai') { if (typeof window.initPhotoWall === 'function') window.initPhotoWall(); }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); }
             };
 
@@ -3002,6 +3002,50 @@
                                     <li>压缩失败时回退策略：≤50MB直接上传原文件，>50MB且压缩失败则跳过</li>
                                     <li>压缩前后尺寸均记录（fileSize + originalSize），数据透明可追溯</li>
                                     <li>Supabase免费版限制已确认：文件存储1GB，单文件50MB，月带宽5GB</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.52',
+                    date: '2026-05-25',
+                    content: `
+                        <h4>修复内容</h4>
+                        <ul>
+                            <li><strong>照片墙数据丢失问题彻底修复</strong>
+                                <ul>
+                                    <li>根因定位：features.js中renderPhotoWall补丁覆盖了render.js的正确实现，导致永远从空数组[]渲染</li>
+                                    <li>移除错误的补丁代码，恢复render.js中完整的加载+排序+渲染流水线</li>
+                                    <li>修复features.js中多个IIFE作用域越界调用（formatPhotoTime、escapeHtml等全局函数引用修复）</li>
+                                </ul>
+                            </li>
+                            <li><strong>筛选排序功能修复</strong>
+                                <ul>
+                                    <li>日期、名称、热度三种排序条件现在能正确组合生效</li>
+                                    <li>排序切换后照片墙实时更新，结果符合预期逻辑</li>
+                                    <li>删除操作后重新渲染保持当前排序键，不再重置为默认排序</li>
+                                </ul>
+                            </li>
+                            <li><strong>相册视图空白修复</strong>
+                                <ul>
+                                    <li>数据加载链路修复后，相册视图在有照片时能正确渲染"按日期分组"的相册列表</li>
+                                    <li>仅在确实无照片数据时才显示"暂无照片"提示</li>
+                                </ul>
+                            </li>
+                            <li><strong>全屏预览交互优化</strong>
+                                <ul>
+                                    <li>双指缩放：新增ppApplyPinchTransformImmediate直接应用transform，跳过rAF延迟，提升跟手性</li>
+                                    <li>自适应帧预算：3轮×10帧中值采样检测120Hz/90Hz/60Hz刷新率，精准分配帧预算</li>
+                                    <li>图片切换消除黑屏：ppDecodeImage预加载+img.decode()确保解码完成后再显示，opacity平滑过渡</li>
+                                    <li>前后各3张照片提前预加载，实现顺滑的即时切换</li>
+                                </ul>
+                            </li>
+                            <li><strong>照片墙模块重构稳定性修复</strong>
+                                <ul>
+                                    <li>photo-wall.js中initPhotoWall函数通过window对象导出，core.js调用时增加typeof安全检查</li>
+                                    <li>preview.js中修复ppEventsBound标志位，确保静态HTML覆盖层事件正确绑定</li>
+                                    <li>修复photocurImg拼写错误为curImg</li>
                                 </ul>
                             </li>
                         </ul>

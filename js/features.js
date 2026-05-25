@@ -214,7 +214,7 @@
                 btn.textContent = '📁 相册';
                 container.style.display = 'none';
                 grid.style.display = '';
-                renderPhotoWall();
+                if (typeof window.renderPhotoWall === 'function') window.renderPhotoWall();
             }
         };
 
@@ -227,7 +227,7 @@
             if (pwAlbumViewActive) {
                 renderAlbumView();
             } else {
-                renderPhotoWall();
+                if (typeof window.renderPhotoWall === 'function') window.renderPhotoWall();
             }
         };
 
@@ -472,7 +472,7 @@
                         originalName: file.name,
                         fileSize: fileToUpload.size
                     });
-                    if (typeof saveLocalPhotoWallData === 'function') saveLocalPhotoWallData();
+                    if (typeof window.saveLocalPhotoWallData === 'function') window.saveLocalPhotoWallData();
 
                     updateProgressItem(itemDiv, '✅ 完成', 100);
                     success++;
@@ -496,7 +496,7 @@
             }, 3000);
 
             // Refresh
-            if (typeof renderPhotoWall === 'function') renderPhotoWall();
+            if (typeof window.renderPhotoWall === 'function') window.renderPhotoWall();
         };
 
         function addProgressItem(container, fileName, status, progress) {
@@ -530,46 +530,7 @@
             return sorted[0];
         };
 
-        // Patch renderPhotoWall to support sorting
-        var _origRenderPhotoWall = window.renderPhotoWall;
-        if (_origRenderPhotoWall) {
-            window.renderPhotoWall = function() {
-                var grid = document.getElementById('photoGrid');
-                if (!grid) return;
-                if (typeof loadLocalPhotoWallData === 'function') loadLocalPhotoWallData();
-                var data = window.photoWallData || [];
-                if (data.length === 0) {
-                    grid.innerHTML = '<div class="photo-wall-empty"><div class="photo-wall-empty-icon">📷</div><div>还没有照片</div><div class="photo-wall-empty-cta" onclick="triggerPhotoUpload()">📤 成为第一个分享照片的人</div></div>';
-                    return;
-                }
-                var sorted = sortPhotoWallData(data, pwCurrentSort);
-                // Use virtual scrolling for large datasets
-                if (sorted.length > 30 && typeof renderVirtualPhotoWall === 'function') {
-                    renderVirtualPhotoWall(sorted, grid);
-                    return;
-                }
-                var html = '';
-                for (var i = 0; i < sorted.length; i++) {
-                    var p = sorted[i];
-                    var timeStr = typeof formatPhotoTime === 'function' ? formatPhotoTime(p.timestamp) : new Date(p.timestamp || Date.now()).toLocaleString();
-                    var name = p.username || '未知用户';
-                    html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + escapeHtml(p.id) + '" style="animation-delay:' + (i * 50 < 500 ? i * 50 : 0) + 'ms" onclick="openPhotoPreview(' + i + ')">';
-                    var gridSrc = p.thumbUrl || p.imageUrl;
-                    html += '<img src="' + gridSrc + '" alt="photo" class="pw-blur-in" data-src="' + gridSrc + '" loading="lazy">';
-                    html += '<div class="pw-item-info"><div class="pw-item-name">' + escapeHtml(name) + '</div>';
-                    html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div></div></div>';
-                }
-                grid.innerHTML = html;
-                requestAnimationFrame(function() {
-                    var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
-                    items.forEach(function(item) {
-                        item.classList.add('pw-stagger-done');
-                        item.classList.remove('pw-stagger-enter');
-                    });
-                });
-                if (typeof pwObserveLazyImages === 'function') pwObserveLazyImages(grid);
-            };
-        }
+
 
         // ================================================================
         // 模块3：系统性能优化
@@ -613,12 +574,12 @@
                 var html = '';
                 for (var i = startIdx; i < endIdx && i < sortedData.length; i++) {
                     var p = sortedData[i];
-                    var timeStr = typeof formatPhotoTime === 'function' ? formatPhotoTime(p.timestamp) : new Date(p.timestamp || Date.now()).toLocaleString();
+                    var timeStr = typeof window.formatPhotoTime === 'function' ? window.formatPhotoTime(p.timestamp) : new Date(p.timestamp || Date.now()).toLocaleString();
                     var name = p.username || '未知用户';
-                    html += '<div class="photo-wall-item" data-photo-id="' + escapeHtml(p.id) + '" style="position:absolute;top:' + ((i - startIdx) * ITEM_HEIGHT) + 'px;left:0;right:0;height:' + (ITEM_HEIGHT - 8) + 'px;" onclick="openPhotoPreview(' + i + ')">';
+                    html += '<div class="photo-wall-item" data-photo-id="' + window.escapeHtml(p.id) + '" style="position:absolute;top:' + ((i - startIdx) * ITEM_HEIGHT) + 'px;left:0;right:0;height:' + (ITEM_HEIGHT - 8) + 'px;" onclick="openPhotoPreview(' + i + ')">';
                     var gridSrc = p.thumbUrl || p.imageUrl;
                     html += '<img src="' + gridSrc + '" alt="photo" class="pw-blur-in" loading="lazy">';
-                    html += '<div class="pw-item-info"><div class="pw-item-name">' + escapeHtml(name) + '</div>';
+                    html += '<div class="pw-item-info"><div class="pw-item-name">' + window.escapeHtml(name) + '</div>';
                     html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div></div></div>';
                 }
                 contentEl.innerHTML = html;

@@ -19,7 +19,7 @@
     var ppRafId = null;
     var ppPreloadCache = {};
     var ppImageCache = {};
-    var ppPreloadQueue = [];
+    var ppDecodeQueue = {};
     var ppGyroTargetX = 0;
     var ppGyroTargetY = 0;
     var ppGyroCurrentX = 0;
@@ -42,21 +42,30 @@
     var photoPreviewClosedAt = 0;
     var photoPreviewCurrent = null;
     window.photoPreviewCurrent = photoPreviewCurrent;
+    var ppEventsBound = false;
 
     function detectRefreshRate() {
         var times = [];
-        var lastTime = performance.now();
         var frames = 0;
+        var lastTime = performance.now();
+        var medians = [];
         function sample() {
             frames++;
             var now = performance.now();
-            if (frames >= 30) {
+            if (frames >= 10) {
                 var elapsed = now - lastTime;
-                ppRefreshRate = Math.round(frames / elapsed * 1000);
-                ppFrameBudget = 1000 / ppRefreshRate;
-                return;
+                var fps = Math.round(frames / elapsed * 1000);
+                medians.push(fps);
+                if (medians.length >= 3) {
+                    medians.sort(function(a, b) { return a - b; });
+                    var median = medians[Math.floor(medians.length / 2)];
+                    ppRefreshRate = Math.max(30, Math.min(144, median));
+                    ppFrameBudget = 1000 / ppRefreshRate;
+                    return;
+                }
+                frames = 0;
+                lastTime = now;
             }
-            times.push(now);
             requestAnimationFrame(sample);
         }
         requestAnimationFrame(sample);
@@ -68,6 +77,51 @@
         ppVw = window.innerWidth;
     }
 
+    function ppDecodeImage(url) {
+        if (!url || ppDecodeQueue[url] instanceof Promise) return ppDecodeQueue[url] || Promise.resolve();
+        ppDecodeQueue[url] = new Promise(function(resolve) {
+            var img = ppImageCache[url];
+            if (img && img !== 'loading') {
+                if (img.decode) { img.decode().then(resolve).catch(function() { resolve(); }); }
+                else { resolve(); }
+                return;
+            }
+            var pre = new Image();
+            pre.crossOrigin = 'anonymous';
+            pre.onload = function() {
+                ppImageCache[url] = pre;
+                if (pre.decode) { pre.decode().then(resolve).catch(function() { resolve(); }); }
+                else { resolve(); }
+            };
+            pre.onerror = function() {
+                ppImageCache[url] = null;
+                resolve();
+            };
+            pre.src = url;
+        });
+        return ppDecodeQueue[url];
+    }
+
+    function ppSwapImage(imgEl, url) {
+        if (!imgEl) return;
+        if (!url) { imgEl.removeAttribute('src'); imgEl.style.opacity = '0'; return; }
+        var cached = ppImageCache[url];
+        if (cached && cached !== 'loading') {
+            if (imgEl.src !== url) {
+                imgEl.src = url;
+            }
+            imgEl.style.opacity = '1';
+            return;
+        }
+        imgEl.style.opacity = '0.3';
+        imgEl.src = url;
+        ppDecodeImage(url).then(function() {
+            if (imgEl.src === url) {
+                imgEl.style.opacity = '1';
+            }
+        });
+    }
+
     function ppSetTrackImages(idx) {
         ppInitTrack();
         if (!ppTrack) return;
@@ -77,30 +131,18 @@
         var nextImg = document.getElementById('ppNextImg');
         ppPreloadAdjacent(idx);
         if (photos[idx]) {
-            var curUrl = photos[idx].imageUrl;
-            if (ppImageCache[curUrl] && ppImageCache[curUrl] !== 'loading') {
-                curImg.src = curUrl;
-            } else {
-                curImg.src = curUrl;
-                ppPreloadImage(curUrl);
-            }
+            ppSwapImage(curImg, photos[idx].imageUrl);
         }
-        setTimeout(function() {
-            if (idx > 0 && photos[idx - 1]) {
-                var prevUrl = photos[idx - 1].imageUrl;
-                prevImg.src = prevUrl;
-                ppPreloadImage(prevUrl);
-            } else {
-                prevImg.removeAttribute('src');
-            }
-            if (idx < photos.length - 1 && photos[idx + 1]) {
-                var nextUrl = photos[idx + 1].imageUrl;
-                nextImg.src = nextUrl;
-                ppPreloadImage(nextUrl);
-            } else {
-                nextImg.removeAttribute('src');
-            }
-        }, 50);
+        if (idx > 0 && photos[idx - 1]) {
+            ppSwapImage(prevImg, photos[idx - 1].imageUrl);
+        } else {
+            ppSwapImage(prevImg, null);
+        }
+        if (idx < photos.length - 1 && photos[idx + 1]) {
+            ppSwapImage(nextImg, photos[idx + 1].imageUrl);
+        } else {
+            ppSwapImage(nextImg, null);
+        }
         ppTrackDrag = 0;
         ppTrackSnapping = false;
         ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
@@ -110,19 +152,8 @@
 
     function ppPreloadImage(url) {
         if (!url || ppImageCache[url]) return Promise.resolve();
-        return new Promise(function(resolve) {
-            ppImageCache[url] = 'loading';
-            var pre = new Image();
-            pre.onload = function() {
-                ppImageCache[url] = pre;
-                resolve();
-            };
-            pre.onerror = function() {
-                ppImageCache[url] = null;
-                resolve();
-            };
-            pre.src = url;
-        });
+        ppImageCache[url] = 'loading';
+        return ppDecodeImage(url);
     }
 
     function ppPreloadAdjacent(idx) {
@@ -161,16 +192,29 @@
         if (isZoomed !== img.classList.contains('zoomed')) {
             img.classList.toggle('zoomed', isZoomed);
         }
-        if (!ppTransformRaf) {
-            ppTransformRaf = requestAnimationFrame(function() {
-                var tx = ppZoom.tx + ppGyroCurrentX;
-                var ty = ppZoom.ty + ppGyroCurrentY;
-                var t = 'translate3d(' + tx + 'px,' + ty + 'px,0) scale(' + ppZoom.scale + ')';
-                img.style.transform = t;
-                img.style.webkitTransform = t;
-                ppTransformRaf = null;
-            });
+        if (ppTransformRaf) return;
+        ppTransformRaf = requestAnimationFrame(function() {
+            var tx = ppZoom.tx + ppGyroCurrentX;
+            var ty = ppZoom.ty + ppGyroCurrentY;
+            var t = 'translate3d(' + tx + 'px,' + ty + 'px,0) scale(' + ppZoom.scale + ')';
+            img.style.transform = t;
+            img.style.webkitTransform = t;
+            ppTransformRaf = null;
+        });
+    }
+
+    function ppApplyPinchTransformImmediate() {
+        var img = document.getElementById('photoPreviewImage');
+        if (!img) return;
+        var isZoomed = ppZoom.scale > 1.01;
+        if (isZoomed !== img.classList.contains('zoomed')) {
+            img.classList.toggle('zoomed', isZoomed);
         }
+        var tx = ppZoom.tx + ppGyroCurrentX;
+        var ty = ppZoom.ty + ppGyroCurrentY;
+        var t = 'translate3d(' + tx + 'px,' + ty + 'px,0) scale(' + ppZoom.scale + ')';
+        img.style.transform = t;
+        img.style.webkitTransform = t;
     }
 
     function ppGyroOnOrientation(e) {
@@ -287,6 +331,7 @@
         var tension = ppSpringTension;
         var friction = ppSpringFriction;
         ppTrackSnapping = true;
+        var dt = ppFrameBudget / 1000;
         function ppSpringStep() {
             if (!ppTrackSnapping) {
                 ppSwipeLock = 0;
@@ -297,8 +342,8 @@
             var springForce = tension * displacement;
             var dampingForce = friction * velocity;
             var acceleration = springForce - dampingForce;
-            velocity += acceleration * (ppFrameBudget / 1000);
-            position += velocity * (ppFrameBudget / 1000);
+            velocity += acceleration * dt;
+            position += velocity * dt;
             ppTrackDrag = position;
             var offset = -ppVw + position;
             ppTrack.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
@@ -329,6 +374,10 @@
         var photo = ppSortedPhotos[newIdx];
         var targetDrag = direction > 0 ? -ppVw : ppVw;
         window.updateAmbientBackground(photo.imageUrl);
+        var curImg = document.getElementById('photoPreviewImage');
+        if (curImg) {
+            ppSwapImage(curImg, photo.imageUrl);
+        }
         ppSnapTo(targetDrag, function() {
             photo.views = (photo.views || 0) + 1;
             ppPhotoIdx = newIdx;
@@ -363,7 +412,13 @@
 
     function openPhotoPreview(index) {
         ppPhotoIdx = index;
-        ppSortedPhotos = window.photoWallData.slice().sort(function(a, b) { return b.timestamp - a.timestamp; });
+        var sortKey = window.pwSortKey || 'date_desc';
+        ppSortedPhotos = window.photoWallData.slice();
+        if (typeof window.pwApplySort === 'function') {
+            ppSortedPhotos = window.pwApplySort(ppSortedPhotos, sortKey);
+        } else {
+            ppSortedPhotos.sort(function(a, b) { return b.timestamp - a.timestamp; });
+        }
         var overlay = document.getElementById('photoPreviewOverlay');
         if (!overlay) {
             var container = document.createElement('div');
@@ -387,6 +442,10 @@
             document.body.appendChild(container);
             overlay = container;
             bindPreviewEvents(overlay);
+            ppEventsBound = true;
+        } else if (!ppEventsBound) {
+            bindPreviewEvents(overlay);
+            ppEventsBound = true;
         }
         ppResetZoom();
         photoPreviewActive = true;
@@ -427,6 +486,7 @@
             overlay.classList.remove('active', 'pp-closing');
             ppImageCache = {};
             ppPreloadCache = {};
+            ppDecodeQueue = {};
         }, 350);
     }
     window.closePhotoPreview = closePhotoPreview;
@@ -470,7 +530,13 @@
             return;
         }
         if (idx >= pwData.length) idx = pwData.length - 1;
-        ppSortedPhotos = pwData.slice().sort(function(a, b) { return b.timestamp - a.timestamp; });
+        var sortKeyDel = window.pwSortKey || 'date_desc';
+        ppSortedPhotos = pwData.slice();
+        if (typeof window.pwApplySort === 'function') {
+            ppSortedPhotos = window.pwApplySort(ppSortedPhotos, sortKeyDel);
+        } else {
+            ppSortedPhotos.sort(function(a, b) { return b.timestamp - a.timestamp; });
+        }
         ppPhotoIdx = idx;
         photoPreviewCurrent = ppSortedPhotos[idx] || null;
         if (!photoPreviewCurrent) { closePhotoPreview(); return; }
@@ -533,7 +599,7 @@
                     ppZoom.scale = newScale;
                     ppZoom.tx = dcx + (ppZoom.scale > 1 ? ppZoom.tx : 0);
                     ppZoom.ty = dcy + (ppZoom.scale > 1 ? ppZoom.ty : 0);
-                    ppApplyImageTransform();
+                    ppApplyPinchTransformImmediate();
                     return;
                 }
                 var dx = e.clientX - ppStart.x;
@@ -541,7 +607,7 @@
                 if (Math.abs(dx) > 3 || Math.abs(dy) > 3) ppMoved = true;
                 ppZoom.tx = ppStart.zx + dx;
                 ppZoom.ty = ppStart.zy + dy;
-                ppApplyImageTransform();
+                ppApplyPinchTransformImmediate();
             } else {
                 var dx2 = e.clientX - ppStart.x;
                 if (Math.abs(dx2) > 5) ppMoved = true;
@@ -588,9 +654,7 @@
             ppStart = null;
             ppVelocitySamples = [];
             if (targetDir !== 0) {
-                var oldDir = targetDir;
                 ppNavigatePhoto(targetDir);
-                if (oldDir !== targetDir) ppSnapTo(0);
             } else {
                 ppSnapTo(0);
             }
