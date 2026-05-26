@@ -563,51 +563,71 @@
             return;
         }
         
-        var imgs = overlay.querySelectorAll('.pp-slide-img');
-        imgs.forEach(function(img) {
-            img.style.transition = 'none';
-            img.style.opacity = '0';
-        });
-        
         ppResetZoom();
         
-        if (ppTrack) {
-            ppTrack.style.transition = 'none';
-            ppTrack.style.transform = '';
+        // FLIP Animation for Close: Step 1 - First (记录当前大图状态)
+        var curImg = document.getElementById('photoPreviewImage');
+        var originRect = overlay._openOrigin;
+        var originImg = overlay._openOriginImg;
+        
+        var currentRect = null;
+        if (curImg) {
+            currentRect = curImg.getBoundingClientRect();
         }
         
-        var originRect = overlay._openOrigin;
-        var initialScale = overlay._openScale || 0.05;
-        
-        if (originRect) {
-            var ox = originRect.left + originRect.width / 2;
-            var oy = originRect.top + originRect.height / 2;
-            overlay.style.transition = 'none';
-            overlay.style.transformOrigin = ox + 'px ' + oy + 'px';
-            overlay.style.transform = 'scale(1)';
-            overlay.style.opacity = '1';
-            void overlay.offsetHeight;
-            overlay.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
-            overlay.style.transform = 'scale(' + initialScale + ')';
+        // FLIP Animation: Step 2 - Last (计算目标状态：缩略图位置)
+        if (originRect && currentRect && originImg) {
+            // 隐藏缩略图，让大图"飞回"到缩略图位置
+            originImg.style.transition = 'none';
+            originImg.style.opacity = '0';
+            
+            // 计算变换参数
+            var dx = originRect.left - currentRect.left;
+            var dy = originRect.top - currentRect.top;
+            var scaleX = originRect.width / currentRect.width;
+            var scaleY = originRect.height / currentRect.height;
+            var scale = Math.min(scaleX, scaleY);
+            
+            // FLIP Animation: Step 3 - Invert (保持当前状态)
+            curImg.style.transition = 'none';
+            curImg.style.transform = 'translate(0, 0) scale(1)';
+            curImg.style.transformOrigin = 'top left';
+            void curImg.offsetHeight;
+            
+            // FLIP Animation: Step 4 - Play (播放反向动画)
+            overlay.style.transition = 'opacity 0.4s cubic-bezier(0.55, 0, 1, 0.45)';
+            curImg.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45)';
+            curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
             overlay.style.opacity = '0';
+            
             setTimeout(function() {
-                overlay.classList.remove('active');
-                overlay.style.transform = '';
-                overlay.style.opacity = '';
+                // 恢复原图可见性
+                if (originImg) {
+                    originImg.style.transition = '';
+                    originImg.style.opacity = '';
+                }
+                
+                // 重置样式
+                curImg.style.transition = '';
+                curImg.style.transform = '';
+                curImg.style.transformOrigin = '';
                 overlay.style.transition = '';
-                overlay.style.transformOrigin = '';
+                overlay.style.opacity = '';
+                overlay.classList.remove('active');
+                
+                document.body.classList.remove('pp-body-noscroll');
             }, 480);
         } else {
+            // 没有原图参考，使用淡入淡出
             overlay.style.transition = 'opacity 0.35s cubic-bezier(0.55, 0, 1, 0.45)';
             overlay.style.opacity = '0';
             setTimeout(function() {
-                overlay.classList.remove('active');
                 overlay.style.opacity = '';
                 overlay.style.transition = '';
+                overlay.classList.remove('active');
+                document.body.classList.remove('pp-body-noscroll');
             }, 380);
         }
-        
-        document.body.classList.remove('pp-body-noscroll');
     }
 
     window.closePhotoPreview = closePhotoPreview;
@@ -687,50 +707,65 @@
         
         var content = modal.querySelector('.pp-info-modal-content');
         
+        // FLIP Animation: Step 1 - First (记录按钮的初始位置)
+        var btn = document.getElementById('ppInfoBtn');
+        var btnRect = null;
+        if (btn) {
+            btnRect = btn.getBoundingClientRect();
+        }
+        
+        // FLIP Animation: Step 2 - Last (设置最终状态)
         modal.classList.remove('closing');
         modal.classList.add('active');
         modal.style.display = 'flex';
-        modal.style.opacity = '0';
+        modal.style.opacity = '1';
         
-        content.offsetHeight;
+        content.style.transition = 'none';
+        content.style.transform = '';
+        content.style.opacity = '1';
         
-        var btn = document.getElementById('ppInfoBtn');
+        void content.offsetHeight;
         
-        if (btn) {
-            var btnRect = btn.getBoundingClientRect();
-            var btnCx = btnRect.left + btnRect.width / 2;
-            var btnCy = btnRect.top + btnRect.height / 2;
+        // FLIP Animation: Step 3 - Invert (计算差异并反向变换)
+        if (btnRect) {
+            var finalRect = content.getBoundingClientRect();
+            var dx = btnRect.left - finalRect.left;
+            var dy = btnRect.top - finalRect.top;
+            var scaleX = btnRect.width / finalRect.width;
+            var scaleY = btnRect.height / finalRect.height;
+            var scale = Math.min(scaleX, scaleY);
             
-            var vpCx = window.innerWidth / 2;
-            var vpCy = window.innerHeight / 2;
-            var offsetX = btnCx - vpCx;
-            var offsetY = btnCy - vpCy;
-            
-            modal._ppInfoOrigin = { dx: offsetX, dy: offsetY };
-            
-            content.style.transition = 'none';
-            content.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(0.3)';
+            content.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
+            content.style.transformOrigin = 'top left';
             content.style.opacity = '0';
             
-            void content.offsetHeight;
-            
-            modal.style.transition = 'opacity 0.35s ease-out';
-            modal.style.opacity = '1';
-            
-            content.style.transition = 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
+            modal._ppInfoOrigin = { 
+                dx: dx, 
+                dy: dy, 
+                scale: scale,
+                btnWidth: btnRect.width,
+                btnHeight: btnRect.height
+            };
+        }
+        
+        void content.offsetHeight;
+        
+        // FLIP Animation: Step 4 - Play (播放动画)
+        modal.style.transition = 'opacity 0.4s ease-out';
+        modal.style.opacity = '0';
+        void modal.offsetHeight;
+        modal.style.opacity = '1';
+        
+        if (btnRect) {
+            content.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
             content.style.transform = 'translate(0, 0) scale(1)';
             content.style.opacity = '1';
         } else {
             content.style.transition = 'none';
-            content.style.transform = 'scale(0.85)';
+            content.style.transform = 'scale(0.9)';
             content.style.opacity = '0';
-            
             void content.offsetHeight;
-            
-            modal.style.transition = 'opacity 0.35s ease-out';
-            modal.style.opacity = '1';
-            
-            content.style.transition = 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
+            content.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
             content.style.transform = 'scale(1)';
             content.style.opacity = '1';
         }
@@ -750,18 +785,43 @@
         
         var origin = modal._ppInfoOrigin;
         
+        // FLIP Animation for Close
         if (origin && content) {
+            // 获取当前弹窗位置
+            var currentRect = content.getBoundingClientRect();
+            
+            // 计算飞向按钮的变换参数
+            var btn = document.getElementById('ppInfoBtn');
+            var btnRect = btn ? btn.getBoundingClientRect() : null;
+            
+            var targetDx = 0;
+            var targetDy = 0;
+            var targetScale = 0.3;
+            
+            if (btnRect) {
+                targetDx = btnRect.left - currentRect.left;
+                targetDy = btnRect.top - currentRect.top;
+                targetScale = Math.min(btnRect.width / currentRect.width, btnRect.height / currentRect.height);
+            } else {
+                // 如果按钮不存在，使用之前保存的偏移
+                targetDx = origin.dx;
+                targetDy = origin.dy;
+                targetScale = origin.scale || 0.3;
+            }
+            
+            // Step 3 - Invert: 保持当前状态
             content.style.transition = 'none';
             content.style.transform = 'translate(0, 0) scale(1)';
             content.style.opacity = '1';
             
             void content.offsetHeight;
             
+            // Step 4 - Play: 播放飞回动画
             content.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
-            content.style.transform = 'translate(' + origin.dx + 'px, ' + origin.dy + 'px) scale(0.3)';
+            content.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
             content.style.opacity = '0';
             
-            modal.style.transition = 'opacity 0.35s ease-in';
+            modal.style.transition = 'opacity 0.4s ease-in';
             modal.style.opacity = '0';
             
             if (modal._closeTimeout) clearTimeout(modal._closeTimeout);
@@ -769,6 +829,7 @@
                 content.style.transition = 'none';
                 content.style.transform = '';
                 content.style.opacity = '';
+                content.style.transformOrigin = '';
                 modal.style.display = 'none';
                 modal.style.opacity = '';
                 modal.style.transition = '';
@@ -782,11 +843,11 @@
                 content.style.opacity = '1';
                 void content.offsetHeight;
                 content.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
-                content.style.transform = 'scale(0.85)';
+                content.style.transform = 'scale(0.9)';
                 content.style.opacity = '0';
             }
             
-            modal.style.transition = 'opacity 0.35s ease-in';
+            modal.style.transition = 'opacity 0.4s ease-in';
             modal.style.opacity = '0';
             
             modal._closeTimeout = setTimeout(function() {
@@ -798,6 +859,7 @@
                     content.style.transition = 'none';
                     content.style.transform = '';
                     content.style.opacity = '';
+                    content.style.transformOrigin = '';
                 }
                 modal._closeTimeout = null;
             }, 480);
@@ -872,23 +934,14 @@
         var btn = document.getElementById('ppDeleteBtn');
         var btnRect = btn ? btn.getBoundingClientRect() : null;
         if (btnRect) {
-            var overlay = document.getElementById('ppConfirmOverlay');
-            var dialog = overlay ? overlay.querySelector('.pp-confirm-dialog') : null;
-            if (overlay && dialog) {
-                overlay.style.display = 'flex';
-                var dialogRect = dialog.getBoundingClientRect();
-                overlay.style.display = '';
-                var btnCx = btnRect.left + btnRect.width / 2;
-                var btnCy = btnRect.top + btnRect.height / 2;
-                var dialogCx = dialogRect.left + dialogRect.width / 2;
-                var dialogCy = dialogRect.top + dialogRect.height / 2;
-                window._confirmOrigin = {
-                    btnCx: btnCx,
-                    btnCy: btnCy,
-                    dialogCx: dialogCx,
-                    dialogCy: dialogCy
-                };
-            }
+            var btnCx = btnRect.left + btnRect.width / 2;
+            var btnCy = btnRect.top + btnRect.height / 2;
+            window._confirmOrigin = {
+                btnCx: btnCx,
+                btnCy: btnCy,
+                btnWidth: btnRect.width,
+                btnHeight: btnRect.height
+            };
         }
         
         window.showConfirm('删除照片', '确定删除这张照片吗？', '是', function() {
