@@ -4011,7 +4011,7 @@
             object-fit: contain;
             box-shadow: none;
             transform-origin: center center;
-            will-change: transform, opacity;
+            will-change: transform, opacity, border-radius;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
             transform: translateZ(0);
