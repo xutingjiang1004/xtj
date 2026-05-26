@@ -1501,7 +1501,7 @@
             display: none;
             align-items: center;
             justify-content: center;
-            z-index: 1000;
+            z-index: 10001;
             pointer-events: none;
             will-change: opacity;
             backface-visibility: hidden;

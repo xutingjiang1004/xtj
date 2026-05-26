@@ -502,6 +502,19 @@
             return;
         }
         
+        var imgs = overlay.querySelectorAll('.pp-slide-img');
+        imgs.forEach(function(img) {
+            img.style.transition = 'none';
+            img.style.opacity = '0';
+        });
+        
+        ppResetZoom();
+        
+        if (ppTrack) {
+            ppTrack.style.transition = 'none';
+            ppTrack.style.transform = '';
+        }
+        
         var originRect = overlay._openOrigin;
         var initialScale = overlay._openScale || 0.05;
         
@@ -526,13 +539,11 @@
                 overlay.style.opacity = '';
                 overlay.style.transition = '';
                 overlay.style.transformOrigin = '';
-                ppResetZoom();
             };
             overlay.addEventListener('transitionend', closeEnd);
             setTimeout(closeEnd, 300);
         } else {
             overlay.classList.remove('active');
-            ppResetZoom();
         }
         
         document.body.classList.remove('pp-body-noscroll');
@@ -640,6 +651,8 @@
             var offsetX = btnCx - contentCx;
             var offsetY = btnCy - contentCy;
             
+            modal._ppInfoOrigin = { dx: offsetX, dy: offsetY };
+            
             content.style.transition = 'none';
             content.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(0.08)';
             content.style.opacity = '0';
@@ -672,20 +685,9 @@
         modal.classList.remove('active');
         modal.classList.add('closing');
         
-        var btn = document.getElementById('ppInfoBtn');
+        var origin = modal._ppInfoOrigin;
         
-        if (btn && content) {
-            var btnRect = btn.getBoundingClientRect();
-            var btnCx = btnRect.left + btnRect.width / 2;
-            var btnCy = btnRect.top + btnRect.height / 2;
-            
-            var contentRect = content.getBoundingClientRect();
-            var contentCx = contentRect.left + contentRect.width / 2;
-            var contentCy = contentRect.top + contentRect.height / 2;
-            
-            var offsetX = btnCx - contentCx;
-            var offsetY = btnCy - contentCy;
-            
+        if (origin && content) {
             content.style.transition = 'none';
             content.style.transform = 'translate(0, 0) scale(1)';
             content.style.opacity = '1';
@@ -693,7 +695,7 @@
             content.offsetHeight;
             
             content.style.transition = 'transform 0.2s ease-in-out, opacity 0.15s ease-in-out';
-            content.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(0.08)';
+            content.style.transform = 'translate(' + origin.dx + 'px, ' + origin.dy + 'px) scale(0.08)';
             content.style.opacity = '0';
             
             var onEnd = function() {

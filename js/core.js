@@ -138,18 +138,21 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var dialog = overlay.querySelector('.pp-confirm-dialog');
                 if (dialog) {
                     var o = overlay._ppDeleteOrigin;
-                    overlay.classList.add('closing');
                     var okBtn = document.getElementById('ppConfirmOkBtn');
                     if (okBtn) okBtn.disabled = true;
+                    overlay.classList.add('closing');
                     dialog.style.transition = 'none';
+                    dialog.style.transform = 'scale(1) translateY(0)';
+                    dialog.style.opacity = '1';
                     void dialog.offsetHeight;
                     dialog.style.transition = 'transform 0.2s ease-in-out, opacity 0.15s ease-in-out';
                     dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(0.05)';
                     dialog.style.opacity = '0';
                     overlay._closeTimer = setTimeout(function() {
-                        overlay.classList.remove('closing');
                         overlay._ppDeleteOrigin = null;
                         overlay._closeTimer = null;
+                        overlay.classList.remove('closing');
+                        overlay.classList.remove('active');
                         window._confirmCallback = null;
                         if (typeof cb === 'function') {
                             cb();
@@ -185,14 +188,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var o = overlay._ppDeleteOrigin;
                     overlay.classList.add('closing');
                     dialog.style.transition = 'none';
+                    dialog.style.transform = 'scale(1) translateY(0)';
+                    dialog.style.opacity = '1';
                     void dialog.offsetHeight;
                     dialog.style.transition = 'transform 0.2s ease-in-out, opacity 0.15s ease-in-out';
                     dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(0.05)';
                     dialog.style.opacity = '0';
                     overlay._closeTimer = setTimeout(function() {
-                        overlay.classList.remove('closing');
                         overlay._ppDeleteOrigin = null;
                         overlay._closeTimer = null;
+                        overlay.classList.remove('closing');
+                        overlay.classList.remove('active');
                         window._confirmCallback = null;
                         var okBtn = document.getElementById('ppConfirmOkBtn');
                         if (okBtn) okBtn.disabled = false;
