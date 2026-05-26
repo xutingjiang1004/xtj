@@ -107,6 +107,24 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             overlay.classList.add('active');
             var okBtn = document.getElementById('ppConfirmOkBtn');
             okBtn.disabled = false;
+            
+            var origin = window._confirmOrigin;
+            if (origin) {
+                var dialog = overlay.querySelector('.pp-confirm-dialog');
+                if (dialog) {
+                    var dx = origin.btnCx - origin.dialogCx;
+                    var dy = origin.btnCy - origin.dialogCy;
+                    overlay._ppDeleteOrigin = { dx: dx, dy: dy };
+                    dialog.style.transition = 'none';
+                    dialog.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(0.08)';
+                    dialog.style.opacity = '0';
+                    void dialog.offsetHeight;
+                    dialog.style.transition = 'transform 0.25s ease-in-out, opacity 0.2s ease-in-out';
+                    dialog.style.transform = '';
+                    dialog.style.opacity = '1';
+                }
+            }
+            window._confirmOrigin = null;
         }
         window.showConfirm = showConfirm;
 
@@ -115,6 +133,32 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (!overlay) return;
             if (overlay.classList.contains('closing')) return;
             var cb = window._confirmCallback;
+            
+            if (overlay._ppDeleteOrigin) {
+                var dialog = overlay.querySelector('.pp-confirm-dialog');
+                if (dialog) {
+                    var o = overlay._ppDeleteOrigin;
+                    overlay.classList.add('closing');
+                    var okBtn = document.getElementById('ppConfirmOkBtn');
+                    if (okBtn) okBtn.disabled = true;
+                    dialog.style.transition = 'none';
+                    void dialog.offsetHeight;
+                    dialog.style.transition = 'transform 0.2s ease-in-out, opacity 0.15s ease-in-out';
+                    dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(0.05)';
+                    dialog.style.opacity = '0';
+                    overlay._closeTimer = setTimeout(function() {
+                        overlay.classList.remove('closing');
+                        overlay._ppDeleteOrigin = null;
+                        overlay._closeTimer = null;
+                        window._confirmCallback = null;
+                        if (typeof cb === 'function') {
+                            cb();
+                        }
+                    }, 280);
+                    return;
+                }
+            }
+            
             overlay.classList.remove('active');
             overlay.classList.add('closing');
             var okBtn = document.getElementById('ppConfirmOkBtn');
@@ -134,6 +178,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             var overlay = document.getElementById('ppConfirmOverlay');
             if (!overlay) return;
             if (overlay.classList.contains('closing')) return;
+            
+            if (overlay._ppDeleteOrigin) {
+                var dialog = overlay.querySelector('.pp-confirm-dialog');
+                if (dialog) {
+                    var o = overlay._ppDeleteOrigin;
+                    overlay.classList.add('closing');
+                    dialog.style.transition = 'none';
+                    void dialog.offsetHeight;
+                    dialog.style.transition = 'transform 0.2s ease-in-out, opacity 0.15s ease-in-out';
+                    dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(0.05)';
+                    dialog.style.opacity = '0';
+                    overlay._closeTimer = setTimeout(function() {
+                        overlay.classList.remove('closing');
+                        overlay._ppDeleteOrigin = null;
+                        overlay._closeTimer = null;
+                        window._confirmCallback = null;
+                        var okBtn = document.getElementById('ppConfirmOkBtn');
+                        if (okBtn) okBtn.disabled = false;
+                    }, 280);
+                    return;
+                }
+            }
+            
             overlay.classList.remove('active');
             overlay.classList.add('closing');
             overlay._closeTimer = setTimeout(function() {
