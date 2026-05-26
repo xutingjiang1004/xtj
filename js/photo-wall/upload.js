@@ -287,6 +287,7 @@
 
             // Step 1: 上传主图
             var uploadResult = await sb.storage.from('uploads').upload(origPath, compressed, {
+                contentType: compressed.type || file.type,
                 cacheControl: '31536000',
                 upsert: false
             });
@@ -332,7 +333,7 @@
                 });
             }
 
-            var thumbBlob = await createThumbBlob(compressed, 1200, 1200, 0.85);
+            var thumbBlob = await createThumbBlob(compressed, 400, 400, 0.7);
 
             var thumbPath = 'thumbs/' + baseName;
             var thumbResult = await sb.storage.from('uploads').upload(thumbPath, thumbBlob, {
