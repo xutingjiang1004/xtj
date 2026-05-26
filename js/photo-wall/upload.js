@@ -225,7 +225,7 @@
             var compressed = await compressToTargetBlob(file, 1 * 1024 * 1024);
             var finalSize = compressed.size;
 
-            var thumbPromise = window.compressImage(compressed, 800, 800, 0.82).then(function(thumbDataUrl) {
+            var thumbPromise = window.compressImage(compressed, 1200, 1200, 0.85).then(function(thumbDataUrl) {
                 return fetch(thumbDataUrl).then(function(r) { return r.blob(); });
             });
             

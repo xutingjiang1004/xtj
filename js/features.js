@@ -435,7 +435,7 @@
                     }
 
                     // Generate thumbnail
-                    var thumbDataUrl = await compressImage(file, 800, 800, 0.82);
+                    var thumbDataUrl = await compressImage(file, 1200, 1200, 0.85);
                     var thumbBlob = await fetch(thumbDataUrl).then(function(r) { return r.blob(); });
                     var thumbPath = 'thumbs/' + baseName;
                     await sb.storage.from('uploads').upload(thumbPath, thumbBlob, { contentType: 'image/jpeg', cacheControl: '31536000' });
