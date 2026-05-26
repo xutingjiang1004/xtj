@@ -4128,37 +4128,34 @@
             bottom: calc(50px + env(safe-area-inset-bottom, 0px));
             right: calc(16px + env(safe-area-inset-right, 0px));
             z-index: 15;
-            width: 48px;
-            height: 48px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.6);
-            background: rgba(255, 255, 255, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            background: rgba(255, 255, 255, 0.15);
             color: white;
-            font-size: 18px;
+            font-size: 16px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             pointer-events: auto;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            box-shadow: none;
         }
         .pp-share-btn:hover {
-            background: rgba(255, 255, 255, 0.4);
-            border-color: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.35);
+            border-color: rgba(255, 255, 255, 1);
             transform: scale(1.1);
-            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
         }
         .pp-share-btn:active {
             transform: scale(0.95);
-            background: rgba(255, 255, 255, 0.35);
+            background: rgba(255, 255, 255, 0.25);
         }
         .pp-share-btn.copied {
             color: #059669;
-            background: rgba(5, 150, 105, 0.35);
-            border-color: rgba(5, 150, 105, 0.7);
+            background: rgba(5, 150, 105, 0.3);
+            border-color: rgba(5, 150, 105, 0.8);
             transform: scale(1.1);
         }
         /* 预览删除按钮 */
@@ -4167,32 +4164,29 @@
             bottom: calc(50px + env(safe-area-inset-bottom, 0px));
             left: calc(16px + env(safe-area-inset-right, 0px));
             z-index: 15;
-            width: 48px;
-            height: 48px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
-            border: 2px solid rgba(239, 68, 68, 0.6);
-            background: rgba(239, 68, 68, 0.25);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            color: #dc2626;
-            font-size: 18px;
+            border: 2px solid rgba(239, 68, 68, 0.7);
+            background: rgba(239, 68, 68, 0.15);
+            color: #ef4444;
+            font-size: 16px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             pointer-events: auto;
-            box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+            box-shadow: none;
         }
         .pp-delete-btn:hover {
-            background: rgba(239, 68, 68, 0.45);
-            border-color: rgba(239, 68, 68, 0.9);
+            background: rgba(239, 68, 68, 0.35);
+            border-color: rgba(239, 68, 68, 1);
             transform: scale(1.1);
-            box-shadow: 0 6px 24px rgba(239, 68, 68, 0.4);
         }
         .pp-delete-btn:active {
             transform: scale(0.95);
-            background: rgba(239, 68, 68, 0.35);
+            background: rgba(239, 68, 68, 0.25);
         }
         /* 预览信息按钮 */
         .pp-info-btn {
@@ -4201,23 +4195,21 @@
             left: 50%;
             transform: translateX(-50%);
             z-index: 15;
-            width: 48px;
-            height: 48px;
+            width: 44px;
+            height: 44px;
             border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.8);
-            background: rgba(255, 255, 255, 0.35);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            color: #1f2937;
-            font-size: 18px;
-            font-weight: 700;
+            border: 2px solid rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             pointer-events: auto;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+            box-shadow: none;
         }
         .pp-info-btn:hover {
             background: rgba(255, 255, 255, 0.55);

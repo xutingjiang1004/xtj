@@ -608,7 +608,6 @@
         
         ppResetZoom();
         
-        // FLIP Animation for Close: Step 1 - First (记录当前大图状态)
         var curImg = document.getElementById('photoPreviewImage');
         var originRect = overlay._openOrigin;
         var originImg = overlay._openOriginImg;
@@ -618,8 +617,12 @@
             currentRect = curImg.getBoundingClientRect();
         }
         
-        // FLIP Animation: Step 2 - Last (计算目标状态：缩略图位置)
-        if (originRect && currentRect && originImg) {
+        // 验证状态有效性
+        var canFlip = originRect && currentRect && originImg && 
+                     currentRect.width > 0 && currentRect.height > 0 &&
+                     originRect.width > 0 && originRect.height > 0;
+        
+        if (canFlip) {
             // 隐藏缩略图，让大图"飞回"到缩略图位置
             originImg.style.transition = 'none';
             originImg.style.opacity = '0';
@@ -637,9 +640,9 @@
             curImg.style.transformOrigin = 'top left';
             void curImg.offsetHeight;
             
-            // FLIP Animation: Step 4 - Play (播放反向动画)
-            overlay.style.transition = 'opacity 0.25s cubic-bezier(0.55, 0, 1, 0.45)';
-            curImg.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45)';
+            // 使用iOS风格的缓动曲线
+            overlay.style.transition = 'opacity 0.4s cubic-bezier(0.55, 0, 1, 0.45)';
+            curImg.style.transition = 'transform 0.5s cubic-bezier(0.55, 0, 1, 0.45)';
             curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
             overlay.style.opacity = '0';
             
@@ -651,25 +654,42 @@
                 }
                 
                 // 重置样式
-                curImg.style.transition = '';
-                curImg.style.transform = '';
-                curImg.style.transformOrigin = '';
+                if (curImg) {
+                    curImg.style.transition = '';
+                    curImg.style.transform = '';
+                    curImg.style.transformOrigin = '';
+                }
                 overlay.style.transition = '';
                 overlay.style.opacity = '';
                 overlay.classList.remove('active');
                 
                 document.body.classList.remove('pp-body-noscroll');
-            }, 320);
+            }, 520);
         } else {
-            // 没有原图参考，使用淡入淡出
-            overlay.style.transition = 'opacity 0.2s cubic-bezier(0.55, 0, 1, 0.45)';
+            // 安全回退：使用淡入淡出
+            overlay.style.transition = 'opacity 0.35s cubic-bezier(0.55, 0, 1, 0.45)';
             overlay.style.opacity = '0';
+            
             setTimeout(function() {
                 overlay.style.opacity = '';
                 overlay.style.transition = '';
                 overlay.classList.remove('active');
+                
+                // 重置图片样式
+                if (curImg) {
+                    curImg.style.transition = '';
+                    curImg.style.transform = '';
+                    curImg.style.transformOrigin = '';
+                }
+                
+                // 恢复原图可见性
+                if (originImg) {
+                    originImg.style.transition = '';
+                    originImg.style.opacity = '';
+                }
+                
                 document.body.classList.remove('pp-body-noscroll');
-            }, 220);
+            }, 380);
         }
     }
 
