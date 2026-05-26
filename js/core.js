@@ -119,7 +119,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     dialog.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(0.08)';
                     dialog.style.opacity = '0';
                     void dialog.offsetHeight;
-                    dialog.style.transition = 'transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.25s ease-out';
+                    dialog.style.transition = 'transform 0.4s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.3s ease-out';
                     dialog.style.transform = '';
                     dialog.style.opacity = '1';
                 }
@@ -145,7 +145,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     dialog.style.transform = 'scale(1) translateY(0)';
                     dialog.style.opacity = '1';
                     void dialog.offsetHeight;
-                    dialog.style.transition = 'transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.18s ease-in';
+                    dialog.style.transition = 'transform 0.35s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.25s ease-in';
                     dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(0.05)';
                     dialog.style.opacity = '0';
                     overlay._closeTimer = setTimeout(function() {
@@ -157,7 +157,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (typeof cb === 'function') {
                             cb();
                         }
-                    }, 330);
+                    }, 380);
                     return;
                 }
             }
@@ -191,7 +191,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     dialog.style.transform = 'scale(1) translateY(0)';
                     dialog.style.opacity = '1';
                     void dialog.offsetHeight;
-                    dialog.style.transition = 'transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.18s ease-in';
+                    dialog.style.transition = 'transform 0.35s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.25s ease-in';
                     dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(0.05)';
                     dialog.style.opacity = '0';
                     overlay._closeTimer = setTimeout(function() {
@@ -202,7 +202,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         window._confirmCallback = null;
                         var okBtn = document.getElementById('ppConfirmOkBtn');
                         if (okBtn) okBtn.disabled = false;
-                    }, 330);
+                    }, 380);
                     return;
                 }
             }
