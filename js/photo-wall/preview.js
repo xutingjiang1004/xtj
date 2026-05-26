@@ -1,112 +1,133 @@
+
 (function() {
     var photoPreviewActive = false;
     var photoPreviewCurrent = null;
+    var photoPreviewOverlay = null;
     var ppZoom = { scale: 1, tx: 0, ty: 0 };
     var ppSortedPhotos = [];
     var ppPhotoIdx = -1;
-    var ppVw = 0, ppVh = 0;
+    var ppVw = 0;
+    var ppVh = 0;
     var ppTrack = null;
     var ppTrackDrag = 0;
     var ppTrackSnapping = false;
     var ppEventsBound = false;
+    var ppLastTap = 0;
+    var ppTapHandled = false;
+    var ppNavBusy = false;
+    var ppPointers = new Map();
+    var ppPinchStart = null;
+    var ppPinchPre = null;
+    var ppStart = null;
+    var ppTrackRaf = null;
+    var ppPinchMinDist = Infinity;
+    var ppPinchMaxDist = 0;
+    var ppCurrentRotation = 0;
+    var ppTapThreshold = 15;
+    var ppMovedDistance = 0;
+    var ppCloseTimer = null;
+    var ppDismissState = {
+        isActive: false,
+        dy: 0,
+        scale: 1,
+        opacity: 1
+    };
+    var ppLongPressTimer = null;
     var ppDownloadActive = false;
-    var ppDownloadAbortController = null;
     var ppDownloadProgress = 0;
     var ppConfirmDownloadModal = null;
+    var ppDownloadAbortController = null;
 
     function ppInitTrack() {
         ppVw = window.innerWidth;
         ppVh = window.innerHeight;
         ppTrack = document.getElementById('ppSlideTrack');
         if (ppTrack) {
-            ppTrack.style.width = (ppVw * 3) + 'px';
-            ppTrack.style.transform = 'translate3d(-' + ppVw + 'px,0,0)';
+            var slots = ppTrack.querySelectorAll('.pp-slide-slot');
+            slots.forEach(function(slot) {
+                slot.style.width = ppVw + 'px';
+                slot.style.height = ppVh + 'px';
+            });
+            ppTrack.style.width = ppVw * 3 + 'px';
+            ppTrack.style.height = ppVh + 'px';
         }
     }
 
-    function ppSetTrackImages(idx) {
+    function ppPreloadAdjacent(idx) {
+        var photos = ppSortedPhotos;
+        var preloadCount = 3;
+        for (var i = -preloadCount; i <= preloadCount; i++) {
+            var adjIdx = idx + i;
+            if (adjIdx >= 0 && adjIdx < photos.length && photos[adjIdx].imageUrl) {
+                ppDecodeImage(photos[adjIdx].imageUrl);
+            }
+        }
+    }
+
+    function ppEnsureSideImages(idx) {
+        var photos = ppSortedPhotos;
+        if (!ppTrack) return;
         var prevImg = document.getElementById('ppPrevImg');
-        var curImg = document.getElementById('photoPreviewImage');
         var nextImg = document.getElementById('ppNextImg');
-        
-        var prevIdx = idx - 1;
-        var nextIdx = idx + 1;
-        
-        if (prevIdx >= 0 && ppSortedPhotos[prevIdx]) {
-            ppSwapImage(prevImg, ppSortedPhotos[prevIdx].imageUrl);
+        if (idx > 0 && photos[idx - 1]) {
+            ppSwapImage(prevImg, photos[idx - 1].imageUrl);
         } else {
-            prevImg.removeAttribute('src');
+            ppSwapImage(prevImg, null);
         }
-        
-        if (ppSortedPhotos[idx]) {
-            ppSwapImage(curImg, ppSortedPhotos[idx].imageUrl);
-        }
-        
-        if (nextIdx < ppSortedPhotos.length && ppSortedPhotos[nextIdx]) {
-            ppSwapImage(nextImg, ppSortedPhotos[nextIdx].imageUrl);
+        if (idx < photos.length - 1 && photos[idx + 1]) {
+            ppSwapImage(nextImg, photos[idx + 1].imageUrl);
         } else {
-            nextImg.removeAttribute('src');
+            ppSwapImage(nextImg, null);
         }
-        
-        ppPreloadAdjacent(idx);
     }
 
     var ppImageCache = {};
     var ppDecodeQueue = {};
+    var ppLoadRetries = {};
+    var MAX_RETRIES = 3;
 
     function ppDecodeImage(url) {
         if (!url) return Promise.resolve();
         if (ppImageCache[url]) return Promise.resolve();
         if (ppDecodeQueue[url]) return ppDecodeQueue[url];
-        
+
         var promise = new Promise(function(resolve) {
             var img = new Image();
             img.src = url;
-            
+
             if ('decode' in img) {
                 img.decode().then(function() {
                     ppImageCache[url] = img;
                     delete ppDecodeQueue[url];
+                    delete ppLoadRetries[url];
                     resolve();
                 }).catch(function() {
-                    ppImageCache[url] = img;
-                    delete ppDecodeQueue[url];
-                    resolve();
+                    tryToLoad();
                 });
             } else {
+                tryToLoad();
+            }
+
+            function tryToLoad() {
                 if (img.complete) {
                     ppImageCache[url] = img;
                     delete ppDecodeQueue[url];
+                    delete ppLoadRetries[url];
                     resolve();
                 } else {
                     img.onload = img.onerror = function() {
                         ppImageCache[url] = img;
                         delete ppDecodeQueue[url];
+                        delete ppLoadRetries[url];
                         resolve();
                     };
                 }
             }
         });
-        
+
         ppDecodeQueue[url] = promise;
         return promise;
     }
-
-    function ppPreloadAdjacent(idx) {
-        var preloadCount = 3;
-        for (var i = -preloadCount; i <= preloadCount; i++) {
-            var adjIdx = idx + i;
-            if (adjIdx >= 0 && adjIdx < ppSortedPhotos.length) {
-                var photo = ppSortedPhotos[adjIdx];
-                if (photo && photo.imageUrl) {
-                    ppDecodeImage(photo.imageUrl);
-                }
-            }
-        }
-    }
-
-    var ppLoadRetries = {};
-    var MAX_RETRIES = 3;
 
     function ppSwapImage(imgEl, url) {
         if (!imgEl) return;
@@ -114,69 +135,64 @@
             imgEl.style.transition = 'none';
             imgEl.removeAttribute('src');
             imgEl.style.opacity = '0';
-            imgEl.classList.remove('pp-placeholder');
+            imgEl._ppUrl = null;
             return;
         }
-        
-        if (imgEl.dataset.ppUrl === url) return;
-        imgEl.dataset.ppUrl = url;
-        
-        var cachedImg = ppImageCache[url];
-        if (cachedImg && cachedImg.naturalWidth > 0) {
+        if (imgEl._ppUrl === url) return;
+        imgEl._ppUrl = url;
+        var cached = ppImageCache[url];
+        if (cached && cached.naturalWidth > 0) {
             imgEl.style.transition = 'none';
             imgEl.src = url;
             imgEl.style.opacity = '1';
-            imgEl.classList.remove('pp-placeholder');
             return;
         }
-        
         imgEl.style.transition = 'none';
+        imgEl.removeAttribute('src');
         imgEl.style.opacity = '0';
-        imgEl.classList.remove('pp-placeholder');
-        
         var loadDone = false;
-        var retryCount = ppLoadRetries[url] || 0;
-        
+        var retryCount = 0;
         function onLoad() {
             if (loadDone) return;
             loadDone = true;
             imgEl.removeEventListener('load', onLoad);
             imgEl.removeEventListener('error', onError);
-            delete ppLoadRetries[url];
-            
             if (!ppImageCache[url]) {
                 ppImageCache[url] = imgEl;
             }
-            
+            delete ppLoadRetries[url];
             requestAnimationFrame(function() {
-                imgEl.style.transition = 'opacity 0.2s ease-out';
+                imgEl.style.transition = 'opacity 0.2s ease-in-out';
+                void imgEl.offsetHeight;
                 imgEl.style.opacity = '1';
             });
         }
-        
         function onError() {
             if (loadDone) return;
             imgEl.removeEventListener('load', onLoad);
             imgEl.removeEventListener('error', onError);
             
-            retryCount++;
+            retryCount = (ppLoadRetries[url] || 0) + 1;
             if (retryCount <= MAX_RETRIES) {
                 ppLoadRetries[url] = retryCount;
-                var retryUrl = url + (url.indexOf('?') === -1 ? '?' : '&') + '_retry=' + Date.now();
-                imgEl.src = retryUrl;
-                imgEl.addEventListener('load', onLoad);
-                imgEl.addEventListener('error', onError);
+                setTimeout(function() {
+                    if (imgEl._ppUrl === url) {
+                        loadDone = false;
+                        imgEl.addEventListener('load', onLoad);
+                        imgEl.addEventListener('error', onError);
+                        imgEl.src = url + (url.indexOf('?') === -1 ? '?t=' : '&t=') + Date.now();
+                    }
+                }, 500 * retryCount);
             } else {
                 loadDone = true;
+                imgEl._ppUrl = null;
                 delete ppLoadRetries[url];
                 showPlaceholder(imgEl);
             }
         }
-        
         imgEl.addEventListener('load', onLoad);
         imgEl.addEventListener('error', onError);
         imgEl.src = url;
-        
         if (imgEl.complete && imgEl.naturalWidth > 0) {
             onLoad();
         }
@@ -189,356 +205,910 @@
         imgEl.classList.add('pp-placeholder');
     }
 
+    function ppSetTrackImages(idx) {
+        ppInitTrack();
+        if (!ppTrack) return;
+        var photos = ppSortedPhotos;
+        var prevImg = document.getElementById('ppPrevImg');
+        var curImg = document.getElementById('photoPreviewImage');
+        var nextImg = document.getElementById('ppNextImg');
+        ppPreloadAdjacent(idx);
+        if (photos[idx]) {
+            ppSwapImage(curImg, photos[idx].imageUrl);
+        }
+        if (idx > 0 && photos[idx - 1]) {
+            ppSwapImage(prevImg, photos[idx - 1].imageUrl);
+        } else {
+            ppSwapImage(prevImg, null);
+        }
+        if (idx < photos.length - 1 && photos[idx + 1]) {
+            ppSwapImage(nextImg, photos[idx + 1].imageUrl);
+        } else {
+            ppSwapImage(nextImg, null);
+        }
+        ppTrackDrag = 0;
+        ppTrackSnapping = false;
+        ppTrack.classList.remove('snapping');
+        ppTrack.style.transition = '';
+        ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+        if (photos[idx]) window.updateAmbientBackground(photos[idx].imageUrl);
+    }
+
+    function ppSlideTo(targetOffsetX, callback) {
+        if (!ppTrack) {
+            if (callback) callback();
+            return;
+        }
+        ppTrackSnapping = true;
+        ppTrack.classList.add('snapping');
+        var duration = 320;
+        ppTrack.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.33, 1, 0.68, 1)';
+        var ran = false;
+        var onEnd = function() {
+            if (ran) return;
+            ran = true;
+            ppTrack.removeEventListener('transitionend', onEnd);
+            ppTrack.classList.remove('snapping');
+            ppTrackSnapping = false;
+            if (callback) callback();
+        };
+        ppTrack.addEventListener('transitionend', onEnd);
+        setTimeout(onEnd, duration + 120);
+        ppTrack.style.transform = 'translate3d(' + targetOffsetX + 'px, 0, 0)';
+    }
+
+    function ppSnapTo(targetOffset) {
+        if (!ppTrack) return;
+        ppTrackSnapping = true;
+        var absDiff = Math.abs(ppTrackDrag - targetOffset);
+        var duration = Math.min(Math.max(absDiff * 0.5, 150), 400);
+        ppTrack.classList.add('snapping');
+        ppTrack.style.transition = 'transform ' + duration + 'ms cubic-bezier(0.33, 1, 0.68, 1)';
+        var onSnapEnd = function() {
+            ppTrack.removeEventListener('transitionend', onSnapEnd);
+            ppTrack.classList.remove('snapping');
+            ppTrackSnapping = false;
+
+            vibrate(10);
+
+            var idx = ppPhotoIdx;
+            var photos = ppSortedPhotos;
+
+            var prevImg = document.getElementById('ppPrevImg');
+            var curImg = document.getElementById('photoPreviewImage');
+            var nextImg = document.getElementById('ppNextImg');
+
+            if (idx > 0 && photos[idx - 1]) {
+                ppSwapImage(prevImg, photos[idx - 1].imageUrl);
+            } else {
+                ppSwapImage(prevImg, null);
+            }
+            if (idx < photos.length - 1 && photos[idx + 1]) {
+                ppSwapImage(nextImg, photos[idx + 1].imageUrl);
+            } else {
+                ppSwapImage(nextImg, null);
+            }
+
+            setTimeout(function() {
+                ppPreloadAdjacent(idx);
+            }, 500);
+        };
+        ppTrack.addEventListener('transitionend', onSnapEnd);
+        var finalOffset = -ppVw + targetOffset;
+        ppTrack.style.transform = 'translate3d(' + finalOffset + 'px, 0, 0)';
+    }
+
+    function ppFinishNavigation(newIdx) {
+        ppPhotoIdx = newIdx;
+        ppResetZoom();
+        photoPreviewCurrent = ppSortedPhotos[newIdx];
+        ppUpdateInfo(newIdx);
+        ppUpdateDots(newIdx);
+
+        ppInitTrack();
+        ppTrack.style.transition = 'none';
+        ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+        ppTrackDrag = 0;
+        ppTrackSnapping = false;
+        ppTrack.classList.remove('snapping');
+
+        ppSetTrackImages(newIdx);
+
+        if (ppSortedPhotos[newIdx]) {
+            window.updateAmbientBackground(ppSortedPhotos[newIdx].imageUrl);
+        }
+
+        setTimeout(function() {
+            ppNavBusy = false;
+        }, 300);
+    }
+
+    function ppNavigatePhoto(direction) {
+        if (ppNavBusy) return;
+        var photos = ppSortedPhotos;
+        var newIdx = ppPhotoIdx + direction;
+
+        if (newIdx < 0 || newIdx >= photos.length) {
+            if (Math.abs(ppTrackDrag) > 2) ppSnapTo(0);
+            return;
+        }
+
+        ppNavBusy = true;
+        ppInitTrack();
+
+        var targetOffset = direction === 1 ? -2 * ppVw : 0;
+
+        ppPreloadAdjacent(newIdx);
+        ppEnsureSideImages(newIdx);
+
+        ppSlideTo(targetOffset, function() {
+            ppFinishNavigation(newIdx);
+        });
+    }
+
+    window.ppPrevPhoto = function() {
+        ppNavigatePhoto(-1);
+    };
+
+    window.ppNextPhoto = function() {
+        ppNavigatePhoto(1);
+    };
+
     function ppUpdateInfo(idx) {
-        var photo = ppSortedPhotos[idx];
-        if (!photo) return;
-        
+        var photos = ppSortedPhotos;
+        if (!photos[idx]) return;
+        var photo = photos[idx];
         var userEl = document.getElementById('photoPreviewUser');
         var timeEl = document.getElementById('photoPreviewTime');
-        var viewsCount = document.getElementById('photoPreviewViewsCount');
-        
-        if (userEl) userEl.textContent = photo.userName || photo.user_name || '用户';
-        if (timeEl) timeEl.textContent = photo.time || photo.created_at || '';
-        if (viewsCount) viewsCount.textContent = photo.views || 0;
+        var viewsEl = document.getElementById('photoPreviewViewsCount');
+
+        if (userEl) userEl.textContent = photo.username || '未知用户';
+        if (timeEl) {
+            var date = new Date(photo.timestamp);
+            timeEl.textContent = date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        }
+        if (viewsEl) viewsEl.textContent = photo.views || '0';
+
+        var deleteBtn = document.getElementById('ppDeleteBtn');
+        if (deleteBtn) {
+            if (window.currentUser === photo.username) {
+                deleteBtn.style.display = 'flex';
+                deleteBtn.title = '删除';
+            } else {
+                deleteBtn.style.display = 'flex';
+                deleteBtn.title = '仅照片上传者可删除';
+            }
+        }
     }
 
     function ppUpdateDots(idx) {
-        var dotsContainer = document.getElementById('ppDots');
-        if (!dotsContainer) return;
-        
-        var html = '';
-        for (var i = 0; i < ppSortedPhotos.length; i++) {
-            var isActive = i === idx;
-            html += '<div class="pp-dot' + (isActive ? ' active' : '') + '" data-index="' + i + '"></div>';
+        var photos = ppSortedPhotos;
+        var dotsEl = document.getElementById('ppDots');
+        if (!dotsEl || photos.length <= 1) {
+            if (dotsEl) dotsEl.style.display = 'none';
+            return;
         }
-        dotsContainer.innerHTML = html;
+        dotsEl.style.display = 'flex';
+        var dots = '';
+        for (var i = 0; i < photos.length; i++) {
+            dots += '<span class="pp-dot' + (i === idx ? ' active' : '') + '" data-index="' + i + '"></span>';
+        }
+        dotsEl.innerHTML = dots;
     }
 
     function ppResetZoom() {
         ppZoom = { scale: 1, tx: 0, ty: 0 };
+        ppPinchStart = null;
+        ppPinchPre = null;
+        ppCurrentRotation = 0;
+        var imgs = document.querySelectorAll('.pp-slide-img');
+        imgs.forEach(function(img) {
+            img.style.transform = '';
+            img.style.borderRadius = '';
+        });
+    }
+
+    function ppToggleZoom(clientX, clientY) {
         var curImg = document.getElementById('photoPreviewImage');
-        if (curImg) {
-            curImg.style.transform = '';
+        if (!curImg) return;
+
+        if (ppZoom.scale > 1.01) {
+            ppResetZoom();
+            curImg.classList.remove('zoomed');
+        } else {
+            var rect = curImg.getBoundingClientRect();
+            var ratio = 2;
+            ppZoom.scale = ratio;
+
+            if (typeof clientX !== 'undefined' && typeof clientY !== 'undefined') {
+                var nx = (clientX - rect.left) / rect.width;
+                var ny = (clientY - rect.top) / rect.height;
+                var cx = rect.left + rect.width * nx;
+                var cy = rect.top + rect.height * ny;
+                ppZoom.tx = (window.innerWidth / 2 - cx) * (1 - ratio);
+                ppZoom.ty = (window.innerHeight / 2 - cy) * (1 - ratio);
+            } else {
+                var centerX = rect.left + rect.width / 2;
+                var centerY = rect.top + rect.height / 2;
+                ppZoom.tx = (window.innerWidth / 2 - centerX) * (1 - ratio);
+                ppZoom.ty = (window.innerHeight / 2 - centerY) * (1 - ratio);
+            }
+
+            var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
+            curImg.style.transform = t;
+            curImg.classList.add('zoomed');
         }
     }
 
-    function openPhotoPreview(idx, keepList) {
-        try {
-            if (photoPreviewActive) return;
-            
-            if (!keepList) {
-                ppSortedPhotos = window.photoWallData ? window.photoWallData.slice() : [];
-            }
-            
-            if (!ppSortedPhotos || ppSortedPhotos.length === 0) {
-                window.showToast('暂无照片');
-                return;
-            }
-            
-            if (idx < 0) idx = 0;
-            if (idx >= ppSortedPhotos.length) idx = ppSortedPhotos.length - 1;
-            
-            var overlay = document.getElementById('photoPreviewOverlay');
-            if (!overlay) {
-                var container = document.createElement('div');
-                container.className = 'photo-preview-overlay';
-                container.id = 'photoPreviewOverlay';
-                container.innerHTML =
-                    '<div class="pp-ambient-bg" id="ppAmbientBg"></div>' +
-                    '<div class="pp-dots" id="ppDots"></div>' +
-                    '<button class="photo-preview-close" onclick="closePhotoPreview()">×</button>' +
-                    '<button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张">' +
-                    '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>' +
-                    '<button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张">' +
-                    '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>' +
-                    '<div class="photo-preview-image-wrapper" id="ppImageWrapper">' +
-                    '<div id="ppSlideTrack" class="pp-slide-track">' +
-                    '<div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"></div>' +
-                    '<div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"></div>' +
-                    '<div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"></div>' +
-                    '</div>' +
-                    '</div>' +
-                    '<button class="pp-info-btn" id="ppInfoBtn" title="照片详情" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></button>' +
-                    '<button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">🔗</button>' +
-                    '<button class="pp-rotate-btn" id="ppRotateBtn" title="旋转90°" onclick="window.ppRotatePhoto()">↻</button>' +
-                    '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">🗑️</button>' +
-                    '<div class="photo-preview-info">' +
-                    '<span class="pp-user" id="photoPreviewUser"></span>' +
-                    '<span class="pp-time" id="photoPreviewTime"></span>' +
-                    '<span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg><span id="photoPreviewViewsCount">0</span></span>' +
-                    '</div>' +
-                    '<div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;">' +
-                    '<div class="pp-download-content">' +
-                    '<div class="pp-download-spinner"></div>' +
-                    '<div class="pp-download-text" id="ppDownloadText">正在下载...</div>' +
-                    '<div class="pp-download-progress">' +
-                    '<div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div>' +
-                    '</div>' +
-                    '</div>' +
-                    '</div>';
-                document.body.appendChild(container);
-                overlay = container;
-            }
-            
-            if (!ppEventsBound) {
-                bindPreviewEvents(overlay);
-                ppEventsBound = true;
-            }
-            
-            ppResetZoom();
-            
-            photoPreviewActive = true;
-            photoPreviewCurrent = ppSortedPhotos[idx] || null;
-            ppPhotoIdx = idx;
-            
-            var photo = ppSortedPhotos[idx];
-            if (photo && photo.imageUrl) {
-                ppDecodeImage(photo.imageUrl);
-            }
-            
-            ppInitTrack();
-            
-            // 设置删除按钮可见性
-            var deleteBtn = document.getElementById('ppDeleteBtn');
-            if (deleteBtn) {
-                var photo = ppSortedPhotos[idx];
-                var isOwner = window.currentUser && photo && (photo.username === window.currentUser || photo.user_name === window.currentUser);
-                deleteBtn.style.display = isOwner ? '' : 'none';
-            }
-            
-            var originRect = null;
-            var originImg = null;
-            var grid = document.getElementById('photoGrid');
-            if (grid) {
-                var items = grid.querySelectorAll('.photo-wall-item');
-                if (items[idx]) {
-                    var thumbImg = items[idx].querySelector('img');
-                    if (thumbImg && thumbImg.complete) {
-                        var r = thumbImg.getBoundingClientRect();
-                        if (r && r.width > 0 && r.height > 0) {
-                            originRect = r;
-                            originImg = thumbImg;
-                        }
+    function vibrate(duration) {
+        if (navigator.vibrate) {
+            try {
+                navigator.vibrate(duration);
+            } catch (e) {}
+        }
+    }
+
+    function openPhotoPreview(index, keepList) {
+        if (photoPreviewActive) {
+            return;
+        }
+
+        if (!keepList) {
+            ppSortedPhotos = window.photoWallData ? window.photoWallData.slice() : [];
+        }
+        if (!ppSortedPhotos || ppSortedPhotos.length === 0) {
+            window.showToast('\u6682\u65e0\u7167\u7247');
+            return;
+        }
+
+        if (index < 0) index = 0;
+        if (index >= ppSortedPhotos.length) index = ppSortedPhotos.length - 1;
+
+        var overlay = document.getElementById('photoPreviewOverlay');
+        if (!overlay) {
+            var container = document.createElement('div');
+            container.className = 'photo-preview-overlay';
+            container.id = 'photoPreviewOverlay';
+            container.innerHTML =
+                '<div class="pp-ambient-bg" id="ppAmbientBg"></div>' +
+                '<div class="pp-dots" id="ppDots"></div>' +
+                '<button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>' +
+                '<button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="\u4e0a\u4e00\u5f20">' +
+                '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+                '<button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="\u4e0b\u4e00\u5f20">' +
+                '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+                '<div class="photo-preview-image-wrapper" id="ppImageWrapper">' +
+                '<div id="ppSlideTrack" class="pp-slide-track">' +
+                '<div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div>' +
+                '<div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div>' +
+                '<div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div>' +
+                '</div>' +
+                '</div>' +
+                '<button class="pp-info-btn" id="ppInfoBtn" title="\u7167\u7247\u8be6\u60c5" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>' +
+                '<button class="pp-share-btn" id="ppShareBtn" title="\u5206\u4eab" onclick="window.shareCurrentPhoto()">\ud83d\udd17</button>' +
+                '<button class="pp-rotate-btn" id="ppRotateBtn" title="\u65cb\u8f6c90\u00b0" onclick="window.ppRotatePhoto()">\u27f3</button>' +
+                '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">\ud83d\uddd1\ufe0f</button>' +
+                '<div class="photo-preview-info">' +
+                '<span class="pp-user" id="photoPreviewUser"></span>' +
+                '<span class="pp-time" id="photoPreviewTime"></span>' +
+                '<span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span>' +
+                '</div>' +
+                '<div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;">' +
+                '<div class="pp-download-content">' +
+                '<div class="pp-download-spinner"></div>' +
+                '<div class="pp-download-text" id="ppDownloadText">\u6b63\u5728\u4e0b\u8f7d...</div>' +
+                '<div class="pp-download-progress">' +
+                '<div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div>' +
+                '</div>' +
+                '</div>' +
+                '</div>';
+            document.body.appendChild(container);
+            overlay = container;
+        }
+
+        if (!ppEventsBound) {
+            bindPreviewEvents(overlay);
+            ppEventsBound = true;
+        }
+
+        ppResetZoom();
+
+        photoPreviewActive = true;
+        photoPreviewCurrent = ppSortedPhotos[index] || null;
+        ppPhotoIdx = index;
+
+        var photo = ppSortedPhotos[index];
+        if (photo && photo.imageUrl) {
+            ppDecodeImage(photo.imageUrl);
+        }
+
+        ppInitTrack();
+        if (ppTrack) {
+            ppTrack.style.transition = 'none';
+            ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+        }
+
+        // FLIP: Step 1 - record origin
+        var originRect = null;
+        var originImg = null;
+        var grid = document.getElementById('photoGrid');
+        if (grid) {
+            var items = grid.querySelectorAll('.photo-wall-item');
+            if (items[index]) {
+                var thumbImg = items[index].querySelector('img');
+                if (thumbImg && thumbImg.complete) {
+                    var r = thumbImg.getBoundingClientRect();
+                    if (r && r.width > 0 && r.height > 0) {
+                        originRect = r;
+                        originImg = thumbImg;
                     }
                 }
             }
-            
-            overlay._openOrigin = originRect;
-            overlay._openOriginImg = originImg;
-            
+        }
+
+        overlay._openOrigin = originRect;
+        overlay._openOriginImg = originImg;
+
+        if (originImg) {
+            originImg.style.transition = 'none';
+            originImg.style.opacity = '0';
+        }
+
+        // Show overlay
+        overlay.classList.add('active');
+        document.body.classList.add('photo-previewing');
+        overlay.style.opacity = '1';
+
+        ppInitTrack();
+        if (ppTrack) {
+            ppTrack.style.transition = 'none';
+            ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+        }
+
+        var curImg = document.getElementById('photoPreviewImage');
+
+        function finishOpen() {
+            if (curImg) {
+                curImg.style.transition = '';
+                curImg.style.transform = '';
+                curImg.style.transformOrigin = '';
+                curImg.style.borderRadius = '';
+            }
+            overlay.style.transition = '';
+            ppSetTrackImages(index);
+            ppUpdateInfo(index);
+            ppUpdateDots(index);
             if (originImg) {
-                originImg.style.transition = 'none';
-                originImg.style.opacity = '0';
+                originImg.style.transition = '';
+                originImg.style.opacity = '';
             }
-            
-            overlay.classList.add('active');
-            document.body.classList.add('photo-previewing');
-            overlay.style.opacity = '1';
-            
-            var curImg = document.getElementById('photoPreviewImage');
-            
-            function finishOpen() {
-                try {
-                    if (curImg) {
-                        curImg.style.transition = '';
-                        curImg.style.transform = '';
-                        curImg.style.transformOrigin = '';
-                        curImg.style.borderRadius = '';
-                    }
-                    overlay.style.transition = '';
-                    ppSetTrackImages(idx);
-                    ppUpdateInfo(idx);
-                    ppUpdateDots(idx);
-                    
-                    if (originImg) {
-                        originImg.style.transition = '';
-                        originImg.style.opacity = '';
-                    }
-                } catch (e) {
-                    console.error('Finish open error:', e);
-                }
-            }
-            
-            if (curImg && photo && photo.imageUrl) {
-                var preloaded = ppImageCache[photo.imageUrl];
-                
-                curImg.style.transition = 'none';
-                curImg.style.opacity = '0';
-                curImg.src = photo.imageUrl;
-                
-                if (preloaded || (curImg.complete && curImg.naturalWidth > 0)) {
-                    void curImg.offsetHeight;
-                    
-                    if (originRect) {
-                        var fr = curImg.getBoundingClientRect();
-                        if (fr && fr.width > 0) {
-                            var dx = originRect.left - fr.left;
-                            var dy = originRect.top - fr.top;
-                            var sx = originRect.width / fr.width;
-                            var sy = originRect.height / fr.height;
-                            var s = Math.min(sx, sy);
-                            
-                            curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + s + ')';
-                            curImg.style.transformOrigin = 'top left';
-                            curImg.style.borderRadius = (14 / s) + 'px';
-                            curImg.style.opacity = '1';
-                        }
-                    }
-                    
-                    void curImg.offsetHeight;
-                    
-                    if (originRect && curImg.getBoundingClientRect().width > 0) {
-                        overlay.style.transition = 'opacity 0.4s cubic-bezier(0.25, 1, 0.5, 1)';
-                        curImg.style.transition = 'transform 0.55s cubic-bezier(0.25, 1, 0.5, 1), border-radius 0.55s cubic-bezier(0.25, 1, 0.5, 1)';
-                        curImg.style.transform = 'translate(0, 0) scale(1)';
-                        curImg.style.borderRadius = '0px';
-                        
-                        setTimeout(finishOpen, 580);
-                    } else {
+        }
+
+        if (curImg && photo && photo.imageUrl) {
+            var preloaded = ppImageCache[photo.imageUrl];
+
+            curImg.style.transition = 'none';
+            curImg.style.opacity = '0';
+            curImg.src = photo.imageUrl;
+
+            if (preloaded || curImg.complete) {
+                // Image already ready
+                void curImg.offsetHeight;
+
+                if (originRect) {
+                    // FLIP: Invert
+                    var fr = curImg.getBoundingClientRect();
+                    if (fr && fr.width > 0) {
+                        var dx = originRect.left - fr.left;
+                        var dy = originRect.top - fr.top;
+                        var sx = originRect.width / fr.width;
+                        var sy = originRect.height / fr.height;
+                        var s = Math.min(sx, sy);
+
+                        curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + s + ')';
+                        curImg.style.transformOrigin = 'top left';
+                        curImg.style.borderRadius = (14 / s) + 'px';
                         curImg.style.opacity = '1';
-                        setTimeout(finishOpen, 320);
                     }
+                }
+
+                void curImg.offsetHeight;
+
+                // FLIP: Play
+                if (originRect && curImg.getBoundingClientRect().width > 0) {
+                    overlay.style.transition = 'opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
+                    curImg.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.55s cubic-bezier(0.16, 1, 0.3, 1)';
+                    curImg.style.transform = 'translate(0, 0) scale(1)';
+                    curImg.style.borderRadius = '0px';
+                    setTimeout(finishOpen, 580);
                 } else {
-                    curImg.addEventListener('load', function onLoad() {
-                        curImg.removeEventListener('load', onLoad);
-                        curImg.removeEventListener('error', onLoadError);
-                        try {
-                            void curImg.offsetHeight;
-                            curImg.style.opacity = '1';
-                            finishOpen();
-                        } catch (e) {
-                            console.error('Image load error:', e);
-                        }
-                    });
-                    curImg.addEventListener('error', function onLoadError() {
-                        curImg.removeEventListener('load', onLoad);
-                        curImg.removeEventListener('error', onLoadError);
-                        try {
-                            curImg.style.opacity = '1';
-                            finishOpen();
-                        } catch (e) {
-                            console.error('Image error:', e);
-                        }
-                    });
-                    setTimeout(finishOpen, 8000);
+                    curImg.style.opacity = '1';
+                    setTimeout(finishOpen, 380);
                 }
             } else {
-                finishOpen();
+                // Wait for load
+                curImg.addEventListener('load', function onLoad() {
+                    curImg.removeEventListener('load', onLoad);
+                    curImg.removeEventListener('error', onErr);
+                    void curImg.offsetHeight;
+                    curImg.style.opacity = '1';
+                    finishOpen();
+                });
+                curImg.addEventListener('error', function onErr() {
+                    curImg.removeEventListener('load', onLoad);
+                    curImg.removeEventListener('error', onErr);
+                    curImg.style.opacity = '1';
+                    finishOpen();
+                });
+                setTimeout(finishOpen, 8000);
             }
-        } catch (e) {
-            console.error('Open preview error:', e);
+        } else {
+            finishOpen();
         }
     }
+
+    window.openPhotoPreview = openPhotoPreview;
 
     function closePhotoPreview() {
-        try {
-            var overlay = document.getElementById('photoPreviewOverlay');
-            if (!overlay) return;
-            
-            var originRect = overlay._openOrigin;
-            var originImg = overlay._openOriginImg;
-            var curImg = document.getElementById('photoPreviewImage');
-            
-            function finishClose() {
-                try {
-                    overlay.classList.remove('active');
-                    document.body.classList.remove('photo-previewing');
-                    overlay.style.display = 'none';
-                    overlay.style.transition = '';
-                    overlay.style.opacity = '';
-                    if (curImg) {
-                        curImg.style.transition = '';
-                        curImg.style.transform = '';
-                        curImg.style.transformOrigin = '';
-                        curImg.style.borderRadius = '';
-                        curImg.removeAttribute('src');
-                        curImg.style.opacity = '';
-                    }
-                    if (originImg) {
-                        originImg.style.transition = '';
-                        originImg.style.opacity = '';
-                    }
-                    photoPreviewActive = false;
-                    photoPreviewCurrent = null;
-                } catch (e) {
-                    console.error('Finish close error:', e);
+        if (!photoPreviewActive) return;
+        photoPreviewActive = false;
+        var overlay = document.getElementById('photoPreviewOverlay');
+        if (!overlay) {
+            document.body.classList.remove('photo-previewing');
+            return;
+        }
+
+        ppResetZoom();
+
+        var curImg = document.getElementById('photoPreviewImage');
+        var originRect = overlay._openOrigin;
+        var originImg = overlay._openOriginImg;
+
+        var currentRect = null;
+        if (curImg) {
+            currentRect = curImg.getBoundingClientRect();
+        }
+
+        var canFlip = originRect && currentRect && originImg &&
+            currentRect.width > 0 && currentRect.height > 0 &&
+            originRect.width > 0 && originRect.height > 0;
+
+        if (canFlip) {
+            originImg.style.transition = 'none';
+            originImg.style.opacity = '0';
+
+            var dx = originRect.left - currentRect.left;
+            var dy = originRect.top - currentRect.top;
+            var scaleX = originRect.width / currentRect.width;
+            var scaleY = originRect.height / currentRect.height;
+            var scale = Math.min(scaleX, scaleY);
+
+            curImg.style.transition = 'none';
+            curImg.style.transform = 'translate(0, 0) scale(1)';
+            curImg.style.transformOrigin = 'top left';
+            curImg.style.borderRadius = '0px';
+            void curImg.offsetHeight;
+
+            overlay.style.transition = 'opacity 0.4s cubic-bezier(0.25, 1, 0.4, 1)';
+            curImg.style.transition = 'transform 0.45s cubic-bezier(0.25, 1, 0.4, 1), border-radius 0.45s cubic-bezier(0.25, 1, 0.4, 1)';
+            curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
+            curImg.style.borderRadius = (14 / scale) + 'px';
+            overlay.style.opacity = '0';
+
+            setTimeout(function() {
+                if (originImg) {
+                    originImg.style.transition = '';
+                    originImg.style.opacity = '';
                 }
-            }
-            
-            if (originRect && curImg) {
-                var fr = curImg.getBoundingClientRect();
-                if (fr && fr.width > 0) {
-                    var dx = originRect.left - fr.left;
-                    var dy = originRect.top - fr.top;
-                    var sx = originRect.width / fr.width;
-                    var sy = originRect.height / fr.height;
-                    var s = Math.min(sx, sy);
-                    
-                    curImg.style.transition = 'none';
+
+                if (curImg) {
+                    curImg.style.transition = '';
                     curImg.style.transform = '';
+                    curImg.style.transformOrigin = '';
                     curImg.style.borderRadius = '';
-                    void curImg.offsetHeight;
-                    
-                    overlay.style.transition = 'opacity 0.4s cubic-bezier(0.5, 0, 0.75, 0)';
-                    curImg.style.transition = 'transform 0.45s cubic-bezier(0.5, 0, 0.75, 0), border-radius 0.45s cubic-bezier(0.5, 0, 0.75, 0)';
-                    
-                    curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + s + ')';
-                    curImg.style.borderRadius = (14 / s) + 'px';
-                    overlay.style.opacity = '0';
-                    
-                    setTimeout(finishClose, 480);
-                    return;
                 }
+                overlay.style.transition = '';
+                overlay.style.opacity = '';
+                overlay.classList.remove('active');
+
+                document.body.classList.remove('photo-previewing');
+            }, 480);
+        } else {
+            overlay.style.transition = 'opacity 0.35s cubic-bezier(0.55, 0, 1, 0.45)';
+            overlay.style.opacity = '0';
+
+            setTimeout(function() {
+                overlay.style.opacity = '';
+                overlay.style.transition = '';
+                overlay.classList.remove('active');
+
+                if (curImg) {
+                    curImg.style.transition = '';
+                    curImg.style.transform = '';
+                    curImg.style.transformOrigin = '';
+                    curImg.style.borderRadius = '';
+                }
+
+                if (originImg) {
+                    originImg.style.transition = '';
+                    originImg.style.opacity = '';
+                }
+
+                document.body.classList.remove('photo-previewing');
+            }, 380);
+        }
+    }
+
+    window.closePhotoPreview = closePhotoPreview;
+
+    function showPhotoInfo() {
+        var photo = photoPreviewCurrent;
+        if (!photo) return;
+
+        var modal = document.getElementById('ppInfoModal');
+
+        if (modal && (modal.style.display === 'flex' || modal.classList.contains('active') || modal.classList.contains('closing'))) {
+            window.closePhotoInfo();
+            return;
+        }
+
+        if (!modal) {
+            var modalEl = document.createElement('div');
+            modalEl.className = 'pp-info-modal';
+            modalEl.id = 'ppInfoModal';
+            modalEl.innerHTML =
+                '<div class="pp-info-modal-content">' +
+                '<div class="pp-info-modal-header">' +
+                '<span class="pp-info-modal-title">照片详情</span>' +
+                '<button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button>' +
+                '</div>' +
+                '<div class="pp-info-modal-body" id="ppInfoModalBody"></div>' +
+                '</div>';
+
+            document.body.appendChild(modalEl);
+            modal = modalEl;
+        }
+
+        if (!modal._bgListener) {
+            modal._bgListener = true;
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    window.closePhotoInfo();
+                }
+            });
+        }
+
+        var sizeStr = '未知';
+        if (photo.fileSize) {
+            var size = photo.fileSize;
+            if (size >= 1024 * 1024) {
+                sizeStr = (size / (1024 * 1024)).toFixed(2) + ' MB';
+            } else if (size >= 1024) {
+                sizeStr = (size / 1024).toFixed(1) + ' KB';
+            } else {
+                sizeStr = size + ' B';
             }
-            
-            finishClose();
-        } catch (e) {
-            console.error('Close preview error:', e);
-            try {
-                var overlay = document.getElementById('photoPreviewOverlay');
-                if (overlay) {
-                    overlay.classList.remove('active');
-                    document.body.classList.remove('photo-previewing');
-                    overlay.style.display = 'none';
+        }
+
+        var dateStr = '未知';
+        if (photo.timestamp) {
+            dateStr = new Date(photo.timestamp).toLocaleString('zh-CN');
+        }
+
+        var exifHtml = '';
+        if (photo.exif) {
+            exifHtml = '<div class="pp-info-divider"></div>' +
+                '<div class="pp-info-section">' +
+                '<div class="pp-info-section-title">拍摄参数</div>';
+            if (photo.exif.make || photo.exif.model) {
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">设备</span><span class="pp-info-value">' + (photo.exif.model || photo.exif.make || '未知') + '</span></div>';
+            }
+            if (photo.exif.fNumber) {
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">光圈</span><span class="pp-info-value">f/' + photo.exif.fNumber + '</span></div>';
+            }
+            if (photo.exif.exposureTime) {
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">快门</span><span class="pp-info-value">' + photo.exif.exposureTime + '</span></div>';
+            }
+            if (photo.exif.iso) {
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">ISO</span><span class="pp-info-value">' + photo.exif.iso + '</span></div>';
+            }
+            if (photo.exif.focalLength) {
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">焦距</span><span class="pp-info-value">' + photo.exif.focalLength + 'mm</span></div>';
+            }
+            exifHtml += '</div>';
+        }
+
+        document.getElementById('ppInfoModalBody').innerHTML =
+            '<div class="pp-info-section">' +
+            '<div class="pp-info-section-title">元数据</div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">上传者</span><span class="pp-info-value">' + (photo.username || '未知') + '</span></div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">上传时间</span><span class="pp-info-value">' + dateStr + '</span></div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">浏览量</span><span class="pp-info-value">' + (photo.views || 0) + ' 次</span></div>' +
+            '</div>' +
+            '<div class="pp-info-divider"></div>' +
+            '<div class="pp-info-section">' +
+            '<div class="pp-info-section-title">文件信息</div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">文件大小</span><span class="pp-info-value">' + sizeStr + '</span></div>' +
+            '</div>' +
+            exifHtml;
+
+        if (modal._closeTimeout) {
+            clearTimeout(modal._closeTimeout);
+            modal._closeTimeout = null;
+        }
+
+        var content = modal.querySelector('.pp-info-modal-content');
+
+        var btn = document.getElementById('ppInfoBtn');
+        var btnRect = null;
+        if (btn) {
+            btnRect = btn.getBoundingClientRect();
+        }
+
+        modal.classList.remove('closing');
+        modal.classList.add('active');
+        modal.style.display = 'flex';
+        modal.style.opacity = '1';
+
+        content.style.transition = 'none';
+        content.style.transform = '';
+        content.style.opacity = '1';
+
+        void content.offsetHeight;
+
+        if (btnRect) {
+            var finalRect = content.getBoundingClientRect();
+            var dx = btnRect.left - finalRect.left;
+            var dy = btnRect.top - finalRect.top;
+            var scaleX = btnRect.width / finalRect.width;
+            var scaleY = btnRect.height / finalRect.height;
+            var scale = Math.min(scaleX, scaleY);
+
+            content.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
+            content.style.transformOrigin = 'top left';
+            content.style.opacity = '0';
+
+            modal._ppInfoOrigin = {
+                dx: dx,
+                dy: dy,
+                scale: scale,
+                btnWidth: btnRect.width,
+                btnHeight: btnRect.height
+            };
+        }
+
+        void content.offsetHeight;
+
+        modal.style.transition = 'opacity 0.25s ease-out';
+        modal.style.opacity = '0';
+        void modal.offsetHeight;
+        modal.style.opacity = '1';
+
+        if (btnRect) {
+            content.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
+            content.style.transform = 'translate(0, 0) scale(1)';
+            content.style.opacity = '1';
+        } else {
+            content.style.transition = 'none';
+            content.style.transform = 'scale(0.9)';
+            content.style.opacity = '0';
+            void content.offsetHeight;
+            content.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
+            content.style.transform = 'scale(1)';
+            content.style.opacity = '1';
+        }
+    }
+
+    window.showPhotoInfo = showPhotoInfo;
+
+    window.closePhotoInfo = function() {
+        var modal = document.getElementById('ppInfoModal');
+        if (!modal) return;
+        if (modal.classList.contains('closing')) return;
+
+        var content = modal.querySelector('.pp-info-modal-content');
+
+        modal.classList.remove('active');
+        modal.classList.add('closing');
+
+        var origin = modal._ppInfoOrigin;
+
+        if (origin && content) {
+            var currentRect = content.getBoundingClientRect();
+
+            var btn = document.getElementById('ppInfoBtn');
+            var btnRect = btn ? btn.getBoundingClientRect() : null;
+
+            var targetDx = 0;
+            var targetDy = 0;
+            var targetScale = 0.3;
+
+            if (btnRect) {
+                targetDx = btnRect.left - currentRect.left;
+                targetDy = btnRect.top - currentRect.top;
+                targetScale = Math.min(btnRect.width / currentRect.width, btnRect.height / currentRect.height);
+            } else {
+                targetDx = origin.dx;
+                targetDy = origin.dy;
+                targetScale = origin.scale || 0.3;
+            }
+
+            content.style.transition = 'none';
+            content.style.transform = 'translate(0, 0) scale(1)';
+            content.style.opacity = '1';
+
+            void content.offsetHeight;
+
+            content.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in';
+            content.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
+            content.style.opacity = '0';
+
+            modal.style.transition = 'opacity 0.25s ease-in';
+            modal.style.opacity = '0';
+
+            if (modal._closeTimeout) clearTimeout(modal._closeTimeout);
+            modal._closeTimeout = setTimeout(function() {
+                content.style.transition = 'none';
+                content.style.transform = '';
+                content.style.opacity = '';
+                content.style.transformOrigin = '';
+                modal.style.display = 'none';
+                modal.style.opacity = '';
+                modal.style.transition = '';
+                modal.classList.remove('closing');
+                modal._closeTimeout = null;
+            }, 320);
+        } else {
+            if (content) {
+                content.style.transition = 'none';
+                content.style.transform = 'scale(1)';
+                content.style.opacity = '1';
+                void content.offsetHeight;
+                content.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in';
+                content.style.transform = 'scale(0.9)';
+                content.style.opacity = '0';
+            }
+
+            modal.style.transition = 'opacity 0.25s ease-in';
+            modal.style.opacity = '0';
+
+            modal._closeTimeout = setTimeout(function() {
+                modal.style.display = 'none';
+                modal.style.opacity = '';
+                modal.style.transition = '';
+                modal.classList.remove('closing');
+                if (content) {
+                    content.style.transition = 'none';
+                    content.style.transform = '';
+                    content.style.opacity = '';
+                    content.style.transformOrigin = '';
                 }
-                photoPreviewActive = false;
-            } catch (e2) {}
-        }
-    }
-
-    function ppSlideTo(idx) {
-        if (idx < 0) idx = 0;
-        if (idx >= ppSortedPhotos.length) idx = ppSortedPhotos.length - 1;
-        if (idx === ppPhotoIdx) return;
-        
-        ppPhotoIdx = idx;
-        photoPreviewCurrent = ppSortedPhotos[idx];
-        ppTrackSnapping = true;
-        
-        if (ppTrack) {
-            ppTrack.style.transition = 'transform 0.35s cubic-bezier(0.25, 1, 0.5, 1)';
-            ppTrack.style.transform = 'translate3d(-' + ppVw + 'px, 0, 0)';
-        }
-        
-        ppSetTrackImages(idx);
-        ppUpdateInfo(idx);
-        ppUpdateDots(idx);
-        
-        setTimeout(function() {
-            ppTrackSnapping = false;
-        }, 400);
-    }
-
-    window.ppPrevPhoto = function() {
-        if (ppPhotoIdx > 0) {
-            ppSlideTo(ppPhotoIdx - 1);
+                modal._closeTimeout = null;
+            }, 320);
         }
     };
 
-    window.ppNextPhoto = function() {
-        if (ppPhotoIdx < ppSortedPhotos.length - 1) {
-            ppSlideTo(ppPhotoIdx + 1);
+    window.shareCurrentPhoto = function() {
+        var photo = photoPreviewCurrent;
+        if (!photo || !photo.imageUrl) return;
+        var btn = document.getElementById('ppShareBtn');
+        if (!btn) return;
+        if (btn._copying) return;
+
+        btn._copying = true;
+        btn._origHTML = btn.innerHTML;
+        btn.textContent = '✓';
+        btn.classList.add('copied');
+
+        function restoreBtn() {
+            if (!btn) return;
+            btn.innerHTML = btn._origHTML || '🔗';
+            btn.classList.remove('copied');
+            btn.style.transform = '';
+            btn._copying = false;
         }
+
+        function copySuccess() {
+            window.showToast('照片链接已复制');
+            setTimeout(restoreBtn, 1500);
+        }
+
+        function copyFail() {
+            window.showToast('复制失败，请手动复制');
+            setTimeout(restoreBtn, 1500);
+        }
+
+        try {
+            if (document.execCommand && document.execCommand('copy')) {
+                var ta = document.createElement('textarea');
+                ta.value = photo.imageUrl;
+                document.body.appendChild(ta);
+                ta.select();
+                var success = document.execCommand('copy');
+                document.body.removeChild(ta);
+                if (success) {
+                    copySuccess();
+                    return;
+                }
+            }
+        } catch (e) {}
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(photo.imageUrl).then(copySuccess).catch(copyFail);
+            return;
+        }
+
+        var ta2 = document.createElement('textarea');
+        ta2.value = photo.imageUrl;
+        document.body.appendChild(ta2);
+        ta2.select();
+        document.body.removeChild(ta2);
+        copyFail();
+    };
+
+    window.deleteCurrentPhoto = function() {
+        window.deletePhotoFromPreview();
+    };
+
+    window.deletePhotoFromPreview = function() {
+        if (!photoPreviewActive) return;
+
+        vibrate(10);
+
+        var btn = document.getElementById('ppDeleteBtn');
+        var btnRect = btn ? btn.getBoundingClientRect() : null;
+        if (btnRect) {
+            var btnCx = btnRect.left + btnRect.width / 2;
+            var btnCy = btnRect.top + btnRect.height / 2;
+            window._confirmOrigin = {
+                btnCx: btnCx,
+                btnCy: btnCy,
+                btnWidth: btnRect.width,
+                btnHeight: btnRect.height
+            };
+        }
+
+        window.showConfirm('删除照片', '确定删除这张照片吗？', '是', function() {
+            var currentPhotos = ppSortedPhotos;
+            if (ppPhotoIdx < 0 || ppPhotoIdx >= currentPhotos.length) return;
+            var photo = currentPhotos[ppPhotoIdx];
+            if (!photo) return;
+            var id = photo.id;
+            if (id != null) {
+                window.addDeletedPhotoId(id);
+            }
+            var idxInGlobal = -1;
+            if (window.photoWallData) {
+                for (var i = 0; i < window.photoWallData.length; i++) {
+                    if (window.photoWallData[i].id === id) {
+                        idxInGlobal = i;
+                        break;
+                    }
+                }
+                if (idxInGlobal >= 0) {
+                    window.photoWallData.splice(idxInGlobal, 1);
+                }
+                window.saveLocalPhotoWallData();
+            }
+            closePhotoPreview();
+            window.renderPhotoWall();
+            window.showToast('已删除');
+        });
+    };
+
+    window.ppRotatePhoto = function() {
+        var imgs = document.querySelectorAll('.pp-slide-img');
+        ppCurrentRotation = (ppCurrentRotation + 90) % 360;
+        var rotateStyle = 'rotate(' + ppCurrentRotation + 'deg)';
+        imgs.forEach(function(img) {
+            img.style.transform = rotateStyle;
+        });
     };
 
     function ppShowDownloadOverlay() {
@@ -548,7 +1118,7 @@
                 dlOverlay.style.display = 'flex';
             }
         } catch (e) {
-            console.error('Show download overlay error:', e);
+            console.error('Error showing download overlay:', e);
         }
     }
 
@@ -563,7 +1133,7 @@
                 progressBar.style.width = '0%';
             }
         } catch (e) {
-            console.error('Hide download overlay error:', e);
+            console.error('Error hiding download overlay:', e);
         }
     }
 
@@ -578,7 +1148,7 @@
                 dlText.textContent = text;
             }
         } catch (e) {
-            console.error('Update progress error:', e);
+            console.error('Error updating download progress:', e);
         }
     }
 
@@ -586,7 +1156,7 @@
         try {
             var overlay = document.getElementById('photoPreviewOverlay');
             if (!overlay) return;
-            
+
             var modal = document.getElementById('ppDownloadConfirmModal');
             if (modal) {
                 modal.style.display = 'flex';
@@ -594,26 +1164,26 @@
                 modal.classList.add('show');
                 return;
             }
-            
+
             var confirmOverlay = document.createElement('div');
             confirmOverlay.id = 'ppDownloadConfirmModal';
             confirmOverlay.className = 'pp-download-confirm-overlay';
             confirmOverlay.innerHTML =
                 '<div class="pp-download-confirm-content">' +
-                '<div class="pp-download-confirm-title">是否要下载该图片？</div>' +
-                '<div class="pp-download-confirm-buttons">' +
-                '<button class="pp-download-confirm-btn pp-cancel-btn" onclick="window.ppCancelDownload()">取消</button>' +
-                '<button class="pp-download-confirm-btn pp-confirm-btn" onclick="window.ppConfirmDownload()">确认</button>' +
-                '</div>' +
+                    '<div class="pp-download-confirm-title">\u662f\u5426\u8981\u4e0b\u8f7d\u8be5\u56fe\u7247\uff1f</div>' +
+                    '<div class="pp-download-confirm-buttons">' +
+                        '<button class="pp-download-confirm-btn pp-cancel-btn" onclick="window.ppCancelDownload()">\u53d6\u6d88</button>' +
+                        '<button class="pp-download-confirm-btn pp-confirm-btn" onclick="window.ppConfirmDownload()">\u786e\u8ba4</button>' +
+                    '</div>' +
                 '</div>';
-            
+
             overlay.appendChild(confirmOverlay);
             ppConfirmDownloadModal = confirmOverlay;
-            
+
             void confirmOverlay.offsetHeight;
             confirmOverlay.classList.add('show');
         } catch (e) {
-            console.error('Show confirm modal error:', e);
+            console.error('Error showing download confirm modal:', e);
         }
     }
 
@@ -627,13 +1197,13 @@
                         if (modal && modal.style) {
                             modal.style.display = 'none';
                         }
-                    } catch (e) {
-                        console.error('Hide modal timeout error:', e);
+                    } catch (e2) {
+                        console.error('Error in hide timeout:', e2);
                     }
                 }, 300);
             }
         } catch (e) {
-            console.error('Hide confirm modal error:', e);
+            console.error('Error hiding download confirm modal:', e);
         }
     }
 
@@ -641,7 +1211,7 @@
         try {
             ppHideDownloadConfirmModal();
         } catch (e) {
-            console.error('Cancel download error:', e);
+            console.error('Error in cancel download:', e);
         }
     };
 
@@ -650,7 +1220,52 @@
             ppHideDownloadConfirmModal();
             ppDoDownloadPhoto();
         } catch (e) {
-            console.error('Confirm download error:', e);
+            console.error('Error in confirm download:', e);
+        }
+    };
+
+    window.shareCurrentPhoto = function() {
+        var photo = photoPreviewCurrent;
+        if (!photo || !photo.imageUrl) {
+            window.showToast('\u6682\u65e0\u53ef\u5206\u4eab\u7684\u56fe\u7247');
+            return;
+        }
+        
+        if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
+            try {
+                navigator.vibrate(10);
+            } catch (e) {}
+        }
+        
+        if ('share' in navigator) {
+            try {
+                navigator.share({
+                    title: '\u56fe\u7247\u5206\u4eab',
+                    text: '\u6765\u81ea\u7167\u7247\u5899\u7684\u56fe\u7247',
+                    url: photo.imageUrl
+                }).catch(function(e) {
+                    console.log('Share cancelled:', e);
+                });
+                return;
+            } catch (e) {
+                console.log('Share not available:', e);
+            }
+        }
+        
+        try {
+            var textarea = document.createElement('textarea');
+            textarea.value = photo.imageUrl;
+            document.body.appendChild(textarea);
+            textarea.select();
+            var success = document.execCommand('copy');
+            document.body.removeChild(textarea);
+            if (success) {
+                window.showToast('\u94fe\u63a5\u5df2\u590d\u5236');
+            } else {
+                window.showToast('\u590d\u5236\u5931\u8d25');
+            }
+        } catch (e) {
+            window.showToast('\u94fe\u63a5: ' + photo.imageUrl);
         }
     };
 
@@ -660,14 +1275,14 @@
             
             var photo = photoPreviewCurrent;
             if (!photo || !photo.imageUrl) {
-                window.showToast('没有可下载的照片');
+                window.showToast('\u6ca1\u6709\u53ef\u4e0b\u8f7d\u7684\u7167\u7247');
                 return;
             }
             
             ppShowDownloadConfirmModal();
         } catch (e) {
-            console.error('Download current photo error:', e);
-            window.showToast('操作失败，请重试');
+            console.error('Error in download current photo:', e);
+            window.showToast('\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
         }
     }
 
@@ -677,96 +1292,61 @@
             
             var photo = photoPreviewCurrent;
             if (!photo || !photo.imageUrl) {
-                window.showToast('没有可下载的照片');
+                window.showToast('\u6ca1\u6709\u53ef\u4e0b\u8f7d\u7684\u7167\u7247');
                 return;
             }
-            
+
             ppDownloadActive = true;
             ppShowDownloadOverlay();
-            ppUpdateDownloadProgress(0, '正在下载...');
-            
+            ppUpdateDownloadProgress(10, '\u6b63\u5728\u4e0b\u8f7d...');
+
             if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
-                try {
-                    navigator.vibrate(10);
-                } catch (e) {
-                    console.log('Vibrate not available:', e);
+                try { navigator.vibrate(10); } catch (e) {}
+            }
+
+            // 模拟进度动画
+            var dlTimer = setInterval(function() {
+                var bar = document.getElementById('ppDownloadProgressBar');
+                if (!bar) { clearInterval(dlTimer); return; }
+                var cur = parseInt(bar.style.width) || 10;
+                if (cur < 85) {
+                    ppUpdateDownloadProgress(cur + 2);
                 }
-            }
-            
-            if ('AbortController' in window) {
-                ppDownloadAbortController = new AbortController();
-            }
-            
-            var response = await fetch(photo.imageUrl, {
-                signal: ppDownloadAbortController ? ppDownloadAbortController.signal : undefined
-            });
+            }, 150);
+
+            var response = await fetch(photo.imageUrl);
+            clearInterval(dlTimer);
             
             if (!response.ok) {
                 throw new Error('HTTP error ' + response.status);
             }
+
+            ppUpdateDownloadProgress(90, '\u6b63\u5728\u4fdd\u5b58...');
+            var blob = await response.blob();
             
-            var total = response.headers ? response.headers.get('content-length') : null;
-            var reader = response.body ? response.body.getReader() : null;
-            var received = 0;
-            var chunks = [];
-            
-            if (reader) {
-                while (true) {
-                    var result = await reader.read();
-                    var done = result.done;
-                    var value = result.value;
-                    
-                    if (value) {
-                        chunks.push(value);
-                        received += value.length;
-                        if (total) {
-                            var percent = Math.round((received / total) * 100);
-                            ppUpdateDownloadProgress(percent);
-                        }
-                    }
-                    
-                    if (done) {
-                        break;
-                    }
-                }
-            } else {
-                var blob = await response.blob();
-                downloadBlob(blob, photo.imageUrl);
-                return;
-            }
-            
-            var blob = new Blob(chunks);
             downloadBlob(blob, photo.imageUrl);
+
         } catch (err) {
-            if (err.name !== 'AbortError') {
-                console.error('Download error:', err);
-                try {
-                    var photo = photoPreviewCurrent;
-                    if (photo && photo.imageUrl) {
-                        var fallbackA = document.createElement('a');
-                        fallbackA.href = photo.imageUrl;
-                        fallbackA.target = '_blank';
-                        fallbackA.rel = 'noopener noreferrer';
-                        document.body.appendChild(fallbackA);
-                        fallbackA.click();
-                        setTimeout(function() {
-                            try {
-                                document.body.removeChild(fallbackA);
-                            } catch (e) {}
-                        }, 100);
-                        window.showToast('已在新标签页打开');
-                    } else {
-                        window.showToast('下载失败，请重试');
-                    }
-                } catch (e2) {
-                    console.error('Fallback download error:', e2);
-                    window.showToast('下载失败，请重试');
-                }
-            }
+            console.error('Download error:', err);
             ppHideDownloadOverlay();
             ppDownloadActive = false;
-        } finally {
-            ppDownloadAbortController = null;
+
+            // 降级：直接打开图片链接
+            try {
+                var a = document.createElement('a');
+                a.href = photo.imageUrl;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.download = 'photo_' + Date.now() + '.jpg';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function() {
+                    try { document.body.removeChild(a); } catch (e) {}
+                }, 100);
+                window.showToast('\u5df2\u5728\u65b0\u7a97\u53e3\u6253\u5f00\u4e0b\u8f7d');
+            } catch (e2) {
+                window.showToast('\u4e0b\u8f7d\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
+            }
         }
     }
 
@@ -791,344 +1371,397 @@
                 try {
                     document.body.removeChild(a);
                     window.URL.revokeObjectURL(url);
-                } catch (e) {
-                    console.error('Cleanup error:', e);
-                }
-            }, 100);
-            
-            ppUpdateDownloadProgress(100, '下载成功!');
+                } catch (e) {}
+            }, 200);
+
+            ppUpdateDownloadProgress(100, '\u4e0b\u8f7d\u6210\u529f!');
             
             setTimeout(function() {
                 ppHideDownloadOverlay();
                 ppDownloadActive = false;
-                window.showToast('下载成功');
-            }, 1000);
+                window.showToast('\u4e0b\u8f7d\u6210\u529f');
+            }, 800);
+
         } catch (e) {
             console.error('Blob download error:', e);
             ppHideDownloadOverlay();
             ppDownloadActive = false;
-            window.showToast('下载失败，请重试');
+            window.showToast('\u4e0b\u8f7d\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
         }
     }
-
-    window.shareCurrentPhoto = function() {
-        try {
-            var photo = photoPreviewCurrent;
-            if (!photo || !photo.imageUrl) {
-                window.showToast('暂无可分享的照片');
-                return;
-            }
-            
-            if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
-                try {
-                    navigator.vibrate(10);
-                } catch (e) {}
-            }
-            
-            if ('share' in navigator) {
-                try {
-                    navigator.share({
-                        title: '图片分享',
-                        text: '来自照片墙的图片',
-                        url: photo.imageUrl
-                    }).catch(function(e) {
-                        console.log('Share cancelled:', e);
-                    });
-                    return;
-                } catch (e) {
-                    console.log('Share not available:', e);
-                }
-            }
-            
-            try {
-                var textarea = document.createElement('textarea');
-                textarea.value = photo.imageUrl;
-                document.body.appendChild(textarea);
-                textarea.select();
-                var success = document.execCommand('copy');
-                setTimeout(function() {
-                    try {
-                        document.body.removeChild(textarea);
-                    } catch (e) {}
-                }, 100);
-                if (success) {
-                    window.showToast('链接已复制');
-                } else {
-                    window.showToast('复制失败');
-                }
-            } catch (e) {
-                window.showToast('链接: ' + photo.imageUrl);
-            }
-        } catch (e) {
-            console.error('Share error:', e);
-        }
-    };
-
-    function showPhotoInfo() {
-        try {
-            var modal = document.getElementById('ppInfoModal');
-            if (modal) {
-                modal.style.display = 'block';
-                void modal.offsetHeight;
-                modal.classList.add('show');
-                return;
-            }
-            
-            var overlay = document.getElementById('photoPreviewOverlay');
-            if (!overlay) return;
-            
-            var infoModal = document.createElement('div');
-            infoModal.id = 'ppInfoModal';
-            infoModal.className = 'pp-info-modal';
-            infoModal.innerHTML =
-                '<div class="pp-info-modal-content">' +
-                '<div class="pp-info-modal-header">' +
-                '<span>照片详情</span>' +
-                '<button class="pp-info-modal-close" onclick="closePhotoInfo()">×</button>' +
-                '</div>' +
-                '<div class="pp-info-modal-body" id="ppInfoBody"></div>' +
-                '</div>';
-            
-            overlay.appendChild(infoModal);
-            
-            var photo = photoPreviewCurrent;
-            var infoBody = document.getElementById('ppInfoBody');
-            if (infoBody && photo) {
-                var html = '';
-                html += '<div class="pp-info-row"><span class="pp-info-label">用户名</span><span class="pp-info-value">' + (photo.userName || photo.user_name || '用户') + '</span></div>';
-                html += '<div class="pp-info-row"><span class="pp-info-label">时间</span><span class="pp-info-value">' + (photo.time || photo.created_at || '') + '</span></div>';
-                html += '<div class="pp-info-row"><span class="pp-info-label">浏览量</span><span class="pp-info-value">' + (photo.views || 0) + '</span></div>';
-                
-                try {
-                    var contentJson = photo.content ? JSON.parse(photo.content) : null;
-                    if (contentJson && contentJson.fileSize) {
-                        var sizeStr = contentJson.fileSize >= 1024 * 1024 
-                            ? (contentJson.fileSize / (1024 * 1024)).toFixed(2) + ' MB' 
-                            : (contentJson.fileSize / 1024).toFixed(1) + ' KB';
-                        html += '<div class="pp-info-row"><span class="pp-info-label">文件大小</span><span class="pp-info-value">' + sizeStr + '</span></div>';
-                    }
-                } catch (e) {}
-                
-                infoBody.innerHTML = html;
-            }
-            
-            void infoModal.offsetHeight;
-            infoModal.classList.add('show');
-        } catch (e) {
-            console.error('Show info error:', e);
-        }
-    }
-
-    function closePhotoInfo() {
-        try {
-            var modal = document.getElementById('ppInfoModal');
-            if (modal) {
-                modal.classList.remove('show');
-                setTimeout(function() {
-                    try {
-                        modal.style.display = 'none';
-                    } catch (e) {}
-                }, 300);
-            }
-        } catch (e) {
-            console.error('Close info error:', e);
-        }
-    }
-
-    var ppRotate = 0;
-
-    window.ppRotatePhoto = function() {
-        try {
-            ppRotate += 90;
-            var curImg = document.getElementById('photoPreviewImage');
-            if (curImg) {
-                curImg.style.transition = 'transform 0.3s ease';
-                curImg.style.transform = 'rotate(' + ppRotate + 'deg)';
-            }
-        } catch (e) {
-            console.error('Rotate photo error:', e);
-        }
-    };
-
-    window.deletePhotoFromPreview = function() {
-        try {
-            if (!window.currentUser) {
-                window.showToast('请先登录');
-                return;
-            }
-            if (!photoPreviewCurrent) {
-                window.showToast('未选择照片');
-                return;
-            }
-            
-            if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
-                try {
-                    navigator.vibrate(10);
-                } catch (e) {}
-            }
-            
-            window.showConfirm('确定要删除这张照片吗？', function() {
-                try {
-                    if (!window.sb || !window.sb.from) {
-                        window.showToast('删除失败');
-                        return;
-                    }
-                    
-                    var photoId = photoPreviewCurrent.id;
-                    window.sb.from('posts').delete().eq('id', photoId).then(function(result) {
-                        if (result.error) {
-                            window.showToast('删除失败: ' + result.error.message);
-                            return;
-                        }
-                        
-                        var idx = ppPhotoIdx;
-                        ppSortedPhotos.splice(idx, 1);
-                        
-                        if (window.photoWallData) {
-                            for (var i = 0; i < window.photoWallData.length; i++) {
-                                if (window.photoWallData[i] && window.photoWallData[i].id === photoId) {
-                                    window.photoWallData.splice(i, 1);
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (window.saveLocalPhotoWallData) {
-                            window.saveLocalPhotoWallData();
-                        }
-                        
-                        if (window.renderPhotoWall) {
-                            window.renderPhotoWall();
-                        }
-                        
-                        closePhotoPreview();
-                        window.showToast('删除成功');
-                    });
-                } catch (e) {
-                    console.error('Delete error:', e);
-                    window.showToast('删除失败');
-                }
-            });
-        } catch (e) {
-            console.error('Delete from preview error:', e);
-        }
-    };
 
     function bindPreviewEvents(overlay) {
         var wrapper = overlay.querySelector('.photo-preview-image-wrapper');
-        var longPressTimer = null;
-        var startX = 0, startY = 0, startTime = 0;
-        var movedDistance = 0;
 
-        overlay.addEventListener('click', function(e) {
-            try {
-                var target = e.target;
-                var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
-                var isModalContent = target.closest('.pp-info-modal-content, .pp-download-confirm-content');
-                var isModal = target.closest('.pp-info-modal, .pp-download-confirm-overlay');
-                
-                if (isButton || isModalContent) {
-                    return;
-                }
-                
-                if (isModal) {
-                    var infoModal = document.getElementById('ppInfoModal');
-                    if (infoModal && infoModal.style.display !== 'none') {
-                        closePhotoInfo();
-                    }
-                    var dlModal = document.getElementById('ppDownloadConfirmModal');
-                    if (dlModal && dlModal.style.display !== 'none') {
-                        ppHideDownloadConfirmModal();
-                    }
-                    return;
-                }
-                
-                if (target === overlay || target.closest('.photo-preview-image-wrapper')) {
-                    if (!ppDownloadActive) {
-                        closePhotoPreview();
-                    }
-                }
-            } catch (e) {
-                console.error('Click handler error:', e);
-            }
-        });
+        var startX, startY, startTime;
 
         overlay.addEventListener('pointerdown', function(e) {
-            try {
-                var target = e.target;
-                var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
-                var isModalContent = target.closest('.pp-info-modal-content, .pp-download-confirm-content');
-                var isModal = target.closest('.pp-info-modal, .pp-download-confirm-overlay');
-                
-                if (isButton) {
-                    e.stopPropagation();
-                    return;
-                }
-                
-                if (isModalContent) {
-                    e.stopPropagation();
-                    return;
-                }
-                
-                if (isModal) {
-                    e.stopPropagation();
-                }
-                
-                startTime = Date.now();
-                startX = e.clientX;
-                startY = e.clientY;
-                movedDistance = 0;
-                
-                if (ppDownloadActive) {
-                    return;
-                }
-                
-                longPressTimer = setTimeout(function() {
-                    longPressTimer = null;
+            var target = e.target;
+            var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
+            var isModalContent = target.closest('.pp-info-modal-content, .pp-download-confirm-content');
+            var isModal = target.closest('.pp-info-modal, .pp-download-confirm-overlay');
+            var isDownloading = ppDownloadActive;
+
+            if (ppCloseTimer) {
+                clearTimeout(ppCloseTimer);
+                ppCloseTimer = null;
+            }
+            
+            if (ppLongPressTimer) {
+                clearTimeout(ppLongPressTimer);
+                ppLongPressTimer = null;
+            }
+
+            if (isButton || isDownloading) {
+                e.stopPropagation();
+                return;
+            }
+
+            if (isModalContent) {
+                e.stopPropagation();
+                return;
+            }
+
+            if (isModal) {
+                e.stopPropagation();
+            }
+
+            startTime = Date.now();
+            startX = e.clientX;
+            startY = e.clientY;
+            ppMovedDistance = 0;
+
+            var pointerId = e.pointerId;
+            var point = { x: e.clientX, y: e.clientY };
+            ppPointers.set(pointerId, point);
+
+            if (ppPointers.size === 1) {
+                ppLongPressTimer = setTimeout(function() {
                     ppDownloadCurrentPhoto();
                 }, 500);
-            } catch (e) {
-                console.error('Pointer down error:', e);
+            }
+
+            if (ppPointers.size === 2) {
+                var pts = Array.from(ppPointers.values());
+                var dx = pts[1].x - pts[0].x;
+                var dy = pts[1].y - pts[0].y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+
+                var vw2 = window.innerWidth / 2;
+                var vh2 = window.innerHeight / 2;
+                var cx = (pts[0].x + pts[1].x) / 2;
+                var cy = (pts[0].y + pts[1].y) / 2;
+
+                var s = ppZoom.scale || 1;
+                ppPinchStart = {
+                    dist: dist,
+                    scale: s,
+                    ax: (cx - vw2) / s - ppZoom.tx,
+                    ay: (cy - vh2) / s - ppZoom.ty
+                };
+                ppPinchPre = ppPinchStart;
+                ppPinchMinDist = dist;
+                ppPinchMaxDist = dist;
+                ppStart = { x: cx, y: cy, zx: ppZoom.tx, zy: ppZoom.ty, pointers: 2 };
+            } else {
+                if (ppTrackSnapping) {
+                    ppTrackSnapping = false;
+                    ppTrack.style.transition = 'none';
+                }
+                if (ppZoom.scale > 1.01) {
+                    ppStart = { x: e.clientX, y: e.clientY, zx: ppZoom.tx, zy: ppZoom.ty, pointers: 1 };
+                } else {
+                    ppDismissState.isActive = true;
+                    ppDismissState.dy = 0;
+                    ppDismissState.scale = 1;
+                    ppDismissState.opacity = 1;
+                }
             }
         });
 
         overlay.addEventListener('pointermove', function(e) {
-            try {
-                movedDistance = Math.abs(e.clientX - startX) + Math.abs(e.clientY - startY);
-                if (movedDistance > 15 && longPressTimer) {
-                    clearTimeout(longPressTimer);
-                    longPressTimer = null;
+            if (ppPointers.size === 0) return;
+
+            var dx = e.clientX - startX;
+            var dy = e.clientY - startY;
+            ppMovedDistance = Math.abs(dx) + Math.abs(dy);
+            
+            if (ppMovedDistance > 15 && ppLongPressTimer) {
+                clearTimeout(ppLongPressTimer);
+                ppLongPressTimer = null;
+            }
+
+            var pointerId = e.pointerId;
+            ppPointers.set(pointerId, { x: e.clientX, y: e.clientY });
+
+            if (ppPointers.size === 2) {
+                var pts = Array.from(ppPointers.values());
+                var pdx = pts[1].x - pts[0].x;
+                var pdy = pts[1].y - pts[0].y;
+                var dist = Math.sqrt(pdx * pdx + pdy * pdy);
+
+                ppPinchMinDist = Math.min(ppPinchMinDist, dist);
+                ppPinchMaxDist = Math.max(ppPinchMaxDist, dist);
+
+                var vw2 = window.innerWidth / 2;
+                var vh2 = window.innerHeight / 2;
+                var cx = (pts[0].x + pts[1].x) / 2;
+                var cy = (pts[0].y + pts[1].y) / 2;
+
+                ppPinchPre = { dist: dist, cx: cx, cy: cy };
+
+                var ratio = dist / ppPinchStart.dist;
+                var newScale = Math.max(1, Math.min(8, ppPinchStart.scale * ratio));
+
+                ppZoom.scale = newScale;
+                ppZoom.tx = cx - vw2 - ppPinchStart.ax * newScale;
+                ppZoom.ty = cy - vh2 - ppPinchStart.ay * newScale;
+
+                var curImg = document.getElementById('photoPreviewImage');
+                if (curImg) {
+                    var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
+                    curImg.style.transform = t;
+                    curImg.classList.add('zoomed');
                 }
-            } catch (e) {
-                console.error('Pointer move error:', e);
+            } else if (ppPointers.size === 1 && ppStart && ppStart.pointers === 1) {
+                var sdx = e.clientX - ppStart.x;
+                var sdy = e.clientY - ppStart.y;
+                ppZoom.tx = ppStart.zx + sdx;
+                ppZoom.ty = ppStart.zy + sdy;
+
+                var curImg = document.getElementById('photoPreviewImage');
+                if (curImg) {
+                    var t = 'translate3d(' + ppZoom.tx + 'px,' + ppZoom.ty + 'px,0) scale(' + ppZoom.scale + ')';
+                    curImg.style.transform = t;
+                }
+            } else {
+                if (ppZoom.scale <= 1.01 && ppDismissState.isActive && dy > 0) {
+                    ppDismissState.dy = dy;
+                    var scaleFactor = Math.max(0.7, 1 - dy / (ppVh * 2));
+                    ppDismissState.scale = scaleFactor;
+                    ppDismissState.opacity = Math.max(0, 1 - dy / ppVh);
+
+                    var curImg = document.getElementById('photoPreviewImage');
+                    if (curImg) {
+                        overlay.style.opacity = ppDismissState.opacity;
+                        curImg.style.transform = 'translate(0, ' + dy + 'px) scale(' + ppDismissState.scale + ')';
+                    }
+                } else {
+                    if (ppTrackSnapping) return;
+                    ppTrackDrag = dx;
+
+                    var isZoomed = ppZoom.scale > 1.01;
+                    if (!isZoomed) {
+                        var offset = -ppVw + ppTrackDrag;
+                        var resistance = 1;
+                        if (ppPhotoIdx === 0 && dx > 0) resistance = 1 + dx / ppVw * 2;
+                        if (ppPhotoIdx === ppSortedPhotos.length - 1 && dx < 0) resistance = 1 - dx / ppVw * 2;
+                        offset = -ppVw + dx / resistance;
+
+                        if (ppTrackRaf) cancelAnimationFrame(ppTrackRaf);
+                        ppTrackRaf = requestAnimationFrame(function() {
+                            ppTrack.style.transform = 'translate3d(' + offset + 'px, 0, 0)';
+                            ppTrackRaf = null;
+                        });
+                    }
+                }
             }
         });
 
         overlay.addEventListener('pointerup', function(e) {
-            try {
-                if (longPressTimer) {
-                    clearTimeout(longPressTimer);
-                    longPressTimer = null;
+            if (ppLongPressTimer) {
+                clearTimeout(ppLongPressTimer);
+                ppLongPressTimer = null;
+            }
+
+            var target = e.target;
+            var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
+            var isModalContent = target.closest('.pp-info-modal-content, .pp-download-confirm-content');
+            var isModal = target.closest('.pp-info-modal, .pp-download-confirm-overlay');
+            var isDownloading = ppDownloadActive;
+
+            if (isButton || isDownloading) {
+                e.stopPropagation();
+                ppPointers.clear();
+                ppStart = null;
+                ppDismissState.isActive = false;
+                return;
+            }
+
+            if (isModalContent) {
+                e.stopPropagation();
+                ppPointers.clear();
+                ppStart = null;
+                ppDismissState.isActive = false;
+                return;
+            }
+
+            if (isModal) {
+                e.stopPropagation();
+                ppPointers.clear();
+                ppStart = null;
+                ppDismissState.isActive = false;
+                var infoModal = document.getElementById('ppInfoModal');
+                if (infoModal && infoModal.style.display !== 'none') {
+                    window.closePhotoInfo();
                 }
-            } catch (e) {
-                console.error('Pointer up error:', e);
+                var downloadModal = document.getElementById('ppDownloadConfirmModal');
+                if (downloadModal && downloadModal.style.display !== 'none') {
+                    ppHideDownloadConfirmModal();
+                }
+                return;
+            }
+
+            var pointerId = e.pointerId;
+            ppPointers.delete(pointerId);
+
+            if (ppPointers.size === 0) {
+                var now = Date.now();
+                var moved = ppMovedDistance > ppTapThreshold;
+
+                if (ppDismissState.isActive && ppZoom.scale <= 1.01 && ppDismissState.dy > 0) {
+                    var dismissThreshold = 150;
+                    if (ppDismissState.dy > dismissThreshold) {
+                        ppDismissState.isActive = false;
+                        closePhotoPreview();
+                        return;
+                    } else {
+                        var curImg = document.getElementById('photoPreviewImage');
+                        if (curImg) {
+                            overlay.style.transition = 'opacity 0.3s cubic-bezier(0.25, 1, 0.4, 1)';
+                            curImg.style.transition = 'transform 0.3s cubic-bezier(0.25, 1, 0.4, 1)';
+                            overlay.style.opacity = 1;
+                            curImg.style.transform = '';
+                        }
+                        ppDismissState.isActive = false;
+                    }
+                }
+
+                if (ppPinchStart) {
+                    var distDiff = ppPinchMaxDist - ppPinchMinDist;
+                    if (distDiff < 10) {
+                        ppZoom = { scale: 1, tx: 0, ty: 0 };
+                        var imgs = document.querySelectorAll('.pp-slide-img');
+                        imgs.forEach(function(img) {
+                            img.style.transform = '';
+                        });
+                    }
+                    ppPinchStart = null;
+                    ppPinchPre = null;
+                }
+
+                var zoomed = ppZoom.scale > 1.01;
+
+                if (!zoomed && !ppTrackSnapping) {
+                    var dx = ppTrackDrag;
+                    var isSwipe = Math.abs(dx) > ppVw / 4;
+
+                    if (isSwipe) {
+                        var direction = dx > 0 ? -1 : 1;
+                        if (direction === -1 && ppPhotoIdx > 0) {
+                            ppNavBusy = true;
+                            ppPreloadAdjacent(ppPhotoIdx - 1);
+                            ppEnsureSideImages(ppPhotoIdx - 1);
+                            ppSlideTo(0, function() {
+                                ppFinishNavigation(ppPhotoIdx - 1);
+                            });
+                        } else if (direction === 1 && ppPhotoIdx < ppSortedPhotos.length - 1) {
+                            ppNavBusy = true;
+                            ppPreloadAdjacent(ppPhotoIdx + 1);
+                            ppEnsureSideImages(ppPhotoIdx + 1);
+                            ppSlideTo(-2 * ppVw, function() {
+                                ppFinishNavigation(ppPhotoIdx + 1);
+                            });
+                        } else {
+                            ppSnapTo(0);
+                        }
+                    }
+                    ppTrackDrag = 0;
+
+                    if (!isSwipe) {
+                        moved = false;
+                    }
+                }
+
+                if (!moved) {
+                    if (!zoomed) {
+                        var isDoubleTap = (now - ppLastTap < 300 && !ppTapHandled && ppZoom.scale <= 1.01);
+
+                        if (isDoubleTap) {
+                            if (ppCloseTimer) {
+                                clearTimeout(ppCloseTimer);
+                                ppCloseTimer = null;
+                            }
+                            ppToggleZoom(e.clientX, e.clientY);
+                            ppTapHandled = true;
+                            setTimeout(function() { ppTapHandled = false; }, 300);
+                        }
+                        ppLastTap = now;
+
+                        if (!ppTapHandled && ppZoom.scale <= 1.01 && !ppNavBusy) {
+                            var modal = document.getElementById('ppInfoModal');
+                            if (modal && modal.style.display !== 'none' && modal.classList.contains('active')) {
+                                window.closePhotoInfo();
+                                ppStart = null;
+                                return;
+                            }
+                            if (ppCloseTimer) clearTimeout(ppCloseTimer);
+                            ppCloseTimer = setTimeout(function() {
+                                ppCloseTimer = null;
+                                closePhotoPreview();
+                            }, 350);
+                        }
+                    } else {
+                        if (now - ppLastTap < 300 && !ppTapHandled) {
+                            if (ppCloseTimer) {
+                                clearTimeout(ppCloseTimer);
+                                ppCloseTimer = null;
+                            }
+                            ppToggleZoom(e.clientX, e.clientY);
+                            ppTapHandled = true;
+                            setTimeout(function() { ppTapHandled = false; }, 300);
+                        }
+                        ppLastTap = now;
+                    }
+                }
+
+                ppStart = null;
             }
         });
 
         overlay.addEventListener('pointercancel', function(e) {
-            try {
-                if (longPressTimer) {
-                    clearTimeout(longPressTimer);
-                    longPressTimer = null;
+            if (ppLongPressTimer) {
+                clearTimeout(ppLongPressTimer);
+                ppLongPressTimer = null;
+            }
+            
+            ppPointers.clear();
+            ppPinchStart = null;
+            ppPinchPre = null;
+            ppStart = null;
+
+            if (ppDismissState.isActive) {
+                var curImg = document.getElementById('photoPreviewImage');
+                if (curImg) {
+                    overlay.style.transition = 'opacity 0.3s cubic-bezier(0.25, 1, 0.4, 1)';
+                    curImg.style.transition = 'transform 0.3s cubic-bezier(0.25, 1, 0.4, 1)';
+                    overlay.style.opacity = 1;
+                    curImg.style.transform = '';
                 }
-            } catch (e) {
-                console.error('Pointer cancel error:', e);
+                ppDismissState.isActive = false;
+            }
+
+            if (ppZoom.scale <= 1.01) {
+                ppSnapTo(0);
             }
         });
-    }
 
-    window.openPhotoPreview = openPhotoPreview;
-    window.closePhotoPreview = closePhotoPreview;
-    window.showPhotoInfo = showPhotoInfo;
-    window.closePhotoInfo = closePhotoInfo;
+        window.addEventListener('resize', function() {
+            if (!photoPreviewActive) return;
+            ppInitTrack();
+            ppSetTrackImages(ppPhotoIdx);
+            ppResetZoom();
+        });
+    }
 })();
+
