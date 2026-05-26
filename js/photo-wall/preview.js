@@ -35,6 +35,7 @@
     var ppLongPressTimer = null;
     var ppDownloadActive = false;
     var ppDownloadProgress = 0;
+    var ppConfirmDownloadModal = null;
 
     function ppInitTrack() {
         ppVw = window.innerWidth;
@@ -81,6 +82,8 @@
 
     var ppImageCache = {};
     var ppDecodeQueue = {};
+    var ppLoadRetries = {};
+    var MAX_RETRIES = 3;
 
     function ppDecodeImage(url) {
         if (!url) return Promise.resolve();
@@ -95,6 +98,7 @@
                 img.decode().then(function() {
                     ppImageCache[url] = img;
                     delete ppDecodeQueue[url];
+                    delete ppLoadRetries[url];
                     resolve();
                 }).catch(function() {
                     tryToLoad();
@@ -107,11 +111,13 @@
                 if (img.complete) {
                     ppImageCache[url] = img;
                     delete ppDecodeQueue[url];
+                    delete ppLoadRetries[url];
                     resolve();
                 } else {
                     img.onload = img.onerror = function() {
                         ppImageCache[url] = img;
                         delete ppDecodeQueue[url];
+                        delete ppLoadRetries[url];
                         resolve();
                     };
                 }
@@ -134,7 +140,7 @@
         if (imgEl._ppUrl === url) return;
         imgEl._ppUrl = url;
         var cached = ppImageCache[url];
-        if (cached) {
+        if (cached && cached.naturalWidth > 0) {
             imgEl.style.transition = 'none';
             imgEl.src = url;
             imgEl.style.opacity = '1';
@@ -144,6 +150,7 @@
         imgEl.removeAttribute('src');
         imgEl.style.opacity = '0';
         var loadDone = false;
+        var retryCount = 0;
         function onLoad() {
             if (loadDone) return;
             loadDone = true;
@@ -152,6 +159,7 @@
             if (!ppImageCache[url]) {
                 ppImageCache[url] = imgEl;
             }
+            delete ppLoadRetries[url];
             requestAnimationFrame(function() {
                 imgEl.style.transition = 'opacity 0.2s ease-in-out';
                 void imgEl.offsetHeight;
@@ -160,10 +168,26 @@
         }
         function onError() {
             if (loadDone) return;
-            loadDone = true;
             imgEl.removeEventListener('load', onLoad);
             imgEl.removeEventListener('error', onError);
-            imgEl._ppUrl = null;
+            
+            retryCount = (ppLoadRetries[url] || 0) + 1;
+            if (retryCount <= MAX_RETRIES) {
+                ppLoadRetries[url] = retryCount;
+                setTimeout(function() {
+                    if (imgEl._ppUrl === url) {
+                        loadDone = false;
+                        imgEl.addEventListener('load', onLoad);
+                        imgEl.addEventListener('error', onError);
+                        imgEl.src = url + (url.indexOf('?') === -1 ? '?t=' : '&t=') + Date.now();
+                    }
+                }, 500 * retryCount);
+            } else {
+                loadDone = true;
+                imgEl._ppUrl = null;
+                delete ppLoadRetries[url];
+                showPlaceholder(imgEl);
+            }
         }
         imgEl.addEventListener('load', onLoad);
         imgEl.addEventListener('error', onError);
@@ -171,6 +195,13 @@
         if (imgEl.complete && imgEl.naturalWidth > 0) {
             onLoad();
         }
+    }
+
+    function showPlaceholder(imgEl) {
+        if (!imgEl) return;
+        imgEl.style.transition = 'opacity 0.3s ease';
+        imgEl.style.opacity = '1';
+        imgEl.classList.add('pp-placeholder');
     }
 
     function ppSetTrackImages(idx) {
@@ -1108,7 +1139,69 @@
         }
     }
 
+    function ppShowDownloadConfirmModal() {
+        var overlay = document.getElementById('photoPreviewOverlay');
+        if (!overlay) return;
+
+        var modal = document.getElementById('ppDownloadConfirmModal');
+        if (modal) {
+            modal.style.display = 'flex';
+            void modal.offsetHeight;
+            modal.classList.add('show');
+            return;
+        }
+
+        var confirmOverlay = document.createElement('div');
+        confirmOverlay.id = 'ppDownloadConfirmModal';
+        confirmOverlay.className = 'pp-download-confirm-overlay';
+        confirmOverlay.innerHTML =
+            '<div class="pp-download-confirm-content">' +
+                '<div class="pp-download-confirm-title">\u662f\u5426\u8981\u4e0b\u8f7d\u8be5\u56fe\u7247\uff1f</div>' +
+                '<div class="pp-download-confirm-buttons">' +
+                    '<button class="pp-download-confirm-btn pp-cancel-btn" onclick="window.ppCancelDownload()">\u53d6\u6d88</button>' +
+                    '<button class="pp-download-confirm-btn pp-confirm-btn" onclick="window.ppConfirmDownload()">\u786e\u8ba4</button>' +
+                '</div>' +
+            '</div>';
+
+        overlay.appendChild(confirmOverlay);
+        ppConfirmDownloadModal = confirmOverlay;
+
+        void confirmOverlay.offsetHeight;
+        confirmOverlay.classList.add('show');
+    }
+
+    function ppHideDownloadConfirmModal() {
+        var modal = document.getElementById('ppDownloadConfirmModal');
+        if (modal) {
+            modal.classList.remove('show');
+            setTimeout(function() {
+                modal.style.display = 'none';
+            }, 300);
+        }
+    }
+
+    window.ppCancelDownload = function() {
+        ppHideDownloadConfirmModal();
+    };
+
+    window.ppConfirmDownload = function() {
+        ppHideDownloadConfirmModal();
+        ppDoDownloadPhoto();
+    };
+
     async function ppDownloadCurrentPhoto() {
+        if (ppDownloadActive) return;
+        
+        var photo = photoPreviewCurrent;
+        if (!photo || !photo.imageUrl) {
+            window.showToast('\u6ca1\u6709\u53ef\u4e0b\u8f7d\u7684\u7167\u7247');
+            return;
+        }
+        
+        ppShowDownloadConfirmModal();
+    }
+
+    async function ppDoDownloadPhoto() {
         if (ppDownloadActive) return;
         
         var photo = photoPreviewCurrent;
@@ -1211,8 +1304,9 @@
         overlay.addEventListener('pointerdown', function(e) {
             var target = e.target;
             var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
-            var isModalContent = target.closest('.pp-info-modal-content');
-            var isModal = target.closest('.pp-info-modal');
+            var isModalContent = target.closest('.pp-info-modal-content, .pp-download-confirm-content');
+            var isModal = target.closest('.pp-info-modal, .pp-download-confirm-overlay');
+            var isDownloading = ppDownloadActive;
 
             if (ppCloseTimer) {
                 clearTimeout(ppCloseTimer);
@@ -1224,7 +1318,7 @@
                 ppLongPressTimer = null;
             }
 
-            if (isButton) {
+            if (isButton || isDownloading) {
                 e.stopPropagation();
                 return;
             }
@@ -1388,10 +1482,11 @@
 
             var target = e.target;
             var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
-            var isModalContent = target.closest('.pp-info-modal-content');
-            var isModal = target.closest('.pp-info-modal');
+            var isModalContent = target.closest('.pp-info-modal-content, .pp-download-confirm-content');
+            var isModal = target.closest('.pp-info-modal, .pp-download-confirm-overlay');
+            var isDownloading = ppDownloadActive;
 
-            if (isButton) {
+            if (isButton || isDownloading) {
                 e.stopPropagation();
                 ppPointers.clear();
                 ppStart = null;
@@ -1415,6 +1510,10 @@
                 var infoModal = document.getElementById('ppInfoModal');
                 if (infoModal && infoModal.style.display !== 'none') {
                     window.closePhotoInfo();
+                }
+                var downloadModal = document.getElementById('ppDownloadConfirmModal');
+                if (downloadModal && downloadModal.style.display !== 'none') {
+                    ppHideDownloadConfirmModal();
                 }
                 return;
             }
