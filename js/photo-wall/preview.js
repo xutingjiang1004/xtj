@@ -459,12 +459,15 @@
         if (!modal) return;
         
         modal.classList.add('closing');
-        modal.classList.remove('active');
+        
+        requestAnimationFrame(function() {
+            modal.classList.remove('active');
+        });
         
         setTimeout(function() {
             modal.style.display = 'none';
             modal.classList.remove('closing');
-        }, 260);
+        }, 220);
     };
 
     window.shareCurrentPhoto = function() {
