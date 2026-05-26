@@ -4344,53 +4344,34 @@
         }
         /* 底部按钮UI优化 */
         .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn {
-            background: rgba(0, 0, 0, 0.3) !important;
             backdrop-filter: none !important;
             -webkit-backdrop-filter: none !important;
             box-shadow: none !important;
-            border: 1px solid rgba(255, 255, 255, 0.15) !important;
             font-weight: normal !important;
-            transition: background 0.2s ease, transform 0.2s ease;
         }
-        .pp-info-btn:hover, .pp-share-btn:hover, .pp-rotate-btn:hover, .pp-delete-btn:hover {
-            background: rgba(0, 0, 0, 0.45) !important;
-            transform: scale(1.05);
-        }
-        /* 信息模块视觉优化 */
+        /* 信息模块视觉优化 - 外部透明，内部10%白色磨砂 */
         .pp-info-modal {
             background: transparent !important;
             backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
         }
         .pp-info-modal::before {
             display: none !important;
         }
         .pp-info-modal-content {
-            background: rgba(255, 255, 255, 0.1) !important;
+            background: rgba(255, 255, 255, 0.10) !important;
             backdrop-filter: blur(20px) saturate(180%) !important;
             -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-            border: 1px solid rgba(255, 255, 255, 0.18) !important;
+            border: 1px solid rgba(255, 255, 255, 0.25) !important;
+            color: rgba(255, 255, 255, 0.95) !important;
         }
-        /* 底部按钮UI优化 */
-        .pp-info-btn,
-        .pp-share-btn,
-        .pp-rotate-btn,
-        .pp-delete-btn {
-            background: rgba(0, 0, 0, 0.35) !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-            box-shadow: none !important;
-            border: 1px solid rgba(255, 255, 255, 0.18) !important;
-            font-weight: normal !important;
-            transition: background 0.2s ease, transform 0.2s ease;
+        .pp-info-modal-content * {
+            color: rgba(255, 255, 255, 0.92) !important;
         }
-        .pp-info-btn:hover,
-        .pp-share-btn:hover,
-        .pp-rotate-btn:hover,
-        .pp-delete-btn:hover {
-            background: rgba(0, 0, 0, 0.5) !important;
-            transform: scale(1.08);
+        .pp-info-modal-content .pp-info-label {
+            color: rgba(255, 255, 255, 0.55) !important;
         }
-        }
+    }
         /* 预览分享按钮 */
         .pp-share-btn {
             position: absolute;
@@ -4400,8 +4381,8 @@
             width: 44px;
             height: 44px;
             border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.8);
-            background: rgba(255, 255, 255, 0.15);
+            border: 2px solid rgba(255, 255, 255, 0.6);
+            background: rgba(255, 255, 255, 0.10);
             color: white;
             font-size: 16px;
             cursor: pointer;
@@ -4413,13 +4394,13 @@
             box-shadow: none;
         }
         .pp-share-btn:hover {
-            background: rgba(255, 255, 255, 0.35);
-            border-color: rgba(255, 255, 255, 1);
+            background: rgba(255, 255, 255, 0.25);
+            border-color: rgba(255, 255, 255, 0.95);
             transform: scale(1.1);
         }
         .pp-share-btn:active {
             transform: scale(0.95);
-            background: rgba(255, 255, 255, 0.25);
+            background: rgba(255, 255, 255, 0.18);
         }
         .pp-share-btn.copied {
             color: #059669;
@@ -4436,8 +4417,8 @@
             width: 44px;
             height: 44px;
             border-radius: 50%;
-            border: 2px solid rgba(239, 68, 68, 0.7);
-            background: rgba(239, 68, 68, 0.15);
+            border: 2px solid rgba(239, 68, 68, 0.5);
+            background: rgba(239, 68, 68, 0.08);
             color: #ef4444;
             font-size: 16px;
             cursor: pointer;
@@ -4467,8 +4448,8 @@
             width: 44px;
             height: 44px;
             border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.9);
-            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.55);
+            background: rgba(255, 255, 255, 0.08);
             color: white;
             font-size: 16px;
             font-weight: 600;
@@ -4481,14 +4462,13 @@
             box-shadow: none;
         }
         .pp-info-btn:hover {
-            background: rgba(255, 255, 255, 0.55);
-            border-color: rgba(255, 255, 255, 1);
+            background: rgba(255, 255, 255, 0.22);
+            border-color: rgba(255, 255, 255, 0.9);
             transform: translateX(-50%) scale(1.1);
-            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
         }
         .pp-info-btn:active {
             transform: translateX(-50%) scale(0.95);
-            background: rgba(255, 255, 255, 0.45);
+            background: rgba(255, 255, 255, 0.15);
         }
         /* 删除确认弹窗 */
         .pw-confirm-dialog {
