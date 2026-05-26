@@ -435,7 +435,7 @@
                     }
 
                     // Generate thumbnail
-                    var thumbDataUrl = await compressImage(file, 400, 400, 0.6);
+                    var thumbDataUrl = await compressImage(file, 800, 800, 0.82);
                     var thumbBlob = await fetch(thumbDataUrl).then(function(r) { return r.blob(); });
                     var thumbPath = 'thumbs/' + baseName;
                     await sb.storage.from('uploads').upload(thumbPath, thumbBlob, { contentType: 'image/jpeg', cacheControl: '31536000' });
@@ -444,7 +444,7 @@
                     var thumbUrl = sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl;
 
                     // Save to posts table
-                    var contentJson = JSON.stringify({ type: 'photo_wall', originalName: file.name, fileSize: fileToUpload.size, originalSize: fileOriginalSize });
+                    var contentJson = JSON.stringify({ type: 'photo_wall', thumb: thumbUrl, fileSize: fileToUpload.size });
                     var insertRes = await sb.from('posts').insert([{
                         user_name: window.currentUser,
                         content: contentJson,

@@ -24,6 +24,7 @@
     var ppCurrentRotation = 0;
     var ppTapThreshold = 15;
     var ppMovedDistance = 0;
+    var ppCloseTimer = null;
 
     function ppInitTrack() {
         ppVw = window.innerWidth;
@@ -274,7 +275,13 @@
         
         var deleteBtn = document.getElementById('ppDeleteBtn');
         if (deleteBtn) {
-            deleteBtn.style.display = (window.currentUser === photo.username) ? 'block' : 'none';
+            if (window.currentUser === photo.username) {
+                deleteBtn.style.display = 'flex';
+                deleteBtn.title = '删除';
+            } else {
+                deleteBtn.style.display = 'flex';
+                deleteBtn.title = '仅照片上传者可删除';
+            }
         }
     }
 
@@ -487,17 +494,15 @@
     window.closePhotoInfo = function() {
         var modal = document.getElementById('ppInfoModal');
         if (!modal) return;
+        if (modal.classList.contains('closing')) return;
         
+        modal.classList.remove('active');
         modal.classList.add('closing');
-        
-        requestAnimationFrame(function() {
-            modal.classList.remove('active');
-        });
         
         setTimeout(function() {
             modal.style.display = 'none';
             modal.classList.remove('closing');
-        }, 220);
+        }, 400);
     };
 
     window.shareCurrentPhoto = function() {
@@ -562,6 +567,36 @@
         window.deletePhotoFromPreview();
     };
 
+    window.deletePhotoFromPreview = function() {
+        if (!photoPreviewActive) return;
+        if (!window.confirm('确定删除这张照片吗？')) return;
+        
+        var currentPhotos = ppSortedPhotos;
+        if (ppPhotoIdx < 0 || ppPhotoIdx >= currentPhotos.length) return;
+        var photo = currentPhotos[ppPhotoIdx];
+        if (!photo) return;
+        var id = photo.id;
+        if (id != null) {
+            window.addDeletedPhotoId(id);
+        }
+        var idxInGlobal = -1;
+        if (window.photoWallData) {
+            for (var i = 0; i < window.photoWallData.length; i++) {
+                if (window.photoWallData[i].id === id) {
+                    idxInGlobal = i;
+                    break;
+                }
+            }
+            if (idxInGlobal >= 0) {
+                window.photoWallData.splice(idxInGlobal, 1);
+            }
+            window.saveLocalPhotoWallData();
+        }
+        closePhotoPreview();
+        window.renderPhotoWall();
+        window.showToast('已删除');
+    };
+
     window.ppRotatePhoto = function() {
         var imgs = document.querySelectorAll('.pp-slide-img');
         ppCurrentRotation = (ppCurrentRotation + 90) % 360;
@@ -579,16 +614,26 @@
         overlay.addEventListener('pointerdown', function(e) {
             var target = e.target;
             var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
+            var isModalContent = target.closest('.pp-info-modal-content');
             var isModal = target.closest('.pp-info-modal');
+            
+            if (ppCloseTimer) {
+                clearTimeout(ppCloseTimer);
+                ppCloseTimer = null;
+            }
             
             if (isButton) {
                 e.stopPropagation();
                 return;
             }
             
-            if (isModal) {
+            if (isModalContent) {
                 e.stopPropagation();
                 return;
+            }
+            
+            if (isModal) {
+                e.stopPropagation();
             }
             
             startTime = Date.now();
@@ -707,9 +752,17 @@
         overlay.addEventListener('pointerup', function(e) {
             var target = e.target;
             var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
+            var isModalContent = target.closest('.pp-info-modal-content');
             var isModal = target.closest('.pp-info-modal');
             
             if (isButton) {
+                e.stopPropagation();
+                ppPointers.clear();
+                ppStart = null;
+                return;
+            }
+            
+            if (isModalContent) {
                 e.stopPropagation();
                 ppPointers.clear();
                 ppStart = null;
@@ -720,6 +773,10 @@
                 e.stopPropagation();
                 ppPointers.clear();
                 ppStart = null;
+                var infoModal = document.getElementById('ppInfoModal');
+                if (infoModal && infoModal.style.display !== 'none') {
+                    window.closePhotoInfo();
+                }
                 return;
             }
             
@@ -747,8 +804,9 @@
                 
                 if (!zoomed && !ppTrackSnapping) {
                     var dx = ppTrackDrag;
+                    var isSwipe = Math.abs(dx) > ppVw / 4;
                     
-                    if (Math.abs(dx) > ppVw / 4) {
+                    if (isSwipe) {
                         var direction = dx > 0 ? -1 : 1;
                         if (direction === -1 && ppPhotoIdx > 0) {
                             ppNavBusy = true;
@@ -765,15 +823,23 @@
                         } else {
                             ppSnapTo(0);
                         }
-                    } else if (Math.abs(ppTrackDrag) > 2) {
-                        ppSnapTo(0);
                     }
                     ppTrackDrag = 0;
+                    
+                    if (!isSwipe) {
+                        moved = false;
+                    }
                 }
                 
                 if (!moved) {
                     if (!zoomed) {
-                        if (now - ppLastTap < 300 && !ppTapHandled && ppZoom.scale <= 1.01) {
+                        var isDoubleTap = (now - ppLastTap < 300 && !ppTapHandled && ppZoom.scale <= 1.01);
+                        
+                        if (isDoubleTap) {
+                            if (ppCloseTimer) {
+                                clearTimeout(ppCloseTimer);
+                                ppCloseTimer = null;
+                            }
                             ppToggleZoom();
                             ppTapHandled = true;
                             setTimeout(function() { ppTapHandled = false; }, 300);
@@ -787,10 +853,18 @@
                                 ppStart = null;
                                 return;
                             }
-                            closePhotoPreview();
+                            if (ppCloseTimer) clearTimeout(ppCloseTimer);
+                            ppCloseTimer = setTimeout(function() {
+                                ppCloseTimer = null;
+                                closePhotoPreview();
+                            }, 350);
                         }
                     } else {
                         if (now - ppLastTap < 300 && !ppTapHandled) {
+                            if (ppCloseTimer) {
+                                clearTimeout(ppCloseTimer);
+                                ppCloseTimer = null;
+                            }
                             ppToggleZoom();
                             ppTapHandled = true;
                             setTimeout(function() { ppTapHandled = false; }, 300);
