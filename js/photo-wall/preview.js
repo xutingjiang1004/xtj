@@ -439,10 +439,9 @@
             ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
         }
         
-        overlay.classList.add('active');
-        document.body.classList.add('pp-body-noscroll');
-        
+        // FLIP Animation: Step 1 - First (记录初始状态)
         var originRect = null;
+        var originImg = null;
         var grid = document.getElementById('photoGrid');
         if (grid) {
             var items = grid.querySelectorAll('.photo-wall-item');
@@ -450,46 +449,106 @@
                 var thumbImg = items[index].querySelector('img');
                 if (thumbImg) {
                     originRect = thumbImg.getBoundingClientRect();
+                    originImg = thumbImg;
                     var area = originRect.width * originRect.height;
-                    if (area < 1) originRect = null;
+                    if (area < 1) {
+                        originRect = null;
+                        originImg = null;
+                    }
                 }
             }
         }
-        overlay._openOrigin = originRect;
         
-        var initialScale = 0.05;
-        if (originRect) {
-            var scaleX = originRect.width / ppVw;
-            var scaleY = originRect.height / ppVh;
-            initialScale = Math.max(0.03, Math.min(scaleX, scaleY));
-            overlay._openScale = initialScale;
+        overlay._openOrigin = originRect;
+        overlay._openOriginImg = originImg;
+        
+        // 设置初始状态：隐藏原图，准备过渡
+        if (originImg) {
+            originImg.style.transition = 'none';
+            originImg.style.opacity = '0';
         }
         
+        // FLIP Animation: Step 2 - Last (设置最终状态)
+        overlay.classList.add('active');
+        document.body.classList.add('pp-body-noscroll');
+        
+        // 立即设置最终状态
+        overlay.style.transition = 'none';
+        overlay.style.opacity = '1';
+        overlay.style.transform = '';
+        overlay.style.transformOrigin = '';
+        
+        ppInitTrack();
+        if (ppTrack) {
+            ppTrack.style.transition = 'none';
+            ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+        }
+        
+        // 强制重排
+        void overlay.offsetHeight;
+        
+        // 设置大图
+        var curImg = document.getElementById('photoPreviewImage');
+        if (curImg && photo && photo.imageUrl) {
+            curImg.src = photo.imageUrl;
+            curImg.style.transition = 'none';
+            curImg.style.opacity = '1';
+        }
+        
+        void curImg?.offsetHeight;
+        
+        // FLIP Animation: Step 3 - Invert (计算差异并反向变换)
+        var finalRect = null;
+        if (originRect && curImg) {
+            finalRect = curImg.getBoundingClientRect();
+            if (finalRect) {
+                // 计算位置和缩放差异
+                var dx = originRect.left - finalRect.left;
+                var dy = originRect.top - finalRect.top;
+                var scaleX = originRect.width / finalRect.width;
+                var scaleY = originRect.height / finalRect.height;
+                var scale = Math.min(scaleX, scaleY);
+                
+                // 应用反向变换，让大图看起来在缩略图位置
+                curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
+                curImg.style.transformOrigin = 'top left';
+            }
+        }
+        
+        // 强制重排
+        void curImg?.offsetHeight;
+        
+        // FLIP Animation: Step 4 - Play (播放动画)
         function finishOpen() {
+            curImg.style.transition = '';
+            curImg.style.transform = '';
+            curImg.style.transformOrigin = '';
             overlay.style.transition = '';
             ppSetTrackImages(index);
             ppUpdateInfo(index);
             ppUpdateDots(index);
+            
+            // 恢复原图可见性
+            if (originImg) {
+                originImg.style.transition = '';
+                originImg.style.opacity = '';
+            }
         }
         
-        if (originRect) {
-            var ox = originRect.left + originRect.width / 2;
-            var oy = originRect.top + originRect.height / 2;
-            overlay.style.transition = 'none';
-            overlay.style.transformOrigin = ox + 'px ' + oy + 'px';
-            overlay.style.transform = 'scale(' + initialScale + ')';
-            overlay.style.opacity = '0';
-            void overlay.offsetHeight;
-            overlay.style.transition = 'transform 0.4s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.35s ease-out';
-            overlay.style.transform = 'scale(1)';
-            overlay.style.opacity = '1';
-            setTimeout(finishOpen, 420);
+        if (originRect && finalRect) {
+            // 开启动画
+            overlay.style.transition = 'opacity 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+            curImg.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1)';
+            curImg.style.transform = 'translate(0, 0) scale(1)';
+            
+            setTimeout(finishOpen, 580);
         } else {
-            overlay.style.transition = 'opacity 0.2s ease-in-out';
+            // 没有原图参考，使用淡入
+            overlay.style.transition = 'opacity 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
             overlay.style.opacity = '0';
             void overlay.offsetHeight;
             overlay.style.opacity = '1';
-            setTimeout(finishOpen, 220);
+            setTimeout(finishOpen, 380);
         }
     }
 
@@ -528,7 +587,7 @@
             overlay.style.transform = 'scale(1)';
             overlay.style.opacity = '1';
             void overlay.offsetHeight;
-            overlay.style.transition = 'transform 0.35s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.25s ease-in';
+            overlay.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
             overlay.style.transform = 'scale(' + initialScale + ')';
             overlay.style.opacity = '0';
             setTimeout(function() {
@@ -537,9 +596,15 @@
                 overlay.style.opacity = '';
                 overlay.style.transition = '';
                 overlay.style.transformOrigin = '';
-            }, 380);
+            }, 480);
         } else {
-            overlay.classList.remove('active');
+            overlay.style.transition = 'opacity 0.35s cubic-bezier(0.55, 0, 1, 0.45)';
+            overlay.style.opacity = '0';
+            setTimeout(function() {
+                overlay.classList.remove('active');
+                overlay.style.opacity = '';
+                overlay.style.transition = '';
+            }, 380);
         }
         
         document.body.classList.remove('pp-body-noscroll');
@@ -625,6 +690,7 @@
         modal.classList.remove('closing');
         modal.classList.add('active');
         modal.style.display = 'flex';
+        modal.style.opacity = '0';
         
         content.offsetHeight;
         
@@ -643,20 +709,28 @@
             modal._ppInfoOrigin = { dx: offsetX, dy: offsetY };
             
             content.style.transition = 'none';
-            content.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(0.08)';
+            content.style.transform = 'translate(' + offsetX + 'px, ' + offsetY + 'px) scale(0.3)';
             content.style.opacity = '0';
             
-            content.offsetHeight;
+            void content.offsetHeight;
             
-            content.style.transition = 'transform 0.4s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.3s ease-out';
+            modal.style.transition = 'opacity 0.35s ease-out';
+            modal.style.opacity = '1';
+            
+            content.style.transition = 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
             content.style.transform = 'translate(0, 0) scale(1)';
             content.style.opacity = '1';
         } else {
             content.style.transition = 'none';
-            content.style.transform = 'scale(0.92)';
+            content.style.transform = 'scale(0.85)';
             content.style.opacity = '0';
-            content.offsetHeight;
-            content.style.transition = 'transform 0.4s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.3s ease-out';
+            
+            void content.offsetHeight;
+            
+            modal.style.transition = 'opacity 0.35s ease-out';
+            modal.style.opacity = '1';
+            
+            content.style.transition = 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
             content.style.transform = 'scale(1)';
             content.style.opacity = '1';
         }
@@ -681,11 +755,14 @@
             content.style.transform = 'translate(0, 0) scale(1)';
             content.style.opacity = '1';
             
-            content.offsetHeight;
+            void content.offsetHeight;
             
-            content.style.transition = 'transform 0.35s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.25s ease-in';
-            content.style.transform = 'translate(' + origin.dx + 'px, ' + origin.dy + 'px) scale(0.08)';
+            content.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
+            content.style.transform = 'translate(' + origin.dx + 'px, ' + origin.dy + 'px) scale(0.3)';
             content.style.opacity = '0';
+            
+            modal.style.transition = 'opacity 0.35s ease-in';
+            modal.style.opacity = '0';
             
             if (modal._closeTimeout) clearTimeout(modal._closeTimeout);
             modal._closeTimeout = setTimeout(function() {
@@ -693,21 +770,29 @@
                 content.style.transform = '';
                 content.style.opacity = '';
                 modal.style.display = 'none';
+                modal.style.opacity = '';
+                modal.style.transition = '';
                 modal.classList.remove('closing');
                 modal._closeTimeout = null;
-            }, 380);
+            }, 480);
         } else {
             if (content) {
                 content.style.transition = 'none';
                 content.style.transform = 'scale(1)';
                 content.style.opacity = '1';
-                content.offsetHeight;
-                content.style.transition = 'transform 0.35s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.25s ease-in';
-                content.style.transform = 'scale(0.92)';
+                void content.offsetHeight;
+                content.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
+                content.style.transform = 'scale(0.85)';
                 content.style.opacity = '0';
             }
+            
+            modal.style.transition = 'opacity 0.35s ease-in';
+            modal.style.opacity = '0';
+            
             modal._closeTimeout = setTimeout(function() {
                 modal.style.display = 'none';
+                modal.style.opacity = '';
+                modal.style.transition = '';
                 modal.classList.remove('closing');
                 if (content) {
                     content.style.transition = 'none';
@@ -715,7 +800,7 @@
                     content.style.opacity = '';
                 }
                 modal._closeTimeout = null;
-            }, 380);
+            }, 480);
         }
     };
 
