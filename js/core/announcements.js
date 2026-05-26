@@ -242,8 +242,7 @@
     };
 
     window.deleteAnnouncement = async function(ann) {
-        if (!confirm('确定要删除这条公告吗？')) return;
-
+    window.showConfirm('删除公告', '确定要删除这条公告吗？', '是', async function() {
         try {
             const { error } = await window.sb.rpc('delete_post_with_actor', {
                 p_post_id: ann.id,
@@ -262,7 +261,8 @@
         } catch(e) {
             window.showToast('删除失败: ' + (e.message || '未知错误'));
         }
-    };
+    });
+};
 
     function subscribeToAnnouncements() {
         if (window.annRealtime) return;

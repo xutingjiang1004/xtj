@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
             const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
             if (typeof window.supabase === 'undefined') {
@@ -91,6 +91,60 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }, 2500);
         }
         window.showToast = showToast;
+
+        function showConfirm(title, message, confirmText, callback) {
+            var overlay = document.getElementById('ppConfirmOverlay');
+            if (!overlay) return;
+            document.getElementById('ppConfirmTitle').textContent = title || '确认操作';
+            document.getElementById('ppConfirmMsg').textContent = message || '确定要执行此操作吗？';
+            document.getElementById('ppConfirmOkBtn').textContent = confirmText || '确认';
+            window._confirmCallback = callback;
+            if (overlay._closeTimer) {
+                clearTimeout(overlay._closeTimer);
+                overlay._closeTimer = null;
+            }
+            overlay.classList.remove('closing');
+            overlay.classList.add('active');
+            var okBtn = document.getElementById('ppConfirmOkBtn');
+            okBtn.disabled = false;
+        }
+        window.showConfirm = showConfirm;
+
+        window.execConfirm = function() {
+            var overlay = document.getElementById('ppConfirmOverlay');
+            if (!overlay) return;
+            if (overlay.classList.contains('closing')) return;
+            var cb = window._confirmCallback;
+            overlay.classList.remove('active');
+            overlay.classList.add('closing');
+            var okBtn = document.getElementById('ppConfirmOkBtn');
+            if (okBtn) okBtn.disabled = true;
+            overlay._closeTimer = setTimeout(function() {
+                overlay.classList.remove('closing');
+                overlay.classList.remove('active');
+                window._confirmCallback = null;
+                overlay._closeTimer = null;
+                if (typeof cb === 'function') {
+                    cb();
+                }
+            }, 280);
+        };
+
+        window.closeConfirm = function() {
+            var overlay = document.getElementById('ppConfirmOverlay');
+            if (!overlay) return;
+            if (overlay.classList.contains('closing')) return;
+            overlay.classList.remove('active');
+            overlay.classList.add('closing');
+            overlay._closeTimer = setTimeout(function() {
+                overlay.classList.remove('closing');
+                overlay.classList.remove('active');
+                window._confirmCallback = null;
+                var okBtn = document.getElementById('ppConfirmOkBtn');
+                if (okBtn) okBtn.disabled = false;
+                overlay._closeTimer = null;
+            }, 300);
+        };
 
             // ===================== 密码哈希 =====================
             async function hashPassword(password) {
@@ -2942,27 +2996,26 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             window.deleteAnnouncement = async function(ann) {
-                if (!confirm('确定要删除这条公告吗？')) return;
+                showConfirm('删除公告', '确定要删除这条公告吗？', '是', async function() {
+                    try {
+                        const { error } = await sb.rpc('delete_post_with_actor', {
+                            p_post_id: ann.id,
+                            p_actor_key: ann.actor_key || 'admin_' + Date.now()
+                        });
+                        if (error) throw error;
 
-                try {
-                    const { error } = await sb.rpc('delete_post_with_actor', {
-                        p_post_id: ann.id,
-                        p_actor_key: ann.actor_key || 'admin_' + Date.now()
-                    });
-                    if (error) throw error;
+                        const readIds = getReadAnnouncements();
+                        const filteredReadIds = readIds.filter(id => id !== ann.id);
+                        saveReadAnnouncements(filteredReadIds);
 
-                    // 从本地已读列表中移除
-                    const readIds = getReadAnnouncements();
-                    const filteredReadIds = readIds.filter(id => id !== ann.id);
-                    saveReadAnnouncements(filteredReadIds);
-
-                    showToast('公告已删除');
-                    await loadAnnouncements();
-                    showAnnouncementList();
-                    renderAnnouncementList();
-                } catch(e) {
-                    showToast('删除失败: ' + (e.message || '未知错误'));
-                }
+                        showToast('公告已删除');
+                        await loadAnnouncements();
+                        showAnnouncementList();
+                        renderAnnouncementList();
+                    } catch(e) {
+                        showToast('删除失败: ' + (e.message || '未知错误'));
+                    }
+                });
             };
 
             function subscribeToAnnouncements() {
@@ -2985,6 +3038,99 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.56',
+                    date: '2026-05-26',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li><strong>图片分辨率一致性优化</strong>
+                                <ul>
+                                    <li>统一缩略图生成参数为1200x1200分辨率、0.85压缩质量，确保封面缩略图与实际内容照片分辨率比例和清晰度标准完全一致</li>
+                                    <li>覆盖照片墙两套上传流程（upload.js + features.js），保证所有新建照片均按统一标准生成高质量缩略图</li>
+                                </ul>
+                            </li>
+                            <li><strong>删除功能UI与交互优化</strong>
+                                <ul>
+                                    <li>将系统级window.confirm删除确认弹窗替换为自定义玻璃磨砂弹窗，整体UI风格统一</li>
+                                    <li>弹窗采用透明玻璃效果 + backdrop-filter: blur(28px) saturate(200%) 增强磨砂质感</li>
+                                    <li>弹窗弹出时从scale(0.9) translateY(20px)平滑过渡到正常位置，动画曲线cubic-bezier弹性缓出</li>
+                                    <li>确认删除后弹窗以scale(0.88)淡出动画消失，遮罩层同步淡化</li>
+                                    <li>按钮在动画期间禁用防重复点击，点击遮罩层外部可取消</li>
+                                    <li>所有交互流程自动清理回调引用，避免内存泄漏</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.55',
+                    date: '2026-05-26',
+                    content: `
+                        <h4>修复内容</h4>
+                        <ul>
+                            <li><strong>照片墙封面显示修复</strong>
+                                <ul>
+                                    <li>简化.photo-wall-item伪元素视觉效果，移除多层渐变叠加，避免用户感知多张图片</li>
+                                    <li>脉冲圆环正确居中定位，消除视觉混乱</li>
+                                </ul>
+                            </li>
+                            <li><strong>照片点击预览修复</strong>
+                                <ul>
+                                    <li>移除冲突的CSS动画ppTrackEnter，避免与JS transform时序冲突</li>
+                                    <li>openPhotoPreview中添加预定位逻辑，确保轨道在遮罩层可见前已就位</li>
+                                    <li>修复相册视图ppSortedPhotos被覆盖的Bug</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.54',
+                    date: '2026-05-25',
+                    content: `
+                        <h4>修复与优化</h4>
+                        <ul>
+                            <li><strong>链接复制优化</strong>
+                                <ul>
+                                    <li>优先使用同步API（&lt;10ms），点击即时显示绿色✓+弹性动画</li>
+                                </ul>
+                            </li>
+                            <li><strong>缩放与手势优化</strong>
+                                <ul>
+                                    <li>ppResetZoom完整重置锚点状态，防止跨图残留</li>
+                                    <li>双指间距变化&lt;10px判定为无效操作，防误识别</li>
+                                </ul>
+                            </li>
+                            <li><strong>稳定性修复</strong>
+                                <ul>
+                                    <li>新增safeLocalStorageGetJSON，25处替换杜绝localStorage崩溃</li>
+                                    <li>移除举报弹窗内联display:none，统一CSS class控制</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.53',
+                    date: '2026-05-25',
+                    content: `
+                        <h4>修复内容</h4>
+                        <ul>
+                            <li><strong>封面闭包陷阱修复</strong>
+                                <ul>
+                                    <li>IIFE包裹确保每张图片独立绑定，全部正确加载</li>
+                                </ul>
+                            </li>
+                            <li><strong>预加载优化</strong>
+                                <ul>
+                                    <li>延迟到滑动动画结束后执行，避免资源竞争</li>
+                                    <li>精准控制预加载数量为3张，提升缓存命中率</li>
+                                </ul>
+                            </li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.51',
                     date: '2026-05-25',
