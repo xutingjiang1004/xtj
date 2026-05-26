@@ -1528,7 +1528,7 @@
             backdrop-filter: blur(8px);
             -webkit-backdrop-filter: blur(8px);
             will-change: background-color;
-            transition: background-color 0.35s ease;
+            transition: background-color 0.25s ease-in-out;
         }
 
         .pp-info-modal.active::before {
@@ -1537,27 +1537,28 @@
 
         .pp-info-modal.closing::before {
             background: rgba(0, 0, 0, 0);
-            transition: background-color 0.3s ease;
+            transition: background-color 0.2s ease-in-out;
         }
 
         .pp-info-modal-content {
             position: relative;
             width: 92%;
             max-width: 360px;
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
+            background: rgba(255, 255, 255, 0.35);
+            backdrop-filter: blur(10px) saturate(150%);
+            -webkit-backdrop-filter: blur(10px) saturate(150%);
             border-radius: 20px;
             overflow: hidden;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-            border: 1px solid rgba(255, 255, 255, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.5);
             will-change: transform, opacity;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
         }
 
         [data-theme="dark"] .pp-info-modal-content {
-            background: rgba(30, 30, 40, 0.95);
+            background: rgba(30, 30, 40, 0.45);
+            border-color: rgba(255, 255, 255, 0.15);
         }
 
         .pp-info-modal-header {
@@ -1677,7 +1678,7 @@
             -webkit-backdrop-filter: blur(0px);
             opacity: 0;
             pointer-events: none;
-            transition: opacity 0.35s ease, backdrop-filter 0.35s ease, background 0.35s ease;
+            transition: opacity 0.25s ease-in-out, backdrop-filter 0.25s ease-in-out, background 0.25s ease-in-out;
         }
         .pp-confirm-overlay.active {
             background: rgba(0, 0, 0, 0.45);
@@ -1692,7 +1693,7 @@
             -webkit-backdrop-filter: blur(0px);
             opacity: 0;
             pointer-events: none;
-            transition: opacity 0.25s ease, backdrop-filter 0.25s ease, background 0.25s ease;
+            transition: opacity 0.2s ease-in-out, backdrop-filter 0.2s ease-in-out, background 0.2s ease-in-out;
         }
         .pp-confirm-dialog {
             width: 88%;
@@ -1706,7 +1707,7 @@
             box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.5);
             transform: scale(0.9) translateY(20px);
             opacity: 0;
-            transition: transform 0.45s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.35s ease;
+            transition: transform 0.25s ease-in-out, opacity 0.2s ease-in-out;
         }
         .pp-confirm-overlay.active .pp-confirm-dialog {
             transform: scale(1) translateY(0);
@@ -1715,7 +1716,7 @@
         .pp-confirm-overlay.closing .pp-confirm-dialog {
             transform: scale(0.88) translateY(12px);
             opacity: 0;
-            transition: transform 0.25s ease, opacity 0.2s ease;
+            transition: transform 0.2s ease-in-out, opacity 0.15s ease-in-out;
         }
         .pp-confirm-title {
             font-size: 18px;
@@ -3807,37 +3808,31 @@
             100% { background-position: 200% 0; }
         }
         .photo-preview-overlay {
-            position: fixed;
-            top: 0;
-            right: 0;
-            bottom: 0;
-            left: 0;
-            z-index: 10000;
-            background: #000;
-            display: none;
-            box-sizing: border-box;
-            overflow: hidden;
-            overscroll-behavior: none;
-            touch-action: none;
-            padding: 0;
-            will-change: opacity, transform;
-            backface-visibility: hidden;
-            -webkit-backface-visibility: hidden;
-        }
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 10000;
+    background: #000;
+    display: none;
+    box-sizing: border-box;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
+    padding: 0;
+    will-change: transform, opacity;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    transform-origin: center center;
+    -webkit-transform-origin: center center;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    contain: layout style;
+    -webkit-tap-highlight-color: transparent;
+}
         .photo-preview-overlay.active {
             display: flex;
-            animation: ppFadeIn 0.35s cubic-bezier(0.16,1,0.3,1);
-        }
-        .photo-preview-overlay.pp-closing {
-            animation: ppFadeOut 0.3s cubic-bezier(0.4,0,0.2,1) forwards;
-        }
-        @keyframes ppFadeIn {
-            0% { opacity: 0; }
-            100% { opacity: 1; }
-        }
-        @keyframes ppFadeOut {
-            0% { opacity: 1; }
-            100% { opacity: 0; }
         }
         .photo-preview-overlay.active .pp-slide-track {
             will-change: transform;
@@ -3983,7 +3978,7 @@
             -webkit-transform-style: preserve-3d;
         }
         .pp-slide-track.snapping {
-            transition: transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            transition: transform 0.25s ease-in-out;
             pointer-events: none;
         }
         /* 每张图的槽位：占满一屏宽 */
@@ -4028,7 +4023,7 @@
             object-fit: contain;
             box-shadow: none;
             transform-origin: center center;
-            will-change: transform;
+            will-change: transform, opacity;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
             transform: translateZ(0);
@@ -4038,7 +4033,7 @@
             -webkit-user-select: none;
             -webkit-user-drag: none;
             touch-action: none;
-            transition: opacity 0.35s ease;
+            transition: opacity 0.25s ease;
         }
         .pp-slide-img[src=""] { opacity: 0; }
         .pp-slide-img.zoomed {

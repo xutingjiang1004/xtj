@@ -297,4 +297,13 @@
             e.target.value = '';
         }
     };
+
+    var fileInput = document.getElementById('photoFileInput');
+    if (fileInput) {
+        fileInput.addEventListener('change', function(e) {
+            if (typeof window.handlePhotoUpload === 'function') {
+                window.handlePhotoUpload(e);
+            }
+        });
+    }
 })();
