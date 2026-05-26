@@ -7,6 +7,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const MARKER = '__photo_wall__';
 const MAX = 1 * 1024 * 1024;
+const MAX_DIM = 2048;
 
 let done = 0, skip = 0, fail = 0, saved = 0;
 const results = [];
@@ -25,24 +26,74 @@ function storagePath(url) {
 }
 
 async function dl(url) {
-  const r = await fetch(url);
-  if (!r.ok) return null;
-  const a = await r.arrayBuffer();
-  return { buf: Buffer.from(a), size: a.byteLength };
+  console.log(`    下载: ${url}`);
+  try {
+    const r = await fetch(url, { 
+      timeout: 30000,
+      headers: { 'Cache-Control': 'no-cache' }
+    });
+    if (!r.ok) {
+      console.log(`    下载失败: HTTP ${r.status}`);
+      return null;
+    }
+    const a = await r.arrayBuffer();
+    console.log(`    下载成功: ${fmt(a.byteLength)}`);
+    return { buf: Buffer.from(a), size: a.byteLength };
+  } catch (e) {
+    console.log(`    下载异常: ${e.message}`);
+    return null;
+  }
 }
 
 async function comp(buf, tgt) {
-  const meta = await sharp(buf).metadata();
-  if (!meta.width || !meta.height) return { buf, size: buf.length, ok: false };
-  let q = 85, best = null, bestSz = Infinity;
-  while (q >= 15) {
-    const b = await sharp(buf).jpeg({ quality: q, mozjpeg: true }).toBuffer();
-    if (b.length <= tgt) return { buf: b, size: b.length, ok: b.length < buf.length };
-    if (b.length < bestSz) { best = b; bestSz = b.length; }
-    q -= 12;
+  try {
+    const meta = await sharp(buf).metadata();
+    if (!meta.width || !meta.height) {
+      return { buf: buf, size: buf.length, ok: false, rotated: false, reason: '无法读取图片' };
+    }
+
+    let pipeline = sharp(buf);
+    let needsRotation = meta.orientation && meta.orientation > 1;
+    let needsResize = meta.width > MAX_DIM || meta.height > MAX_DIM;
+    let processed = false;
+    
+    if (needsRotation) {
+      pipeline = pipeline.rotate();
+      processed = true;
+      console.log(`    需要旋转: orientation=${meta.orientation}`);
+    }
+
+    let width = meta.width;
+    let height = meta.height;
+    
+    if (needsResize) {
+      const ratio = MAX_DIM / Math.max(width, height);
+      width = Math.round(width * ratio);
+      height = Math.round(height * ratio);
+      pipeline = pipeline.resize(width, height, { fit: 'inside', withoutEnlargement: true });
+      processed = true;
+      console.log(`    调整尺寸: ${meta.width}x${meta.height} -> ${width}x${height}`);
+    }
+
+    let q = 85, best = null, bestSz = Infinity;
+    while (q >= 15) {
+      const b = await pipeline.clone().jpeg({ quality: q, mozjpeg: true }).toBuffer();
+      if (b.length <= tgt) {
+        console.log(`    压缩成功: 质量=${q}, 大小=${fmt(b.length)}`);
+        return { buf: b, size: b.length, ok: true, rotated: needsRotation, reason: '压缩成功' };
+      }
+      if (b.length < bestSz) { best = b; bestSz = b.length; }
+      q -= 8;
+    }
+    if (best) {
+      console.log(`    压缩到最小质量: 大小=${fmt(bestSz)}`);
+      return { buf: best, size: bestSz, ok: processed || bestSz < buf.length, rotated: needsRotation, reason: processed ? '尺寸调整' : '质量压缩' };
+    }
+    return { buf: buf, size: buf.length, ok: processed, rotated: needsRotation, reason: processed ? '仅调整尺寸' : '无需处理' };
+  } catch (e) {
+    console.error('压缩错误:', e.message);
+    return { buf: buf, size: buf.length, ok: false, rotated: false, reason: '压缩异常: ' + e.message };
   }
-  if (best) return { buf: best, size: bestSz, ok: bestSz < buf.length };
-  return { buf, size: buf.length, ok: false };
 }
 
 async function validate(url) {
@@ -57,40 +108,56 @@ async function validate(url) {
 }
 
 async function one(p, i) {
-  const row = { i: i + 1, user: (p.user_name || '').slice(0, 12), before: 0, after: 0, saved: 0, status: '', chk: '' };
+  const row = { i: i + 1, user: (p.user_name || '').slice(0, 12), before: 0, after: 0, saved: 0, status: '', chk: '', rotated: false, reason: '' };
   try {
     const pt = storagePath(p.media_url);
     if (!pt) { row.status = 'SKIP'; row.chk = '无路径'; skip++; return row; }
 
+    console.log(`\n处理 #${i + 1}: ${pt}`);
     const d = await dl(p.media_url);
     if (!d) { row.status = 'FAIL'; row.chk = '下载失败'; fail++; return row; }
 
     row.before = d.size;
-    if (d.size <= MAX) {
-      row.status = 'SKIP'; row.after = d.size; row.chk = '≤1MB';
-      skip++; return row;
+    
+    const c = await comp(d.buf, MAX);
+    row.rotated = c.rotated;
+    row.reason = c.reason;
+    
+    if (!c.ok) {
+      row.status = 'SKIP'; row.after = d.size; row.chk = c.reason;
+      skip++; 
+      console.log(`    跳过: ${c.reason}`);
+      return row;
     }
 
-    process.stdout.write(`  [${i + 1}] ${fmt(d.size)} → 压缩中...\r`);
-    const c = await comp(d.buf, MAX);
     row.after = c.size;
     row.saved = d.size - c.size;
     saved += row.saved;
 
+    console.log(`    上传到: ${pt}`);
     const up = await sb.storage.from('uploads').upload(pt, c.buf, { upsert: true, contentType: 'image/jpeg' });
-    if (up.error) { row.status = 'FAIL'; row.chk = up.error.message; fail++; return row; }
+    if (up.error) { 
+      console.log(`    上传失败: ${up.error.message}`);
+      row.status = 'FAIL'; row.chk = up.error.message; fail++; return row; 
+    }
 
     row.chk = await validate(p.media_url);
+    console.log(`    校验: ${row.chk}`);
 
     let ex = {};
     try { ex = p.content ? JSON.parse(p.content) : {}; } catch(_) {}
     ex.fileSize = c.size;
     const db = await sb.from('posts').update({ content: JSON.stringify(ex) }).eq('id', p.id);
-    if (db.error) { row.status = 'FAIL'; row.chk = 'DB: ' + db.error.message; fail++; return row; }
+    if (db.error) { 
+      console.log(`    DB更新失败: ${db.error.message}`);
+      row.status = 'FAIL'; row.chk = 'DB: ' + db.error.message; fail++; return row; 
+    }
 
     row.status = 'OK';
     done++;
+    console.log(`    完成! 节省: ${fmt(row.saved)}`);
   } catch(e) {
+    console.log(`    异常: ${e.message}`);
     row.status = 'FAIL'; row.chk = e.message; fail++;
   }
   return row;
@@ -111,8 +178,6 @@ async function main() {
   for (let i = 0; i < photos.length; i++) {
     const row = await one(photos[i], i);
     results.push(row);
-    const mark = row.status === 'OK' ? '✓' : (row.status === 'SKIP' ? '-' : '✗');
-    console.log(`  ${mark} #${row.i} ${row.user.padEnd(12)} ${fmt(row.before).padStart(10)} → ${fmt(row.after).padStart(10)} | ${row.status === 'OK' ? '节省 ' + fmt(row.saved).padStart(8) : ''}${row.status === 'OK' ? '' : '  ' + row.chk}`);
   }
 
   const total = photos.length;
@@ -122,11 +187,10 @@ async function main() {
   console.log(`  总节省: ${fmt(saved)}`);
   console.log(`========================================\n`);
 
-  // Report
   console.log('完整报告:');
-  console.log('#\t用户\t\t原始\t\t压缩后\t\t结果\t校验');
+  console.log('#\t用户\t\t原始\t\t压缩后\t\t节省\t\t结果\t旋转\t原因');
   for (const row of results) {
-    console.log(`${row.i}\t${row.user.padEnd(12)}\t${fmt(row.before).padStart(10)}\t${fmt(row.after).padStart(10)}\t${row.status}\t${row.chk}`);
+    console.log(`${row.i}\t${row.user.padEnd(12)}\t${fmt(row.before).padStart(10)}\t${fmt(row.after).padStart(10)}\t${fmt(row.saved).padStart(10)}\t${row.status}\t${row.rotated ? '是' : ''}\t${row.reason}`);
   }
 }
 
