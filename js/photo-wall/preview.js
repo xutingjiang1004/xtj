@@ -447,7 +447,7 @@
             var items = grid.querySelectorAll('.photo-wall-item');
             if (items[index]) {
                 var thumbImg = items[index].querySelector('img');
-                if (thumbImg) {
+                if (thumbImg && thumbImg.complete) {
                     originRect = thumbImg.getBoundingClientRect();
                     originImg = thumbImg;
                     var area = originRect.width * originRect.height;
@@ -484,71 +484,114 @@
             ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
         }
         
-        // 强制重排
-        void overlay.offsetHeight;
-        
-        // 设置大图
         var curImg = document.getElementById('photoPreviewImage');
-        if (curImg && photo && photo.imageUrl) {
-            curImg.src = photo.imageUrl;
-            curImg.style.transition = 'none';
-            curImg.style.opacity = '1';
-        }
         
-        void curImg?.offsetHeight;
-        
-        // FLIP Animation: Step 3 - Invert (计算差异并反向变换)
-        var finalRect = null;
-        if (originRect && curImg) {
-            finalRect = curImg.getBoundingClientRect();
-            if (finalRect) {
-                // 计算位置和缩放差异
-                var dx = originRect.left - finalRect.left;
-                var dy = originRect.top - finalRect.top;
-                var scaleX = originRect.width / finalRect.width;
-                var scaleY = originRect.height / finalRect.height;
-                var scale = Math.min(scaleX, scaleY);
-                
-                // 应用反向变换，让大图看起来在缩略图位置
-                curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
-                curImg.style.transformOrigin = 'top left';
-            }
-        }
-        
-        // 强制重排
-        void curImg?.offsetHeight;
-        
-        // FLIP Animation: Step 4 - Play (播放动画)
-        function finishOpen() {
-            curImg.style.transition = '';
-            curImg.style.transform = '';
-            curImg.style.transformOrigin = '';
-            overlay.style.transition = '';
-            ppSetTrackImages(index);
-            ppUpdateInfo(index);
-            ppUpdateDots(index);
-            
-            // 恢复原图可见性
-            if (originImg) {
-                originImg.style.transition = '';
-                originImg.style.opacity = '';
-            }
-        }
-        
-        if (originRect && finalRect) {
-            // 开启动画
-            overlay.style.transition = 'opacity 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-            curImg.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1)';
-            curImg.style.transform = 'translate(0, 0) scale(1)';
-            
-            setTimeout(finishOpen, 580);
-        } else {
-            // 没有原图参考，使用淡入
-            overlay.style.transition = 'opacity 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-            overlay.style.opacity = '0';
+        // 等待图片加载完成后再执行FLIP动画
+        function executeFlipAnimation() {
+            // 强制重排
             void overlay.offsetHeight;
-            overlay.style.opacity = '1';
-            setTimeout(finishOpen, 380);
+            
+            // 设置大图
+            if (curImg && photo && photo.imageUrl) {
+                curImg.src = photo.imageUrl;
+                curImg.style.transition = 'none';
+                curImg.style.opacity = '1';
+            }
+            
+            void curImg?.offsetHeight;
+            
+            // FLIP Animation: Step 3 - Invert (计算差异并反向变换)
+            var finalRect = null;
+            var dx = 0, dy = 0, scale = 0.05;
+            
+            if (originRect && curImg) {
+                finalRect = curImg.getBoundingClientRect();
+                if (finalRect && finalRect.width > 0 && finalRect.height > 0) {
+                    // 计算位置和缩放差异
+                    dx = originRect.left - finalRect.left;
+                    dy = originRect.top - finalRect.top;
+                    var scaleX = originRect.width / finalRect.width;
+                    var scaleY = originRect.height / finalRect.height;
+                    scale = Math.min(scaleX, scaleY);
+                    
+                    // 应用反向变换，让大图看起来在缩略图位置
+                    curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
+                    curImg.style.transformOrigin = 'top left';
+                }
+            }
+            
+            // 强制重排
+            void curImg?.offsetHeight;
+            
+            // FLIP Animation: Step 4 - Play (播放动画)
+            function finishOpen() {
+                if (curImg) {
+                    curImg.style.transition = '';
+                    curImg.style.transform = '';
+                    curImg.style.transformOrigin = '';
+                }
+                overlay.style.transition = '';
+                ppSetTrackImages(index);
+                ppUpdateInfo(index);
+                ppUpdateDots(index);
+                
+                // 恢复原图可见性
+                if (originImg) {
+                    originImg.style.transition = '';
+                    originImg.style.opacity = '';
+                }
+            }
+            
+            if (originRect && finalRect && finalRect.width > 0) {
+                // 使用iOS风格的缓动曲线
+                overlay.style.transition = 'opacity 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                curImg.style.transition = 'transform 0.55s cubic-bezier(0.32, 0.72, 0, 1)';
+                curImg.style.transform = 'translate(0, 0) scale(1)';
+                
+                setTimeout(finishOpen, 580);
+            } else {
+                // 没有原图参考，使用淡入
+                overlay.style.transition = 'opacity 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                overlay.style.opacity = '0';
+                void overlay.offsetHeight;
+                overlay.style.opacity = '1';
+                
+                // 设置大图正常显示
+                if (curImg) {
+                    curImg.style.transition = '';
+                    curImg.style.transform = '';
+                    curImg.style.transformOrigin = '';
+                }
+                
+                setTimeout(finishOpen, 380);
+            }
+        }
+        
+        // 如果图片已经加载完成，立即执行动画；否则等待加载
+        if (curImg && photo && photo.imageUrl) {
+            var cachedImg = ppImageCache[photo.imageUrl];
+            if (cachedImg || curImg.src === photo.imageUrl && curImg.complete) {
+                executeFlipAnimation();
+            } else {
+                // 等待图片加载
+                var loadHandler = function() {
+                    curImg.removeEventListener('load', loadHandler);
+                    curImg.removeEventListener('error', loadHandler);
+                    executeFlipAnimation();
+                };
+                curImg.addEventListener('load', loadHandler);
+                curImg.addEventListener('error', loadHandler);
+                
+                // 设置src触发加载
+                curImg.style.transition = 'none';
+                curImg.style.opacity = '0';
+                curImg.src = photo.imageUrl;
+                
+                // 超时处理，避免加载失败导致卡死
+                setTimeout(loadHandler, 2000);
+            }
+        } else {
+            executeFlipAnimation();
         }
     }
 
@@ -595,8 +638,8 @@
             void curImg.offsetHeight;
             
             // FLIP Animation: Step 4 - Play (播放反向动画)
-            overlay.style.transition = 'opacity 0.4s cubic-bezier(0.55, 0, 1, 0.45)';
-            curImg.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45)';
+            overlay.style.transition = 'opacity 0.25s cubic-bezier(0.55, 0, 1, 0.45)';
+            curImg.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45)';
             curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
             overlay.style.opacity = '0';
             
@@ -616,17 +659,17 @@
                 overlay.classList.remove('active');
                 
                 document.body.classList.remove('pp-body-noscroll');
-            }, 480);
+            }, 320);
         } else {
             // 没有原图参考，使用淡入淡出
-            overlay.style.transition = 'opacity 0.35s cubic-bezier(0.55, 0, 1, 0.45)';
+            overlay.style.transition = 'opacity 0.2s cubic-bezier(0.55, 0, 1, 0.45)';
             overlay.style.opacity = '0';
             setTimeout(function() {
                 overlay.style.opacity = '';
                 overlay.style.transition = '';
                 overlay.classList.remove('active');
                 document.body.classList.remove('pp-body-noscroll');
-            }, 380);
+            }, 220);
         }
     }
 
@@ -751,13 +794,13 @@
         void content.offsetHeight;
         
         // FLIP Animation: Step 4 - Play (播放动画)
-        modal.style.transition = 'opacity 0.4s ease-out';
+        modal.style.transition = 'opacity 0.25s ease-out';
         modal.style.opacity = '0';
         void modal.offsetHeight;
         modal.style.opacity = '1';
         
         if (btnRect) {
-            content.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
+            content.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
             content.style.transform = 'translate(0, 0) scale(1)';
             content.style.opacity = '1';
         } else {
@@ -765,7 +808,7 @@
             content.style.transform = 'scale(0.9)';
             content.style.opacity = '0';
             void content.offsetHeight;
-            content.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
+            content.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
             content.style.transform = 'scale(1)';
             content.style.opacity = '1';
         }
@@ -817,11 +860,11 @@
             void content.offsetHeight;
             
             // Step 4 - Play: 播放飞回动画
-            content.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
+            content.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in';
             content.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
             content.style.opacity = '0';
             
-            modal.style.transition = 'opacity 0.4s ease-in';
+            modal.style.transition = 'opacity 0.25s ease-in';
             modal.style.opacity = '0';
             
             if (modal._closeTimeout) clearTimeout(modal._closeTimeout);
@@ -835,19 +878,19 @@
                 modal.style.transition = '';
                 modal.classList.remove('closing');
                 modal._closeTimeout = null;
-            }, 480);
+            }, 320);
         } else {
             if (content) {
                 content.style.transition = 'none';
                 content.style.transform = 'scale(1)';
                 content.style.opacity = '1';
                 void content.offsetHeight;
-                content.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
+                content.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in';
                 content.style.transform = 'scale(0.9)';
                 content.style.opacity = '0';
             }
             
-            modal.style.transition = 'opacity 0.4s ease-in';
+            modal.style.transition = 'opacity 0.25s ease-in';
             modal.style.opacity = '0';
             
             modal._closeTimeout = setTimeout(function() {
@@ -862,7 +905,7 @@
                     content.style.transformOrigin = '';
                 }
                 modal._closeTimeout = null;
-            }, 480);
+            }, 320);
         }
     };
 
