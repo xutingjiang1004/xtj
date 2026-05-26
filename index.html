@@ -165,7 +165,7 @@
                             <span class="profile-setting-icon">ℹ️</span>
                             <span>关于</span>
                         </div>
-                        <span class="profile-setting-value">xtj v0.0.43</span>
+                        <span class="profile-setting-value">xtj v0.0.56</span>
                     </div>
                 </div>
             </div>
@@ -366,6 +366,17 @@
             <div style="display: flex; gap: 10px;">
                 <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delModal')">取消</button>
                 <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="pp-confirm-overlay" id="ppConfirmOverlay" onclick="if(event.target===this)window.closeConfirm()">
+        <div class="pp-confirm-dialog" onclick="event.stopPropagation()">
+            <h3 class="pp-confirm-title" id="ppConfirmTitle">确认操作</h3>
+            <p class="pp-confirm-msg" id="ppConfirmMsg">确定要执行此操作吗？</p>
+            <div class="pp-confirm-actions">
+                <button class="pp-confirm-btn pp-confirm-cancel" onclick="window.closeConfirm()">取消</button>
+                <button class="pp-confirm-btn pp-confirm-ok" id="ppConfirmOkBtn" onclick="window.execConfirm()">确认</button>
             </div>
         </div>
     </div>
