@@ -3711,7 +3711,9 @@
             overscroll-behavior: none;
             touch-action: none;
             padding: 0;
-            animation: fadeIn 0.2s ease;
+            will-change: opacity, transform;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
         }
         .photo-preview-overlay.active {
             display: flex;
@@ -3873,6 +3875,7 @@
         }
         .pp-slide-track.snapping {
             transition: transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            pointer-events: none;
         }
         /* 每张图的槽位：占满一屏宽 */
         .pp-slide-slot {
