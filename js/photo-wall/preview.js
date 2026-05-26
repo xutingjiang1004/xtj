@@ -92,7 +92,7 @@
         imgEl.addEventListener('load', show);
         imgEl.addEventListener('error', show);
         imgEl.src = url;
-        if (imgEl.complete && imgEl.naturalWidth > 0) {
+        if (imgEl.complete && img.naturalWidth > 0) {
             show();
         }
         setTimeout(function() {
@@ -148,9 +148,9 @@
         var timeEl = document.getElementById('photoPreviewTime');
         var viewsEl = document.getElementById('photoPreviewViewsCount');
         
-        if (userEl) userEl.textContent = photo.user_name || '未知用户';
+        if (userEl) userEl.textContent = photo.username || '未知用户';
         if (timeEl) {
-            var date = new Date(photo.created_at);
+            var date = new Date(photo.timestamp);
             timeEl.textContent = date.toLocaleString('zh-CN', {
                 year: 'numeric',
                 month: '2-digit',
@@ -163,7 +163,7 @@
         
         var deleteBtn = document.getElementById('ppDeleteBtn');
         if (deleteBtn) {
-            deleteBtn.style.display = (window.currentUser === photo.user_name) ? 'block' : 'none';
+            deleteBtn.style.display = (window.currentUser === photo.username) ? 'block' : 'none';
         }
     }
 
@@ -331,7 +331,12 @@
                 '<button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>' +
                 '<button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">&#x1F517;</button>' +
                 '<button class="pp-rotate-btn" id="ppRotateBtn" title="旋转90°" onclick="window.ppRotatePhoto()">&#x27F3;</button>' +
-                '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">🗑️</button>';
+                '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">🗑️</button>' +
+                '<div class="photo-preview-info">' +
+                '<span class="pp-user" id="photoPreviewUser"></span>' +
+                '<span class="pp-time" id="photoPreviewTime"></span>' +
+                '<span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg><span id="photoPreviewViewsCount">0</span></span>' +
+                '</div>';
             document.body.appendChild(container);
             overlay = container;
         }
@@ -387,6 +392,7 @@
     function showPhotoInfo() {
         var photo = photoPreviewCurrent;
         if (!photo) return;
+        
         var modal = document.getElementById('ppInfoModal');
         if (!modal) {
             var modalEl = document.createElement('div');
@@ -396,41 +402,53 @@
                 '<div class="pp-info-modal-content">' +
                 '<div class="pp-info-modal-header">' +
                 '<span class="pp-info-modal-title">照片详情</span>' +
-                '<button class="pp-info-modal-close" onclick="closePhotoInfo()">×</button>' +
+                '<button class="pp-info-modal-close" onclick="window.closePhotoInfo()">×</button>' +
                 '</div>' +
                 '<div class="pp-info-modal-body" id="ppInfoModalBody"></div>' +
                 '</div>';
+            
+            modalEl.addEventListener('click', function(e) {
+                if (e.target === modalEl) {
+                    window.closePhotoInfo();
+                }
+            });
+            
             document.body.appendChild(modalEl);
             modal = modalEl;
         }
         
         var sizeStr = '未知';
-        if (photo.content) {
-            try {
-                var content = JSON.parse(photo.content);
-                if (content.fileSize) {
-                    var size = content.fileSize;
-                    if (size >= 1024 * 1024) {
-                        sizeStr = (size / (1024 * 1024)).toFixed(2) + ' MB';
-                    } else if (size >= 1024) {
-                        sizeStr = (size / 1024).toFixed(1) + ' KB';
-                    } else {
-                        sizeStr = size + ' B';
-                    }
-                }
-            } catch (e) {}
+        if (photo.fileSize) {
+            var size = photo.fileSize;
+            if (size >= 1024 * 1024) {
+                sizeStr = (size / (1024 * 1024)).toFixed(2) + ' MB';
+            } else if (size >= 1024) {
+                sizeStr = (size / 1024).toFixed(1) + ' KB';
+            } else {
+                sizeStr = size + ' B';
+            }
         }
         
         var dateStr = '未知';
-        if (photo.created_at) {
-            dateStr = new Date(photo.created_at).toLocaleString('zh-CN');
+        if (photo.timestamp) {
+            dateStr = new Date(photo.timestamp).toLocaleString('zh-CN');
         }
         
         document.getElementById('ppInfoModalBody').innerHTML = 
-            '<div class="pp-info-row"><span class="pp-info-label">上传者</span><span class="pp-info-value">' + (photo.user_name || '未知') + '</span></div>' +
+            '<div class="pp-info-section">' +
+            '<div class="pp-info-section-title">元数据</div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">上传者</span><span class="pp-info-value">' + (photo.username || '未知') + '</span></div>' +
             '<div class="pp-info-row"><span class="pp-info-label">上传时间</span><span class="pp-info-value">' + dateStr + '</span></div>' +
-            '<div class="pp-info-row"><span class="pp-info-label">浏览</span><span class="pp-info-value">' + (photo.views || 0) + ' 次</span></div>' +
-            (sizeStr !== '未知' ? '<div class="pp-info-row"><span class="pp-info-label">文件大小</span><span class="pp-info-value">' + sizeStr + '</span></div>' : '');
+            '<div class="pp-info-row"><span class="pp-info-label">浏览量</span><span class="pp-info-value">' + (photo.views || 0) + ' 次</span></div>' +
+            '</div>' +
+            '<div class="pp-info-divider"></div>' +
+            '<div class="pp-info-section">' +
+            '<div class="pp-info-section-title">文件信息</div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">文件大小</span><span class="pp-info-value">' + sizeStr + '</span></div>' +
+            '</div>';
+        
+        modal.classList.remove('closing');
+        modal.classList.add('active');
         modal.style.display = 'flex';
     }
 
@@ -438,7 +456,15 @@
 
     window.closePhotoInfo = function() {
         var modal = document.getElementById('ppInfoModal');
-        if (modal) modal.style.display = 'none';
+        if (!modal) return;
+        
+        modal.classList.add('closing');
+        modal.classList.remove('active');
+        
+        setTimeout(function() {
+            modal.style.display = 'none';
+            modal.classList.remove('closing');
+        }, 260);
     };
 
     window.shareCurrentPhoto = function() {
@@ -520,7 +546,17 @@
         var wasMoved = false;
         
         overlay.addEventListener('pointerdown', function(e) {
-            if (e.target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn, .pp-info-modal')) {
+            var target = e.target;
+            var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
+            var isModal = target.closest('.pp-info-modal');
+            
+            if (isButton) {
+                e.stopPropagation();
+                return;
+            }
+            
+            if (isModal) {
+                e.stopPropagation();
                 return;
             }
             
@@ -640,6 +676,24 @@
         });
         
         overlay.addEventListener('pointerup', function(e) {
+            var target = e.target;
+            var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
+            var isModal = target.closest('.pp-info-modal');
+            
+            if (isButton) {
+                e.stopPropagation();
+                ppPointers.clear();
+                ppStart = null;
+                return;
+            }
+            
+            if (isModal) {
+                e.stopPropagation();
+                ppPointers.clear();
+                ppStart = null;
+                return;
+            }
+            
             var pointerId = e.pointerId;
             ppPointers.delete(pointerId);
             
@@ -693,6 +747,10 @@
                 ppLastTap = now2;
                 
                 if (!ppTapHandled && !wasMoved && ppZoom.scale <= 1.01 && !ppNavBusy) {
+                    var modal = document.getElementById('ppInfoModal');
+                    if (modal && modal.style.display !== 'none') {
+                        return;
+                    }
                     closePhotoPreview();
                 }
                 
