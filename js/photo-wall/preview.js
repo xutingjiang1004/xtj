@@ -996,59 +996,59 @@
 
     window.shareCurrentPhoto = function() {
         var photo = photoPreviewCurrent;
-        if (!photo || !photo.imageUrl) return;
+        if (!photo || !photo.imageUrl) {
+            window.showToast('\u6682\u65e0\u53ef\u5206\u4eab\u7684\u56fe\u7247');
+            return;
+        }
+        
+        if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
+            try { navigator.vibrate(10); } catch (e) {}
+        }
+        
         var btn = document.getElementById('ppShareBtn');
-        if (!btn) return;
-        if (btn._copying) return;
-
-        btn._copying = true;
-        btn._origHTML = btn.innerHTML;
-        btn.textContent = '✓';
-        btn.classList.add('copied');
-
+        if (btn) {
+            if (btn._copying) return;
+            btn._copying = true;
+            btn._origHTML = btn.innerHTML;
+            btn.textContent = '\u2713';
+            btn.classList.add('copied');
+        }
+        
         function restoreBtn() {
             if (!btn) return;
-            btn.innerHTML = btn._origHTML || '🔗';
+            btn.innerHTML = btn._origHTML || '\ud83d\udd17';
             btn.classList.remove('copied');
             btn.style.transform = '';
             btn._copying = false;
         }
-
+        
         function copySuccess() {
-            window.showToast('照片链接已复制');
+            window.showToast('\u56fe\u7247\u94fe\u63a5\u5df2\u590d\u5236');
             setTimeout(restoreBtn, 1500);
         }
-
+        
         function copyFail() {
-            window.showToast('复制失败，请手动复制');
+            window.showToast('\u590d\u5236\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
             setTimeout(restoreBtn, 1500);
         }
-
+        
         try {
-            if (document.execCommand && document.execCommand('copy')) {
-                var ta = document.createElement('textarea');
-                ta.value = photo.imageUrl;
-                document.body.appendChild(ta);
-                ta.select();
-                var success = document.execCommand('copy');
-                document.body.removeChild(ta);
-                if (success) {
-                    copySuccess();
-                    return;
-                }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(photo.imageUrl).then(copySuccess).catch(copyFail);
+                return;
             }
         } catch (e) {}
-
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-            navigator.clipboard.writeText(photo.imageUrl).then(copySuccess).catch(copyFail);
-            return;
-        }
-
-        var ta2 = document.createElement('textarea');
-        ta2.value = photo.imageUrl;
-        document.body.appendChild(ta2);
-        ta2.select();
-        document.body.removeChild(ta2);
+        
+        try {
+            var ta = document.createElement('textarea');
+            ta.value = photo.imageUrl;
+            document.body.appendChild(ta);
+            ta.select();
+            var success = document.execCommand('copy');
+            document.body.removeChild(ta);
+            if (success) { copySuccess(); return; }
+        } catch (e) {}
+        
         copyFail();
     };
 
@@ -1221,51 +1221,6 @@
             ppDoDownloadPhoto();
         } catch (e) {
             console.error('Error in confirm download:', e);
-        }
-    };
-
-    window.shareCurrentPhoto = function() {
-        var photo = photoPreviewCurrent;
-        if (!photo || !photo.imageUrl) {
-            window.showToast('\u6682\u65e0\u53ef\u5206\u4eab\u7684\u56fe\u7247');
-            return;
-        }
-        
-        if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
-            try {
-                navigator.vibrate(10);
-            } catch (e) {}
-        }
-        
-        if ('share' in navigator) {
-            try {
-                navigator.share({
-                    title: '\u56fe\u7247\u5206\u4eab',
-                    text: '\u6765\u81ea\u7167\u7247\u5899\u7684\u56fe\u7247',
-                    url: photo.imageUrl
-                }).catch(function(e) {
-                    console.log('Share cancelled:', e);
-                });
-                return;
-            } catch (e) {
-                console.log('Share not available:', e);
-            }
-        }
-        
-        try {
-            var textarea = document.createElement('textarea');
-            textarea.value = photo.imageUrl;
-            document.body.appendChild(textarea);
-            textarea.select();
-            var success = document.execCommand('copy');
-            document.body.removeChild(textarea);
-            if (success) {
-                window.showToast('\u94fe\u63a5\u5df2\u590d\u5236');
-            } else {
-                window.showToast('\u590d\u5236\u5931\u8d25');
-            }
-        } catch (e) {
-            window.showToast('\u94fe\u63a5: ' + photo.imageUrl);
         }
     };
 
