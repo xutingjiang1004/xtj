@@ -538,8 +538,17 @@ if (jsVocabStart >= 0 && jsVocabEnd > jsVocabStart) {
 
             window.closePhotoInfo = function() {
                 var modal = document.getElementById('ppInfoModal');
-                modal.classList.remove('active');
-                setTimeout(function() { modal.style.display = 'none'; }, 220);
+                if (!modal) return;
+                if (modal.classList.contains('active')) {
+                    modal.classList.add('closing');
+                    modal.classList.remove('active');
+                    setTimeout(function() { 
+                        modal.classList.remove('closing');
+                        modal.style.display = 'none'; 
+                    }, 220);
+                } else {
+                    modal.style.display = 'none';
+                }
             };
 
             window.shareCurrentPhoto = function() {
@@ -554,14 +563,27 @@ if (jsVocabStart >= 0 && jsVocabEnd > jsVocabStart) {
             };
 
             var startX = 0, startY = 0, wasMoved = false;
+            var lastTouchEndTime = 0;
             
             document.getElementById('photoPreviewOverlay').addEventListener('click', function(e) {
                 var overlay = document.getElementById('photoPreviewOverlay');
                 if (!overlay.classList.contains('active')) return;
                 
+                var now = Date.now();
+                if (now - lastTouchEndTime < 300) {
+                    return;
+                }
+                
                 var target = e.target;
-                if (target.classList.contains('photo-preview-overlay')) {
-                    closePhotoPreview();
+                var isClickableElement = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-delete-btn, .pp-info-modal-content');
+                
+                if (!isClickableElement) {
+                    var infoModal = document.getElementById('ppInfoModal');
+                    if (infoModal && infoModal.classList.contains('active')) {
+                        window.closePhotoInfo();
+                    } else {
+                        closePhotoPreview();
+                    }
                 }
             });
             
@@ -577,7 +599,7 @@ if (jsVocabStart >= 0 && jsVocabEnd > jsVocabStart) {
                 if (!overlay || !overlay.classList.contains('active')) return;
                 
                 var target = e.target;
-                if (target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-info-modal')) {
+                if (target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-delete-btn, .pp-info-modal-content')) {
                     return;
                 }
                 
@@ -591,25 +613,40 @@ if (jsVocabStart >= 0 && jsVocabEnd > jsVocabStart) {
                 var overlay = document.getElementById('photoPreviewOverlay');
                 if (!overlay || !overlay.classList.contains('active')) return;
                 
+                var target = e.target;
+                if (target.closest('.pp-info-modal-content')) {
+                    return;
+                }
+                
                 var touch = e.touches[0];
                 var dx = touch.clientX - startX;
+                var dy = touch.clientY - startY;
                 
-                if (Math.abs(dx) > 5) wasMoved = true;
+                if (Math.abs(dx) > 5 || Math.abs(dy) > 5) wasMoved = true;
                 
-                var track = document.getElementById('ppSlideTrack');
-                if (!track) return;
-                
-                var resistance = 1;
-                if (ppPhotoIdx === 0 && dx > 0) resistance = 2;
-                if (ppPhotoIdx === ppSortedPhotos.length - 1 && dx < 0) resistance = 2;
-                
-                track.style.transition = 'none';
-                track.style.transform = 'translate3d(' + (-ppVw + dx / resistance) + 'px, 0, 0)';
+                if (Math.abs(dx) > 5) {
+                    var track = document.getElementById('ppSlideTrack');
+                    if (!track) return;
+                    
+                    var resistance = 1;
+                    if (ppPhotoIdx === 0 && dx > 0) resistance = 2;
+                    if (ppPhotoIdx === ppSortedPhotos.length - 1 && dx < 0) resistance = 2;
+                    
+                    track.style.transition = 'none';
+                    track.style.transform = 'translate3d(' + (-ppVw + dx / resistance) + 'px, 0, 0)';
+                }
             }, { passive: true });
 
             document.addEventListener('touchend', function(e) {
                 var overlay = document.getElementById('photoPreviewOverlay');
                 if (!overlay || !overlay.classList.contains('active')) return;
+                
+                lastTouchEndTime = Date.now();
+                
+                var target = e.target;
+                if (target.closest('.pp-info-modal-content')) {
+                    return;
+                }
                 
                 if (wasMoved) {
                     var track = document.getElementById('ppSlideTrack');
@@ -626,12 +663,13 @@ if (jsVocabStart >= 0 && jsVocabEnd > jsVocabStart) {
                             track.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
                         }
                     } else {
+                        var track = document.getElementById('ppSlideTrack');
                         track.style.transition = 'transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
                         track.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
                     }
                 } else {
-                    var modal = document.getElementById('ppInfoModal');
-                    if (modal.style.display === 'flex') {
+                    var infoModal = document.getElementById('ppInfoModal');
+                    if (infoModal && infoModal.classList.contains('active')) {
                         window.closePhotoInfo();
                     } else {
                         closePhotoPreview();
