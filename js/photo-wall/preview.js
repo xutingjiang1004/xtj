@@ -635,14 +635,14 @@
 
                 // FLIP: Play
                 if (originRect && curImg.getBoundingClientRect().width > 0) {
-                    overlay.style.transition = 'opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
-                    curImg.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.55s cubic-bezier(0.16, 1, 0.3, 1)';
+                    overlay.style.transition = 'opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1)';
+                    curImg.style.transition = 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
                     curImg.style.transform = 'translate(0, 0) scale(1)';
                     curImg.style.borderRadius = '0px';
-                    setTimeout(finishOpen, 580);
+                    setTimeout(finishOpen, 220);
                 } else {
                     curImg.style.opacity = '1';
-                    setTimeout(finishOpen, 380);
+                    setTimeout(finishOpen, 150);
                 }
             } else {
                 // Wait for load
@@ -708,8 +708,8 @@
             curImg.style.borderRadius = '0px';
             void curImg.offsetHeight;
 
-            overlay.style.transition = 'opacity 0.4s cubic-bezier(0.25, 1, 0.4, 1)';
-            curImg.style.transition = 'transform 0.45s cubic-bezier(0.25, 1, 0.4, 1), border-radius 0.45s cubic-bezier(0.25, 1, 0.4, 1)';
+            overlay.style.transition = 'opacity 0.15s cubic-bezier(0.25, 1, 0.4, 1)';
+            curImg.style.transition = 'transform 0.2s cubic-bezier(0.25, 1, 0.4, 1), border-radius 0.2s cubic-bezier(0.25, 1, 0.4, 1)';
             curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
             curImg.style.borderRadius = (14 / scale) + 'px';
             overlay.style.opacity = '0';
@@ -731,9 +731,9 @@
                 overlay.classList.remove('active');
 
                 document.body.classList.remove('photo-previewing');
-            }, 480);
+            }, 220);
         } else {
-            overlay.style.transition = 'opacity 0.35s cubic-bezier(0.55, 0, 1, 0.45)';
+            overlay.style.transition = 'opacity 0.15s cubic-bezier(0.55, 0, 1, 0.45)';
             overlay.style.opacity = '0';
 
             setTimeout(function() {
@@ -754,7 +754,7 @@
                 }
 
                 document.body.classList.remove('photo-previewing');
-            }, 380);
+            }, 150);
         }
     }
 
