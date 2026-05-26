@@ -257,11 +257,12 @@
                 e.target.value = '';
                 return;
             }
+            
+            // 使用最简单可靠的文件名 - 纯随机字符串 + 时间戳
             var ts = Date.now();
+            var randomStr = Math.random().toString(36).substring(2, 10);
             var ext = file.type === 'image/png' ? '.png' : '.jpg';
-            // 只保留字母、数字、下划线和点，避免中文替换为 _，防止Supabase不接受的字符
-            var safeName = file.name.replace(/[^\w\.]/g, '_');
-            var baseName = ts + '_' + safeName.replace(/\.[^.]+$/, '') + ext;
+            var baseName = ts + '_' + randomStr + ext;
 
             var origPath = 'photos/' + baseName;
             var needCompress = file.size > 1 * 1024 * 1024;
@@ -287,16 +288,21 @@
             }, 200);
 
             // Step 1: 上传主图
+            console.log('准备上传文件:', origPath, '大小:', compressed.size, '类型:', compressed.type || file.type);
+            
             var uploadResult = await sb.storage.from('uploads').upload(origPath, compressed, {
-                contentType: compressed.type || file.type,
+                contentType: file.type, // 直接使用原文件的 MIME 类型
                 cacheControl: '31536000',
                 upsert: false
             });
 
             clearInterval(progressTimer);
             
+            console.log('上传结果:', uploadResult);
+            
             if (uploadResult.error) {
-                throw new Error('\u4e0a\u4f20\u5931\u8d25: ' + (uploadResult.error.message || '\u672a\u77e5\u9519\u8bef'));
+                console.error('上传详细错误:', uploadResult.error);
+                throw new Error('\u4e0a\u4f20\u5931\u8d25: ' + (uploadResult.error.message || uploadResult.error));
             }
 
             updateUploadProgress(80, '\u6b63\u5728\u5904\u7406\u7f29\u7565\u56fe...');
