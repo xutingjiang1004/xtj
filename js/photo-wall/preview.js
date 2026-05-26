@@ -420,13 +420,15 @@
     }
 
     function openPhotoPreview(index, keepList) {
-        if (photoPreviewActive) return;
+        if (photoPreviewActive) {
+            return;
+        }
 
         if (!keepList) {
             ppSortedPhotos = window.photoWallData ? window.photoWallData.slice() : [];
         }
         if (!ppSortedPhotos || ppSortedPhotos.length === 0) {
-            window.showToast('暂无照片');
+            window.showToast('\u6682\u65e0\u7167\u7247');
             return;
         }
 
@@ -442,9 +444,9 @@
                 '<div class="pp-ambient-bg" id="ppAmbientBg"></div>' +
                 '<div class="pp-dots" id="ppDots"></div>' +
                 '<button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>' +
-                '<button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张">' +
+                '<button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="\u4e0a\u4e00\u5f20">' +
                 '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
-                '<button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张">' +
+                '<button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="\u4e0b\u4e00\u5f20">' +
                 '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
                 '<div class="photo-preview-image-wrapper" id="ppImageWrapper">' +
                 '<div id="ppSlideTrack" class="pp-slide-track">' +
@@ -453,10 +455,10 @@
                 '<div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div>' +
                 '</div>' +
                 '</div>' +
-                '<button class="pp-info-btn" id="ppInfoBtn" title="照片详情" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>' +
-                '<button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">&#x1F517;</button>' +
-                '<button class="pp-rotate-btn" id="ppRotateBtn" title="旋转90°" onclick="window.ppRotatePhoto()">&#x27F3;</button>' +
-                '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">🗑️</button>' +
+                '<button class="pp-info-btn" id="ppInfoBtn" title="\u7167\u7247\u8be6\u60c5" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>' +
+                '<button class="pp-share-btn" id="ppShareBtn" title="\u5206\u4eab" onclick="window.shareCurrentPhoto()">\ud83d\udd17</button>' +
+                '<button class="pp-rotate-btn" id="ppRotateBtn" title="\u65cb\u8f6c90\u00b0" onclick="window.ppRotatePhoto()">\u27f3</button>' +
+                '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">\ud83d\uddd1\ufe0f</button>' +
                 '<div class="photo-preview-info">' +
                 '<span class="pp-user" id="photoPreviewUser"></span>' +
                 '<span class="pp-time" id="photoPreviewTime"></span>' +
@@ -465,11 +467,14 @@
             document.body.appendChild(container);
             overlay = container;
         }
+
         if (!ppEventsBound) {
             bindPreviewEvents(overlay);
             ppEventsBound = true;
         }
+
         ppResetZoom();
+
         photoPreviewActive = true;
         photoPreviewCurrent = ppSortedPhotos[index] || null;
         ppPhotoIdx = index;
@@ -485,6 +490,7 @@
             ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
         }
 
+        // FLIP: Step 1 - record origin
         var originRect = null;
         var originImg = null;
         var grid = document.getElementById('photoGrid');
@@ -493,12 +499,10 @@
             if (items[index]) {
                 var thumbImg = items[index].querySelector('img');
                 if (thumbImg && thumbImg.complete) {
-                    originRect = thumbImg.getBoundingClientRect();
-                    originImg = thumbImg;
-                    var area = originRect.width * originRect.height;
-                    if (area < 1) {
-                        originRect = null;
-                        originImg = null;
+                    var r = thumbImg.getBoundingClientRect();
+                    if (r && r.width > 0 && r.height > 0) {
+                        originRect = r;
+                        originImg = thumbImg;
                     }
                 }
             }
@@ -512,13 +516,10 @@
             originImg.style.opacity = '0';
         }
 
+        // Show overlay
         overlay.classList.add('active');
         document.body.classList.add('photo-previewing');
-
-        overlay.style.transition = 'none';
         overlay.style.opacity = '1';
-        overlay.style.transform = '';
-        overlay.style.transformOrigin = '';
 
         ppInitTrack();
         if (ppTrack) {
@@ -528,100 +529,83 @@
 
         var curImg = document.getElementById('photoPreviewImage');
 
-        function executeFlipAnimation() {
-            void overlay.offsetHeight;
-
-            if (curImg && photo && photo.imageUrl) {
-                curImg.src = photo.imageUrl;
-                curImg.style.transition = 'none';
-                curImg.style.opacity = '1';
+        function finishOpen() {
+            if (curImg) {
+                curImg.style.transition = '';
+                curImg.style.transform = '';
+                curImg.style.transformOrigin = '';
+                curImg.style.borderRadius = '';
             }
-
-            void curImg?.offsetHeight;
-
-            var finalRect = null;
-            var dx = 0, dy = 0, scale = 0.05;
-
-            if (originRect && curImg) {
-                finalRect = curImg.getBoundingClientRect();
-                if (finalRect && finalRect.width > 0 && finalRect.height > 0) {
-                    dx = originRect.left - finalRect.left;
-                    dy = originRect.top - finalRect.top;
-                    var scaleX = originRect.width / finalRect.width;
-                    var scaleY = originRect.height / finalRect.height;
-                    scale = Math.min(scaleX, scaleY);
-
-                    curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
-                    curImg.style.transformOrigin = 'top left';
-                    curImg.style.borderRadius = (14 / scale) + 'px';
-                }
-            }
-
-            void curImg?.offsetHeight;
-
-            function finishOpen() {
-                if (curImg) {
-                    curImg.style.transition = '';
-                    curImg.style.transform = '';
-                    curImg.style.transformOrigin = '';
-                    curImg.style.borderRadius = '';
-                }
-                overlay.style.transition = '';
-                ppSetTrackImages(index);
-                ppUpdateInfo(index);
-                ppUpdateDots(index);
-
-                if (originImg) {
-                    originImg.style.transition = '';
-                    originImg.style.opacity = '';
-                }
-            }
-
-            if (originRect && finalRect && finalRect.width > 0) {
-                overlay.style.transition = 'opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
-                curImg.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.55s cubic-bezier(0.16, 1, 0.3, 1)';
-                curImg.style.transform = 'translate(0, 0) scale(1)';
-                curImg.style.borderRadius = '0px';
-
-                setTimeout(finishOpen, 580);
-            } else {
-                overlay.style.transition = 'opacity 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
-                overlay.style.opacity = '0';
-                void overlay.offsetHeight;
-                overlay.style.opacity = '1';
-
-                if (curImg) {
-                    curImg.style.transition = '';
-                    curImg.style.transform = '';
-                    curImg.style.transformOrigin = '';
-                    curImg.style.borderRadius = '';
-                }
-
-                setTimeout(finishOpen, 380);
+            overlay.style.transition = '';
+            ppSetTrackImages(index);
+            ppUpdateInfo(index);
+            ppUpdateDots(index);
+            if (originImg) {
+                originImg.style.transition = '';
+                originImg.style.opacity = '';
             }
         }
 
         if (curImg && photo && photo.imageUrl) {
-            var cachedImg = ppImageCache[photo.imageUrl];
-            if (cachedImg || curImg.src === photo.imageUrl && curImg.complete) {
-                executeFlipAnimation();
+            var preloaded = ppImageCache[photo.imageUrl];
+
+            curImg.style.transition = 'none';
+            curImg.style.opacity = '0';
+            curImg.src = photo.imageUrl;
+
+            if (preloaded || curImg.complete) {
+                // Image already ready
+                void curImg.offsetHeight;
+
+                if (originRect) {
+                    // FLIP: Invert
+                    var fr = curImg.getBoundingClientRect();
+                    if (fr && fr.width > 0) {
+                        var dx = originRect.left - fr.left;
+                        var dy = originRect.top - fr.top;
+                        var sx = originRect.width / fr.width;
+                        var sy = originRect.height / fr.height;
+                        var s = Math.min(sx, sy);
+
+                        curImg.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + s + ')';
+                        curImg.style.transformOrigin = 'top left';
+                        curImg.style.borderRadius = (14 / s) + 'px';
+                        curImg.style.opacity = '1';
+                    }
+                }
+
+                void curImg.offsetHeight;
+
+                // FLIP: Play
+                if (originRect && curImg.getBoundingClientRect().width > 0) {
+                    overlay.style.transition = 'opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
+                    curImg.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.55s cubic-bezier(0.16, 1, 0.3, 1)';
+                    curImg.style.transform = 'translate(0, 0) scale(1)';
+                    curImg.style.borderRadius = '0px';
+                    setTimeout(finishOpen, 580);
+                } else {
+                    curImg.style.opacity = '1';
+                    setTimeout(finishOpen, 380);
+                }
             } else {
-                var loadHandler = function() {
-                    curImg.removeEventListener('load', loadHandler);
-                    curImg.removeEventListener('error', loadHandler);
-                    executeFlipAnimation();
-                };
-                curImg.addEventListener('load', loadHandler);
-                curImg.addEventListener('error', loadHandler);
-
-                curImg.style.transition = 'none';
-                curImg.style.opacity = '0';
-                curImg.src = photo.imageUrl;
-
-                setTimeout(loadHandler, 2000);
+                // Wait for load
+                curImg.addEventListener('load', function onLoad() {
+                    curImg.removeEventListener('load', onLoad);
+                    curImg.removeEventListener('error', onErr);
+                    void curImg.offsetHeight;
+                    curImg.style.opacity = '1';
+                    finishOpen();
+                });
+                curImg.addEventListener('error', function onErr() {
+                    curImg.removeEventListener('load', onLoad);
+                    curImg.removeEventListener('error', onErr);
+                    curImg.style.opacity = '1';
+                    finishOpen();
+                });
+                setTimeout(finishOpen, 8000);
             }
         } else {
-            executeFlipAnimation();
+            finishOpen();
         }
     }
 
