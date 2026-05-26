@@ -32,6 +32,9 @@
         scale: 1,
         opacity: 1
     };
+    var ppLongPressTimer = null;
+    var ppDownloadActive = false;
+    var ppDownloadProgress = 0;
 
     function ppInitTrack() {
         ppVw = window.innerWidth;
@@ -463,6 +466,15 @@
                 '<span class="pp-user" id="photoPreviewUser"></span>' +
                 '<span class="pp-time" id="photoPreviewTime"></span>' +
                 '<span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span>' +
+                '</div>' +
+                '<div class="pp-download-overlay" id="ppDownloadOverlay" style="display:none;">' +
+                '<div class="pp-download-content">' +
+                '<div class="pp-download-spinner"></div>' +
+                '<div class="pp-download-text" id="ppDownloadText">\u6b63\u5728\u4e0b\u8f7d...</div>' +
+                '<div class="pp-download-progress">' +
+                '<div class="pp-download-progress-bar" id="ppDownloadProgressBar"></div>' +
+                '</div>' +
+                '</div>' +
                 '</div>';
             document.body.appendChild(container);
             overlay = container;
@@ -1067,6 +1079,130 @@
         });
     };
 
+    function ppShowDownloadOverlay() {
+        var dlOverlay = document.getElementById('ppDownloadOverlay');
+        if (dlOverlay) {
+            dlOverlay.style.display = 'flex';
+        }
+    }
+
+    function ppHideDownloadOverlay() {
+        var dlOverlay = document.getElementById('ppDownloadOverlay');
+        if (dlOverlay) {
+            dlOverlay.style.display = 'none';
+        }
+        var progressBar = document.getElementById('ppDownloadProgressBar');
+        if (progressBar) {
+            progressBar.style.width = '0%';
+        }
+    }
+
+    function ppUpdateDownloadProgress(percent, text) {
+        var progressBar = document.getElementById('ppDownloadProgressBar');
+        if (progressBar) {
+            progressBar.style.width = percent + '%';
+        }
+        var dlText = document.getElementById('ppDownloadText');
+        if (dlText && text) {
+            dlText.textContent = text;
+        }
+    }
+
+    async function ppDownloadCurrentPhoto() {
+        if (ppDownloadActive) return;
+        
+        var photo = photoPreviewCurrent;
+        if (!photo || !photo.imageUrl) {
+            window.showToast('\u6ca1\u6709\u53ef\u4e0b\u8f7d\u7684\u7167\u7247');
+            return;
+        }
+
+        try {
+            ppDownloadActive = true;
+            ppShowDownloadOverlay();
+            ppUpdateDownloadProgress(0, '\u6b63\u5728\u4e0b\u8f7d...');
+
+            if ('vibrate' in navigator) {
+                try {
+                    navigator.vibrate(10);
+                } catch (e) {}
+            }
+
+            var response = await fetch(photo.imageUrl);
+            if (!response.ok) {
+                throw new Error('HTTP error ' + response.status);
+            }
+
+            var total = response.headers.get('content-length');
+            var reader = response.body.getReader();
+            var received = 0;
+            var chunks = [];
+
+            while (true) {
+                var result = await reader.read();
+                var done = result.done;
+                var value = result.value;
+
+                if (value) {
+                    chunks.push(value);
+                    received += value.length;
+                    if (total) {
+                        var percent = Math.round((received / total) * 100);
+                        ppUpdateDownloadProgress(percent);
+                    }
+                }
+
+                if (done) {
+                    break;
+                }
+            }
+
+            var blob = new Blob(chunks);
+            var url = window.URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            
+            var filename = 'photo_' + Date.now() + '.jpg';
+            if (photo.imageUrl) {
+                var urlParts = photo.imageUrl.split('/');
+                var lastPart = urlParts[urlParts.length - 1].split('?')[0];
+                if (lastPart && lastPart.length > 0) {
+                    filename = lastPart;
+                }
+            }
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+
+            ppUpdateDownloadProgress(100, '\u4e0b\u8f7d\u6210\u529f!');
+            
+            setTimeout(function() {
+                ppHideDownloadOverlay();
+                ppDownloadActive = false;
+                window.showToast('\u4e0b\u8f7d\u6210\u529f');
+            }, 1000);
+
+        } catch (err) {
+            console.error('Download error:', err);
+            try {
+                var fallbackA = document.createElement('a');
+                fallbackA.href = photo.imageUrl;
+                fallbackA.target = '_blank';
+                fallbackA.rel = 'noopener noreferrer';
+                document.body.appendChild(fallbackA);
+                fallbackA.click();
+                document.body.removeChild(fallbackA);
+                window.showToast('\u5df2\u5728\u65b0\u6807\u7b7e\u9875\u6253\u5f00');
+            } catch (e2) {
+                window.showToast('\u4e0b\u8f7d\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
+            }
+            ppHideDownloadOverlay();
+            ppDownloadActive = false;
+        }
+    }
+
     function bindPreviewEvents(overlay) {
         var wrapper = overlay.querySelector('.photo-preview-image-wrapper');
 
@@ -1081,6 +1217,11 @@
             if (ppCloseTimer) {
                 clearTimeout(ppCloseTimer);
                 ppCloseTimer = null;
+            }
+            
+            if (ppLongPressTimer) {
+                clearTimeout(ppLongPressTimer);
+                ppLongPressTimer = null;
             }
 
             if (isButton) {
@@ -1105,6 +1246,12 @@
             var pointerId = e.pointerId;
             var point = { x: e.clientX, y: e.clientY };
             ppPointers.set(pointerId, point);
+
+            if (ppPointers.size === 1) {
+                ppLongPressTimer = setTimeout(function() {
+                    ppDownloadCurrentPhoto();
+                }, 500);
+            }
 
             if (ppPointers.size === 2) {
                 var pts = Array.from(ppPointers.values());
@@ -1150,6 +1297,11 @@
             var dx = e.clientX - startX;
             var dy = e.clientY - startY;
             ppMovedDistance = Math.abs(dx) + Math.abs(dy);
+            
+            if (ppMovedDistance > 15 && ppLongPressTimer) {
+                clearTimeout(ppLongPressTimer);
+                ppLongPressTimer = null;
+            }
 
             var pointerId = e.pointerId;
             ppPointers.set(pointerId, { x: e.clientX, y: e.clientY });
@@ -1229,6 +1381,11 @@
         });
 
         overlay.addEventListener('pointerup', function(e) {
+            if (ppLongPressTimer) {
+                clearTimeout(ppLongPressTimer);
+                ppLongPressTimer = null;
+            }
+
             var target = e.target;
             var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
             var isModalContent = target.closest('.pp-info-modal-content');
@@ -1380,6 +1537,11 @@
         });
 
         overlay.addEventListener('pointercancel', function(e) {
+            if (ppLongPressTimer) {
+                clearTimeout(ppLongPressTimer);
+                ppLongPressTimer = null;
+            }
+            
             ppPointers.clear();
             ppPinchStart = null;
             ppPinchPre = null;
