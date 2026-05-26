@@ -4358,17 +4358,37 @@
         }
         /* 信息模块视觉优化 */
         .pp-info-modal {
-            background: rgba(0, 0, 0, 0.6) !important;
+            background: transparent !important;
             backdrop-filter: none !important;
         }
         .pp-info-modal::before {
             display: none !important;
         }
         .pp-info-modal-content {
-            background: rgba(255, 255, 255, 0.12) !important;
-            backdrop-filter: blur(24px) saturate(180%) !important;
-            -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
-            border: 1px solid rgba(255, 255, 255, 0.2) !important;
+            background: rgba(255, 255, 255, 0.1) !important;
+            backdrop-filter: blur(20px) saturate(180%) !important;
+            -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+            border: 1px solid rgba(255, 255, 255, 0.18) !important;
+        }
+        /* 底部按钮UI优化 */
+        .pp-info-btn,
+        .pp-share-btn,
+        .pp-rotate-btn,
+        .pp-delete-btn {
+            background: rgba(0, 0, 0, 0.35) !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            box-shadow: none !important;
+            border: 1px solid rgba(255, 255, 255, 0.18) !important;
+            font-weight: normal !important;
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+        .pp-info-btn:hover,
+        .pp-share-btn:hover,
+        .pp-rotate-btn:hover,
+        .pp-delete-btn:hover {
+            background: rgba(0, 0, 0, 0.5) !important;
+            transform: scale(1.08);
         }
         }
         /* 预览分享按钮 */
