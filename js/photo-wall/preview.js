@@ -975,7 +975,7 @@
 
         btn._copying = true;
         btn._origHTML = btn.innerHTML;
-        btn.textContent = '�?;
+        btn.textContent = '✓';
         btn.classList.add('copied');
 
         function restoreBtn() {
@@ -987,7 +987,7 @@
         }
 
         function copySuccess() {
-            window.showToast('照片链接已复�?);
+            window.showToast('照片链接已复制');
             setTimeout(restoreBtn, 1500);
         }
 
@@ -1046,7 +1046,7 @@
             };
         }
 
-        window.showConfirm('删除照片', '确定删除这张照片吗？', '�?, function() {
+        window.showConfirm('删除照片', '确定删除这张照片吗？', '是', function() {
             var currentPhotos = ppSortedPhotos;
             if (ppPhotoIdx < 0 || ppPhotoIdx >= currentPhotos.length) return;
             var photo = currentPhotos[ppPhotoIdx];
@@ -1070,7 +1070,7 @@
             }
             closePhotoPreview();
             window.renderPhotoWall();
-            window.showToast('已删�?);
+            window.showToast('已删除');
         });
     };
 
