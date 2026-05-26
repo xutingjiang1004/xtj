@@ -371,14 +371,16 @@
         dots.innerHTML = html;
     }
 
-    function openPhotoPreview(index) {
+    function openPhotoPreview(index, keepList) {
         ppPhotoIdx = index;
-        var sortKey = window.pwSortKey || 'date_desc';
-        ppSortedPhotos = window.photoWallData.slice();
-        if (typeof window.pwApplySort === 'function') {
-            ppSortedPhotos = window.pwApplySort(ppSortedPhotos, sortKey);
-        } else {
-            ppSortedPhotos.sort(function(a, b) { return b.timestamp - a.timestamp; });
+        if (!keepList) {
+            var sortKey = window.pwSortKey || 'date_desc';
+            ppSortedPhotos = window.photoWallData.slice();
+            if (typeof window.pwApplySort === 'function') {
+                ppSortedPhotos = window.pwApplySort(ppSortedPhotos, sortKey);
+            } else {
+                ppSortedPhotos.sort(function(a, b) { return b.timestamp - a.timestamp; });
+            }
         }
         var overlay = document.getElementById('photoPreviewOverlay');
         if (!overlay) {
@@ -416,6 +418,13 @@
         ppResetZoom();
         photoPreviewActive = true;
         photoPreviewCurrent = ppSortedPhotos[index] || null;
+        ppInitTrack();
+        if (ppTrack) {
+            ppTrack.style.transition = 'none';
+            ppTrack.style.webkitTransition = 'none';
+            ppTrack.style.transform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+            ppTrack.style.webkitTransform = 'translate3d(' + (-ppVw) + 'px, 0, 0)';
+        }
         overlay.classList.add('active');
         document.body.classList.add('pp-body-noscroll');
         document.getElementById('photoPreviewUser').textContent = photoPreviewCurrent ? (photoPreviewCurrent.username || '未知用户') : '';

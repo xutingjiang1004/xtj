@@ -329,7 +329,7 @@
             if (typeof window.photoWallData !== 'undefined' && photoList && photoList.length > 0) {
                 ppSortedPhotos = photoList;
                 ppPhotoIdx = 0;
-                openPhotoPreview(0);
+                openPhotoPreview(0, true);
             }
         };
 
