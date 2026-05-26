@@ -219,36 +219,6 @@
         });
     }
 
-    function simpleCompress(blob, maxW, maxH, quality) {
-        return new Promise(function(resolve, reject) {
-            var img = new Image();
-            var url = URL.createObjectURL(blob);
-            img.onload = function() {
-                URL.revokeObjectURL(url);
-                var w = img.naturalWidth, h = img.naturalHeight;
-                if (w > maxW || h > maxH) {
-                    var ratio = Math.min(maxW / w, maxH / h);
-                    w = Math.round(w * ratio);
-                    h = Math.round(h * ratio);
-                }
-                var canvas = document.createElement('canvas');
-                canvas.width = w;
-                canvas.height = h;
-                var ctx = canvas.getContext('2d');
-                ctx.imageSmoothingEnabled = true;
-                ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(img, 0, 0, w, h);
-                var dataUrl = canvas.toDataURL('image/jpeg', quality);
-                resolve(dataUrl);
-            };
-            img.onerror = function() {
-                URL.revokeObjectURL(url);
-                reject(new Error('图片加载失败'));
-            };
-            img.src = url;
-        });
-    }
-
     window.triggerPhotoUpload = function() {
         if (!window.currentUser) {
             window.showToast('\u8bf7\u5148\u767b\u5f55');
@@ -301,42 +271,68 @@
             var compressed = await compressToTargetBlob(file, 1 * 1024 * 1024);
             var finalSize = compressed.size;
             
-            updateUploadProgress(30, '\u6b63\u5728\u521b\u5efa\u7f29\u7565\u56fe...');
-
-            var thumbPromise = simpleCompress(compressed, 1200, 1200, 0.85).then(function(thumbDataUrl) {
-                return fetch(thumbDataUrl).then(function(r) { return r.blob(); });
-            });
+            updateUploadProgress(30, '\u6b63\u5728\u5904\u7406\u56fe\u7247...');
             
             updateUploadProgress(40, '\u6b63\u5728\u4e0a\u4f20\u56fe\u7247...');
 
-            // 模拟上传进度（Supabase 原生上传不支持 onUploadProgress 回调）
+            // 分步上传：先传主图，再传缩略图
             var progressTimer = setInterval(function() {
                 var el = document.getElementById('uploadProgressBar');
                 if (!el) { clearInterval(progressTimer); return; }
                 var cur = parseInt(el.style.width) || 40;
-                if (cur < 78) {
+                if (cur < 75) {
                     updateUploadProgress(cur + 1, '\u6b63\u5728\u4e0a\u4f20\u56fe\u7247...');
                 }
             }, 200);
 
-            var [thumbBlob, uploadResult] = await Promise.all([
-                thumbPromise,
-                sb.storage.from('uploads').upload(origPath, compressed, {
-                    cacheControl: '31536000',
-                    upsert: false
-                })
-            ]);
+            // Step 1: 上传主图
+            var uploadResult = await sb.storage.from('uploads').upload(origPath, compressed, {
+                cacheControl: '31536000',
+                upsert: false
+            });
 
             clearInterval(progressTimer);
-            updateUploadProgress(80, '\u6b63\u5728\u4e0a\u4f20\u56fe\u7247...');
             
-            var uploadErr = uploadResult.error;
-            
-            if (uploadErr) {
-                throw new Error('\u4e0a\u4f20\u5931\u8d25: ' + (uploadErr.message || '\u672a\u77e5\u9519\u8bef'));
+            if (uploadResult.error) {
+                throw new Error('\u4e0a\u4f20\u5931\u8d25: ' + (uploadResult.error.message || '\u672a\u77e5\u9519\u8bef'));
             }
 
+            updateUploadProgress(80, '\u6b63\u5728\u5904\u7406\u7f29\u7565\u56fe...');
+
+            var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
+            
+            // Step 2: 创建缩略图（不依赖 fetch(dataUrl)，直接用 canvas.toBlob）
             updateUploadProgress(85, '\u6b63\u5728\u4e0a\u4f20\u7f29\u7565\u56fe...');
+
+            function createThumbBlob(imgBlob, maxW, maxH, quality) {
+                return new Promise(function(resolve) {
+                    var img = new Image();
+                    var url = URL.createObjectURL(imgBlob);
+                    img.onload = function() {
+                        URL.revokeObjectURL(url);
+                        var w = img.naturalWidth, h = img.naturalHeight;
+                        if (w > maxW || h > maxH) {
+                            var r = Math.min(maxW / w, maxH / h);
+                            w = Math.round(w * r);
+                            h = Math.round(h * r);
+                        }
+                        var c = document.createElement('canvas');
+                        c.width = w;
+                        c.height = h;
+                        var ctx = c.getContext('2d');
+                        ctx.imageSmoothingEnabled = true;
+                        ctx.imageSmoothingQuality = 'high';
+                        ctx.drawImage(img, 0, 0, w, h);
+                        c.toBlob(function(b) {
+                            resolve(b || imgBlob);
+                        }, 'image/jpeg', quality);
+                    };
+                    img.onerror = function() { URL.revokeObjectURL(url); resolve(imgBlob); };
+                    img.src = url;
+                });
+            }
+
+            var thumbBlob = await createThumbBlob(compressed, 1200, 1200, 0.85);
 
             var thumbPath = 'thumbs/' + baseName;
             var thumbResult = await sb.storage.from('uploads').upload(thumbPath, thumbBlob, {
@@ -345,9 +341,7 @@
             });
             var thumbErr = thumbResult.error;
 
-            var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
-            
-            updateUploadProgress(95, '\u6b63\u5728\u66f4\u65b0\u6570\u636e...');
+            updateUploadProgress(90, '\u6b63\u5728\u66f4\u65b0\u6570\u636e...');
             
             if (thumbErr) {
                 var contentJson = JSON.stringify({ type: 'photo_wall', fileSize: finalSize });
