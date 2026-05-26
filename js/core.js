@@ -103,27 +103,57 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 clearTimeout(overlay._closeTimer);
                 overlay._closeTimer = null;
             }
+            
+            // FLIP Animation: Step 1 - First (记录按钮位置)
+            var origin = window._confirmOrigin;
+            
+            // FLIP Animation: Step 2 - Last (设置最终状态)
             overlay.classList.remove('closing');
             overlay.classList.add('active');
             var okBtn = document.getElementById('ppConfirmOkBtn');
             okBtn.disabled = false;
             
-            var origin = window._confirmOrigin;
-            if (origin) {
-                var dialog = overlay.querySelector('.pp-confirm-dialog');
-                if (dialog) {
-                    var dx = origin.btnCx - origin.dialogCx;
-                    var dy = origin.btnCy - origin.dialogCy;
-                    overlay._ppDeleteOrigin = { dx: dx, dy: dy };
-                    dialog.style.transition = 'none';
-                    dialog.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(0.3)';
-                    dialog.style.opacity = '0';
-                    void dialog.offsetHeight;
-                    dialog.style.transition = 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
-                    dialog.style.transform = 'translate(0, 0) scale(1)';
-                    dialog.style.opacity = '1';
-                }
+            var dialog = overlay.querySelector('.pp-confirm-dialog');
+            if (dialog) {
+                dialog.style.transition = 'none';
+                dialog.style.transform = '';
+                dialog.style.opacity = '1';
             }
+            
+            void dialog?.offsetHeight;
+            
+            // FLIP Animation: Step 3 - Invert (计算差异并反向变换)
+            if (origin && dialog) {
+                var dialogRect = dialog.getBoundingClientRect();
+                var dx = origin.btnCx - dialogRect.left - dialogRect.width / 2;
+                var dy = origin.btnCy - dialogRect.top - dialogRect.height / 2;
+                
+                var btnSize = Math.sqrt(origin.btnWidth * origin.btnWidth + origin.btnHeight * origin.btnHeight) || 40;
+                var dialogSize = Math.sqrt(dialogRect.width * dialogRect.width + dialogRect.height * dialogRect.height);
+                var scale = btnSize / dialogSize * 0.6;
+                
+                dialog.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
+                dialog.style.transformOrigin = 'center center';
+                dialog.style.opacity = '0';
+                
+                overlay._ppDeleteOrigin = { 
+                    dx: dx, 
+                    dy: dy, 
+                    scale: scale,
+                    btnCx: origin.btnCx,
+                    btnCy: origin.btnCy
+                };
+            }
+            
+            void dialog?.offsetHeight;
+            
+            // FLIP Animation: Step 4 - Play (播放动画)
+            if (origin && dialog) {
+                dialog.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
+                dialog.style.transform = 'translate(0, 0) scale(1)';
+                dialog.style.opacity = '1';
+            }
+            
             window._confirmOrigin = null;
         }
         window.showConfirm = showConfirm;
@@ -141,17 +171,44 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var okBtn = document.getElementById('ppConfirmOkBtn');
                     if (okBtn) okBtn.disabled = true;
                     overlay.classList.add('closing');
+                    
+                    // FLIP Animation for Close: 获取当前弹窗位置
+                    var dialogRect = dialog.getBoundingClientRect();
+                    
+                    // 获取删除按钮当前位置
+                    var deleteBtn = document.getElementById('ppDeleteBtn');
+                    var btnRect = deleteBtn ? deleteBtn.getBoundingClientRect() : null;
+                    
+                    var targetDx = o.dx;
+                    var targetDy = o.dy;
+                    var targetScale = o.scale || 0.3;
+                    
+                    if (btnRect) {
+                        // 使用按钮当前位置计算目标变换
+                        targetDx = btnRect.left + btnRect.width / 2 - dialogRect.left - dialogRect.width / 2;
+                        targetDy = btnRect.top + btnRect.height / 2 - dialogRect.top - dialogRect.height / 2;
+                        
+                        var btnSize = Math.sqrt(btnRect.width * btnRect.width + btnRect.height * btnRect.height);
+                        var dialogSize = Math.sqrt(dialogRect.width * dialogRect.width + dialogRect.height * dialogRect.height);
+                        targetScale = btnSize / dialogSize * 0.6;
+                    }
+                    
+                    // Step 3 - Invert: 保持当前状态
                     dialog.style.transition = 'none';
                     dialog.style.transform = 'translate(0, 0) scale(1)';
                     dialog.style.opacity = '1';
                     void dialog.offsetHeight;
+                    
+                    // Step 4 - Play: 播放飞回动画
                     dialog.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
-                    dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(0.3)';
+                    dialog.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
                     dialog.style.opacity = '0';
+                    
                     overlay._closeTimer = setTimeout(function() {
                         dialog.style.transform = '';
                         dialog.style.opacity = '';
                         dialog.style.transition = '';
+                        dialog.style.transformOrigin = '';
                         overlay._ppDeleteOrigin = null;
                         overlay._closeTimer = null;
                         overlay.classList.remove('closing');
