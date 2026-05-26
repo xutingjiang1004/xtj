@@ -149,7 +149,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             
             // FLIP Animation: Step 4 - Play (播放动画)
             if (origin && dialog) {
-                dialog.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
+                dialog.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
                 dialog.style.transform = 'translate(0, 0) scale(1)';
                 dialog.style.opacity = '1';
             }
@@ -200,7 +200,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     void dialog.offsetHeight;
                     
                     // Step 4 - Play: 播放飞回动画
-                    dialog.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
+                    dialog.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in';
                     dialog.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
                     dialog.style.opacity = '0';
                     
@@ -217,7 +217,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (typeof cb === 'function') {
                             cb();
                         }
-                    }, 480);
+                    }, 320);
                     return;
                 }
             }
