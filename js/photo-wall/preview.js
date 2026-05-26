@@ -51,9 +51,9 @@
     function ppPreloadAdjacent(idx) {
         var photos = ppSortedPhotos;
         var preloadCount = 3;
-        for (var i = -preloadCount; i &lt;= preloadCount; i++) {
+        for (var i = -preloadCount; i <= preloadCount; i++) {
             var adjIdx = idx + i;
-            if (adjIdx &gt;= 0 &amp;&amp; adjIdx &lt; photos.length &amp;&amp; photos[adjIdx].imageUrl) {
+            if (adjIdx >= 0 && adjIdx < photos.length && photos[adjIdx].imageUrl) {
                 ppDecodeImage(photos[adjIdx].imageUrl);
             }
         }
@@ -64,12 +64,12 @@
         if (!ppTrack) return;
         var prevImg = document.getElementById('ppPrevImg');
         var nextImg = document.getElementById('ppNextImg');
-        if (idx &gt; 0 &amp;&amp; photos[idx - 1]) {
+        if (idx > 0 && photos[idx - 1]) {
             ppSwapImage(prevImg, photos[idx - 1].imageUrl);
         } else {
             ppSwapImage(prevImg, null);
         }
-        if (idx &lt; photos.length - 1 &amp;&amp; photos[idx + 1]) {
+        if (idx < photos.length - 1 && photos[idx + 1]) {
             ppSwapImage(nextImg, photos[idx + 1].imageUrl);
         } else {
             ppSwapImage(nextImg, null);
@@ -165,7 +165,7 @@
         imgEl.addEventListener('load', onLoad);
         imgEl.addEventListener('error', onError);
         imgEl.src = url;
-        if (imgEl.complete &amp;&amp; imgEl.naturalWidth &gt; 0) {
+        if (imgEl.complete && imgEl.naturalWidth > 0) {
             onLoad();
         }
     }
@@ -181,12 +181,12 @@
         if (photos[idx]) {
             ppSwapImage(curImg, photos[idx].imageUrl);
         }
-        if (idx &gt; 0 &amp;&amp; photos[idx - 1]) {
+        if (idx > 0 && photos[idx - 1]) {
             ppSwapImage(prevImg, photos[idx - 1].imageUrl);
         } else {
             ppSwapImage(prevImg, null);
         }
-        if (idx &lt; photos.length - 1 &amp;&amp; photos[idx + 1]) {
+        if (idx < photos.length - 1 && photos[idx + 1]) {
             ppSwapImage(nextImg, photos[idx + 1].imageUrl);
         } else {
             ppSwapImage(nextImg, null);
@@ -243,12 +243,12 @@
             var curImg = document.getElementById('photoPreviewImage');
             var nextImg = document.getElementById('ppNextImg');
 
-            if (idx &gt; 0 &amp;&amp; photos[idx - 1]) {
+            if (idx > 0 && photos[idx - 1]) {
                 ppSwapImage(prevImg, photos[idx - 1].imageUrl);
             } else {
                 ppSwapImage(prevImg, null);
             }
-            if (idx &lt; photos.length - 1 &amp;&amp; photos[idx + 1]) {
+            if (idx < photos.length - 1 && photos[idx + 1]) {
                 ppSwapImage(nextImg, photos[idx + 1].imageUrl);
             } else {
                 ppSwapImage(nextImg, null);
@@ -293,8 +293,8 @@
         var photos = ppSortedPhotos;
         var newIdx = ppPhotoIdx + direction;
 
-        if (newIdx &lt; 0 || newIdx &gt;= photos.length) {
-            if (Math.abs(ppTrackDrag) &gt; 2) ppSnapTo(0);
+        if (newIdx < 0 || newIdx >= photos.length) {
+            if (Math.abs(ppTrackDrag) > 2) ppSnapTo(0);
             return;
         }
 
@@ -355,14 +355,14 @@
     function ppUpdateDots(idx) {
         var photos = ppSortedPhotos;
         var dotsEl = document.getElementById('ppDots');
-        if (!dotsEl || photos.length &lt;= 1) {
+        if (!dotsEl || photos.length <= 1) {
             if (dotsEl) dotsEl.style.display = 'none';
             return;
         }
         dotsEl.style.display = 'flex';
         var dots = '';
-        for (var i = 0; i &lt; photos.length; i++) {
-            dots += '&lt;span class="pp-dot' + (i === idx ? ' active' : '') + '" data-index="' + i + '"&gt;&lt;/span&gt;';
+        for (var i = 0; i < photos.length; i++) {
+            dots += '<span class="pp-dot' + (i === idx ? ' active' : '') + '" data-index="' + i + '"></span>';
         }
         dotsEl.innerHTML = dots;
     }
@@ -383,7 +383,7 @@
         var curImg = document.getElementById('photoPreviewImage');
         if (!curImg) return;
 
-        if (ppZoom.scale &gt; 1.01) {
+        if (ppZoom.scale > 1.01) {
             ppResetZoom();
             curImg.classList.remove('zoomed');
         } else {
@@ -391,7 +391,7 @@
             var ratio = 2;
             ppZoom.scale = ratio;
 
-            if (typeof clientX !== 'undefined' &amp;&amp; typeof clientY !== 'undefined') {
+            if (typeof clientX !== 'undefined' && typeof clientY !== 'undefined') {
                 var nx = (clientX - rect.left) / rect.width;
                 var ny = (clientY - rect.top) / rect.height;
                 var cx = rect.left + rect.width * nx;
@@ -430,8 +430,8 @@
             return;
         }
 
-        if (index &lt; 0) index = 0;
-        if (index &gt;= ppSortedPhotos.length) index = ppSortedPhotos.length - 1;
+        if (index < 0) index = 0;
+        if (index >= ppSortedPhotos.length) index = ppSortedPhotos.length - 1;
 
         var overlay = document.getElementById('photoPreviewOverlay');
         if (!overlay) {
@@ -439,29 +439,29 @@
             container.className = 'photo-preview-overlay';
             container.id = 'photoPreviewOverlay';
             container.innerHTML =
-                '&lt;div class="pp-ambient-bg" id="ppAmbientBg"&gt;&lt;/div&gt;' +
-                '&lt;div class="pp-dots" id="ppDots"&gt;&lt;/div&gt;' +
-                '&lt;button class="photo-preview-close" onclick="closePhotoPreview()"&gt;&amp;times;&lt;/button&gt;' +
-                '&lt;button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张"&gt;' +
-                '&lt;svg width="20" height="20" viewBox="0 0 20 20" fill="none"&gt;&lt;path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/&gt;&lt;/svg&gt;&lt;/button&gt;' +
-                '&lt;button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张"&gt;' +
-                '&lt;svg width="20" height="20" viewBox="0 0 20 20" fill="none"&gt;&lt;path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/&gt;&lt;/svg&gt;&lt;/button&gt;' +
-                '&lt;div class="photo-preview-image-wrapper" id="ppImageWrapper"&gt;' +
-                '&lt;div id="ppSlideTrack" class="pp-slide-track"&gt;' +
-                '&lt;div class="pp-slide-slot pp-prev-slot"&gt;&lt;img id="ppPrevImg" class="pp-slide-img" alt="prev"/&gt;&lt;/div&gt;' +
-                '&lt;div class="pp-slide-slot pp-cur-slot"&gt;&lt;img id="photoPreviewImage" class="pp-slide-img" alt="current"/&gt;&lt;/div&gt;' +
-                '&lt;div class="pp-slide-slot pp-next-slot"&gt;&lt;img id="ppNextImg" class="pp-slide-img" alt="next"/&gt;&lt;/div&gt;' +
-                '&lt;/div&gt;' +
-                '&lt;/div&gt;' +
-                '&lt;button class="pp-info-btn" id="ppInfoBtn" title="照片详情" onclick="showPhotoInfo()"&gt;&lt;svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"&gt;&lt;circle cx="12" cy="12" r="10"/&gt;&lt;line x1="12" y1="16" x2="12" y2="12"/&gt;&lt;line x1="12" y1="8" x2="12.01" y2="8"/&gt;&lt;/svg&gt;&lt;/button&gt;' +
-                '&lt;button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()"&gt;&amp;#x1F517;&lt;/button&gt;' +
-                '&lt;button class="pp-rotate-btn" id="ppRotateBtn" title="旋转90°" onclick="window.ppRotatePhoto()"&gt;&amp;#x27F3;&lt;/button&gt;' +
-                '&lt;button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()"&gt;🗑️&lt;/button&gt;' +
-                '&lt;div class="photo-preview-info"&gt;' +
-                '&lt;span class="pp-user" id="photoPreviewUser"&gt;&lt;/span&gt;' +
-                '&lt;span class="pp-time" id="photoPreviewTime"&gt;&lt;/span&gt;' +
-                '&lt;span class="pp-views" id="photoPreviewViews"&gt;&lt;svg viewBox="0 0 24 24" aria-hidden="true"&gt;&lt;path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/&gt;&lt;circle cx="12" cy="12" r="2.6"/&gt;&lt;/svg&gt;&lt;span id="photoPreviewViewsCount"&gt;0&lt;/span&gt;&lt;/span&gt;' +
-                '&lt;/div&gt;';
+                '<div class="pp-ambient-bg" id="ppAmbientBg"></div>' +
+                '<div class="pp-dots" id="ppDots"></div>' +
+                '<button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>' +
+                '<button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张">' +
+                '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+                '<button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张">' +
+                '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
+                '<div class="photo-preview-image-wrapper" id="ppImageWrapper">' +
+                '<div id="ppSlideTrack" class="pp-slide-track">' +
+                '<div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"/></div>' +
+                '<div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"/></div>' +
+                '<div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div>' +
+                '</div>' +
+                '</div>' +
+                '<button class="pp-info-btn" id="ppInfoBtn" title="照片详情" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>' +
+                '<button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">&#x1F517;</button>' +
+                '<button class="pp-rotate-btn" id="ppRotateBtn" title="旋转90°" onclick="window.ppRotatePhoto()">&#x27F3;</button>' +
+                '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">🗑️</button>' +
+                '<div class="photo-preview-info">' +
+                '<span class="pp-user" id="photoPreviewUser"></span>' +
+                '<span class="pp-time" id="photoPreviewTime"></span>' +
+                '<span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"/><circle cx="12" cy="12" r="2.6"/></svg><span id="photoPreviewViewsCount">0</span></span>' +
+                '</div>';
             document.body.appendChild(container);
             overlay = container;
         }
@@ -475,7 +475,7 @@
         ppPhotoIdx = index;
 
         var photo = ppSortedPhotos[index];
-        if (photo &amp;&amp; photo.imageUrl) {
+        if (photo && photo.imageUrl) {
             ppDecodeImage(photo.imageUrl);
         }
 
@@ -492,11 +492,11 @@
             var items = grid.querySelectorAll('.photo-wall-item');
             if (items[index]) {
                 var thumbImg = items[index].querySelector('img');
-                if (thumbImg &amp;&amp; thumbImg.complete) {
+                if (thumbImg && thumbImg.complete) {
                     originRect = thumbImg.getBoundingClientRect();
                     originImg = thumbImg;
                     var area = originRect.width * originRect.height;
-                    if (area &lt; 1) {
+                    if (area < 1) {
                         originRect = null;
                         originImg = null;
                     }
@@ -531,7 +531,7 @@
         function executeFlipAnimation() {
             void overlay.offsetHeight;
 
-            if (curImg &amp;&amp; photo &amp;&amp; photo.imageUrl) {
+            if (curImg && photo && photo.imageUrl) {
                 curImg.src = photo.imageUrl;
                 curImg.style.transition = 'none';
                 curImg.style.opacity = '1';
@@ -542,9 +542,9 @@
             var finalRect = null;
             var dx = 0, dy = 0, scale = 0.05;
 
-            if (originRect &amp;&amp; curImg) {
+            if (originRect && curImg) {
                 finalRect = curImg.getBoundingClientRect();
-                if (finalRect &amp;&amp; finalRect.width &gt; 0 &amp;&amp; finalRect.height &gt; 0) {
+                if (finalRect && finalRect.width > 0 && finalRect.height > 0) {
                     dx = originRect.left - finalRect.left;
                     dy = originRect.top - finalRect.top;
                     var scaleX = originRect.width / finalRect.width;
@@ -577,7 +577,7 @@
                 }
             }
 
-            if (originRect &amp;&amp; finalRect &amp;&amp; finalRect.width &gt; 0) {
+            if (originRect && finalRect && finalRect.width > 0) {
                 overlay.style.transition = 'opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
                 curImg.style.transition = 'transform 0.55s cubic-bezier(0.16, 1, 0.3, 1), border-radius 0.55s cubic-bezier(0.16, 1, 0.3, 1)';
                 curImg.style.transform = 'translate(0, 0) scale(1)';
@@ -601,9 +601,9 @@
             }
         }
 
-        if (curImg &amp;&amp; photo &amp;&amp; photo.imageUrl) {
+        if (curImg && photo && photo.imageUrl) {
             var cachedImg = ppImageCache[photo.imageUrl];
-            if (cachedImg || curImg.src === photo.imageUrl &amp;&amp; curImg.complete) {
+            if (cachedImg || curImg.src === photo.imageUrl && curImg.complete) {
                 executeFlipAnimation();
             } else {
                 var loadHandler = function() {
@@ -647,9 +647,9 @@
             currentRect = curImg.getBoundingClientRect();
         }
 
-        var canFlip = originRect &amp;&amp; currentRect &amp;&amp; originImg &amp;&amp;
-            currentRect.width &gt; 0 &amp;&amp; currentRect.height &gt; 0 &amp;&amp;
-            originRect.width &gt; 0 &amp;&amp; originRect.height &gt; 0;
+        var canFlip = originRect && currentRect && originImg &&
+            currentRect.width > 0 && currentRect.height > 0 &&
+            originRect.width > 0 && originRect.height > 0;
 
         if (canFlip) {
             originImg.style.transition = 'none';
@@ -725,7 +725,7 @@
 
         var modal = document.getElementById('ppInfoModal');
 
-        if (modal &amp;&amp; (modal.style.display === 'flex' || modal.classList.contains('active') || modal.classList.contains('closing'))) {
+        if (modal && (modal.style.display === 'flex' || modal.classList.contains('active') || modal.classList.contains('closing'))) {
             window.closePhotoInfo();
             return;
         }
@@ -735,13 +735,13 @@
             modalEl.className = 'pp-info-modal';
             modalEl.id = 'ppInfoModal';
             modalEl.innerHTML =
-                '&lt;div class="pp-info-modal-content"&gt;' +
-                '&lt;div class="pp-info-modal-header"&gt;' +
-                '&lt;span class="pp-info-modal-title"&gt;照片详情&lt;/span&gt;' +
-                '&lt;button class="pp-info-modal-close" onclick="window.closePhotoInfo()"&gt;&amp;times;&lt;/button&gt;' +
-                '&lt;/div&gt;' +
-                '&lt;div class="pp-info-modal-body" id="ppInfoModalBody"&gt;&lt;/div&gt;' +
-                '&lt;/div&gt;';
+                '<div class="pp-info-modal-content">' +
+                '<div class="pp-info-modal-header">' +
+                '<span class="pp-info-modal-title">照片详情</span>' +
+                '<button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button>' +
+                '</div>' +
+                '<div class="pp-info-modal-body" id="ppInfoModalBody"></div>' +
+                '</div>';
 
             document.body.appendChild(modalEl);
             modal = modalEl;
@@ -759,9 +759,9 @@
         var sizeStr = '未知';
         if (photo.fileSize) {
             var size = photo.fileSize;
-            if (size &gt;= 1024 * 1024) {
+            if (size >= 1024 * 1024) {
                 sizeStr = (size / (1024 * 1024)).toFixed(2) + ' MB';
-            } else if (size &gt;= 1024) {
+            } else if (size >= 1024) {
                 sizeStr = (size / 1024).toFixed(1) + ' KB';
             } else {
                 sizeStr = size + ' B';
@@ -775,39 +775,39 @@
 
         var exifHtml = '';
         if (photo.exif) {
-            exifHtml = '&lt;div class="pp-info-divider"&gt;&lt;/div&gt;' +
-                '&lt;div class="pp-info-section"&gt;' +
-                '&lt;div class="pp-info-section-title"&gt;拍摄参数&lt;/div&gt;';
+            exifHtml = '<div class="pp-info-divider"></div>' +
+                '<div class="pp-info-section">' +
+                '<div class="pp-info-section-title">拍摄参数</div>';
             if (photo.exif.make || photo.exif.model) {
-                exifHtml += '&lt;div class="pp-info-row"&gt;&lt;span class="pp-info-label"&gt;设备&lt;/span&gt;&lt;span class="pp-info-value"&gt;' + (photo.exif.model || photo.exif.make || '未知') + '&lt;/span&gt;&lt;/div&gt;';
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">设备</span><span class="pp-info-value">' + (photo.exif.model || photo.exif.make || '未知') + '</span></div>';
             }
             if (photo.exif.fNumber) {
-                exifHtml += '&lt;div class="pp-info-row"&gt;&lt;span class="pp-info-label"&gt;光圈&lt;/span&gt;&lt;span class="pp-info-value"&gt;f/' + photo.exif.fNumber + '&lt;/span&gt;&lt;/div&gt;';
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">光圈</span><span class="pp-info-value">f/' + photo.exif.fNumber + '</span></div>';
             }
             if (photo.exif.exposureTime) {
-                exifHtml += '&lt;div class="pp-info-row"&gt;&lt;span class="pp-info-label"&gt;快门&lt;/span&gt;&lt;span class="pp-info-value"&gt;' + photo.exif.exposureTime + '&lt;/span&gt;&lt;/div&gt;';
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">快门</span><span class="pp-info-value">' + photo.exif.exposureTime + '</span></div>';
             }
             if (photo.exif.iso) {
-                exifHtml += '&lt;div class="pp-info-row"&gt;&lt;span class="pp-info-label"&gt;ISO&lt;/span&gt;&lt;span class="pp-info-value"&gt;' + photo.exif.iso + '&lt;/span&gt;&lt;/div&gt;';
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">ISO</span><span class="pp-info-value">' + photo.exif.iso + '</span></div>';
             }
             if (photo.exif.focalLength) {
-                exifHtml += '&lt;div class="pp-info-row"&gt;&lt;span class="pp-info-label"&gt;焦距&lt;/span&gt;&lt;span class="pp-info-value"&gt;' + photo.exif.focalLength + 'mm&lt;/span&gt;&lt;/div&gt;';
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">焦距</span><span class="pp-info-value">' + photo.exif.focalLength + 'mm</span></div>';
             }
-            exifHtml += '&lt;/div&gt;';
+            exifHtml += '</div>';
         }
 
         document.getElementById('ppInfoModalBody').innerHTML =
-            '&lt;div class="pp-info-section"&gt;' +
-            '&lt;div class="pp-info-section-title"&gt;元数据&lt;/div&gt;' +
-            '&lt;div class="pp-info-row"&gt;&lt;span class="pp-info-label"&gt;上传者&lt;/span&gt;&lt;span class="pp-info-value"&gt;' + (photo.username || '未知') + '&lt;/span&gt;&lt;/div&gt;' +
-            '&lt;div class="pp-info-row"&gt;&lt;span class="pp-info-label"&gt;上传时间&lt;/span&gt;&lt;span class="pp-info-value"&gt;' + dateStr + '&lt;/span&gt;&lt;/div&gt;' +
-            '&lt;div class="pp-info-row"&gt;&lt;span class="pp-info-label"&gt;浏览量&lt;/span&gt;&lt;span class="pp-info-value"&gt;' + (photo.views || 0) + ' 次&lt;/span&gt;&lt;/div&gt;' +
-            '&lt;/div&gt;' +
-            '&lt;div class="pp-info-divider"&gt;&lt;/div&gt;' +
-            '&lt;div class="pp-info-section"&gt;' +
-            '&lt;div class="pp-info-section-title"&gt;文件信息&lt;/div&gt;' +
-            '&lt;div class="pp-info-row"&gt;&lt;span class="pp-info-label"&gt;文件大小&lt;/span&gt;&lt;span class="pp-info-value"&gt;' + sizeStr + '&lt;/span&gt;&lt;/div&gt;' +
-            '&lt;/div&gt;' +
+            '<div class="pp-info-section">' +
+            '<div class="pp-info-section-title">元数据</div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">上传者</span><span class="pp-info-value">' + (photo.username || '未知') + '</span></div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">上传时间</span><span class="pp-info-value">' + dateStr + '</span></div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">浏览量</span><span class="pp-info-value">' + (photo.views || 0) + ' 次</span></div>' +
+            '</div>' +
+            '<div class="pp-info-divider"></div>' +
+            '<div class="pp-info-section">' +
+            '<div class="pp-info-section-title">文件信息</div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">文件大小</span><span class="pp-info-value">' + sizeStr + '</span></div>' +
+            '</div>' +
             exifHtml;
 
         if (modal._closeTimeout) {
@@ -891,7 +891,7 @@
 
         var origin = modal._ppInfoOrigin;
 
-        if (origin &amp;&amp; content) {
+        if (origin && content) {
             var currentRect = content.getBoundingClientRect();
 
             var btn = document.getElementById('ppInfoBtn');
@@ -975,7 +975,7 @@
 
         btn._copying = true;
         btn._origHTML = btn.innerHTML;
-        btn.textContent = '✓';
+        btn.textContent = '�?;
         btn.classList.add('copied');
 
         function restoreBtn() {
@@ -987,7 +987,7 @@
         }
 
         function copySuccess() {
-            window.showToast('照片链接已复制');
+            window.showToast('照片链接已复�?);
             setTimeout(restoreBtn, 1500);
         }
 
@@ -997,7 +997,7 @@
         }
 
         try {
-            if (document.execCommand &amp;&amp; document.execCommand('copy')) {
+            if (document.execCommand && document.execCommand('copy')) {
                 var ta = document.createElement('textarea');
                 ta.value = photo.imageUrl;
                 document.body.appendChild(ta);
@@ -1011,7 +1011,7 @@
             }
         } catch (e) {}
 
-        if (navigator.clipboard &amp;&amp; navigator.clipboard.writeText) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(photo.imageUrl).then(copySuccess).catch(copyFail);
             return;
         }
@@ -1046,9 +1046,9 @@
             };
         }
 
-        window.showConfirm('删除照片', '确定删除这张照片吗？', '是', function() {
+        window.showConfirm('删除照片', '确定删除这张照片吗？', '�?, function() {
             var currentPhotos = ppSortedPhotos;
-            if (ppPhotoIdx &lt; 0 || ppPhotoIdx &gt;= currentPhotos.length) return;
+            if (ppPhotoIdx < 0 || ppPhotoIdx >= currentPhotos.length) return;
             var photo = currentPhotos[ppPhotoIdx];
             if (!photo) return;
             var id = photo.id;
@@ -1057,20 +1057,20 @@
             }
             var idxInGlobal = -1;
             if (window.photoWallData) {
-                for (var i = 0; i &lt; window.photoWallData.length; i++) {
+                for (var i = 0; i < window.photoWallData.length; i++) {
                     if (window.photoWallData[i].id === id) {
                         idxInGlobal = i;
                         break;
                     }
                 }
-                if (idxInGlobal &gt;= 0) {
+                if (idxInGlobal >= 0) {
                     window.photoWallData.splice(idxInGlobal, 1);
                 }
                 window.saveLocalPhotoWallData();
             }
             closePhotoPreview();
             window.renderPhotoWall();
-            window.showToast('已删除');
+            window.showToast('已删�?);
         });
     };
 
@@ -1149,7 +1149,7 @@
                     ppTrackSnapping = false;
                     ppTrack.style.transition = 'none';
                 }
-                if (ppZoom.scale &gt; 1.01) {
+                if (ppZoom.scale > 1.01) {
                     ppStart = { x: e.clientX, y: e.clientY, zx: ppZoom.tx, zy: ppZoom.ty, pointers: 1 };
                 } else {
                     ppDismissState.isActive = true;
@@ -1199,7 +1199,7 @@
                     curImg.style.transform = t;
                     curImg.classList.add('zoomed');
                 }
-            } else if (ppPointers.size === 1 &amp;&amp; ppStart &amp;&amp; ppStart.pointers === 1) {
+            } else if (ppPointers.size === 1 && ppStart && ppStart.pointers === 1) {
                 var sdx = e.clientX - ppStart.x;
                 var sdy = e.clientY - ppStart.y;
                 ppZoom.tx = ppStart.zx + sdx;
@@ -1211,7 +1211,7 @@
                     curImg.style.transform = t;
                 }
             } else {
-                if (ppZoom.scale &lt;= 1.01 &amp;&amp; ppDismissState.isActive &amp;&amp; dy &gt; 0) {
+                if (ppZoom.scale <= 1.01 && ppDismissState.isActive && dy > 0) {
                     ppDismissState.dy = dy;
                     var scaleFactor = Math.max(0.7, 1 - dy / (ppVh * 2));
                     ppDismissState.scale = scaleFactor;
@@ -1226,12 +1226,12 @@
                     if (ppTrackSnapping) return;
                     ppTrackDrag = dx;
 
-                    var isZoomed = ppZoom.scale &gt; 1.01;
+                    var isZoomed = ppZoom.scale > 1.01;
                     if (!isZoomed) {
                         var offset = -ppVw + ppTrackDrag;
                         var resistance = 1;
-                        if (ppPhotoIdx === 0 &amp;&amp; dx &gt; 0) resistance = 1 + dx / ppVw * 2;
-                        if (ppPhotoIdx === ppSortedPhotos.length - 1 &amp;&amp; dx &lt; 0) resistance = 1 - dx / ppVw * 2;
+                        if (ppPhotoIdx === 0 && dx > 0) resistance = 1 + dx / ppVw * 2;
+                        if (ppPhotoIdx === ppSortedPhotos.length - 1 && dx < 0) resistance = 1 - dx / ppVw * 2;
                         offset = -ppVw + dx / resistance;
 
                         if (ppTrackRaf) cancelAnimationFrame(ppTrackRaf);
@@ -1272,7 +1272,7 @@
                 ppStart = null;
                 ppDismissState.isActive = false;
                 var infoModal = document.getElementById('ppInfoModal');
-                if (infoModal &amp;&amp; infoModal.style.display !== 'none') {
+                if (infoModal && infoModal.style.display !== 'none') {
                     window.closePhotoInfo();
                 }
                 return;
@@ -1283,11 +1283,11 @@
 
             if (ppPointers.size === 0) {
                 var now = Date.now();
-                var moved = ppMovedDistance &gt; ppTapThreshold;
+                var moved = ppMovedDistance > ppTapThreshold;
 
-                if (ppDismissState.isActive &amp;&amp; ppZoom.scale &lt;= 1.01 &amp;&amp; ppDismissState.dy &gt; 0) {
+                if (ppDismissState.isActive && ppZoom.scale <= 1.01 && ppDismissState.dy > 0) {
                     var dismissThreshold = 150;
-                    if (ppDismissState.dy &gt; dismissThreshold) {
+                    if (ppDismissState.dy > dismissThreshold) {
                         ppDismissState.isActive = false;
                         closePhotoPreview();
                         return;
@@ -1305,7 +1305,7 @@
 
                 if (ppPinchStart) {
                     var distDiff = ppPinchMaxDist - ppPinchMinDist;
-                    if (distDiff &lt; 10) {
+                    if (distDiff < 10) {
                         ppZoom = { scale: 1, tx: 0, ty: 0 };
                         var imgs = document.querySelectorAll('.pp-slide-img');
                         imgs.forEach(function(img) {
@@ -1316,22 +1316,22 @@
                     ppPinchPre = null;
                 }
 
-                var zoomed = ppZoom.scale &gt; 1.01;
+                var zoomed = ppZoom.scale > 1.01;
 
-                if (!zoomed &amp;&amp; !ppTrackSnapping) {
+                if (!zoomed && !ppTrackSnapping) {
                     var dx = ppTrackDrag;
-                    var isSwipe = Math.abs(dx) &gt; ppVw / 4;
+                    var isSwipe = Math.abs(dx) > ppVw / 4;
 
                     if (isSwipe) {
-                        var direction = dx &gt; 0 ? -1 : 1;
-                        if (direction === -1 &amp;&amp; ppPhotoIdx &gt; 0) {
+                        var direction = dx > 0 ? -1 : 1;
+                        if (direction === -1 && ppPhotoIdx > 0) {
                             ppNavBusy = true;
                             ppPreloadAdjacent(ppPhotoIdx - 1);
                             ppEnsureSideImages(ppPhotoIdx - 1);
                             ppSlideTo(0, function() {
                                 ppFinishNavigation(ppPhotoIdx - 1);
                             });
-                        } else if (direction === 1 &amp;&amp; ppPhotoIdx &lt; ppSortedPhotos.length - 1) {
+                        } else if (direction === 1 && ppPhotoIdx < ppSortedPhotos.length - 1) {
                             ppNavBusy = true;
                             ppPreloadAdjacent(ppPhotoIdx + 1);
                             ppEnsureSideImages(ppPhotoIdx + 1);
@@ -1351,7 +1351,7 @@
 
                 if (!moved) {
                     if (!zoomed) {
-                        var isDoubleTap = (now - ppLastTap &lt; 300 &amp;&amp; !ppTapHandled &amp;&amp; ppZoom.scale &lt;= 1.01);
+                        var isDoubleTap = (now - ppLastTap < 300 && !ppTapHandled && ppZoom.scale <= 1.01);
 
                         if (isDoubleTap) {
                             if (ppCloseTimer) {
@@ -1364,9 +1364,9 @@
                         }
                         ppLastTap = now;
 
-                        if (!ppTapHandled &amp;&amp; ppZoom.scale &lt;= 1.01 &amp;&amp; !ppNavBusy) {
+                        if (!ppTapHandled && ppZoom.scale <= 1.01 && !ppNavBusy) {
                             var modal = document.getElementById('ppInfoModal');
-                            if (modal &amp;&amp; modal.style.display !== 'none' &amp;&amp; modal.classList.contains('active')) {
+                            if (modal && modal.style.display !== 'none' && modal.classList.contains('active')) {
                                 window.closePhotoInfo();
                                 ppStart = null;
                                 return;
@@ -1378,7 +1378,7 @@
                             }, 350);
                         }
                     } else {
-                        if (now - ppLastTap &lt; 300 &amp;&amp; !ppTapHandled) {
+                        if (now - ppLastTap < 300 && !ppTapHandled) {
                             if (ppCloseTimer) {
                                 clearTimeout(ppCloseTimer);
                                 ppCloseTimer = null;
@@ -1412,7 +1412,7 @@
                 ppDismissState.isActive = false;
             }
 
-            if (ppZoom.scale &lt;= 1.01) {
+            if (ppZoom.scale <= 1.01) {
                 ppSnapTo(0);
             }
         });
