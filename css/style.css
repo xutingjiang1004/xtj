@@ -1504,13 +1504,26 @@
             z-index: 1000;
             opacity: 0;
             pointer-events: none;
-            transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: opacity;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
+
+        .pp-info-modal.active,
+        .pp-info-modal.closing {
+            display: flex;
         }
 
         .pp-info-modal.active {
-            display: flex;
             opacity: 1;
             pointer-events: auto;
+            transition: opacity 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .pp-info-modal.closing {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
         }
 
         .pp-info-modal::before {
@@ -1522,11 +1535,18 @@
             bottom: 0;
             background: rgba(0, 0, 0, 0);
             backdrop-filter: blur(8px);
-            transition: background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            -webkit-backdrop-filter: blur(8px);
+            will-change: background-color;
+            transition: background-color 0.28s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
         .pp-info-modal.active::before {
             background: rgba(0, 0, 0, 0.5);
+        }
+
+        .pp-info-modal.closing::before {
+            background: rgba(0, 0, 0, 0);
+            transition: background-color 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
         }
 
         .pp-info-modal-content {
@@ -1535,34 +1555,34 @@
             max-width: 360px;
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
             border-radius: 20px;
             overflow: hidden;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
             opacity: 0;
             transform: scale(0.92) translateY(16px);
-            transition: opacity 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.28s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             will-change: opacity, transform;
             backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
             perspective: 1000px;
         }
 
         .pp-info-modal.active .pp-info-modal-content {
             opacity: 1;
             transform: scale(1) translateY(0);
+            transition: opacity 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
+                        transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
 
         .pp-info-modal.closing .pp-info-modal-content {
             opacity: 0;
             transform: scale(0.96) translateY(8px);
-            transition: opacity 0.2s cubic-bezier(0.55, 0, 1, 0.45), transform 0.2s cubic-bezier(0.55, 0, 1, 0.45);
+            transition: opacity 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55),
+                        transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
         }
 
         [data-theme="dark"] .pp-info-modal-content {
             background: rgba(30, 30, 40, 0.95);
-        }
-
-        .pp-info-modal.closing .pp-info-modal-content {
-            animation: pp-modal-content-exit 0.25s cubic-bezier(0.55, 0, 1, 0.45);
         }
 
         .pp-info-modal-header {
@@ -1597,7 +1617,7 @@
             cursor: pointer;
             font-size: 20px;
             color: var(--text-muted);
-            transition: all 0.2s ease;
+            transition: background-color 0.2s ease, color 0.2s ease;
         }
 
         .pp-info-modal-close:hover {
