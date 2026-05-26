@@ -1,12 +1,18 @@
-﻿(function() {
+(function() {
     window.photoWallData = [];
 
     var photoWallKey = 'xtj_photos';
     var photoWallDeletedKey = 'xtj_photos_deleted';
+    var photoWallLastSyncKey = 'xtj_photos_sync';
 
     var PHOTO_WALL_MARKER = '__photo_wall__';
     window.PHOTO_WALL_MARKER = PHOTO_WALL_MARKER;
     var photoWallMigrating = false;
+
+    var pageSize = 20;
+    var currentPage = 0;
+    var hasMore = true;
+    var isLoading = false;
 
     function getDeletedPhotoIds() {
         try {
@@ -97,37 +103,59 @@
         }
     }
 
-    async function loadPhotoWallData() {
-        var localData = loadLocalPhotoWallData();
-        if (!window.sb) {
-            window.photoWallData = localData;
-            return window.photoWallData;
-        }
+    async function loadPhotoWallPage(pageNum = 0) {
+        if (!window.sb) return [];
         try {
-            await migrateLocalPhotosToCloud(localData);
             var res = await window.sb.from('posts')
                 .select('id,user_name,media_url,content,created_at,views')
                 .eq('media_type', PHOTO_WALL_MARKER)
                 .order('created_at', { ascending: false })
-                .limit(500);
+                .range(pageNum * pageSize, (pageNum + 1) * pageSize - 1);
             if (res.error) throw res.error;
-            var deletedIds = getDeletedPhotoIds();
-            window.photoWallData = (res.data || []).map(normalizePhotoWallRow).filter(function(p) { return !!p.imageUrl; });
-            if (deletedIds.length > 0) {
-                var cloudIds = {};
-                window.photoWallData.forEach(function(p) { cloudIds[String(p.id)] = true; });
-                var cleaned = deletedIds.filter(function(id) { return cloudIds[id]; });
-                if (cleaned.length !== deletedIds.length) {
-                    try { localStorage.setItem(photoWallDeletedKey, JSON.stringify(cleaned)); } catch(e) {}
-                    deletedIds = cleaned;
-                }
-                if (deletedIds.length > 0) {
-                    window.photoWallData = window.photoWallData.filter(function(p) {
-                        return deletedIds.indexOf(String(p.id)) < 0;
-                    });
-                }
+            return (res.data || []).map(normalizePhotoWallRow).filter(function(p) { return !!p.imageUrl; });
+        } catch(e) {
+            console.error('加载照片墙分页失败:', e);
+            return [];
+        }
+    }
+
+    async function loadPhotoWallData() {
+        var localData = loadLocalPhotoWallData();
+        currentPage = 0;
+        hasMore = true;
+        isLoading = false;
+
+        if (!window.sb) {
+            window.photoWallData = localData;
+            return window.photoWallData;
+        }
+
+        try {
+            await migrateLocalPhotosToCloud(localData);
+
+            var lastSync = localStorage.getItem(photoWallLastSyncKey);
+            var shouldQuickLoad = lastSync && (Date.now() - parseInt(lastSync) < 300000);
+
+            if (shouldQuickLoad && localData.length > 0) {
+                window.photoWallData = localData;
+                setTimeout(fetchLatestPhotos, 500);
+                return window.photoWallData;
             }
-            if (!window.photoWallData.length && localData.length) window.photoWallData = localData;
+
+            var firstPage = await loadPhotoWallPage(0);
+            var deletedIds = getDeletedPhotoIds();
+            
+            if (deletedIds.length > 0) {
+                firstPage = firstPage.filter(function(p) {
+                    return deletedIds.indexOf(String(p.id)) < 0;
+                });
+            }
+
+            window.photoWallData = firstPage;
+            hasMore = firstPage.length >= pageSize;
+            localStorage.setItem(photoWallLastSyncKey, Date.now().toString());
+            saveLocalPhotoWallData();
+
             return window.photoWallData;
         } catch(e) {
             console.error('加载云端照片墙失败:', e);
@@ -136,6 +164,74 @@
         }
     }
     window.loadPhotoWallData = loadPhotoWallData;
+
+    async function fetchLatestPhotos() {
+        if (!window.sb || !window.currentUser) return;
+        try {
+            var latest = await window.sb.from('posts')
+                .select('id,user_name,media_url,content,created_at,views')
+                .eq('media_type', PHOTO_WALL_MARKER)
+                .order('created_at', { ascending: false })
+                .limit(5);
+            if (latest.error) return;
+            
+            var existingIds = new Set(window.photoWallData.map(function(p) { return String(p.id); }));
+            var deletedIds = getDeletedPhotoIds();
+            
+            for (var i = 0; i < latest.data.length; i++) {
+                var row = latest.data[i];
+                var id = String(row.id);
+                if (!existingIds.has(id) && deletedIds.indexOf(id) < 0) {
+                    var normalized = normalizePhotoWallRow(row);
+                    if (normalized.imageUrl) {
+                        window.photoWallData.unshift(normalized);
+                    }
+                }
+            }
+            
+            saveLocalPhotoWallData();
+            if (window.renderPhotoWallWithoutReload) {
+                window.renderPhotoWallWithoutReload();
+            }
+        } catch(e) {}
+    }
+
+    async function loadMorePhotos() {
+        if (isLoading || !hasMore || !window.sb) return false;
+        isLoading = true;
+        
+        try {
+            currentPage++;
+            var pageData = await loadPhotoWallPage(currentPage);
+            var deletedIds = getDeletedPhotoIds();
+            
+            pageData = pageData.filter(function(p) {
+                return deletedIds.indexOf(String(p.id)) < 0;
+            });
+
+            if (pageData.length > 0) {
+                window.photoWallData = window.photoWallData.concat(pageData);
+                saveLocalPhotoWallData();
+                hasMore = pageData.length >= pageSize;
+                return true;
+            } else {
+                hasMore = false;
+                return false;
+            }
+        } catch(e) {
+            console.error('加载更多照片失败:', e);
+            hasMore = false;
+            return false;
+        } finally {
+            isLoading = false;
+        }
+    }
+    window.loadMorePhotos = loadMorePhotos;
+
+    function hasMorePhotos() {
+        return hasMore && !isLoading;
+    }
+    window.hasMorePhotos = hasMorePhotos;
 
     function saveLocalPhotoWallData() {
         try {
