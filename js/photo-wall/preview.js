@@ -36,6 +36,7 @@
     var ppDownloadActive = false;
     var ppDownloadProgress = 0;
     var ppConfirmDownloadModal = null;
+    var ppDownloadAbortController = null;
 
     function ppInitTrack() {
         ppVw = window.innerWidth;
@@ -1111,153 +1112,282 @@
     };
 
     function ppShowDownloadOverlay() {
-        var dlOverlay = document.getElementById('ppDownloadOverlay');
-        if (dlOverlay) {
-            dlOverlay.style.display = 'flex';
+        try {
+            var dlOverlay = document.getElementById('ppDownloadOverlay');
+            if (dlOverlay) {
+                dlOverlay.style.display = 'flex';
+            }
+        } catch (e) {
+            console.error('Error showing download overlay:', e);
         }
     }
 
     function ppHideDownloadOverlay() {
-        var dlOverlay = document.getElementById('ppDownloadOverlay');
-        if (dlOverlay) {
-            dlOverlay.style.display = 'none';
-        }
-        var progressBar = document.getElementById('ppDownloadProgressBar');
-        if (progressBar) {
-            progressBar.style.width = '0%';
+        try {
+            var dlOverlay = document.getElementById('ppDownloadOverlay');
+            if (dlOverlay) {
+                dlOverlay.style.display = 'none';
+            }
+            var progressBar = document.getElementById('ppDownloadProgressBar');
+            if (progressBar) {
+                progressBar.style.width = '0%';
+            }
+        } catch (e) {
+            console.error('Error hiding download overlay:', e);
         }
     }
 
     function ppUpdateDownloadProgress(percent, text) {
-        var progressBar = document.getElementById('ppDownloadProgressBar');
-        if (progressBar) {
-            progressBar.style.width = percent + '%';
-        }
-        var dlText = document.getElementById('ppDownloadText');
-        if (dlText && text) {
-            dlText.textContent = text;
+        try {
+            var progressBar = document.getElementById('ppDownloadProgressBar');
+            if (progressBar) {
+                progressBar.style.width = Math.max(0, Math.min(100, percent)) + '%';
+            }
+            var dlText = document.getElementById('ppDownloadText');
+            if (dlText && text) {
+                dlText.textContent = text;
+            }
+        } catch (e) {
+            console.error('Error updating download progress:', e);
         }
     }
 
     function ppShowDownloadConfirmModal() {
-        var overlay = document.getElementById('photoPreviewOverlay');
-        if (!overlay) return;
+        try {
+            var overlay = document.getElementById('photoPreviewOverlay');
+            if (!overlay) return;
 
-        var modal = document.getElementById('ppDownloadConfirmModal');
-        if (modal) {
-            modal.style.display = 'flex';
-            void modal.offsetHeight;
-            modal.classList.add('show');
-            return;
+            var modal = document.getElementById('ppDownloadConfirmModal');
+            if (modal) {
+                modal.style.display = 'flex';
+                void modal.offsetHeight;
+                modal.classList.add('show');
+                return;
+            }
+
+            var confirmOverlay = document.createElement('div');
+            confirmOverlay.id = 'ppDownloadConfirmModal';
+            confirmOverlay.className = 'pp-download-confirm-overlay';
+            confirmOverlay.innerHTML =
+                '<div class="pp-download-confirm-content">' +
+                    '<div class="pp-download-confirm-title">\u662f\u5426\u8981\u4e0b\u8f7d\u8be5\u56fe\u7247\uff1f</div>' +
+                    '<div class="pp-download-confirm-buttons">' +
+                        '<button class="pp-download-confirm-btn pp-cancel-btn" onclick="window.ppCancelDownload()">\u53d6\u6d88</button>' +
+                        '<button class="pp-download-confirm-btn pp-confirm-btn" onclick="window.ppConfirmDownload()">\u786e\u8ba4</button>' +
+                    '</div>' +
+                '</div>';
+
+            overlay.appendChild(confirmOverlay);
+            ppConfirmDownloadModal = confirmOverlay;
+
+            void confirmOverlay.offsetHeight;
+            confirmOverlay.classList.add('show');
+        } catch (e) {
+            console.error('Error showing download confirm modal:', e);
         }
-
-        var confirmOverlay = document.createElement('div');
-        confirmOverlay.id = 'ppDownloadConfirmModal';
-        confirmOverlay.className = 'pp-download-confirm-overlay';
-        confirmOverlay.innerHTML =
-            '<div class="pp-download-confirm-content">' +
-                '<div class="pp-download-confirm-title">\u662f\u5426\u8981\u4e0b\u8f7d\u8be5\u56fe\u7247\uff1f</div>' +
-                '<div class="pp-download-confirm-buttons">' +
-                    '<button class="pp-download-confirm-btn pp-cancel-btn" onclick="window.ppCancelDownload()">\u53d6\u6d88</button>' +
-                    '<button class="pp-download-confirm-btn pp-confirm-btn" onclick="window.ppConfirmDownload()">\u786e\u8ba4</button>' +
-                '</div>' +
-            '</div>';
-
-        overlay.appendChild(confirmOverlay);
-        ppConfirmDownloadModal = confirmOverlay;
-
-        void confirmOverlay.offsetHeight;
-        confirmOverlay.classList.add('show');
     }
 
     function ppHideDownloadConfirmModal() {
-        var modal = document.getElementById('ppDownloadConfirmModal');
-        if (modal) {
-            modal.classList.remove('show');
-            setTimeout(function() {
-                modal.style.display = 'none';
-            }, 300);
+        try {
+            var modal = document.getElementById('ppDownloadConfirmModal');
+            if (modal) {
+                modal.classList.remove('show');
+                setTimeout(function() {
+                    try {
+                        if (modal && modal.style) {
+                            modal.style.display = 'none';
+                        }
+                    } catch (e2) {
+                        console.error('Error in hide timeout:', e2);
+                    }
+                }, 300);
+            }
+        } catch (e) {
+            console.error('Error hiding download confirm modal:', e);
         }
     }
 
     window.ppCancelDownload = function() {
-        ppHideDownloadConfirmModal();
+        try {
+            ppHideDownloadConfirmModal();
+        } catch (e) {
+            console.error('Error in cancel download:', e);
+        }
     };
 
     window.ppConfirmDownload = function() {
-        ppHideDownloadConfirmModal();
-        ppDoDownloadPhoto();
+        try {
+            ppHideDownloadConfirmModal();
+            ppDoDownloadPhoto();
+        } catch (e) {
+            console.error('Error in confirm download:', e);
+        }
     };
 
-    async function ppDownloadCurrentPhoto() {
-        if (ppDownloadActive) return;
-        
+    window.shareCurrentPhoto = function() {
         var photo = photoPreviewCurrent;
         if (!photo || !photo.imageUrl) {
-            window.showToast('\u6ca1\u6709\u53ef\u4e0b\u8f7d\u7684\u7167\u7247');
+            window.showToast('\u6682\u65e0\u53ef\u5206\u4eab\u7684\u56fe\u7247');
             return;
         }
         
-        ppShowDownloadConfirmModal();
+        if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
+            try {
+                navigator.vibrate(10);
+            } catch (e) {}
+        }
+        
+        if ('share' in navigator) {
+            try {
+                navigator.share({
+                    title: '\u56fe\u7247\u5206\u4eab',
+                    text: '\u6765\u81ea\u7167\u7247\u5899\u7684\u56fe\u7247',
+                    url: photo.imageUrl
+                }).catch(function(e) {
+                    console.log('Share cancelled:', e);
+                });
+                return;
+            } catch (e) {
+                console.log('Share not available:', e);
+            }
+        }
+        
+        try {
+            var textarea = document.createElement('textarea');
+            textarea.value = photo.imageUrl;
+            document.body.appendChild(textarea);
+            textarea.select();
+            var success = document.execCommand('copy');
+            document.body.removeChild(textarea);
+            if (success) {
+                window.showToast('\u94fe\u63a5\u5df2\u590d\u5236');
+            } else {
+                window.showToast('\u590d\u5236\u5931\u8d25');
+            }
+        } catch (e) {
+            window.showToast('\u94fe\u63a5: ' + photo.imageUrl);
+        }
+    };
+
+    function ppDownloadCurrentPhoto() {
+        try {
+            if (ppDownloadActive) return;
+            
+            var photo = photoPreviewCurrent;
+            if (!photo || !photo.imageUrl) {
+                window.showToast('\u6ca1\u6709\u53ef\u4e0b\u8f7d\u7684\u7167\u7247');
+                return;
+            }
+            
+            ppShowDownloadConfirmModal();
+        } catch (e) {
+            console.error('Error in download current photo:', e);
+            window.showToast('\u64cd\u4f5c\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
+        }
     }
 
     async function ppDoDownloadPhoto() {
-        if (ppDownloadActive) return;
-        
-        var photo = photoPreviewCurrent;
-        if (!photo || !photo.imageUrl) {
-            window.showToast('\u6ca1\u6709\u53ef\u4e0b\u8f7d\u7684\u7167\u7247');
-            return;
-        }
-
         try {
+            if (ppDownloadActive) return;
+            
+            var photo = photoPreviewCurrent;
+            if (!photo || !photo.imageUrl) {
+                window.showToast('\u6ca1\u6709\u53ef\u4e0b\u8f7d\u7684\u7167\u7247');
+                return;
+            }
+
             ppDownloadActive = true;
             ppShowDownloadOverlay();
             ppUpdateDownloadProgress(0, '\u6b63\u5728\u4e0b\u8f7d...');
 
-            if ('vibrate' in navigator) {
+            if ('vibrate' in navigator && typeof navigator.vibrate === 'function') {
                 try {
                     navigator.vibrate(10);
-                } catch (e) {}
+                } catch (e) {
+                    console.log('Vibrate not available:', e);
+                }
             }
 
-            var response = await fetch(photo.imageUrl);
+            if ('AbortController' in window) {
+                ppDownloadAbortController = new AbortController();
+            }
+            
+            var response = await fetch(photo.imageUrl, {
+                signal: ppDownloadAbortController ? ppDownloadAbortController.signal : undefined
+            });
+            
             if (!response.ok) {
                 throw new Error('HTTP error ' + response.status);
             }
 
-            var total = response.headers.get('content-length');
-            var reader = response.body.getReader();
+            var total = response.headers ? response.headers.get('content-length') : null;
+            var reader = response.body ? response.body.getReader() : null;
             var received = 0;
             var chunks = [];
 
-            while (true) {
-                var result = await reader.read();
-                var done = result.done;
-                var value = result.value;
+            if (reader) {
+                while (true) {
+                    var result = await reader.read();
+                    var done = result.done;
+                    var value = result.value;
 
-                if (value) {
-                    chunks.push(value);
-                    received += value.length;
-                    if (total) {
-                        var percent = Math.round((received / total) * 100);
-                        ppUpdateDownloadProgress(percent);
+                    if (value) {
+                        chunks.push(value);
+                        received += value.length;
+                        if (total) {
+                            var percent = Math.round((received / total) * 100);
+                            ppUpdateDownloadProgress(percent);
+                        }
+                    }
+
+                    if (done) {
+                        break;
                     }
                 }
-
-                if (done) {
-                    break;
-                }
+            } else {
+                var blob = await response.blob();
+                downloadBlob(blob, photo.imageUrl);
+                return;
             }
 
             var blob = new Blob(chunks);
+            downloadBlob(blob, photo.imageUrl);
+
+        } catch (err) {
+            if (err.name !== 'AbortError') {
+                console.error('Download error:', err);
+                try {
+                    var fallbackA = document.createElement('a');
+                    fallbackA.href = photo.imageUrl;
+                    fallbackA.target = '_blank';
+                    fallbackA.rel = 'noopener noreferrer';
+                    document.body.appendChild(fallbackA);
+                    fallbackA.click();
+                    setTimeout(function() {
+                        try { document.body.removeChild(fallbackA); } catch (e) {}
+                    }, 100);
+                    window.showToast('\u5df2\u5728\u65b0\u6807\u7b7e\u9875\u6253\u5f00');
+                } catch (e2) {
+                    console.error('Fallback download error:', e2);
+                    window.showToast('\u4e0b\u8f7d\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
+                }
+            }
+            ppHideDownloadOverlay();
+            ppDownloadActive = false;
+        } finally {
+            ppDownloadAbortController = null;
+        }
+    }
+
+    function downloadBlob(blob, originalUrl) {
+        try {
             var url = window.URL.createObjectURL(blob);
             var a = document.createElement('a');
             a.href = url;
             
             var filename = 'photo_' + Date.now() + '.jpg';
-            if (photo.imageUrl) {
-                var urlParts = photo.imageUrl.split('/');
+            if (originalUrl) {
+                var urlParts = originalUrl.split('/');
                 var lastPart = urlParts[urlParts.length - 1].split('?')[0];
                 if (lastPart && lastPart.length > 0) {
                     filename = lastPart;
@@ -1266,8 +1396,14 @@
             a.download = filename;
             document.body.appendChild(a);
             a.click();
-            document.body.removeChild(a);
-            window.URL.revokeObjectURL(url);
+            setTimeout(function() {
+                try {
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                } catch (e) {
+                    console.error('Cleanup error:', e);
+                }
+            }, 100);
 
             ppUpdateDownloadProgress(100, '\u4e0b\u8f7d\u6210\u529f!');
             
@@ -1276,23 +1412,11 @@
                 ppDownloadActive = false;
                 window.showToast('\u4e0b\u8f7d\u6210\u529f');
             }, 1000);
-
-        } catch (err) {
-            console.error('Download error:', err);
-            try {
-                var fallbackA = document.createElement('a');
-                fallbackA.href = photo.imageUrl;
-                fallbackA.target = '_blank';
-                fallbackA.rel = 'noopener noreferrer';
-                document.body.appendChild(fallbackA);
-                fallbackA.click();
-                document.body.removeChild(fallbackA);
-                window.showToast('\u5df2\u5728\u65b0\u6807\u7b7e\u9875\u6253\u5f00');
-            } catch (e2) {
-                window.showToast('\u4e0b\u8f7d\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
-            }
+        } catch (e) {
+            console.error('Blob download error:', e);
             ppHideDownloadOverlay();
             ppDownloadActive = false;
+            window.showToast('\u4e0b\u8f7d\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
         }
     }
 

@@ -1,4 +1,41 @@
 (function() {
+    function showUploadProgress() {
+        var overlay = document.getElementById('uploadProgressOverlay');
+        if (overlay) {
+            overlay.style.display = 'flex';
+        }
+    }
+
+    function hideUploadProgress() {
+        var overlay = document.getElementById('uploadProgressOverlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+        }
+        var bar = document.getElementById('uploadProgressBar');
+        if (bar) {
+            bar.style.width = '0%';
+        }
+        var text = document.getElementById('uploadProgressText');
+        if (text) {
+            text.textContent = '0%';
+        }
+    }
+
+    function updateUploadProgress(percent, title) {
+        var bar = document.getElementById('uploadProgressBar');
+        if (bar) {
+            bar.style.width = Math.max(0, Math.min(100, percent)) + '%';
+        }
+        var text = document.getElementById('uploadProgressText');
+        if (text) {
+            text.textContent = Math.round(percent) + '%';
+        }
+        var titleEl = document.getElementById('uploadProgressTitle');
+        if (titleEl && title) {
+            titleEl.textContent = title;
+        }
+    }
+
     function getOrientation(file) {
         return new Promise(function(resolve) {
             if (!file || !file.type.startsWith('image/')) {
@@ -258,22 +295,31 @@
             var origPath = 'photos/' + baseName;
             var needCompress = file.size > 1 * 1024 * 1024;
             
-            if (needCompress) {
-                window.showToast('\u6b63\u5728\u538b\u7f29\u56fe\u7247...');
-            }
+            showUploadProgress();
+            updateUploadProgress(10, '\u6b63\u5728\u5904\u7406\u56fe\u7247...');
             
             var compressed = await compressToTargetBlob(file, 1 * 1024 * 1024);
             var finalSize = compressed.size;
+            
+            updateUploadProgress(30, '\u6b63\u5728\u521b\u5efa\u7f29\u7565\u56fe...');
 
             var thumbPromise = simpleCompress(compressed, 1200, 1200, 0.85).then(function(thumbDataUrl) {
                 return fetch(thumbDataUrl).then(function(r) { return r.blob(); });
             });
             
+            updateUploadProgress(40, '\u6b63\u5728\u4e0a\u4f20\u56fe\u7247...');
+            
             var [thumbBlob, uploadResult] = await Promise.all([
                 thumbPromise,
                 sb.storage.from('uploads').upload(origPath, compressed, {
                     cacheControl: '31536000',
-                    upsert: false
+                    upsert: false,
+                    onUploadProgress: function(progress) {
+                        if (progress && progress.total > 0) {
+                            var percent = Math.round((progress.loaded / progress.total) * 40) + 40;
+                            updateUploadProgress(percent, '\u6b63\u5728\u4e0a\u4f20\u56fe\u7247...');
+                        }
+                    }
                 })
             ]);
             
@@ -283,6 +329,8 @@
                 throw new Error('\u4e0a\u4f20\u5931\u8d25: ' + (uploadErr.message || '\u672a\u77e5\u9519\u8bef'));
             }
 
+            updateUploadProgress(85, '\u6b63\u5728\u4e0a\u4f20\u7f29\u7565\u56fe...');
+
             var thumbPath = 'thumbs/' + baseName;
             var thumbResult = await sb.storage.from('uploads').upload(thumbPath, thumbBlob, {
                 contentType: 'image/jpeg',
@@ -291,6 +339,8 @@
             var thumbErr = thumbResult.error;
 
             var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
+            
+            updateUploadProgress(95, '\u6b63\u5728\u66f4\u65b0\u6570\u636e...');
             
             if (thumbErr) {
                 var contentJson = JSON.stringify({ type: 'photo_wall', fileSize: finalSize });
@@ -313,7 +363,11 @@
                 if (window.renderPhotoWall) {
                     await window.renderPhotoWall();
                 }
-                window.showToast('\u4e0a\u4f20\u6210\u529f');
+                updateUploadProgress(100, '\u4e0a\u4f20\u6210\u529f');
+                setTimeout(function() {
+                    hideUploadProgress();
+                    window.showToast('\u4e0a\u4f20\u6210\u529f');
+                }, 500);
                 e.target.value = '';
                 return;
             }
@@ -346,11 +400,19 @@
             var sizeStr = finalSize >= 1024 * 1024 
                 ? (finalSize / (1024 * 1024)).toFixed(2) + ' MB'
                 : (finalSize / 1024).toFixed(1) + ' KB';
-            window.showToast('\u4e0a\u4f20\u6210\u529f (' + sizeStr + ')');
+            
+            updateUploadProgress(100, '\u4e0a\u4f20\u6210\u529f');
+            
+            setTimeout(function() {
+                hideUploadProgress();
+                window.showToast('\u4e0a\u4f20\u6210\u529f (' + sizeStr + ')');
+            }, 500);
+            
             e.target.value = '';
             
         } catch (err) {
             console.error('\u4e0a\u4f20\u5f02\u5e38:', err);
+            hideUploadProgress();
             window.showToast(err.message || '\u4e0a\u4f20\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
             e.target.value = '';
         }
