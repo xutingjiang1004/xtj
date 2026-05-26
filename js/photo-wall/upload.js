@@ -41,105 +41,102 @@
         });
     }
 
-    function drawImageWithOrientation(ctx, img, orientation, canvasWidth, canvasHeight) {
-        switch (orientation) {
-            case 2:
-                ctx.transform(-1, 0, 0, 1, canvasWidth, 0);
-                break;
-            case 3:
-                ctx.transform(-1, 0, 0, -1, canvasWidth, canvasHeight);
-                break;
-            case 4:
-                ctx.transform(1, 0, 0, -1, 0, canvasHeight);
-                break;
-            case 5:
-                ctx.transform(0, 1, 1, 0, 0, 0);
-                break;
-            case 6:
-                ctx.transform(0, 1, -1, 0, canvasHeight, 0);
-                break;
-            case 7:
-                ctx.transform(0, -1, -1, 0, canvasHeight, canvasWidth);
-                break;
-            case 8:
-                ctx.transform(0, -1, 1, 0, 0, canvasWidth);
-                break;
-        }
-        ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
-    }
-
     function compressToTargetBlob(file, maxBytes) {
-        return new Promise(async function(resolve, reject) {
-            if (file.size <= maxBytes) {
-                var orientation = await getOrientation(file);
-                if (orientation > 1) {
-                    var img = new Image();
-                    var url = URL.createObjectURL(file);
-                    img.onload = function() {
-                        URL.revokeObjectURL(url);
-                        var needRotate = [5, 6, 7, 8].includes(orientation);
-                        var canvas = document.createElement('canvas');
-                        canvas.width = needRotate ? img.height : img.width;
-                        canvas.height = needRotate ? img.width : img.height;
-                        var ctx = canvas.getContext('2d');
-                        drawImageWithOrientation(ctx, img, orientation, canvas.width, canvas.height);
-                        canvas.toBlob(function(blob) {
-                            resolve(blob || file);
-                        }, 'image/jpeg', 0.9);
-                    };
-                    img.onerror = function() { URL.revokeObjectURL(url); resolve(file); };
-                    img.src = url;
-                } else {
-                    resolve(file);
-                }
-                return;
-            }
-
+        return new Promise(async function(resolve) {
             var orientation = await getOrientation(file);
             var img = new Image();
             var url = URL.createObjectURL(file);
+            
             img.onload = function() {
                 URL.revokeObjectURL(url);
-                var needRotate = [5, 6, 7, 8].includes(orientation);
+                
+                var needsRotation = [5, 6, 7, 8].includes(orientation);
                 var srcWidth = img.width;
                 var srcHeight = img.height;
+                
                 var targetWidth = srcWidth;
                 var targetHeight = srcHeight;
                 var maxDim = 2048;
+                
                 if (targetWidth > maxDim || targetHeight > maxDim) {
                     var ratio = maxDim / Math.max(targetWidth, targetHeight);
                     targetWidth = Math.round(targetWidth * ratio);
                     targetHeight = Math.round(targetHeight * ratio);
                 }
-
+                
+                var canvasWidth = needsRotation ? targetHeight : targetWidth;
+                var canvasHeight = needsRotation ? targetWidth : targetHeight;
+                
                 var canvas = document.createElement('canvas');
-                canvas.width = needRotate ? targetHeight : targetWidth;
-                canvas.height = needRotate ? targetWidth : targetHeight;
+                canvas.width = canvasWidth;
+                canvas.height = canvasHeight;
                 var ctx = canvas.getContext('2d');
                 ctx.imageSmoothingEnabled = true;
                 ctx.imageSmoothingQuality = 'high';
-                drawImageWithOrientation(ctx, img, orientation, canvas.width, canvas.height);
-
-                var quality = 0.85;
-                var step = 0.1;
-                function tryQuality() {
-                    canvas.toBlob(function(blob) {
-                        if (!blob) {
-                            resolve(file);
-                            return;
-                        }
-                        if (blob.size <= maxBytes || quality <= 0.1) {
-                            resolve(blob);
-                            return;
-                        }
-                        quality -= step;
-                        if (quality < 0.3) step = 0.05;
-                        tryQuality();
-                    }, 'image/jpeg', quality);
+                
+                switch (orientation) {
+                    case 2:
+                        ctx.transform(-1, 0, 0, 1, canvasWidth, 0);
+                        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+                        break;
+                    case 3:
+                        ctx.transform(-1, 0, 0, -1, canvasWidth, canvasHeight);
+                        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+                        break;
+                    case 4:
+                        ctx.transform(1, 0, 0, -1, 0, canvasHeight);
+                        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+                        break;
+                    case 5:
+                        ctx.transform(0, 1, 1, 0, 0, 0);
+                        ctx.drawImage(img, 0, 0, targetHeight, targetWidth);
+                        break;
+                    case 6:
+                        ctx.transform(0, 1, -1, 0, canvasHeight, 0);
+                        ctx.drawImage(img, 0, 0, targetHeight, targetWidth);
+                        break;
+                    case 7:
+                        ctx.transform(0, -1, -1, 0, canvasHeight, canvasWidth);
+                        ctx.drawImage(img, 0, 0, targetHeight, targetWidth);
+                        break;
+                    case 8:
+                        ctx.transform(0, -1, 1, 0, 0, canvasWidth);
+                        ctx.drawImage(img, 0, 0, targetHeight, targetWidth);
+                        break;
+                    default:
+                        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
                 }
-                tryQuality();
+
+                if (canvas.toBlob) {
+                    var quality = 0.85;
+                    var step = 0.1;
+                    
+                    function tryQuality() {
+                        canvas.toBlob(function(blob) {
+                            if (!blob) {
+                                resolve(file);
+                                return;
+                            }
+                            if (blob.size <= maxBytes || quality <= 0.1) {
+                                resolve(blob);
+                                return;
+                            }
+                            quality -= step;
+                            if (quality < 0.3) step = 0.05;
+                            tryQuality();
+                        }, 'image/jpeg', quality);
+                    }
+                    tryQuality();
+                } else {
+                    resolve(file);
+                }
             };
-            img.onerror = function() { URL.revokeObjectURL(url); resolve(file); };
+            
+            img.onerror = function() {
+                URL.revokeObjectURL(url);
+                resolve(file);
+            };
+            
             img.src = url;
         });
     }

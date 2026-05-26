@@ -9,7 +9,7 @@
     }
     window.formatPhotoTime = formatPhotoTime;
 
-    var pwPlaceholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    var pwPlaceholder = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cpath fill="%23ccc" d="M320 340H80c-11 0-20-9-20-20V80c0-11 9-20 20-20h240c11 0 20 9 20 20v240c0 11-9 20-20 20zM280 120h-80v80h-40v-80h-80v-40h80v-80h40v80h80v40z"/%3E%3C/svg%3E';
 
     function sortPhotoWallData(data, sortKey) {
         var sorted = data.slice();
@@ -35,8 +35,9 @@
         return sorted;
     }
 
-    function renderPhotoWallHtml(sorted) {
+    function renderPhotoWallHtml(sorted, startIndex) {
         var html = '';
+        var startIdx = startIndex || 0;
         for (var i = 0; i < sorted.length; i++) {
             var p = sorted[i];
             var timeStr = formatPhotoTime(p.timestamp);
@@ -44,8 +45,9 @@
             var gridSrc = p.thumbUrl || p.imageUrl;
             if (!gridSrc) gridSrc = '';
             var escapedGridSrc = gridSrc.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(String(p.id)) + '" style="animation-delay:' + (i * 50 < 500 ? i * 50 : 0) + 'ms" onclick="openPhotoPreview(' + i + ')">';
-            html += '<img src="' + pwPlaceholder + '" alt="photo" class="pw-blur-in" data-src="' + escapedGridSrc + '">';
+            var actualIndex = startIdx + i;
+            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(String(p.id)) + '" style="animation-delay:' + (actualIndex * 30 < 300 ? actualIndex * 30 : 0) + 'ms" onclick="openPhotoPreview(' + actualIndex + ')">';
+            html += '<img src="' + pwPlaceholder + '" alt="photo" class="pw-blur-in" data-src="' + escapedGridSrc + '" loading="lazy">';
             html += '<div class="pw-item-info">';
             html += '<div class="pw-item-name">' + window.escapeHtml(name) + '</div>';
             html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
@@ -54,12 +56,24 @@
         return html;
     }
 
+    var renderLock = false;
+    var pendingRender = false;
+
     async function renderPhotoWall() {
+        if (renderLock) {
+            pendingRender = true;
+            return;
+        }
+        renderLock = true;
+
         var grid = document.getElementById('photoGrid');
-        if (!grid) return;
+        if (!grid) {
+            renderLock = false;
+            return;
+        }
 
         var skeletonHtml = '';
-        for (var s = 0; s < 6; s++) {
+        for (var s = 0; s < 9; s++) {
             skeletonHtml += '<div class="pw-skeleton"></div>';
         }
         grid.innerHTML = skeletonHtml;
@@ -72,6 +86,7 @@
                 '<div>还没有照片</div>' +
                 '<div class="photo-wall-empty-cta" onclick="triggerPhotoUpload()">📤 成为第一个分享照片的人</div>' +
                 '</div>';
+            renderLock = false;
             return;
         }
 
@@ -82,13 +97,22 @@
 
         requestAnimationFrame(function() {
             var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
-            items.forEach(function(item) {
-                item.classList.add('pw-stagger-done');
-                item.classList.remove('pw-stagger-enter');
+            items.forEach(function(item, index) {
+                setTimeout(function() {
+                    item.classList.add('pw-stagger-done');
+                    item.classList.remove('pw-stagger-enter');
+                }, index * 20);
             });
         });
 
+        setupInfiniteScroll();
         pwObserveLazyImages(grid);
+
+        renderLock = false;
+        if (pendingRender) {
+            pendingRender = false;
+            renderPhotoWall();
+        }
     }
     window.renderPhotoWall = renderPhotoWall;
 
@@ -112,9 +136,11 @@
 
         requestAnimationFrame(function() {
             var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
-            items.forEach(function(item) {
-                item.classList.add('pw-stagger-done');
-                item.classList.remove('pw-stagger-enter');
+            items.forEach(function(item, index) {
+                setTimeout(function() {
+                    item.classList.add('pw-stagger-done');
+                    item.classList.remove('pw-stagger-enter');
+                }, index * 20);
             });
         });
 
@@ -123,8 +149,53 @@
     window.renderPhotoWallWithoutReload = renderPhotoWallWithoutReload;
 
     var pwLazyObserver = null;
+    var imageLoadQueue = [];
+    var isProcessingQueue = false;
+
+    function processImageQueue() {
+        if (isProcessingQueue || imageLoadQueue.length === 0) return;
+        isProcessingQueue = true;
+
+        var batchSize = 3;
+        var batch = imageLoadQueue.splice(0, batchSize);
+
+        batch.forEach(function(entry) {
+            var img = entry.target;
+            var realSrc = img.getAttribute('data-src');
+            if (realSrc) {
+                img.src = realSrc;
+                img.removeAttribute('data-src');
+                if (img.complete && img.naturalWidth > 0) {
+                    img.classList.remove('pw-blur-in');
+                    img.classList.add('pw-blur-done');
+                } else {
+                    (function(imgEl) {
+                        var loadedFn = function() {
+                            imgEl.classList.remove('pw-blur-in');
+                            imgEl.classList.add('pw-blur-done');
+                        };
+                        imgEl.addEventListener('load', loadedFn, { once: true });
+                        imgEl.addEventListener('error', loadedFn, { once: true });
+                    })(img);
+                }
+            } else {
+                img.classList.remove('pw-blur-in');
+                img.classList.add('pw-blur-done');
+            }
+            if (pwLazyObserver) {
+                pwLazyObserver.unobserve(img);
+            }
+        });
+
+        isProcessingQueue = false;
+        if (imageLoadQueue.length > 0) {
+            requestAnimationFrame(processImageQueue);
+        }
+    }
+
     function pwObserveLazyImages(grid) {
         if (pwLazyObserver) pwLazyObserver.disconnect();
+
         if (!window.IntersectionObserver) {
             var imgs = grid.querySelectorAll('.pw-blur-in');
             for (var i = 0; i < imgs.length; i++) {
@@ -135,40 +206,89 @@
             }
             return;
         }
+
         pwLazyObserver = new IntersectionObserver(function(entries) {
             for (var e = 0; e < entries.length; e++) {
                 var entry = entries[e];
                 if (entry.isIntersecting) {
-                    var img = entry.target;
-                    var realSrc = img.getAttribute('data-src');
-                    if (realSrc) {
-                        img.src = realSrc;
-                        img.removeAttribute('data-src');
-                        if (img.complete && img.naturalWidth > 0) {
-                            img.classList.remove('pw-blur-in');
-                            img.classList.add('pw-blur-done');
-                        } else {
-                            (function(imgEl) {
-                                var loadedFn = function() {
-                                    imgEl.classList.remove('pw-blur-in');
-                                    imgEl.classList.add('pw-blur-done');
-                                };
-                                imgEl.addEventListener('load', loadedFn, { once: true });
-                                imgEl.addEventListener('error', loadedFn, { once: true });
-                            })(img);
-                        }
-                    } else {
-                        img.classList.remove('pw-blur-in');
-                        img.classList.add('pw-blur-done');
-                    }
-                    pwLazyObserver.unobserve(img);
+                    imageLoadQueue.push(entry);
                 }
             }
-        }, { rootMargin: '200px 0px' });
+            processImageQueue();
+        }, { 
+            rootMargin: '300px 0px',
+            threshold: 0.01
+        });
+
         var imgs = grid.querySelectorAll('.pw-blur-in');
         for (var j = 0; j < imgs.length; j++) {
             pwLazyObserver.observe(imgs[j]);
         }
+    }
+
+    var infiniteScrollObserver = null;
+    var isLoadingMore = false;
+
+    function setupInfiniteScroll() {
+        if (infiniteScrollObserver) infiniteScrollObserver.disconnect();
+
+        var grid = document.getElementById('photoGrid');
+        if (!grid || !window.IntersectionObserver) return;
+
+        var sentinel = document.createElement('div');
+        sentinel.className = 'pw-load-more-sentinel';
+        sentinel.innerHTML = '<div class="pw-load-more-indicator">加载更多...</div>';
+        grid.appendChild(sentinel);
+
+        infiniteScrollObserver = new IntersectionObserver(async function(entries) {
+            for (var i = 0; i < entries.length; i++) {
+                var entry = entries[i];
+                if (entry.isIntersecting && !isLoadingMore && window.hasMorePhotos()) {
+                    isLoadingMore = true;
+                    var indicator = sentinel.querySelector('.pw-load-more-indicator');
+                    if (indicator) indicator.textContent = '加载中...';
+
+                    var success = await window.loadMorePhotos();
+                    
+                    if (success) {
+                        var sortKey = window.pwSortKey || 'date_desc';
+                        var sorted = sortPhotoWallData(window.photoWallData, sortKey);
+                        var startIdx = sorted.length - (success.length || 20);
+                        var newHtml = renderPhotoWallHtml(sorted.slice(startIdx), startIdx);
+                        
+                        sentinel.insertAdjacentHTML('beforebegin', newHtml);
+                        
+                        requestAnimationFrame(function() {
+                            var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
+                            items.forEach(function(item) {
+                                item.classList.add('pw-stagger-done');
+                                item.classList.remove('pw-stagger-enter');
+                            });
+                        });
+                        
+                        pwObserveLazyImages(grid);
+                        
+                        if (!window.hasMorePhotos()) {
+                            if (indicator) indicator.textContent = '没有更多了';
+                            infiniteScrollObserver.disconnect();
+                        } else {
+                            if (indicator) indicator.textContent = '加载更多...';
+                        }
+                    } else {
+                        if (indicator) indicator.textContent = '加载失败';
+                        setTimeout(function() {
+                            if (indicator && window.hasMorePhotos()) {
+                                indicator.textContent = '加载更多...';
+                            }
+                        }, 2000);
+                    }
+                    
+                    isLoadingMore = false;
+                }
+            }
+        }, { rootMargin: '400px 0px' });
+
+        infiniteScrollObserver.observe(sentinel);
     }
 
     var pwLastScroll = 0;

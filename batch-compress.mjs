@@ -52,6 +52,8 @@ async function comp(buf, tgt) {
       return { buf: buf, size: buf.length, ok: false, rotated: false, reason: '无法读取图片' };
     }
 
+    console.log(`    原始信息: ${meta.width}x${meta.height}, orientation=${meta.orientation || 'undefined'}, format=${meta.format}`);
+
     let pipeline = sharp(buf);
     let needsRotation = meta.orientation && meta.orientation > 1;
     let needsResize = meta.width > MAX_DIM || meta.height > MAX_DIM;
@@ -60,7 +62,7 @@ async function comp(buf, tgt) {
     if (needsRotation) {
       pipeline = pipeline.rotate();
       processed = true;
-      console.log(`    需要旋转: orientation=${meta.orientation}`);
+      console.log(`    自动旋转: orientation=${meta.orientation}`);
     }
 
     let width = meta.width;
@@ -98,7 +100,7 @@ async function comp(buf, tgt) {
 
 async function validate(url) {
   try {
-    const r = await fetch(url);
+    const r = await fetch(url, { headers: { 'Cache-Control': 'no-cache' } });
     if (!r.ok) return `HTTP ${r.status}`;
     const b = Buffer.from(await r.arrayBuffer());
     if (b.length < 100) return '太小';
