@@ -55,7 +55,7 @@
 
     function ppPreloadAdjacent(idx) {
         var photos = ppSortedPhotos;
-        var preloadCount = 3;
+        var preloadCount = 1;
         for (var i = -preloadCount; i <= preloadCount; i++) {
             var adjIdx = idx + i;
             if (adjIdx >= 0 && adjIdx < photos.length && photos[adjIdx].imageUrl) {
@@ -131,6 +131,11 @@
 
     function ppSwapImage(imgEl, url) {
         if (!imgEl) return;
+
+        // 先完全清理旧的监听器
+        imgEl.onload = null;
+        imgEl.onerror = null;
+
         if (!url) {
             imgEl.style.transition = 'none';
             imgEl.removeAttribute('src');
@@ -138,6 +143,7 @@
             imgEl._ppUrl = null;
             return;
         }
+
         if (imgEl._ppUrl === url) return;
         imgEl._ppUrl = url;
         var cached = ppImageCache[url];
@@ -147,16 +153,19 @@
             imgEl.style.opacity = '1';
             return;
         }
+
         imgEl.style.transition = 'none';
         imgEl.removeAttribute('src');
         imgEl.style.opacity = '0';
+
         var loadDone = false;
         var retryCount = 0;
-        function onLoad() {
+        var loadHandler = function() {
             if (loadDone) return;
             loadDone = true;
-            imgEl.removeEventListener('load', onLoad);
-            imgEl.removeEventListener('error', onError);
+            imgEl.onload = null;
+            imgEl.onerror = null;
+
             if (!ppImageCache[url]) {
                 ppImageCache[url] = imgEl;
             }
@@ -166,20 +175,22 @@
                 void imgEl.offsetHeight;
                 imgEl.style.opacity = '1';
             });
-        }
-        function onError() {
+        };
+
+        var errorHandler = function() {
             if (loadDone) return;
-            imgEl.removeEventListener('load', onLoad);
-            imgEl.removeEventListener('error', onError);
-            
+
+            imgEl.onload = null;
+            imgEl.onerror = null;
+
             retryCount = (ppLoadRetries[url] || 0) + 1;
             if (retryCount <= MAX_RETRIES) {
                 ppLoadRetries[url] = retryCount;
                 setTimeout(function() {
                     if (imgEl._ppUrl === url) {
                         loadDone = false;
-                        imgEl.addEventListener('load', onLoad);
-                        imgEl.addEventListener('error', onError);
+                        imgEl.onload = loadHandler;
+                        imgEl.onerror = errorHandler;
                         imgEl.src = url + (url.indexOf('?') === -1 ? '?t=' : '&t=') + Date.now();
                     }
                 }, 500 * retryCount);
@@ -189,12 +200,14 @@
                 delete ppLoadRetries[url];
                 showPlaceholder(imgEl);
             }
-        }
-        imgEl.addEventListener('load', onLoad);
-        imgEl.addEventListener('error', onError);
+        };
+
+        imgEl.onload = loadHandler;
+        imgEl.onerror = errorHandler;
         imgEl.src = url;
+
         if (imgEl.complete && imgEl.naturalWidth > 0) {
-            onLoad();
+            loadHandler();
         }
     }
 
