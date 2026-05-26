@@ -259,7 +259,8 @@
             }
             var ts = Date.now();
             var ext = file.type === 'image/png' ? '.png' : '.jpg';
-            var safeName = file.name.replace(/[^\u4e00-\u9fa5a-zA-Z0-9_\-\.]+/g, '_');
+            // 只保留字母、数字、下划线和点，避免中文替换为 _，防止Supabase不接受的字符
+            var safeName = file.name.replace(/[^\w\.]/g, '_');
             var baseName = ts + '_' + safeName.replace(/\.[^.]+$/, '') + ext;
 
             var origPath = 'photos/' + baseName;
