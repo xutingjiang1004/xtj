@@ -116,11 +116,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var dy = origin.btnCy - origin.dialogCy;
                     overlay._ppDeleteOrigin = { dx: dx, dy: dy };
                     dialog.style.transition = 'none';
-                    dialog.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(0.08)';
+                    dialog.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(0.3)';
                     dialog.style.opacity = '0';
                     void dialog.offsetHeight;
-                    dialog.style.transition = 'transform 0.4s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.3s ease-out';
-                    dialog.style.transform = '';
+                    dialog.style.transition = 'transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s ease-out';
+                    dialog.style.transform = 'translate(0, 0) scale(1)';
                     dialog.style.opacity = '1';
                 }
             }
@@ -142,13 +142,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (okBtn) okBtn.disabled = true;
                     overlay.classList.add('closing');
                     dialog.style.transition = 'none';
-                    dialog.style.transform = 'scale(1) translateY(0)';
+                    dialog.style.transform = 'translate(0, 0) scale(1)';
                     dialog.style.opacity = '1';
                     void dialog.offsetHeight;
-                    dialog.style.transition = 'transform 0.35s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.25s ease-in';
-                    dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(0.05)';
+                    dialog.style.transition = 'transform 0.45s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.35s ease-in';
+                    dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(0.3)';
                     dialog.style.opacity = '0';
                     overlay._closeTimer = setTimeout(function() {
+                        dialog.style.transform = '';
+                        dialog.style.opacity = '';
+                        dialog.style.transition = '';
                         overlay._ppDeleteOrigin = null;
                         overlay._closeTimer = null;
                         overlay.classList.remove('closing');
@@ -157,7 +160,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (typeof cb === 'function') {
                             cb();
                         }
-                    }, 380);
+                    }, 480);
                     return;
                 }
             }
