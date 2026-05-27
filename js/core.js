@@ -70,8 +70,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         window.appState = {
             get currentUser() { return window.currentUser; },
             set currentUser(v) { window.currentUser = v; },
-            get photoWallData() { return photoWallData; },
-            set photoWallData(v) { photoWallData = v; },
+            get photoWallData() { return window.photoWallData; },
+            set photoWallData(v) { window.photoWallData = v; },
             get deviceId() { return window.deviceId; },
             _listeners: {}
         };
