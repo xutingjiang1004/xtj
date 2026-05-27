@@ -61,10 +61,187 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
             return postVisibilityObserver;
         }
-        const CACHE_KEY = "xtj_feed_cache";
+        const CACHE_KEY = "xtj_feed_cache_v2";
         const CACHE_DURATION = 5 * 60 * 1000; // 缓存5分钟
 
+        const POST_METADATA_MARKER = "__xtj_post_v2__";
+        const POST_META_DEFAULTS = {
+            visibility: "public",
+            is_pinned: false,
+            pinned_at: null,
+            updated_at: null
+        };
+        let postSearchState = {
+            keyword: "",
+            user: "",
+            startDate: "",
+            endDate: "",
+            visibility: "all",
+            onlyMine: false
+        };
+        let editPostId = null;
+
         function isAdmin() { return currentUser === ADMIN_NAME; }
+
+        function clearFeedCache() {
+            try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
+        }
+        window.clearFeedCache = clearFeedCache;
+
+        function parsePostContent(post) {
+            var raw = post && typeof post.content === "string" ? post.content : "";
+            if (!raw) return { text: "", meta: {} };
+            try {
+                var parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === "object" && parsed.__type === POST_METADATA_MARKER) {
+                    return {
+                        text: typeof parsed.text === "string" ? parsed.text : "",
+                        meta: parsed.meta && typeof parsed.meta === "object" ? parsed.meta : {}
+                    };
+                }
+            } catch (e) {}
+            return { text: raw, meta: {} };
+        }
+        window.parsePostContent = parsePostContent;
+
+        function buildPostContentPayload(text, meta) {
+            return JSON.stringify({
+                __type: POST_METADATA_MARKER,
+                text: text || "",
+                meta: Object.assign({}, POST_META_DEFAULTS, meta || {})
+            });
+        }
+
+        function normalizePost(post) {
+            var parsed = parsePostContent(post || {});
+            var meta = Object.assign({}, POST_META_DEFAULTS, parsed.meta || {});
+            return Object.assign({}, post, {
+                content: parsed.text || "",
+                visibility: post && post.visibility ? post.visibility : (meta.visibility || "public"),
+                is_pinned: post ? !!post.is_pinned : !!meta.is_pinned,
+                pinned_at: post && post.pinned_at ? post.pinned_at : (meta.pinned_at || null),
+                updated_at: post && post.updated_at ? post.updated_at : (meta.updated_at || null),
+                _contentMeta: meta
+            });
+        }
+        window.normalizePost = normalizePost;
+
+        function getPostDisplayContent(post) {
+            return normalizePost(post).content || "";
+        }
+        window.getPostDisplayContent = getPostDisplayContent;
+
+        function canViewPost(post) {
+            var p = normalizePost(post);
+            if (p.visibility === "private") {
+                return !!window.currentUser && p.user_name === window.currentUser;
+            }
+            return true;
+        }
+        window.canViewPost = canViewPost;
+
+        function canEditPost(post) {
+            var p = normalizePost(post);
+            return !!currentUser && (p.user_name === currentUser || isAdmin());
+        }
+        window.canEditPost = canEditPost;
+
+        function canPinPost(post) {
+            return canEditPost(post);
+        }
+        window.canPinPost = canPinPost;
+
+        function normalizePosts(posts) {
+            return (posts || []).map(normalizePost);
+        }
+
+        function sortPosts(posts) {
+            return posts.slice().sort(function(a, b) {
+                var pa = normalizePost(a);
+                var pb = normalizePost(b);
+                if (!!pa.is_pinned !== !!pb.is_pinned) return pa.is_pinned ? -1 : 1;
+                if (pa.is_pinned && pb.is_pinned) return new Date(pb.pinned_at || pb.created_at || 0) - new Date(pa.pinned_at || pa.created_at || 0);
+                return new Date(pb.created_at || 0) - new Date(pa.created_at || 0);
+            });
+        }
+        window.sortPosts = sortPosts;
+
+        function toLocalDateKey(dateLike) {
+            if (!dateLike) return "";
+            var d = new Date(dateLike);
+            if (isNaN(d.getTime())) return "";
+            var y = d.getFullYear();
+            var m = String(d.getMonth() + 1).padStart(2, "0");
+            var day = String(d.getDate()).padStart(2, "0");
+            return y + "-" + m + "-" + day;
+        }
+
+        function isPostInDateRange(post, startDate, endDate) {
+            var key = toLocalDateKey(post && post.created_at);
+            if (!key) return false;
+            if (startDate && key < startDate) return false;
+            if (endDate && key > endDate) return false;
+            return true;
+        }
+        window.isPostInDateRange = isPostInDateRange;
+
+        function getPostSearchState() {
+            return Object.assign({}, postSearchState);
+        }
+        window.getPostSearchState = getPostSearchState;
+
+        function getFilteredPosts(posts, comments) {
+            var state = getPostSearchState();
+            var keyword = (state.keyword || "").trim().toLowerCase();
+            var userFilter = (state.user || "").trim().toLowerCase();
+            var visibilityFilter = state.visibility || "all";
+            var onlyMine = !!state.onlyMine;
+            var matchedCommentPostIds = new Set();
+
+            (comments || []).forEach(function(c) {
+                if (!c) return;
+                var commentContent = String(c.content || "").toLowerCase();
+                var commentUser = String(c.user_name || "").toLowerCase();
+                if (keyword && (commentContent.indexOf(keyword) >= 0 || commentUser.indexOf(keyword) >= 0)) {
+                    matchedCommentPostIds.add(String(c.post_id));
+                }
+            });
+
+            return sortPosts(normalizePosts(posts).filter(function(post) {
+                if (!post) return false;
+                if (post.media_type === AUTH_MARKER || post.media_type === DM_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__ann__") return false;
+                if (!post.user_name) return false;
+                if (!canViewPost(post)) return false;
+                if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
+                if (visibilityFilter !== "all" && post.visibility !== visibilityFilter) return false;
+                if (userFilter && String(post.user_name || "").toLowerCase().indexOf(userFilter) < 0) return false;
+                if ((state.startDate || state.endDate) && !isPostInDateRange(post, state.startDate, state.endDate)) return false;
+                if (!keyword) return true;
+                var postContent = String(post.content || "").toLowerCase();
+                var postUser = String(post.user_name || "").toLowerCase();
+                var dateText = toLocalDateKey(post.created_at);
+                return postContent.indexOf(keyword) >= 0 ||
+                    postUser.indexOf(keyword) >= 0 ||
+                    dateText.indexOf(keyword) >= 0 ||
+                    matchedCommentPostIds.has(String(post.id));
+            }));
+        }
+        window.getFilteredPosts = getFilteredPosts;
+
+        function renderFilterSummary(count) {
+            var el = document.getElementById("postFilterSummary");
+            if (!el) return;
+            var state = getPostSearchState();
+            var hasFilters = !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
+            if (!hasFilters) {
+                el.textContent = "全部帖子";
+            } else if (!count) {
+                el.textContent = "没找到相关帖子";
+            } else {
+                el.textContent = "找到 " + count + " 条结果";
+            }
+        }
+        window.renderFilterSummary = renderFilterSummary;
 
         // ========== 状态管理命名空间（向后兼容） ==========
         window.appState = {
@@ -1272,6 +1449,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     clearInterval(statPollTimer);
                     statPollTimer = null;
                 }
+                if (id === 'editPostModal') {
+                    editPostId = null;
+                }
             };
 
             // ===================== 图片查看器 =====================
@@ -1895,6 +2075,527 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (currentUser) loadDockChatList();
             }
 
+            function collectPostMetadata(visibility, overrides) {
+                return Object.assign({}, POST_META_DEFAULTS, {
+                    visibility: visibility || "public"
+                }, overrides || {});
+            }
+
+            async function insertPostRecord(payload, fallbackContent) {
+                var primary = await sb.from("posts").insert([payload]);
+                if (!primary.error) return { ok: true, fallback: false };
+
+                var message = String(primary.error.message || "");
+                var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message);
+                if (!maybeSchemaIssue) return { ok: false, error: primary.error };
+
+                var fallbackPayload = {
+                    user_name: payload.user_name,
+                    content: fallbackContent,
+                    media_url: payload.media_url,
+                    media_type: payload.media_type,
+                    actor_key: payload.actor_key
+                };
+                var fallback = await sb.from("posts").insert([fallbackPayload]);
+                if (fallback.error) return { ok: false, error: fallback.error };
+                return { ok: true, fallback: true };
+            }
+
+            function resetPostComposer() {
+                var postInp = document.getElementById("postInp");
+                var fileInp = document.getElementById("fileInp");
+                var visibilityEl = document.getElementById("postVisibility");
+                if (postInp) postInp.value = "";
+                if (fileInp) fileInp.value = "";
+                if (visibilityEl) visibilityEl.value = "public";
+            }
+
+            function buildPostStorageContent(post, text, metaOverrides) {
+                var normalized = normalizePost(post || {});
+                var meta = Object.assign({}, normalized._contentMeta || POST_META_DEFAULTS, {
+                    visibility: normalized.visibility || "public",
+                    is_pinned: !!normalized.is_pinned,
+                    pinned_at: normalized.pinned_at || null,
+                    updated_at: normalized.updated_at || null
+                }, metaOverrides || {});
+                var nextText = typeof text === "string" ? text : normalized.content || "";
+                return buildPostContentPayload(nextText, meta);
+            }
+
+            async function updatePostRecord(post, updates) {
+                var normalized = normalizePost(post);
+                var nextVisibility = updates.visibility != null ? updates.visibility : normalized.visibility;
+                var nextPinned = updates.is_pinned != null ? !!updates.is_pinned : !!normalized.is_pinned;
+                var nextPinnedAt = Object.prototype.hasOwnProperty.call(updates, "pinned_at") ? updates.pinned_at : normalized.pinned_at;
+                var nextUpdatedAt = Object.prototype.hasOwnProperty.call(updates, "updated_at") ? updates.updated_at : normalized.updated_at;
+                var nextContent = typeof updates.content === "string" ? updates.content : normalized.content;
+                var directPayload = {
+                    content: nextContent,
+                    visibility: nextVisibility,
+                    is_pinned: nextPinned,
+                    pinned_at: nextPinnedAt,
+                    updated_at: nextUpdatedAt
+                };
+                var direct = await sb.from("posts").update(directPayload).eq("id", post.id);
+                if (!direct.error) return { ok: true, fallback: false };
+
+                var message = String(direct.error.message || "");
+                var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message);
+                if (!maybeSchemaIssue) return { ok: false, error: direct.error };
+
+                var fallbackContent = buildPostStorageContent(normalized, nextContent, {
+                    visibility: nextVisibility,
+                    is_pinned: nextPinned,
+                    pinned_at: nextPinnedAt,
+                    updated_at: nextUpdatedAt
+                });
+                var fallback = await sb.from("posts").update({ content: fallbackContent }).eq("id", post.id);
+                if (fallback.error) return { ok: false, error: fallback.error };
+                return { ok: true, fallback: true };
+            }
+
+            function getRenderableComments(comments, visiblePosts) {
+                var visibleIds = new Set((visiblePosts || []).map(function(post) { return String(post.id); }));
+                return (comments || []).filter(function(comment) {
+                    return comment && visibleIds.has(String(comment.post_id));
+                });
+            }
+
+            function formatPostTime(post) {
+                var normalized = normalizePost(post);
+                var time = normalized.created_at ? new Date(normalized.created_at).toLocaleString() : "";
+                if (normalized.updated_at) return time + " · 已编辑";
+                return time;
+            }
+
+            function buildPostBadges(post) {
+                var normalized = normalizePost(post);
+                var bits = [];
+                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '🔒 私密' : '🌍 公开') + '</span>');
+                if (normalized.is_pinned) bits.push('<span class="post-pin-badge">📌 置顶</span>');
+                return bits.join("");
+            }
+
+            function buildPostActionHtml(post, isLiked, canDelete) {
+                var id = escapeHtml(String(post.id)).replace(/'/g, "\\'");
+                var actorKey = escapeHtml(String(post.actor_key || "")).replace(/'/g, "\\'");
+                var actions = [
+                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" onclick="toggleLike(this, \'' + id + '\')">' + (isLiked ? '❤️' : '点赞') + '</button>',
+                    '<button class="action-btn" onclick="openComment(\'' + id + '\')">评论</button>'
+                ];
+                if (canEditPost(post)) {
+                    actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + id + '\')">编辑</button>');
+                }
+                if (canPinPost(post)) {
+                    actions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + id + '\')">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                }
+                if (canDelete) {
+                    actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + id + '\', \'' + actorKey + '\')">删除</button>');
+                }
+                actions.push('<button class="action-btn report-btn" style="margin-left:auto;" data-id="' + escapeHtml(String(post.id)) + '" data-user="' + escapeHtml(post.user_name || "") + '">举报</button>');
+                return actions.join("");
+            }
+
+            function renderPostCard(post, commentMap, likeMap, likeUserMap) {
+                var normalized = normalizePost(post);
+                var pLikes = likeMap[normalized.id] || [];
+                var pComms = commentMap[normalized.id] || [];
+                var isLiked = likeUserMap[normalized.id + '|' + deviceId];
+                var canDelete = normalized.actor_key === deviceId || normalized.actor_key === currentUser || isAdmin();
+                trackView(normalized.id);
+                return `
+                <div class="post glass" data-post-id="${escapeHtml(normalized.id)}">
+                  <div class="post-header">
+                    ${getAvatarHtml(normalized.user_name)}
+                    <div class="post-header-main">
+                      <div class="user-info">
+                        <span class="user-name">${escapeHtml(normalized.user_name)}</span>
+                        <span class="post-time post-meta-line">${escapeHtml(formatPostTime(normalized))}</span>
+                      </div>
+                      <div class="post-badge-stack">${buildPostBadges(normalized)}</div>
+                    </div>
+                  </div>
+                  <div class="content">${escapeHtml(normalized.content || "")}</div>
+                  ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none"></video>` : `<img src="${escapeHtml(normalized.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(normalized.media_url).replace(/'/g, "\\'")}')">`}</div>` : ''}
+                  <div class="post-stats-text">浏览 ${normalized.views || 0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
+                  <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
+                  ${pComms.length ? `<div class="comments">${pComms.map(function(c) {
+                    return `<div class="comment-item" data-comment-id="${escapeHtml(c.id)}"><div><b>${escapeHtml(c.user_name)}:</b> ${escapeHtml(c.content)}</div></div>`;
+                  }).join('')}</div>` : ''}
+                </div>`;
+            }
+
+            function updatePostFilterStateFromDom() {
+                var keywordEl = document.getElementById("postSearchInput");
+                var userEl = document.getElementById("postUserFilter");
+                var startEl = document.getElementById("postStartDate");
+                var endEl = document.getElementById("postEndDate");
+                var visibilityEl = document.getElementById("postVisibilityFilter");
+                var mineEl = document.getElementById("postOnlyMine");
+                postSearchState = {
+                    keyword: keywordEl ? keywordEl.value.trim() : "",
+                    user: userEl ? userEl.value.trim() : "",
+                    startDate: startEl ? startEl.value : "",
+                    endDate: endEl ? endEl.value : "",
+                    visibility: visibilityEl ? visibilityEl.value : "all",
+                    onlyMine: !!(mineEl && mineEl.checked)
+                };
+            }
+
+            window.applyPostFilters = function() {
+                updatePostFilterStateFromDom();
+                feedPage = 0;
+                feedEndReached = false;
+                renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+            };
+
+            window.clearPostFilters = function() {
+                var ids = ["postSearchInput", "postUserFilter", "postStartDate", "postEndDate"];
+                ids.forEach(function(id) {
+                    var el = document.getElementById(id);
+                    if (el) el.value = "";
+                });
+                var visibilityEl = document.getElementById("postVisibilityFilter");
+                var mineEl = document.getElementById("postOnlyMine");
+                if (visibilityEl) visibilityEl.value = "all";
+                if (mineEl) mineEl.checked = false;
+                postSearchState = {
+                    keyword: "",
+                    user: "",
+                    startDate: "",
+                    endDate: "",
+                    visibility: "all",
+                    onlyMine: false
+                };
+                feedPage = 0;
+                feedEndReached = false;
+                renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+            };
+
+            function bindPostFilterEvents() {
+                if (window._postFilterEventsBound) return;
+                window._postFilterEventsBound = true;
+                ["postSearchInput", "postUserFilter", "postStartDate", "postEndDate", "postVisibilityFilter", "postOnlyMine"].forEach(function(id) {
+                    var el = document.getElementById(id);
+                    if (!el) return;
+                    var eventName = el.type === "checkbox" || el.tagName === "SELECT" || el.type === "date" ? "change" : "input";
+                    el.addEventListener(eventName, function() {
+                        window.applyPostFilters();
+                    });
+                });
+            }
+
+            window.openEditPost = function(postId) {
+                var target = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
+                if (!target || !canEditPost(target)) {
+                    showToast("无权编辑这条帖子");
+                    return;
+                }
+                editPostId = String(target.id);
+                var input = document.getElementById("editPostInp");
+                var visibility = document.getElementById("editPostVisibility");
+                if (input) input.value = target.content || "";
+                if (visibility) visibility.value = target.visibility || "public";
+                openModal("editPostModal");
+            };
+
+            window.saveEditPost = async function() {
+                if (!editPostId) return;
+                var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(editPostId); });
+                if (!post || !canEditPost(post)) {
+                    showToast("无权编辑这条帖子");
+                    return;
+                }
+                var input = document.getElementById("editPostInp");
+                var visibility = document.getElementById("editPostVisibility");
+                var btn = document.getElementById("saveEditPostBtn");
+                var nextContent = input ? input.value.trim() : "";
+                var nextVisibility = visibility ? visibility.value : "public";
+                if (!nextContent) {
+                    showToast("请输入帖子内容");
+                    return;
+                }
+                btn.disabled = true;
+                btn.textContent = "保存中...";
+                try {
+                    var result = await updatePostRecord(post, {
+                        content: nextContent.slice(0, 2000),
+                        visibility: nextVisibility,
+                        updated_at: new Date().toISOString()
+                    });
+                    if (!result.ok) {
+                        showToast("保存失败: " + ((result.error && result.error.message) || "未知错误"));
+                        return;
+                    }
+                    clearFeedCache();
+                    closeModal("editPostModal");
+                    editPostId = null;
+                    showToast(result.fallback ? "已保存，使用旧数据兼容模式" : "已保存修改");
+                    await loadFeed(true);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = "保存修改";
+                }
+            };
+
+            window.togglePostPin = async function(postId) {
+                var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
+                if (!post || !canPinPost(post)) {
+                    showToast("无权置顶这条帖子");
+                    return;
+                }
+                var nextPinned = !post.is_pinned;
+                var result = await updatePostRecord(post, {
+                    is_pinned: nextPinned,
+                    pinned_at: nextPinned ? new Date().toISOString() : null
+                });
+                if (!result.ok) {
+                    showToast("置顶操作失败: " + ((result.error && result.error.message) || "未知错误"));
+                    return;
+                }
+                clearFeedCache();
+                showToast(nextPinned ? "帖子已置顶" : "已取消置顶");
+                await loadFeed(true);
+            };
+
+            window.doPublish = async function () {
+                if (!currentUser) { showToast("请先登录"); return; }
+                var content = document.getElementById("postInp").value.trim();
+                var file = document.getElementById("fileInp").files[0];
+                var visibilityEl = document.getElementById("postVisibility");
+                var visibility = visibilityEl ? visibilityEl.value : "public";
+                if (!content && !file) { showToast("请输入内容"); return; }
+                if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
+                var btn = document.getElementById("pubBtn");
+                btn.disabled = true;
+                btn.textContent = "发布中...";
+                try {
+                    var media_url = "";
+                    var media_type = "";
+                    if (file) {
+                        var path = Date.now() + "_" + file.name;
+                        await sb.storage.from("uploads").upload(path, file);
+                        media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
+                        media_type = file.type.startsWith("image") ? "image" : "video";
+                    }
+                    var plainText = content.slice(0, 2000);
+                    var metadata = collectPostMetadata ? collectPostMetadata(visibility) : { visibility: visibility || "public" };
+                    var payload = {
+                        user_name: currentUser,
+                        content: plainText,
+                        media_url: media_url,
+                        media_type: media_type,
+                        actor_key: deviceId,
+                        visibility: metadata.visibility,
+                        is_pinned: false,
+                        pinned_at: null,
+                        updated_at: null
+                    };
+                    var fallbackContent = buildPostContentPayload(plainText, metadata);
+                    var insertRes = await insertPostRecord(payload, fallbackContent);
+                    if (!insertRes.ok) {
+                        showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
+                        return;
+                    }
+                    clearFeedCache();
+                    resetPostComposer();
+                    showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
+                    await loadFeed(true);
+                } catch (e) {
+                    showToast("发布失败: " + (e.message || "网络错误"));
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = "发布动态";
+                }
+            };
+
+            loadFeed = async function(forceRefresh) {
+                var now = Date.now();
+                if (forceRefresh) {
+                    feedPage = 0;
+                    feedEndReached = false;
+                    feedAllPosts = [];
+                    feedAllComments = [];
+                    feedAllLikes = [];
+                    clearFeedCache();
+                }
+                bindPostFilterEvents();
+                if (!forceRefresh) {
+                    var cached = localStorage.getItem(CACHE_KEY);
+                    if (cached) {
+                        try {
+                            var parsed = JSON.parse(cached);
+                            if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION) {
+                                feedAllPosts = normalizePosts(parsed.data.posts || []);
+                                feedAllComments = parsed.data.comments || [];
+                                feedAllLikes = parsed.data.likes || [];
+                                await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+                                setupFeedInfiniteScroll();
+                                return;
+                            }
+                        } catch (e) {}
+                    }
+                }
+                var feed = document.getElementById("feed");
+                if (!forceRefresh && feed) {
+                    feed.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
+                }
+                try {
+                    var results = await Promise.all([
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("comments").select("*").order("created_at"),
+                        sb.from("likes").select("*")
+                    ]);
+                    var postRes = results[0];
+                    var commRes = results[1];
+                    var likeRes = results[2];
+                    if (postRes.error || commRes.error || likeRes.error) {
+                        var err = postRes.error || commRes.error || likeRes.error;
+                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败: ' + escapeHtml(err.message || "未知错误") + '</div>';
+                        return;
+                    }
+                    feedAllPosts = normalizePosts(postRes.data || []);
+                    feedAllComments = commRes.data || [];
+                    feedAllLikes = likeRes.data || [];
+                    localStorage.setItem(CACHE_KEY, JSON.stringify({
+                        data: {
+                            posts: feedAllPosts,
+                            comments: feedAllComments,
+                            likes: feedAllLikes
+                        },
+                        timestamp: now
+                    }));
+                    await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+                    setupFeedInfiniteScroll();
+                } catch (e) {
+                    if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
+                    console.error(e);
+                }
+            };
+            window.loadFeed = loadFeed;
+
+            loadMoreFeedPosts = function() {
+                if (feedEndReached) return;
+                var feed = document.getElementById("feed");
+                var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                var startIdx = feedPage * FEED_PAGE_SIZE;
+                var endIdx = startIdx + FEED_PAGE_SIZE;
+                if (startIdx >= filteredPosts.length) {
+                    feedEndReached = true;
+                    var noMore = document.getElementById("feedNoMore");
+                    if (!noMore) {
+                        noMore = document.createElement("div");
+                        noMore.id = "feedNoMore";
+                        noMore.className = "loading";
+                        noMore.textContent = "没有更多了";
+                        noMore.style.padding = "30px";
+                        noMore.style.textAlign = "center";
+                        feed.appendChild(noMore);
+                    }
+                    return;
+                }
+                appendMorePosts(filteredPosts.slice(startIdx, endIdx), feedAllComments, feedAllLikes);
+                feedPage++;
+            };
+
+            appendMorePosts = function(posts, comments, likes) {
+                var feed = document.getElementById("feed");
+                var maps = buildPostMaps(getRenderableComments(comments, posts), likes);
+                var postsHtml = posts.map(function(post) {
+                    return renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
+                }).join("");
+                var sentinel = document.getElementById("feedSentinel");
+                var tempContainer = document.createElement("div");
+                tempContainer.innerHTML = postsHtml;
+                while (tempContainer.firstChild) {
+                    feed.insertBefore(tempContainer.firstChild, sentinel);
+                }
+                var newPosts = feed.querySelectorAll(".post:not(.visible)");
+                newPosts.forEach(function(p) { getPostVisibilityObserver().observe(p); });
+                updateFeedStats();
+            };
+
+            renderFeedWithAvatars = function(visiblePosts, comments, likes) {
+                var feed = document.getElementById("feed");
+                var scopedComments = getRenderableComments(comments, visiblePosts);
+                var maps = buildPostMaps(scopedComments, likes);
+                var state = getPostSearchState();
+                var hasFilters = !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
+                feed.innerHTML = visiblePosts.length ? visiblePosts.map(function(post) {
+                    return renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
+                }).join("") : '<div class="loading">' + (hasFilters ? '没找到相关帖子' : '快来发布第一条动态吧~') + '</div>';
+                initPostScrollAnimation();
+            };
+
+            renderFeed = async function(payload) {
+                bindPostFilterEvents();
+                var filteredPosts = getFilteredPosts(payload.posts, payload.comments);
+                var visibleComments = getRenderableComments(payload.comments, filteredPosts);
+                document.getElementById("sPosts").textContent = filteredPosts.length;
+                document.getElementById("sViews").textContent = filteredPosts.reduce(function(sum, post) { return sum + (post.views || 0); }, 0);
+                document.getElementById("sLikes").textContent = payload.likes.length + visibleComments.length;
+                filteredPosts.forEach(function(post) {
+                    postInfoCache[post.id] = { content: post.content, user_name: post.user_name };
+                });
+                var allUsers = new Set();
+                filteredPosts.forEach(function(post) { allUsers.add(post.user_name); });
+                visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
+                await loadAvatarsForUsers(Array.from(allUsers));
+                var firstPage = filteredPosts.slice(0, FEED_PAGE_SIZE);
+                feedPage = 1;
+                feedEndReached = firstPage.length >= filteredPosts.length;
+                renderFeedWithAvatars(firstPage, visibleComments, payload.likes);
+                renderFilterSummary(filteredPosts.length);
+                setTimeout(function() { prefetchStatData(); }, 1000);
+            };
+            window.renderFeed = renderFeed;
+
+            document.getElementById("delBtn").onclick = async function() {
+                if (!delPostId) return;
+                var btn = document.getElementById("delBtn");
+                btn.disabled = true;
+                btn.textContent = "删除中...";
+                try {
+                    var key = isAdmin() ? delOwnerKey : deviceId;
+                    var result = await sb.rpc("delete_post_with_actor", {
+                        p_post_id: delPostId,
+                        p_actor_key: key
+                    });
+                    if (result.error) {
+                        showToast("删除失败: " + result.error.message);
+                        return;
+                    }
+                    clearFeedCache();
+                    closeModal("delModal");
+                    showToast("帖子已删除");
+                    delPostId = null;
+                    await loadFeed(true);
+                } catch (e) {
+                    showToast("删除帖子失败");
+                    console.error(e);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = "确认删除";
+                }
+            };
+
+            window.prefetchStatData = async function() {
+                if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
+                try {
+                    var results = await Promise.all([
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("comments").select("*").order("created_at"),
+                        sb.from("likes").select("*").order("created_at", { ascending: false })
+                    ]);
+                    statAllPosts = normalizePosts(results[0].data || []).filter(function(post) {
+                        return post.media_type !== AUTH_MARKER && post.media_type !== DM_MARKER && post.media_type !== "__photo_wall__" && canViewPost(post);
+                    });
+                    statAllComments = results[1].data || [];
+                    statAllLikes = results[2].data || [];
+                    statCacheTime = Date.now();
+                } catch (e) {}
+            };
+
             // ===================== 数据统计详情功能 =====================
             // 存储当前的统计视图状态
             let statCurrentType = null;
@@ -1914,7 +2615,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__');
+                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__' && canViewPost(p); });
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
                     statCacheTime = Date.now();
@@ -1950,7 +2651,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = (postRes.data || []).filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__');
+                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__' && canViewPost(p); });
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
                     statCacheTime = Date.now();
@@ -2234,7 +2935,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
                     var postRes = results[0], commRes = results[1], likeRes = results[2];
-                    statAllPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__'; });
+                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__' && canViewPost(p); });
                     statAllComments = commRes.data || [];
                     statAllLikes = likeRes.data || [];
                     var body = document.getElementById('statModalBody');
