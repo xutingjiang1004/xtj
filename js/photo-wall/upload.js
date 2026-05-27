@@ -8,6 +8,7 @@
     var targetProgress = 0;
     var progressAnimFrame = null;
     var lastProgressTitle = '';
+    var lastTitleChangeTime = 0;
 
     function showUploadProgress() {
         currentProgress = 0;
@@ -16,8 +17,9 @@
         
         var overlay = document.getElementById('uploadProgressOverlay');
         if (overlay) {
-            overlay.classList.add('upload-overlay-visible');
             overlay.style.display = 'flex';
+            void overlay.offsetHeight;
+            overlay.classList.add('upload-overlay-visible');
         }
         
         var bar = document.getElementById('uploadProgressBar');
@@ -51,18 +53,24 @@
                 var text = document.getElementById('uploadProgressText');
                 if (text) text.textContent = '0%';
                 var titleEl = document.getElementById('uploadProgressTitle');
-                if (titleEl) titleEl.textContent = '';
-            }, 300);
+                if (titleEl) titleEl.textContent = '准备中...';
+            }, 350);
         }
     }
 
     function startProgressAnimation() {
         if (progressAnimFrame) return;
         
-        function animate() {
-            if (Math.abs(targetProgress - currentProgress) > 0.1) {
-                // 使用缓动算法平滑过渡
-                currentProgress += (targetProgress - currentProgress) * 0.15;
+        var lastTime = performance.now();
+        
+        function animate(currentTime) {
+            var deltaTime = Math.min(currentTime - lastTime, 50);
+            lastTime = currentTime;
+            
+            if (Math.abs(targetProgress - currentProgress) > 0.05) {
+                // 使用缓动算法平滑过渡，根据设备性能调整
+                var easeFactor = isIOS ? 0.12 : 0.18;
+                currentProgress += (targetProgress - currentProgress) * easeFactor;
                 var displayPercent = Math.round(currentProgress);
                 
                 var bar = document.getElementById('uploadProgressBar');
@@ -74,8 +82,8 @@
                     text.textContent = displayPercent + '%';
                 }
                 progressAnimFrame = requestAnimationFrame(animate);
-            } else {
-                // 目标已达成
+            } else if (targetProgress !== currentProgress) {
+                // 确保最终值完全一致
                 currentProgress = targetProgress;
                 var bar = document.getElementById('uploadProgressBar');
                 if (bar) bar.style.width = Math.max(0, Math.min(100, currentProgress)) + '%';
@@ -93,12 +101,18 @@
         
         var titleEl = document.getElementById('uploadProgressTitle');
         if (titleEl && title && title !== lastProgressTitle) {
-            lastProgressTitle = title;
-            titleEl.style.opacity = '0';
-            setTimeout(function() {
-                titleEl.textContent = title;
-                titleEl.style.opacity = '1';
-            }, 100);
+            var now = Date.now();
+            // 标题切换防抖，避免快速闪烁
+            if (now - lastTitleChangeTime > 200) {
+                lastTitleChangeTime = now;
+                lastProgressTitle = title;
+                titleEl.style.transition = 'opacity 0.12s ease-out';
+                titleEl.style.opacity = '0';
+                setTimeout(function() {
+                    titleEl.textContent = title;
+                    titleEl.style.opacity = '1';
+                }, 120);
+            }
         } else if (titleEl && title) {
             titleEl.textContent = title;
         }

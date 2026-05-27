@@ -1103,32 +1103,78 @@
             
             if (id != null) {
                 window.addDeletedPhotoId(id);
-                // 广播删除同步消息
+                // 广播删除同步消息（同浏览器多标签）
                 if (window.broadcastSync) {
                     window.broadcastSync('photo_deleted', { photoId: id });
                 }
                 
-                // 从数据库删除记录
+                // 先从数据库删除记录（这会触发Supabase Realtime同步）
                 if (window.sb && photo.cloudId) {
                     try {
-                        await window.sb.from('posts').delete().eq('id', photo.cloudId);
+                        var deleteRes = await window.sb
+                            .from('posts')
+                            .delete()
+                            .eq('id', photo.cloudId);
+                        
+                        if (deleteRes.error) {
+                            console.warn('删除数据库记录失败:', deleteRes.error);
+                        }
                     } catch(e) {
-                        console.warn('删除数据库记录失败:', e);
+                        console.warn('删除数据库记录异常:', e);
                     }
                 }
                 
-                // 同时从Supabase Storage删除物理文件
-                if (window.sb && photo.imageUrl) {
-                    var origPath = window.extractStoragePath(photo.imageUrl);
-                    if (origPath) {
-                        var thumbPath = origPath.replace('/photos/', '/thumbs/');
-                        window.sb.storage.from('uploads').remove([origPath, thumbPath]).catch(function(e) {
-                            console.warn('删除存储文件失败:', e);
-                        });
+                // 同时从Supabase Storage删除物理文件（原图+缩略图）
+                if (window.sb) {
+                    try {
+                        var deletePromises = [];
+                        
+                        if (photo.imageUrl) {
+                            var origPath = window.extractStoragePath(photo.imageUrl);
+                            if (origPath) {
+                                deletePromises.push(
+                                    window.sb.storage.from('uploads').remove([origPath])
+                                );
+                            }
+                        }
+                        
+                        if (photo.thumbUrl) {
+                            var thumbPath = window.extractStoragePath(photo.thumbUrl);
+                            if (thumbPath) {
+                                deletePromises.push(
+                                    window.sb.storage.from('uploads').remove([thumbPath])
+                                );
+                            }
+                        }
+                        
+                        // 如果没有提取到path，尝试从imageUrl构造
+                        if (deletePromises.length === 0 && photo.imageUrl) {
+                            try {
+                                var urlObj = new URL(photo.imageUrl);
+                                var pathSegments = urlObj.pathname.split('/');
+                                var fileName = pathSegments[pathSegments.length - 1];
+                                if (fileName) {
+                                    var origPathFallback = 'photos/' + decodeURIComponent(fileName);
+                                    var thumbPathFallback = 'thumbs/' + decodeURIComponent(fileName);
+                                    deletePromises.push(
+                                        window.sb.storage.from('uploads').remove([origPathFallback, thumbPathFallback])
+                                    );
+                                }
+                            } catch(e) {}
+                        }
+                        
+                        if (deletePromises.length > 0) {
+                            Promise.all(deletePromises).catch(function(e) {
+                                console.warn('清理存储文件时发生问题:', e);
+                            });
+                        }
+                    } catch(e) {
+                        console.warn('删除存储文件失败:', e);
                     }
                 }
             }
             
+            // 从本地数据移除
             var idxInGlobal = -1;
             if (window.photoWallData) {
                 for (var i = 0; i < window.photoWallData.length; i++) {

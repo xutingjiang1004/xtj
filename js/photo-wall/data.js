@@ -18,6 +18,7 @@
     // 实时订阅句柄
     var realtimeSubscription = null;
     var isSubscribed = false;
+    var subscriptionRetryTimer = null;
     
     // 多设备同步：BroadcastChannel API
     var syncChannel = null;
@@ -44,7 +45,7 @@
                     // 有新照片上传，刷新数据
                     setTimeout(function() {
                         fetchLatestPhotos();
-                    }, 1000);
+                    }, 800);
                 }
             };
         } catch(e) {
@@ -56,7 +57,7 @@
     function broadcastSync(type, data) {
         if (syncChannel) {
             try {
-                syncChannel.postMessage({ type: type, ...data });
+                syncChannel.postMessage({ type: type, ...data, ts: Date.now() });
             } catch(e) {}
         }
         // 同时更新localStorage用于跨标签页同步
@@ -71,10 +72,15 @@
     window.broadcastSync = broadcastSync;
     
     // localStorage备用同步方案（用于不支持BroadcastChannel的环境）
+    var lastLocalStorageTs = 0;
     window.addEventListener('storage', function(event) {
         if (event.key === 'xtj_photo_sync_data') {
             try {
                 var syncData = JSON.parse(event.newValue || '{}');
+                // 防抖，避免重复处理
+                if (syncData.lastUpdate && syncData.lastUpdate <= lastLocalStorageTs) return;
+                lastLocalStorageTs = syncData.lastUpdate;
+                
                 if (syncData.lastAction === 'photo_deleted' && syncData.lastPhotoId) {
                     var deletedId = String(syncData.lastPhotoId);
                     var idx = window.photoWallData.findIndex(function(p) {
@@ -91,19 +97,31 @@
                 } else if (syncData.lastAction === 'photo_added') {
                     setTimeout(function() {
                         fetchLatestPhotos();
-                    }, 1000);
+                    }, 800);
                 }
             } catch(e) {}
         }
     });
     
-    // 建立Supabase实时订阅
+    // 建立Supabase实时订阅（主同步机制）
     function setupRealtimeSubscription() {
         if (isSubscribed || !window.sb) return;
         
         try {
+            // 先清理旧的订阅
+            if (realtimeSubscription) {
+                try {
+                    window.sb.removeChannel(realtimeSubscription);
+                } catch(e) {}
+            }
+            
             realtimeSubscription = window.sb
-                .channel('photo-wall-changes')
+                .channel('photo-wall-realtime', {
+                    config: {
+                        broadcast: { self: true },
+                        presence: { key: 'photo-wall' }
+                    }
+                })
                 .on(
                     'postgres_changes',
                     {
@@ -113,7 +131,7 @@
                         filter: 'media_type=eq.' + PHOTO_WALL_MARKER
                     },
                     function(payload) {
-                        console.log('收到实时更新:', payload);
+                        console.log('[Realtime] 收到照片墙更新:', payload);
                         
                         if (payload.eventType === 'INSERT') {
                             // 新照片添加
@@ -128,6 +146,7 @@
                                     if (window.renderPhotoWallWithoutReload) {
                                         window.renderPhotoWallWithoutReload();
                                     }
+                                    // 不在这再showToast了，避免重复提示
                                 }
                             }
                         } else if (payload.eventType === 'DELETE') {
@@ -142,27 +161,66 @@
                                 if (window.renderPhotoWallWithoutReload) {
                                     window.renderPhotoWallWithoutReload();
                                 }
-                                window.showToast('照片已被删除');
+                                window.showToast('照片已删除');
+                            }
+                        } else if (payload.eventType === 'UPDATE') {
+                            // 照片更新
+                            var updatedPhoto = normalizePhotoWallRow(payload.new);
+                            if (updatedPhoto && updatedPhoto.id) {
+                                var idx = window.photoWallData.findIndex(function(p) {
+                                    return String(p.id) === String(updatedPhoto.id);
+                                });
+                                if (idx >= 0) {
+                                    window.photoWallData[idx] = updatedPhoto;
+                                    saveLocalPhotoWallData();
+                                    if (window.renderPhotoWallWithoutReload) {
+                                        window.renderPhotoWallWithoutReload();
+                                    }
+                                }
                             }
                         }
                     }
                 )
                 .subscribe(function(status) {
-                    console.log('实时订阅状态:', status);
+                    console.log('[Realtime] 订阅状态:', status);
                     isSubscribed = status === 'SUBSCRIBED';
+                    
+                    if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+                        // 订阅断开，延迟重试
+                        isSubscribed = false;
+                        if (subscriptionRetryTimer) {
+                            clearTimeout(subscriptionRetryTimer);
+                        }
+                        subscriptionRetryTimer = setTimeout(function() {
+                            setupRealtimeSubscription();
+                        }, 3000);
+                    }
                 });
         } catch(e) {
-            console.error('建立实时订阅失败:', e);
+            console.error('[Realtime] 建立订阅失败:', e);
+            // 失败重试
+            if (subscriptionRetryTimer) {
+                clearTimeout(subscriptionRetryTimer);
+            }
+            subscriptionRetryTimer = setTimeout(function() {
+                setupRealtimeSubscription();
+            }, 5000);
         }
     }
     window.setupRealtimeSubscription = setupRealtimeSubscription;
     
     // 清理实时订阅
     function cleanupRealtimeSubscription() {
-        if (realtimeSubscription) {
+        if (subscriptionRetryTimer) {
+            clearTimeout(subscriptionRetryTimer);
+            subscriptionRetryTimer = null;
+        }
+        if (realtimeSubscription && window.sb) {
             try {
-                realtimeSubscription.unsubscribe();
-            } catch(e) {}
+                window.sb.removeChannel(realtimeSubscription);
+            } catch(e) {
+                console.warn('[Realtime] 清理订阅失败:', e);
+            }
             realtimeSubscription = null;
         }
         isSubscribed = false;
@@ -274,7 +332,7 @@
         }
     }
 
-    async function loadPhotoWallData() {
+    async function loadPhotoWallData(forceRefresh) {
         var localData = loadLocalPhotoWallData();
         currentPage = 0;
         hasMore = true;
@@ -289,7 +347,7 @@
             await migrateLocalPhotosToCloud(localData);
 
             var lastSync = localStorage.getItem(photoWallLastSyncKey);
-            var shouldQuickLoad = lastSync && (Date.now() - parseInt(lastSync) < 300000);
+            var shouldQuickLoad = !forceRefresh && lastSync && (Date.now() - parseInt(lastSync) < 300000);
 
             if (shouldQuickLoad && localData.length > 0) {
                 window.photoWallData = localData;
@@ -297,6 +355,13 @@
                 // 启动实时订阅
                 setTimeout(setupRealtimeSubscription, 1000);
                 return window.photoWallData;
+            }
+
+            // 强制刷新时清除旧缓存
+            if (forceRefresh) {
+                try {
+                    localStorage.removeItem(photoWallLastSyncKey);
+                } catch(e) {}
             }
 
             var firstPage = await loadPhotoWallPage(0);
