@@ -178,6 +178,14 @@
     }
     window.syncProfileUser = syncProfileUser;
 
+    document.addEventListener('click', function(e) {
+        var btn = e.target.closest('.report-btn');
+        if (!btn) return;
+        var postId = btn.getAttribute('data-id');
+        var userName = btn.getAttribute('data-user') || '';
+        window.openReport('post', postId, userName);
+    });
+
     window.openReport = function(targetType, targetId, targetUser) {
         var modal = document.getElementById('reportModal');
         if (!modal) return;
@@ -205,20 +213,36 @@
             var evidenceUrl = '';
             if (evidenceFile) {
                 var path = 'reports/' + Date.now() + '_' + evidenceFile.name;
-                await window.sb.storage.from('uploads').upload(path, evidenceFile);
+                var uploadRes = await window.sb.storage.from('uploads').upload(path, evidenceFile);
+                if (uploadRes.error) throw uploadRes.error;
                 evidenceUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
             }
-            var { error } = await window.sb.from('reports').insert([{
+            var payload = {
+                reporter_name: window.currentUser || 'anonymous',
                 target_type: target.type,
                 target_id: target.id,
-                target_user: target.user,
-                reporter: window.currentUser || 'anonymous',
-                category: category,
-                reason: reason,
+                target_user: target.user || '',
+                report_category: category,
+                report_reason: reason,
                 evidence_url: evidenceUrl,
-                actor_key: window.deviceId || 'unknown'
-            }]);
-            if (error) throw error;
+                status: 'pending'
+            };
+            var { error } = await window.sb.from('reports').insert([payload]);
+            if (error) {
+                var fallbackPayload = {
+                    reporter: window.currentUser || 'anonymous',
+                    target_type: target.type,
+                    target_id: target.id,
+                    target_user: target.user || '',
+                    category: category,
+                    reason: reason,
+                    evidence_url: evidenceUrl,
+                    actor_key: window.deviceId || 'unknown'
+                };
+                console.warn('[report] 主字段插入失败，尝试备用字段:', error.message);
+                var { error: err2 } = await window.sb.from('reports').insert([fallbackPayload]);
+                if (err2) throw err2;
+            }
             window.showToast('举报已提交，感谢你的反馈！');
             window.closeModal('reportModal');
         } catch (e) {
@@ -264,7 +288,7 @@
     document.addEventListener('change', function(e) {
         if (e.target && e.target.id === 'profileNotifToggle') {
             var enabled = e.target.checked;
-            try { localStorage.setItem('xtj_notif_enabled', enabled ? '1' : '0'); } catch(e2) {}
+            try { localStorage.setItem('xtj-notif', enabled ? 'on' : 'off'); } catch(e2) {}
         }
     });
 
@@ -277,8 +301,8 @@
         }
         if (notifToggle) {
             try {
-                var saved = localStorage.getItem('xtj_notif_enabled');
-                if (saved !== null) notifToggle.checked = saved === '1';
+                var saved = localStorage.getItem('xtj-notif');
+                if (saved !== null) notifToggle.checked = saved !== 'off';
             } catch(e) {}
         }
     }

@@ -183,7 +183,7 @@
     var isProcessingQueue = false;
     var imgCache = new Map(); // 图片缓存
     var activeLoadCount = 0;
-    var MAX_CONCURRENT_LOADS = 2; // 限制并发加载数
+    var MAX_CONCURRENT_LOADS = 4; // 限制并发加载数
 
     function processImageQueue() {
         if (isProcessingQueue || imageLoadQueue.length === 0) return;
@@ -287,7 +287,7 @@
                 processImageQueue();
             }
         }, { 
-            rootMargin: '200px 0px', // 减少预加载距离
+            rootMargin: '500px 0px', // 减少预加载距离
             threshold: 0.05
         });
 
