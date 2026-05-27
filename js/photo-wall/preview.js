@@ -1,4 +1,4 @@
-
+﻿
 (function() {
     var photoPreviewActive = false;
     var photoPreviewCurrent = null;
@@ -132,7 +132,7 @@
     function ppSwapImage(imgEl, url) {
         if (!imgEl) return;
 
-        // 先完全清理旧的监听器
+        // 鍏堝畬鍏ㄦ竻鐞嗘棫鐨勭洃鍚櫒
         imgEl.onload = null;
         imgEl.onerror = null;
 
@@ -375,7 +375,7 @@
         var timeEl = document.getElementById('photoPreviewTime');
         var viewsEl = document.getElementById('photoPreviewViewsCount');
 
-        if (userEl) userEl.textContent = photo.username || '未知用户';
+        if (userEl) userEl.textContent = photo.username || '鏈煡鐢ㄦ埛';
         if (timeEl) {
             var date = new Date(photo.timestamp);
             timeEl.textContent = date.toLocaleString('zh-CN', {
@@ -390,12 +390,13 @@
 
         var deleteBtn = document.getElementById('ppDeleteBtn');
         if (deleteBtn) {
-            if (window.currentUser === photo.username) {
+            var isAdmin = window.currentUser === 'xxz';
+            var isOwner = window.currentUser === photo.username;
+            if (isAdmin || isOwner) {
                 deleteBtn.style.display = 'flex';
                 deleteBtn.title = '删除';
             } else {
-                deleteBtn.style.display = 'flex';
-                deleteBtn.title = '仅照片上传者可删除';
+                deleteBtn.style.display = 'none';
             }
         }
     }
@@ -473,7 +474,7 @@
         }
 
         if (!keepList) {
-            ppSortedPhotos = window.photoWallData ? window.photoWallData.slice() : [];
+            ppSortedPhotos = window.pwCurrentSortedPhotos ? window.pwCurrentSortedPhotos.slice() : (window.photoWallData ? window.photoWallData.slice() : []);
         }
         if (!ppSortedPhotos || ppSortedPhotos.length === 0) {
             window.showToast('\u6682\u65e0\u7167\u7247');
@@ -551,16 +552,14 @@
         var originRect = null;
         var originImg = null;
         var grid = document.getElementById('photoGrid');
-        if (grid) {
-            var items = grid.querySelectorAll('.photo-wall-item');
-            if (items[index]) {
-                var thumbImg = items[index].querySelector('img');
-                if (thumbImg && thumbImg.complete) {
-                    var r = thumbImg.getBoundingClientRect();
-                    if (r && r.width > 0 && r.height > 0) {
-                        originRect = r;
-                        originImg = thumbImg;
-                    }
+        if (grid && photo && photo.id != null) {
+            var thumbItem = grid.querySelector('.photo-wall-item[data-photo-id="' + String(photo.id).replace(/"/g, '\\"') + '"]');
+            var thumbImg = thumbItem ? thumbItem.querySelector('img') : null;
+            if (thumbImg && thumbImg.complete) {
+                var r = thumbImg.getBoundingClientRect();
+                if (r && r.width > 0 && r.height > 0) {
+                    originRect = r;
+                    originImg = thumbImg;
                 }
             }
         }
@@ -677,7 +676,7 @@
             return;
         }
 
-        // 调用清理函数防止内存泄漏
+        // 璋冪敤娓呯悊鍑芥暟闃叉鍐呭瓨娉勬紡
         if (overlay._cleanupPreview) {
             overlay._cleanupPreview();
         }
@@ -783,7 +782,7 @@
             modalEl.innerHTML =
                 '<div class="pp-info-modal-content">' +
                 '<div class="pp-info-modal-header">' +
-                '<span class="pp-info-modal-title">照片详情</span>' +
+                '<span class="pp-info-modal-title">鐓х墖璇︽儏</span>' +
                 '<button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button>' +
                 '</div>' +
                 '<div class="pp-info-modal-body" id="ppInfoModalBody"></div>' +
@@ -802,7 +801,7 @@
             });
         }
 
-        var sizeStr = '未知';
+        var sizeStr = '鏈煡';
         if (photo.fileSize) {
             var size = photo.fileSize;
             if (size >= 1024 * 1024) {
@@ -814,7 +813,7 @@
             }
         }
 
-        var dateStr = '未知';
+        var dateStr = '鏈煡';
         if (photo.timestamp) {
             dateStr = new Date(photo.timestamp).toLocaleString('zh-CN');
         }
@@ -823,36 +822,36 @@
         if (photo.exif) {
             exifHtml = '<div class="pp-info-divider"></div>' +
                 '<div class="pp-info-section">' +
-                '<div class="pp-info-section-title">拍摄参数</div>';
+                '<div class="pp-info-section-title">鎷嶆憚鍙傛暟</div>';
             if (photo.exif.make || photo.exif.model) {
-                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">设备</span><span class="pp-info-value">' + (photo.exif.model || photo.exif.make || '未知') + '</span></div>';
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">璁惧</span><span class="pp-info-value">' + (photo.exif.model || photo.exif.make || '鏈煡') + '</span></div>';
             }
             if (photo.exif.fNumber) {
-                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">光圈</span><span class="pp-info-value">f/' + photo.exif.fNumber + '</span></div>';
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">鍏夊湀</span><span class="pp-info-value">f/' + photo.exif.fNumber + '</span></div>';
             }
             if (photo.exif.exposureTime) {
-                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">快门</span><span class="pp-info-value">' + photo.exif.exposureTime + '</span></div>';
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">蹇棬</span><span class="pp-info-value">' + photo.exif.exposureTime + '</span></div>';
             }
             if (photo.exif.iso) {
                 exifHtml += '<div class="pp-info-row"><span class="pp-info-label">ISO</span><span class="pp-info-value">' + photo.exif.iso + '</span></div>';
             }
             if (photo.exif.focalLength) {
-                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">焦距</span><span class="pp-info-value">' + photo.exif.focalLength + 'mm</span></div>';
+                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">鐒﹁窛</span><span class="pp-info-value">' + photo.exif.focalLength + 'mm</span></div>';
             }
             exifHtml += '</div>';
         }
 
         document.getElementById('ppInfoModalBody').innerHTML =
             '<div class="pp-info-section">' +
-            '<div class="pp-info-section-title">元数据</div>' +
-            '<div class="pp-info-row"><span class="pp-info-label">上传者</span><span class="pp-info-value">' + (photo.username || '未知') + '</span></div>' +
-            '<div class="pp-info-row"><span class="pp-info-label">上传时间</span><span class="pp-info-value">' + dateStr + '</span></div>' +
-            '<div class="pp-info-row"><span class="pp-info-label">浏览量</span><span class="pp-info-value">' + (photo.views || 0) + ' 次</span></div>' +
+            '<div class="pp-info-section-title">鍏冩暟鎹?/div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">涓婁紶鑰?/span><span class="pp-info-value">' + (photo.username || '鏈煡') + '</span></div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">涓婁紶鏃堕棿</span><span class="pp-info-value">' + dateStr + '</span></div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">娴忚閲?/span><span class="pp-info-value">' + (photo.views || 0) + ' 娆?/span></div>' +
             '</div>' +
             '<div class="pp-info-divider"></div>' +
             '<div class="pp-info-section">' +
-            '<div class="pp-info-section-title">文件信息</div>' +
-            '<div class="pp-info-row"><span class="pp-info-label">文件大小</span><span class="pp-info-value">' + sizeStr + '</span></div>' +
+            '<div class="pp-info-section-title">鏂囦欢淇℃伅</div>' +
+            '<div class="pp-info-row"><span class="pp-info-label">鏂囦欢澶у皬</span><span class="pp-info-value">' + sizeStr + '</span></div>' +
             '</div>' +
             exifHtml;
 
@@ -1092,109 +1091,39 @@
             };
         }
 
-        window.showConfirm('删除照片', '确定删除这张照片吗？', '是', async function() {
+        window.showConfirm('删除照片', '确定删除这张照片吗？', '确认删除', async function() {
             var currentPhotos = ppSortedPhotos;
             if (ppPhotoIdx < 0 || ppPhotoIdx >= currentPhotos.length) return;
             var photo = currentPhotos[ppPhotoIdx];
             if (!photo) return;
-            var id = photo.id;
-            
+
+            var deleteBtn = document.getElementById('ppDeleteBtn');
+            var confirmOkBtn = document.getElementById('ppConfirmOkBtn');
+            if (deleteBtn) deleteBtn.disabled = true;
+            if (confirmOkBtn) confirmOkBtn.disabled = true;
+
             window.showToast('正在删除...');
-            
-            if (id != null) {
-                window.addDeletedPhotoId(id);
-                // 广播删除同步消息（同浏览器多标签）
-                if (window.broadcastSync) {
-                    window.broadcastSync('photo_deleted', { photoId: id });
-                }
-                
-                // 先从数据库删除记录（这会触发Supabase Realtime同步）
-                if (window.sb && photo.cloudId) {
-                    try {
-                        var deleteRes = await window.sb
-                            .from('posts')
-                            .delete()
-                            .eq('id', photo.cloudId);
-                        
-                        if (deleteRes.error) {
-                            console.warn('删除数据库记录失败:', deleteRes.error);
-                        }
-                    } catch(e) {
-                        console.warn('删除数据库记录异常:', e);
-                    }
-                }
-                
-                // 同时从Supabase Storage删除物理文件（原图+缩略图）
-                if (window.sb) {
-                    try {
-                        var deletePromises = [];
-                        
-                        if (photo.imageUrl) {
-                            var origPath = window.extractStoragePath(photo.imageUrl);
-                            if (origPath) {
-                                deletePromises.push(
-                                    window.sb.storage.from('uploads').remove([origPath])
-                                );
-                            }
-                        }
-                        
-                        if (photo.thumbUrl) {
-                            var thumbPath = window.extractStoragePath(photo.thumbUrl);
-                            if (thumbPath) {
-                                deletePromises.push(
-                                    window.sb.storage.from('uploads').remove([thumbPath])
-                                );
-                            }
-                        }
-                        
-                        // 如果没有提取到path，尝试从imageUrl构造
-                        if (deletePromises.length === 0 && photo.imageUrl) {
-                            try {
-                                var urlObj = new URL(photo.imageUrl);
-                                var pathSegments = urlObj.pathname.split('/');
-                                var fileName = pathSegments[pathSegments.length - 1];
-                                if (fileName) {
-                                    var origPathFallback = 'photos/' + decodeURIComponent(fileName);
-                                    var thumbPathFallback = 'thumbs/' + decodeURIComponent(fileName);
-                                    deletePromises.push(
-                                        window.sb.storage.from('uploads').remove([origPathFallback, thumbPathFallback])
-                                    );
-                                }
-                            } catch(e) {}
-                        }
-                        
-                        if (deletePromises.length > 0) {
-                            Promise.all(deletePromises).catch(function(e) {
-                                console.warn('清理存储文件时发生问题:', e);
-                            });
-                        }
-                    } catch(e) {
-                        console.warn('删除存储文件失败:', e);
-                    }
-                }
+            var deleteResult = { ok: true };
+            if (window.deletePhotoWallPhoto) {
+                deleteResult = await window.deletePhotoWallPhoto(photo, { render: false });
             }
-            
-            // 从本地数据移除
-            var idxInGlobal = -1;
-            if (window.photoWallData) {
-                for (var i = 0; i < window.photoWallData.length; i++) {
-                    if (window.photoWallData[i].id === id) {
-                        idxInGlobal = i;
-                        break;
-                    }
+
+            if (deleteResult && deleteResult.ok) {
+                ppSortedPhotos = currentPhotos.filter(function(item) {
+                    return item && String(item.id) !== String(photo.id);
+                });
+
+                closePhotoPreview();
+                if (window.renderPhotoWallWithoutReload) {
+                    window.renderPhotoWallWithoutReload();
+                } else if (window.renderPhotoWall) {
+                    window.renderPhotoWall();
                 }
-                if (idxInGlobal >= 0) {
-                    window.photoWallData.splice(idxInGlobal, 1);
-                }
-                window.saveLocalPhotoWallData();
-            }
-            closePhotoPreview();
-            if (window.renderPhotoWallWithoutReload) {
-                window.renderPhotoWallWithoutReload();
+                window.showToast('已删除，正在同步到其他设备');
             } else {
-                window.renderPhotoWall();
+                if (deleteBtn) deleteBtn.disabled = false;
+                if (confirmOkBtn) confirmOkBtn.disabled = false;
             }
-            window.showToast('已删除');
         });
     };
 
@@ -1355,7 +1284,7 @@
                 try { navigator.vibrate(10); } catch (e) {}
             }
 
-            // 模拟进度动画
+            // 妯℃嫙杩涘害鍔ㄧ敾
             var dlTimer = setInterval(function() {
                 var bar = document.getElementById('ppDownloadProgressBar');
                 if (!bar) { clearInterval(dlTimer); return; }
@@ -1382,7 +1311,7 @@
             ppHideDownloadOverlay();
             ppDownloadActive = false;
 
-            // 降级：直接打开图片链接
+            // 闄嶇骇锛氱洿鎺ユ墦寮€鍥剧墖閾炬帴
             try {
                 var a = document.createElement('a');
                 a.href = photo.imageUrl;
@@ -1446,7 +1375,6 @@
 
         var startX, startY, startTime;
         
-        // 清理函数，防止内存泄漏
         function cleanupPreview() {
             if (ppLongPressTimer) {
                 clearTimeout(ppLongPressTimer);
@@ -1467,7 +1395,6 @@
             ppDismissState.isActive = false;
         }
         
-        // 保存清理函数供外部调用
         overlay._cleanupPreview = cleanupPreview;
 
         overlay.addEventListener('pointerdown', function(e) {
@@ -1839,4 +1766,3 @@
         });
     }
 })();
-

@@ -10,18 +10,45 @@
     var lastProgressTitle = '';
     var lastTitleChangeTime = 0;
 
+    function setUploadStatusText(text) {
+        var statusEl = document.getElementById('uploadProgressStatus');
+        if (statusEl) {
+            statusEl.textContent = text || '';
+        }
+    }
+
     function showUploadProgress() {
         currentProgress = 0;
         targetProgress = 0;
         lastProgressTitle = '';
-        
+
         var overlay = document.getElementById('uploadProgressOverlay');
+        var container = overlay ? overlay.querySelector('.upload-progress-container') : null;
         if (overlay) {
             overlay.style.display = 'flex';
             void overlay.offsetHeight;
             overlay.classList.add('upload-overlay-visible');
         }
-        
+        if (container) {
+            var trigger = document.getElementById('photoUploadBtn');
+            var triggerRect = trigger ? trigger.getBoundingClientRect() : null;
+            container.style.transition = 'none';
+            if (triggerRect && triggerRect.width > 0 && triggerRect.height > 0) {
+                var finalRect = container.getBoundingClientRect();
+                var dx = triggerRect.left + triggerRect.width / 2 - (finalRect.left + finalRect.width / 2);
+                var dy = triggerRect.top + triggerRect.height / 2 - (finalRect.top + finalRect.height / 2);
+                var scale = Math.max(0.42, Math.min(0.72, triggerRect.width / finalRect.width));
+                container.style.transformOrigin = 'center center';
+                container.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
+                container.style.opacity = '0.4';
+            }
+            requestAnimationFrame(function() {
+                container.style.transition = '';
+                container.style.transform = '';
+                container.style.opacity = '';
+            });
+        }
+
         var bar = document.getElementById('uploadProgressBar');
         if (bar) {
             bar.style.width = '0%';
@@ -30,8 +57,12 @@
         if (text) {
             text.textContent = '0%';
         }
-        
-        // 开始平滑动画循环
+        var titleEl = document.getElementById('uploadProgressTitle');
+        if (titleEl) {
+            titleEl.textContent = '准备上传照片';
+        }
+        setUploadStatusText('正在整理照片内容...');
+
         startProgressAnimation();
     }
 
@@ -40,7 +71,7 @@
             cancelAnimationFrame(progressAnimFrame);
             progressAnimFrame = null;
         }
-        
+
         var overlay = document.getElementById('uploadProgressOverlay');
         if (overlay) {
             overlay.classList.remove('upload-overlay-visible');
@@ -53,7 +84,8 @@
                 var text = document.getElementById('uploadProgressText');
                 if (text) text.textContent = '0%';
                 var titleEl = document.getElementById('uploadProgressTitle');
-                if (titleEl) titleEl.textContent = '准备中...';
+                if (titleEl) titleEl.textContent = '准备上传照片';
+                setUploadStatusText('正在整理照片内容...');
             }, 350);
         }
     }
@@ -98,11 +130,21 @@
 
     function updateUploadProgress(percent, title) {
         targetProgress = Math.max(0, Math.min(100, percent));
+        if (percent >= 100) {
+            setUploadStatusText('照片已同步到照片墙');
+        } else if (percent >= 90) {
+            setUploadStatusText('正在写入照片墙与同步数据...');
+        } else if (percent >= 75) {
+            setUploadStatusText('正在生成更轻的预览图...');
+        } else if (percent >= 30) {
+            setUploadStatusText('正在安全上传原图...');
+        } else {
+            setUploadStatusText('正在整理照片内容...');
+        }
         
         var titleEl = document.getElementById('uploadProgressTitle');
         if (titleEl && title && title !== lastProgressTitle) {
             var now = Date.now();
-            // 标题切换防抖，避免快速闪烁
             if (now - lastTitleChangeTime > 200) {
                 lastTitleChangeTime = now;
                 lastProgressTitle = title;
@@ -117,7 +159,6 @@
             titleEl.textContent = title;
         }
         
-        // 确保动画循环在运行
         if (!progressAnimFrame) {
             startProgressAnimation();
         }
@@ -176,7 +217,6 @@
         });
     }
 
-    // iOS安全的图片压缩 - 限制canvas尺寸，避免内存溢出
     function compressToTargetBlob(file, maxBytes) {
         return new Promise(async function(resolve, reject) {
             try {
@@ -221,7 +261,7 @@
                         ctx.imageSmoothingQuality = 'high';
                         
                         ctx.save();
-                        switch (orientation) {
+                        switch(orientation) {
                             case 2:
                                 ctx.translate(canvasWidth, 0);
                                 ctx.scale(-1, 1);
@@ -314,7 +354,7 @@
 
     window.triggerPhotoUpload = function() {
         if (!window.currentUser) {
-            window.showToast('\u8bf7\u5148\u767b\u5f55');
+            window.showToast('请先登录');
             return;
         }
         var input = document.getElementById('photoFileInput');
@@ -322,211 +362,199 @@
     };
 
     window.handlePhotoUpload = async function(e) {
-        var file = e.target.files && e.target.files[0];
-        if (!file) return;
+        var files = e.target.files && Array.from(e.target.files);
+        if (!files || files.length === 0) return;
         
         if (!window.currentUser) {
-            window.showToast('\u8bf7\u5148\u767b\u5f55');
+            window.showToast('请先登录');
             e.target.value = '';
             return;
         }
         
-        if (file.size > 50 * 1024 * 1024) {
-            window.showToast('\u56fe\u7247\u8d85\u8fc7 50MB \u9650\u5236');
+        // 过滤有效图片
+        var validFiles = [];
+        for (var i = 0; i < files.length; i++) {
+            var f = files[i];
+            if (!f.type.startsWith('image/')) {
+                window.showToast('仅支持上传图片文件');
+                continue;
+            }
+            if (f.size > 50 * 1024 * 1024) {
+                window.showToast('单张图片大小不能超过 50MB');
+                continue;
+            }
+            if (f.name.toLowerCase().endsWith('.heic') || f.name.toLowerCase().endsWith('.heif')) {
+                window.showToast('iOS HEIC格式请先在设置中改为"兼容性最佳"');
+                continue;
+            }
+            validFiles.push(f);
+        }
+        
+        if (validFiles.length === 0) {
             e.target.value = '';
             return;
         }
         
-        if (!file.type.startsWith('image/')) {
-            window.showToast('\u8bf7\u9009\u62e9\u56fe\u7247\u6587\u4ef6');
-            e.target.value = '';
-            return;
-        }
-        
-        // iOS: 检查HEIC格式并提示
-        if (file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif')) {
-            window.showToast('iOS HEIC格式请先在设置中改为"兼容性最佳"');
-            e.target.value = '';
-            return;
-        }
+        var successCount = 0;
+        var failCount = 0;
         
         try {
             var sb = window.sb;
             if (!sb) {
-                window.showToast('\u7f51\u7edc\u8fde\u63a5\u5f02\u5e38');
+                window.showToast('网络连接异常');
                 e.target.value = '';
                 return;
             }
-            
-            // 使用最简单可靠的文件名 - 纯随机字符串 + 时间戳
-            var ts = Date.now();
-            var randomStr = Math.random().toString(36).substring(2, 10);
-            var ext = file.type === 'image/png' ? '.png' : '.jpg';
-            var baseName = ts + '_' + randomStr + ext;
-
-            var origPath = 'photos/' + baseName;
             
             showUploadProgress();
-            updateUploadProgress(5, '\u6b63\u5728\u5904\u7406\u56fe\u7247...');
             
-            // iOS: 使用较小的压缩目标，避免内存问题
-            var compressTarget = isIOS ? 512 * 1024 : 1 * 1024 * 1024;
-            var compressed = await compressToTargetBlob(file, compressTarget);
-            var finalSize = compressed.size;
-            
-            updateUploadProgress(30, '\u6b63\u5728\u4e0a\u4f20\u56fe\u7247...');
-
-            // 分步上传：先传主图，再传缩略图
-            var progressTimer = setInterval(function() {
-                var el = document.getElementById('uploadProgressBar');
-                if (!el) { clearInterval(progressTimer); return; }
-                var cur = parseInt(el.style.width) || 30;
-                if (cur < 70) {
-                    updateUploadProgress(cur + 1, '\u6b63\u5728\u4e0a\u4f20\u56fe\u7247...');
-                }
-            }, 300);
-
-            // Step 1: 上传主图
-            console.log('准备上传文件:', origPath, '大小:', compressed.size, '类型:', file.type);
-            
-            var uploadResult = await sb.storage.from('uploads').upload(origPath, compressed, {
-                contentType: file.type,
-                cacheControl: '31536000',
-                upsert: false
-            });
-
-            clearInterval(progressTimer);
-            
-            console.log('上传结果:', uploadResult);
-            
-            if (uploadResult.error) {
-                console.error('上传详细错误:', uploadResult.error);
-                throw new Error('\u4e0a\u4f20\u5931\u8d25: ' + (uploadResult.error.message || JSON.stringify(uploadResult.error)));
-            }
-
-            updateUploadProgress(75, '\u6b63\u5728\u5904\u7406\u7f29\u7565\u56fe...');
-
-            var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
-            
-            // Step 2: 创建缩略图
-            updateUploadProgress(80, '\u6b63\u5728\u4e0a\u4f20\u7f29\u7565\u56fe...');
-
-            function createThumbBlob(imgBlob, maxW, maxH, quality) {
-                return new Promise(function(resolve) {
-                    var img = new Image();
-                    var url = URL.createObjectURL(imgBlob);
-                    img.onload = function() {
-                        URL.revokeObjectURL(url);
-                        var w = img.naturalWidth, h = img.naturalHeight;
-                        if (w > maxW || h > maxH) {
-                            var r = Math.min(maxW / w, maxH / h);
-                            w = Math.round(w * r);
-                            h = Math.round(h * r);
+            for (var idx = 0; idx < validFiles.length; idx++) {
+                try {
+                    var file = validFiles[idx];
+                    var progressStart = (idx / validFiles.length) * 80;
+                    var progressEnd = ((idx + 1) / validFiles.length) * 80;
+                    
+                    updateUploadProgress(progressStart, '正在处理第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片...');
+                    
+                    var ts = Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+                    var ext = file.type === 'image/png' ? '.png' : '.jpg';
+                    var baseName = ts + ext;
+                    var origPath = 'photos/' + baseName;
+                    
+                    // 压缩图片
+                    var compressTarget = isIOS ? 512 * 1024 : 1 * 1024 * 1024;
+                    var compressed = await compressToTargetBlob(file, compressTarget);
+                    var finalSize = compressed.size;
+                    
+                    updateUploadProgress(progressStart + (progressEnd - progressStart) * 0.25, '正在上传第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片...');
+                    
+                    // 上传主图
+                    var uploadResult = await sb.storage.from('uploads').upload(origPath, compressed, {
+                        contentType: file.type,
+                        cacheControl: '31536000',
+                        upsert: false
+                    });
+                    
+                    if (uploadResult.error) {
+                        console.error('上传失败:', uploadResult.error);
+                        failCount++;
+                        continue;
+                    }
+                    
+                    updateUploadProgress(progressStart + (progressEnd - progressStart) * 0.6, '正在处理第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片...');
+                    
+                    var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
+                    
+                    // 创建并上传缩略图
+                    var thumbBlob = await (function(imgBlob, maxW, maxH, quality) {
+                        return new Promise(function(resolve) {
+                            var img = new Image();
+                            var url = URL.createObjectURL(imgBlob);
+                            img.onload = function() {
+                                URL.revokeObjectURL(url);
+                                var w = img.naturalWidth, h = img.naturalHeight;
+                                if (w > maxW || h > maxH) {
+                                    var r = Math.min(maxW / w, maxH / h);
+                                    w = Math.round(w * r);
+                                    h = Math.round(h * r);
+                                }
+                                var c = document.createElement('canvas');
+                                c.width = w;
+                                c.height = h;
+                                var ctx = c.getContext('2d');
+                                ctx.imageSmoothingEnabled = true;
+                                ctx.imageSmoothingQuality = 'high';
+                                ctx.drawImage(img, 0, 0, w, h);
+                                c.toBlob(function(b) {
+                                    resolve(b || imgBlob);
+                                }, 'image/jpeg', quality);
+                            };
+                            img.onerror = function() { URL.revokeObjectURL(url); resolve(imgBlob); };
+                            img.src = url;
+                        });
+                    })(compressed, 400, 400, 0.7);
+                    
+                    var thumbPath = 'thumbs/' + baseName;
+                    var thumbResult = await sb.storage.from('uploads').upload(thumbPath, thumbBlob, {
+                        contentType: 'image/jpeg',
+                        cacheControl: '31536000'
+                    });
+                    
+                    var thumbUrl = !thumbResult.error ? sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl : '';
+                    
+                    updateUploadProgress(progressStart + (progressEnd - progressStart) * 0.9, '正在保存第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片...');
+                    
+                    // 插入数据库记录
+                    var contentJson = JSON.stringify({ 
+                        type: 'photo_wall', 
+                        thumb: thumbUrl, 
+                        fileSize: finalSize 
+                    });
+                    var insertRes = await sb.from('posts').insert([{
+                        user_name: window.currentUser,
+                        content: contentJson,
+                        media_url: imageUrl,
+                        media_type: window.PHOTO_WALL_MARKER,
+                        actor_key: window.deviceId || 'photo_wall'
+                    }]).select('id,user_name,media_url,content,created_at,views').single();
+                    
+                    if (insertRes.error) {
+                        console.error('保存记录失败:', insertRes.error);
+                        failCount++;
+                        continue;
+                    }
+                    
+                    // 更新本地数据 - 去重
+                    if (window.photoWallData && window.photoWallData.unshift) {
+                        var newPhoto = window.normalizePhotoWallRow(insertRes.data);
+                        var existingIdx = window.photoWallData.findIndex(function(p) { 
+                            return String(p.id) === String(newPhoto.id); 
+                        });
+                        if (existingIdx < 0) {
+                            window.photoWallData.unshift(newPhoto);
                         }
-                        var c = document.createElement('canvas');
-                        c.width = w;
-                        c.height = h;
-                        var ctx = c.getContext('2d');
-                        ctx.imageSmoothingEnabled = true;
-                        ctx.imageSmoothingQuality = 'high';
-                        ctx.drawImage(img, 0, 0, w, h);
-                        c.toBlob(function(b) {
-                            resolve(b || imgBlob);
-                        }, 'image/jpeg', quality);
-                    };
-                    img.onerror = function() { URL.revokeObjectURL(url); resolve(imgBlob); };
-                    img.src = url;
-                });
-            }
-
-            var thumbBlob = await createThumbBlob(compressed, 400, 400, 0.7);
-
-            var thumbPath = 'thumbs/' + baseName;
-            var thumbResult = await sb.storage.from('uploads').upload(thumbPath, thumbBlob, {
-                contentType: 'image/jpeg',
-                cacheControl: '31536000'
-            });
-            var thumbErr = thumbResult.error;
-
-            updateUploadProgress(90, '\u6b63\u5728\u66f4\u65b0\u6570\u636e...');
-            
-            if (thumbErr) {
-                var contentJson = JSON.stringify({ type: 'photo_wall', fileSize: finalSize });
-                var insertRes = await sb.from('posts').insert([{
-                    user_name: window.currentUser,
-                    content: contentJson,
-                    media_url: imageUrl,
-                    media_type: window.PHOTO_WALL_MARKER,
-                    actor_key: window.deviceId || 'photo_wall'
-                }]).select('id,user_name,media_url,content,created_at,views').single();
-                
-                if (insertRes.error) throw new Error(insertRes.error.message);
-                
-                if (window.photoWallData && window.photoWallData.unshift) {
-                    window.photoWallData.unshift(window.normalizePhotoWallRow(insertRes.data));
+                    }
+                    
+                    // 广播同步消息
+                    if (window.broadcastSync && insertRes.data && insertRes.data.id) {
+                        window.broadcastSync('photo_added', { photoId: insertRes.data.id });
+                    }
+                    
+                    successCount++;
+                } catch (fileErr) {
+                    console.error('处理单张图片失败:', fileErr);
+                    failCount++;
                 }
-                if (window.saveLocalPhotoWallData) {
-                    window.saveLocalPhotoWallData();
-                }
-                if (window.renderPhotoWall) {
-                    await window.renderPhotoWall();
-                }
-                updateUploadProgress(100, '\u4e0a\u4f20\u6210\u529f');
-                setTimeout(function() {
-                    hideUploadProgress();
-                    window.showToast('\u4e0a\u4f20\u6210\u529f');
-                }, 500);
-                e.target.value = '';
-                return;
-            }
-
-            var thumbUrl = sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl;
-
-            var contentJson = JSON.stringify({ type: 'photo_wall', thumb: thumbUrl, fileSize: finalSize });
-            var insertRes = await sb.from('posts').insert([{
-                user_name: window.currentUser,
-                content: contentJson,
-                media_url: imageUrl,
-                media_type: window.PHOTO_WALL_MARKER,
-                actor_key: window.deviceId || 'photo_wall'
-            }]).select('id,user_name,media_url,content,created_at,views').single();
-            
-            if (insertRes.error) {
-                throw new Error('\u7167\u7247\u5df2\u4e0a\u4f20\uff0c\u4f46\u53d1\u5e03\u5230\u7167\u7247\u5899\u5931\u8d25: ' + (insertRes.error.message || '\u672a\u77e5\u9519\u8bef'));
             }
             
-            if (window.photoWallData && window.photoWallData.unshift) {
-                window.photoWallData.unshift(window.normalizePhotoWallRow(insertRes.data));
-            }
+            // 完成所有上传
             if (window.saveLocalPhotoWallData) {
                 window.saveLocalPhotoWallData();
             }
-            if (window.renderPhotoWall) {
+            if (window.renderPhotoWallWithoutReload) {
+                window.renderPhotoWallWithoutReload();
+            } else if (window.renderPhotoWall) {
                 await window.renderPhotoWall();
             }
             
-            var sizeStr = finalSize >= 1024 * 1024 
-                ? (finalSize / (1024 * 1024)).toFixed(2) + ' MB'
-                : (finalSize / 1024).toFixed(1) + ' KB';
-            
-            updateUploadProgress(100, '\u4e0a\u4f20\u6210\u529f');
-            
-            // 广播上传成功消息，通知其他设备
-            if (window.broadcastSync && insertRes.data && insertRes.data.id) {
-                window.broadcastSync('photo_added', { photoId: insertRes.data.id });
-            }
+            updateUploadProgress(100, '上传完成');
             
             setTimeout(function() {
                 hideUploadProgress();
-                window.showToast('\u4e0a\u4f20\u6210\u529f (' + sizeStr + ')');
+                if (successCount > 0 && failCount === 0) {
+                    window.showToast('成功上传 ' + successCount + ' 张照片');
+                } else if (successCount > 0 && failCount > 0) {
+                    window.showToast('成功上传 ' + successCount + ' 张，' + failCount + ' 张上传失败');
+                } else {
+                    window.showToast('上传失败，请重试');
+                }
             }, 500);
             
-            e.target.value = '';
-            
         } catch (err) {
-            console.error('\u4e0a\u4f20\u5f02\u5e38:', err);
+            console.error('上传异常:', err);
             hideUploadProgress();
-            window.showToast(err.message || '\u4e0a\u4f20\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5');
+            window.showToast(err.message || '上传失败，请重试');
+        } finally {
             e.target.value = '';
         }
     };
@@ -542,7 +570,6 @@
             });
         }
 
-        // 上传进度弹窗：点击外部关闭
         var progressOverlay = document.getElementById('uploadProgressOverlay');
         if (progressOverlay) {
             progressOverlay.addEventListener('click', function(e) {
