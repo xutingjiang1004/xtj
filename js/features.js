@@ -85,12 +85,8 @@
                 color: var(--primary) !important;
                 transform: translateY(-4px) !important;
             }
-            #dockBar .dock-tab:active {
-                transform: scale(.94) !important;
-            }
-            #dockBar .dock-tab.active:active {
-                transform: translateY(-4px) scale(.94) !important;
-            }
+            #dockBar .dock-tab:active { transform: scale(.94) !important; }
+            #dockBar .dock-tab.active:active { transform: translateY(-4px) scale(.94) !important; }
             #dockBar .dock-tab .dt-icon,
             #dockBar .dock-tab .dt-label {
                 position: relative !important;
@@ -109,9 +105,7 @@
                 line-height: 1 !important;
                 filter: none !important;
             }
-            #dockBar .dock-tab.active .dt-icon {
-                filter: drop-shadow(0 4px 8px rgba(5,150,105,.22)) !important;
-            }
+            #dockBar .dock-tab.active .dt-icon { filter: drop-shadow(0 4px 8px rgba(5,150,105,.22)) !important; }
             #dockBar .dock-tab .dt-icon svg.dt-svg,
             #dockBar .dock-tab .dt-icon svg {
                 width: 21px !important;
@@ -128,12 +122,8 @@
                 letter-spacing: .25px !important;
                 color: currentColor !important;
             }
-            #dockBar .dock-tab.active .dt-label {
-                font-weight: 700 !important;
-            }
-            #dockBar .dock-tab[data-tab="ai"] .dt-label {
-                display: none !important;
-            }
+            #dockBar .dock-tab.active .dt-label { font-weight: 700 !important; }
+            #dockBar .dock-tab[data-tab="ai"] .dt-label { display: none !important; }
             #dockBar .dock-tab .anim-layer,
             #dockBar .dock-tab .anim-layer * {
                 background: transparent !important;
@@ -150,9 +140,7 @@
                 pointer-events: none !important;
                 z-index: 2 !important;
             }
-            body.photo-previewing #dockBar {
-                display: none !important;
-            }
+            body.photo-previewing #dockBar { display: none !important; }
         `;
     }
 
@@ -168,11 +156,11 @@
         if (!profileName) return;
         if (window.currentUser) {
             profileName.textContent = window.currentUser;
-            profileStatus.textContent = '查看资料';
+            if (profileStatus) profileStatus.textContent = '查看资料';
             if (profileAvatar) profileAvatar.textContent = window.currentUser[0].toUpperCase();
         } else {
             profileName.textContent = '未登录';
-            profileStatus.textContent = '点击登录';
+            if (profileStatus) profileStatus.textContent = '点击登录';
             if (profileAvatar) profileAvatar.innerHTML = '?';
         }
     }
@@ -189,29 +177,34 @@
     window.openReport = function(targetType, targetId, targetUser) {
         var modal = document.getElementById('reportModal');
         if (!modal) return;
-        var overlay = modal.closest('.modal-overlay') || modal;
-        overlay.style.display = '';
-        overlay.classList.add('active');
-        document.getElementById('reportCategory').value = 'spam';
-        document.getElementById('reportReason').value = '';
-        document.getElementById('reportEvidencePreview').textContent = '';
-        document.getElementById('reportEvidenceInput').value = '';
+        modal.style.display = '';
+        modal.classList.add('active');
+        var category = document.getElementById('reportCategory');
+        var reason = document.getElementById('reportReason');
+        var preview = document.getElementById('reportEvidencePreview');
+        var input = document.getElementById('reportEvidenceInput');
+        if (category) category.value = 'spam';
+        if (reason) reason.value = '';
+        if (preview) preview.textContent = '';
+        if (input) input.value = '';
         window._reportTarget = { type: targetType, id: targetId, user: targetUser };
     };
 
     window.submitReport = async function() {
         var target = window._reportTarget;
-        if (!target) { window.showToast('举报目标不存在'); return; }
-        var category = document.getElementById('reportCategory').value;
-        var reason = document.getElementById('reportReason').value.trim();
-        if (!reason) { window.showToast('请填写举报理由'); return; }
+        if (!target) { window.showToast && window.showToast('举报目标不存在'); return; }
+        var categoryEl = document.getElementById('reportCategory');
+        var reasonEl = document.getElementById('reportReason');
+        var category = categoryEl ? categoryEl.value : 'other';
+        var reason = reasonEl ? reasonEl.value.trim() : '';
+        if (!reason) { window.showToast && window.showToast('请填写举报理由'); return; }
         var btn = document.getElementById('reportSubmitBtn');
-        btn.disabled = true;
-        btn.textContent = '提交中...';
+        if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
         try {
-            var evidenceFile = document.getElementById('reportEvidenceInput').files[0];
+            var fileInput = document.getElementById('reportEvidenceInput');
+            var evidenceFile = fileInput && fileInput.files ? fileInput.files[0] : null;
             var evidenceUrl = '';
-            if (evidenceFile) {
+            if (evidenceFile && window.sb && window.sb.storage) {
                 var path = 'reports/' + Date.now() + '_' + evidenceFile.name;
                 var uploadRes = await window.sb.storage.from('uploads').upload(path, evidenceFile);
                 if (uploadRes.error) throw uploadRes.error;
@@ -227,8 +220,8 @@
                 evidence_url: evidenceUrl,
                 status: 'pending'
             };
-            var { error } = await window.sb.from('reports').insert([payload]);
-            if (error) {
+            var res = await window.sb.from('reports').insert([payload]);
+            if (res.error) {
                 var fallbackPayload = {
                     reporter: window.currentUser || 'anonymous',
                     target_type: target.type,
@@ -239,66 +232,45 @@
                     evidence_url: evidenceUrl,
                     actor_key: window.deviceId || 'unknown'
                 };
-                console.warn('[report] 主字段插入失败，尝试备用字段:', error.message);
-                var { error: err2 } = await window.sb.from('reports').insert([fallbackPayload]);
-                if (err2) throw err2;
+                console.warn('[report] 主字段插入失败，尝试备用字段:', res.error.message);
+                var res2 = await window.sb.from('reports').insert([fallbackPayload]);
+                if (res2.error) throw res2.error;
             }
-            window.showToast('举报已提交，感谢你的反馈！');
-            window.closeModal('reportModal');
+            window.showToast && window.showToast('举报已提交，感谢你的反馈');
+            window.closeModal && window.closeModal('reportModal');
         } catch (e) {
-            window.showToast('提交失败: ' + (e.message || '网络错误'));
+            window.showToast && window.showToast('提交失败: ' + (e.message || '网络错误'));
         } finally {
-            btn.disabled = false;
-            btn.textContent = '提交举报';
+            if (btn) { btn.disabled = false; btn.textContent = '提交举报'; }
         }
     };
 
     document.addEventListener('change', function(e) {
         if (e.target && e.target.id === 'reportEvidenceInput') {
-            var file = e.target.files[0];
+            var file = e.target.files && e.target.files[0];
             var preview = document.getElementById('reportEvidencePreview');
-            if (preview) {
-                preview.textContent = file ? '已选择: ' + file.name + ' (' + (file.size / 1024).toFixed(1) + 'KB)' : '';
-            }
+            if (preview) preview.textContent = file ? '已选择: ' + file.name + ' (' + (file.size / 1024).toFixed(1) + 'KB)' : '';
+        }
+        if (e.target && e.target.id === 'profileThemeToggle') {
+            var themeToggle = document.getElementById('themeToggle');
+            if (themeToggle) themeToggle.click();
+        }
+        if (e.target && e.target.id === 'profileNotifToggle') {
+            try { localStorage.setItem('xtj-notif', e.target.checked ? 'on' : 'off'); } catch(e2) {}
         }
     });
 
     function calcPathLengths() {
         var pathEl = document.querySelector('.dock-tab[data-tab="posts"] .al-path');
         if (pathEl && typeof pathEl.getTotalLength === 'function') {
-            var len = Math.round(pathEl.getTotalLength());
-            pathEl.style.setProperty('--path-len', len);
+            pathEl.style.setProperty('--path-len', Math.round(pathEl.getTotalLength()));
         }
     }
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', calcPathLengths);
-    } else {
-        calcPathLengths();
-    }
-
-    document.addEventListener('change', function(e) {
-        if (e.target && e.target.id === 'profileThemeToggle') {
-            var themeToggle = document.getElementById('themeToggle');
-            if (themeToggle) {
-                themeToggle.click();
-            }
-        }
-    });
-
-    document.addEventListener('change', function(e) {
-        if (e.target && e.target.id === 'profileNotifToggle') {
-            var enabled = e.target.checked;
-            try { localStorage.setItem('xtj-notif', enabled ? 'on' : 'off'); } catch(e2) {}
-        }
-    });
 
     function initProfileToggles() {
         var themeToggle = document.getElementById('profileThemeToggle');
         var notifToggle = document.getElementById('profileNotifToggle');
-        if (themeToggle) {
-            var isDark = document.body.classList.contains('dark-theme');
-            themeToggle.checked = isDark;
-        }
+        if (themeToggle) themeToggle.checked = document.body.classList.contains('dark-theme');
         if (notifToggle) {
             try {
                 var saved = localStorage.getItem('xtj-notif');
@@ -306,9 +278,11 @@
             } catch(e) {}
         }
     }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initProfileToggles);
+        document.addEventListener('DOMContentLoaded', function() { calcPathLengths(); initProfileToggles(); });
     } else {
+        calcPathLengths();
         initProfileToggles();
     }
 })();
@@ -339,7 +313,11 @@
         lastTapAt: 0,
         lastTapX: 0,
         lastTapY: 0,
-        touchPinching: false
+        touchPinching: false,
+        touchStartX: 0,
+        touchStartY: 0,
+        touchMoved: false,
+        lastNativeTouchAt: 0
     };
 
     function injectZoomStyle() {
@@ -347,6 +325,8 @@
         var style = document.createElement('style');
         style.id = 'xtjPhotoZoomPatchStyle';
         style.textContent = [
+            '#photoPreviewOverlay.active #ppImageWrapper{touch-action:none!important;overscroll-behavior:contain;}',
+            '#photoPreviewOverlay.active .photo-preview-image-wrapper{touch-action:none!important;overscroll-behavior:contain;}',
             '#photoPreviewOverlay.pp-zooming .photo-preview-image-wrapper{touch-action:none!important;}',
             '#photoPreviewImage.pp-zoom-active{cursor:grab;will-change:transform;}',
             '#photoPreviewImage.pp-zoom-active:active{cursor:grabbing;}',
@@ -356,7 +336,6 @@
     }
 
     function overlay() { return document.getElementById('photoPreviewOverlay'); }
-    function wrapper() { return document.getElementById('ppImageWrapper'); }
     function img() { return document.getElementById('photoPreviewImage'); }
     function active() {
         var ov = overlay();
@@ -409,8 +388,7 @@
     window.xtjPhotoPreviewResetZoom = resetZoom;
 
     function zoomAt(nextScale, clientX, clientY, animate) {
-        var im = img();
-        if (!im) return;
+        if (!img()) return;
         var oldScale = z.scale || 1;
         nextScale = clamp(nextScale, MIN_SCALE, MAX_SCALE);
         if (nextScale <= 1.01) {
@@ -419,8 +397,8 @@
         }
         var cx = window.innerWidth / 2;
         var cy = window.innerHeight / 2;
-        var px = (typeof clientX === 'number') ? clientX : cx;
-        var py = (typeof clientY === 'number') ? clientY : cy;
+        var px = typeof clientX === 'number' ? clientX : cx;
+        var py = typeof clientY === 'number' ? clientY : cy;
         var ratio = nextScale / oldScale;
         z.tx = px - cx - (px - cx - z.tx) * ratio;
         z.ty = py - cy - (py - cy - z.ty) * ratio;
@@ -428,14 +406,8 @@
         applyZoom(animate !== false);
     }
 
-    function distance(a, b) {
-        var dx = a.clientX - b.clientX;
-        var dy = a.clientY - b.clientY;
-        return Math.hypot(dx, dy);
-    }
-    function center(a, b) {
-        return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
-    }
+    function distance(a, b) { return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY); }
+    function center(a, b) { return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 }; }
 
     function beginPinch() {
         var pts = Array.from(z.pointers.values());
@@ -468,8 +440,12 @@
         applyZoom(false);
     }
 
+    function ignoreDuplicateTouchPointer(e) {
+        return e.pointerType === 'touch' && Date.now() - z.lastNativeTouchAt < 700;
+    }
+
     function handlePointerDown(e) {
-        if (!active() || !inPreviewTarget(e.target)) return;
+        if (!active() || !inPreviewTarget(e.target) || ignoreDuplicateTouchPointer(e)) return;
         z.pointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
         z.moved = false;
         if (z.pointers.size >= 2) {
@@ -490,7 +466,7 @@
     }
 
     function handlePointerMove(e) {
-        if (!active() || !z.pointers.has(e.pointerId)) return;
+        if (!active() || !z.pointers.has(e.pointerId) || ignoreDuplicateTouchPointer(e)) return;
         z.pointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
         if (z.pinching) {
             e.preventDefault();
@@ -512,7 +488,7 @@
     }
 
     function handlePointerUp(e) {
-        if (!active()) return;
+        if (!active() || ignoreDuplicateTouchPointer(e)) return;
         var hadPointer = z.pointers.has(e.pointerId);
         var wasPinching = z.pinching;
         var wasPanning = z.panning;
@@ -567,8 +543,11 @@
     }
 
     function touchPoint(t) { return { clientX: t.clientX, clientY: t.clientY }; }
+
     function handleTouchStart(e) {
         if (!active() || !inPreviewTarget(e.target)) return;
+        z.lastNativeTouchAt = Date.now();
+        z.touchMoved = false;
         if (e.touches.length === 2) {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -584,18 +563,24 @@
             z.startTy = z.ty;
             var ov = overlay();
             if (ov) ov.classList.add('pp-zooming');
-        } else if (e.touches.length === 1 && z.scale > 1.01) {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            z.panning = true;
-            z.startX = e.touches[0].clientX;
-            z.startY = e.touches[0].clientY;
-            z.startTx = z.tx;
-            z.startTy = z.ty;
+        } else if (e.touches.length === 1) {
+            z.touchStartX = e.touches[0].clientX;
+            z.touchStartY = e.touches[0].clientY;
+            if (z.scale > 1.01) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                z.panning = true;
+                z.startX = e.touches[0].clientX;
+                z.startY = e.touches[0].clientY;
+                z.startTx = z.tx;
+                z.startTy = z.ty;
+            }
         }
     }
+
     function handleTouchMove(e) {
         if (!active() || !inPreviewTarget(e.target)) return;
+        z.lastNativeTouchAt = Date.now();
         if (z.touchPinching && e.touches.length === 2) {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -614,13 +599,22 @@
         } else if (z.panning && z.scale > 1.01 && e.touches.length === 1) {
             e.preventDefault();
             e.stopImmediatePropagation();
-            z.tx = z.startTx + (e.touches[0].clientX - z.startX);
-            z.ty = z.startTy + (e.touches[0].clientY - z.startY);
+            var dx = e.touches[0].clientX - z.startX;
+            var dy = e.touches[0].clientY - z.startY;
+            if (Math.abs(dx) + Math.abs(dy) > 6) z.touchMoved = true;
+            z.tx = z.startTx + dx;
+            z.ty = z.startTy + dy;
             applyZoom(false);
+        } else if (e.touches.length === 1) {
+            var mdx = e.touches[0].clientX - z.touchStartX;
+            var mdy = e.touches[0].clientY - z.touchStartY;
+            if (Math.abs(mdx) + Math.abs(mdy) > 8) z.touchMoved = true;
         }
     }
+
     function handleTouchEnd(e) {
         if (!active()) return;
+        z.lastNativeTouchAt = Date.now();
         if (z.touchPinching || z.panning) {
             e.preventDefault();
             e.stopImmediatePropagation();
@@ -628,6 +622,23 @@
             z.panning = false;
             if (z.scale <= 1.04) resetZoom(true);
             else applyZoom(true);
+            return;
+        }
+        var t = e.changedTouches && e.changedTouches[0];
+        if (t && !z.touchMoved) {
+            var now = Date.now();
+            var dist = Math.hypot(t.clientX - z.lastTapX, t.clientY - z.lastTapY);
+            if (now - z.lastTapAt < 320 && dist < 44) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                if (z.scale > 1.01) resetZoom(true);
+                else zoomAt(DOUBLE_TAP_SCALE, t.clientX, t.clientY, true);
+                z.lastTapAt = 0;
+            } else {
+                z.lastTapAt = now;
+                z.lastTapX = t.clientX;
+                z.lastTapY = t.clientY;
+            }
         }
     }
 
@@ -697,4 +708,101 @@
     } else {
         installZoomEvents();
     }
+})();
+
+(function() {
+    if (window.__xtjPostEditVisibilitySafePatchInstalled) return;
+    window.__xtjPostEditVisibilitySafePatchInstalled = true;
+
+    var editTargetPostId = null;
+
+    function show(message) {
+        if (window.showToast) window.showToast(message);
+        else console.warn(message);
+    }
+
+    function normalize(post) {
+        return window.normalizePost ? window.normalizePost(post || {}) : (post || {});
+    }
+
+    function canEdit(post) {
+        if (window.canEditPost) return window.canEditPost(post);
+        return !!window.currentUser && post && (post.user_name === window.currentUser || window.currentUser === 'xxz');
+    }
+
+    async function fetchPost(postId) {
+        if (!window.sb) throw new Error('Supabase 未初始化');
+        var res = await window.sb.from('posts').select('*').eq('id', postId).limit(1);
+        if (res.error) throw res.error;
+        return res.data && res.data[0] ? res.data[0] : null;
+    }
+
+    window.openEditPost = async function(postId) {
+        try {
+            var post = await fetchPost(postId);
+            if (!post) { show('帖子不存在或已删除'); return; }
+            var p = normalize(post);
+            if (!canEdit(p)) { show('无权编辑这条帖子'); return; }
+            editTargetPostId = String(p.id);
+            var input = document.getElementById('editPostInp');
+            var visibility = document.getElementById('editPostVisibility');
+            if (input) input.value = p.content || '';
+            if (visibility) visibility.value = p.visibility === 'private' ? 'private' : 'public';
+            if (window.openModal) window.openModal('editPostModal');
+            else {
+                var modal = document.getElementById('editPostModal');
+                if (modal) { modal.style.display = ''; modal.classList.add('active'); }
+            }
+        } catch (e) {
+            console.error('[edit-post] open failed', e);
+            show('打开编辑失败: ' + (e.message || '网络错误'));
+        }
+    };
+
+    window.saveEditPost = async function() {
+        if (!editTargetPostId) { show('编辑目标丢失，请重新打开编辑'); return; }
+        var input = document.getElementById('editPostInp');
+        var visibilityEl = document.getElementById('editPostVisibility');
+        var btn = document.getElementById('saveEditPostBtn');
+        var nextContent = input ? input.value.trim() : '';
+        var nextVisibility = visibilityEl && visibilityEl.value === 'private' ? 'private' : 'public';
+        if (!nextContent) { show('请输入帖子内容'); return; }
+        if (btn) { btn.disabled = true; btn.textContent = '保存中...'; }
+
+        try {
+            var fresh = await fetchPost(editTargetPostId);
+            if (!fresh) throw new Error('帖子不存在或已删除');
+            var current = normalize(fresh);
+            if (!canEdit(current)) throw new Error('无权编辑这条帖子');
+
+            var payload = {
+                content: nextContent.slice(0, 2000),
+                visibility: nextVisibility,
+                updated_at: new Date().toISOString()
+            };
+            var updateRes = await window.sb.from('posts').update(payload).eq('id', editTargetPostId).select('*');
+            if (updateRes.error) throw updateRes.error;
+            if (!updateRes.data || !updateRes.data.length) throw new Error('数据库未更新任何记录，可能被权限规则拦截');
+
+            var verify = normalize(updateRes.data[0]);
+            if (verify.visibility !== nextVisibility) {
+                var check = await fetchPost(editTargetPostId);
+                verify = normalize(check);
+            }
+            if (verify.visibility !== nextVisibility) {
+                throw new Error('公开/私密状态未实际保存');
+            }
+
+            if (window.clearFeedCache) window.clearFeedCache();
+            if (window.closeModal) window.closeModal('editPostModal');
+            editTargetPostId = null;
+            show(nextVisibility === 'private' ? '已改为私密' : '已改为公开');
+            if (window.loadFeed) await window.loadFeed(true);
+        } catch (e) {
+            console.error('[edit-post] save failed', e);
+            show('保存失败: ' + (e.message || '网络错误'));
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '保存修改'; }
+        }
+    };
 })();
