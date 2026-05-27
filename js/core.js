@@ -1282,7 +1282,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 draw();
             }
 
-            // ===================== 发布动态 =====================
+            // ===================== [已废弃] 下方第2361行有更新版本 =====================
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
                 var content = document.getElementById("postInp").value.trim();
@@ -1437,14 +1437,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             window.openModal = function (id) {
-                document.getElementById(id).classList.add("active");
+                var el = document.getElementById(id);
+                if (!el) return;
+                el.style.display = '';
+                el.classList.add("active");
             };
 
             window.closeModal = function (id) {
                 var el = document.getElementById(id);
                 if (!el) return;
                 el.classList.remove("active");
-                el.style.display = 'none';
                 if (id === 'statModal' && statPollTimer) {
                     clearInterval(statPollTimer);
                     statPollTimer = null;
@@ -1710,6 +1712,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let feedAllLikes = [];
             let feedScrollObserver = null;
 
+            // ====== [已废弃] 下方第2412行有更新版本 ======
             async function loadFeed(forceRefresh = false) {
                 const now = Date.now();
                 if (forceRefresh) {
@@ -1793,7 +1796,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 feedScrollObserver = observer;
             }
 
-            // 任务5：加载更多帖子
+            // ====== [已废弃] 下方第2479行有更新版本 ======
             function loadMoreFeedPosts() {
                 if (feedEndReached) return;
                 
@@ -1824,7 +1827,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 feedPage++;
             }
 
-            // 任务5：追加更多帖子到 feed
+            // ====== [已废弃] 下方第2503行有更新版本 ======
             function appendMorePosts(posts, comments, likes) {
                 const feed = document.getElementById('feed');
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
@@ -1883,6 +1886,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 updateFeedStats();
             }
 
+            // ====== [已废弃] 下方第2532行有更新版本 ======
             async function renderFeed({ posts, comments, likes }) {
                 const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__ann__' && p.user_name);
                 document.getElementById("sPosts").textContent = visiblePosts.length;
@@ -1992,6 +1996,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
+            // ====== [已废弃] 下方第2520行有更新版本 ======
             function renderFeedWithAvatars(visiblePosts, comments, likes) {
                 const feed = document.getElementById("feed");
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
@@ -2494,7 +2499,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                     return;
                 }
-                appendMorePosts(filteredPosts.slice(startIdx, endIdx), feedAllComments, feedAllLikes);
+                var filteredPostIds = new Set();
+                filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
+                var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
+                var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
+                appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
                 feedPage++;
             };
 
@@ -2533,7 +2542,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var visibleComments = getRenderableComments(payload.comments, filteredPosts);
                 document.getElementById("sPosts").textContent = filteredPosts.length;
                 document.getElementById("sViews").textContent = filteredPosts.reduce(function(sum, post) { return sum + (post.views || 0); }, 0);
-                document.getElementById("sLikes").textContent = payload.likes.length + visibleComments.length;
+                var visiblePostIds = new Set();
+                filteredPosts.forEach(function(p) { visiblePostIds.add(String(p.id)); });
+                var scopedLikes = (payload.likes || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
+                document.getElementById("sLikes").textContent = scopedLikes.length + visibleComments.length;
                 filteredPosts.forEach(function(post) {
                     postInfoCache[post.id] = { content: post.content, user_name: post.user_name };
                 });
@@ -2544,7 +2556,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var firstPage = filteredPosts.slice(0, FEED_PAGE_SIZE);
                 feedPage = 1;
                 feedEndReached = firstPage.length >= filteredPosts.length;
-                renderFeedWithAvatars(firstPage, visibleComments, payload.likes);
+                renderFeedWithAvatars(firstPage, visibleComments, scopedLikes);
                 renderFilterSummary(filteredPosts.length);
                 setTimeout(function() { prefetchStatData(); }, 1000);
             };
@@ -2579,6 +2591,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
 
+            // ====== [已废弃] 下方第2618行有更新版本 ======
             window.prefetchStatData = async function() {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
@@ -3181,7 +3194,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             window.showToast('正在刷新...');
                             // 清除缓存并重新加载
                             try {
-                                localStorage.removeItem('xtj_feed_cache');
+                                localStorage.removeItem(CACHE_KEY);
                             } catch(e) {}
                             if (typeof window.initialLoad === 'function') {
                                 window.initialLoad(true);

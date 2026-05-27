@@ -21,6 +21,10 @@
             --like-color: #ff3b60;
             --text-main: #1d1d24;
             --text-muted: #6b6c7a;
+            --card-bg: var(--glass-bg);
+            --border: var(--glass-border);
+            --bg: var(--bg-color);
+            --text: var(--text-main);
             --radius-sm: 16px;
             --radius-md: 24px;
             --radius-lg: 32px;

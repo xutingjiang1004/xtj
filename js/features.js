@@ -160,4 +160,131 @@
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', restoreMinimalDockStyles);
     }
+
+    function syncProfileUser() {
+        var profileName = document.getElementById('profileName');
+        var profileStatus = document.getElementById('profileStatus');
+        var profileAvatar = document.getElementById('profileAvatar');
+        if (!profileName) return;
+        if (window.currentUser) {
+            profileName.textContent = window.currentUser;
+            profileStatus.textContent = '查看资料';
+            if (profileAvatar) profileAvatar.textContent = window.currentUser[0].toUpperCase();
+        } else {
+            profileName.textContent = '未登录';
+            profileStatus.textContent = '点击登录';
+            if (profileAvatar) profileAvatar.innerHTML = '?';
+        }
+    }
+    window.syncProfileUser = syncProfileUser;
+
+    window.openReport = function(targetType, targetId, targetUser) {
+        var modal = document.getElementById('reportModal');
+        if (!modal) return;
+        var overlay = modal.closest('.modal-overlay') || modal;
+        overlay.style.display = '';
+        overlay.classList.add('active');
+        document.getElementById('reportCategory').value = 'spam';
+        document.getElementById('reportReason').value = '';
+        document.getElementById('reportEvidencePreview').textContent = '';
+        document.getElementById('reportEvidenceInput').value = '';
+        window._reportTarget = { type: targetType, id: targetId, user: targetUser };
+    };
+
+    window.submitReport = async function() {
+        var target = window._reportTarget;
+        if (!target) { window.showToast('举报目标不存在'); return; }
+        var category = document.getElementById('reportCategory').value;
+        var reason = document.getElementById('reportReason').value.trim();
+        if (!reason) { window.showToast('请填写举报理由'); return; }
+        var btn = document.getElementById('reportSubmitBtn');
+        btn.disabled = true;
+        btn.textContent = '提交中...';
+        try {
+            var evidenceFile = document.getElementById('reportEvidenceInput').files[0];
+            var evidenceUrl = '';
+            if (evidenceFile) {
+                var path = 'reports/' + Date.now() + '_' + evidenceFile.name;
+                await window.sb.storage.from('uploads').upload(path, evidenceFile);
+                evidenceUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
+            }
+            var { error } = await window.sb.from('reports').insert([{
+                target_type: target.type,
+                target_id: target.id,
+                target_user: target.user,
+                reporter: window.currentUser || 'anonymous',
+                category: category,
+                reason: reason,
+                evidence_url: evidenceUrl,
+                actor_key: window.deviceId || 'unknown'
+            }]);
+            if (error) throw error;
+            window.showToast('举报已提交，感谢你的反馈！');
+            window.closeModal('reportModal');
+        } catch (e) {
+            window.showToast('提交失败: ' + (e.message || '网络错误'));
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '提交举报';
+        }
+    };
+
+    document.addEventListener('change', function(e) {
+        if (e.target && e.target.id === 'reportEvidenceInput') {
+            var file = e.target.files[0];
+            var preview = document.getElementById('reportEvidencePreview');
+            if (preview) {
+                preview.textContent = file ? '已选择: ' + file.name + ' (' + (file.size / 1024).toFixed(1) + 'KB)' : '';
+            }
+        }
+    });
+
+    function calcPathLengths() {
+        var pathEl = document.querySelector('.dock-tab[data-tab="posts"] .al-path');
+        if (pathEl && typeof pathEl.getTotalLength === 'function') {
+            var len = Math.round(pathEl.getTotalLength());
+            pathEl.style.setProperty('--path-len', len);
+        }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', calcPathLengths);
+    } else {
+        calcPathLengths();
+    }
+
+    document.addEventListener('change', function(e) {
+        if (e.target && e.target.id === 'profileThemeToggle') {
+            var themeToggle = document.getElementById('themeToggle');
+            if (themeToggle) {
+                themeToggle.click();
+            }
+        }
+    });
+
+    document.addEventListener('change', function(e) {
+        if (e.target && e.target.id === 'profileNotifToggle') {
+            var enabled = e.target.checked;
+            try { localStorage.setItem('xtj_notif_enabled', enabled ? '1' : '0'); } catch(e2) {}
+        }
+    });
+
+    function initProfileToggles() {
+        var themeToggle = document.getElementById('profileThemeToggle');
+        var notifToggle = document.getElementById('profileNotifToggle');
+        if (themeToggle) {
+            var isDark = document.body.classList.contains('dark-theme');
+            themeToggle.checked = isDark;
+        }
+        if (notifToggle) {
+            try {
+                var saved = localStorage.getItem('xtj_notif_enabled');
+                if (saved !== null) notifToggle.checked = saved === '1';
+            } catch(e) {}
+        }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initProfileToggles);
+    } else {
+        initProfileToggles();
+    }
 })();
