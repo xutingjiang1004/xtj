@@ -33,6 +33,7 @@
                 </div>
             </div>
             <div class="upload-progress-text" id="uploadProgressText">0%</div>
+            <div class="upload-progress-status" id="uploadProgressStatus"></div>
         </div>
     </div>
 
@@ -125,6 +126,10 @@
                         <div class="photo-wall-container" id="photoWallContainer">
                 <div class="photo-wall-header">
                     <div class="photo-wall-title">📷 照片墙</div>
+                    <div class="photo-wall-sync-status is-idle" id="pwSyncStatus" aria-live="polite">
+                        <span class="pw-sync-dot"></span>
+                        <span class="pw-sync-label" id="pwSyncLabel">???</span>
+                    </div>
                     <div class="photo-wall-controls" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                         <select id="pwAlbumSort" onchange="switchPhotoWallView()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:12px;outline:none;color:var(--text);">
                             <option value="date_desc">按日期 ↓</option>
