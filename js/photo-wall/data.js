@@ -667,7 +667,7 @@
     window.reconcilePhotoWallData = reconcilePhotoWallData;
 
     async function loadMorePhotos() {
-        if (isLoading || !hasMore || !window.sb) return false;
+        if (isLoading || !hasMore || !window.sb) return [];
         isLoading = true;
 
         try {
@@ -683,7 +683,7 @@
 
             if (!pageData.length) {
                 hasMore = false;
-                return false;
+                return [];
             }
 
             var existingIds = new Set(window.photoWallData.map(function(photo) {
@@ -703,7 +703,7 @@
             return appended;
         } catch (e) {
             console.error('[PhotoWall] load more failed', e);
-            return false;
+            return [];
         } finally {
             isLoading = false;
         }

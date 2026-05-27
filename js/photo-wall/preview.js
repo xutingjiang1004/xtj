@@ -375,7 +375,7 @@
         var timeEl = document.getElementById('photoPreviewTime');
         var viewsEl = document.getElementById('photoPreviewViewsCount');
 
-        if (userEl) userEl.textContent = photo.username || '鏈煡鐢ㄦ埛';
+        if (userEl) userEl.textContent = photo.username || '未知用户';
         if (timeEl) {
             var date = new Date(photo.timestamp);
             timeEl.textContent = date.toLocaleString('zh-CN', {
