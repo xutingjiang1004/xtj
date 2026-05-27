@@ -38,6 +38,25 @@
     var ppConfirmDownloadModal = null;
     var ppDownloadAbortController = null;
 
+    function ppIconSvg(type) {
+        if (type === 'close') {
+            return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span>';
+        }
+        if (type === 'info') {
+            return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span>';
+        }
+        if (type === 'share') {
+            return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span>';
+        }
+        if (type === 'rotate') {
+            return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></svg></span>';
+        }
+        if (type === 'delete') {
+            return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>';
+        }
+        return '';
+    }
+
     function ppInitTrack() {
         ppVw = window.innerWidth;
         ppVh = window.innerHeight;
@@ -492,7 +511,7 @@
             container.innerHTML =
                 '<div class="pp-ambient-bg" id="ppAmbientBg"></div>' +
                 '<div class="pp-dots" id="ppDots"></div>' +
-                '<button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>' +
+                '<button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="\u5173\u95ed\u9884\u89c8">' + ppIconSvg('close') + '</button>' +
                 '<button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="\u4e0a\u4e00\u5f20">' +
                 '<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>' +
                 '<button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="\u4e0b\u4e00\u5f20">' +
@@ -504,10 +523,10 @@
                 '<div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div>' +
                 '</div>' +
                 '</div>' +
-                '<button class="pp-info-btn" id="ppInfoBtn" title="\u7167\u7247\u8be6\u60c5" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>' +
-                '<button class="pp-share-btn" id="ppShareBtn" title="\u5206\u4eab" onclick="window.shareCurrentPhoto()">\ud83d\udd17</button>' +
-                '<button class="pp-rotate-btn" id="ppRotateBtn" title="\u65cb\u8f6c90\u00b0" onclick="window.ppRotatePhoto()">\u27f3</button>' +
-                '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">\ud83d\uddd1\ufe0f</button>' +
+                '<button class="pp-info-btn" id="ppInfoBtn" title="\u7167\u7247\u4fe1\u606f" onclick="showPhotoInfo()">' + ppIconSvg('info') + '</button>' +
+                '<button class="pp-share-btn" id="ppShareBtn" title="\u5206\u4eab" onclick="window.shareCurrentPhoto()">' + ppIconSvg('share') + '</button>' +
+                '<button class="pp-rotate-btn" id="ppRotateBtn" title="\u65cb\u8f6c 90 \u5ea6" onclick="window.ppRotatePhoto()">' + ppIconSvg('rotate') + '</button>' +
+                '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + ppIconSvg('delete') + '</button>' +
                 '<div class="photo-preview-info">' +
                 '<span class="pp-user" id="photoPreviewUser"></span>' +
                 '<span class="pp-time" id="photoPreviewTime"></span>' +
@@ -782,7 +801,7 @@
             modalEl.innerHTML =
                 '<div class="pp-info-modal-content">' +
                 '<div class="pp-info-modal-header">' +
-                '<span class="pp-info-modal-title">????</span>' +
+                '<span class="pp-info-modal-title">照片详情</span>' +
                 '<button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button>' +
                 '</div>' +
                 '<div class="pp-info-modal-body" id="ppInfoModalBody"></div>' +
@@ -801,7 +820,7 @@
             });
         }
 
-        var sizeStr = '??';
+        var sizeStr = '--';
         if (photo.fileSize) {
             var size = photo.fileSize;
             if (size >= 1024 * 1024) {
@@ -813,7 +832,7 @@
             }
         }
 
-        var dateStr = '??';
+        var dateStr = '--';
         if (photo.timestamp) {
             dateStr = new Date(photo.timestamp).toLocaleString('zh-CN');
         }
@@ -823,44 +842,44 @@
         }
 
         function safeValue(value, fallback) {
-            return window.escapeHtml(String(value == null || value === '' ? (fallback || '??') : value));
+            return window.escapeHtml(String(value == null || value === '' ? (fallback || '--') : value));
         }
 
         var metadataRows = '';
-        metadataRows += infoRow('???', safeValue(photo.username, '??'));
-        metadataRows += infoRow('????', safeValue(dateStr, '??'));
-        metadataRows += infoRow('???', safeValue(photo.views || 0, '0'));
+        metadataRows += infoRow('作者', safeValue(photo.username, '--'));
+        metadataRows += infoRow('时间', safeValue(dateStr, '--'));
+        metadataRows += infoRow('浏览', safeValue(photo.views || 0, '0'));
 
         var fileRows = '';
-        fileRows += infoRow('????', safeValue(sizeStr, '??'));
+        fileRows += infoRow('大小', safeValue(sizeStr, '--'));
 
         var exifRows = '';
         if (photo.exif) {
             if (photo.exif.make || photo.exif.model) {
-                exifRows += infoRow('??', safeValue(photo.exif.model || photo.exif.make, '??'));
+                exifRows += infoRow('设备', safeValue(photo.exif.model || photo.exif.make, '--'));
             }
             if (photo.exif.fNumber) {
-                exifRows += infoRow('??', safeValue('f/' + photo.exif.fNumber, '??'));
+                exifRows += infoRow('光圈', safeValue('f/' + photo.exif.fNumber, '--'));
             }
             if (photo.exif.exposureTime) {
-                exifRows += infoRow('??', safeValue(photo.exif.exposureTime, '??'));
+                exifRows += infoRow('快门', safeValue(photo.exif.exposureTime, '--'));
             }
             if (photo.exif.iso) {
-                exifRows += infoRow('ISO', safeValue(photo.exif.iso, '??'));
+                exifRows += infoRow('ISO', safeValue(photo.exif.iso, '--'));
             }
             if (photo.exif.focalLength) {
-                exifRows += infoRow('??', safeValue(photo.exif.focalLength + 'mm', '??'));
+                exifRows += infoRow('焦距', safeValue(photo.exif.focalLength + 'mm', '--'));
             }
         }
 
         var bodyHtml =
             '<div class="pp-info-section">' +
-            '<div class="pp-info-section-title">???</div>' +
+            '<div class="pp-info-section-title">照片信息</div>' +
             metadataRows +
             '</div>' +
             '<div class="pp-info-divider"></div>' +
             '<div class="pp-info-section">' +
-            '<div class="pp-info-section-title">????</div>' +
+            '<div class="pp-info-section-title">文件信息</div>' +
             fileRows +
             '</div>';
 
@@ -868,7 +887,7 @@
             bodyHtml +=
                 '<div class="pp-info-divider"></div>' +
                 '<div class="pp-info-section">' +
-                '<div class="pp-info-section-title">????</div>' +
+                '<div class="pp-info-section-title">拍摄参数</div>' +
                 exifRows +
                 '</div>';
         }
@@ -1111,7 +1130,7 @@
             };
         }
 
-        window.showConfirm('????', '??????????', '????', async function() {
+        window.showConfirm('删除照片', '删除后将无法恢复，确定继续吗？', '确认删除', async function() {
             var currentPhotos = ppSortedPhotos;
             if (ppPhotoIdx < 0 || ppPhotoIdx >= currentPhotos.length) return;
             var photo = currentPhotos[ppPhotoIdx];
@@ -1122,7 +1141,7 @@
             if (deleteBtn) deleteBtn.disabled = true;
             if (confirmOkBtn) confirmOkBtn.disabled = true;
 
-            window.showToast('????...');
+            window.showToast('正在删除...');
             var deleteResult = { ok: true };
             if (window.deletePhotoWallPhoto) {
                 deleteResult = await window.deletePhotoWallPhoto(photo, { render: false });
@@ -1139,7 +1158,7 @@
                 } else if (window.renderPhotoWall) {
                     window.renderPhotoWall();
                 }
-                window.showToast('?????????????');
+                window.showToast('照片已从照片墙删除');
             } else {
                 if (deleteBtn) deleteBtn.disabled = false;
                 if (confirmOkBtn) confirmOkBtn.disabled = false;

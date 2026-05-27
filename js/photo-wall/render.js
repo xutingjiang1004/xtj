@@ -35,6 +35,42 @@
         return sorted;
     }
 
+    function photoWallIconSvg(type, extraClass) {
+        var cls = extraClass ? ' class="' + extraClass + '"' : '';
+        if (type === 'empty') {
+            return '<span class="ui-icon' + cls + '" aria-hidden="true">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+                '<path d="M4 7h4l2-2h4l2 2h4a2 2 0 0 1 2 2v8a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V9a2 2 0 0 1 2-2Z"></path>' +
+                '<circle cx="12" cy="13" r="4"></circle>' +
+                '</svg></span>';
+        }
+        if (type === 'upload') {
+            return '<span class="ui-icon' + cls + '" aria-hidden="true">' +
+                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+                '<path d="M7 18a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 1 1 .5 6.96H15"></path>' +
+                '<path d="M12 11v9"></path>' +
+                '<path d="m8.5 14.5 3.5-3.5 3.5 3.5"></path>' +
+                '</svg></span>';
+        }
+        return '';
+    }
+
+    function getPhotoWallEmptyHtml() {
+        return '<div class="photo-wall-empty">' +
+            '<div class="photo-wall-empty-icon">' + photoWallIconSvg('empty', 'photo-wall-empty-svg') + '</div>' +
+            '<div>还没有照片</div>' +
+            '<div class="photo-wall-empty-cta" onclick="triggerPhotoUpload()">' + photoWallIconSvg('upload') + '<span>成为第一个分享照片的人</span></div>' +
+            '</div>';
+    }
+
+    function applyPhotoAspect(imgEl) {
+        var item = imgEl && imgEl.closest ? imgEl.closest('.photo-wall-item') : null;
+        if (!item || !imgEl || !imgEl.naturalWidth || !imgEl.naturalHeight) return;
+        var ratio = imgEl.naturalWidth / imgEl.naturalHeight;
+        ratio = Math.max(3 / 4, Math.min(4 / 3, ratio));
+        item.style.setProperty('--pw-aspect', String(Math.round(ratio * 1000)) + ' / 1000');
+    }
+
     function renderPhotoWallHtml(sorted, startIndex) {
         var html = '';
         var startIdx = startIndex || 0;
@@ -81,11 +117,7 @@
         await window.loadPhotoWallData();
 
         if (window.photoWallData.length === 0) {
-            grid.innerHTML = '<div class="photo-wall-empty">' +
-                '<div class="photo-wall-empty-icon">📷</div>' +
-                '<div>还没有照片</div>' +
-                '<div class="photo-wall-empty-cta" onclick="triggerPhotoUpload()">📤 成为第一个分享照片的人</div>' +
-                '</div>';
+            grid.innerHTML = getPhotoWallEmptyHtml();
             renderLock = false;
             return;
         }
@@ -122,11 +154,7 @@
         if (!grid) return;
 
         if (window.photoWallData.length === 0) {
-            grid.innerHTML = '<div class="photo-wall-empty">' +
-                '<div class="photo-wall-empty-icon">📷</div>' +
-                '<div>还没有照片</div>' +
-                '<div class="photo-wall-empty-cta" onclick="triggerPhotoUpload()">📤 成为第一个分享照片的人</div>' +
-                '</div>';
+            grid.innerHTML = getPhotoWallEmptyHtml();
             return;
         }
 
@@ -179,6 +207,7 @@
                         img.removeAttribute('data-src');
                         img.classList.remove('pw-blur-in');
                         img.classList.add('pw-blur-done');
+                        if (img.complete && img.naturalWidth > 0) applyPhotoAspect(img);
                         if (pwLazyObserver) pwLazyObserver.unobserve(img);
                         return;
                     }
@@ -192,6 +221,7 @@
                     imgCache.set(realSrc, 'success');
                     img.classList.remove('pw-blur-in');
                     img.classList.add('pw-blur-done');
+                    applyPhotoAspect(img);
                     activeLoadCount--;
                     if (pwLazyObserver) pwLazyObserver.unobserve(img);
                     processImageQueue(); // 继续处理队列
@@ -201,6 +231,7 @@
                             imgCache.set(src, 'success');
                             imgEl.classList.remove('pw-blur-in');
                             imgEl.classList.add('pw-blur-done');
+                            applyPhotoAspect(imgEl);
                             activeLoadCount--;
                             if (pwLazyObserver) pwLazyObserver.unobserve(imgEl);
                             processImageQueue(); // 继续处理队列
@@ -235,6 +266,8 @@
             for (var i = 0; i < imgs.length; i++) {
                 var img = imgs[i];
                 if (img.dataset.src) img.src = img.dataset.src;
+                if (img.complete && img.naturalWidth > 0) applyPhotoAspect(img);
+                else img.onload = function() { applyPhotoAspect(this); };
                 img.classList.remove('pw-blur-in');
                 img.classList.add('pw-blur-done');
             }
@@ -294,16 +327,16 @@
                         }
 
                         if (!window.hasMorePhotos()) {
-                            if (indicator) indicator.textContent = '????????';
+                            if (indicator) indicator.textContent = '已经到底了';
                             if (infiniteScrollObserver) infiniteScrollObserver.disconnect();
                         } else if (indicator) {
-                            indicator.textContent = '??????...';
+                            indicator.textContent = '加载更多...';
                         }
                     } else {
-                        if (indicator) indicator.textContent = '??????';
+                        if (indicator) indicator.textContent = '暂无更多';
                         setTimeout(function() {
                             if (indicator && window.hasMorePhotos()) {
-                                indicator.textContent = '??????...';
+                                indicator.textContent = '加载更多...';
                             }
                         }, 2000);
                     }

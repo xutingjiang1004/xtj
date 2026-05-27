@@ -1574,8 +1574,8 @@
             -ms-overflow-style: none;
             -webkit-overflow-scrolling: touch;
             opacity: 0; pointer-events: none;
-            transform: translateY(10px);
-            transition: opacity 0.25s ease-out, transform 0.25s ease-out;
+            transform: translate3d(0, 14px, 0) scale(0.985);
+            transition: opacity 0.28s cubic-bezier(0.16,1,0.3,1), transform 0.28s cubic-bezier(0.16,1,0.3,1);
             padding: 16px 16px 100px;
             padding-top: calc(24px + env(safe-area-inset-top, 0px));
             padding-left: calc(16px + env(safe-area-inset-left, 0px));
@@ -1610,7 +1610,7 @@
         .dock-panel::-webkit-scrollbar-thumb { display: none !important; background: transparent !important; }
         .dock-panel.active {
             opacity: 1; pointer-events: all;
-            transform: translateY(0);
+            transform: translate3d(0, 0, 0) scale(1);
         }
         .dock-bar {
             position: fixed; bottom: 0; left: 0; right: 0;
@@ -1647,20 +1647,8 @@
             backdrop-filter: none !important;
             -webkit-backdrop-filter: none !important;
         }
-        .dock-bar,
-        .dock-bar *,
-        .dock-bar *::before,
-        .dock-bar *::after {
-            background: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-        }
-        .dock-tab,
-        .dock-tab::before,
-        .dock-tab::after {
+        .dock-bar .anim-layer,
+        .dock-bar .anim-layer * {
             background: transparent !important;
             border: none !important;
             box-shadow: none !important;
@@ -1988,6 +1976,18 @@
             user-select: none;
             -webkit-focus-ring-color: transparent;
         }
+        .dock-tab::before {
+            content: '';
+            position: absolute;
+            inset: -4px 6px;
+            border-radius: 999px;
+            background: transparent;
+            opacity: 0;
+            transform: scale(0.88);
+            transition: opacity 0.28s, transform 0.28s, background 0.28s;
+            z-index: 0;
+            pointer-events: none;
+        }
         .dock-tab .dt-icon {
             font-size: 20px; line-height: 1;
             position: relative; z-index: 1;
@@ -1995,10 +1995,21 @@
         .dock-tab .dt-label {
             font-weight: 500; letter-spacing: 0.3px;
             transition: color 0.3s;
+            position: relative;
+            z-index: 1;
         }
         .dock-tab.active {
             color: #059669;
             transform: translateY(-4px);
+        }
+        .dock-tab.active::before {
+            opacity: 1;
+            transform: scale(1);
+            background: rgba(255,255,255,0.42);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            border: 1px solid rgba(255,255,255,0.55);
+            box-shadow: 0 10px 26px rgba(5,150,105,0.12);
         }
         .dock-tab.active .dt-icon {
             filter: drop-shadow(0 4px 8px rgba(5,150,105,0.25));
@@ -2024,6 +2035,19 @@
         }
         .dock-tab.active:active { transform: translateY(-4px) scale(0.92); }
         .dock-tab .dt-icon { transition: none; }
+        .ui-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.2em;
+            height: 1.2em;
+            flex-shrink: 0;
+        }
+        .ui-icon svg {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
         /* AI花朵按钮：图标更大(28x28)无文字标签，垂直居中保持和其他按钮等高 */
         .dock-tab[data-tab="ai"] {
             justify-content: center;
@@ -2139,6 +2163,10 @@
         [data-theme="dark"] .dock-tab.active {
             color: #34d399;
         }
+        [data-theme="dark"] .dock-tab.active::before {
+            background: rgba(30,30,45,.55);
+            border-color: rgba(255,255,255,.12);
+        }
         /* 移除dock-indicator的液态玻璃效果，保持无背景无边框 */
         .dock-indicator {
             background: transparent !important;
@@ -2212,7 +2240,7 @@
             100% { transform: scale(0); opacity: 0; }
         }
         .dock-tab.anim-ai .dt-svg {
-            animation: iconAIClick 1.4s ease forwards;
+            animation: iconAIClick 0.9s ease forwards;
             transform-origin: center;
         }
         @keyframes iconAIClick {
@@ -2229,14 +2257,14 @@
         /* ---- Button 1: 帖子 - Pen Drawing (1.5s) ---- */
         .dock-tab.anim-post .anim-layer {
             color: var(--text-main);
-            animation: postContainer 1.5s ease forwards;
+            animation: postContainer 0.9s ease forwards;
         }
         @keyframes postContainer {
             0%, 82% { opacity: 1; }
             100% { opacity: 0; }
         }
         .dock-tab.anim-post .al-pen {
-            animation: penLiftMove 1.5s ease forwards;
+            animation: penLiftMove 0.9s ease forwards;
         }
         @keyframes penLiftMove {
             0%   { transform: rotate(0deg) translate(0, 0); opacity: 0; }
@@ -2250,7 +2278,7 @@
         .dock-tab.anim-post .al-path {
             stroke-dasharray: var(--path-len, 120);
             stroke-dashoffset: var(--path-len, 120);
-            animation: pathDraw 1.5s ease forwards;
+            animation: pathDraw 0.9s ease forwards;
         }
         @keyframes pathDraw {
             0%   { stroke-dashoffset: var(--path-len, 120); }
@@ -2263,7 +2291,7 @@
         /* ---- Button 2: 聊天 - Real Bubble Animation (2.5s) ---- */
         .dock-tab.anim-chat .anim-layer {
             color: var(--text-main);
-            animation: chatContainer 2.5s ease forwards;
+            animation: chatContainer 0.9s ease forwards;
         }
         @keyframes chatContainer {
             0%, 92% { opacity: 1; }
@@ -2274,7 +2302,7 @@
         .dock-tab.anim-chat .al-dot-1,
         .dock-tab.anim-chat .al-dot-2,
         .dock-tab.anim-chat .al-dot-3 {
-            animation: dotTypeMerge 1.5s ease forwards;
+            animation: dotTypeMerge 0.9s ease forwards;
         }
         .dock-tab.anim-chat .al-dot-1 { animation-delay: 0.1s; }
         .dock-tab.anim-chat .al-dot-2 { animation-delay: 0.2s; }
@@ -2290,7 +2318,7 @@
 
         /* Bubble 1 (Big): Main message bubble - 中心偏左位置 */
         .dock-tab.anim-chat .al-bubble-1 {
-            animation: bubble1Inflate 2.5s ease forwards;
+            animation: bubble1Inflate 0.9s ease forwards;
         }
         @keyframes bubble1Inflate {
             0%, 8%  { transform: translate(8px, 20px) scale(0); opacity: 0; }
@@ -2311,7 +2339,7 @@
 
         /* Bubble 2 (Medium): Second message bubble - 右上方位置 */
         .dock-tab.anim-chat .al-bubble-2 {
-            animation: bubble2Inflate 2.5s ease forwards;
+            animation: bubble2Inflate 0.9s ease forwards;
         }
         @keyframes bubble2Inflate {
             0%, 28% { transform: translate(50px, 5px) scale(0); opacity: 0; }
@@ -2327,7 +2355,7 @@
 
         /* Bubble 3 (Small): Third message bubble - 左上方位置 */
         .dock-tab.anim-chat .al-bubble-3 {
-            animation: bubble3Inflate 2.5s ease forwards;
+            animation: bubble3Inflate 0.9s ease forwards;
         }
         @keyframes bubble3Inflate {
             0%, 48% { transform: translate(0px, 2px) scale(0); opacity: 0; }
@@ -2343,7 +2371,7 @@
 
         /* ---- Button 3: AI - Flower Petals Scatter & Return (1.4s) ---- */
         .dock-tab.anim-ai .anim-layer {
-            animation: aiContainerFade 1.4s ease forwards;
+            animation: aiContainerFade 0.9s ease forwards;
         }
         @keyframes aiContainerFade {
             0%, 55% { opacity: 1; }
@@ -2354,7 +2382,7 @@
         }
         /* 原始花朵图标淡出淡入 - 透明轮廓风格 */
         .dock-tab.anim-ai .dt-svg {
-            animation: flowerIconFadeOut 1.6s ease forwards;
+            animation: flowerIconFadeOut 0.9s ease forwards;
             transform-origin: center;
         }
         @keyframes flowerIconFadeOut {
@@ -2371,7 +2399,7 @@
         }
         /* CSS层花朵中心的闪光 */
         .dock-tab.anim-ai .al-flash {
-            animation: flowerFlashNew 1.6s ease forwards;
+            animation: flowerFlashNew 0.9s ease forwards;
         }
         @keyframes flowerFlashNew {
             0%   { opacity: 0; transform: scale(0.3); }
@@ -2381,7 +2409,7 @@
         }
         /* 花朵中心消失与重现 */
         .dock-tab.anim-ai .al-flower-center {
-            animation: centerPopNew 1.4s ease forwards;
+            animation: centerPopNew 0.9s ease forwards;
         }
         @keyframes centerPopNew {
             0%, 5%   { transform: scale(1); opacity: 1; }
@@ -2395,7 +2423,7 @@
         /* 6片花瓣的飞散CSS动画 - 从透明渐变上色+飞散+飞回褪色回透明 */
         .dock-tab.anim-ai .al-flower { transform-origin: 40px 30px; }
         /* 花瓣0：向上飞 translate(0, -15) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(1) { animation: petalFly0 1.4s ease forwards; }
+        .dock-tab.anim-ai .al-petal-g:nth-child(1) { animation: petalFly0 0.9s ease forwards; }
         @keyframes petalFly0 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
@@ -2411,7 +2439,7 @@
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣1：右上飞 translate(13, -7) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(2) { animation: petalFly1 1.4s ease forwards; }
+        .dock-tab.anim-ai .al-petal-g:nth-child(2) { animation: petalFly1 0.9s ease forwards; }
         @keyframes petalFly1 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
@@ -2427,7 +2455,7 @@
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣2：右下飞 translate(13, 7) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(3) { animation: petalFly2 1.4s ease forwards; }
+        .dock-tab.anim-ai .al-petal-g:nth-child(3) { animation: petalFly2 0.9s ease forwards; }
         @keyframes petalFly2 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
@@ -2443,7 +2471,7 @@
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣3：向下飞 translate(0, 15) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(4) { animation: petalFly3 1.4s ease forwards; }
+        .dock-tab.anim-ai .al-petal-g:nth-child(4) { animation: petalFly3 0.9s ease forwards; }
         @keyframes petalFly3 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
@@ -2459,7 +2487,7 @@
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣4：左下飞 translate(-13, 7) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(5) { animation: petalFly4 1.4s ease forwards; }
+        .dock-tab.anim-ai .al-petal-g:nth-child(5) { animation: petalFly4 0.9s ease forwards; }
         @keyframes petalFly4 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
@@ -2475,7 +2503,7 @@
             100% { transform: translate(0, 0) rotate(0deg); opacity: 0; }
         }
         /* 花瓣5：左上飞 translate(-13, -7) */
-        .dock-tab.anim-ai .al-petal-g:nth-child(6) { animation: petalFly5 1.4s ease forwards; }
+        .dock-tab.anim-ai .al-petal-g:nth-child(6) { animation: petalFly5 0.9s ease forwards; }
         @keyframes petalFly5 {
             0%   { transform: translate(0,0); opacity: 0; }
             5%   { transform: translate(0,0); opacity: 1; }
@@ -3113,7 +3141,7 @@
 
         /* ========== "我的"按钮光波动画 ========== */
         .dock-tab.anim-profile .anim-layer {
-            animation: profileContainerFade 1.4s ease forwards;
+            animation: profileContainerFade 0.9s ease forwards;
         }
         @keyframes profileContainerFade {
             0%, 55% { opacity: 1; }
@@ -3124,7 +3152,7 @@
         }
 
         .dock-tab.anim-profile .dt-svg {
-            animation: profileIconFade 1.4s ease forwards;
+            animation: profileIconFade 0.9s ease forwards;
             transform-origin: center;
         }
         @keyframes profileIconFade {
@@ -3141,7 +3169,7 @@
         /* 小人头部+身体弹动 */
         .dock-tab.anim-profile .al-person-head,
         .dock-tab.anim-profile .al-person-body {
-            animation: profilePersonPop 1.4s ease forwards;
+            animation: profilePersonPop 0.9s ease forwards;
         }
         @keyframes profilePersonPop {
             0%   { opacity: 0; transform: scale(0.5); }
@@ -3156,11 +3184,11 @@
         }
 
         /* 5条光波飞散动画 - 从脑袋周围散射，只向上和左右 */
-        .dock-tab.anim-profile .al-wave-0 { animation: waveFly0 1.4s ease forwards; }
-        .dock-tab.anim-profile .al-wave-1 { animation: waveFly1 1.4s ease forwards; }
-        .dock-tab.anim-profile .al-wave-2 { animation: waveFly2 1.4s ease forwards; }
-        .dock-tab.anim-profile .al-wave-3 { animation: waveFly3 1.4s ease forwards; }
-        .dock-tab.anim-profile .al-wave-4 { animation: waveFly4 1.4s ease forwards; }
+        .dock-tab.anim-profile .al-wave-0 { animation: waveFly0 0.9s ease forwards; }
+        .dock-tab.anim-profile .al-wave-1 { animation: waveFly1 0.9s ease forwards; }
+        .dock-tab.anim-profile .al-wave-2 { animation: waveFly2 0.9s ease forwards; }
+        .dock-tab.anim-profile .al-wave-3 { animation: waveFly3 0.9s ease forwards; }
+        .dock-tab.anim-profile .al-wave-4 { animation: waveFly4 0.9s ease forwards; }
 
         /* 上：向上飞 */
         @keyframes waveFly0 {
@@ -3711,33 +3739,52 @@
             display: flex;
             flex-direction: column;
             min-height: 100%;
-            padding: 4px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+            padding: 12px 16px calc(26px + env(safe-area-inset-bottom, 0px));
             position: relative;
         }
         .photo-wall-header {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: space-between;
-            padding: 14px 18px;
-            margin: 0 0 12px;
+            gap: 12px;
+            flex-wrap: wrap;
+            padding: 16px 18px;
+            margin: 0 0 18px;
             flex-shrink: 0;
-            position: relative;
-            top: auto;
+            position: sticky;
+            top: calc(10px + env(safe-area-inset-top, 0px));
             z-index: 10;
-            background: rgba(255, 255, 255, 0.34);
-            backdrop-filter: blur(18px) saturate(150%);
-            -webkit-backdrop-filter: blur(18px) saturate(150%);
+            background: linear-gradient(180deg, rgba(255,255,255,0.52), rgba(255,255,255,0.28));
+            backdrop-filter: blur(22px) saturate(165%);
+            -webkit-backdrop-filter: blur(22px) saturate(165%);
             border: 1px solid rgba(255, 255, 255, 0.58);
-            border-radius: 20px;
-            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.62);
+            border-radius: var(--radius-md);
+            box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.62);
             transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.35s ease;
             animation: fadeInUp 0.4s ease;
         }
         .photo-wall-header.pw-header-hidden { transform: none; opacity: 1; pointer-events: auto; }
         .photo-wall-title {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-main);
             font-size: 18px;
             font-weight: 700;
-            color: var(--text-main);
+        }
+        .photo-wall-title .ui-icon {
+            width: 20px;
+            height: 20px;
+        }
+        .photo-wall-title-text {
+            display: inline-flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .photo-wall-title-text small {
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 500;
         }
         .photo-wall-controls {
             display: flex;
@@ -3745,16 +3792,37 @@
             justify-content: flex-end;
             gap: 8px;
             flex-wrap: wrap;
+            margin-left: auto;
+        }
+        .photo-wall-select,
+        .photo-wall-btn,
+        .photo-wall-upload-btn,
+        .photo-wall-sync-status {
+            min-height: 36px;
+        }
+        .photo-wall-select {
+            appearance: none;
+            padding: 6px 34px 6px 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.48);
+            background:
+                linear-gradient(180deg, rgba(255,255,255,0.4), rgba(255,255,255,0.22)),
+                url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 7 5 6 5-6'/%3E%3C/svg%3E") no-repeat right 12px center / 14px;
+            color: var(--text-main);
+            font-size: 12px;
+            outline: none;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.45);
         }
         .photo-wall-sync-status {
             display: inline-flex;
             align-items: center;
-            gap: 8px;
-            min-height: 34px;
-            padding: 0 12px;
+            gap: 6px;
+            padding: 6px 10px;
             border-radius: 999px;
             border: 1px solid rgba(255, 255, 255, 0.42);
-            background: rgba(255, 255, 255, 0.28);
+            background: rgba(255, 255, 255, 0.22);
+            backdrop-filter: blur(16px) saturate(155%);
+            -webkit-backdrop-filter: blur(16px) saturate(155%);
             color: var(--text-main);
             font-size: 12px;
             font-weight: 600;
@@ -3780,8 +3848,8 @@
         }
         .photo-wall-sync-status.is-offline .pw-sync-dot,
         .photo-wall-sync-status.is-error .pw-sync-dot {
-            background: #f59e0b;
-            box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14);
+            background: #ef4444;
+            box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.14);
         }
         @keyframes pwSyncPulse {
             0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.35); }
@@ -3792,19 +3860,16 @@
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            min-height: 40px;
             padding: 8px 16px 8px 14px;
             border-radius: 999px;
-            border: 1px solid rgba(5, 150, 105, 0.3);
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(210, 250, 229, 0.76));
-            backdrop-filter: blur(14px) saturate(180%);
-            -webkit-backdrop-filter: blur(14px) saturate(180%);
-            color: #059669;
+            border: none;
+            background: linear-gradient(135deg, var(--primary), #10b981);
+            color: #fff;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
             transition: transform 0.25s ease, background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
-            box-shadow: 0 10px 22px rgba(16, 185, 129, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.52);
+            box-shadow: 0 10px 26px rgba(5,150,105,.28);
         }
         .photo-wall-upload-btn svg {
             width: 18px;
@@ -3817,26 +3882,27 @@
             flex-shrink: 0;
         }
         .photo-wall-upload-btn:hover {
-            transform: translateY(-1px) scale(1.02);
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(187, 247, 208, 0.92));
-            border-color: rgba(5, 150, 105, 0.5);
-            box-shadow: 0 14px 26px rgba(16, 185, 129, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.65);
+            transform: translateY(-1px);
+            box-shadow: 0 14px 30px rgba(5,150,105,.3);
         }
         .photo-wall-upload-btn:active {
-            transform: scale(0.98);
+            transform: scale(0.96);
         }
         .photo-wall-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
             padding: 6px 14px;
             border-radius: 999px;
-            border: 1px solid var(--border);
-            background: rgba(128,128,128,0.06);
-            backdrop-filter: blur(12px) saturate(160%);
-            -webkit-backdrop-filter: blur(12px) saturate(160%);
-            color: var(--text);
+            border: 1px solid rgba(255,255,255,0.48);
+            background: rgba(255,255,255,0.18);
+            backdrop-filter: blur(14px) saturate(160%);
+            -webkit-backdrop-filter: blur(14px) saturate(160%);
+            color: var(--text-main);
             font-size: 12px;
-            font-weight: 500;
+            font-weight: 600;
             cursor: pointer;
-            transition: background 0.25s ease, transform 0.25s ease;
+            transition: background 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
         }
         .photo-wall-btn:hover {
             background: rgba(128,128,128,0.12);
@@ -3886,44 +3952,45 @@
         }
         .photo-wall-item {
             position: relative;
-            aspect-ratio: 4 / 5;
+            aspect-ratio: var(--pw-aspect, 1 / 1);
             overflow: hidden;
-            border-radius: 14px;
+            border-radius: 20px;
             cursor: pointer;
-            background: linear-gradient(180deg, rgba(255,255,255,0.2), rgba(255,255,255,0.04));
-            border: none;
-            box-shadow:
-                0 20px 44px rgba(15, 23, 42, 0.14),
-                0 8px 18px rgba(15, 23, 42, 0.08),
-                inset 0 1px 0 rgba(255, 255, 255, 0.5);
-            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.4s ease;
+            background: rgba(255,255,255,.18);
+            border: 1px solid rgba(255,255,255,.45);
+            box-shadow: 0 24px 44px rgba(15, 23, 42, 0.12), 0 8px 20px rgba(15, 23, 42, 0.08);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            transition: transform 0.4s cubic-bezier(0.16,1,0.3,1), box-shadow 0.4s cubic-bezier(0.16,1,0.3,1), filter 0.35s ease, opacity 0.35s ease;
             will-change: transform;
         }
         .photo-wall-item.pw-stagger-enter {
             opacity: 0;
-            transform: translateY(30px) scale(0.94);
+            transform: translateY(18px) scale(0.96);
+            filter: blur(8px);
         }
         .photo-wall-item.pw-stagger-done {
             opacity: 1;
             transform: translateY(0) scale(1);
-            transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.16,1,0.3,1);
+            filter: blur(0);
+            transition: opacity 420ms cubic-bezier(0.16,1,0.3,1), transform 420ms cubic-bezier(0.16,1,0.3,1), filter 420ms cubic-bezier(0.16,1,0.3,1);
         }
         .photo-wall-item::before {
             content: "";
             position: absolute;
             inset: 0;
-            border-radius: 14px;
+            border-radius: inherit;
             z-index: 1;
             pointer-events: none;
-            background:
-                linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.04) 24%, rgba(255,255,255,0) 44%),
-                radial-gradient(circle at 14% 10%, rgba(255,255,255,0.34), rgba(255,255,255,0) 26%);
+            background: linear-gradient(135deg, rgba(255,255,255,.32), transparent 45%);
+            opacity: .35;
+            transition: opacity .35s ease;
         }
         .photo-wall-item::after {
             content: "";
             position: absolute;
             inset: 1px;
-            border-radius: 13px;
+            border-radius: 19px;
             z-index: 2;
             pointer-events: none;
             border: 1px solid rgba(255, 255, 255, 0.18);
@@ -3934,22 +4001,22 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
-            border-radius: 14px;
+            border-radius: inherit;
             display: block;
             position: relative;
             z-index: 0;
             box-shadow: none;
-            transition: filter 0.5s ease, transform 0.5s ease, opacity 0.4s ease;
-            filter: blur(0px);
+            transition: transform .45s cubic-bezier(0.16,1,0.3,1), filter .35s ease, opacity .36s ease;
+            filter: blur(0);
             opacity: 0;
         }
         .photo-wall-item img.pw-blur-in {
-            filter: blur(20px);
-            transform: scale(1.08);
-            opacity: 0;
+            filter: blur(16px);
+            transform: scale(1.02);
+            opacity: .25;
         }
         .photo-wall-item img.pw-blur-done {
-            filter: blur(0px);
+            filter: blur(0);
             transform: scale(1);
             opacity: 1;
         }
@@ -3959,11 +4026,35 @@
             left: 0;
             right: 0;
             z-index: 3;
-            padding: 40px 12px 12px;
-            border-radius: 0 0 14px 14px;
-            background: linear-gradient(transparent, rgba(0,0,0,0.65) 40%, rgba(0,0,0,0.78));
+            padding: 28px 12px 12px;
+            border-radius: 0 0 20px 20px;
+            background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0));
+            color: white;
+            opacity: .88;
+            transform: translateY(8px);
+            transition: opacity .35s ease, transform .35s cubic-bezier(0.16,1,0.3,1);
+        }
+        .photo-wall-item:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 28px 52px rgba(15, 23, 42, 0.16), 0 10px 24px rgba(15, 23, 42, 0.1);
+        }
+        .photo-wall-item:hover::before,
+        .photo-wall-item:focus-visible::before,
+        .photo-wall-item:active::before {
+            opacity: .55;
+        }
+        .photo-wall-item:hover img,
+        .photo-wall-item:focus-visible img {
+            transform: scale(1.045);
+        }
+        .photo-wall-item:hover .pw-item-info,
+        .photo-wall-item:focus-visible .pw-item-info,
+        .photo-wall-item:active .pw-item-info {
             opacity: 1;
             transform: translateY(0);
+        }
+        .photo-wall-item:active {
+            transform: scale(.985);
         }
         .pw-item-info .pw-item-name {
             color: white;
@@ -3987,12 +4078,19 @@
             font-size: 15px;
         }
         .photo-wall-empty-icon {
-            font-size: 48px;
+            display: flex;
+            justify-content: center;
             margin-bottom: 12px;
-            opacity: 0.5;
+            opacity: 0.72;
+        }
+        .photo-wall-empty-svg {
+            width: 54px;
+            height: 54px;
         }
         .photo-wall-empty-cta {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
             margin-top: 18px;
             padding: 12px 28px;
             border-radius: 999px;
@@ -4015,21 +4113,27 @@
         /* 骨架屏加载 */
         .pw-skeleton {
             position: relative;
-            aspect-ratio: 4 / 5;
-            border-radius: 14px;
+            aspect-ratio: 1 / 1;
+            border-radius: 20px;
             overflow: hidden;
-            background: rgba(0,0,0,0.06);
+            background: rgba(255,255,255,0.18);
+            border: 1px solid rgba(255,255,255,0.38);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
         }
+        .pw-skeleton:nth-child(3n+1) { aspect-ratio: 4 / 5; }
+        .pw-skeleton:nth-child(3n+2) { aspect-ratio: 1 / 1; }
+        .pw-skeleton:nth-child(3n+3) { aspect-ratio: 5 / 4; }
         .pw-skeleton::after {
             content: "";
             position: absolute;
             inset: 0;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-            animation: pwSkelShimmer 1.6s infinite;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.34), transparent);
+            animation: pwShimmer 1.6s infinite;
         }
-        @keyframes pwSkelShimmer {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
+        @keyframes pwShimmer {
+            from { transform: translateX(-100%); }
+            to { transform: translateX(100%); }
         }
 
         /* 动画关键帧 */
@@ -4083,28 +4187,32 @@
         .pp-ambient-bg {
             position: absolute;
             top: 0; right: 0; bottom: 0; left: 0;
-            background: #000;
-            transition: background 0.8s ease;
+            background:
+                radial-gradient(circle at 50% 30%, rgba(52, 211, 153, 0.18), transparent 62%),
+                radial-gradient(circle at 50% 72%, rgba(14, 165, 233, 0.12), transparent 58%),
+                #000;
+            transition: background .35s ease, opacity .35s ease;
             z-index: 0;
             pointer-events: none;
+            opacity: .92;
         }
         .photo-preview-close {
             position: absolute;
             top: calc(16px + env(safe-area-inset-top, 0px));
             right: calc(12px + env(safe-area-inset-right, 0px));
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: rgba(255,255,255,0.15);
+            width: 42px;
+            height: 42px;
+            border-radius: 999px;
+            background: rgba(255,255,255,.12);
             color: white;
-            font-size: 28px;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            transition: opacity 0.2s ease, transform 0.2s ease;
-            border: none;
-            line-height: 1;
+            transition: transform .18s, background .18s, opacity .18s;
+            border: 1px solid rgba(255,255,255,.18);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
             z-index: 10;
             opacity: 0;
             transform: translateY(-10px);
@@ -4123,31 +4231,32 @@
             }
         }
         .photo-preview-close:hover {
-            background: rgba(255,255,255,0.25);
-            transform: rotate(90deg);
+            background: rgba(255,255,255,.22);
+            transform: translateY(-1px) scale(1.04);
         }
+        .photo-preview-close:active { transform: scale(.94); }
         /* 预览左右切换箭头 */
         .pp-nav-arrow {
             position: absolute;
             top: 50%;
             z-index: 12;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: 1px solid rgba(255,255,255,0.15);
-            background: rgba(0,0,0,0.35);
-            backdrop-filter: blur(16px) saturate(140%);
-            -webkit-backdrop-filter: blur(16px) saturate(140%);
-            color: rgba(255,255,255,0.85);
+            width: 42px;
+            height: 42px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,.18);
+            background: rgba(255,255,255,.12);
+            backdrop-filter: blur(18px) saturate(140%);
+            -webkit-backdrop-filter: blur(18px) saturate(140%);
+            color: white;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: opacity 0.3s cubic-bezier(0.16,1,0.3,1), transform 0.3s cubic-bezier(0.16,1,0.3,1);
+            transition: transform .18s, background .18s, opacity .18s;
             pointer-events: auto;
             transform: translateY(-50%);
             opacity: 0;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.2);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.18);
         }
         .photo-preview-overlay.active .pp-nav-arrow {
             animation: ppNavEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.15s forwards;
@@ -4169,13 +4278,11 @@
             right: calc(12px + env(safe-area-inset-right, 0px));
         }
         .pp-nav-arrow:hover {
-            background: rgba(255,255,255,0.18);
-            border-color: rgba(255,255,255,0.35);
-            transform: translateY(-50%) scale(1.1);
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            background: rgba(255,255,255,.22);
+            transform: translateY(calc(-50% - 1px)) scale(1.04);
         }
         .pp-nav-arrow:active {
-            transform: translateY(-50%) scale(0.95);
+            transform: translateY(-50%) scale(.94);
         }
         .pp-nav-arrow.pp-nav-hidden {
             opacity: 0;
@@ -4220,8 +4327,13 @@
             -webkit-transform-style: preserve-3d;
         }
         .pp-slide-track.snapping {
-            transition: transform 0.32s cubic-bezier(0.33, 1, 0.68, 1);
+            transition: transform 0.3s cubic-bezier(0.33, 1, 0.68, 1);
             pointer-events: none;
+        }
+        .pp-slide-track.snapping .pp-slide-img {
+            transform: translateZ(0) scale(.985);
+            filter: saturate(.96);
+            transition: transform .3s cubic-bezier(0.33, 1, 0.68, 1), filter .3s ease;
         }
         /* 每张图的槽位：占满一屏宽 */
         .pp-slide-slot {
@@ -4275,7 +4387,7 @@
             -webkit-user-select: none;
             -webkit-user-drag: none;
             touch-action: none;
-            transition: opacity 0.25s ease;
+            transition: opacity 0.25s ease, transform .3s cubic-bezier(0.16,1,0.3,1), filter .3s ease;
         }
         .pp-slide-img[src=""] { opacity: 0; }
         .pp-slide-img.zoomed {
@@ -4286,25 +4398,27 @@
         }
         .photo-preview-info {
             position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
+            left: 50%;
+            bottom: calc(92px + env(safe-area-inset-bottom, 0px));
             z-index: 5;
             display: flex;
             align-items: center;
             gap: 10px;
-            padding: 48px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+            padding: 8px 14px;
             color: rgba(255,255,255,0.9);
             font-size: 14px;
             flex-wrap: wrap;
             justify-content: center;
-            background: linear-gradient(transparent, rgba(0,0,0,0.55) 50%, rgba(0,0,0,0.75));
-            backdrop-filter: blur(4px);
-            -webkit-backdrop-filter: blur(4px);
+            max-width: 90vw;
+            border-radius: 999px;
+            background: rgba(17, 24, 39, 0.28);
+            border: 1px solid rgba(255,255,255,0.14);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
             pointer-events: none;
             transition: opacity 0.35s ease;
             opacity: 0;
-            transform: translateY(20px);
+            transform: translate(-50%, 20px);
         }
         .photo-preview-overlay.active .photo-preview-info {
             animation: ppInfoEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.2s forwards;
@@ -4312,11 +4426,11 @@
         @keyframes ppInfoEnter {
             0% {
                 opacity: 0;
-                transform: translateY(20px);
+                transform: translate(-50%, 20px);
             }
             100% {
                 opacity: 1;
-                transform: translateY(0);
+                transform: translate(-50%, 0);
             }
         }
         .photo-preview-overlay.pp-info-hidden .photo-preview-info {
@@ -4528,9 +4642,15 @@
             justify-content: center;
         }
         .pp-placeholder::after {
-            content: '📷';
-            font-size: 48px;
-            opacity: 0.4;
+            content: '';
+            width: 56px;
+            height: 56px;
+            border-radius: 18px;
+            border: 1px solid rgba(255,255,255,0.12);
+            background:
+                radial-gradient(circle at 50% 50%, rgba(255,255,255,0.12) 0 16%, transparent 17%),
+                linear-gradient(135deg, rgba(255,255,255,0.14), rgba(255,255,255,0.03));
+            opacity: 0.45;
         }
         /* 上传进度 */
         .upload-progress-overlay {
@@ -4756,20 +4876,49 @@
             z-index: 1;
         }
         .upload-progress-status {
-            color: rgba(226, 232, 240, 0.72);
+            color: var(--text-muted);
             font-size: 12px;
             line-height: 1.5;
+            margin-top: 6px;
             text-align: center;
             min-height: 18px;
             position: relative;
             z-index: 1;
+            opacity: 0.8;
         }
         /* 底部按钮UI优化 */
         .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn {
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-            box-shadow: none !important;
-            font-weight: normal !important;
+            position: absolute;
+            bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+            z-index: 15;
+            width: 42px;
+            height: 42px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,.18);
+            background: rgba(255,255,255,.12);
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform .18s, background .18s, opacity .18s;
+            pointer-events: auto;
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+        }
+        .pp-info-btn:hover,
+        .pp-share-btn:hover,
+        .pp-rotate-btn:hover,
+        .pp-delete-btn:hover {
+            background: rgba(255,255,255,.22);
+            transform: translateY(-1px) scale(1.04);
+        }
+        .pp-info-btn:active,
+        .pp-share-btn:active,
+        .pp-rotate-btn:active,
+        .pp-delete-btn:active {
+            transform: scale(.94);
         }
         /* 信息模块视觉优化 - 外部透明，内部10%白色磨砂 */
         .pp-info-modal {
@@ -4795,101 +4944,37 @@
         }
         /* 预览分享按钮 */
         .pp-share-btn {
-            position: absolute;
-            bottom: calc(50px + env(safe-area-inset-bottom, 0px));
             right: calc(16px + env(safe-area-inset-right, 0px));
-            z-index: 15;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.6);
-            background: rgba(255, 255, 255, 0.10);
-            color: white;
-            font-size: 16px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-            pointer-events: auto;
-            box-shadow: none;
-        }
-        .pp-share-btn:hover {
-            background: rgba(255, 255, 255, 0.25);
-            border-color: rgba(255, 255, 255, 0.95);
-            transform: scale(1.1);
-        }
-        .pp-share-btn:active {
-            transform: scale(0.95);
-            background: rgba(255, 255, 255, 0.18);
         }
         .pp-share-btn.copied {
             color: #059669;
             background: rgba(5, 150, 105, 0.3);
             border-color: rgba(5, 150, 105, 0.8);
-            transform: scale(1.1);
+            transform: scale(1.04);
         }
         /* 预览删除按钮 */
         .pp-delete-btn {
-            position: absolute;
-            bottom: calc(50px + env(safe-area-inset-bottom, 0px));
-            left: calc(16px + env(safe-area-inset-right, 0px));
-            z-index: 15;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: 2px solid rgba(239, 68, 68, 0.5);
-            background: rgba(239, 68, 68, 0.08);
-            color: #ef4444;
-            font-size: 16px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-            pointer-events: auto;
-            box-shadow: none;
+            left: calc(16px + env(safe-area-inset-left, 0px));
+            background: rgba(239, 68, 68, 0.14);
+            color: #fecaca;
+            border-color: rgba(239, 68, 68, 0.3);
         }
         .pp-delete-btn:hover {
-            background: rgba(239, 68, 68, 0.35);
-            border-color: rgba(239, 68, 68, 1);
-            transform: scale(1.1);
-        }
-        .pp-delete-btn:active {
-            transform: scale(0.95);
-            background: rgba(239, 68, 68, 0.25);
+            background: rgba(239, 68, 68, 0.22);
         }
         /* 预览信息按钮 */
         .pp-info-btn {
-            position: absolute;
-            bottom: calc(50px + env(safe-area-inset-bottom, 0px));
             left: 50%;
             transform: translateX(-50%);
-            z-index: 15;
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: 2px solid rgba(255, 255, 255, 0.55);
-            background: rgba(255, 255, 255, 0.08);
-            color: white;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-            pointer-events: auto;
-            box-shadow: none;
         }
         .pp-info-btn:hover {
-            background: rgba(255, 255, 255, 0.22);
-            border-color: rgba(255, 255, 255, 0.9);
-            transform: translateX(-50%) scale(1.1);
+            transform: translateX(-50%) translateY(-1px) scale(1.04);
         }
         .pp-info-btn:active {
-            transform: translateX(-50%) scale(0.95);
-            background: rgba(255, 255, 255, 0.15);
+            transform: translateX(-50%) scale(.94);
+        }
+        .pp-rotate-btn {
+            right: calc(68px + env(safe-area-inset-right, 0px));
         }
         /* 删除确认弹窗 */
         .pw-confirm-dialog {
@@ -4953,28 +5038,40 @@
         .pw-confirm-danger:hover { background: #b91c1c; }
 
         [data-theme="dark"] .photo-wall-item {
-            background: rgba(255,255,255,0.04);
+            background: rgba(22, 28, 40, 0.42);
+            border-color: rgba(255,255,255,0.08);
             box-shadow:
                 0 18px 40px rgba(0, 0, 0, 0.42),
                 0 4px 14px rgba(0, 0, 0, 0.24);
         }
         [data-theme="dark"] .photo-wall-header {
-            background: rgba(16, 18, 26, 0.22);
-            backdrop-filter: blur(18px) saturate(130%);
-            -webkit-backdrop-filter: blur(18px) saturate(130%);
+            background: linear-gradient(180deg, rgba(16, 18, 26, 0.42), rgba(16, 18, 26, 0.22));
+            backdrop-filter: blur(22px) saturate(130%);
+            -webkit-backdrop-filter: blur(22px) saturate(130%);
             border-color: rgba(255, 255, 255, 0.08);
             box-shadow: 0 4px 28px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
         }
+        [data-theme="dark"] .photo-wall-select,
+        [data-theme="dark"] .photo-wall-btn,
+        [data-theme="dark"] .photo-wall-sync-status {
+            background-color: rgba(255,255,255,0.06);
+            border-color: rgba(255,255,255,0.12);
+            color: rgba(255,255,255,0.9);
+        }
         [data-theme="dark"] .photo-wall-upload-btn {
-            background: rgba(52, 211, 153, 0.08);
-            border-color: rgba(52, 211, 153, 0.25);
-            color: #34d399;
-            box-shadow: 0 2px 12px rgba(52, 211, 153, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: #fff;
+            box-shadow: 0 10px 26px rgba(5,150,105,.24);
         }
         [data-theme="dark"] .photo-wall-upload-btn:hover {
-            background: rgba(52, 211, 153, 0.14);
-            border-color: rgba(52, 211, 153, 0.4);
-            box-shadow: 0 4px 20px rgba(52, 211, 153, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            box-shadow: 0 14px 30px rgba(5,150,105,.28);
+        }
+        [data-theme="dark"] .pw-skeleton {
+            background: rgba(255,255,255,0.06);
+            border-color: rgba(255,255,255,0.08);
+        }
+        [data-theme="dark"] .pp-ambient-bg {
+            opacity: .82;
         }
 
         /* ========== 移动端 GPU 渲染降级 ========== */
@@ -4997,6 +5094,47 @@
             .photo-preview-overlay.active {
                 backdrop-filter: blur(4px) !important;
                 -webkit-backdrop-filter: blur(4px) !important;
+            }
+            .photo-wall-header {
+                top: calc(6px + env(safe-area-inset-top, 0px));
+            }
+            .photo-wall-controls {
+                width: 100%;
+                justify-content: flex-start;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .photo-wall-header {
+                gap: 10px;
+                padding: 14px;
+            }
+            .photo-wall-title {
+                width: 100%;
+            }
+            .photo-wall-controls {
+                width: 100%;
+                justify-content: flex-start;
+            }
+            .photo-wall-select {
+                flex: 1 1 160px;
+            }
+            .photo-preview-info {
+                bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.001ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.001ms !important;
+                scroll-behavior: auto !important;
+            }
+            .pw-skeleton::after {
+                display: none;
             }
         }
 
