@@ -556,8 +556,6 @@
         if (!active() || !inPreviewTarget(e.target)) return;
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (z.scale > 1.01) resetZoom(true);
-        else zoomAt(DOUBLE_TAP_SCALE, e.clientX, e.clientY, true);
     }
 
     function handleWheel(e) {
