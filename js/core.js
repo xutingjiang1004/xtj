@@ -3257,7 +3257,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // Track which buttons currently have animation playing
             var animatingTabs = {};
             // Animation durations by tab (in ms, matching CSS)
-            var animDurations = { posts: 1500, chat: 2500, ai: 1400, profile: 1400 };
+            var animDurations = { posts: 900, chat: 900, ai: 900, profile: 900 };
 
             function triggerTabAnimation(el, tab) {
                 var cls = animClassMap[tab];

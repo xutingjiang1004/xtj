@@ -33,7 +33,7 @@
                 </div>
             </div>
             <div class="upload-progress-text" id="uploadProgressText">0%</div>
-            <div class="upload-progress-status" id="uploadProgressStatus"></div>
+            <div class="upload-progress-status" id="uploadProgressStatus">正在整理照片内容...</div>
         </div>
     </div>
 
@@ -154,21 +154,48 @@
         <div class="dock-panel" id="panelAi">
                         <div class="photo-wall-container" id="photoWallContainer">
                 <div class="photo-wall-header">
-                    <div class="photo-wall-title">📷 照片墙</div>
+                    <div class="photo-wall-title">
+                        <span class="ui-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4 7h4l2-2h4l2 2h4a2 2 0 0 1 2 2v8a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V9a2 2 0 0 1 2-2Z"></path>
+                                <circle cx="12" cy="13" r="4"></circle>
+                            </svg>
+                        </span>
+                        <span class="photo-wall-title-text">
+                            <span>照片墙</span>
+                            <small>记录光影和日常</small>
+                        </span>
+                    </div>
                     <div class="photo-wall-sync-status is-idle" id="pwSyncStatus" aria-live="polite">
                         <span class="pw-sync-dot"></span>
-                        <span class="pw-sync-label" id="pwSyncLabel">???</span>
+                        <span class="pw-sync-label" id="pwSyncLabel">已同步</span>
                     </div>
-                    <div class="photo-wall-controls" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                        <select id="pwAlbumSort" onchange="switchPhotoWallView()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:12px;outline:none;color:var(--text);">
+                    <div class="photo-wall-controls">
+                        <select id="pwAlbumSort" class="photo-wall-select" onchange="switchPhotoWallView()">
                             <option value="date_desc">按日期 ↓</option>
                             <option value="date_asc">按日期 ↑</option>
                             <option value="name">按名称</option>
                             <option value="size">按大小</option>
                             <option value="views">按热度</option>
                         </select>
-                        <button class="photo-wall-btn" id="pwAlbumToggle" onclick="toggleAlbumView()" title="相册视图">📁 相册</button>
-                        <button class="photo-wall-upload-btn" id="photoUploadBtn" onclick="triggerPhotoUpload()">📤 上传</button>
+                        <button class="photo-wall-btn" id="pwAlbumToggle" onclick="toggleAlbumView()" title="相册视图">
+                            <span class="ui-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9Z"></path>
+                                </svg>
+                            </span>
+                            <span>相册</span>
+                        </button>
+                        <button class="photo-wall-upload-btn" id="photoUploadBtn" onclick="triggerPhotoUpload()">
+                            <span class="ui-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M7 18a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 1 1 .5 6.96H15"></path>
+                                    <path d="M12 11v9"></path>
+                                    <path d="m8.5 14.5 3.5-3.5 3.5 3.5"></path>
+                                </svg>
+                            </span>
+                            <span>上传</span>
+                        </button>
                     </div>
                 </div>
                 <div id="pwAlbumContainer" style="display:none;"></div>
@@ -298,16 +325,11 @@
         </button>
         <button class="dock-tab" data-tab="ai">
             <span class="dt-icon">
-                <svg class="dt-svg" viewBox="-1 -1 26 26" width="28" height="28" fill="none">
-                    <g transform="translate(12,12)">
-                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(0)"/>
-                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(60)"/>
-                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(120)"/>
-                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(180)"/>
-                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(240)"/>
-                        <ellipse cx="0" cy="-6" rx="3.2" ry="6" fill="none" stroke="#EC4899" stroke-width="1" transform="rotate(300)"/>
-                        <circle cx="0" cy="0" r="2.5" fill="none" stroke="#D97706" stroke-width="1"/>
-                    </g>
+                <svg class="dt-svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="5" width="18" height="14" rx="3"></rect>
+                    <circle cx="9" cy="10" r="1.8"></circle>
+                    <path d="m21 15-4.2-4.2a1.8 1.8 0 0 0-2.55 0L8 17"></path>
+                    <path d="m13 17 2.2-2.2a1.8 1.8 0 0 1 2.55 0L21 18"></path>
                 </svg>
             </span>
             <span class="dt-label" style="height:0;overflow:hidden;pointer-events:none;">.</span>
@@ -363,7 +385,14 @@
     <div class="photo-preview-overlay" id="photoPreviewOverlay">
         <div class="pp-ambient-bg" id="ppAmbientBg"></div>
         <div class="pp-dots" id="ppDots"></div>
-        <button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>
+        <button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">
+            <span class="ui-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 6 6 18"></path>
+                    <path d="m6 6 12 12"></path>
+                </svg>
+            </span>
+        </button>
         <button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -377,9 +406,10 @@
                 <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false" loading="eager"></div>
             </div>
         </div>
-        <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>
-        <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">&#x1F517;</button>
-        <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="deleteCurrentPhoto()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
+        <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span></button>
+        <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span></button>
+        <button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></svg></span></button>
+        <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="deleteCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span></button>
         
         <!-- 照片信息弹窗 -->
         <div class="pp-info-modal" id="ppInfoModal" style="display:none;">
