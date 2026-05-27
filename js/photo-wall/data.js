@@ -15,6 +15,10 @@
     var hasMore = true;
     var isLoading = false;
     
+    // 实时订阅句柄
+    var realtimeSubscription = null;
+    var isSubscribed = false;
+    
     // 多设备同步：BroadcastChannel API
     var syncChannel = null;
     if (typeof BroadcastChannel !== 'undefined') {
@@ -92,6 +96,78 @@
             } catch(e) {}
         }
     });
+    
+    // 建立Supabase实时订阅
+    function setupRealtimeSubscription() {
+        if (isSubscribed || !window.sb) return;
+        
+        try {
+            realtimeSubscription = window.sb
+                .channel('photo-wall-changes')
+                .on(
+                    'postgres_changes',
+                    {
+                        event: '*',
+                        schema: 'public',
+                        table: 'posts',
+                        filter: 'media_type=eq.' + PHOTO_WALL_MARKER
+                    },
+                    function(payload) {
+                        console.log('收到实时更新:', payload);
+                        
+                        if (payload.eventType === 'INSERT') {
+                            // 新照片添加
+                            var newPhoto = normalizePhotoWallRow(payload.new);
+                            if (newPhoto && newPhoto.id) {
+                                var existingIdx = window.photoWallData.findIndex(function(p) {
+                                    return String(p.id) === String(newPhoto.id);
+                                });
+                                if (existingIdx < 0) {
+                                    window.photoWallData.unshift(newPhoto);
+                                    saveLocalPhotoWallData();
+                                    if (window.renderPhotoWallWithoutReload) {
+                                        window.renderPhotoWallWithoutReload();
+                                    }
+                                }
+                            }
+                        } else if (payload.eventType === 'DELETE') {
+                            // 照片删除
+                            var deletedId = String(payload.old.id);
+                            var idx = window.photoWallData.findIndex(function(p) {
+                                return String(p.id) === deletedId;
+                            });
+                            if (idx >= 0) {
+                                window.photoWallData.splice(idx, 1);
+                                saveLocalPhotoWallData();
+                                if (window.renderPhotoWallWithoutReload) {
+                                    window.renderPhotoWallWithoutReload();
+                                }
+                                window.showToast('照片已被删除');
+                            }
+                        }
+                    }
+                )
+                .subscribe(function(status) {
+                    console.log('实时订阅状态:', status);
+                    isSubscribed = status === 'SUBSCRIBED';
+                });
+        } catch(e) {
+            console.error('建立实时订阅失败:', e);
+        }
+    }
+    window.setupRealtimeSubscription = setupRealtimeSubscription;
+    
+    // 清理实时订阅
+    function cleanupRealtimeSubscription() {
+        if (realtimeSubscription) {
+            try {
+                realtimeSubscription.unsubscribe();
+            } catch(e) {}
+            realtimeSubscription = null;
+        }
+        isSubscribed = false;
+    }
+    window.cleanupRealtimeSubscription = cleanupRealtimeSubscription;
 
     function getDeletedPhotoIds() {
         try {
@@ -218,6 +294,8 @@
             if (shouldQuickLoad && localData.length > 0) {
                 window.photoWallData = localData;
                 setTimeout(fetchLatestPhotos, 500);
+                // 启动实时订阅
+                setTimeout(setupRealtimeSubscription, 1000);
                 return window.photoWallData;
             }
 
@@ -234,6 +312,9 @@
             hasMore = firstPage.length >= pageSize;
             localStorage.setItem(photoWallLastSyncKey, Date.now().toString());
             saveLocalPhotoWallData();
+
+            // 启动实时订阅
+            setTimeout(setupRealtimeSubscription, 500);
 
             return window.photoWallData;
         } catch(e) {

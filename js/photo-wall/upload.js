@@ -3,18 +3,23 @@
     var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
     
+    // 平滑动画变量
+    var currentProgress = 0;
+    var targetProgress = 0;
+    var progressAnimFrame = null;
+    var lastProgressTitle = '';
+
     function showUploadProgress() {
+        currentProgress = 0;
+        targetProgress = 0;
+        lastProgressTitle = '';
+        
         var overlay = document.getElementById('uploadProgressOverlay');
         if (overlay) {
+            overlay.classList.add('upload-overlay-visible');
             overlay.style.display = 'flex';
         }
-    }
-
-    function hideUploadProgress() {
-        var overlay = document.getElementById('uploadProgressOverlay');
-        if (overlay) {
-            overlay.style.display = 'none';
-        }
+        
         var bar = document.getElementById('uploadProgressBar');
         if (bar) {
             bar.style.width = '0%';
@@ -23,24 +28,84 @@
         if (text) {
             text.textContent = '0%';
         }
-        var titleEl = document.getElementById('uploadProgressTitle');
-        if (titleEl) {
-            titleEl.textContent = '';
+        
+        // 开始平滑动画循环
+        startProgressAnimation();
+    }
+
+    function hideUploadProgress() {
+        if (progressAnimFrame) {
+            cancelAnimationFrame(progressAnimFrame);
+            progressAnimFrame = null;
+        }
+        
+        var overlay = document.getElementById('uploadProgressOverlay');
+        if (overlay) {
+            overlay.classList.remove('upload-overlay-visible');
+            setTimeout(function() {
+                overlay.style.display = 'none';
+                currentProgress = 0;
+                targetProgress = 0;
+                var bar = document.getElementById('uploadProgressBar');
+                if (bar) bar.style.width = '0%';
+                var text = document.getElementById('uploadProgressText');
+                if (text) text.textContent = '0%';
+                var titleEl = document.getElementById('uploadProgressTitle');
+                if (titleEl) titleEl.textContent = '';
+            }, 300);
         }
     }
 
+    function startProgressAnimation() {
+        if (progressAnimFrame) return;
+        
+        function animate() {
+            if (Math.abs(targetProgress - currentProgress) > 0.1) {
+                // 使用缓动算法平滑过渡
+                currentProgress += (targetProgress - currentProgress) * 0.15;
+                var displayPercent = Math.round(currentProgress);
+                
+                var bar = document.getElementById('uploadProgressBar');
+                if (bar) {
+                    bar.style.width = Math.max(0, Math.min(100, currentProgress)) + '%';
+                }
+                var text = document.getElementById('uploadProgressText');
+                if (text) {
+                    text.textContent = displayPercent + '%';
+                }
+                progressAnimFrame = requestAnimationFrame(animate);
+            } else {
+                // 目标已达成
+                currentProgress = targetProgress;
+                var bar = document.getElementById('uploadProgressBar');
+                if (bar) bar.style.width = Math.max(0, Math.min(100, currentProgress)) + '%';
+                var text = document.getElementById('uploadProgressText');
+                if (text) text.textContent = Math.round(currentProgress) + '%';
+                progressAnimFrame = null;
+            }
+        }
+        
+        progressAnimFrame = requestAnimationFrame(animate);
+    }
+
     function updateUploadProgress(percent, title) {
-        var bar = document.getElementById('uploadProgressBar');
-        if (bar) {
-            bar.style.width = Math.max(0, Math.min(100, percent)) + '%';
-        }
-        var text = document.getElementById('uploadProgressText');
-        if (text) {
-            text.textContent = Math.round(percent) + '%';
-        }
+        targetProgress = Math.max(0, Math.min(100, percent));
+        
         var titleEl = document.getElementById('uploadProgressTitle');
-        if (titleEl && title) {
+        if (titleEl && title && title !== lastProgressTitle) {
+            lastProgressTitle = title;
+            titleEl.style.opacity = '0';
+            setTimeout(function() {
+                titleEl.textContent = title;
+                titleEl.style.opacity = '1';
+            }, 100);
+        } else if (titleEl && title) {
             titleEl.textContent = title;
+        }
+        
+        // 确保动画循环在运行
+        if (!progressAnimFrame) {
+            startProgressAnimation();
         }
     }
 

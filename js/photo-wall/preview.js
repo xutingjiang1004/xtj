@@ -1092,18 +1092,31 @@
             };
         }
 
-        window.showConfirm('删除照片', '确定删除这张照片吗？', '是', function() {
+        window.showConfirm('删除照片', '确定删除这张照片吗？', '是', async function() {
             var currentPhotos = ppSortedPhotos;
             if (ppPhotoIdx < 0 || ppPhotoIdx >= currentPhotos.length) return;
             var photo = currentPhotos[ppPhotoIdx];
             if (!photo) return;
             var id = photo.id;
+            
+            window.showToast('正在删除...');
+            
             if (id != null) {
                 window.addDeletedPhotoId(id);
                 // 广播删除同步消息
                 if (window.broadcastSync) {
                     window.broadcastSync('photo_deleted', { photoId: id });
                 }
+                
+                // 从数据库删除记录
+                if (window.sb && photo.cloudId) {
+                    try {
+                        await window.sb.from('posts').delete().eq('id', photo.cloudId);
+                    } catch(e) {
+                        console.warn('删除数据库记录失败:', e);
+                    }
+                }
+                
                 // 同时从Supabase Storage删除物理文件
                 if (window.sb && photo.imageUrl) {
                     var origPath = window.extractStoragePath(photo.imageUrl);
@@ -1115,6 +1128,7 @@
                     }
                 }
             }
+            
             var idxInGlobal = -1;
             if (window.photoWallData) {
                 for (var i = 0; i < window.photoWallData.length; i++) {
@@ -1129,7 +1143,11 @@
                 window.saveLocalPhotoWallData();
             }
             closePhotoPreview();
-            window.renderPhotoWall();
+            if (window.renderPhotoWallWithoutReload) {
+                window.renderPhotoWallWithoutReload();
+            } else {
+                window.renderPhotoWall();
+            }
             window.showToast('已删除');
         });
     };
