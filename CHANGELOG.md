@@ -1,5 +1,25 @@
 # 更新日志
 
+## 2026-05-27 — 功能修复与稳定性提升
+
+### 修复
+- 修复举报按钮点击无响应问题
+- 修复举报提交字段名匹配，添加 fallback 机制
+- 修复通知开关 localStorage key 不一致
+- 修复统计详情泄露私密帖子互动
+- 修复帖子详情页无私密权限检查
+- 修复发帖文件上传未检查错误
+
+### 优化
+- 照片墙缩略图加载速度提升
+- 去除 index.html UTF-8 BOM
+
+### 技术细节
+- js/features.js：增加举报按钮事件委托，更新 submitReport 字段名与 fallback，统一通知开关 localStorage key
+- js/core.js：prefetchStatData 中过滤评论和点赞，openPostDetail 添加权限检查，doPublish 检查上传错误
+- js/photo-wall/render.js：MAX_CONCURRENT_LOADS 从 2 改为 4，rootMargin 从 200px 改为 500px
+- 全面语法检查修复
+
 ## 2026-05-26 — 照片墙功能全面优化
 
 ### 修复
