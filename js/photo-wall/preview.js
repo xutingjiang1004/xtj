@@ -1,4 +1,4 @@
-
+﻿
 (function() {
     var photoPreviewActive = false;
     var photoPreviewCurrent = null;
@@ -491,6 +491,9 @@
         if (photoPreviewActive) {
             return;
         }
+        if (window.__xtjPhotoPreviewHotfixInstalled) {
+            return window.openPhotoPreview && window.openPhotoPreview(index, keepList);
+        }
 
         if (!keepList) {
             ppSortedPhotos = window.pwCurrentSortedPhotos ? window.pwCurrentSortedPhotos.slice() : (window.photoWallData ? window.photoWallData.slice() : []);
@@ -688,6 +691,10 @@
 
     function closePhotoPreview() {
         if (!photoPreviewActive) return;
+        if (window.__xtjPhotoPreviewHotfixInstalled) {
+            photoPreviewActive = false;
+            return window.closePhotoPreview && window.closePhotoPreview();
+        }
         photoPreviewActive = false;
         var overlay = document.getElementById('photoPreviewOverlay');
         if (!overlay) {
@@ -784,6 +791,9 @@
     window.closePhotoPreview = closePhotoPreview;
 
     function showPhotoInfo() {
+        if (window.__xtjPhotoPreviewHotfixInstalled) {
+            return window.showPhotoInfo && window.showPhotoInfo();
+        }
         var photo = photoPreviewCurrent;
         if (!photo) return;
 
@@ -1051,6 +1061,9 @@
     };
 
     window.shareCurrentPhoto = function() {
+        if (window.__xtjPhotoPreviewHotfixInstalled) {
+            return window.shareCurrentPhoto && window.shareCurrentPhoto();
+        }
         var photo = photoPreviewCurrent;
         if (!photo || !photo.imageUrl) {
             window.showToast('\u6682\u65e0\u53ef\u5206\u4eab\u7684\u56fe\u7247');
@@ -1114,6 +1127,9 @@
 
     window.deletePhotoFromPreview = function() {
         if (!photoPreviewActive) return;
+        if (window.__xtjPhotoPreviewHotfixInstalled) {
+            return window.deletePhotoFromPreview && window.deletePhotoFromPreview();
+        }
 
         vibrate(10);
 
@@ -1166,6 +1182,9 @@
         });
     };
     window.ppRotatePhoto = function() {
+        if (window.__xtjPhotoPreviewHotfixInstalled) {
+            return window.ppRotatePhoto && window.ppRotatePhoto();
+        }
         var imgs = document.querySelectorAll('.pp-slide-img');
         ppCurrentRotation = (ppCurrentRotation + 90) % 360;
         var rotateStyle = 'rotate(' + ppCurrentRotation + 'deg)';
