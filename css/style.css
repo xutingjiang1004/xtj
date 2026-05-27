@@ -4327,15 +4327,31 @@
         }
         .upload-progress-bar {
             height: 100%;
-            background: linear-gradient(90deg, #0ea5e9, #3b82f6, #0ea5e9);
-            background-size: 200% 100%;
-            animation: progress-shine 1.5s ease-in-out infinite;
+            background: linear-gradient(90deg, #0ea5e9, #3b82f6, #8b5cf6, #3b82f6, #0ea5e9);
+            background-size: 300% 100%;
+            animation: progress-shine 2s ease-in-out infinite;
             border-radius: 4px;
-            transition: width 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+            transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            position: relative;
+            overflow: hidden;
+        }
+        .upload-progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+            animation: progress-shimmer 1.5s ease-in-out infinite;
         }
         @keyframes progress-shine {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
+            0% { background-position: 300% 0; }
+            100% { background-position: -300% 0; }
+        }
+        @keyframes progress-shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
         }
         .upload-progress-text {
             color: rgba(255, 255, 255, 0.75);
@@ -4371,7 +4387,6 @@
         .pp-info-modal-content .pp-info-label {
             color: rgba(255, 255, 255, 0.55) !important;
         }
-
         /* 预览分享按钮 */
         .pp-share-btn {
             position: absolute;

@@ -677,6 +677,11 @@
             return;
         }
 
+        // 调用清理函数防止内存泄漏
+        if (overlay._cleanupPreview) {
+            overlay._cleanupPreview();
+        }
+
         ppResetZoom();
 
         var curImg = document.getElementById('photoPreviewImage');
@@ -1095,6 +1100,20 @@
             var id = photo.id;
             if (id != null) {
                 window.addDeletedPhotoId(id);
+                // 广播删除同步消息
+                if (window.broadcastSync) {
+                    window.broadcastSync('photo_deleted', { photoId: id });
+                }
+                // 同时从Supabase Storage删除物理文件
+                if (window.sb && photo.imageUrl) {
+                    var origPath = window.extractStoragePath(photo.imageUrl);
+                    if (origPath) {
+                        var thumbPath = origPath.replace('/photos/', '/thumbs/');
+                        window.sb.storage.from('uploads').remove([origPath, thumbPath]).catch(function(e) {
+                            console.warn('删除存储文件失败:', e);
+                        });
+                    }
+                }
             }
             var idxInGlobal = -1;
             if (window.photoWallData) {
@@ -1362,6 +1381,30 @@
         var wrapper = overlay.querySelector('.photo-preview-image-wrapper');
 
         var startX, startY, startTime;
+        
+        // 清理函数，防止内存泄漏
+        function cleanupPreview() {
+            if (ppLongPressTimer) {
+                clearTimeout(ppLongPressTimer);
+                ppLongPressTimer = null;
+            }
+            if (ppCloseTimer) {
+                clearTimeout(ppCloseTimer);
+                ppCloseTimer = null;
+            }
+            if (ppTrackRaf) {
+                cancelAnimationFrame(ppTrackRaf);
+                ppTrackRaf = null;
+            }
+            ppPointers.clear();
+            ppPinchStart = null;
+            ppPinchPre = null;
+            ppStart = null;
+            ppDismissState.isActive = false;
+        }
+        
+        // 保存清理函数供外部调用
+        overlay._cleanupPreview = cleanupPreview;
 
         overlay.addEventListener('pointerdown', function(e) {
             var target = e.target;

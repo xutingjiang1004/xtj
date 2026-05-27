@@ -4,6 +4,7 @@
     var photoWallKey = 'xtj_photos';
     var photoWallDeletedKey = 'xtj_photos_deleted';
     var photoWallLastSyncKey = 'xtj_photos_sync';
+    var photoWallSyncChannel = 'xtj_photo_sync';
 
     var PHOTO_WALL_MARKER = '__photo_wall__';
     window.PHOTO_WALL_MARKER = PHOTO_WALL_MARKER;
@@ -13,6 +14,84 @@
     var currentPage = 0;
     var hasMore = true;
     var isLoading = false;
+    
+    // 多设备同步：BroadcastChannel API
+    var syncChannel = null;
+    if (typeof BroadcastChannel !== 'undefined') {
+        try {
+            syncChannel = new BroadcastChannel(photoWallSyncChannel);
+            syncChannel.onmessage = function(event) {
+                if (event.data && event.data.type === 'photo_deleted') {
+                    var deletedId = String(event.data.photoId);
+                    // 从当前数据中移除
+                    var idx = window.photoWallData.findIndex(function(p) {
+                        return String(p.id) === deletedId;
+                    });
+                    if (idx >= 0) {
+                        window.photoWallData.splice(idx, 1);
+                        saveLocalPhotoWallData();
+                        // 刷新UI
+                        if (window.renderPhotoWallWithoutReload) {
+                            window.renderPhotoWallWithoutReload();
+                        }
+                        window.showToast('照片已被其他设备删除');
+                    }
+                } else if (event.data && event.data.type === 'photo_added') {
+                    // 有新照片上传，刷新数据
+                    setTimeout(function() {
+                        fetchLatestPhotos();
+                    }, 1000);
+                }
+            };
+        } catch(e) {
+            console.warn('BroadcastChannel不支持:', e);
+        }
+    }
+    
+    // 发送同步消息
+    function broadcastSync(type, data) {
+        if (syncChannel) {
+            try {
+                syncChannel.postMessage({ type: type, ...data });
+            } catch(e) {}
+        }
+        // 同时更新localStorage用于跨标签页同步
+        try {
+            var syncData = JSON.parse(localStorage.getItem('xtj_photo_sync_data') || '{}');
+            syncData.lastUpdate = Date.now();
+            syncData.lastAction = type;
+            syncData.lastPhotoId = data.photoId;
+            localStorage.setItem('xtj_photo_sync_data', JSON.stringify(syncData));
+        } catch(e) {}
+    }
+    window.broadcastSync = broadcastSync;
+    
+    // localStorage备用同步方案（用于不支持BroadcastChannel的环境）
+    window.addEventListener('storage', function(event) {
+        if (event.key === 'xtj_photo_sync_data') {
+            try {
+                var syncData = JSON.parse(event.newValue || '{}');
+                if (syncData.lastAction === 'photo_deleted' && syncData.lastPhotoId) {
+                    var deletedId = String(syncData.lastPhotoId);
+                    var idx = window.photoWallData.findIndex(function(p) {
+                        return String(p.id) === deletedId;
+                    });
+                    if (idx >= 0) {
+                        window.photoWallData.splice(idx, 1);
+                        saveLocalPhotoWallData();
+                        if (window.renderPhotoWallWithoutReload) {
+                            window.renderPhotoWallWithoutReload();
+                        }
+                        window.showToast('照片已被其他设备删除');
+                    }
+                } else if (syncData.lastAction === 'photo_added') {
+                    setTimeout(function() {
+                        fetchLatestPhotos();
+                    }, 1000);
+                }
+            } catch(e) {}
+        }
+    });
 
     function getDeletedPhotoIds() {
         try {
@@ -239,6 +318,25 @@
         } catch (e) {}
     }
     window.saveLocalPhotoWallData = saveLocalPhotoWallData;
+    
+    // 从Supabase Storage URL提取存储路径
+    function extractStoragePath(url) {
+        if (!url) return null;
+        try {
+            var urlObj = new URL(url);
+            var pathMatch = urlObj.pathname.match(/\/object\/public\/uploads\/(.*)/);
+            if (pathMatch) {
+                return decodeURIComponent(pathMatch[1]);
+            }
+            // 备用匹配模式
+            var altMatch = urlObj.pathname.match(/\/uploads\/(.*)/);
+            if (altMatch) {
+                return decodeURIComponent(altMatch[1]);
+            }
+        } catch(e) {}
+        return null;
+    }
+    window.extractStoragePath = extractStoragePath;
 
     function updatePhotoViewDisplays(photo) {
         if (!photo) return;
