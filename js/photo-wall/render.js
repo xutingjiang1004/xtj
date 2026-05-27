@@ -92,6 +92,7 @@
 
         var sortKey = window.pwSortKey || 'date_desc';
         var sorted = sortPhotoWallData(window.photoWallData, sortKey);
+        window.pwCurrentSortedPhotos = sorted.slice();
         var html = renderPhotoWallHtml(sorted);
         grid.innerHTML = html;
 
@@ -131,6 +132,7 @@
 
         var sortKey = window.pwSortKey || 'date_desc';
         var sorted = sortPhotoWallData(window.photoWallData, sortKey);
+        window.pwCurrentSortedPhotos = sorted.slice();
         var html = renderPhotoWallHtml(sorted);
         grid.innerHTML = html;
 
@@ -284,12 +286,12 @@
                     var indicator = sentinel.querySelector('.pw-load-more-indicator');
                     if (indicator) indicator.textContent = '加载中...';
 
-                    var success = await window.loadMorePhotos();
+                    var newPhotos = await window.loadMorePhotos();
                     
-                    if (success) {
+                    if (newPhotos && newPhotos.length > 0) {
                         var sortKey = window.pwSortKey || 'date_desc';
                         var sorted = sortPhotoWallData(window.photoWallData, sortKey);
-                        var startIdx = sorted.length - (success.length || 20);
+                        var startIdx = sorted.length - newPhotos.length;
                         var newHtml = renderPhotoWallHtml(sorted.slice(startIdx), startIdx);
                         
                         sentinel.insertAdjacentHTML('beforebegin', newHtml);
@@ -330,24 +332,10 @@
     var pwLastScroll = 0;
     var pwScrollThreshold = 20;
     function bindPhotoWallScroll() {
-        var panelAi = document.getElementById('panelAi');
-        if (!panelAi) return;
-        panelAi.addEventListener('scroll', function() {
-            var header = document.querySelector('.photo-wall-header');
-            if (!header) return;
-            var currentScroll = panelAi.scrollTop;
-            var diff = currentScroll - pwLastScroll;
-            if (Math.abs(diff) < 5) { pwLastScroll = currentScroll; return; }
-            if (diff > 0 && currentScroll > pwScrollThreshold) {
-                header.classList.add('pw-header-hidden');
-            } else if (diff < 0) {
-                header.classList.remove('pw-header-hidden');
-            }
-            if (currentScroll <= pwScrollThreshold) {
-                header.classList.remove('pw-header-hidden');
-            }
-            pwLastScroll = currentScroll;
-        }, { passive: true });
+        var header = document.querySelector('.photo-wall-header');
+        if (header) {
+            header.classList.remove('pw-header-hidden');
+        }
     }
     window.bindPhotoWallScroll = bindPhotoWallScroll;
 

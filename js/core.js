@@ -34,6 +34,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             try { deviceId = crypto.randomUUID(); } catch(e) { deviceId = 'd_' + Date.now() + '_' + Math.random().toString(36).slice(2,9); }
             localStorage.setItem("xtj_device_id", deviceId);
         }
+        window.deviceId = deviceId;
 
         let delPostId = null, delOwnerKey = null;
         let activePostId = null;
@@ -252,7 +253,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     dialog.style.opacity = '1';
                     void dialog.offsetHeight;
                     dialog.style.transition = 'transform 0.35s cubic-bezier(0.5, 0, 0.75, 0), opacity 0.25s ease-in';
-                    dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(0.05)';
+                    dialog.style.transform = 'translate(' + o.dx + 'px, ' + o.dy + 'px) scale(' + (o.scale || 0.18) + ')';
                     dialog.style.opacity = '0';
                     overlay._closeTimer = setTimeout(function() {
                         overlay._ppDeleteOrigin = null;
@@ -491,6 +492,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
 
                     currentUser = name;
+                    window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
                     showToast("注册成功，欢迎 " + name);
                     closeModal('registerModal');
