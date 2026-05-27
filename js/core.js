@@ -2379,7 +2379,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var media_type = "";
                     if (file) {
                         var path = Date.now() + "_" + file.name;
-                        await sb.storage.from("uploads").upload(path, file);
+                        var uploadRes = await sb.storage.from("uploads").upload(path, file);
+                        if (uploadRes.error) throw uploadRes.error;
                         media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
                         media_type = file.type.startsWith("image") ? "image" : "video";
                     }
@@ -2629,8 +2630,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
                     statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__' && canViewPost(p); });
-                    statAllComments = commRes.data || [];
-                    statAllLikes = likeRes.data || [];
+                    var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
+                    statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
+                    statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
                     statCacheTime = Date.now();
                 } catch(e) {}
             };
@@ -2715,9 +2717,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         sb.from("likes").select("*").eq("post_id", postId).order("created_at", {ascending: false})
                     ]);
 
-                    const post = postRes.data;
+                    const post = normalizePost(postRes.data);
                     if (!post) {
                         document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">帖子不存在或已被删除</div>';
+                        return;
+                    }
+                    if (!canViewPost(post)) {
+                        document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">无权查看这条帖子</div>';
                         return;
                     }
                     const likes = likeRes.data || [];
