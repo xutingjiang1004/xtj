@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
@@ -20,27 +20,19 @@
 
     <div class="upload-progress-overlay" id="uploadProgressOverlay" style="display:none;">
         <div class="upload-progress-container">
-            <div class="upload-progress-icon" aria-hidden="true">
-                <div class="upload-progress-halo"></div>
-                <div class="upload-progress-ring"></div>
-                <div class="upload-progress-ring upload-progress-ring-delayed"></div>
-                <svg class="camera-icon" viewBox="0 0 24 24" width="54" height="54" fill="none" stroke="currentColor" stroke-width="1.6">
-                    <path d="M4 8.2C4 6.99 4.99 6 6.2 6h2.45c.58 0 1.13-.25 1.51-.68l.97-1.12A2.2 2.2 0 0 1 12.8 3.5h2.42c.64 0 1.25.28 1.67.77l.88 1.03c.38.45.94.7 1.52.7h.51C21.01 6 22 6.99 22 8.2V18a2.5 2.5 0 0 1-2.5 2.5h-15A2.5 2.5 0 0 1 2 18V8.2A2.2 2.2 0 0 1 4 8.2Z"></path>
-                    <circle cx="12" cy="12.7" r="4.2"></circle>
-                    <circle cx="18.1" cy="9" r="1"></circle>
+            <div class="upload-progress-icon">
+                <svg class="camera-icon" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                    <circle cx="12" cy="13" r="4"></circle>
                 </svg>
-                <div class="upload-progress-shutter"></div>
-                <div class="upload-progress-spark upload-progress-spark-a"></div>
-                <div class="upload-progress-spark upload-progress-spark-b"></div>
             </div>
-            <div class="upload-progress-title" id="uploadProgressTitle">准备上传照片</div>
+            <div class="upload-progress-title" id="uploadProgressTitle">准备中...</div>
             <div class="upload-progress-bar-wrapper">
                 <div class="upload-progress-bar" id="uploadProgressBar" style="width:0%">
                     <div class="upload-progress-bar-shine"></div>
                 </div>
             </div>
             <div class="upload-progress-text" id="uploadProgressText">0%</div>
-            <div class="upload-progress-status" id="uploadProgressStatus">正在整理照片内容...</div>
         </div>
     </div>
 
@@ -51,10 +43,10 @@
             <nav>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <h1>xtj</h1>
-                    <button id="themeToggle" class="theme-toggle-btn" title="鍒囨崲涓婚">鈽€锔?/button>
+                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
                 </div>
                 <div id="announcement-btn-wrapper" style="display:none; margin-right: 8px;">
-                    <button class="announcement-btn" id="announcementBtn" title="鍏憡">
+                    <button class="announcement-btn" id="announcementBtn" title="公告">
                         <svg viewBox="0 0 24 24">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
                             <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
@@ -64,8 +56,8 @@
                 </div>
                 <div class="nav-auth">
                     <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
-                        <button class="btn btn-primary" onclick="openAuthModal('login')">鐧诲綍</button>
-                        <button class="btn btn-ghost" onclick="openAuthModal('register')">娉ㄥ唽</button>
+                        <button class="btn btn-primary" onclick="openAuthModal('login')">登录</button>
+                        <button class="btn btn-ghost" onclick="openAuthModal('register')">注册</button>
                     </div>
                     <div id="authUI" style="display: none;">
                         <div class="user-pill">
@@ -78,22 +70,22 @@
             </nav>
             <div class="wrap" style="position:relative; z-index:2; margin:0; padding:16px 0; max-width:100%;">
                 <div class="publish-box glass" id="publishBox">
-                    <textarea id="postInp" placeholder="鍒嗕韩涓€鐐规柊椴滀簨..."></textarea>
+                    <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
                     <div class="publish-footer">
-                        <label for="fileInp" class="file-label">馃摲 閫夊彇鐓х墖鎴栬棰?/label>
+                        <label for="fileInp" class="file-label">📷 选取照片或视频</label>
                         <input type="file" id="fileInp" accept="image/*,video/*" style="display:none" />
-                        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">鍙戝竷鍔ㄦ€?/button>
+                        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
                     </div>
                 </div>
 
                 <div class="stats">
-                    <div class="stat-card glass" onclick="openStatDetail('posts')" title="鐐瑰嚮鏌ョ湅璇︽儏"><b id="sPosts">0</b><span>鎬诲姩鎬?/span></div>
-                    <div class="stat-card glass" onclick="openStatDetail('views')" title="鐐瑰嚮鏌ョ湅璇︽儏"><b id="sViews">0</b><span>鎬绘祻瑙?/span></div>
-                    <div class="stat-card glass" onclick="openStatDetail('likes')" title="鐐瑰嚮鏌ョ湅璇︽儏"><b id="sLikes">0</b><span>鐐硅禐鍜岃瘎璁?/span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('posts')" title="点击查看详情"><b id="sPosts">0</b><span>总动态</span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('views')" title="点击查看详情"><b id="sViews">0</b><span>总浏览</span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>点赞和评论</span></div>
                 </div>
 
                 <div id="feed" class="feed">
-                    <div class="loading"><div class="loading-spinner"></div><span class="loading-text">鍐呭鍔犺浇涓?..</span></div>
+                    <div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中...</span></div>
                 </div>
             </div>
         </div>
@@ -101,8 +93,8 @@
         <div class="dock-panel" id="panelChat">
             <div class="dock-chat-container" id="dockChatContainer">
                 <div class="chat-header">
-                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">鈥?/button>
-                    <h3 id="dockChatTitle">娑堟伅</h3>
+                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">‹</button>
+                    <h3 id="dockChatTitle">消息</h3>
                 </div>
                 <div id="dockChatListView" class="chat-view">
                     <div id="dockChatList" class="chat-list"></div>
@@ -112,16 +104,16 @@
                     <div class="chat-input-area">
                         <div class="chat-input-row">
                             <div class="chat-input-wrap">
-                                <input id="dockChatInput" placeholder="杈撳叆娑堟伅..." maxlength="500" />
+                                <input id="dockChatInput" placeholder="输入消息..." maxlength="500" />
                                 <div id="dockChatFilePreview" class="chat-file-preview hidden">
                                     <div class="cfp-thumb" id="dockCfpThumb">
-                                        <button class="cfp-x" id="dockCfpRemove" title="绉婚櫎">鉁?/button>
+                                        <button class="cfp-x" id="dockCfpRemove" title="移除">✕</button>
                                     </div>
                                     <span class="cfp-name" id="dockCfpName"></span>
                                 </div>
                             </div>
-                            <button class="chat-img-btn" id="dockChatImgBtn" title="鍙戦€佸浘鐗?>馃摲</button>
-                            <button class="send-btn" id="dockChatSendBtn">鉃?/button>
+                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送图片">📷</button>
+                            <button class="send-btn" id="dockChatSendBtn">➤</button>
                         </div>
                     </div>
                     <input type="file" id="dockChatFileInp" accept="image/*,video/*" style="display:none" />
@@ -132,29 +124,17 @@
         <div class="dock-panel" id="panelAi">
                         <div class="photo-wall-container" id="photoWallContainer">
                 <div class="photo-wall-header">
-                    <div class="photo-wall-title">馃摲 鐓х墖澧?/div>
+                    <div class="photo-wall-title">📷 照片墙</div>
                     <div class="photo-wall-controls" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-                        <div class="photo-wall-sync-status is-idle" id="pwSyncStatus" aria-live="polite">
-                            <span class="pw-sync-dot"></span>
-                            <span class="pw-sync-label" id="pwSyncLabel">宸插悓姝?/span>
-                        </div>
                         <select id="pwAlbumSort" onchange="switchPhotoWallView()" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:12px;outline:none;color:var(--text);">
-                            <option value="date_desc">鎸夋棩鏈?鈫?/option>
-                            <option value="date_asc">鎸夋棩鏈?鈫?/option>
-                            <option value="name">鎸夊悕绉?/option>
-                            <option value="size">鎸夊ぇ灏?/option>
-                            <option value="views">鎸夌儹搴?/option>
+                            <option value="date_desc">按日期 ↓</option>
+                            <option value="date_asc">按日期 ↑</option>
+                            <option value="name">按名称</option>
+                            <option value="size">按大小</option>
+                            <option value="views">按热度</option>
                         </select>
-                        <button class="photo-wall-btn" id="pwAlbumToggle" onclick="toggleAlbumView()" title="鐩稿唽瑙嗗浘">馃搧 鐩稿唽</button>
-                        <button class="photo-wall-upload-btn" id="photoUploadBtn" onclick="triggerPhotoUpload()">
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M4 8.5A2.5 2.5 0 0 1 6.5 6H9l1.18-1.48A1.8 1.8 0 0 1 11.59 4h.82a1.8 1.8 0 0 1 1.41.52L15 6h2.5A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-8Z"></path>
-                                <circle cx="12" cy="12.3" r="3.2"></circle>
-                                <path d="M12 2.8v4.4"></path>
-                                <path d="M9.9 5.3 12 3.2l2.1 2.1"></path>
-                            </svg>
-                            <span>上传照片</span>
-                        </button>
+                        <button class="photo-wall-btn" id="pwAlbumToggle" onclick="toggleAlbumView()" title="相册视图">📁 相册</button>
+                        <button class="photo-wall-upload-btn" id="photoUploadBtn" onclick="triggerPhotoUpload()">📤 上传</button>
                     </div>
                 </div>
                 <div id="pwAlbumContainer" style="display:none;"></div>
@@ -167,21 +147,21 @@
         <div class="dock-panel" id="panelProfile">
             <div class="dock-profile-container">
                 <div class="profile-header">
-                    <span class="profile-title">鎴戠殑</span>
+                    <span class="profile-title">我的</span>
                 </div>
                 <div class="profile-user-card" id="profileUserCard" onclick="handleProfileCardClick()">
                     <span class="avatar profile-avatar" id="profileAvatar">?</span>
                     <div class="profile-user-info">
-                        <div class="profile-user-name" id="profileName">鏈櫥褰?/div>
-                        <div class="profile-user-status" id="profileStatus">鐐瑰嚮鐧诲綍</div>
+                        <div class="profile-user-name" id="profileName">未登录</div>
+                        <div class="profile-user-status" id="profileStatus">点击登录</div>
                     </div>
-                    <span class="profile-chevron">鈥?/span>
+                    <span class="profile-chevron">›</span>
                 </div>
                 <div class="profile-settings">
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
-                            <span class="profile-setting-icon">馃寵</span>
-                            <span>娣辫壊妯″紡</span>
+                            <span class="profile-setting-icon">🌙</span>
+                            <span>深色模式</span>
                         </div>
                         <label class="profile-switch">
                             <input type="checkbox" id="profileThemeToggle">
@@ -190,8 +170,8 @@
                     </div>
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
-                            <span class="profile-setting-icon">馃敂</span>
-                            <span>閫氱煡</span>
+                            <span class="profile-setting-icon">🔔</span>
+                            <span>通知</span>
                         </div>
                         <label class="profile-switch">
                             <input type="checkbox" id="profileNotifToggle" checked>
@@ -200,8 +180,8 @@
                     </div>
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
-                            <span class="profile-setting-icon">鈩癸笍</span>
-                            <span>鍏充簬</span>
+                            <span class="profile-setting-icon">ℹ️</span>
+                            <span>关于</span>
                         </div>
                         <span class="profile-setting-value">xtj v0.0.56</span>
                     </div>
@@ -218,7 +198,7 @@
                     <path d="m15 5 4 4"/>
                 </svg>
             </span>
-            <span class="dt-label">甯栧瓙</span>
+            <span class="dt-label">帖子</span>
             <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
                 <defs>
                     <linearGradient id="g-stroke" x1="0" y1="0" x2="1" y2="0">
@@ -229,17 +209,17 @@
                 </defs>
                 <path class="al-path" d="M 8,32 Q 22,12 38,28 T 70,18" fill="none" stroke="url(#g-stroke)" stroke-width="3" stroke-linecap="round"/>
                 <g class="al-pen">
-                    <!-- 淇暱铚＄瑪 - rotate(25)浣跨瑪灏栨洿鍊炬枩锛岃窡鐫€璺緞鏂瑰悜鐢?-->
+                    <!-- 修长蜡笔 - rotate(25)使笔尖更倾斜，跟着路径方向画 -->
                     <g transform="rotate(25)">
-                        <!-- 铚＄瑪韬綋 - 缂╃煭1/4锛屼粠32鍑忓埌24 -->
+                        <!-- 蜡笔身体 - 缩短1/4，从32减到24 -->
                         <rect x="-2" y="-4" width="5" height="24" rx="1.5" fill="#F59E0B" stroke="#D97706" stroke-width="0.8"/>
-                        <!-- 铚＄瑪鏍囩鏉＄汗 -->
+                        <!-- 蜡笔标签条纹 -->
                         <rect x="-2" y="6" width="5" height="4" rx="1" fill="#FBBF24" opacity="0.5"/>
-                        <!-- 铚＄瑪閲戝睘鍖呰竟 - 浣嶇疆鐩稿簲璋冩暣 -->
+                        <!-- 蜡笔金属包边 - 位置相应调整 -->
                         <rect x="-2" y="18" width="5" height="3" rx="0.5" fill="#9CA3AF" stroke="#6B7280" stroke-width="0.5"/>
-                        <!-- 铚＄瑪绗斿皷 - 涓夎褰綅缃皟鏁?-->
+                        <!-- 蜡笔笔尖 - 三角形位置调整 -->
                         <path d="M-2,21 L0.5,28 L3,21 Z" fill="#F59E0B" stroke="#D97706" stroke-width="0.6"/>
-                        <!-- 绗斿皷灏栫棰滆壊 -->
+                        <!-- 笔尖尖端颜色 -->
                         <path d="M0,24 L0.5,28 L1,24 Z" fill="#FF6B6B"/>
                     </g>
                 </g>
@@ -251,10 +231,10 @@
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                 </svg>
             </span>
-            <span class="dt-label">鑱婂ぉ</span>
+            <span class="dt-label">聊天</span>
             <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
-                <!-- 3涓皵娉″悇鑷嫭绔嬪畾浣嶏紝鏄庢樉鍒嗗紑 -->
-                <!-- Bubble 1 (Big)锛氫富姘旀场 - 鍦ㄤ腑蹇冨亸宸?-->
+                <!-- 3个气泡各自独立定位，明显分开 -->
+                <!-- Bubble 1 (Big)：主气泡 - 在中心偏左 -->
                 <g class="al-bubble-1" opacity="0" transform="translate(8, 20)">
                     <path d="M0,0 Q0,-12 14,-12 L28,-12 Q32,-12 32,-8 L32,6 Q32,10 28,10 L18,10 L14,16 L10,10 L0,10 Q-4,10 -4,6 L-4,-8 Q-4,-12 0,0 Z" 
                           fill="rgba(74,108,247,0.15)" stroke="rgba(74,108,247,0.4)" stroke-width="1.2"/>
@@ -262,21 +242,21 @@
                     <line x1="4" y1="2" x2="18" y2="2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.3"/>
                     <line x1="4" y1="8" x2="20" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.25"/>
                 </g>
-                <!-- Bubble 2 (Medium)锛氫腑姘旀场 - 鍦ㄥぇ姘旀场鍙充笂鏂?-->
+                <!-- Bubble 2 (Medium)：中气泡 - 在大气泡右上方 -->
                 <g class="al-bubble-2" opacity="0" transform="translate(50, 5)">
                     <path d="M0,0 Q0,-10 10,-10 L20,-10 Q24,-10 24,-6 L24,4 Q24,8 20,8 L12,8 L9,13 L6,8 L0,8 Q-4,8 -4,4 L-4,-6 Q-4,-10 0,0 Z" 
                           fill="rgba(74,108,247,0.12)" stroke="rgba(74,108,247,0.3)" stroke-width="1"/>
                     <line x1="2" y1="-3" x2="16" y2="-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.35"/>
                     <line x1="2" y1="2" x2="12" y2="2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.25"/>
                 </g>
-                <!-- Bubble 3 (Small)锛氬皬姘旀场 - 鍦ㄥぇ姘旀场宸︿笂鏂?-->
+                <!-- Bubble 3 (Small)：小气泡 - 在大气泡左上方 -->
                 <g class="al-bubble-3" opacity="0" transform="translate(0, 2)">
                     <path d="M0,0 Q0,-7 7,-7 L14,-7 Q17,-7 17,-4 L17,3 Q17,6 14,6 L8,6 L5,10 L2,6 L0,6 Q-4,6 -4,3 L-4,-4 Q-4,-7 0,0 Z" 
                           fill="rgba(74,108,247,0.1)" stroke="rgba(74,108,247,0.25)" stroke-width="1"/>
                     <line x1="1" y1="-1" x2="11" y2="-1" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.3"/>
                     <line x1="1" y1="3" x2="8" y2="3" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity="0.2"/>
                 </g>
-                <!-- 鎵撳瓧鎸囩ず鐐?-->
+                <!-- 打字指示点 -->
                 <circle class="al-dot-1" cx="31" cy="25" r="2.8" fill="currentColor" opacity="0"/>
                 <circle class="al-dot-2" cx="40" cy="25" r="2.8" fill="currentColor" opacity="0"/>
                 <circle class="al-dot-3" cx="49" cy="25" r="2.8" fill="currentColor" opacity="0"/>
@@ -323,21 +303,21 @@
                     <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
                 </svg>
             </span>
-            <span class="dt-label">鎴戠殑</span>
+            <span class="dt-label">我的</span>
             <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
                 <g class="al-person" transform="translate(40, 30)">
                     <circle class="al-person-head" cx="0" cy="-8" r="5" fill="currentColor" opacity="0"/>
                     <path class="al-person-body" d="M-7,2 a7,6 0 0,1 14,0" fill="currentColor" opacity="0"/>
-                    <!-- 5鏉″厜娉細浠庤剳琚嬭竟缂樻暎灏勶紝鍙悜涓婂拰宸﹀彸锛屼笅鏂逛笉鍙?-->
-                    <!-- 涓婏細浠庡ご椤跺彂鍑?-->
+                    <!-- 5条光波：从脑袋边缘散射，只向上和左右，下方不发 -->
+                    <!-- 上：从头顶发出 -->
                     <g class="al-wave-0" opacity="0"><line x1="0" y1="-14" x2="0" y2="-26" stroke="#FF6B6B" stroke-width="2" stroke-linecap="round"/></g>
-                    <!-- 鍙充笂锛氫粠鍙充笂鏂瑰彂鍑?-->
+                    <!-- 右上：从右上方发出 -->
                     <g class="al-wave-1" opacity="0"><line x1="4" y1="-12" x2="15" y2="-22" stroke="#FBBF24" stroke-width="2" stroke-linecap="round"/></g>
-                    <!-- 鍙筹細浠庡彸鑰冲彂鍑?-->
+                    <!-- 右：从右耳发出 -->
                     <g class="al-wave-2" opacity="0"><line x1="6" y1="-8" x2="20" y2="-8" stroke="#34D399" stroke-width="2" stroke-linecap="round"/></g>
-                    <!-- 宸︼細浠庡乏鑰冲彂鍑?-->
+                    <!-- 左：从左耳发出 -->
                     <g class="al-wave-3" opacity="0"><line x1="-6" y1="-8" x2="-20" y2="-8" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/></g>
-                    <!-- 宸︿笂锛氫粠宸︿笂鏂瑰彂鍑?-->
+                    <!-- 左上：从左上方发出 -->
                     <g class="al-wave-4" opacity="0"><line x1="-4" y1="-12" x2="-15" y2="-22" stroke="#A78BFA" stroke-width="2" stroke-linecap="round"/></g>
                 </g>
             </svg>
@@ -345,15 +325,15 @@
     </div>
     </div>
 
-    <!-- 鐓х墖澧欏叏灞忛瑙?- 蹇呴』鍦?body 鐩存帴瀛愮骇锛岄伩鍏嶇埗绾?transform 鐮村潖 position:fixed -->
+    <!-- 照片墙全屏预览 - 必须在 body 直接子级，避免父级 transform 破坏 position:fixed -->
     <div class="photo-preview-overlay" id="photoPreviewOverlay">
         <div class="pp-ambient-bg" id="ppAmbientBg"></div>
         <div class="pp-dots" id="ppDots"></div>
         <button class="photo-preview-close" onclick="closePhotoPreview()">&times;</button>
-        <button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="涓婁竴寮?>
+        <button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="涓嬩竴寮?>
+        <button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div class="photo-preview-image-wrapper" id="ppImageWrapper">
@@ -363,16 +343,16 @@
                 <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false" loading="eager"></div>
             </div>
         </div>
-        <button class="pp-info-btn" id="ppInfoBtn" title="鐓х墖淇℃伅" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>
-        <button class="pp-share-btn" id="ppShareBtn" title="鍒嗕韩" onclick="window.shareCurrentPhoto()">&#x1F517;</button>
-        <button class="pp-delete-btn" id="ppDeleteBtn" title="鍒犻櫎" style="display:none;" onclick="deleteCurrentPhoto()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
+        <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></button>
+        <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">&#x1F517;</button>
+        <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="deleteCurrentPhoto()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg></button>
         
-        <!-- 鐓х墖淇℃伅寮圭獥 -->
+        <!-- 照片信息弹窗 -->
         <div class="pp-info-modal" id="ppInfoModal" style="display:none;">
             <div class="pp-info-modal-content">
                 <div class="pp-info-modal-header">
-                    <span class="pp-info-modal-title">鐓х墖璇︽儏</span>
-                    <button class="pp-info-modal-close" onclick="closePhotoInfo()">脳</button>
+                    <span class="pp-info-modal-title">照片详情</span>
+                    <button class="pp-info-modal-close" onclick="closePhotoInfo()">×</button>
                 </div>
                 <div class="pp-info-modal-body" id="ppInfoModalBody">
                 </div>
@@ -385,36 +365,36 @@
         </div>
     </div>
 
-    <!-- ========== 妯℃€佹(淇濈暀) ========== -->
+    <!-- ========== 模态框(保留) ========== -->
     <div class="modal-overlay" id="commentModal">
         <div class="modal-box glass">
-            <h3 style="margin-top:0;">鍙戣〃璇勮</h3>
-            <textarea id="commInp" placeholder="鍐欎笅浣犵殑鎯虫硶..." style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
+            <h3 style="margin-top:0;">发表评论</h3>
+            <textarea id="commInp" placeholder="写下你的想法..." style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top:16px;">
-                <button class="btn btn-ghost" onclick="closeModal('commentModal')">鍙栨秷</button>
-                <button class="btn btn-primary" id="commBtn">鍙戝竷璇勮</button>
+                <button class="btn btn-ghost" onclick="closeModal('commentModal')">取消</button>
+                <button class="btn btn-primary" id="commBtn">发布评论</button>
             </div>
         </div>
     </div>
 
     <div class="modal-overlay" id="delModal">
         <div class="modal-box glass" style="text-align: center;">
-            <h3 style="margin-top:0;">纭鍒犻櫎甯栧瓙锛?/h3>
-            <p style="color: var(--text-muted); margin-bottom:20px;">鍒犻櫎鍚庢棤娉曟仮澶?/p>
+            <h3 style="margin-top:0;">确认删除帖子？</h3>
+            <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢复</p>
             <div style="display: flex; gap: 10px;">
-                <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delModal')">鍙栨秷</button>
-                <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">纭鍒犻櫎</button>
+                <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delModal')">取消</button>
+                <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
             </div>
         </div>
     </div>
 
     <div class="pp-confirm-overlay" id="ppConfirmOverlay" onclick="if(event.target===this)window.closeConfirm()">
         <div class="pp-confirm-dialog" onclick="event.stopPropagation()">
-            <h3 class="pp-confirm-title" id="ppConfirmTitle">纭鎿嶄綔</h3>
-            <p class="pp-confirm-msg" id="ppConfirmMsg">纭畾瑕佹墽琛屾鎿嶄綔鍚楋紵</p>
+            <h3 class="pp-confirm-title" id="ppConfirmTitle">确认操作</h3>
+            <p class="pp-confirm-msg" id="ppConfirmMsg">确定要执行此操作吗？</p>
             <div class="pp-confirm-actions">
-                <button class="pp-confirm-btn pp-confirm-cancel" onclick="window.closeConfirm()">鍙栨秷</button>
-                <button class="pp-confirm-btn pp-confirm-ok" id="ppConfirmOkBtn" onclick="window.execConfirm()">纭</button>
+                <button class="pp-confirm-btn pp-confirm-cancel" onclick="window.closeConfirm()">取消</button>
+                <button class="pp-confirm-btn pp-confirm-ok" id="ppConfirmOkBtn" onclick="window.execConfirm()">确认</button>
             </div>
         </div>
     </div>
@@ -422,11 +402,11 @@
     <div class="modal-overlay" id="loginModal" onclick="if(event.target===this)closeModal('loginModal')">
         <div class="modal-box glass" style="padding: 32px;" onclick="event.stopPropagation()">
             <div class="auth-form">
-                <p class="af-title">娆㈣繋鍥炴潵</p>
-                <input id="loginNickInp" class="af-input" placeholder="鏄电О" autocomplete="off" />
-                <input id="loginPwInp" class="af-input" type="password" placeholder="瀵嗙爜" />
-                <button class="btn btn-primary af-btn" id="loginSubmitBtn">鐧诲綍</button>
-                <span class="af-link" onclick="closeModal('loginModal');openAuthModal('register')">娌℃湁璐﹀彿锛熷幓娉ㄥ唽</span>
+                <p class="af-title">欢迎回来</p>
+                <input id="loginNickInp" class="af-input" placeholder="昵称" autocomplete="off" />
+                <input id="loginPwInp" class="af-input" type="password" placeholder="密码" />
+                <button class="btn btn-primary af-btn" id="loginSubmitBtn">登录</button>
+                <span class="af-link" onclick="closeModal('loginModal');openAuthModal('register')">没有账号？去注册</span>
             </div>
         </div>
     </div>
@@ -434,11 +414,11 @@
     <div class="modal-overlay" id="registerModal" onclick="if(event.target===this)closeModal('registerModal')">
         <div class="modal-box glass" style="padding: 32px;" onclick="event.stopPropagation()">
             <div class="auth-form">
-                <p class="af-title">鍒涘缓璐﹀彿</p>
-                <input id="regNickInp" class="af-input" placeholder="鏄电О" autocomplete="off" />
-                <input id="regPwInp" class="af-input" type="password" placeholder="瀵嗙爜锛堣嚦灏?浣嶏級" />
-                <button class="btn btn-primary af-btn" id="registerSubmitBtn">娉ㄥ唽</button>
-                <span class="af-link" onclick="closeModal('registerModal');openAuthModal('login')">宸叉湁璐﹀彿锛熷幓鐧诲綍</span>
+                <p class="af-title">创建账号</p>
+                <input id="regNickInp" class="af-input" placeholder="昵称" autocomplete="off" />
+                <input id="regPwInp" class="af-input" type="password" placeholder="密码（至少3位）" />
+                <button class="btn btn-primary af-btn" id="registerSubmitBtn">注册</button>
+                <span class="af-link" onclick="closeModal('registerModal');openAuthModal('login')">已有账号？去登录</span>
             </div>
         </div>
     </div>
@@ -446,19 +426,19 @@
     <div class="img-viewer" id="imgViewer">
         <button class="iv-close" onclick="closeImageViewer()">&times;</button>
         <div class="iv-wrapper" id="ivWrapper">
-            <img id="ivImg" src="" alt="棰勮" draggable="false" />
+            <img id="ivImg" src="" alt="预览" draggable="false" />
         </div>
-        <div class="iv-zoom-hint" id="ivZoomHint">鎹忓悎鍙屾寚鍙缉鏀?/div>
+        <div class="iv-zoom-hint" id="ivZoomHint">捏合双指可缩放</div>
     </div>
 
     <div class="modal-overlay" id="statModal" onclick="if(event.target===this)closeModal('statModal')">
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
-                <h3 id="statModalTitle">缁熻璇︽儏</h3>
-                <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">鉁?/button>
+                <h3 id="statModalTitle">统计详情</h3>
+                <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="stat-detail-body" id="statModalBody">
-                鍔犺浇涓?..
+                加载中...
             </div>
         </div>
     </div>
@@ -466,91 +446,91 @@
     <div class="modal-overlay" id="postDetailModal" onclick="if(event.target===this)closeModal('postDetailModal')">
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
-                <h3 id="postDetailTitle">甯栧瓙璇︽儏</h3>
-                <button class="btn btn-ghost" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;">鉁?/button>
+                <h3 id="postDetailTitle">帖子详情</h3>
+                <button class="btn btn-ghost" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="stat-detail-body" id="postDetailBody">
-                鍔犺浇涓?..
+                加载中...
             </div>
         </div>
     </div>
 
-    <!-- 涓汉璧勬枡璇︽儏妯℃€佹 -->
+    <!-- 个人资料详情模态框 -->
     <div class="modal-overlay" id="profileDetailModal" onclick="if(event.target===this)closeModal('profileDetailModal')">
         <div class="modal-box glass profile-detail-modal" onclick="event.stopPropagation()">
             <div class="profile-detail-header">
-                <h3>涓汉璧勬枡</h3>
-                <button class="btn btn-ghost" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;">鉁?/button>
+                <h3>个人资料</h3>
+                <button class="btn btn-ghost" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="profile-detail-body">
                 <div class="profile-detail-avatar-wrapper">
                     <div class="profile-detail-avatar" id="profileDetailAvatar" onclick="triggerAvatarUpload()">
                         <span id="profileDetailAvatarText">?</span>
                     </div>
-                    <div class="profile-detail-avatar-edit" onclick="triggerAvatarUpload()" title="鏇存崲澶村儚">馃摲</div>
+                    <div class="profile-detail-avatar-edit" onclick="triggerAvatarUpload()" title="更换头像">📷</div>
                     <input type="file" id="avatarUploadInput" accept="image/*" style="display:none;" onchange="handleAvatarUpload(event)">
                 </div>
                 <div class="profile-detail-info">
                     <div class="profile-detail-info-item">
-                        <span class="profile-detail-info-label">鐢ㄦ埛鍚?/span>
+                        <span class="profile-detail-info-label">用户名</span>
                         <span class="profile-detail-info-value" id="profileDetailName">-</span>
                     </div>
                     <div class="profile-detail-info-item">
-                        <span class="profile-detail-info-label">鐢ㄦ埛ID</span>
+                        <span class="profile-detail-info-label">用户ID</span>
                         <span class="profile-detail-info-value" id="profileDetailId">-</span>
                     </div>
                     <div class="profile-detail-info-item">
-                        <span class="profile-detail-info-label">娉ㄥ唽鏃堕棿</span>
+                        <span class="profile-detail-info-label">注册时间</span>
                         <span class="profile-detail-info-value" id="profileDetailRegTime">-</span>
                     </div>
                 </div>
-                <button class="profile-detail-logout-btn" onclick="doLogoutFromProfile()">閫€鍑虹櫥褰?/button>
+                <button class="profile-detail-logout-btn" onclick="doLogoutFromProfile()">退出登录</button>
             </div>
         </div>
     </div>
 
-    <!-- 鏌ョ湅鐢ㄦ埛璧勬枡鍗＄墖妯℃€佹 -->
+    <!-- 查看用户资料卡片模态框 -->
     <div class="modal-overlay" id="userProfileModal" onclick="if(event.target===this)closeModal('userProfileModal')">
         <div class="modal-box glass user-profile-card-modal" onclick="event.stopPropagation()">
             <div class="upc-header">
-                <h3>鐢ㄦ埛璧勬枡</h3>
-                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;">鉁?/button>
+                <h3>用户资料</h3>
+                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="upc-body">
                 <div class="upc-avatar" id="upcAvatar">
                     <span id="upcAvatarText">?</span>
                 </div>
                 <div class="upc-name" id="upcName">-</div>
-                <div class="upc-login" id="upcLogin">鏈€杩戠櫥褰曪細鍔犺浇涓?..</div>
-                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">馃挰 鍙戞秷鎭?/button>
+                <div class="upc-login" id="upcLogin">最近登录：加载中...</div>
+                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">💬 发消息</button>
             </div>
         </div>
     </div>
 
-    <!-- 鍏憡妯℃€佹 -->
+    <!-- 公告模态框 -->
     <div class="announcement-modal-overlay" id="announcementModal" onclick="if(event.target===this)closeAnnouncementModal()">
         <div class="announcement-modal" onclick="event.stopPropagation()">
             <div class="announcement-header">
                 <div class="announcement-tab-bar">
-                    <button class="announcement-tab active" data-tab="announcements">馃敂 鍏憡</button>
-                    <button class="announcement-tab" data-tab="changelog">馃摑 鏇存柊鏃ュ織</button>
+                    <button class="announcement-tab active" data-tab="announcements">🔔 公告</button>
+                    <button class="announcement-tab" data-tab="changelog">📝 更新日志</button>
                 </div>
-                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">鉁?/button>
+                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="announcement-content">
                 <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
-                    <div class="announcement-admin-title">馃摙 鍙戝竷鏂板叕鍛?/div>
-                    <input type="text" id="announcementAdminTitle" class="announcement-admin-title-input" placeholder="杈撳叆鍏憡鏍囬锛堝彲閫夛級">
-                    <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="杈撳叆鍏憡鍐呭锛堝彲閫夛級"></textarea>
+                    <div class="announcement-admin-title">📢 发布新公告</div>
+                    <input type="text" id="announcementAdminTitle" class="announcement-admin-title-input" placeholder="输入公告标题（可选）">
+                    <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="输入公告内容（可选）"></textarea>
                     <div class="announcement-admin-row">
-                        <button class="announcement-admin-btn primary" onclick="publishAnnouncement()">鍙戝竷</button>
+                        <button class="announcement-admin-btn primary" onclick="publishAnnouncement()">发布</button>
                     </div>
                 </div>
                 <div id="announcementListContainer">
                     <div class="announcement-list" id="announcementList"></div>
                 </div>
                 <div id="announcementDetail" class="announcement-detail">
-                    <button class="announcement-back-btn" onclick="showAnnouncementList()">鈫?杩斿洖</button>
+                    <button class="announcement-back-btn" onclick="showAnnouncementList()">← 返回</button>
                     <div class="announcement-detail-header">
                         <div class="announcement-detail-left">
                             <div class="announcement-detail-user" id="announcementDetailUserInfo"></div>
@@ -583,38 +563,38 @@
     
 
     <!-- ============================================================ -->
-    <!-- 鍔熻兘妯″潡锛氱敤鎴风鐞?& 鍐呭瀹夊叏 / 鐓х墖澧欏寮?/ 鎬ц兘浼樺寲        -->
+    <!-- 功能模块：用户管理 & 内容安全 / 照片墙增强 / 性能优化        -->
     <!-- ============================================================ -->
 
-    <!-- 涓炬姤寮圭獥 HTML -->
+    <!-- 举报弹窗 HTML -->
     <div class="modal-overlay" id="reportModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);backdrop-filter:blur(8px);z-index:10002;justify-content:center;align-items:center;" onclick="if(event.target===this)window.closeModal('reportModal')">
         <div style="background:var(--card-bg);border-radius:20px;padding:24px;max-width:440px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 16px 48px rgba(0,0,0,0.2);">
-            <h3 style="margin:0 0 16px;font-size:18px;">馃毃 涓炬姤</h3>
+            <h3 style="margin:0 0 16px;font-size:18px;">🚨 举报</h3>
             <div style="margin-bottom:12px;">
-                <label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">涓炬姤绫诲瀷</label>
+                <label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">举报类型</label>
                 <select id="reportCategory" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);font-size:14px;outline:none;color:var(--text);">
-                    <option value="spam">鍨冨溇骞垮憡</option>
-                    <option value="harassment">楠氭壈/浜鸿韩鏀诲嚮</option>
-                    <option value="inappropriate">涓嶉泤鍐呭</option>
-                    <option value="fake">铏氬亣淇℃伅</option>
-                    <option value="violence">鏆村姏鍐呭</option>
-                    <option value="hate_speech">浠囨仺瑷€璁?/option>
-                    <option value="copyright">渚电姱鐗堟潈</option>
-                    <option value="other">鍏朵粬</option>
+                    <option value="spam">垃圾广告</option>
+                    <option value="harassment">骚扰/人身攻击</option>
+                    <option value="inappropriate">不雅内容</option>
+                    <option value="fake">虚假信息</option>
+                    <option value="violence">暴力内容</option>
+                    <option value="hate_speech">仇恨言论</option>
+                    <option value="copyright">侵犯版权</option>
+                    <option value="other">其他</option>
                 </select>
             </div>
             <div style="margin-bottom:12px;">
-                <label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">涓炬姤鐞嗙敱</label>
-                <textarea id="reportReason" rows="4" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);font-size:14px;outline:none;color:var(--text);resize:vertical;box-sizing:border-box;" placeholder="璇疯缁嗘弿杩颁妇鎶ュ師鍥?.."></textarea>
+                <label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">举报理由</label>
+                <textarea id="reportReason" rows="4" style="width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--bg);font-size:14px;outline:none;color:var(--text);resize:vertical;box-sizing:border-box;" placeholder="请详细描述举报原因..."></textarea>
             </div>
             <div style="margin-bottom:16px;">
-                <label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">璇佹嵁鎴浘锛堝彲閫夛級</label>
+                <label style="font-size:13px;font-weight:600;display:block;margin-bottom:4px;">证据截图（可选）</label>
                 <input type="file" id="reportEvidenceInput" accept="image/*" style="width:100%;padding:8px;border-radius:10px;border:1px solid var(--border);background:var(--bg);font-size:13px;">
                 <div id="reportEvidencePreview" style="margin-top:4px;font-size:12px;color:var(--text-muted);"></div>
             </div>
             <div style="display:flex;gap:8px;justify-content:flex-end;">
-                <button onclick="window.closeModal('reportModal')" style="padding:8px 18px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:14px;">鍙栨秷</button>
-                <button id="reportSubmitBtn" onclick="window.submitReport()" style="padding:8px 18px;border-radius:10px;border:none;background:var(--primary);color:#fff;cursor:pointer;font-size:14px;">鎻愪氦涓炬姤</button>
+                <button onclick="window.closeModal('reportModal')" style="padding:8px 18px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-size:14px;">取消</button>
+                <button id="reportSubmitBtn" onclick="window.submitReport()" style="padding:8px 18px;border-radius:10px;border:none;background:var(--primary);color:#fff;cursor:pointer;font-size:14px;">提交举报</button>
             </div>
         </div>
     </div>
