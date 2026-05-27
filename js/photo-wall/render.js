@@ -151,46 +151,78 @@
     var pwLazyObserver = null;
     var imageLoadQueue = [];
     var isProcessingQueue = false;
+    var imgCache = new Map(); // 图片缓存
+    var activeLoadCount = 0;
+    var MAX_CONCURRENT_LOADS = 2; // 限制并发加载数
 
     function processImageQueue() {
         if (isProcessingQueue || imageLoadQueue.length === 0) return;
+        if (activeLoadCount >= MAX_CONCURRENT_LOADS) return;
+        
         isProcessingQueue = true;
 
-        var batchSize = 3;
+        var batchSize = Math.max(1, MAX_CONCURRENT_LOADS - activeLoadCount);
         var batch = imageLoadQueue.splice(0, batchSize);
 
         batch.forEach(function(entry) {
             var img = entry.target;
             var realSrc = img.getAttribute('data-src');
+            
             if (realSrc) {
+                // 检查缓存
+                if (imgCache.has(realSrc)) {
+                    var cachedState = imgCache.get(realSrc);
+                    if (cachedState === 'success') {
+                        img.src = realSrc;
+                        img.removeAttribute('data-src');
+                        img.classList.remove('pw-blur-in');
+                        img.classList.add('pw-blur-done');
+                        if (pwLazyObserver) pwLazyObserver.unobserve(img);
+                        return;
+                    }
+                }
+
+                activeLoadCount++;
                 img.src = realSrc;
                 img.removeAttribute('data-src');
+
                 if (img.complete && img.naturalWidth > 0) {
+                    imgCache.set(realSrc, 'success');
                     img.classList.remove('pw-blur-in');
                     img.classList.add('pw-blur-done');
+                    activeLoadCount--;
+                    if (pwLazyObserver) pwLazyObserver.unobserve(img);
+                    processImageQueue(); // 继续处理队列
                 } else {
-                    (function(imgEl) {
+                    (function(imgEl, src) {
                         var loadedFn = function() {
+                            imgCache.set(src, 'success');
                             imgEl.classList.remove('pw-blur-in');
                             imgEl.classList.add('pw-blur-done');
+                            activeLoadCount--;
+                            if (pwLazyObserver) pwLazyObserver.unobserve(imgEl);
+                            processImageQueue(); // 继续处理队列
                         };
-                        imgEl.addEventListener('load', loadedFn, { once: true });
-                        imgEl.addEventListener('error', loadedFn, { once: true });
-                    })(img);
+                        var errorFn = function() {
+                            imgCache.set(src, 'error');
+                            imgEl.classList.remove('pw-blur-in');
+                            imgEl.classList.add('pw-blur-done');
+                            activeLoadCount--;
+                            if (pwLazyObserver) pwLazyObserver.unobserve(imgEl);
+                            processImageQueue(); // 继续处理队列
+                        };
+                        imgEl.onload = loadedFn;
+                        imgEl.onerror = errorFn;
+                    })(img, realSrc);
                 }
             } else {
                 img.classList.remove('pw-blur-in');
                 img.classList.add('pw-blur-done');
-            }
-            if (pwLazyObserver) {
-                pwLazyObserver.unobserve(img);
+                if (pwLazyObserver) pwLazyObserver.unobserve(img);
             }
         });
 
         isProcessingQueue = false;
-        if (imageLoadQueue.length > 0) {
-            requestAnimationFrame(processImageQueue);
-        }
     }
 
     function pwObserveLazyImages(grid) {
@@ -208,16 +240,20 @@
         }
 
         pwLazyObserver = new IntersectionObserver(function(entries) {
+            var hasNewEntries = false;
             for (var e = 0; e < entries.length; e++) {
                 var entry = entries[e];
                 if (entry.isIntersecting) {
                     imageLoadQueue.push(entry);
+                    hasNewEntries = true;
                 }
             }
-            processImageQueue();
+            if (hasNewEntries) {
+                processImageQueue();
+            }
         }, { 
-            rootMargin: '300px 0px',
-            threshold: 0.01
+            rootMargin: '200px 0px', // 减少预加载距离
+            threshold: 0.05
         });
 
         var imgs = grid.querySelectorAll('.pw-blur-in');
