@@ -1,4 +1,4 @@
-﻿
+
 (function() {
     var photoPreviewActive = false;
     var photoPreviewCurrent = null;
@@ -782,7 +782,7 @@
             modalEl.innerHTML =
                 '<div class="pp-info-modal-content">' +
                 '<div class="pp-info-modal-header">' +
-                '<span class="pp-info-modal-title">鐓х墖璇︽儏</span>' +
+                '<span class="pp-info-modal-title">????</span>' +
                 '<button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button>' +
                 '</div>' +
                 '<div class="pp-info-modal-body" id="ppInfoModalBody"></div>' +
@@ -801,7 +801,7 @@
             });
         }
 
-        var sizeStr = '鏈煡';
+        var sizeStr = '??';
         if (photo.fileSize) {
             var size = photo.fileSize;
             if (size >= 1024 * 1024) {
@@ -813,47 +813,68 @@
             }
         }
 
-        var dateStr = '鏈煡';
+        var dateStr = '??';
         if (photo.timestamp) {
             dateStr = new Date(photo.timestamp).toLocaleString('zh-CN');
         }
 
-        var exifHtml = '';
-        if (photo.exif) {
-            exifHtml = '<div class="pp-info-divider"></div>' +
-                '<div class="pp-info-section">' +
-                '<div class="pp-info-section-title">鎷嶆憚鍙傛暟</div>';
-            if (photo.exif.make || photo.exif.model) {
-                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">璁惧</span><span class="pp-info-value">' + (photo.exif.model || photo.exif.make || '鏈煡') + '</span></div>';
-            }
-            if (photo.exif.fNumber) {
-                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">鍏夊湀</span><span class="pp-info-value">f/' + photo.exif.fNumber + '</span></div>';
-            }
-            if (photo.exif.exposureTime) {
-                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">蹇棬</span><span class="pp-info-value">' + photo.exif.exposureTime + '</span></div>';
-            }
-            if (photo.exif.iso) {
-                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">ISO</span><span class="pp-info-value">' + photo.exif.iso + '</span></div>';
-            }
-            if (photo.exif.focalLength) {
-                exifHtml += '<div class="pp-info-row"><span class="pp-info-label">鐒﹁窛</span><span class="pp-info-value">' + photo.exif.focalLength + 'mm</span></div>';
-            }
-            exifHtml += '</div>';
+        function infoRow(label, value) {
+            return '<div class="pp-info-row"><span class="pp-info-label">' + label + '</span><span class="pp-info-value">' + value + '</span></div>';
         }
 
-        document.getElementById('ppInfoModalBody').innerHTML =
+        function safeValue(value, fallback) {
+            return window.escapeHtml(String(value == null || value === '' ? (fallback || '??') : value));
+        }
+
+        var metadataRows = '';
+        metadataRows += infoRow('???', safeValue(photo.username, '??'));
+        metadataRows += infoRow('????', safeValue(dateStr, '??'));
+        metadataRows += infoRow('???', safeValue(photo.views || 0, '0'));
+
+        var fileRows = '';
+        fileRows += infoRow('????', safeValue(sizeStr, '??'));
+
+        var exifRows = '';
+        if (photo.exif) {
+            if (photo.exif.make || photo.exif.model) {
+                exifRows += infoRow('??', safeValue(photo.exif.model || photo.exif.make, '??'));
+            }
+            if (photo.exif.fNumber) {
+                exifRows += infoRow('??', safeValue('f/' + photo.exif.fNumber, '??'));
+            }
+            if (photo.exif.exposureTime) {
+                exifRows += infoRow('??', safeValue(photo.exif.exposureTime, '??'));
+            }
+            if (photo.exif.iso) {
+                exifRows += infoRow('ISO', safeValue(photo.exif.iso, '??'));
+            }
+            if (photo.exif.focalLength) {
+                exifRows += infoRow('??', safeValue(photo.exif.focalLength + 'mm', '??'));
+            }
+        }
+
+        var bodyHtml =
             '<div class="pp-info-section">' +
-            '<div class="pp-info-section-title">鍏冩暟鎹?/div>' +
-            '<div class="pp-info-row"><span class="pp-info-label">涓婁紶鑰?/span><span class="pp-info-value">' + (photo.username || '鏈煡') + '</span></div>' +
-            '<div class="pp-info-row"><span class="pp-info-label">涓婁紶鏃堕棿</span><span class="pp-info-value">' + dateStr + '</span></div>' +
-            '<div class="pp-info-row"><span class="pp-info-label">娴忚閲?/span><span class="pp-info-value">' + (photo.views || 0) + ' 娆?/span></div>' +
+            '<div class="pp-info-section-title">???</div>' +
+            metadataRows +
             '</div>' +
             '<div class="pp-info-divider"></div>' +
             '<div class="pp-info-section">' +
-            '<div class="pp-info-section-title">鏂囦欢淇℃伅</div>' +
-            '<div class="pp-info-row"><span class="pp-info-label">鏂囦欢澶у皬</span><span class="pp-info-value">' + sizeStr + '</span></div>' +
-            '</div>' +
-            exifHtml;
+            '<div class="pp-info-section-title">????</div>' +
+            fileRows +
+            '</div>';
+
+        if (exifRows) {
+            bodyHtml +=
+                '<div class="pp-info-divider"></div>' +
+                '<div class="pp-info-section">' +
+                '<div class="pp-info-section-title">????</div>' +
+                exifRows +
+                '</div>';
+        }
+
+        var bodyEl = document.getElementById('ppInfoModalBody');
+        if (bodyEl) bodyEl.innerHTML = bodyHtml;
 
         if (modal._closeTimeout) {
             clearTimeout(modal._closeTimeout);
@@ -921,7 +942,6 @@
             content.style.opacity = '1';
         }
     }
-
     window.showPhotoInfo = showPhotoInfo;
 
     window.closePhotoInfo = function() {
@@ -1091,7 +1111,7 @@
             };
         }
 
-        window.showConfirm('删除照片', '确定删除这张照片吗？', '确认删除', async function() {
+        window.showConfirm('????', '??????????', '????', async function() {
             var currentPhotos = ppSortedPhotos;
             if (ppPhotoIdx < 0 || ppPhotoIdx >= currentPhotos.length) return;
             var photo = currentPhotos[ppPhotoIdx];
@@ -1102,7 +1122,7 @@
             if (deleteBtn) deleteBtn.disabled = true;
             if (confirmOkBtn) confirmOkBtn.disabled = true;
 
-            window.showToast('正在删除...');
+            window.showToast('????...');
             var deleteResult = { ok: true };
             if (window.deletePhotoWallPhoto) {
                 deleteResult = await window.deletePhotoWallPhoto(photo, { render: false });
@@ -1119,14 +1139,13 @@
                 } else if (window.renderPhotoWall) {
                     window.renderPhotoWall();
                 }
-                window.showToast('已删除，正在同步到其他设备');
+                window.showToast('?????????????');
             } else {
                 if (deleteBtn) deleteBtn.disabled = false;
                 if (confirmOkBtn) confirmOkBtn.disabled = false;
             }
         });
     };
-
     window.ppRotatePhoto = function() {
         var imgs = document.querySelectorAll('.pp-slide-img');
         ppCurrentRotation = (ppCurrentRotation + 90) % 360;

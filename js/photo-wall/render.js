@@ -284,43 +284,30 @@
                 if (entry.isIntersecting && !isLoadingMore && window.hasMorePhotos()) {
                     isLoadingMore = true;
                     var indicator = sentinel.querySelector('.pw-load-more-indicator');
-                    if (indicator) indicator.textContent = '加载中...';
+                    if (indicator) indicator.textContent = '加载中...';                    var newPhotos = await window.loadMorePhotos();
 
-                    var newPhotos = await window.loadMorePhotos();
-                    
                     if (newPhotos && newPhotos.length > 0) {
-                        var sortKey = window.pwSortKey || 'date_desc';
-                        var sorted = sortPhotoWallData(window.photoWallData, sortKey);
-                        var startIdx = sorted.length - newPhotos.length;
-                        var newHtml = renderPhotoWallHtml(sorted.slice(startIdx), startIdx);
-                        
-                        sentinel.insertAdjacentHTML('beforebegin', newHtml);
-                        
-                        requestAnimationFrame(function() {
-                            var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
-                            items.forEach(function(item) {
-                                item.classList.add('pw-stagger-done');
-                                item.classList.remove('pw-stagger-enter');
-                            });
-                        });
-                        
-                        pwObserveLazyImages(grid);
-                        
+                        if (window.renderPhotoWallWithoutReload) {
+                            window.renderPhotoWallWithoutReload();
+                        } else if (window.renderPhotoWall) {
+                            await window.renderPhotoWall();
+                        }
+
                         if (!window.hasMorePhotos()) {
-                            if (indicator) indicator.textContent = '没有更多了';
-                            infiniteScrollObserver.disconnect();
-                        } else {
-                            if (indicator) indicator.textContent = '加载更多...';
+                            if (indicator) indicator.textContent = '????????';
+                            if (infiniteScrollObserver) infiniteScrollObserver.disconnect();
+                        } else if (indicator) {
+                            indicator.textContent = '??????...';
                         }
                     } else {
-                        if (indicator) indicator.textContent = '加载失败';
+                        if (indicator) indicator.textContent = '??????';
                         setTimeout(function() {
                             if (indicator && window.hasMorePhotos()) {
-                                indicator.textContent = '加载更多...';
+                                indicator.textContent = '??????...';
                             }
                         }, 2000);
                     }
-                    
+
                     isLoadingMore = false;
                 }
             }

@@ -167,6 +167,7 @@
             thumbUrl: extra.thumb || '',
             timestamp: row.created_at ? Date.parse(row.created_at) : (extra.timestamp || Date.now()),
             views: typeof row.views === 'number' ? row.views : (extra.views || 0),
+            actor_key: row.actor_key || extra.actor_key || window.deviceId || '',
             fileSize: extra.fileSize || null,
             exif: extra.exif || null
         };
@@ -350,12 +351,24 @@
 
     async function deletePhotoCloudRecord(entry) {
         if (!window.sb || !entry || !entry.cloudId) return false;
-        var res = await window.sb
-            .from('posts')
-            .delete()
-            .eq('id', entry.cloudId)
-            .select('id');
-        if (res.error) throw res.error;
+
+        try {
+            var res = await window.sb
+                .from('posts')
+                .delete()
+                .eq('id', entry.cloudId)
+                .select('id');
+            if (res && !res.error) return true;
+        } catch (e) {}
+
+        var actorKey = entry.actor_key || entry.actorKey || window.deviceId || '';
+        if (!actorKey) return false;
+
+        var rpcRes = await window.sb.rpc('delete_post_with_actor', {
+            p_post_id: entry.cloudId,
+            p_actor_key: actorKey
+        });
+        if (rpcRes && rpcRes.error) throw rpcRes.error;
         return true;
     }
 
@@ -412,6 +425,9 @@
                 var entry = nextQueue[i];
                 try {
                     await deletePhotoCloudRecord(entry);
+                    addDeletedPhotoId(entry.id);
+                    removePhotoLocallyById(entry.id, { render: true });
+                    broadcastSync('photo_deleted', { photoId: entry.id });
                     removePendingDelete(entry.id);
                     await cleanupPhotoStorage(entry);
                 } catch (e) {
@@ -438,6 +454,7 @@
             cloudId: photo.cloudId,
             imageUrl: photo.imageUrl || '',
             thumbUrl: photo.thumbUrl || '',
+            actor_key: photo.actor_key || photo.actorKey || window.deviceId || '',
             queuedAt: Date.now(),
             retryCount: 0
         });
@@ -449,49 +466,37 @@
 
         var id = String(photo.id || photo.cloudId || '');
         if (!id) return { ok: false };
-        
-        // 先检查权限
+
         var isAdmin = window.currentUser === 'xxz';
         var isOwner = window.currentUser === photo.username;
         if (!isAdmin && !isOwner) {
-            window.showToast('无权限删除该照片');
+            window.showToast('????????????');
             return { ok: false, error: 'unauthorized' };
         }
 
-        // 先尝试云端删除
         if (photo.cloudId && window.sb) {
             try {
-                // 删除数据库记录
-                var res = await window.sb
-                    .from('posts')
-                    .delete()
-                    .eq('id', photo.cloudId)
-                    .select('id');
-                if (res.error) throw res.error;
+                var cloudDeleted = await deletePhotoCloudRecord(photo);
+                if (!cloudDeleted) throw new Error('cloud_delete_failed');
 
-                // 成功删除，然后才本地处理
                 addDeletedPhotoId(id);
                 removePhotoLocallyById(id, { render: options.render !== false });
                 broadcastSync('photo_deleted', { photoId: id });
-                
-                // 清理 Storage 文件（可选失败，不影响结果）
                 await cleanupPhotoStorage(photo);
-                
                 refreshSyncStatus();
                 return { ok: true, cloudDeleted: true };
             } catch (e) {
                 console.error('[PhotoWall] cloud delete failed', e);
-                window.showToast('删除失败，请稍后重试');
-                return { ok: false, error: e.message };
+                window.showToast('???????????????');
+                return { ok: false, error: e && e.message ? e.message : 'delete_failed' };
             }
-        } else {
-            // 无 cloudId，只本地删除
-            addDeletedPhotoId(id);
-            removePhotoLocallyById(id, { render: options.render !== false });
-            broadcastSync('photo_deleted', { photoId: id });
-            refreshSyncStatus();
-            return { ok: true, localOnly: true };
         }
+
+        addDeletedPhotoId(id);
+        removePhotoLocallyById(id, { render: options.render !== false });
+        broadcastSync('photo_deleted', { photoId: id });
+        refreshSyncStatus();
+        return { ok: true, localOnly: true };
     };
 
     async function migrateLocalPhotosToCloud(localData) {
@@ -542,7 +547,7 @@
         if (!window.sb) return [];
         try {
             var res = await window.sb.from('posts')
-                .select('id,user_name,media_url,content,created_at,views')
+                .select('id,user_name,media_url,content,created_at,views,actor_key')
                 .eq('media_type', PHOTO_WALL_MARKER)
                 .order('created_at', { ascending: false })
                 .range(pageNum * pageSize, (pageNum + 1) * pageSize - 1);
@@ -613,7 +618,7 @@
         if (!window.sb) return;
         try {
             var latest = await window.sb.from('posts')
-                .select('id,user_name,media_url,content,created_at,views')
+                .select('id,user_name,media_url,content,created_at,views,actor_key')
                 .eq('media_type', PHOTO_WALL_MARKER)
                 .order('created_at', { ascending: false })
                 .limit(8);
@@ -638,7 +643,7 @@
         try {
             var fetchCount = Math.max(pageSize, Math.min(100, Math.max(window.photoWallData.length, 40)));
             var res = await window.sb.from('posts')
-                .select('id,user_name,media_url,content,created_at,views')
+                .select('id,user_name,media_url,content,created_at,views,actor_key')
                 .eq('media_type', PHOTO_WALL_MARKER)
                 .order('created_at', { ascending: false })
                 .limit(fetchCount);
