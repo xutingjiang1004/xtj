@@ -2439,37 +2439,101 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // ========== Dock 切换 ==========
             let currentDockTab = localStorage.getItem('xtj_current_tab') || 'posts';
             let lastTabTapTime = {};
+            let lastTabTapCount = {};
+            let isRefreshing = {};
             window.switchDockTab = function(tab, skipReturn) {
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
                 // 先触发点击动画（即使已经在当前tab也要播放）
                 var btn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
                 if (btn) triggerTabAnimation(btn, tab);
                 const now = Date.now();
+                
+                // 检查是否是双击刷新（300ms内再次点击同一tab）
+                const isDoubleTap = (tab === currentDockTab) && lastTabTapTime[tab] && (now - lastTabTapTime[tab] < 300);
+                
                 if (tab === currentDockTab && !skipReturn) {
-                    // 已经在当前tab，单击执行返回操作
-                    if (tab === 'posts') {
-                        // 帖子页：回到顶部
-                        const panel = document.getElementById('panelPosts');
-                        if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
-                    } else if (tab === 'chat') {
-                        // 聊天页：如果在对话中，返回聊天列表；否则回到顶部
-                        if (dockChatActiveUser) {
-                            dockChatGoBack();
-                        } else {
-                            const panel = document.getElementById('panelChat');
+                    if (isDoubleTap && !isRefreshing[tab]) {
+                        // 双击：执行刷新
+                        isRefreshing[tab] = true;
+                        lastTabTapCount[tab] = (lastTabTapCount[tab] || 0) + 1;
+                        
+                        if (tab === 'ai') {
+                            // 照片墙刷新
+                            window.showToast('正在刷新照片墙...');
+                            if (typeof window.loadPhotoWallData === 'function') {
+                                window.loadPhotoWallData(true).then(function() {
+                                    if (typeof window.renderPhotoWall === 'function') {
+                                        window.renderPhotoWall();
+                                    }
+                                    isRefreshing[tab] = false;
+                                    window.showToast('刷新完成');
+                                }).catch(function() {
+                                    isRefreshing[tab] = false;
+                                });
+                            } else {
+                                isRefreshing[tab] = false;
+                            }
+                        } else if (tab === 'posts') {
+                            // 帖子页刷新
+                            window.showToast('正在刷新...');
+                            // 清除缓存并重新加载
+                            try {
+                                localStorage.removeItem('xtj_feed_cache');
+                            } catch(e) {}
+                            if (typeof window.initialLoad === 'function') {
+                                window.initialLoad(true);
+                            }
+                            // 回到顶部
+                            const panel = document.getElementById('panelPosts');
+                            if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
+                            isRefreshing[tab] = false;
+                            window.showToast('刷新完成');
+                        } else if (tab === 'chat') {
+                            // 聊天页刷新
+                            window.showToast('正在刷新...');
+                            dockChatListCacheTime = 0;
+                            loadDockChatList();
+                            isRefreshing[tab] = false;
+                            window.showToast('刷新完成');
+                        } else if (tab === 'profile') {
+                            // 个人页刷新
+                            window.showToast('正在刷新...');
+                            syncProfileUser();
+                            if (currentUser) loadUserAvatar();
+                            isRefreshing[tab] = false;
+                            window.showToast('刷新完成');
+                        }
+                    } else {
+                        // 单击：执行返回/回顶操作
+                        lastTabTapCount[tab] = 1;
+                        if (tab === 'posts') {
+                            // 帖子页：回到顶部
+                            const panel = document.getElementById('panelPosts');
+                            if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
+                        } else if (tab === 'chat') {
+                            // 聊天页：如果在对话中，返回聊天列表；否则回到顶部
+                            if (dockChatActiveUser) {
+                                dockChatGoBack();
+                            } else {
+                                const panel = document.getElementById('panelChat');
+                                if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
+                            }
+                        } else if (tab === 'ai') {
+                            const photoWallPage = document.getElementById('photoWallContainer');
+                            if (photoWallPage) photoWallPage.scrollTo({ top: 0, behavior: 'smooth' });
+                        } else if (tab === 'profile') {
+                            // 我的页：回到顶部
+                            const panel = document.getElementById('panelProfile');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         }
-                    } else if (tab === 'ai') {
-                        const photoWallPage = document.getElementById('photoWallContainer');
-                        if (photoWallPage) photoWallPage.scrollTo({ top: 0, behavior: 'smooth' });
-                    } else if (tab === 'profile') {
-                        // 我的页：回到顶部
-                        const panel = document.getElementById('panelProfile');
-                        if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                     }
+                    lastTabTapTime[tab] = now;
                     return;
                 }
+                
+                // 切换到新tab
                 lastTabTapTime[tab] = now;
+                lastTabTapCount[tab] = 1;
                 currentDockTab = tab;
                 localStorage.setItem('xtj_current_tab', tab);
                 document.querySelectorAll('.dock-panel').forEach(p => p.classList.remove('active'));
