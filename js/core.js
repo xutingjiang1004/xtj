@@ -2591,7 +2591,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
 
-            // ====== [已废弃] 下方第2618行有更新版本 ======
+            // ====== [已废弃] 下方第2668行有更新版本 ======
             window.prefetchStatData = async function() {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
