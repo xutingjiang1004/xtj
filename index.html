@@ -72,11 +72,40 @@
             <div class="wrap" style="position:relative; z-index:2; margin:0; padding:16px 0; max-width:100%;">
                 <div class="publish-box glass" id="publishBox">
                     <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
+                    <div class="post-compose-row">
+                        <label class="post-compose-label" for="postVisibility">可见范围</label>
+                        <select id="postVisibility" class="post-filter-select post-visibility-select">
+                            <option value="public">公开</option>
+                            <option value="private">私密</option>
+                        </select>
+                    </div>
                     <div class="publish-footer">
                         <label for="fileInp" class="file-label">📷 选取照片或视频</label>
                         <input type="file" id="fileInp" accept="image/*,video/*" style="display:none" />
                         <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
                     </div>
+                </div>
+
+                <div class="post-filter-bar glass" id="postFilterBar">
+                    <div class="post-filter-row">
+                        <input id="postSearchInput" class="post-search-input" type="search" placeholder="搜索帖子、用户、评论..." autocomplete="off" />
+                        <input id="postUserFilter" class="post-filter-input" type="text" placeholder="筛选用户" autocomplete="off" />
+                        <select id="postVisibilityFilter" class="post-filter-select">
+                            <option value="all">全部可见性</option>
+                            <option value="public">公开</option>
+                            <option value="private">私密</option>
+                        </select>
+                    </div>
+                    <div class="post-filter-row">
+                        <input id="postStartDate" class="post-filter-input" type="date" />
+                        <input id="postEndDate" class="post-filter-input" type="date" />
+                        <label class="post-filter-toggle">
+                            <input id="postOnlyMine" type="checkbox" />
+                            <span>只看我的</span>
+                        </label>
+                        <button class="btn btn-ghost post-filter-clear" type="button" onclick="clearPostFilters()">清除筛选</button>
+                    </div>
+                    <div class="post-filter-summary" id="postFilterSummary">全部帖子</div>
                 </div>
 
                 <div class="stats">
@@ -389,6 +418,25 @@
             <div style="display: flex; gap: 10px;">
                 <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delModal')">取消</button>
                 <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="editPostModal" onclick="if(event.target===this)closeModal('editPostModal')">
+        <div class="modal-box glass post-edit-modal" onclick="event.stopPropagation()">
+            <h3 style="margin-top:0;">编辑帖子</h3>
+            <textarea id="editPostInp" class="post-edit-textarea" placeholder="修改帖子内容..."></textarea>
+            <div class="post-edit-controls">
+                <label class="post-compose-label" for="editPostVisibility">可见范围</label>
+                <select id="editPostVisibility" class="post-filter-select post-visibility-select">
+                    <option value="public">公开</option>
+                    <option value="private">私密</option>
+                </select>
+            </div>
+            <div class="post-edit-note">媒体文件会保留，本次只编辑正文和可见范围。</div>
+            <div class="post-edit-actions">
+                <button class="btn btn-ghost" type="button" onclick="closeModal('editPostModal')">取消</button>
+                <button class="btn btn-primary" type="button" id="saveEditPostBtn" onclick="saveEditPost()">保存修改</button>
             </div>
         </div>
     </div>
