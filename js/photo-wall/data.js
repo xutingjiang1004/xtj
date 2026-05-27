@@ -470,7 +470,7 @@
         var isAdmin = window.currentUser === 'xxz';
         var isOwner = window.currentUser === photo.username;
         if (!isAdmin && !isOwner) {
-            window.showToast('????????????');
+            window.showToast('无权删除这张照片');
             return { ok: false, error: 'unauthorized' };
         }
 
@@ -487,7 +487,7 @@
                 return { ok: true, cloudDeleted: true };
             } catch (e) {
                 console.error('[PhotoWall] cloud delete failed', e);
-                window.showToast('???????????????');
+                window.showToast('删除失败，请稍后重试');
                 return { ok: false, error: e && e.message ? e.message : 'delete_failed' };
             }
         }
