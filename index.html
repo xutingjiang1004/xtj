@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
@@ -44,7 +44,7 @@
             <nav>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <h1>xtj</h1>
-                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
+                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题" aria-label="切换主题"><span class="ui-icon" id="themeToggleIcon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2.5"></path><path d="M12 19.5V22"></path><path d="M4.93 4.93 6.7 6.7"></path><path d="M17.3 17.3 19.07 19.07"></path><path d="M2 12h2.5"></path><path d="M19.5 12H22"></path><path d="M4.93 19.07 6.7 17.3"></path><path d="M17.3 6.7 19.07 4.93"></path></svg></span></button>
                 </div>
                 <div id="announcement-btn-wrapper" style="display:none; margin-right: 8px;">
                     <button class="announcement-btn" id="announcementBtn" title="公告">
@@ -57,8 +57,8 @@
                 </div>
                 <div class="nav-auth">
                     <div id="unauthUI" style="display: flex; gap: 6px; align-items: center;">
-                        <button class="btn btn-primary" onclick="openAuthModal('login')">登录</button>
-                        <button class="btn btn-ghost" onclick="openAuthModal('register')">注册</button>
+                        <button class="btn btn-primary ui-button" type="button" onclick="openAuthModal('login')" data-button-role="auth-login-open" data-button-icon="login" data-button-label="登录" data-state="idle" aria-label="打开登录弹窗">登录</button>
+                        <button class="btn btn-ghost ui-button" type="button" onclick="openAuthModal('register')" data-button-role="auth-register-open" data-button-icon="register" data-button-label="注册" data-state="idle" aria-label="打开注册弹窗">注册</button>
                     </div>
                     <div id="authUI" style="display: none;">
                         <div class="user-pill">
@@ -80,9 +80,9 @@
                         </select>
                     </div>
                     <div class="publish-footer">
-                        <label for="fileInp" class="file-label">📷 选取照片或视频</label>
+                        <label for="fileInp" class="file-label ui-button" aria-label="选取照片或视频"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h2.3l1.5-2h3.4l1.5 2h2.3A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5v-8Z"></path><circle cx="12" cy="12.5" r="3.2"></circle></svg></span><span>选取照片或视频</span></label>
                         <input type="file" id="fileInp" accept="image/*,video/*" style="display:none" />
-                        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
+                        <button class="btn btn-primary ui-button" id="pubBtn" type="button" onclick="doPublish()" data-button-role="publish-post" data-button-icon="publish" data-button-label="发布动态" data-busy-label="发布中..." data-state="idle" aria-label="发布动态">发布动态</button>
                     </div>
                 </div>
 
@@ -103,7 +103,7 @@
                             <input id="postOnlyMine" type="checkbox" />
                             <span>只看我的</span>
                         </label>
-                        <button class="btn btn-ghost post-filter-clear" type="button" onclick="clearPostFilters()">清除筛选</button>
+                        <button class="btn btn-ghost post-filter-clear ui-button" type="button" onclick="clearPostFilters()" data-button-role="clear-post-filters" data-button-icon="clear" data-button-label="清除筛选" data-state="idle" aria-label="清除帖子筛选条件">清除筛选</button>
                     </div>
                     <div class="post-filter-summary" id="postFilterSummary">全部帖子</div>
                 </div>
@@ -123,7 +123,7 @@
         <div class="dock-panel" id="panelChat">
             <div class="dock-chat-container" id="dockChatContainer">
                 <div class="chat-header">
-                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">‹</button>
+                    <button class="back-btn ui-button" id="dockChatBackBtn" onclick="dockChatGoBack()" data-button-role="dock-chat-back" data-button-icon="back" data-button-label="返回" data-state="idle" aria-label="返回"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"></path></svg></span></button>
                     <h3 id="dockChatTitle">消息</h3>
                 </div>
                 <div id="dockChatListView" class="chat-view">
@@ -390,7 +390,7 @@
     <div class="photo-preview-overlay" id="photoPreviewOverlay">
         <div class="pp-ambient-bg" id="ppAmbientBg"></div>
         <div class="pp-dots" id="ppDots"></div>
-        <button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">
+        <button class="photo-preview-close ui-button" type="button" onclick="closePhotoPreview()" data-button-role="close-photo-preview" data-button-icon="close" data-button-label="关闭预览" data-state="idle" aria-label="关闭预览">
             <span class="ui-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M18 6 6 18"></path>
@@ -398,10 +398,10 @@
                 </svg>
             </span>
         </button>
-        <button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张">
+        <button class="pp-nav-arrow pp-nav-prev ui-button" type="button" id="ppPrevBtn" onclick="window.ppPrevPhoto()" data-button-role="photo-prev" data-button-icon="prev" data-button-label="上一张" data-state="idle" aria-label="上一张照片">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M12 4L6 10L12 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张">
+        <button class="pp-nav-arrow pp-nav-next ui-button" type="button" id="ppNextBtn" onclick="window.ppNextPhoto()" data-button-role="photo-next" data-button-icon="next" data-button-label="下一张" data-state="idle" aria-label="下一张照片">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M8 4L14 10L8 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
         <div class="photo-preview-image-wrapper" id="ppImageWrapper">
@@ -411,17 +411,17 @@
                 <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false" loading="eager"></div>
             </div>
         </div>
-        <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span></button>
-        <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span></button>
-        <button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></svg></span></button>
-        <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="deleteCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span></button>
+        <button class="pp-info-btn ui-button" type="button" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()" data-button-role="photo-info" data-button-icon="info" data-button-label="信息" data-state="idle" aria-label="查看照片信息"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span></button>
+        <button class="pp-share-btn ui-button" type="button" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()" data-button-role="photo-share" data-button-icon="share" data-button-label="分享" data-state="idle" aria-label="分享照片"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span></button>
+        <button class="pp-rotate-btn ui-button" type="button" id="ppRotateBtn" title="旋转 90°" onclick="window.ppRotatePhoto()" data-button-role="photo-rotate" data-button-icon="rotate" data-button-label="旋转" data-state="idle" aria-label="旋转照片"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></svg></span></button>
+        <button class="pp-delete-btn ui-button" id="ppDeleteBtn" type="button" title="删除" style="display:none;" onclick="deleteCurrentPhoto()" data-button-role="photo-delete" data-button-icon="delete" data-button-label="删除" data-busy-label="删除中..." data-state="idle" aria-label="删除照片"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span></button>
         
         <!-- 照片信息弹窗 -->
         <div class="pp-info-modal" id="ppInfoModal" style="display:none;">
             <div class="pp-info-modal-content">
                 <div class="pp-info-modal-header">
                     <span class="pp-info-modal-title">照片详情</span>
-                    <button class="pp-info-modal-close" onclick="closePhotoInfo()">×</button>
+                    <button class="pp-info-modal-close ui-button" type="button" onclick="closePhotoInfo()" data-button-role="close-photo-info" data-button-icon="close" data-button-label="关闭" data-state="idle" aria-label="关闭照片信息"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span></button>
                 </div>
                 <div class="pp-info-modal-body" id="ppInfoModalBody">
                 </div>
@@ -440,8 +440,8 @@
             <h3 style="margin-top:0;">发表评论</h3>
             <textarea id="commInp" placeholder="写下你的想法..." style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
             <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top:16px;">
-                <button class="btn btn-ghost" onclick="closeModal('commentModal')">取消</button>
-                <button class="btn btn-primary" id="commBtn">发布评论</button>
+                <button class="btn btn-ghost ui-button" type="button" onclick="closeModal('commentModal')" data-button-role="cancel-comment" data-button-icon="cancel" data-button-label="取消" data-state="idle" aria-label="取消发表评论">取消</button>
+                <button class="btn btn-primary ui-button" id="commBtn" type="button" data-button-role="submit-comment" data-button-icon="comment" data-button-label="发布评论" data-busy-label="发布中..." data-state="idle" aria-label="发布评论">发布评论</button>
             </div>
         </div>
     </div>
@@ -451,8 +451,8 @@
             <h3 style="margin-top:0;">确认删除帖子？</h3>
             <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢复</p>
             <div style="display: flex; gap: 10px;">
-                <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delModal')">取消</button>
-                <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
+                <button class="btn btn-ghost ui-button" style="flex:1;" type="button" onclick="closeModal('delModal')" data-button-role="cancel-delete-post" data-button-icon="cancel" data-button-label="取消" data-state="idle" aria-label="取消删除帖子">取消</button>
+                <button class="btn btn-primary ui-button" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn" type="button" data-button-role="confirm-delete-post" data-button-icon="delete" data-button-label="确认删除" data-busy-label="删除中..." data-state="idle" aria-label="确认删除帖子">确认删除</button>
             </div>
         </div>
     </div>
@@ -470,8 +470,8 @@
             </div>
             <div class="post-edit-note">媒体文件会保留，本次只编辑正文和可见范围。</div>
             <div class="post-edit-actions">
-                <button class="btn btn-ghost" type="button" onclick="closeModal('editPostModal')">取消</button>
-                <button class="btn btn-primary" type="button" id="saveEditPostBtn" onclick="saveEditPost()">保存修改</button>
+                <button class="btn btn-ghost ui-button" type="button" onclick="closeModal('editPostModal')" data-button-role="cancel-edit-post" data-button-icon="cancel" data-button-label="取消" data-state="idle" aria-label="取消编辑帖子">取消</button>
+                <button class="btn btn-primary ui-button" type="button" id="saveEditPostBtn" onclick="saveEditPost()" data-button-role="save-edit-post" data-button-icon="save" data-button-label="保存修改" data-busy-label="保存中..." data-state="idle" aria-label="保存帖子修改">保存修改</button>
             </div>
         </div>
     </div>
@@ -481,8 +481,8 @@
             <h3 class="pp-confirm-title" id="ppConfirmTitle">确认操作</h3>
             <p class="pp-confirm-msg" id="ppConfirmMsg">确定要执行此操作吗？</p>
             <div class="pp-confirm-actions">
-                <button class="pp-confirm-btn pp-confirm-cancel" onclick="window.closeConfirm()">取消</button>
-                <button class="pp-confirm-btn pp-confirm-ok" id="ppConfirmOkBtn" onclick="window.execConfirm()">确认</button>
+                <button class="pp-confirm-btn pp-confirm-cancel ui-button" type="button" onclick="window.closeConfirm()" data-button-role="cancel-confirm" data-button-icon="cancel" data-button-label="取消" data-state="idle" aria-label="取消操作">取消</button>
+                <button class="pp-confirm-btn pp-confirm-ok ui-button" id="ppConfirmOkBtn" type="button" onclick="window.execConfirm()" data-button-role="confirm-action" data-button-icon="confirm" data-button-label="确认" data-state="idle" aria-label="确认操作">确认</button>
             </div>
         </div>
     </div>
@@ -493,7 +493,7 @@
                 <p class="af-title">欢迎回来</p>
                 <input id="loginNickInp" class="af-input" placeholder="昵称" autocomplete="off" />
                 <input id="loginPwInp" class="af-input" type="password" placeholder="密码" />
-                <button class="btn btn-primary af-btn" id="loginSubmitBtn">登录</button>
+                <button class="btn btn-primary af-btn ui-button" id="loginSubmitBtn" type="button" data-button-role="login-submit" data-button-icon="login" data-button-label="登录" data-busy-label="验证中..." data-state="idle" aria-label="登录">登录</button>
                 <span class="af-link" onclick="closeModal('loginModal');openAuthModal('register')">没有账号？去注册</span>
             </div>
         </div>
@@ -505,7 +505,7 @@
                 <p class="af-title">创建账号</p>
                 <input id="regNickInp" class="af-input" placeholder="昵称" autocomplete="off" />
                 <input id="regPwInp" class="af-input" type="password" placeholder="密码（至少3位）" />
-                <button class="btn btn-primary af-btn" id="registerSubmitBtn">注册</button>
+                <button class="btn btn-primary af-btn ui-button" id="registerSubmitBtn" type="button" data-button-role="register-submit" data-button-icon="register" data-button-label="注册" data-busy-label="注册中..." data-state="idle" aria-label="注册">注册</button>
                 <span class="af-link" onclick="closeModal('registerModal');openAuthModal('login')">已有账号？去登录</span>
             </div>
         </div>
@@ -523,7 +523,7 @@
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
                 <h3 id="statModalTitle">统计详情</h3>
-                <button class="btn btn-ghost" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;">✕</button>
+                <button class="btn btn-ghost ui-button" type="button" onclick="closeModal('statModal')" style="padding:4px 12px; font-size:16px;" data-button-role="close-stat-modal" data-button-icon="close" data-button-label="关闭" data-state="idle" aria-label="关闭统计详情">✕</button>
             </div>
             <div class="stat-detail-body" id="statModalBody">
                 加载中...
@@ -535,7 +535,7 @@
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
                 <h3 id="postDetailTitle">帖子详情</h3>
-                <button class="btn btn-ghost" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
+                <button class="btn btn-ghost ui-button" type="button" onclick="closeModal('postDetailModal')" style="padding:4px 12px; font-size:16px;" data-button-role="close-post-detail" data-button-icon="close" data-button-label="关闭" data-state="idle" aria-label="关闭帖子详情">✕</button>
             </div>
             <div class="stat-detail-body" id="postDetailBody">
                 加载中...
@@ -548,7 +548,7 @@
         <div class="modal-box glass profile-detail-modal" onclick="event.stopPropagation()">
             <div class="profile-detail-header">
                 <h3>个人资料</h3>
-                <button class="btn btn-ghost" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
+                <button class="btn btn-ghost ui-button" type="button" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;" data-button-role="close-profile-detail" data-button-icon="close" data-button-label="关闭" data-state="idle" aria-label="关闭个人资料">✕</button>
             </div>
             <div class="profile-detail-body">
                 <div class="profile-detail-avatar-wrapper">
@@ -582,7 +582,7 @@
         <div class="modal-box glass user-profile-card-modal" onclick="event.stopPropagation()">
             <div class="upc-header">
                 <h3>用户资料</h3>
-                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;">✕</button>
+                <button class="btn btn-ghost ui-button" type="button" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;" data-button-role="close-user-profile" data-button-icon="close" data-button-label="关闭" data-state="idle" aria-label="关闭用户资料">✕</button>
             </div>
             <div class="upc-body">
                 <div class="upc-avatar" id="upcAvatar">
@@ -590,7 +590,7 @@
                 </div>
                 <div class="upc-name" id="upcName">-</div>
                 <div class="upc-login" id="upcLogin">最近登录：加载中...</div>
-                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">💬 发消息</button>
+                <button class="upc-msg-btn ui-button" id="upcMsgBtn" onclick="upcSendMessage()" data-button-role="user-message" data-button-icon="message" data-button-label="发消息" data-state="idle" aria-label="发消息"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a7.5 7.5 0 0 1-7.5 7.5H8l-5 3 1.5-4.5A7.5 7.5 0 1 1 21 11.5Z"></path></svg></span><span>发消息</span></button>
             </div>
         </div>
     </div>
@@ -603,7 +603,7 @@
                     <button class="announcement-tab active" data-tab="announcements">🔔 公告</button>
                     <button class="announcement-tab" data-tab="changelog">📝 更新日志</button>
                 </div>
-                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">✕</button>
+                <button class="btn btn-ghost ui-button" type="button" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;" data-button-role="close-announcement-modal" data-button-icon="close" data-button-label="关闭" data-state="idle" aria-label="关闭公告弹窗">✕</button>
             </div>
             <div class="announcement-content">
                 <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
@@ -611,14 +611,14 @@
                     <input type="text" id="announcementAdminTitle" class="announcement-admin-title-input" placeholder="输入公告标题（可选）">
                     <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="输入公告内容（可选）"></textarea>
                     <div class="announcement-admin-row">
-                        <button class="announcement-admin-btn primary" onclick="publishAnnouncement()">发布</button>
+                        <button class="announcement-admin-btn primary ui-button" type="button" onclick="publishAnnouncement()" data-button-role="publish-announcement" data-button-icon="publish" data-button-label="发布" data-busy-label="发布中..." data-state="idle" aria-label="发布公告">发布</button>
                     </div>
                 </div>
                 <div id="announcementListContainer">
                     <div class="announcement-list" id="announcementList"></div>
                 </div>
                 <div id="announcementDetail" class="announcement-detail">
-                    <button class="announcement-back-btn" onclick="showAnnouncementList()">← 返回</button>
+                    <button class="announcement-back-btn ui-button" type="button" onclick="showAnnouncementList()" data-button-role="announcement-back" data-button-icon="back" data-button-label="返回" data-state="idle" aria-label="返回公告列表">← 返回</button>
                     <div class="announcement-detail-header">
                         <div class="announcement-detail-left">
                             <div class="announcement-detail-user" id="announcementDetailUserInfo"></div>
