@@ -662,7 +662,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
             }
 
-            // ===================== 登录 / 娉ㄥ唽 / 閫€鍑?=====================
+            // ===================== 登录 / 注册 / 閫€鍑?=====================
             const AUTH_MARKER = '__auth__';
             const DM_MARKER = '__dm__';
 
@@ -1313,7 +1313,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     // 已��ヨぐ�：打开个人�у��枡���︽儏
                     openProfileDetail();
                 } else {
-                    // 未��ヨぐ�：打开���?娉ㄥ唽妞ょ敻娼?
+                    // 未��ヨぐ�：打开���?注册妞ょ敻娼?
                     openAuthModal('login');
                 }
             };
