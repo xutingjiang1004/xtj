@@ -261,7 +261,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
             toast.className = 'toast';
-            toast.textContent = message;
+            if (typeof window.__xtjUiTextRepair === 'function') {
+                try { message = window.__xtjUiTextRepair(message); } catch (e) {}
+            }
+            toast.textContent = message == null ? '' : String(message);
             container.appendChild(toast);
             setTimeout(() => {
                 toast.style.animation = 'toastFade 0.3s ease-out forwards';
@@ -5128,7 +5131,38 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ['鏆傛棤娑堟伅', '暂无消息'],
                 ['鍦ㄥ笘瀛愰〉闈㈢偣鍑诲ご鍍忓紑濮嬭亰澶', '在帖子页面点击头像开始聊天'],
                 ['鍙戦€佺涓€鏉℃秷鎭惂', '发送第一条消息吧'],
-                ['鏆傛棤鍏憡', '暂无公告']
+                ['鏆傛棤鍏憡', '暂无公告'],
+                ['鏌ョ湅璧勬枡', '查看资料'],
+                ['鏈櫥褰?', '未登录'],
+                ['鐐瑰嚮鐧诲綍', '点击登录'],
+                ['涓炬姤鐩爣涓嶅瓨鍦?', '举报目标不存在'],
+                ['璇峰～鍐欎妇鎶ョ悊鐢?', '请填写举报理由'],
+                ['鎻愪氦涓?..', '提交中...'],
+                ['娑撶偓濮ゅ鍙夊絹娴溿倧绱濋幇鐔婚樋娴ｇ姷娈戦崣宥夘洯', '举报已提交'],
+                ['閹绘劒姘︽径杈Е', '提交失败'],
+                ['缂冩垹绮堕柨娆掝嚖', '未知错误'],
+                ['閹绘劒姘︽稉鐐Г', '提交举报'],
+                ['姝ｅ湪澶勭悊绗?', '正在处理第 '],
+                ['姝ｅ湪涓婁紶绗?', '正在上传第 '],
+                ['姝ｅ湪淇濆瓨绗?', '正在保存第 '],
+                ['寮犲浘鐗?..', '张图片...'],
+                ['鍑嗗涓婁紶鐓х墖', '准备上传照片'],
+                ['姝ｅ湪鏁寸悊鐓х墖鍐呭...', '正在整理照片内容...'],
+                ['鐓х墖宸插悓姝ュ埌鐓х墖澧?', '照片已同步到照片墙'],
+                ['姝ｅ湪鍐欏叆鐓х墖澧欎笌鍚屾鏁版嵁...', '正在写入照片墙与同步数据...'],
+                ['姝ｅ湪鐢熸垚鏇磋交鐨勯瑙堝浘...', '正在生成更轻的预览图...'],
+                ['姝ｅ湪瀹夊叏涓婁紶鍘熷浘...', '正在安全上传原图...'],
+                ['涓婁紶瀹屾垚', '上传完成'],
+                ['鎴愬姛涓婁紶', '成功上传'],
+                ['寮犵収鐗?', '张照片'],
+                ['涓婁紶澶辫触锛岃閲嶈瘯', '上传失败，请重试'],
+                ['涓婁紶寮傚父', '上传异常'],
+                ['鍔犺浇娑?..', '加载中...'],
+                ['棣冩尠', '💬'],
+                ['瀹歌尪顕?', '已读'],
+                ['閺堫亣顕?', '未读'],
+                ['馃寵', '🌙'],
+                ['鈽€锔?', '☀️']
             ];
 
             function repairString(value) {
