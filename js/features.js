@@ -156,11 +156,11 @@
         if (!profileName) return;
         if (window.currentUser) {
             profileName.textContent = window.currentUser;
-            if (profileStatus) profileStatus.textContent = '鏌ョ湅璧勬枡';
+            if (profileStatus) profileStatus.textContent = '查看资料';
             if (profileAvatar) profileAvatar.textContent = window.currentUser[0].toUpperCase();
         } else {
-            profileName.textContent = '鏈櫥褰';
-            if (profileStatus) profileStatus.textContent = '鐐瑰嚮鐧诲綍';
+            profileName.textContent = '未登录';
+            if (profileStatus) profileStatus.textContent = '点击登录';
             if (profileAvatar) profileAvatar.innerHTML = '?';
         }
     }
@@ -192,14 +192,14 @@
 
     window.submitReport = async function() {
         var target = window._reportTarget;
-        if (!target) { window.showToast && window.showToast('涓炬姤鐩爣涓嶅瓨鍦?'); return; }
+        if (!target) { window.showToast && window.showToast('举报目标不存在'); return; }
         var categoryEl = document.getElementById('reportCategory');
         var reasonEl = document.getElementById('reportReason');
         var category = categoryEl ? categoryEl.value : 'other';
         var reason = reasonEl ? reasonEl.value.trim() : '';
-        if (!reason) { window.showToast && window.showToast('璇峰～鍐欎妇鎶ョ悊鐢?'); return; }
+        if (!reason) { window.showToast && window.showToast('请填写举报理由'); return; }
         var btn = document.getElementById('reportSubmitBtn');
-        if (btn) { btn.disabled = true; btn.textContent = '鎻愪氦涓?..'; }
+        if (btn) { btn.disabled = true; btn.textContent = '提交中...'; }
         try {
             var fileInput = document.getElementById('reportEvidenceInput');
             var evidenceFile = fileInput && fileInput.files ? fileInput.files[0] : null;
@@ -232,16 +232,16 @@
                     evidence_url: evidenceUrl,
                     actor_key: window.deviceId || 'unknown'
                 };
-                console.warn('[report] 涓诲瓧娈垫彃鍏ュけ璐ワ紝灏濊瘯澶囩敤瀛楁:', res.error.message);
+                console.warn('[report] 主字段插入失败，尝试备用字段:', res.error.message);
                 var res2 = await window.sb.from('reports').insert([fallbackPayload]);
                 if (res2.error) throw res2.error;
             }
-            window.showToast && window.showToast('涓炬姤宸叉彁浜わ紝鎰熻阿浣犵殑鍙嶉');
+            window.showToast && window.showToast('举报已提交，感谢你的反馈');
             window.closeModal && window.closeModal('reportModal');
         } catch (e) {
-            window.showToast && window.showToast('鎻愪氦澶辫触: ' + (e.message || '缃戠粶閿欒'));
+            window.showToast && window.showToast('提交失败: ' + (e.message || '网络错误'));
         } finally {
-            if (btn) { btn.disabled = false; btn.textContent = '鎻愪氦涓炬姤'; }
+            if (btn) { btn.disabled = false; btn.textContent = '提交举报'; }
         }
     };
 
@@ -249,7 +249,7 @@
         if (e.target && e.target.id === 'reportEvidenceInput') {
             var file = e.target.files && e.target.files[0];
             var preview = document.getElementById('reportEvidencePreview');
-            if (preview) preview.textContent = file ? '宸查€夋嫨: ' + file.name + ' (' + (file.size / 1024).toFixed(1) + 'KB)' : '';
+            if (preview) preview.textContent = file ? '已选择: ' + file.name + ' (' + (file.size / 1024).toFixed(1) + 'KB)' : '';
         }
         if (e.target && e.target.id === 'profileThemeToggle') {
             var themeToggle = document.getElementById('themeToggle');
