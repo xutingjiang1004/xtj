@@ -1808,10 +1808,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (postEl) {
                         var statsEl = postEl.querySelector('.post-stats-text');
                         if (statsEl) {
-                            var vm = statsEl.textContent.match(/浏��?(\d+)/);
+                            var vm = statsEl.textContent.match(/浏览(\d+)/);
                             if (vm) {
                                 var newVal = parseInt(vm[1]) + 1;
-                                statsEl.innerHTML = statsEl.innerHTML.replace(/浏��?\d+/, '浏��?' + newVal);
+                                statsEl.innerHTML = statsEl.innerHTML.replace(/浏览\d+/, '浏览' + newVal);
                             }
                         }
                     }
@@ -1820,7 +1820,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         saveViewHistory({
                             user_name: currentUser,
                             post_id: postId,
-                            post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || '(閸ュ墽澧?视��?'),
+                            post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || '(图片/视频)'),
                             post_author: postInfoCache[postId].user_name || '未��?,
                             viewed_at: new Date().toISOString()
                         });
@@ -1834,8 +1834,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // ===================== 加载��︹偓?=====================
-            // 任��?：分�い�加载相关变�?
+            // ===================== 加载帖子 =====================
+            // 任务：分页加载相关变量
             let feedPage = 0;
             const FEED_PAGE_SIZE = 20;
             let feedEndReached = false;
@@ -1844,7 +1844,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let feedAllLikes = [];
             let feedScrollObserver = null;
 
-            // DEPRECATED_DO_NOT_EDIT ====== [已废��?下方�?412行有更新版��?======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃，下方第412行有更新版本======
             async function loadFeed(forceRefresh = false) {
                 const now = Date.now();
                 if (forceRefresh) {
@@ -1874,7 +1874,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载�?..</span></div>`;
+                if (!forceRefresh) feed.innerHTML = `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>`;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -1928,7 +1928,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 feedScrollObserver = observer;
             }
 
-            // DEPRECATED_DO_NOT_EDIT ====== [已废��?下方�?479行有更新版��?======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃，下方第479行有更新版本======
             function loadMoreFeedPosts() {
                 if (feedEndReached) return;
                 
@@ -1940,13 +1940,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 
                 if (startIdx >= visiblePosts.length) {
                     feedEndReached = true;
-                    // 显�ず�▽℃��更多�?
+                    // 显示没有更多
                     let noMore = document.getElementById('feedNoMore');
                     if (!noMore) {
                         noMore = document.createElement('div');
                         noMore.id = 'feedNoMore';
                         noMore.className = 'loading';
-                        noMore.textContent = '娌℃��更多�?;
+                        noMore.textContent = '没有更多了';
                         noMore.style.padding = '30px';
                         noMore.style.textAlign = 'center';
                         feed.appendChild(noMore);
@@ -1959,7 +1959,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 feedPage++;
             }
 
-            // DEPRECATED_DO_NOT_EDIT ====== [已废��?下方�?503行有更新版��?======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃，下方第503行有更新版本======
             function appendMorePosts(posts, comments, likes) {
                 const feed = document.getElementById('feed');
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
@@ -1981,11 +1981,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   </div>
                   <div class="content">${escapeHtml(p.content)}</div>
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(p.media_url).replace(/'/g, "\\'")}')">`}</div>`:''}
-                  <div class="post-stats-text">浏��?${p.views||0} 璺?点��?${pLikes.length} 璺?评��?${pComms.length}</div>
+                  <div class="post-stats-text">浏览 ${p.views||0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'鉂わ�?:'点��?}</button>
-                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评��?/button>
-                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删��?/button>`:''}
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
+                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
+                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                     <button class="action-btn report-btn" style="margin-left:auto;" data-id="${escapeHtml(p.id)}" data-user="${escapeHtml(p.user_name)}">举报</button>
                   </div>
                   ${pComms.length?`
@@ -2001,7 +2001,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
               `;
                 }).join('');
                 
-                // 閸?sentinel 之前插入新帖�€?
+                // 在sentinel 之前插入新帖子
                 const sentinel = document.getElementById('feedSentinel');
                 const tempContainer = document.createElement('div');
                 tempContainer.innerHTML = postsHtml;
@@ -2010,7 +2010,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     feed.insertBefore(tempContainer.firstChild, sentinel);
                 }
                 
-                // 为新��х��娣�����进入�ㄧ��观察（复��ュ��灞€观察器）
+                // 为新帖子添加进入视野观察（复活交叉观察器）
                 const newPosts = feed.querySelectorAll('.post:not(.visible)');
                 newPosts.forEach(p => getPostVisibilityObserver().observe(p));
                 
@@ -2018,7 +2018,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 updateFeedStats();
             }
 
-            // DEPRECATED_DO_NOT_EDIT ====== [已废��?下方�?532行有更新版��?======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃，下方第532行有更新版本======
             async function renderFeed({ posts, comments, likes }) {
                 const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__ann__' && p.user_name);
                 document.getElementById("sPosts").textContent = visiblePosts.length;
@@ -2128,7 +2128,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // DEPRECATED_DO_NOT_EDIT ====== [已废��?下方�?520行有更新版��?======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃，下方第520行有更新版本======
             function renderFeedWithAvatars(visiblePosts, comments, likes) {
                 const feed = document.getElementById("feed");
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
@@ -2150,11 +2150,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   </div>
                   <div class="content">${escapeHtml(p.content)}</div>
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(p.media_url).replace(/'/g, "\\'")}')">`}</div>`:''}
-                  <div class="post-stats-text">浏��?${p.views||0} 璺?点��?${pLikes.length} 璺?评��?${pComms.length}</div>
+                  <div class="post-stats-text">浏览 ${p.views||0} · 点赞 ${pLikes.length} · 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'鉂わ�?:'点��?}</button>
-                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评��?/button>
-                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删��?/button>`:''}
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
+                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
+                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                     <button class="action-btn report-btn" style="margin-left:auto;" data-id="${escapeHtml(p.id)}" data-user="${escapeHtml(p.user_name)}">举报</button>
                   </div>
                   ${pComms.length?`
@@ -2583,7 +2583,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
-                    feed.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载�?..</span></div>';
+                    feed.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
                 }
                 try {
                     var results = await Promise.all([
@@ -2703,7 +2703,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             window.renderFeed = renderFeed;
 
 
-            // DEPRECATED_DO_NOT_EDIT ====== [已废��?下方�?668行有更新版��?======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃，下方第668行有更新版本======
             window.prefetchStatData = async function() {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
@@ -2748,19 +2748,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 } catch(e) {}
             };
 
-            // 打开统计�︽儏�Ο℃€�框
+            // 打开统计详情模态框
             window.openStatDetail = async function(type) {
                 statCurrentType = type;
-                const titles = { posts: '总��╅幀?- 按��ら���分�?, views: '总浏�?- 浏览记录', likes: '点赞和评�?- 记��? };
-                document.getElementById('statModalTitle').textContent = titles[type] || '统计�︽儏';
+                const titles = { posts: '总动态 - 按用户分组', views: '总浏览 - 浏览记录', likes: '点赞和评论 - 记录' };
+                document.getElementById('statModalTitle').textContent = titles[type] || '统计详情';
                 document.getElementById('statModal').classList.add('active');
 
-                // 婵″����有缓��ɑ��据，立即�〒�染，同时异�ュ埛鏂?
+                // 如果有缓存数据，立即渲染，同时异步刷新
                 if (statAllPosts.length > 0 && Date.now() - statCacheTime < STAT_CACHE_DURATION) {
                     renderStatByType(type);
                     if (statPollTimer) clearInterval(statPollTimer);
                     statPollTimer = setInterval(refreshStatModal, 15000);
-                    // 后台静默刷��?
+                    // 后台静默刷新
                     prefetchStatData().then(function() {
                         if (document.getElementById('statModal').classList.contains('active') && statCurrentType === type) {
                             renderStatByType(type);
@@ -2769,7 +2769,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                document.getElementById('statModalBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载�?..</span></div>';
+                document.getElementById('statModalBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
@@ -2785,7 +2785,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                     renderStatByType(type);
                 } catch(e) {
-                    document.getElementById('statModalBody').innerHTML = '<div class="stat-empty">加载失��Е，请重试</div>';
+                    document.getElementById('statModalBody').innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
                     console.error('stat error', e);
                 }
 
@@ -2803,7 +2803,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // 滚��╅���指定帖�€��并高亮
+            // 滚动到指定帖子并高亮
             window.scrollToPost = function(postId) {
                 closeModal('statModal');
                 setTimeout(() => {
@@ -2818,8 +2818,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             window.openPostDetail = async function(postId) {
-                document.getElementById('postDetailTitle').textContent = '帖子�︽儏';
-                document.getElementById('postDetailBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载�?..</span></div>';
+                document.getElementById('postDetailTitle').textContent = '帖子详情';
+                document.getElementById('postDetailBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
                 document.getElementById('postDetailModal').classList.add('active');
 
                 try {
@@ -2842,7 +2842,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     const comments = commRes.data || [];
                     renderPostDetail(post, likes, comments);
                 } catch(e) {
-                    document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">加载失��Е，请重试</div>';
+                    document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
                     console.error(e);
                 }
             };
@@ -2860,10 +2860,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     </div>
                     ${post.content ? `<div class="post-detail-content">${escapeHtml(post.content)}</div>` : ''}
                     ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${escapeHtml(post.media_url)}" controls preload="none"></video>`:`<img src="${escapeHtml(post.media_url)}" onclick="openImageViewer('${escapeHtml(post.media_url).replace(/'/g, "\\'")}')" loading="lazy" />`}</div>` : ''}
-                    <div class="post-detail-stats">浏��?${vc} 璺?点��?${likes.length} 璺?评��?${comments.length}</div>
+                    <div class="post-detail-stats">浏览 ${vc} · 点赞 ${likes.length} · 评论 ${comments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
-                            <div class="stat-section-title">鉂わ�?点赞��﹀煕閿?{likes.length}閿?/div>
+                            <div class="stat-section-title">❤️ 点赞用户(${likes.length})</div>
                             ${likes.length ? likes.map(l => `
                                 <div class="stat-like-item">
                                     <div class="sli-info">
@@ -2871,10 +2871,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     </div>
                                     <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                                 </div>
-                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂��ら���赞</div>'}
+                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
                         </div>
                         <div class="stat-col">
-                            <div class="stat-section-title">馃挰 评论列��€�锛?{comments.length}閿?/div>
+                            <div class="stat-section-title">💬 评论列表(${comments.length})</div>
                             ${comments.length ? comments.map(c => `
                                 <div class="stat-comment-item">
                                     <div class="sci-info">
@@ -2883,32 +2883,32 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     </div>
                                     <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                                 </div>
-                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂��ょ���论</div>'}
+                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无评论</div>'}
                         </div>
                     </div>
                 `;
             }
 
-            // 格���鍖�х��子内�€��摘要（�?����展�ず�?
+            // 格式化帖子内容摘要（用于展示
             function formatPostSummary(p) {
                 const text = p.content || '';
                 const hasImg = p.media_url && p.media_type === 'image';
                 const hasVid = p.media_url && p.media_type === 'video';
                 let tag = '';
-                if (hasImg) tag = '<span class="spi-img-tag">馃柤 閸ュ墽澧?/span>';
-                if (hasVid) tag = '<span class="spi-img-tag">馃幀 视��?/span>';
+                if (hasImg) tag = '<span class="spi-img-tag">🖼️ 图片</span>';
+                if (hasVid) tag = '<span class="spi-img-tag">🎞️ 视频</span>';
                 const summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
-                const display = summary || (hasImg ? '涓€张图�? : hasVid ? '涓€个视�? : '(无内�?');
+                const display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
                 return { display, tag, hasImg, hasVid, thumbUrl: hasImg ? p.media_url : null };
             }
 
-            // 閻㈢��垚甯�х��条���的HTML（可点击跳转�?
+            // 生成帖子条目的HTML（可点击跳转
             function renderPostItemHTML(p) {
                 const fmt = formatPostSummary(p);
                 const onclick = `openPostDetail('${escapeHtml(p.id).replace(/'/g, "\\'")}')`;
                 return `
                     <div class="stat-post-item">
-                        <span class="spi-content" onclick="${onclick}" title="点击�ョ��帖子�︽儏">
+                        <span class="spi-content" onclick="${onclick}" title="点击查看帖子详情">
                             ${escapeHtml(fmt.display)}
                             ${fmt.tag}
                         </span>
@@ -2918,10 +2918,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 `;
             }
 
-            // 渲染总��З态统�★��按��ら���分组��?
+            // 渲染总动态统计，按用户分组
             function renderPostStats() {
                 const body = document.getElementById('statModalBody');
-                // 閹?user_name 分组统计
+                // 按 user_name 分组统计
                 const userMap = {};
                 statAllPosts.forEach(p => {
                     if (!userMap[p.user_name]) userMap[p.user_name] = [];
@@ -2930,7 +2930,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const entries = Object.entries(userMap).sort((a, b) => b[1].length - a[1].length);
                 
                 if (!entries.length) {
-                    body.innerHTML = '<div class="stat-empty">暂无�ㄦ€�数�?/div>';
+                    body.innerHTML = '<div class="stat-empty">暂无数据</div>';
                     return;
                 }
 
@@ -2941,7 +2941,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 <div class="suh-avatar">${escapeHtml(name)[0].toUpperCase()}</div>
                                 <span class="suh-name">${escapeHtml(name)}</span>
                             </div>
-                            <span class="suh-count">${posts.length} 鏉?/span>
+                            <span class="suh-count">${posts.length} 条</span>
                         </div>
                         <div class="stat-user-posts">
                             ${posts.slice(0, 3).map(p => renderPostItemHTML(p)).join('')}
@@ -2968,7 +2968,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 `;
             };
 
-            // 渲染总��セ览统�★紙�?localStorage 读取�ù�览历史�?
+            // 渲染总浏览统计，从 localStorage 读取浏览历史
             function renderViewStats() {
                 const body = document.getElementById('statModalBody');
                 const history = getViewHistory();
@@ -2977,9 +2977,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     body.innerHTML = `
                         <div class="stat-empty">
                             <div style="font-size:16px; margin-bottom:8px;">馃搳 浏览记录</div>
-                            <div style="font-size:13px;">暂��ゅù�览�︽��数据</div>
-                            <div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖�€��时自��З保��?/div>
-                            <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录�€�浏览数�?{document.getElementById('sViews').textContent} 濞?/div>
+                            <div style="font-size:13px;">暂无浏览记录数据</div>
+                            <div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>
+                            <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录浏览数: ${document.getElementById('sViews').textContent} 次</div>
                         </div>
                     `;
                     return;
@@ -2996,7 +2996,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 `).join('');
             }
 
-            // 渲染点赞和评论统�?
+            // 渲染点赞和评论统计
             function renderLikeStats() {
                 const body = document.getElementById('statModalBody');
 
@@ -3020,7 +3020,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     `;
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">暂��ら���赞记��?/div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无点赞记录</div>';
                     }
                     return h;
                 }
@@ -3035,14 +3035,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         <div class="stat-comment-item">
                             <div class="sci-info">
                                 <div class="sci-user">${escapeHtml(c.user_name)}</div>
-                                <div class="sci-target">评论了�€?{postContent}銆嶏�?{escapeHtml(c.content)}</div>
+                                <div class="sci-target">评论了「${postContent}」：${escapeHtml(c.content)}</div>
                             </div>
                             <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                         </div>
                     `;
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">暂��ょ���论记��?/div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
                     }
                     return h;
                 }
