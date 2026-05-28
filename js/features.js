@@ -1,4 +1,4 @@
-﻿(function() {
+(function() {
     function restoreMinimalDockStyles() {
         var old = document.getElementById('xtjDockRestoreStyle');
         if (old) old.remove();
@@ -111,6 +111,12 @@
                 width: 21px !important;
                 height: 21px !important;
                 display: block !important;
+            }
+            /* 花朵图标单独设置为 28px */
+            #dockBar .dock-tab[data-tab="ai"] .dt-icon svg.dt-svg,
+            #dockBar .dock-tab[data-tab="ai"] .dt-icon svg {
+                width: 28px !important;
+                height: 28px !important;
             }
             #dockBar .dock-tab .dt-label {
                 display: block !important;

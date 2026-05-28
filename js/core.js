@@ -582,7 +582,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 const btn = document.getElementById("loginSubmitBtn");
                 btn.disabled = true;
-                btn.textContent = "楠岃瘉涓?..";
+                btn.textContent = "验证中...";
 
                 try {
                     if (name === ADMIN_NAME) {
@@ -694,7 +694,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             window.openUserProfile = async function(userName) {
                 upcTargetUser = userName;
                 document.getElementById('upcName').textContent = userName;
-                document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細鍔犺浇涓?..';
+                document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細加载中...';
                 
                 var avatarEl = document.getElementById('upcAvatar');
                 // localStorage鏉冨▉浼樺厛锛氬綋鍓嶇敤鎴峰厛妫€鏌ユ湰鍦扮紦瀛?
@@ -1290,7 +1290,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!content && !file) { showToast("璇疯緭鍏ュ唴瀹"); return; }
                 // 杈撳叆鏍￠獙锛氶檺鍒堕暱搴︺€佸幓闄ゅ嵄闄╁唴瀹?
                 if (content.length > 2000) { showToast("鍐呭涓嶈兘瓒呰繃2000瀛"); return; }
-                var btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "鍙戝竷涓?..";
+                var btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中...";
                 try {
                     let media_url = "", media_type = "";
                     if (file) {
@@ -1412,7 +1412,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!delPostId) return;
                 const btn = document.getElementById("delBtn");
                 btn.disabled = true;
-                btn.textContent = "鍒犻櫎涓?..";
+                btn.textContent = "删除中...";
                 try {
                     const key = isAdmin() ? delOwnerKey : deviceId;
                     const { error } = await sb.rpc("delete_post_with_actor", {
@@ -1742,7 +1742,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">鍔犺浇涓?..</span></div>`;
+                if (!forceRefresh) feed.innerHTML = `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>`;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -2389,7 +2389,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (content.length > 2000) { showToast("鍐呭涓嶈兘瓒呰繃2000瀛"); return; }
                 var btn = document.getElementById("pubBtn");
                 btn.disabled = true;
-                btn.textContent = "鍙戝竷涓?..";
+                btn.textContent = "发布中...";
                 try {
                     var media_url = "";
                     var media_type = "";
@@ -2460,7 +2460,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
-                    feed.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">鍔犺浇涓?..</span></div>';
+                    feed.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
                 }
                 try {
                     var results = await Promise.all([
@@ -2583,7 +2583,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!delPostId) return;
                 var btn = document.getElementById("delBtn");
                 btn.disabled = true;
-                btn.textContent = "鍒犻櫎涓?..";
+                btn.textContent = "删除中...";
                 try {
                     var key = isAdmin() ? delOwnerKey : deviceId;
                     var result = await sb.rpc("delete_post_with_actor", {
@@ -2674,7 +2674,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                document.getElementById('statModalBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">鍔犺浇涓?..</span></div>';
+                document.getElementById('statModalBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
@@ -2724,7 +2724,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             window.openPostDetail = async function(postId) {
                 document.getElementById('postDetailTitle').textContent = '甯栧瓙璇︽儏';
-                document.getElementById('postDetailBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">鍔犺浇涓?..</span></div>';
+                document.getElementById('postDetailBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
                 document.getElementById('postDetailModal').classList.add('active');
 
                 try {
@@ -3355,7 +3355,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
-                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>鍔犺浇涓?..</div></div>';
+                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>加载中...</div></div>';
                 document.getElementById('dockChatListView').classList.add('hidden');
                 document.getElementById('dockChatDetailView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'flex';
@@ -3370,7 +3370,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!el) return;
                 if (Date.now() - dockChatListCacheTime < DOCK_CHAT_CACHE_DURATION) return;
                 dockChatListCacheTime = Date.now();
-                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">鈴?/div><div>鍔犺浇涓?..</div></div>';
+                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">鈴?/div><div>加载中...</div></div>';
                 try {
                     const { data: allMsgs, error } = await sb.from("posts")
                         .select("id, user_name, media_url, content, created_at")
