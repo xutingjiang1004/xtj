@@ -80,13 +80,18 @@
             current: null,
             scale: 1,
             rotation: 0,
+            tx: 0,
+            ty: 0,
             startX: 0,
             startY: 0,
             moved: false,
             dragging: false,
             dismissY: 0,
             lastTap: 0,
-            fullToastAt: 0
+            fullToastAt: 0,
+            pinchStartDist: 0,
+            pinchStartScale: 1,
+            pinchActive: false
         };
 
         var imageCache = new Map();
@@ -193,6 +198,7 @@
             }
 
             bindHotfixEvents(overlay);
+            addPinchEvents(overlay);
             return overlay;
         }
 
@@ -275,7 +281,7 @@
 
         function applyTransform(img) {
             if (!img) return;
-            img.style.transform = 'translate3d(0,0,0) scale(' + state.scale + ') rotate(' + state.rotation + 'deg)';
+            img.style.transform = 'translate3d(' + state.tx + 'px,' + state.ty + 'px,0) scale(' + state.scale + ') rotate(' + state.rotation + 'deg)';
         }
 
         function updateSideImages() {
@@ -749,9 +755,16 @@
                 var dx = e.clientX - state.startX;
                 var dy = e.clientY - state.startY;
                 if (Math.abs(dx) + Math.abs(dy) > 12) state.moved = true;
-                if (state.scale <= 1.01 && dy > 0 && Math.abs(dy) > Math.abs(dx)) {
+                var curImg = document.getElementById('photoPreviewImage');
+                if (state.scale > 1.01) {
+                    state.tx = dx;
+                    state.ty = dy;
+                    if (curImg) {
+                        curImg.style.transition = 'none';
+                        applyTransform(curImg);
+                    }
+                } else if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
                     state.dismissY = dy;
-                    var curImg = document.getElementById('photoPreviewImage');
                     var opacity = Math.max(0.25, 1 - dy / window.innerHeight);
                     overlay.style.opacity = String(opacity);
                     if (curImg) curImg.style.transform = 'translate3d(0,' + dy + 'px,0) scale(' + Math.max(0.76, 1 - dy / 900) + ') rotate(' + state.rotation + 'deg)';
@@ -769,12 +782,20 @@
                     return;
                 }
                 overlay.style.opacity = '1';
-                if (curImg) {
+                if (state.scale > 1.01 && state.moved) {
+                    state.tx = 0;
+                    state.ty = 0;
+                    if (curImg) {
+                        curImg.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
+                        applyTransform(curImg);
+                        setTimeout(function() { if (curImg) curImg.style.transition = ''; }, 260);
+                    }
+                } else if (curImg) {
                     curImg.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
                     applyTransform(curImg);
                     setTimeout(function() { if (curImg) curImg.style.transition = ''; }, 260);
                 }
-                if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)) {
+                if (!(state.scale > 1.01) && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)) {
                     navigate(dx < 0 ? 1 : -1);
                     return;
                 }
@@ -797,9 +818,62 @@
             var img = document.getElementById('photoPreviewImage');
             if (!img) return;
             state.scale = state.scale > 1.01 ? 1 : 2;
+            if (state.scale <= 1.01) { state.tx = 0; state.ty = 0; }
             img.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
             applyTransform(img);
             setTimeout(function() { if (img) img.style.transition = ''; }, 260);
+        }
+
+        function addPinchEvents(wrapper) {
+            if (wrapper._xtjPinchBound) return;
+            wrapper._xtjPinchBound = true;
+            var startTouches = null;
+
+            wrapper.addEventListener('touchstart', function(e) {
+                if (e.touches.length === 2) {
+                    state.pinchActive = true;
+                    startTouches = [e.touches[0], e.touches[1]];
+                    var dx = e.touches[0].clientX - e.touches[1].clientX;
+                    var dy = e.touches[0].clientY - e.touches[1].clientY;
+                    state.pinchStartDist = Math.sqrt(dx * dx + dy * dy);
+                    state.pinchStartScale = state.scale;
+                }
+            }, { passive: true });
+
+            wrapper.addEventListener('touchmove', function(e) {
+                if (!state.pinchActive || e.touches.length < 2) return;
+                e.preventDefault();
+                var dx = e.touches[0].clientX - e.touches[1].clientX;
+                var dy = e.touches[0].clientY - e.touches[1].clientY;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (state.pinchStartDist > 0) {
+                    state.scale = Math.max(0.5, Math.min(6, state.pinchStartScale * (dist / state.pinchStartDist)));
+                    var img = document.getElementById('photoPreviewImage');
+                    if (img) {
+                        img.style.transition = 'none';
+                        applyTransform(img);
+                    }
+                }
+            }, { passive: false });
+
+            wrapper.addEventListener('touchend', function(e) {
+                if (!state.pinchActive) return;
+                if (e.touches.length < 2) {
+                    state.pinchActive = false;
+                    startTouches = null;
+                    if (state.scale <= 1.04) {
+                        state.scale = 1;
+                        state.tx = 0;
+                        state.ty = 0;
+                        var img = document.getElementById('photoPreviewImage');
+                        if (img) {
+                            img.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
+                            applyTransform(img);
+                            setTimeout(function() { if (img) img.style.transition = ''; }, 260);
+                        }
+                    }
+                }
+            }, { passive: true });
         }
     }
 
