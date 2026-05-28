@@ -5142,6 +5142,10 @@
             }
         }
 
+        #dockBar .dock-tab[data-tab="ai"] .dt-icon {
+            font-size: 23px;
+        }
+
         /* ========== View Transitions API ========== */
         
  
