@@ -16,6 +16,19 @@
             --glass-border: rgba(255, 255, 255, 0.72);
             --glass-shadow: 0 18px 50px rgba(0, 0, 0, 0.04);
             --glass-blur: blur(24px);
+            --button-glass-bg: rgba(255, 255, 255, 0.24);
+            --button-glass-bg-hover: rgba(255, 255, 255, 0.34);
+            --button-glass-bg-active: rgba(255, 255, 255, 0.18);
+            --button-glass-border: rgba(255, 255, 255, 0.44);
+            --button-glass-border-hover: rgba(255, 255, 255, 0.68);
+            --button-glass-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
+            --button-glass-shadow-hover: 0 14px 34px rgba(0, 0, 0, 0.12);
+            --button-glass-shadow-active: 0 6px 16px rgba(0, 0, 0, 0.08);
+            --button-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+            --button-glass-blur: blur(20px) saturate(175%);
+            --button-glass-radius: 999px;
+            --button-icon-size: 18px;
+            --button-icon-gap: 8px;
             --primary: #059669;
             --admin-color: #ff9f0a;
             --like-color: #ff3b60;
@@ -44,6 +57,15 @@
             --dock-bg: rgba(18,18,24,0.50);
             --dock-border: rgba(255,255,255,0.08);
             --dock-shadow: 0 -2px 20px rgba(0,0,0,0.3);
+            --button-glass-bg: rgba(22, 24, 36, 0.46);
+            --button-glass-bg-hover: rgba(30, 33, 48, 0.58);
+            --button-glass-bg-active: rgba(18, 20, 30, 0.42);
+            --button-glass-border: rgba(255, 255, 255, 0.12);
+            --button-glass-border-hover: rgba(255, 255, 255, 0.2);
+            --button-glass-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
+            --button-glass-shadow-hover: 0 16px 42px rgba(0, 0, 0, 0.3);
+            --button-glass-shadow-active: 0 8px 20px rgba(0, 0, 0, 0.18);
+            --button-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
         }
 
         /* ========== 黑暗模式覆盖 ========== */
@@ -5140,6 +5162,510 @@
             .pw-skeleton::after {
                 display: none;
             }
+        }
+
+        /* Shared non-dock button system */
+        :is(
+            .btn,
+            .btn-primary,
+            .btn-ghost,
+            .action-btn,
+            .file-label,
+            .theme-toggle-btn,
+            .post-filter-clear,
+            .photo-wall-btn,
+            .photo-wall-upload-btn,
+            .announcement-back-btn,
+            .announcement-delete-btn,
+            .announcement-admin-btn,
+            .profile-detail-logout-btn,
+            .upc-msg-btn,
+            .photo-preview-close,
+            .pp-nav-arrow,
+            .pp-info-btn,
+            .pp-share-btn,
+            .pp-rotate-btn,
+            .pp-delete-btn,
+            .pp-info-modal-close,
+            .pp-confirm-btn,
+            .send-btn,
+            .chat-img-btn,
+            .chat-header .back-btn,
+            .chat-header .chat-close-btn,
+            .img-viewer .iv-close,
+            .pw-confirm-actions button,
+            #reportModal button
+        ) {
+            position: relative;
+            isolation: isolate;
+            box-sizing: border-box;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: var(--button-icon-gap);
+            padding-inline: 16px;
+            min-height: 40px;
+            border-radius: var(--button-glass-radius);
+            border: 1px solid var(--button-glass-border);
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.08) 50%, rgba(255, 255, 255, 0) 100%),
+                var(--button-glass-bg);
+            color: var(--text-main);
+            backdrop-filter: var(--button-glass-blur);
+            -webkit-backdrop-filter: var(--button-glass-blur);
+            box-shadow: var(--button-glass-highlight), var(--button-glass-shadow);
+            text-decoration: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-user-select: none;
+            outline: none;
+            transition: var(--button-glass-transition);
+            transform: translateZ(0);
+            overflow: hidden;
+        }
+        :is(
+            .btn,
+            .btn-primary,
+            .btn-ghost,
+            .action-btn,
+            .file-label,
+            .theme-toggle-btn,
+            .post-filter-clear,
+            .photo-wall-btn,
+            .photo-wall-upload-btn,
+            .announcement-back-btn,
+            .announcement-delete-btn,
+            .announcement-admin-btn,
+            .profile-detail-logout-btn,
+            .upc-msg-btn,
+            .photo-preview-close,
+            .pp-nav-arrow,
+            .pp-info-btn,
+            .pp-share-btn,
+            .pp-rotate-btn,
+            .pp-delete-btn,
+            .pp-info-modal-close,
+            .pp-confirm-btn,
+            .send-btn,
+            .chat-img-btn,
+            .chat-header .back-btn,
+            .chat-header .chat-close-btn,
+            .img-viewer .iv-close,
+            .pw-confirm-actions button,
+            #reportModal button
+        ):focus-visible {
+            box-shadow:
+                0 0 0 3px rgba(5, 150, 105, 0.14),
+                var(--button-glass-highlight),
+                var(--button-glass-shadow-hover);
+            border-color: var(--button-glass-border-hover);
+        }
+        :is(
+            .btn,
+            .btn-primary,
+            .btn-ghost,
+            .action-btn,
+            .file-label,
+            .theme-toggle-btn,
+            .post-filter-clear,
+            .photo-wall-btn,
+            .photo-wall-upload-btn,
+            .announcement-back-btn,
+            .announcement-delete-btn,
+            .announcement-admin-btn,
+            .profile-detail-logout-btn,
+            .upc-msg-btn,
+            .photo-preview-close,
+            .pp-nav-arrow,
+            .pp-info-btn,
+            .pp-share-btn,
+            .pp-rotate-btn,
+            .pp-delete-btn,
+            .pp-info-modal-close,
+            .pp-confirm-btn,
+            .send-btn,
+            .chat-img-btn,
+            .chat-header .back-btn,
+            .chat-header .chat-close-btn,
+            .img-viewer .iv-close,
+            .pw-confirm-actions button,
+            #reportModal button
+        ):disabled,
+        :is(
+            .btn,
+            .btn-primary,
+            .btn-ghost,
+            .action-btn,
+            .file-label,
+            .theme-toggle-btn,
+            .post-filter-clear,
+            .photo-wall-btn,
+            .photo-wall-upload-btn,
+            .announcement-back-btn,
+            .announcement-delete-btn,
+            .announcement-admin-btn,
+            .profile-detail-logout-btn,
+            .upc-msg-btn,
+            .photo-preview-close,
+            .pp-nav-arrow,
+            .pp-info-btn,
+            .pp-share-btn,
+            .pp-rotate-btn,
+            .pp-delete-btn,
+            .pp-info-modal-close,
+            .pp-confirm-btn,
+            .send-btn,
+            .chat-img-btn,
+            .chat-header .back-btn,
+            .chat-header .chat-close-btn,
+            .img-viewer .iv-close,
+            .pw-confirm-actions button,
+            #reportModal button
+        )[aria-disabled="true"] {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+            filter: saturate(0.85);
+            transform: none !important;
+            box-shadow: none;
+        }
+        @media (hover: hover) and (pointer: fine) {
+            :is(
+                .btn,
+                .btn-primary,
+                .btn-ghost,
+                .action-btn,
+                .file-label,
+                .theme-toggle-btn,
+                .post-filter-clear,
+                .photo-wall-btn,
+                .photo-wall-upload-btn,
+                .announcement-back-btn,
+                .announcement-delete-btn,
+                .announcement-admin-btn,
+                .profile-detail-logout-btn,
+                .upc-msg-btn,
+                .photo-preview-close,
+                .pp-nav-arrow,
+                .pp-info-btn,
+                .pp-share-btn,
+                .pp-rotate-btn,
+                .pp-delete-btn,
+                .pp-info-modal-close,
+                .pp-confirm-btn,
+                .send-btn,
+                .chat-img-btn,
+                .chat-header .back-btn,
+                .chat-header .chat-close-btn,
+                .img-viewer .iv-close,
+                .pw-confirm-actions button,
+                #reportModal button
+            ):not(:disabled):not([aria-disabled="true"]):hover {
+                transform: translateY(-1px);
+                border-color: var(--button-glass-border-hover);
+                background:
+                    linear-gradient(135deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.12) 52%, rgba(255, 255, 255, 0.04) 100%),
+                    var(--button-glass-bg-hover);
+                box-shadow: var(--button-glass-highlight), var(--button-glass-shadow-hover);
+            }
+        }
+        :is(
+            .btn,
+            .btn-primary,
+            .btn-ghost,
+            .action-btn,
+            .file-label,
+            .theme-toggle-btn,
+            .post-filter-clear,
+            .photo-wall-btn,
+            .photo-wall-upload-btn,
+            .announcement-back-btn,
+            .announcement-delete-btn,
+            .announcement-admin-btn,
+            .profile-detail-logout-btn,
+            .upc-msg-btn,
+            .photo-preview-close,
+            .pp-nav-arrow,
+            .pp-info-btn,
+            .pp-share-btn,
+            .pp-rotate-btn,
+            .pp-delete-btn,
+            .pp-info-modal-close,
+            .pp-confirm-btn,
+            .send-btn,
+            .chat-img-btn,
+            .chat-header .back-btn,
+            .chat-header .chat-close-btn,
+            .img-viewer .iv-close,
+            .pw-confirm-actions button,
+            #reportModal button
+        ):not(:disabled):not([aria-disabled="true"]):active {
+            transform: translateY(0) scale(0.97);
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.04) 60%, rgba(255, 255, 255, 0) 100%),
+                var(--button-glass-bg-active);
+            box-shadow: var(--button-glass-highlight), var(--button-glass-shadow-active);
+        }
+        :is(
+            .btn,
+            .btn-primary,
+            .btn-ghost,
+            .action-btn,
+            .file-label,
+            .theme-toggle-btn,
+            .post-filter-clear,
+            .photo-wall-btn,
+            .photo-wall-upload-btn,
+            .announcement-back-btn,
+            .announcement-delete-btn,
+            .announcement-admin-btn,
+            .profile-detail-logout-btn,
+            .upc-msg-btn,
+            .photo-preview-close,
+            .pp-nav-arrow,
+            .pp-info-btn,
+            .pp-share-btn,
+            .pp-rotate-btn,
+            .pp-delete-btn,
+            .pp-info-modal-close,
+            .pp-confirm-btn,
+            .send-btn,
+            .chat-img-btn,
+            .chat-header .back-btn,
+            .chat-header .chat-close-btn,
+            .img-viewer .iv-close,
+            .pw-confirm-actions button,
+            #reportModal button
+        ) .ui-icon {
+            width: var(--button-icon-size);
+            height: var(--button-icon-size);
+            flex-shrink: 0;
+        }
+        :is(
+            .btn,
+            .btn-primary,
+            .btn-ghost,
+            .action-btn,
+            .file-label,
+            .theme-toggle-btn,
+            .post-filter-clear,
+            .photo-wall-btn,
+            .photo-wall-upload-btn,
+            .announcement-back-btn,
+            .announcement-delete-btn,
+            .announcement-admin-btn,
+            .profile-detail-logout-btn,
+            .upc-msg-btn,
+            .photo-preview-close,
+            .pp-nav-arrow,
+            .pp-info-btn,
+            .pp-share-btn,
+            .pp-rotate-btn,
+            .pp-delete-btn,
+            .pp-info-modal-close,
+            .pp-confirm-btn,
+            .send-btn,
+            .chat-img-btn,
+            .chat-header .back-btn,
+            .chat-header .chat-close-btn,
+            .img-viewer .iv-close,
+            .pw-confirm-actions button,
+            #reportModal button
+        ) svg {
+            width: var(--button-icon-size);
+            height: var(--button-icon-size);
+            flex-shrink: 0;
+        }
+        .btn-primary,
+        .announcement-admin-btn.primary,
+        .photo-wall-upload-btn,
+        .upc-msg-btn,
+        .send-btn,
+        .pp-confirm-ok,
+        #reportSubmitBtn {
+            color: #fff;
+            border-color: rgba(16, 185, 129, 0.34);
+            background:
+                linear-gradient(135deg, rgba(5, 150, 105, 0.34), rgba(16, 185, 129, 0.24) 60%, rgba(255, 255, 255, 0.08) 100%),
+                var(--button-glass-bg);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.28),
+                0 12px 30px rgba(5, 150, 105, 0.22);
+        }
+        .btn-primary:hover,
+        .announcement-admin-btn.primary:hover,
+        .photo-wall-upload-btn:hover,
+        .upc-msg-btn:hover,
+        .send-btn:hover,
+        .pp-confirm-ok:hover,
+        #reportSubmitBtn:hover {
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.34),
+                0 16px 36px rgba(5, 150, 105, 0.26);
+        }
+        .pp-confirm-cancel {
+            color: var(--text-main);
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.06) 58%, rgba(255, 255, 255, 0.02) 100%),
+                var(--button-glass-bg);
+        }
+        .btn-ghost,
+        .file-label,
+        .photo-wall-btn,
+        .announcement-back-btn,
+        .post-filter-clear,
+        .chat-header .back-btn,
+        .chat-header .chat-close-btn,
+        .img-viewer .iv-close,
+        .pp-info-modal-close,
+        .pw-confirm-cancel {
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.06) 58%, rgba(255, 255, 255, 0.02) 100%),
+                var(--button-glass-bg);
+        }
+        .action-btn {
+            min-width: 84px;
+            padding: 6px 14px;
+            font-weight: 600;
+            color: var(--text-muted);
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.05) 58%, rgba(255, 255, 255, 0.02) 100%),
+                var(--button-glass-bg);
+            box-shadow: var(--button-glass-highlight), 0 4px 12px rgba(0, 0, 0, 0.03);
+        }
+        .action-btn:hover {
+            color: var(--text-main);
+        }
+        .action-btn.liked {
+            color: var(--like-color);
+            border-color: rgba(255, 59, 96, 0.26);
+            background:
+                linear-gradient(135deg, rgba(255, 59, 96, 0.16), rgba(255, 255, 255, 0.04) 62%, rgba(255, 255, 255, 0.02) 100%),
+                rgba(255, 255, 255, 0.16);
+        }
+        .action-btn.del,
+        .pp-delete-btn,
+        .announcement-delete-btn,
+        .profile-detail-logout-btn,
+        #delBtn,
+        .pw-confirm-danger {
+            color: #ff3b60;
+            border-color: rgba(255, 59, 96, 0.22);
+            background:
+                linear-gradient(135deg, rgba(255, 59, 96, 0.12), rgba(255, 255, 255, 0.04) 60%, rgba(255, 255, 255, 0.02) 100%),
+                rgba(255, 255, 255, 0.12);
+        }
+        .action-btn.del:hover,
+        .pp-delete-btn:hover,
+        .announcement-delete-btn:hover,
+        .profile-detail-logout-btn:hover,
+        #delBtn:hover,
+        .pw-confirm-danger:hover {
+            border-color: rgba(255, 59, 96, 0.32);
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.22),
+                0 16px 34px rgba(255, 59, 96, 0.18);
+        }
+        .pp-info-btn,
+        .pp-share-btn,
+        .pp-rotate-btn,
+        .pp-delete-btn,
+        .photo-preview-close,
+        .pp-nav-arrow,
+        .img-viewer .iv-close,
+        .pp-info-modal-close,
+        .theme-toggle-btn {
+            width: 42px;
+            height: 42px;
+            padding: 0;
+            min-height: 42px;
+            border-radius: 999px;
+        }
+        .theme-toggle-btn {
+            font-size: 18px;
+            line-height: 1;
+        }
+        .photo-preview-close,
+        .pp-nav-arrow,
+        .img-viewer .iv-close {
+            color: #fff;
+        }
+        .pp-info-btn {
+            left: 50%;
+            transform: translateX(-50%);
+        }
+        .pp-info-btn:hover {
+            transform: translateX(-50%) translateY(-1px);
+        }
+        .pp-info-btn:active {
+            transform: translateX(-50%) scale(0.97);
+        }
+        .pp-nav-arrow {
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.22),
+                0 12px 30px rgba(0, 0, 0, 0.18);
+        }
+        .pp-nav-arrow:hover {
+            transform: translateY(calc(-50% - 1px)) scale(1.03);
+        }
+        .pp-nav-arrow:active {
+            transform: translateY(-50%) scale(0.97);
+        }
+        .photo-preview-close:hover,
+        .img-viewer .iv-close:hover,
+        .pp-info-modal-close:hover,
+        .chat-header .back-btn:hover,
+        .chat-header .chat-close-btn:hover {
+            transform: translateY(-1px) scale(1.03);
+        }
+        .photo-preview-close:active,
+        .img-viewer .iv-close:active,
+        .pp-info-modal-close:active,
+        .chat-header .back-btn:active,
+        .chat-header .chat-close-btn:active {
+            transform: scale(0.97);
+        }
+        .pp-confirm-btn {
+            min-height: 44px;
+        }
+        .pw-confirm-actions button {
+            min-height: 44px;
+            padding-inline: 20px;
+        }
+        #reportModal button {
+            min-height: 42px !important;
+            padding: 10px 18px !important;
+            border-radius: 999px !important;
+        }
+        #reportModal button[onclick*="closeModal('reportModal')"] {
+            color: var(--text-main) !important;
+            border: 1px solid var(--button-glass-border) !important;
+            background:
+                linear-gradient(135deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.06) 58%, rgba(255, 255, 255, 0.02) 100%),
+                var(--button-glass-bg) !important;
+            box-shadow: var(--button-glass-highlight), var(--button-glass-shadow) !important;
+        }
+        #reportSubmitBtn {
+            color: #fff !important;
+            border: 1px solid rgba(16, 185, 129, 0.34) !important;
+            background:
+                linear-gradient(135deg, rgba(5, 150, 105, 0.34), rgba(16, 185, 129, 0.24) 60%, rgba(255, 255, 255, 0.08) 100%),
+                var(--button-glass-bg) !important;
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.28),
+                0 12px 30px rgba(5, 150, 105, 0.22) !important;
+        }
+        #delBtn {
+            color: #ff3b60 !important;
+            border: 1px solid rgba(255, 59, 96, 0.22) !important;
+            background:
+                linear-gradient(135deg, rgba(255, 59, 96, 0.12), rgba(255, 255, 255, 0.04) 60%, rgba(255, 255, 255, 0.02) 100%),
+                rgba(255, 255, 255, 0.12) !important;
+        }
+        .ui-icon svg {
+            width: 100%;
+            height: 100%;
         }
 
         /* ========== View Transitions API ========== */
