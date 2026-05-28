@@ -36,6 +36,15 @@
         }
     }
 
+    function setUploadProgressState(title, detail) {
+        var titleEl = document.getElementById('uploadProgressTitle');
+        if (titleEl) {
+            titleEl.textContent = title || '';
+            titleEl.style.opacity = '1';
+        }
+        setUploadStatusText(detail || '');
+    }
+
     function showUploadProgress() {
         currentProgress = 0;
         targetProgress = 0;
@@ -49,23 +58,8 @@
             overlay.classList.add('upload-overlay-visible');
         }
         if (container) {
-            var trigger = document.getElementById('photoUploadBtn');
-            var triggerRect = trigger ? trigger.getBoundingClientRect() : null;
-            container.style.transition = 'none';
-            if (triggerRect && triggerRect.width > 0 && triggerRect.height > 0) {
-                var finalRect = container.getBoundingClientRect();
-                var dx = triggerRect.left + triggerRect.width / 2 - (finalRect.left + finalRect.width / 2);
-                var dy = triggerRect.top + triggerRect.height / 2 - (finalRect.top + finalRect.height / 2);
-                var scale = Math.max(0.42, Math.min(0.72, triggerRect.width / finalRect.width));
-                container.style.transformOrigin = 'center center';
-                container.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
-                container.style.opacity = '0.4';
-            }
-            requestAnimationFrame(function() {
-                container.style.transition = '';
-                container.style.transform = '';
-                container.style.opacity = '';
-            });
+            container.style.transform = '';
+            container.style.opacity = '';
         }
 
         var bar = document.getElementById('uploadProgressBar');
@@ -78,9 +72,9 @@
         }
         var titleEl = document.getElementById('uploadProgressTitle');
         if (titleEl) {
-            titleEl.textContent = '正在准备上传';
+            titleEl.textContent = '准备上传';
         }
-        setUploadStatusText('正在整理照片内容...');
+        setUploadStatusText('');
 
         startProgressAnimation();
     }
@@ -103,8 +97,8 @@
                 var text = document.getElementById('uploadProgressText');
                 if (text) text.textContent = '0%';
                 var titleEl = document.getElementById('uploadProgressTitle');
-                if (titleEl) titleEl.textContent = '正在准备上传';
-                setUploadStatusText('正在整理照片内容...');
+                if (titleEl) titleEl.textContent = '准备上传';
+                setUploadStatusText('');
             }, 350);
         }
     }
@@ -147,18 +141,12 @@
         progressAnimFrame = requestAnimationFrame(animate);
     }
 
-    function updateUploadProgress(percent, title) {
+    function updateUploadProgress(percent, title, detail) {
         targetProgress = Math.max(0, Math.min(100, percent));
-        if (percent >= 100) {
-            setUploadStatusText('照片已同步到照片墙');
-        } else if (percent >= 90) {
-            setUploadStatusText('正在写入照片墙与同步数据...');
-        } else if (percent >= 75) {
-            setUploadStatusText('正在生成更轻的预览图...');
-        } else if (percent >= 30) {
-            setUploadStatusText('正在安全上传原图...');
-        } else {
-            setUploadStatusText('正在整理照片内容...');
+        if (typeof detail === 'string') {
+            setUploadStatusText(detail);
+        } else if (percent >= 100) {
+            setUploadStatusText('');
         }
         
         var titleEl = document.getElementById('uploadProgressTitle');
@@ -167,12 +155,8 @@
             if (now - lastTitleChangeTime > 200) {
                 lastTitleChangeTime = now;
                 lastProgressTitle = title;
-                titleEl.style.transition = 'opacity 0.12s ease-out';
-                titleEl.style.opacity = '0';
-                setTimeout(function() {
-                    titleEl.textContent = title;
-                    titleEl.style.opacity = '1';
-                }, 120);
+                titleEl.textContent = title;
+                titleEl.style.opacity = '1';
             }
         } else if (titleEl && title) {
             titleEl.textContent = title;
