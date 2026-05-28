@@ -1282,7 +1282,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 draw();
             }
 
-            // ===================== [已废弃] 下方第2361行有更新版本 =====================
+            // DEPRECATED_DO_NOT_EDIT ===================== [已废弃] 下方第2361行有更新版本 =====================
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
                 var content = document.getElementById("postInp").value.trim();
@@ -1712,7 +1712,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let feedAllLikes = [];
             let feedScrollObserver = null;
 
-            // ====== [已废弃] 下方第2412行有更新版本 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃] 下方第2412行有更新版本 ======
             async function loadFeed(forceRefresh = false) {
                 const now = Date.now();
                 if (forceRefresh) {
@@ -1796,7 +1796,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 feedScrollObserver = observer;
             }
 
-            // ====== [已废弃] 下方第2479行有更新版本 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃] 下方第2479行有更新版本 ======
             function loadMoreFeedPosts() {
                 if (feedEndReached) return;
                 
@@ -1827,7 +1827,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 feedPage++;
             }
 
-            // ====== [已废弃] 下方第2503行有更新版本 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃] 下方第2503行有更新版本 ======
             function appendMorePosts(posts, comments, likes) {
                 const feed = document.getElementById('feed');
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
@@ -1886,7 +1886,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 updateFeedStats();
             }
 
-            // ====== [已废弃] 下方第2532行有更新版本 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃] 下方第2532行有更新版本 ======
             async function renderFeed({ posts, comments, likes }) {
                 const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__ann__' && p.user_name);
                 document.getElementById("sPosts").textContent = visiblePosts.length;
@@ -1996,7 +1996,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // ====== [已废弃] 下方第2520行有更新版本 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃] 下方第2520行有更新版本 ======
             function renderFeedWithAvatars(visiblePosts, comments, likes) {
                 const feed = document.getElementById("feed");
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
@@ -2141,8 +2141,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     pinned_at: nextPinnedAt,
                     updated_at: nextUpdatedAt
                 };
-                var direct = await sb.from("posts").update(directPayload).eq("id", post.id);
-                if (!direct.error) return { ok: true, fallback: false };
+                var direct = await sb.from("posts").update(directPayload).eq("id", post.id).select("*");
+                if (!direct.error) {
+                    if (!direct.data || (Array.isArray(direct.data) && direct.data.length === 0)) {
+                        return { ok: false, error: new Error("数据库未更新任何记录") };
+                    }
+                    return { ok: true, fallback: false };
+                }
 
                 var message = String(direct.error.message || "");
                 var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message);
@@ -2332,10 +2337,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         showToast("保存失败: " + ((result.error && result.error.message) || "未知错误"));
                         return;
                     }
+                    var verify = await sb.from("posts").select("*").eq("id", editPostId).maybeSingle();
+                    if (!verify.error && verify.data) {
+                        var verified = normalizePost(verify.data);
+                        if (verified && String(verified.visibility) !== String(nextVisibility)) {
+                            showToast("保存但 visibility 未生效，请检查数据库字段");
+                        } else {
+                            showToast(result.fallback ? "已保存，使用旧数据兼容模式" : "已保存修改");
+                        }
+                    } else {
+                        showToast(result.fallback ? "已保存，使用旧数据兼容模式" : "已保存修改");
+                    }
                     clearFeedCache();
                     closeModal("editPostModal");
                     editPostId = null;
-                    showToast(result.fallback ? "已保存，使用旧数据兼容模式" : "已保存修改");
                     await loadFeed(true);
                 } finally {
                     btn.disabled = false;
@@ -2592,7 +2607,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
 
-            // ====== [已废弃] 下方第2668行有更新版本 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [已废弃] 下方第2668行有更新版本 ======
             window.prefetchStatData = async function() {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
@@ -2667,8 +2682,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
                     statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__' && canViewPost(p); });
-                    statAllComments = commRes.data || [];
-                    statAllLikes = likeRes.data || [];
+                    var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
+                    statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
+                    statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
                     statCacheTime = Date.now();
 
                     renderStatByType(type);
@@ -2955,8 +2971,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ]).then(function(results) {
                     var postRes = results[0], commRes = results[1], likeRes = results[2];
                     statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__' && canViewPost(p); });
-                    statAllComments = commRes.data || [];
-                    statAllLikes = likeRes.data || [];
+                    var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
+                    statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
+                    statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
                     var body = document.getElementById('statModalBody');
                     if (!body) return;
                     if (type === 'posts') renderPostStats();
@@ -3957,6 +3974,44 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // ========== 更新日志系统 ==========
             const changelogData = [
+                {
+                    version: 'v0.0.60',
+                    date: '2026-05-28',
+                    content: `
+                        <h4>修复内容</h4>
+                        <ul>
+                            <li>修复编辑帖子公开/私密不真正生效问题</li>
+                            <li>修复统计详情泄露私密帖子互动</li>
+                            <li>修复照片预览双击缩小/双指缩放不稳定</li>
+                        </ul>
+                        <h4>优化内容</h4>
+                        <ul>
+                            <li>照片墙预览新增双指缩放</li>
+                            <li>标记废弃函数避免误修改</li>
+                            <li>upload.js select 字段完整性提升</li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.0.59',
+                    date: '2026-05-27',
+                    content: `
+                        <h4>修复内容</h4>
+                        <ul>
+                            <li>修复举报按钮点击无响应问题</li>
+                            <li>修复举报提交字段名匹配，添加 fallback 机制</li>
+                            <li>修复通知开关 localStorage key 不一致</li>
+                            <li>修复统计详情泄露私密帖子互动</li>
+                            <li>修复帖子详情页无私密权限检查</li>
+                            <li>修复发帖文件上传未检查错误</li>
+                        </ul>
+                        <h4>优化内容</h4>
+                        <ul>
+                            <li>照片墙缩略图加载速度提升</li>
+                            <li>去除 index.html UTF-8 BOM</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.0.56',
                     date: '2026-05-26',
