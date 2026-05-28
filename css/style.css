@@ -773,14 +773,16 @@
 
         .actions { display: flex; gap: 8px; flex-wrap: wrap; position: relative; }
         .action-btn {
-            background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.7);
-            padding: 6px 16px; border-radius: 99px; font-size: 13px; color: var(--text-muted);
+            background: rgba(255,255,255,0.22); border: 1px solid rgba(255,255,255,0.32);
+            padding: 7px 14px; border-radius: 999px; font-size: 13px; color: var(--text-main);
             cursor: pointer; transition: var(--trans-smooth); font-weight: 600;
             position: relative; overflow: visible !important;
-            min-width: 86px; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.02);
+            min-width: 88px; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box; gap: 6px;
+            backdrop-filter: blur(18px) saturate(155%);
+            -webkit-backdrop-filter: blur(18px) saturate(155%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.34), 0 6px 16px rgba(15,23,42,0.05);
         }
-        .action-btn:hover { background: rgba(255,255,255,0.7); }
+        .action-btn:hover { background: rgba(255,255,255,0.34); }
 
         @keyframes likePulse {
             0% { transform: scale(1); }
@@ -790,8 +792,8 @@
             100% { transform: scale(1); }
         }
         .action-btn.liked {
-            background: rgba(255, 59, 96, 0.15); color: var(--like-color);
-            border-color: rgba(255, 59, 96, 0.3);
+            background: rgba(255, 59, 96, 0.14); color: var(--like-color);
+            border-color: rgba(255, 59, 96, 0.26);
             animation: likePulse 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
 
@@ -811,7 +813,7 @@
         }
 
         .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: auto; }
-        .action-btn.del:hover { background: rgba(255,59,96,0.06); }
+        .action-btn.del:hover { background: rgba(255,59,96,0.08); }
         .action-btn.pin {
             color: #b45309;
         }
@@ -1286,20 +1288,23 @@
             width: 44px; height: 44px; border-radius: 50%;
             border: none; cursor: pointer; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
-            background: linear-gradient(135deg, #059669, #10b981);
+            background: linear-gradient(135deg, rgba(5,150,105,0.96), rgba(16,185,129,0.92));
             color: white; font-size: 18px;
-            transition: transform 0.3s, box-shadow 0.3s, opacity 0.3s;
+            transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.22s ease, opacity 0.22s ease;
+            box-shadow: 0 12px 24px rgba(5,150,105,0.24);
         }
-        .send-btn:hover { transform: scale(1.03); box-shadow: 0 4px 14px rgba(5,150,105,0.3); }
+        .send-btn:hover { transform: translateY(-1px) scale(1.03); box-shadow: 0 16px 28px rgba(5,150,105,0.26); }
         .send-btn:disabled { opacity: 0.4; transform: none !important; }
         .chat-img-btn {
             width: 40px; height: 40px; border-radius: 50%;
-            border: 1px solid rgba(255,255,255,0.15); cursor: pointer; flex-shrink: 0;
+            border: 1px solid rgba(255,255,255,0.2); cursor: pointer; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
-            background: rgba(255,255,255,0.1); font-size: 18px;
-            transition: background 0.3s, transform 0.3s;
+            background: rgba(255,255,255,0.12); font-size: 18px;
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.28);
         }
-        .chat-img-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.03); }
+        .chat-img-btn:hover { background: rgba(255,255,255,0.22); transform: translateY(-1px) scale(1.03); }
         /* iMessage 风格发送动画 */
         @keyframes msgSend {
             0%   { opacity: 0; transform: scale(0.6) translateY(16px); }
@@ -1329,20 +1334,23 @@
         }
 
         .theme-toggle-btn {
-            background: rgba(255,255,255,0.15);
-            border: 1px solid rgba(255,255,255,0.25);
+            background: rgba(255,255,255,0.16);
+            border: 1px solid rgba(255,255,255,0.22);
             width: 34px; height: 34px; border-radius: 50%;
             cursor: pointer; font-size: 17px; line-height: 1;
             display: flex; align-items: center; justify-content: center;
-            transition: transform 0.3s, background 0.3s;
+            transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), background 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease;
             padding: 0; margin: 0;
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.32);
         }
-        .theme-toggle-btn:hover { transform: scale(1.05); background: rgba(255,255,255,0.28); }
+        .theme-toggle-btn:hover { transform: translateY(-1px) scale(1.04); background: rgba(255,255,255,0.26); }
         [data-theme="dark"] .theme-toggle-btn {
-            background: rgba(30,30,50,0.35);
-            border-color: rgba(255,255,255,0.06);
+            background: rgba(25,25,42,0.2);
+            border-color: rgba(255,255,255,0.08);
         }
-        [data-theme="dark"] .theme-toggle-btn:hover { background: rgba(40,40,60,0.45); }
+        [data-theme="dark"] .theme-toggle-btn:hover { background: rgba(40,40,60,0.42); }
         @media (max-width: 480px) {
             .chat-panel { height: 88vh; max-height: none; border-radius: 20px 20px 0 0; }
             .chat-msg { max-width: 88%; font-size: 14px; }
@@ -1809,26 +1817,29 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            border: none;
-            background: rgba(0, 0, 0, 0.04);
-            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.16);
+            background: rgba(255,255,255,0.12);
+            border-radius: 999px;
             cursor: pointer;
             font-size: 20px;
             color: var(--text-muted);
-            transition: background-color 0.25s ease, color 0.25s ease;
+            backdrop-filter: blur(18px) saturate(165%);
+            -webkit-backdrop-filter: blur(18px) saturate(165%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.32);
         }
 
         .pp-info-modal-close:hover {
-            background: rgba(0, 0, 0, 0.08);
+            background: rgba(255,255,255,0.2);
             color: var(--text-main);
+            transform: translateY(-1px);
         }
 
         [data-theme="dark"] .pp-info-modal-close {
-            background: rgba(255, 255, 255, 0.06);
+            background: rgba(25,25,42,0.22);
         }
 
         [data-theme="dark"] .pp-info-modal-close:hover {
-            background: rgba(255, 255, 255, 0.12);
+            background: rgba(40,40,60,0.42);
             color: #fff;
         }
 
@@ -1923,13 +1934,13 @@
         .pp-confirm-dialog {
             width: 88%;
             max-width: 340px;
-            background: rgba(255, 255, 255, 0.4);
-            backdrop-filter: blur(28px) saturate(200%);
-            -webkit-backdrop-filter: blur(28px) saturate(200%);
-            border: 1px solid rgba(255, 255, 255, 0.55);
+            background: rgba(255, 255, 255, 0.16);
+            backdrop-filter: blur(30px) saturate(190%);
+            -webkit-backdrop-filter: blur(30px) saturate(190%);
+            border: 1px solid rgba(255, 255, 255, 0.22);
             border-radius: 24px;
             padding: 28px 24px 20px;
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.36);
             transform: scale(0.9) translateY(20px);
             opacity: 0;
             transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.3s ease-out;
@@ -1964,36 +1975,36 @@
         .pp-confirm-btn {
             flex: 1;
             height: 44px;
-            border: none;
-            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,0.16);
+            border-radius: 999px;
             font-size: 15px;
             font-weight: 600;
             cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, border-color 0.2s ease;
             -webkit-tap-highlight-color: transparent;
         }
         .pp-confirm-btn:active {
             transform: scale(0.96);
         }
         .pp-confirm-cancel {
-            background: rgba(0, 0, 0, 0.06);
+            background: rgba(255,255,255,0.18);
             color: var(--text-main);
         }
         .pp-confirm-cancel:hover {
-            background: rgba(0, 0, 0, 0.1);
+            background: rgba(255,255,255,0.26);
         }
         .pp-confirm-ok {
-            background: linear-gradient(135deg, #ff3b60, #ff6b8b);
+            background: linear-gradient(135deg, rgba(255,59,96,0.96), rgba(255,107,139,0.92));
             color: #fff;
-            box-shadow: 0 4px 14px rgba(255, 59, 96, 0.35);
+            box-shadow: 0 12px 24px rgba(255, 59, 96, 0.24);
         }
         .pp-confirm-ok:hover {
-            box-shadow: 0 6px 20px rgba(255, 59, 96, 0.45);
+            box-shadow: 0 16px 28px rgba(255, 59, 96, 0.28);
         }
         [data-theme="dark"] .pp-confirm-dialog {
-            background: rgba(35, 35, 50, 0.45);
-            border-color: rgba(255, 255, 255, 0.2);
-            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            background: rgba(35, 35, 50, 0.28);
+            border-color: rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.08);
         }
         [data-theme="dark"] .pp-confirm-cancel {
             background: rgba(255, 255, 255, 0.08);
@@ -2721,18 +2732,20 @@
             width: 36px;
             height: 36px;
             border-radius: 50%;
-            background: rgba(255,255,255,0.2);
-            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(255,255,255,0.14);
+            border: 1px solid rgba(255,255,255,0.24);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: var(--trans-smooth);
-            backdrop-filter: blur(4px);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.34);
         }
         .announcement-btn:hover {
-            background: rgba(255,255,255,0.35);
-            transform: scale(1.025);
+            background: rgba(255,255,255,0.26);
+            transform: translateY(-1px) scale(1.03);
         }
         .announcement-btn svg {
             width: 20px;
@@ -3080,18 +3093,21 @@
             gap: 6px;
             padding: 8px 14px;
             border-radius: 99px;
-            border: 1px solid rgba(255,255,255,0.4);
-            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.24);
+            background: rgba(255,255,255,0.14);
             cursor: pointer;
             font-size: 13px;
             font-weight: 600;
             color: var(--text-main);
             transition: var(--trans-smooth);
             margin-bottom: 16px;
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.34);
         }
         .announcement-back-btn:hover {
-            background: rgba(255,255,255,0.35);
-            transform: translateX(-2px);
+            background: rgba(255,255,255,0.26);
+            transform: translateX(-2px) translateY(-1px);
         }
         .announcement-delete-btn {
             margin-left: auto;
@@ -3582,9 +3598,9 @@
             width: 100%;
             margin-top: 24px;
             padding: 12px;
-            border-radius: 12px;
-            border: 1px solid rgba(255,59,96,0.3);
-            background: rgba(255,59,96,0.1);
+            border-radius: 999px;
+            border: 1px solid rgba(255,59,96,0.22);
+            background: rgba(255,59,96,0.12);
             color: var(--danger, #ff3b60);
             font-size: 14px;
             font-weight: 600;
@@ -3592,10 +3608,10 @@
             transition: var(--trans-smooth);
         }
         .profile-detail-logout-btn:hover {
-            background: rgba(255,59,96,0.2);
+            background: rgba(255,59,96,0.18);
         }
         [data-theme="dark"] .profile-detail-logout-btn {
-            background: rgba(255,59,96,0.15);
+            background: rgba(255,59,96,0.14);
         }
 
         /* ========== 查看用户资料卡片 ========== */
@@ -3656,18 +3672,19 @@
             width: 100%;
             max-width: 200px;
             padding: 12px 24px;
-            border: none;
-            border-radius: 24px;
-            background: linear-gradient(135deg, #059669, #34d399);
+            border: 1px solid rgba(255,255,255,0.18);
+            border-radius: 999px;
+            background: linear-gradient(135deg, rgba(5,150,105,0.96), rgba(52,211,153,0.92));
             color: white;
             font-size: 15px;
             font-weight: 600;
             cursor: pointer;
             transition: var(--trans-smooth);
+            box-shadow: 0 12px 26px rgba(5,150,105,0.22), inset 0 1px 0 rgba(255,255,255,0.18);
         }
         .upc-msg-btn:hover {
-            transform: scale(1.02);
-            opacity: 0.9;
+            transform: translateY(-1px) scale(1.02);
+            opacity: 0.96;
         }
         [data-theme="dark"] .upc-header {
             background: rgba(255,255,255,0.04);
@@ -3855,14 +3872,14 @@
             appearance: none;
             padding: 6px 34px 6px 12px;
             border-radius: 999px;
-            border: 1px solid rgba(255,255,255,0.48);
+            border: 1px solid rgba(255,255,255,0.28);
             background:
-                linear-gradient(180deg, rgba(255,255,255,0.4), rgba(255,255,255,0.22)),
+                linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.12)),
                 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%2364748b' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 7 5 6 5-6'/%3E%3C/svg%3E") no-repeat right 12px center / 14px;
             color: var(--text-main);
             font-size: 12px;
             outline: none;
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.45);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.3);
         }
         .photo-wall-sync-status {
             display: inline-flex;
@@ -3870,15 +3887,15 @@
             gap: 6px;
             padding: 6px 10px;
             border-radius: 999px;
-            border: 1px solid rgba(255, 255, 255, 0.42);
-            background: rgba(255, 255, 255, 0.22);
-            backdrop-filter: blur(16px) saturate(155%);
-            -webkit-backdrop-filter: blur(16px) saturate(155%);
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            background: rgba(255, 255, 255, 0.14);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
             color: var(--text-main);
             font-size: 12px;
             font-weight: 600;
             letter-spacing: 0;
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
             transition: var(--trans-smooth);
         }
         .pw-sync-dot {
@@ -3913,14 +3930,14 @@
             gap: 8px;
             padding: 8px 16px 8px 14px;
             border-radius: 999px;
-            border: none;
-            background: linear-gradient(135deg, var(--primary), #10b981);
+            border: 1px solid rgba(255,255,255,0.18);
+            background: linear-gradient(135deg, rgba(5,150,105,0.96), rgba(16,185,129,0.92));
             color: #fff;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
-            transition: transform 0.25s ease, background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
-            box-shadow: 0 10px 26px rgba(5,150,105,.28);
+            transition: transform 0.22s cubic-bezier(0.2,0.8,0.2,1), background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+            box-shadow: 0 12px 26px rgba(5,150,105,.24), inset 0 1px 0 rgba(255,255,255,0.18);
         }
         .photo-wall-upload-btn svg {
             width: 18px;
@@ -3934,7 +3951,7 @@
         }
         .photo-wall-upload-btn:hover {
             transform: translateY(-1px);
-            box-shadow: 0 14px 30px rgba(5,150,105,.3);
+            box-shadow: 0 16px 30px rgba(5,150,105,.28), inset 0 1px 0 rgba(255,255,255,0.2);
         }
         .photo-wall-upload-btn:active {
             transform: scale(0.96);
@@ -3945,19 +3962,20 @@
             gap: 8px;
             padding: 6px 14px;
             border-radius: 999px;
-            border: 1px solid rgba(255,255,255,0.48);
-            background: rgba(255,255,255,0.18);
-            backdrop-filter: blur(14px) saturate(160%);
-            -webkit-backdrop-filter: blur(14px) saturate(160%);
+            border: 1px solid rgba(255,255,255,0.26);
+            background: rgba(255,255,255,0.14);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
             color: var(--text-main);
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
             transition: background 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.32);
         }
         .photo-wall-btn:hover {
-            background: rgba(128,128,128,0.12);
-            transform: scale(1.03);
+            background: rgba(255,255,255,0.22);
+            transform: translateY(-1px) scale(1.03);
         }
         .photo-wall-btn.active {
             background: rgba(5, 150, 105, 0.12);
@@ -4254,19 +4272,20 @@
             width: 42px;
             height: 42px;
             border-radius: 999px;
-            background: rgba(255,255,255,.12);
+            background: rgba(255,255,255,.09);
             color: white;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            transition: transform .18s, background .18s, opacity .18s;
-            border: 1px solid rgba(255,255,255,.18);
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
+            transition: transform .18s cubic-bezier(0.2, 0.8, 0.2, 1), background .18s, opacity .18s, box-shadow .18s;
+            border: 1px solid rgba(255,255,255,.16);
+            backdrop-filter: blur(22px) saturate(180%);
+            -webkit-backdrop-filter: blur(22px) saturate(180%);
             z-index: 10;
             opacity: 0;
             transform: translateY(-10px);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 12px 28px rgba(0,0,0,0.14);
         }
         .photo-preview-overlay.active .photo-preview-close {
             animation: ppCloseEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.1s forwards;
@@ -4282,10 +4301,10 @@
             }
         }
         .photo-preview-close:hover {
-            background: rgba(255,255,255,.22);
-            transform: translateY(-1px) scale(1.04);
+            background: rgba(255,255,255,.18);
+            transform: translateY(-1px) scale(1.03);
         }
-        .photo-preview-close:active { transform: scale(.94); }
+        .photo-preview-close:active { transform: translateY(1px) scale(.96); }
         /* 预览左右切换箭头 */
         .pp-nav-arrow {
             position: absolute;
@@ -4294,20 +4313,20 @@
             width: 42px;
             height: 42px;
             border-radius: 999px;
-            border: 1px solid rgba(255,255,255,.18);
-            background: rgba(255,255,255,.12);
-            backdrop-filter: blur(18px) saturate(140%);
-            -webkit-backdrop-filter: blur(18px) saturate(140%);
+            border: 1px solid rgba(255,255,255,.16);
+            background: rgba(255,255,255,.09);
+            backdrop-filter: blur(22px) saturate(180%);
+            -webkit-backdrop-filter: blur(22px) saturate(180%);
             color: white;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: transform .18s, background .18s, opacity .18s;
+            transition: transform .18s cubic-bezier(0.2, 0.8, 0.2, 1), background .18s, opacity .18s, box-shadow .18s;
             pointer-events: auto;
             transform: translateY(-50%);
             opacity: 0;
-            box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 12px 28px rgba(0,0,0,0.14);
         }
         .photo-preview-overlay.active .pp-nav-arrow {
             animation: ppNavEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.15s forwards;
@@ -4329,11 +4348,11 @@
             right: calc(12px + env(safe-area-inset-right, 0px));
         }
         .pp-nav-arrow:hover {
-            background: rgba(255,255,255,.22);
-            transform: translateY(calc(-50% - 1px)) scale(1.04);
+            background: rgba(255,255,255,.18);
+            transform: translateY(calc(-50% - 1px)) scale(1.03);
         }
         .pp-nav-arrow:active {
-            transform: translateY(-50%) scale(.94);
+            transform: translateY(calc(-50% + 1px)) scale(.96);
         }
         .pp-nav-arrow.pp-nav-hidden {
             opacity: 0;
@@ -4945,31 +4964,40 @@
             width: 42px;
             height: 42px;
             border-radius: 999px;
-            border: 1px solid rgba(255,255,255,.18);
-            background: rgba(255,255,255,.12);
+            border: 1px solid rgba(255,255,255,.16);
+            background: rgba(255,255,255,.09);
             color: white;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: transform .18s, background .18s, opacity .18s;
+            transition: transform .18s cubic-bezier(0.2, 0.8, 0.2, 1), background .18s, opacity .18s, box-shadow .18s;
             pointer-events: auto;
-            backdrop-filter: blur(18px);
-            -webkit-backdrop-filter: blur(18px);
-            box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+            backdrop-filter: blur(22px) saturate(180%);
+            -webkit-backdrop-filter: blur(22px) saturate(180%);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 12px 28px rgba(0,0,0,0.14);
+        }
+        .photo-preview-close .ui-button-text,
+        .pp-nav-arrow .ui-button-text,
+        .pp-info-btn .ui-button-text,
+        .pp-share-btn .ui-button-text,
+        .pp-rotate-btn .ui-button-text,
+        .pp-delete-btn .ui-button-text,
+        .pp-info-modal-close .ui-button-text {
+            display: none;
         }
         .pp-info-btn:hover,
         .pp-share-btn:hover,
         .pp-rotate-btn:hover,
         .pp-delete-btn:hover {
-            background: rgba(255,255,255,.22);
-            transform: translateY(-1px) scale(1.04);
+            background: rgba(255,255,255,.18);
+            transform: translateY(-1px) scale(1.03);
         }
         .pp-info-btn:active,
         .pp-share-btn:active,
         .pp-rotate-btn:active,
         .pp-delete-btn:active {
-            transform: scale(.94);
+            transform: translateY(1px) scale(.96);
         }
         /* 信息模块视觉优化 - 外部透明，内部10%白色磨砂 */
         .pp-info-modal {
