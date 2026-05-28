@@ -1,19 +1,70 @@
 (function() {
+    var BROKEN_PHOTO_KEY = 'xtj_photos_broken_media';
+    var pwPlaceholder = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cpath fill="%23c9d5cf" d="M86 285h228L248 198l-42 55-31-39-89 71Z"/%3E%3Ccircle cx="132" cy="128" r="28" fill="%23bccbc4"/%3E%3C/svg%3E';
+
+    function safeEsc(value) {
+        if (window.escapeHtml) return window.escapeHtml(String(value == null ? '' : value));
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function getBrokenPhotoIds() {
+        try {
+            var raw = localStorage.getItem(BROKEN_PHOTO_KEY);
+            var list = raw ? JSON.parse(raw) : [];
+            return Array.isArray(list) ? list.map(String) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function addBrokenPhotoId(id) {
+        if (!id) return;
+        var list = getBrokenPhotoIds();
+        var sid = String(id);
+        if (list.indexOf(sid) < 0) {
+            list.push(sid);
+            try { localStorage.setItem(BROKEN_PHOTO_KEY, JSON.stringify(list.slice(-400))); } catch (e) {}
+        }
+    }
+
+    function isBrokenPhotoId(id) {
+        if (!id) return false;
+        return getBrokenPhotoIds().indexOf(String(id)) >= 0;
+    }
+    window.isBrokenPhotoWallPhoto = isBrokenPhotoId;
+
+    function hasUsableImage(photo) {
+        if (!photo) return false;
+        var src = photo.thumbUrl || photo.imageUrl || '';
+        if (!src) return false;
+        if (String(src).indexOf('data:image/svg+xml') === 0) return false;
+        if (isBrokenPhotoId(photo.id)) return false;
+        return true;
+    }
+
+    function getRenderablePhotos(data) {
+        return (Array.isArray(data) ? data : []).filter(hasUsableImage);
+    }
+    window.getRenderablePhotoWallPhotos = getRenderablePhotos;
+
     function formatPhotoTime(ts) {
-        var diff = Date.now() - ts;
+        var diff = Date.now() - (ts || Date.now());
         if (diff < 60000) return '刚刚';
         if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前';
         if (diff < 86400000) return Math.floor(diff / 3600000) + ' 小时前';
-        var d = new Date(ts);
-        return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0');
+        var d = new Date(ts || Date.now());
+        return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
     }
     window.formatPhotoTime = formatPhotoTime;
 
-    var pwPlaceholder = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cpath fill="%23ccc" d="M320 340H80c-11 0-20-9-20-20V80c0-11 9-20 20-20h240c11 0 20 9 20 20v240c0 11-9 20-20 20zM280 120h-80v80h-40v-80h-80v-40h80v-80h40v80h80v40z"/%3E%3C/svg%3E';
-
     function sortPhotoWallData(data, sortKey) {
-        var sorted = data.slice();
-        switch(sortKey) {
+        var sorted = getRenderablePhotos(data).slice();
+        switch (sortKey) {
             case 'date_asc':
                 sorted.sort(function(a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
                 break;
@@ -34,33 +85,21 @@
         }
         return sorted;
     }
+    window.sortPhotoWallData = sortPhotoWallData;
 
     function photoWallIconSvg(type, extraClass) {
-        var cls = extraClass ? ' class="' + extraClass + '"' : '';
+        var cls = extraClass ? ' ' + extraClass : '';
         if (type === 'empty') {
-            return '<span class="ui-icon' + cls + '" aria-hidden="true">' +
-                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-                '<path d="M4 7h4l2-2h4l2 2h4a2 2 0 0 1 2 2v8a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V9a2 2 0 0 1 2-2Z"></path>' +
-                '<circle cx="12" cy="13" r="4"></circle>' +
-                '</svg></span>';
+            return '<span class="ui-icon' + cls + '" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h4l2-2h4l2 2h4a2 2 0 0 1 2 2v8a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V9a2 2 0 0 1 2-2Z"></path><circle cx="12" cy="13" r="4"></circle></svg></span>';
         }
         if (type === 'upload') {
-            return '<span class="ui-icon' + cls + '" aria-hidden="true">' +
-                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-                '<path d="M7 18a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 1 1 .5 6.96H15"></path>' +
-                '<path d="M12 11v9"></path>' +
-                '<path d="m8.5 14.5 3.5-3.5 3.5 3.5"></path>' +
-                '</svg></span>';
+            return '<span class="ui-icon' + cls + '" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 1 1 .5 6.96H15"></path><path d="M12 11v9"></path><path d="m8.5 14.5 3.5-3.5 3.5 3.5"></path></svg></span>';
         }
         return '';
     }
 
     function getPhotoWallEmptyHtml() {
-        return '<div class="photo-wall-empty">' +
-            '<div class="photo-wall-empty-icon">' + photoWallIconSvg('empty', 'photo-wall-empty-svg') + '</div>' +
-            '<div>还没有照片</div>' +
-            '<div class="photo-wall-empty-cta" onclick="triggerPhotoUpload()">' + photoWallIconSvg('upload') + '<span>成为第一个分享照片的人</span></div>' +
-            '</div>';
+        return '<div class="photo-wall-empty"><div class="photo-wall-empty-icon">' + photoWallIconSvg('empty', 'photo-wall-empty-svg') + '</div><div>还没有照片</div><div class="photo-wall-empty-cta" onclick="triggerPhotoUpload()">' + photoWallIconSvg('upload') + '<span>成为第一个分享照片的人</span></div></div>';
     }
 
     function applyPhotoAspect(imgEl) {
@@ -70,24 +109,53 @@
         ratio = Math.max(3 / 4, Math.min(4 / 3, ratio));
         item.style.setProperty('--pw-aspect', String(Math.round(ratio * 1000)) + ' / 1000');
     }
+    window.applyPhotoWallAspect = applyPhotoAspect;
+
+    function removePhotoCardDom(photoId) {
+        var item = document.querySelector('.photo-wall-item[data-photo-id="' + String(photoId).replace(/"/g, '\\"') + '"]');
+        if (item) {
+            item.classList.add('pw-card-removing');
+            setTimeout(function() {
+                if (item && item.parentNode) item.parentNode.removeChild(item);
+            }, 180);
+        }
+    }
+
+    window.hideBrokenPhotoWallItem = function(photoId, reason) {
+        if (!photoId) return;
+        var id = String(photoId);
+        addBrokenPhotoId(id);
+        if (Array.isArray(window.photoWallData)) {
+            window.photoWallData = window.photoWallData.filter(function(photo) { return photo && String(photo.id) !== id; });
+        }
+        if (Array.isArray(window.pwCurrentSortedPhotos)) {
+            window.pwCurrentSortedPhotos = window.pwCurrentSortedPhotos.filter(function(photo) { return photo && String(photo.id) !== id; });
+        }
+        if (window.saveLocalPhotoWallData) window.saveLocalPhotoWallData();
+        removePhotoCardDom(id);
+        var grid = document.getElementById('photoGrid');
+        if (grid && (!window.pwCurrentSortedPhotos || window.pwCurrentSortedPhotos.length === 0)) {
+            setTimeout(function() {
+                if (grid.querySelectorAll('.photo-wall-item').length === 0) grid.innerHTML = getPhotoWallEmptyHtml();
+            }, 220);
+        }
+        if (reason) console.warn('[PhotoWall] hide broken photo:', id, reason);
+    };
 
     function renderPhotoWallHtml(sorted, startIndex) {
         var html = '';
         var startIdx = startIndex || 0;
         for (var i = 0; i < sorted.length; i++) {
             var p = sorted[i];
+            if (!hasUsableImage(p)) continue;
             var timeStr = formatPhotoTime(p.timestamp);
             var name = p.username || '未知用户';
-            var gridSrc = p.thumbUrl || p.imageUrl;
-            if (!gridSrc) gridSrc = '';
-            var escapedGridSrc = gridSrc.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            var gridSrc = p.thumbUrl || p.imageUrl || '';
+            var escapedGridSrc = String(gridSrc).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             var actualIndex = startIdx + i;
-            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + window.escapeHtml(String(p.id)) + '" style="animation-delay:' + (actualIndex * 30 < 300 ? actualIndex * 30 : 0) + 'ms" onclick="openPhotoPreview(' + actualIndex + ')">';
+            html += '<div class="photo-wall-item pw-stagger-enter" data-photo-id="' + safeEsc(String(p.id)) + '" style="animation-delay:' + (actualIndex * 30 < 300 ? actualIndex * 30 : 0) + 'ms" onclick="openPhotoPreview(' + actualIndex + ')">';
             html += '<img src="' + pwPlaceholder + '" alt="photo" class="pw-blur-in" data-src="' + escapedGridSrc + '" loading="lazy">';
-            html += '<div class="pw-item-info">';
-            html += '<div class="pw-item-name">' + window.escapeHtml(name) + '</div>';
-            html += '<div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div>';
-            html += '</div></div>';
+            html += '<div class="pw-item-info"><div class="pw-item-name">' + safeEsc(name) + '</div><div class="pw-item-meta"><span>' + timeStr + '</span><span>浏览 <b class="pw-view-count">' + (p.views || 0) + '</b></span></div></div></div>';
         }
         return html;
     }
@@ -101,46 +169,27 @@
             return;
         }
         renderLock = true;
-
         var grid = document.getElementById('photoGrid');
-        if (!grid) {
-            renderLock = false;
-            return;
-        }
-
+        if (!grid) { renderLock = false; return; }
         var skeletonHtml = '';
-        for (var s = 0; s < 9; s++) {
-            skeletonHtml += '<div class="pw-skeleton"></div>';
-        }
+        for (var s = 0; s < 9; s++) skeletonHtml += '<div class="pw-skeleton"></div>';
         grid.innerHTML = skeletonHtml;
 
         await window.loadPhotoWallData();
+        var sortKey = window.pwSortKey || 'date_desc';
+        var sorted = sortPhotoWallData(window.photoWallData, sortKey);
+        window.pwCurrentSortedPhotos = sorted.slice();
 
-        if (window.photoWallData.length === 0) {
+        if (sorted.length === 0) {
             grid.innerHTML = getPhotoWallEmptyHtml();
             renderLock = false;
             return;
         }
 
-        var sortKey = window.pwSortKey || 'date_desc';
-        var sorted = sortPhotoWallData(window.photoWallData, sortKey);
-        window.pwCurrentSortedPhotos = sorted.slice();
-        var html = renderPhotoWallHtml(sorted);
-        grid.innerHTML = html;
-
-        requestAnimationFrame(function() {
-            var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
-            items.forEach(function(item, index) {
-                setTimeout(function() {
-                    item.classList.add('pw-stagger-done');
-                    item.classList.remove('pw-stagger-enter');
-                }, index * 20);
-            });
-        });
-
+        grid.innerHTML = renderPhotoWallHtml(sorted);
+        animatePhotoCards(grid);
         setupInfiniteScroll();
         pwObserveLazyImages(grid);
-
         renderLock = false;
         if (pendingRender) {
             pendingRender = false;
@@ -152,18 +201,20 @@
     function renderPhotoWallWithoutReload() {
         var grid = document.getElementById('photoGrid');
         if (!grid) return;
-
-        if (window.photoWallData.length === 0) {
-            grid.innerHTML = getPhotoWallEmptyHtml();
-            return;
-        }
-
         var sortKey = window.pwSortKey || 'date_desc';
         var sorted = sortPhotoWallData(window.photoWallData, sortKey);
         window.pwCurrentSortedPhotos = sorted.slice();
-        var html = renderPhotoWallHtml(sorted);
-        grid.innerHTML = html;
+        if (sorted.length === 0) {
+            grid.innerHTML = getPhotoWallEmptyHtml();
+            return;
+        }
+        grid.innerHTML = renderPhotoWallHtml(sorted);
+        animatePhotoCards(grid);
+        pwObserveLazyImages(grid);
+    }
+    window.renderPhotoWallWithoutReload = renderPhotoWallWithoutReload;
 
+    function animatePhotoCards(grid) {
         requestAnimationFrame(function() {
             var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
             items.forEach(function(item, index) {
@@ -173,128 +224,108 @@
                 }, index * 20);
             });
         });
-
-        pwObserveLazyImages(grid);
     }
-    window.renderPhotoWallWithoutReload = renderPhotoWallWithoutReload;
 
     var pwLazyObserver = null;
     var imageLoadQueue = [];
     var isProcessingQueue = false;
-    var imgCache = new Map(); // 图片缓存
+    var imgCache = new Map();
     var activeLoadCount = 0;
-    var MAX_CONCURRENT_LOADS = 4; // 限制并发加载数
+    var MAX_CONCURRENT_LOADS = 4;
 
     function processImageQueue() {
         if (isProcessingQueue || imageLoadQueue.length === 0) return;
         if (activeLoadCount >= MAX_CONCURRENT_LOADS) return;
-        
         isProcessingQueue = true;
-
         var batchSize = Math.max(1, MAX_CONCURRENT_LOADS - activeLoadCount);
         var batch = imageLoadQueue.splice(0, batchSize);
-
         batch.forEach(function(entry) {
             var img = entry.target;
             var realSrc = img.getAttribute('data-src');
-            
-            if (realSrc) {
-                // 检查缓存
-                if (imgCache.has(realSrc)) {
-                    var cachedState = imgCache.get(realSrc);
-                    if (cachedState === 'success') {
-                        img.src = realSrc;
-                        img.removeAttribute('data-src');
-                        img.classList.remove('pw-blur-in');
-                        img.classList.add('pw-blur-done');
-                        if (img.complete && img.naturalWidth > 0) applyPhotoAspect(img);
-                        if (pwLazyObserver) pwLazyObserver.unobserve(img);
-                        return;
-                    }
-                }
-
-                activeLoadCount++;
+            var card = img.closest('.photo-wall-item');
+            var photoId = card ? card.getAttribute('data-photo-id') : '';
+            if (!realSrc) {
+                img.classList.remove('pw-blur-in');
+                img.classList.add('pw-blur-done');
+                if (pwLazyObserver) pwLazyObserver.unobserve(img);
+                return;
+            }
+            if (imgCache.get(realSrc) === 'success') {
                 img.src = realSrc;
                 img.removeAttribute('data-src');
-
-                if (img.complete && img.naturalWidth > 0) {
+                img.classList.remove('pw-blur-in');
+                img.classList.add('pw-blur-done');
+                if (img.complete && img.naturalWidth > 0) applyPhotoAspect(img);
+                if (pwLazyObserver) pwLazyObserver.unobserve(img);
+                return;
+            }
+            if (imgCache.get(realSrc) === 'error') {
+                if (window.hideBrokenPhotoWallItem) window.hideBrokenPhotoWallItem(photoId, 'cached image error');
+                if (pwLazyObserver) pwLazyObserver.unobserve(img);
+                return;
+            }
+            activeLoadCount++;
+            img.src = realSrc;
+            img.removeAttribute('data-src');
+            if (img.complete && img.naturalWidth > 0) {
+                imgCache.set(realSrc, 'success');
+                img.classList.remove('pw-blur-in');
+                img.classList.add('pw-blur-done');
+                applyPhotoAspect(img);
+                activeLoadCount--;
+                if (pwLazyObserver) pwLazyObserver.unobserve(img);
+                processImageQueue();
+            } else {
+                img.onload = function() {
                     imgCache.set(realSrc, 'success');
                     img.classList.remove('pw-blur-in');
                     img.classList.add('pw-blur-done');
                     applyPhotoAspect(img);
                     activeLoadCount--;
                     if (pwLazyObserver) pwLazyObserver.unobserve(img);
-                    processImageQueue(); // 继续处理队列
-                } else {
-                    (function(imgEl, src) {
-                        var loadedFn = function() {
-                            imgCache.set(src, 'success');
-                            imgEl.classList.remove('pw-blur-in');
-                            imgEl.classList.add('pw-blur-done');
-                            applyPhotoAspect(imgEl);
-                            activeLoadCount--;
-                            if (pwLazyObserver) pwLazyObserver.unobserve(imgEl);
-                            processImageQueue(); // 继续处理队列
-                        };
-                        var errorFn = function() {
-                            imgCache.set(src, 'error');
-                            imgEl.classList.remove('pw-blur-in');
-                            imgEl.classList.add('pw-blur-done');
-                            activeLoadCount--;
-                            if (pwLazyObserver) pwLazyObserver.unobserve(imgEl);
-                            processImageQueue(); // 继续处理队列
-                        };
-                        imgEl.onload = loadedFn;
-                        imgEl.onerror = errorFn;
-                    })(img, realSrc);
-                }
-            } else {
-                img.classList.remove('pw-blur-in');
-                img.classList.add('pw-blur-done');
-                if (pwLazyObserver) pwLazyObserver.unobserve(img);
+                    processImageQueue();
+                };
+                img.onerror = function() {
+                    imgCache.set(realSrc, 'error');
+                    activeLoadCount--;
+                    if (pwLazyObserver) pwLazyObserver.unobserve(img);
+                    if (window.hideBrokenPhotoWallItem) window.hideBrokenPhotoWallItem(photoId, 'image load error');
+                    processImageQueue();
+                };
             }
         });
-
         isProcessingQueue = false;
     }
 
     function pwObserveLazyImages(grid) {
+        imageLoadQueue = [];
         if (pwLazyObserver) pwLazyObserver.disconnect();
-
         if (!window.IntersectionObserver) {
-            var imgs = grid.querySelectorAll('.pw-blur-in');
-            for (var i = 0; i < imgs.length; i++) {
-                var img = imgs[i];
-                if (img.dataset.src) img.src = img.dataset.src;
-                if (img.complete && img.naturalWidth > 0) applyPhotoAspect(img);
-                else img.onload = function() { applyPhotoAspect(this); };
-                img.classList.remove('pw-blur-in');
-                img.classList.add('pw-blur-done');
+            var fallbackImgs = grid.querySelectorAll('.pw-blur-in');
+            for (var i = 0; i < fallbackImgs.length; i++) {
+                var img = fallbackImgs[i];
+                var src = img.getAttribute('data-src');
+                if (src) img.src = src;
+                img.onload = function() { this.classList.remove('pw-blur-in'); this.classList.add('pw-blur-done'); applyPhotoAspect(this); };
+                img.onerror = function() {
+                    var card = this.closest('.photo-wall-item');
+                    if (window.hideBrokenPhotoWallItem && card) window.hideBrokenPhotoWallItem(card.getAttribute('data-photo-id'), 'fallback image error');
+                };
             }
             return;
         }
-
         pwLazyObserver = new IntersectionObserver(function(entries) {
             var hasNewEntries = false;
             for (var e = 0; e < entries.length; e++) {
-                var entry = entries[e];
-                if (entry.isIntersecting) {
-                    imageLoadQueue.push(entry);
+                if (entries[e].isIntersecting) {
+                    imageLoadQueue.push(entries[e]);
                     hasNewEntries = true;
                 }
             }
-            if (hasNewEntries) {
-                processImageQueue();
-            }
-        }, { 
-            rootMargin: '500px 0px', // 减少预加载距离
-            threshold: 0.05
-        });
-
+            if (hasNewEntries) processImageQueue();
+        }, { rootMargin: '500px 0px', threshold: 0.05 });
         var imgs = grid.querySelectorAll('.pw-blur-in');
-        for (var j = 0; j < imgs.length; j++) {
-            pwLazyObserver.observe(imgs[j]);
-        }
+        for (var j = 0; j < imgs.length; j++) pwLazyObserver.observe(imgs[j]);
     }
 
     var infiniteScrollObserver = null;
@@ -302,60 +333,35 @@
 
     function setupInfiniteScroll() {
         if (infiniteScrollObserver) infiniteScrollObserver.disconnect();
-
         var grid = document.getElementById('photoGrid');
         if (!grid || !window.IntersectionObserver) return;
-
         var sentinel = document.createElement('div');
         sentinel.className = 'pw-load-more-sentinel';
         sentinel.innerHTML = '<div class="pw-load-more-indicator">加载更多...</div>';
         grid.appendChild(sentinel);
-
         infiniteScrollObserver = new IntersectionObserver(async function(entries) {
             for (var i = 0; i < entries.length; i++) {
                 var entry = entries[i];
-                if (entry.isIntersecting && !isLoadingMore && window.hasMorePhotos()) {
+                if (entry.isIntersecting && !isLoadingMore && window.hasMorePhotos && window.hasMorePhotos()) {
                     isLoadingMore = true;
                     var indicator = sentinel.querySelector('.pw-load-more-indicator');
-                    if (indicator) indicator.textContent = '加载中...';                    var newPhotos = await window.loadMorePhotos();
-
+                    if (indicator) indicator.textContent = '加载中...';
+                    var newPhotos = await window.loadMorePhotos();
                     if (newPhotos && newPhotos.length > 0) {
-                        if (window.renderPhotoWallWithoutReload) {
-                            window.renderPhotoWallWithoutReload();
-                        } else if (window.renderPhotoWall) {
-                            await window.renderPhotoWall();
-                        }
-
-                        if (!window.hasMorePhotos()) {
-                            if (indicator) indicator.textContent = '已经到底了';
-                            if (infiniteScrollObserver) infiniteScrollObserver.disconnect();
-                        } else if (indicator) {
-                            indicator.textContent = '加载更多...';
-                        }
-                    } else {
-                        if (indicator) indicator.textContent = '暂无更多';
-                        setTimeout(function() {
-                            if (indicator && window.hasMorePhotos()) {
-                                indicator.textContent = '加载更多...';
-                            }
-                        }, 2000);
+                        renderPhotoWallWithoutReload();
+                    } else if (indicator) {
+                        indicator.textContent = '暂无更多';
                     }
-
                     isLoadingMore = false;
                 }
             }
         }, { rootMargin: '400px 0px' });
-
         infiniteScrollObserver.observe(sentinel);
     }
 
-    var pwLastScroll = 0;
-    var pwScrollThreshold = 20;
     function bindPhotoWallScroll() {
         var header = document.querySelector('.photo-wall-header');
-        if (header) {
-            header.classList.remove('pw-header-hidden');
-        }
+        if (header) header.classList.remove('pw-header-hidden');
     }
     window.bindPhotoWallScroll = bindPhotoWallScroll;
 
