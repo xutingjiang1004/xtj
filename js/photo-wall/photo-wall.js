@@ -175,21 +175,20 @@
                 overlay.innerHTML =
                     '<div class="pp-ambient-bg" id="ppAmbientBg"></div>' +
                     '<div class="pp-dots" id="ppDots"></div>' +
-                    '<button class="photo-preview-close ui-button" type="button" onclick="closePhotoPreview()" data-button-role="close-photo-preview" data-button-icon="close" data-button-label="关闭预览" data-state="idle" aria-label="关闭预览">' + icon('close') + '</button>' +
-                    '<button class="pp-nav-arrow pp-nav-prev ui-button" type="button" id="ppPrevBtn" onclick="window.ppPrevPhoto()" data-button-role="photo-prev" data-button-icon="prev" data-button-label="上一张" data-state="idle" aria-label="上一张照片">' + icon('prev') + '</button>' +
-                    '<button class="pp-nav-arrow pp-nav-next ui-button" type="button" id="ppNextBtn" onclick="window.ppNextPhoto()" data-button-role="photo-next" data-button-icon="next" data-button-label="下一张" data-state="idle" aria-label="下一张照片">' + icon('next') + '</button>' +
+                    '<button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="鍏抽棴棰勮">' + icon('close') + '</button>' +
+                    '<button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="涓婁竴寮?>' + icon('prev') + '</button>' +
+                    '<button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="涓嬩竴寮?>' + icon('next') + '</button>' +
                     '<div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track">' +
                     '<div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"></div>' +
                     '<div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"></div>' +
                     '<div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"></div>' +
                     '</div></div>' +
-                    '<button class="pp-info-btn ui-button" type="button" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()" data-button-role="photo-info" data-button-icon="info" data-button-label="信息" data-state="idle" aria-label="查看照片信息">' + icon('info') + '</button>' +
-                    '<button class="pp-share-btn ui-button" type="button" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()" data-button-role="photo-share" data-button-icon="share" data-button-label="分享" data-state="idle" aria-label="分享照片">' + icon('share') + '</button>' +
-                    '<button class="pp-rotate-btn ui-button" type="button" id="ppRotateBtn" title="旋转 90°" onclick="window.ppRotatePhoto()" data-button-role="photo-rotate" data-button-icon="rotate" data-button-label="旋转" data-state="idle" aria-label="旋转照片">' + icon('rotate') + '</button>' +
-                    '<button id="ppDeleteBtn" class="pp-delete-btn ui-button" type="button" onclick="window.deletePhotoFromPreview()" data-button-role="photo-delete" data-button-icon="delete" data-button-label="删除" data-busy-label="删除中..." data-state="idle" aria-label="删除照片">' + icon('delete') + '</button>' +
+                    '<button class="pp-info-btn" id="ppInfoBtn" title="鐓х墖淇℃伅" onclick="showPhotoInfo()">' + icon('info') + '</button>' +
+                    '<button class="pp-share-btn" id="ppShareBtn" title="鍒嗕韩" onclick="window.shareCurrentPhoto()">' + icon('share') + '</button>' +
+                    '<button class="pp-rotate-btn" id="ppRotateBtn" title="鏃嬭浆 90 搴? onclick="window.ppRotatePhoto()">' + icon('rotate') + '</button>' +
+                    '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + icon('delete') + '</button>' +
                     '<div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg><span id="photoPreviewViewsCount">0</span></span></div>' +
                     '<div class="pp-current-loading" id="ppCurrentLoading">鍔犺浇楂樻竻涓?..</div>';
-                if (window.enhanceUiButtons) window.enhanceUiButtons(overlay);
             } else if (!overlay.querySelector('#ppCurrentLoading')) {
                 var loading = document.createElement('div');
                 loading.className = 'pp-current-loading';
@@ -661,31 +660,11 @@
             if (!photo) return;
             var url = photo.imageUrl || photo.thumbUrl || '';
             try {
-                var shareBtn = document.getElementById('ppShareBtn');
-                var task = async function() {
-                    if (navigator.share) {
-                        await navigator.share({ title: '照片墙', text: '分享一张照片', url: url });
-                        return;
-                    }
-                    if (navigator.clipboard && url) {
-                        await navigator.clipboard.writeText(url);
-                        if (window.showToast) window.showToast('链接已复制');
-                        if (shareBtn) {
-                            shareBtn.classList.add('copied');
-                            shareBtn.dataset.state = 'copied';
-                            clearTimeout(shareBtn._copiedTimer);
-                            shareBtn._copiedTimer = setTimeout(function() {
-                                shareBtn.classList.remove('copied');
-                                shareBtn.dataset.state = 'idle';
-                                delete shareBtn._copiedTimer;
-                            }, 1200);
-                        }
-                    }
-                };
-                if (shareBtn && window.withButtonBusy) {
-                    await window.withButtonBusy(shareBtn, { busyLabel: '分享中...' }, task);
-                } else {
-                    await task();
+                if (navigator.share) {
+                    await navigator.share({ title: '照片墙', text: '分享一张照片', url: url });
+                } else if (navigator.clipboard && url) {
+                    await navigator.clipboard.writeText(url);
+                    if (window.showToast) window.showToast('链接已复制');
                 }
             } catch (e) {}
         };
@@ -698,9 +677,8 @@
                 modal = document.createElement('div');
                 modal.id = 'ppInfoModal';
                 modal.className = 'pp-info-modal';
-                modal.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close ui-button" type="button" onclick="window.closePhotoInfo()" data-button-role="close-photo-info" data-button-icon="close" data-button-label="关闭" data-state="idle" aria-label="关闭照片信息">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>';
+                modal.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">鐓х墖璇︽儏</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>';
                 document.body.appendChild(modal);
-                if (window.enhanceUiButtons) window.enhanceUiButtons(modal);
                 modal.addEventListener('click', function(e) {
                     if (e.target === modal) window.closePhotoInfo();
                 });
@@ -711,18 +689,18 @@
                 sizeStr = photo.fileSize >= 1048576 ? (photo.fileSize / 1048576).toFixed(2) + ' MB' : (photo.fileSize / 1024).toFixed(1) + ' KB';
             }
             var rows = '';
-            rows += infoRow('作者', photo.username || '未知用户');
-            rows += infoRow('时间', photo.timestamp ? new Date(photo.timestamp).toLocaleString('zh-CN') : '--');
-            rows += infoRow('浏览', photo.views || 0);
-            rows += infoRow('大小', sizeStr);
+            rows += infoRow('浣滆€', photo.username || '鏈煡鐢ㄦ埛');
+            rows += infoRow('鏃堕棿', photo.timestamp ? new Date(photo.timestamp).toLocaleString('zh-CN') : '--');
+            rows += infoRow('娴忚', photo.views || 0);
+            rows += infoRow('澶у皬', sizeStr);
             if (photo.exif) {
-                rows += infoRow('设备', photo.exif.model || photo.exif.make || '--');
-                if (photo.exif.fNumber) rows += infoRow('光圈', 'f/' + photo.exif.fNumber);
-                if (photo.exif.exposureTime) rows += infoRow('快门', photo.exif.exposureTime);
+                rows += infoRow('璁惧', photo.exif.model || photo.exif.make || '--');
+                if (photo.exif.fNumber) rows += infoRow('鍏夊湀', 'f/' + photo.exif.fNumber);
+                if (photo.exif.exposureTime) rows += infoRow('蹇棬', photo.exif.exposureTime);
                 if (photo.exif.iso) rows += infoRow('ISO', photo.exif.iso);
-                if (photo.exif.focalLength) rows += infoRow('焦距', photo.exif.focalLength + 'mm');
+                if (photo.exif.focalLength) rows += infoRow('鐒﹁窛', photo.exif.focalLength + 'mm');
             }
-            if (body) body.innerHTML = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + rows + '</div>';
+            if (body) body.innerHTML = '<div class="pp-info-section"><div class="pp-info-section-title">鐓х墖淇℃伅</div>' + rows + '</div>';
             modal.classList.remove('closing');
             modal.style.display = 'flex';
             requestAnimationFrame(function() { modal.classList.add('active'); });
@@ -752,16 +730,9 @@
             }
             var doDelete = async function() {
                 var btn = document.getElementById('ppDeleteBtn');
+                if (btn) btn.disabled = true;
                 try {
-                    var res;
-                    if (btn && window.withButtonBusy) {
-                        res = await window.withButtonBusy(btn, { busyLabel: '删除中...' }, async function() {
-                            return window.deletePhotoWallPhoto ? await window.deletePhotoWallPhoto(photo, { render: false }) : { ok: false };
-                        });
-                    } else {
-                        if (btn) btn.disabled = true;
-                        res = window.deletePhotoWallPhoto ? await window.deletePhotoWallPhoto(photo, { render: false }) : { ok: false };
-                    }
+                    var res = window.deletePhotoWallPhoto ? await window.deletePhotoWallPhoto(photo, { render: false }) : { ok: false };
                     if (!res || !res.ok) {
                         if (window.showToast) window.showToast('鍒犻櫎澶辫触');
                         return;
@@ -776,7 +747,7 @@
                     }
                     if (window.showToast) window.showToast('已删除');
                 } finally {
-                    if (btn && !window.withButtonBusy) btn.disabled = false;
+                    if (btn) btn.disabled = false;
                 }
             };
             if (window.showConfirm) {
