@@ -20,6 +20,32 @@
     window.dockChatListCacheTime = 0;
     var DOCK_CHAT_CACHE_DURATION = 120000;
 
+    function renderChatLoading(el, options) {
+        if (!el) return;
+        var title = options && options.title ? options.title : '正在加载';
+        var subtitle = options && options.subtitle ? options.subtitle : '请稍候';
+        var variant = options && options.variant ? ' chat-loading-card--' + options.variant : '';
+        var esc = window.escapeHtml || function(v) {
+            return String(v).replace(/[&<>"']/g, function(ch) {
+                return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
+            });
+        };
+        el.innerHTML =
+            '<div class="chat-loading-card' + variant + '">' +
+                '<div class="chat-loading-orb">' +
+                    '<span class="chat-loading-ring"></span>' +
+                    '<span class="chat-loading-ring chat-loading-ring--late"></span>' +
+                    '<span class="chat-loading-core"></span>' +
+                '</div>' +
+                '<div class="chat-loading-text">' +
+                    '<div class="chat-loading-title">' + esc(title) + '</div>' +
+                    '<div class="chat-loading-subtitle">' + esc(subtitle) + '</div>' +
+                '</div>' +
+                '<div class="chat-loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>' +
+            '</div>';
+    }
+    window.renderChatLoading = renderChatLoading;
+
     // ===================== 通知系统 =====================
     var activeNotifications = [];
 
@@ -225,7 +251,11 @@
             if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
         }
         dockChatActiveUser = userName;
-        document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中...</div></div>';
+        renderChatLoading(document.getElementById('dockChatMessages'), {
+            title: '正在进入聊天',
+            subtitle: '同步最近消息中',
+            variant: 'detail'
+        });
         document.getElementById('dockChatListView').classList.add('hidden');
         document.getElementById('dockChatDetailView').classList.remove('hidden');
         document.getElementById('dockChatBackBtn').style.display = 'flex';
@@ -242,7 +272,11 @@
         if (!el) return;
         if (Date.now() - window.dockChatListCacheTime < DOCK_CHAT_CACHE_DURATION) return;
         window.dockChatListCacheTime = Date.now();
-        el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">⏳</div><div>加载中...</div></div>';
+        renderChatLoading(el, {
+            title: '正在读取消息列表',
+            subtitle: '同步联系人与未读状态',
+            variant: 'list'
+        });
         try {
             var result = await window.sb.from("posts")
                 .select("id, user_name, media_url, content, created_at")
