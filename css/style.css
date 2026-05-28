@@ -12,10 +12,10 @@
         }
         :root {
             --bg-color: #eaf7ee;
-            --glass-bg: rgba(255, 255, 255, 0.18);
-            --glass-border: rgba(255, 255, 255, 0.72);
-            --glass-shadow: 0 18px 50px rgba(0, 0, 0, 0.04);
-            --glass-blur: blur(24px);
+            --glass-bg: rgba(255, 255, 255, 0.12);
+            --glass-border: rgba(255, 255, 255, 0.54);
+            --glass-shadow: 0 18px 42px rgba(0, 0, 0, 0.04);
+            --glass-blur: blur(28px);
             --primary: #059669;
             --admin-color: #ff9f0a;
             --like-color: #ff3b60;
@@ -31,6 +31,11 @@
             --trans-smooth: opacity 0.32s cubic-bezier(0.25, 1, 0.3, 1), transform 0.32s cubic-bezier(0.25, 1, 0.3, 1), background 0.32s cubic-bezier(0.25, 1, 0.3, 1), border-color 0.32s cubic-bezier(0.25, 1, 0.3, 1), box-shadow 0.32s cubic-bezier(0.25, 1, 0.3, 1), color 0.32s cubic-bezier(0.25, 1, 0.3, 1);
             --trans-spring: opacity 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             --trans-ppt: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            --glass-surface: rgba(255, 255, 255, 0.12);
+            --glass-surface-strong: rgba(255, 255, 255, 0.2);
+            --glass-surface-border: rgba(255, 255, 255, 0.42);
+            --glass-surface-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
+            --focus-ring: rgba(5, 150, 105, 0.18);
             --panel-bg: rgba(233, 248, 237, 0.96);
             --dock-bg: rgba(223, 244, 229, 0.75);
             --dock-border: rgba(255,255,255,0.8);
@@ -40,6 +45,14 @@
         [data-theme="dark"] {
             --text-main: #e4e4ec;
             --text-muted: #9e9eb0;
+            --glass-bg: rgba(25, 25, 42, 0.18);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
+            --glass-surface: rgba(25, 25, 42, 0.22);
+            --glass-surface-strong: rgba(30, 30, 50, 0.34);
+            --glass-surface-border: rgba(255, 255, 255, 0.08);
+            --glass-surface-shadow: 0 18px 42px rgba(0, 0, 0, 0.24);
+            --focus-ring: rgba(52, 211, 153, 0.18);
             --panel-bg: rgba(18,18,24,0.60);
             --dock-bg: rgba(18,18,24,0.50);
             --dock-border: rgba(255,255,255,0.08);
@@ -395,31 +408,59 @@
             transition: var(--trans-smooth);
         }
         .nav-input:focus { background: rgba(255, 255, 255, 0.95); border-color: var(--primary); }
+        :where(.btn, .action-btn, .file-label, .photo-wall-btn, .photo-wall-upload-btn, .theme-toggle-btn, .announcement-btn, .back-btn, .chat-img-btn, .photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn, .pp-info-modal-close, .pp-confirm-btn, .announcement-back-btn, .profile-detail-logout-btn, .upc-msg-btn, .post-filter-clear, .chat-header .back-btn, .chat-header .chat-close-btn) {
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.22s ease, border-color 0.22s ease, box-shadow 0.22s ease, color 0.22s ease, opacity 0.22s ease, filter 0.22s ease;
+        }
+        :where(.btn, .action-btn, .file-label, .photo-wall-btn, .photo-wall-upload-btn, .theme-toggle-btn, .announcement-btn, .back-btn, .chat-img-btn, .photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn, .pp-info-modal-close, .pp-confirm-btn, .announcement-back-btn, .profile-detail-logout-btn, .upc-msg-btn, .post-filter-clear, .chat-header .back-btn, .chat-header .chat-close-btn):focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px var(--focus-ring), var(--glass-surface-shadow);
+        }
+        :where(.btn, .action-btn, .file-label, .photo-wall-btn, .photo-wall-upload-btn, .theme-toggle-btn, .announcement-btn, .back-btn, .chat-img-btn, .photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn, .pp-info-modal-close, .pp-confirm-btn, .announcement-back-btn, .profile-detail-logout-btn, .upc-msg-btn, .post-filter-clear, .chat-header .back-btn, .chat-header .chat-close-btn):active {
+            transform: translateY(1px) scale(0.985);
+        }
+        :where(.btn, .action-btn, .file-label, .photo-wall-btn, .photo-wall-upload-btn, .theme-toggle-btn, .announcement-btn, .back-btn, .chat-img-btn, .photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn, .pp-info-modal-close, .pp-confirm-btn, .announcement-back-btn, .profile-detail-logout-btn, .upc-msg-btn, .post-filter-clear, .chat-header .back-btn, .chat-header .chat-close-btn):disabled,
+        :where(.btn, .action-btn, .file-label, .photo-wall-btn, .photo-wall-upload-btn, .theme-toggle-btn, .announcement-btn, .back-btn, .chat-img-btn, .photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn, .pp-info-modal-close, .pp-confirm-btn, .announcement-back-btn, .profile-detail-logout-btn, .upc-msg-btn, .post-filter-clear, .chat-header .back-btn, .chat-header .chat-close-btn)[aria-busy="true"] {
+            opacity: 0.55;
+            cursor: progress;
+            pointer-events: none;
+            transform: none !important;
+            filter: saturate(0.85);
+        }
         .btn {
             cursor: pointer;
-            border: none;
+            border: 1px solid var(--glass-surface-border);
             font-weight: 600;
-            padding: 6px 16px;
-            border-radius: 99px;
+            padding: 8px 18px;
+            border-radius: 999px;
             font-size: 13px;
-            transition: var(--trans-spring);
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            gap: 8px;
+            background: var(--glass-surface);
+            color: var(--text-main);
+            backdrop-filter: blur(18px) saturate(160%);
+            -webkit-backdrop-filter: blur(18px) saturate(160%);
+            box-shadow: var(--glass-surface-shadow);
         }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
         .btn-primary {
-            background: linear-gradient(135deg, var(--primary), #10b981);
+            background: linear-gradient(135deg, rgba(5, 150, 105, 0.96), rgba(16, 185, 129, 0.92));
             color: white;
-            box-shadow: 0 4px 12px rgba(5, 150, 105, 0.25);
+            border-color: rgba(255,255,255,0.18);
+            box-shadow: 0 12px 28px rgba(5, 150, 105, 0.24), inset 0 1px 0 rgba(255,255,255,0.18);
         }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(5, 150, 105, 0.35); }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 16px 34px rgba(5, 150, 105, 0.28), inset 0 1px 0 rgba(255,255,255,0.2); }
         .btn-ghost {
-            background: rgba(255,255,255,0.5);
+            background: rgba(255,255,255,0.26);
             color: var(--text-main);
-            border: 1px solid rgba(255,255,255,0.7);
+            border: 1px solid rgba(255,255,255,0.34);
+            backdrop-filter: blur(18px) saturate(165%);
+            -webkit-backdrop-filter: blur(18px) saturate(165%);
         }
-        .btn-ghost:hover { background: rgba(255,255,255,0.8); transform: translateY(-2px); }
+        .btn-ghost:hover { background: rgba(255,255,255,0.42); transform: translateY(-1px); }
         .user-pill {
             display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 4px;
             background: rgba(255, 255, 255, 0.7);
@@ -487,22 +528,27 @@
         }
         .file-label {
             display: inline-block;
-            font-size: 12px; color: var(--text-muted);
-            background: rgba(255,255,255,0.15);
-            padding: 4px 10px; border-radius: 99px;
-            border: 1px solid rgba(255,255,255,0.12);
-            backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+            font-size: 12px; color: var(--text-main);
+            background: rgba(255,255,255,0.14);
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.22);
+            backdrop-filter: blur(18px) saturate(155%); -webkit-backdrop-filter: blur(18px) saturate(155%);
             transition: var(--trans-smooth);
             cursor: pointer;
-            line-height: 1.6;
+            line-height: 1.2;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.34);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
         .file-label:hover {
-            background: rgba(255,255,255,0.28);
-            border-color: rgba(255,255,255,0.25);
+            background: rgba(255,255,255,0.24);
+            border-color: rgba(255,255,255,0.36);
+            transform: translateY(-1px);
         }
         .publish-footer .btn-primary {
             padding: 8px 22px; font-size: 14px;
-            backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
         }
         .post-filter-bar {
             position: relative;
@@ -576,6 +622,7 @@
         }
         .post-filter-clear {
             min-height: 40px;
+            padding-inline: 16px;
         }
         .post-filter-summary {
             font-size: 12px;
