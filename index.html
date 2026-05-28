@@ -21,12 +21,19 @@
     <div class="upload-progress-overlay" id="uploadProgressOverlay" style="display:none;">
         <div class="upload-progress-container">
             <div class="upload-progress-icon">
-                <svg class="camera-icon" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-                    <circle cx="12" cy="13" r="4"></circle>
+                <span class="upload-progress-halo"></span>
+                <span class="upload-progress-ring"></span>
+                <span class="upload-progress-ring upload-progress-ring-delayed"></span>
+                <span class="upload-progress-spark upload-progress-spark-a"></span>
+                <span class="upload-progress-spark upload-progress-spark-b"></span>
+                <svg class="camera-icon" viewBox="0 0 24 24" width="50" height="50" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <rect x="3.5" y="5.5" width="17" height="13" rx="3.2"></rect>
+                    <path d="M8 14l4-4 4 4"></path>
+                    <path d="M12 10v8"></path>
+                    <path d="M7.5 9h.01"></path>
                 </svg>
             </div>
-            <div class="upload-progress-title" id="uploadProgressTitle">准备中...</div>
+            <div class="upload-progress-title" id="uploadProgressTitle">正在准备上传</div>
             <div class="upload-progress-bar-wrapper">
                 <div class="upload-progress-bar" id="uploadProgressBar" style="width:0%">
                     <div class="upload-progress-bar-shine"></div>

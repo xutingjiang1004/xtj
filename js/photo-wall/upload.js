@@ -78,7 +78,7 @@
         }
         var titleEl = document.getElementById('uploadProgressTitle');
         if (titleEl) {
-            titleEl.textContent = '准备上传照片';
+            titleEl.textContent = '正在准备上传';
         }
         setUploadStatusText('正在整理照片内容...');
 
@@ -103,7 +103,7 @@
                 var text = document.getElementById('uploadProgressText');
                 if (text) text.textContent = '0%';
                 var titleEl = document.getElementById('uploadProgressTitle');
-                if (titleEl) titleEl.textContent = '准备上传照片';
+                if (titleEl) titleEl.textContent = '正在准备上传';
                 setUploadStatusText('正在整理照片内容...');
             }, 350);
         }
@@ -660,7 +660,7 @@
                 var text = document.getElementById('uploadProgressText');
                 if (text) text.textContent = '0%';
                 var titleEl = document.getElementById('uploadProgressTitle');
-                if (titleEl) titleEl.textContent = '准备上传照片';
+                if (titleEl) titleEl.textContent = '正在准备上传';
                 setUploadStatusText('正在整理照片内容...');
                 __xtjHideUploadProgressTimer = null;
             }, 350);
