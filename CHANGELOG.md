@@ -1,5 +1,19 @@
 # 更新日志
 
+## 2026-05-28 — 核心功能修复与照片墙预览优化
+
+### 修复
+- 修复编辑帖子公开/私密不真正生效问题
+- 修复统计详情泄露私密帖子互动
+- 修复照片预览双击缩小/双指缩放不稳定
+
+### 优化
+- 照片墙预览新增双指缩放
+- 标记废弃函数避免误修改
+- upload.js select 字段完整性提升
+
+---
+
 ## 2026-05-27 — 功能修复与稳定性提升
 
 ### 修复
@@ -13,12 +27,6 @@
 ### 优化
 - 照片墙缩略图加载速度提升
 - 去除 index.html UTF-8 BOM
-
-### 技术细节
-- js/features.js：增加举报按钮事件委托，更新 submitReport 字段名与 fallback，统一通知开关 localStorage key
-- js/core.js：prefetchStatData 中过滤评论和点赞，openPostDetail 添加权限检查，doPublish 检查上传错误
-- js/photo-wall/render.js：MAX_CONCURRENT_LOADS 从 2 改为 4，rootMargin 从 200px 改为 500px
-- 全面语法检查修复
 
 ## 2026-05-26 — 照片墙功能全面优化
 

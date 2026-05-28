@@ -285,6 +285,44 @@
 
     const CHANGELOG_DATA = [
         {
+            version: 'v0.0.60',
+            date: '2026-05-28',
+            content: `
+                <h4>修复内容</h4>
+                <ul>
+                    <li>修复编辑帖子公开/私密不真正生效问题</li>
+                    <li>修复统计详情泄露私密帖子互动</li>
+                    <li>修复照片预览双击缩小/双指缩放不稳定</li>
+                </ul>
+                <h4>优化内容</h4>
+                <ul>
+                    <li>照片墙预览新增双指缩放</li>
+                    <li>标记废弃函数避免误修改</li>
+                    <li>upload.js select 字段完整性提升</li>
+                </ul>
+            `
+        },
+        {
+            version: 'v0.0.59',
+            date: '2026-05-27',
+            content: `
+                <h4>修复内容</h4>
+                <ul>
+                    <li>修复举报按钮点击无响应问题</li>
+                    <li>修复举报提交字段名匹配，添加 fallback 机制</li>
+                    <li>修复通知开关 localStorage key 不一致</li>
+                    <li>修复统计详情泄露私密帖子互动</li>
+                    <li>修复帖子详情页无私密权限检查</li>
+                    <li>修复发帖文件上传未检查错误</li>
+                </ul>
+                <h4>优化内容</h4>
+                <ul>
+                    <li>照片墙缩略图加载速度提升</li>
+                    <li>去除 index.html UTF-8 BOM</li>
+                </ul>
+            `
+        },
+        {
             version: 'v0.0.51',
             date: '2026-05-25',
             content: `

@@ -496,7 +496,7 @@
                         media_url: imageUrl,
                         media_type: window.PHOTO_WALL_MARKER,
                         actor_key: window.deviceId || 'photo_wall'
-                    }]).select('id,user_name,media_url,content,created_at,views').single();
+                    }]).select('id,user_name,media_url,content,created_at,views,actor_key').single();
                     
                     if (insertRes.error) {
                         console.error('保存记录失败:', insertRes.error);
