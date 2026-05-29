@@ -6,11 +6,7 @@
         var style = document.createElement('style');
         style.id = 'xtjPhotoPreviewControlFix';
         style.textContent = `
-            /*
-             * Hotfix: the shared non-Dock button system sets preview buttons to
-             * position: relative / inline-flex. Fullscreen preview controls must stay
-             * absolutely anchored to the overlay, otherwise they fly around or vanish.
-             */
+            /* Hotfix: preview controls are floating controls, not normal inline buttons. */
             #photoPreviewOverlay.photo-preview-overlay {
                 position: fixed !important;
                 inset: 0 !important;
@@ -193,6 +189,25 @@
                 pointer-events: none !important;
             }
 
+            /* Info modal: keep the background click-through so the i button can toggle close again. */
+            #photoPreviewOverlay .pp-info-modal {
+                position: absolute !important;
+                inset: 0 !important;
+                z-index: 38 !important;
+                display: none;
+                align-items: center !important;
+                justify-content: center !important;
+                padding: 24px !important;
+                background: transparent !important;
+                pointer-events: none !important;
+                opacity: 0;
+            }
+            #photoPreviewOverlay .pp-info-modal-content {
+                pointer-events: auto !important;
+                transform-origin: center bottom !important;
+                will-change: transform, opacity, filter !important;
+            }
+
             @media (max-width: 480px) {
                 #photoPreviewOverlay .photo-preview-close,
                 #photoPreviewOverlay .pp-nav-arrow,
@@ -211,6 +226,243 @@
             }
         `;
         document.head.appendChild(style);
+    }
+
+    function hasMojibakeText(str) {
+        return typeof str === 'string' && /(鐐|硅|禐|璇|勮|鍒|犻|櫎|缂|栬|緫|纭||鏃|犳|潈|甯|栧|瓙|涓|锛|浣|鏆|傛|棤|淇|濆|鐧|诲|綍|鍔|ㄦ|€|漠|砘|壇|�|€)/.test(str);
+    }
+
+    function fixMojibakeString(input) {
+        if (typeof input !== 'string' || !input) return input;
+        var s = input;
+        var fixes = [
+            ['鏃犳潈编辑杩欐潯甯栧瓙', '无权编辑这条帖子'],
+            ['鏃犳潈置顶杩欐潯甯栧瓙', '无权置顶这条帖子'],
+            ['请输入ュ笘瀛愬唴瀹?', '请输入帖子内容'],
+            ['请输入ュ笘瀛愬唴瀹', '请输入帖子内容'],
+            ['请输入ュ唴瀹', '请输入内容'],
+            ['内容涓嶈兘瓒呰繃2000瀛', '内容不能超过2000字'],
+            ['淇濆瓨涓?..', '保存中...'],
+            ['淇濆瓨淇敼', '保存修改'],
+            ['淇濆瓨失败', '保存失败'],
+            ['宸叉敼涓虹瀵?', '已改为私密'],
+            ['宸叉敼涓哄叕寮€', '已改为公开'],
+            ['置顶鎿嶄綔失败', '置顶操作失败'],
+            ['请先鐧诲綍', '请先登录'],
+            ['发布涓?..', '发布中...'],
+            ['发布鍔ㄦ€', '发布动态'],
+            ['加载涓?..', '加载中...'],
+            ['加载失败锛岃刷新閲嶈瘯', '加载失败，请刷新重试'],
+            ['娌℃湁鏇村浜', '没有更多了'],
+            ['删除涓?..', '删除中...'],
+            ['甯栧瓙宸插垹闄', '帖子已删除'],
+            ['删除甯栧瓙失败', '删除帖子失败'],
+            ['纭删除', '确认删除'],
+            ['纭', '确认'],
+            ['缂栬緫', '编辑'],
+            ['鍒犻櫎', '删除'],
+            ['鐐硅禐', '点赞'],
+            ['璇勮', '评论'],
+            ['娴忚', '浏览'],
+            ['鏆傛棤', '暂无'],
+            ['鏃犳潈', '无权'],
+            ['杩欐潯', '这条'],
+            ['甯栧瓙', '帖子'],
+            ['鐧诲綍', '登录'],
+            ['鍔犺浇', '加载'],
+            ['涓?..', '中...'],
+            ['锛岃', '，请'],
+            ['閲嶈瘯', '重试'],
+            ['缃戠粶', '网络'],
+            ['鍙栨秷', '取消'],
+            ['涓炬姤', '举报'],
+            ['提交涓炬姤', '提交举报'],
+            ['鎻愪氦', '提交'],
+            ['澶辫触', '失败'],
+            ['鏈煡閿欒', '未知错误']
+        ];
+        for (var i = 0; i < fixes.length; i++) {
+            s = s.split(fixes[i][0]).join(fixes[i][1]);
+        }
+        return s;
+    }
+
+    function fixKnownUiLabels() {
+        var delTitle = document.querySelector('#delModal h3');
+        var delMsg = document.querySelector('#delModal p');
+        var delBtn = document.getElementById('delBtn');
+        var editTitle = document.querySelector('#editPostModal h3');
+        var editNote = document.querySelector('#editPostModal .post-edit-note');
+        var saveBtn = document.getElementById('saveEditPostBtn');
+        var pubBtn = document.getElementById('pubBtn');
+        if (delTitle && hasMojibakeText(delTitle.textContent)) delTitle.textContent = '确认删除帖子？';
+        if (delMsg && hasMojibakeText(delMsg.textContent)) delMsg.textContent = '删除后无法恢复';
+        if (delBtn && hasMojibakeText(delBtn.textContent)) delBtn.textContent = delBtn.disabled ? '删除中...' : '确认删除';
+        if (editTitle && hasMojibakeText(editTitle.textContent)) editTitle.textContent = '编辑帖子';
+        if (editNote && hasMojibakeText(editNote.textContent)) editNote.textContent = '媒体文件会保留，本次只编辑正文和可见范围。';
+        if (saveBtn && hasMojibakeText(saveBtn.textContent)) saveBtn.textContent = saveBtn.disabled ? '保存中...' : '保存修改';
+        if (pubBtn && hasMojibakeText(pubBtn.textContent)) pubBtn.textContent = pubBtn.disabled ? '发布中...' : '发布动态';
+    }
+
+    function sanitizeMojibakeInDom(root) {
+        root = root || document.body;
+        if (!root) return;
+        var skip = { SCRIPT: true, STYLE: true, TEXTAREA: true, CODE: true, PRE: true };
+        var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+            acceptNode: function(node) {
+                var p = node.parentElement;
+                if (!p || skip[p.tagName]) return NodeFilter.FILTER_REJECT;
+                return hasMojibakeText(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+            }
+        });
+        var nodes = [];
+        while (walker.nextNode()) nodes.push(walker.currentNode);
+        nodes.forEach(function(node) {
+            node.nodeValue = fixMojibakeString(node.nodeValue);
+        });
+        var els = root.querySelectorAll ? root.querySelectorAll('[title], [placeholder], [aria-label], input[type="button"], input[type="submit"]') : [];
+        els.forEach(function(el) {
+            ['title', 'placeholder', 'aria-label', 'value'].forEach(function(attr) {
+                var val = attr === 'value' ? el.value : el.getAttribute(attr);
+                if (hasMojibakeText(val)) {
+                    if (attr === 'value') el.value = fixMojibakeString(val);
+                    else el.setAttribute(attr, fixMojibakeString(val));
+                }
+            });
+        });
+        fixKnownUiLabels();
+    }
+
+    function installMojibakeGuard() {
+        if (window.__xtjMojibakeGuardInstalled) return;
+        window.__xtjMojibakeGuardInstalled = true;
+
+        if (typeof window.showToast === 'function') {
+            var nativeShowToast = window.showToast;
+            window.showToast = function(message) {
+                if (typeof message === 'string') message = fixMojibakeString(message);
+                return nativeShowToast.apply(this, arguments.length ? [message].concat(Array.prototype.slice.call(arguments, 1)) : arguments);
+            };
+        }
+
+        if (typeof window.openModal === 'function') {
+            var nativeOpenModal = window.openModal;
+            window.openModal = function() {
+                var ret = nativeOpenModal.apply(this, arguments);
+                setTimeout(function() { sanitizeMojibakeInDom(document.body); }, 0);
+                return ret;
+            };
+        }
+
+        sanitizeMojibakeInDom(document.body);
+        var timer = null;
+        var observer = new MutationObserver(function() {
+            clearTimeout(timer);
+            timer = setTimeout(function() { sanitizeMojibakeInDom(document.body); }, 30);
+        });
+        observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title', 'placeholder', 'aria-label', 'value'] });
+    }
+
+    function installPhotoInfoAnimationFix() {
+        if (window.__xtjPhotoInfoAnimationFixInstalled) return;
+        if (typeof window.showPhotoInfo !== 'function') return;
+        window.__xtjPhotoInfoAnimationFixInstalled = true;
+
+        var nativeShowPhotoInfo = window.showPhotoInfo;
+
+        function getModal() {
+            return document.getElementById('ppInfoModal');
+        }
+        function getContent(modal) {
+            return modal ? modal.querySelector('.pp-info-modal-content') : null;
+        }
+        function isVisible(modal) {
+            if (!modal) return false;
+            return modal.style.display !== 'none' && (modal.classList.contains('active') || modal.style.display === 'flex') && !modal.classList.contains('xtj-info-closing');
+        }
+        function animateOpen(modal) {
+            var content = getContent(modal);
+            if (!modal || !content) return;
+            if (modal._xtjCloseTimer) clearTimeout(modal._xtjCloseTimer);
+            modal.classList.remove('xtj-info-closing');
+            modal.classList.add('active', 'xtj-info-visible');
+            modal.style.display = 'flex';
+            modal.style.pointerEvents = 'none';
+            modal.style.opacity = '0';
+            modal.style.transition = 'opacity 220ms ease-out';
+            content.style.pointerEvents = 'auto';
+            content.style.transition = 'none';
+            content.style.transformOrigin = 'center bottom';
+            content.style.transform = 'translate3d(0, 18px, 0) scale(0.92)';
+            content.style.opacity = '0';
+            content.style.filter = 'blur(8px)';
+            void content.offsetHeight;
+            requestAnimationFrame(function() {
+                modal.style.opacity = '1';
+                content.style.transition = 'transform 360ms cubic-bezier(0.16, 1, 0.3, 1), opacity 240ms ease-out, filter 320ms ease-out';
+                content.style.transform = 'translate3d(0, 0, 0) scale(1)';
+                content.style.opacity = '1';
+                content.style.filter = 'blur(0)';
+            });
+        }
+        function animateClose(modal) {
+            modal = modal || getModal();
+            var content = getContent(modal);
+            if (!modal) return;
+            if (modal._xtjCloseTimer) clearTimeout(modal._xtjCloseTimer);
+            modal.classList.remove('active');
+            modal.classList.add('xtj-info-closing');
+            modal.style.display = 'flex';
+            modal.style.pointerEvents = 'none';
+            modal.style.transition = 'opacity 220ms ease-in';
+            modal.style.opacity = '1';
+            if (content) {
+                content.style.pointerEvents = 'auto';
+                content.style.transition = 'none';
+                content.style.transformOrigin = 'center bottom';
+                content.style.transform = 'translate3d(0, 0, 0) scale(1)';
+                content.style.opacity = '1';
+                content.style.filter = 'blur(0)';
+                void content.offsetHeight;
+                content.style.transition = 'transform 260ms cubic-bezier(0.55, 0, 1, 0.45), opacity 180ms ease-in, filter 220ms ease-in';
+                content.style.transform = 'translate3d(0, 14px, 0) scale(0.94)';
+                content.style.opacity = '0';
+                content.style.filter = 'blur(6px)';
+            }
+            requestAnimationFrame(function() { modal.style.opacity = '0'; });
+            modal._xtjCloseTimer = setTimeout(function() {
+                modal.style.display = 'none';
+                modal.style.opacity = '';
+                modal.style.transition = '';
+                modal.classList.remove('xtj-info-closing', 'xtj-info-visible');
+                if (content) {
+                    content.style.transition = '';
+                    content.style.transform = '';
+                    content.style.opacity = '';
+                    content.style.filter = '';
+                    content.style.transformOrigin = '';
+                }
+                modal._xtjCloseTimer = null;
+            }, 280);
+        }
+
+        window.showPhotoInfo = function() {
+            var modal = getModal();
+            if (isVisible(modal)) {
+                animateClose(modal);
+                return;
+            }
+            nativeShowPhotoInfo.apply(this, arguments);
+            setTimeout(function() {
+                modal = getModal();
+                sanitizeMojibakeInDom(modal || document.body);
+                animateOpen(modal);
+            }, 0);
+        };
+
+        window.closePhotoInfo = function() {
+            animateClose(getModal());
+        };
     }
 
     function restoreMinimalDockStyles() {}
@@ -356,17 +608,21 @@
         document.head.appendChild(style);
     })();
 
-    injectPhotoPreviewControlFix();
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            injectPhotoPreviewControlFix();
-            calcPathLengths();
-            initProfileToggles();
-        });
-    } else {
+    function bootFeatureFixes() {
         injectPhotoPreviewControlFix();
+        installMojibakeGuard();
+        installPhotoInfoAnimationFix();
         calcPathLengths();
         initProfileToggles();
+        setTimeout(function() {
+            installPhotoInfoAnimationFix();
+            sanitizeMojibakeInDom(document.body);
+        }, 300);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootFeatureFixes);
+    } else {
+        bootFeatureFixes();
     }
 })();
