@@ -1,30 +1,45 @@
 (function () {
   'use strict';
-  if (window.__xtjFeaturesSafeV2) return;
-  window.__xtjFeaturesSafeV2 = true;
+  if (window.__xtjFeaturesSafeV3) return;
+  window.__xtjFeaturesSafeV3 = true;
 
   var chatListSnapshot = '';
   var loadingTimers = {};
 
   function esc(v) {
-    return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   function fixText(v) {
     var s = String(v == null ? '' : v);
+
     [
+      ['鏄ㄥぉ', '昨天'], ['鏄 ㄥ ぉ', '昨天'], ['鏄ㄥ?', '昨天'], ['鑽ㄥぉ', '昨天'], ['鑽 ん お', '昨天'], ['鑽んお', '昨天'],
       ['加载涓?..', '加载中...'], ['加载娑?..', '加载中...'], ['鍔犺浇涓?..', '加载中...'], ['鍔犺浇', '加载'],
       ['姝ｅ湪刷新鐓х墖澧?..', '正在刷新照片墙...'], ['姝ｅ湪刷新...', '正在刷新...'], ['刷新瀹屾垚', '已刷新'], ['鍒锋柊瀹屾垚', '已刷新'],
       ['鏆傛棤娑堟伅', '暂无消息'], ['鍦ㄥ笘瀛愰〉闈㈢偣鍑诲ご鍍忓紑濮嬭亰澶?', '在帖子页面点击头像开始聊天'], ['鍙戦€佺涓€鏉℃秷鎭惂', '发送第一条消息吧'], ['娑堟伅', '消息'],
-      ['鈴?/div><div>', ''], ['鈴?', ''], ['鈴', ''], ['馃挰', ''], ['鈿狅笍', ''], ['鉂わ笍', '❤️'], ['请先鐧诲綍', '请先登录'],
-      ['宸茶', '已读'], ['鏈', '未读'], ['纭删除', '确认删除'], ['纭', '确认'], ['缂栬緫', '编辑'], ['鍒犻櫎', '删除'], ['鐐硅禐', '点赞'], ['璇勮', '评论'], ['娴忚', '浏览'], ['鏆傛棤', '暂无'], ['鏃犳潈', '无权'], ['甯栧瓙', '帖子'], ['鐧诲綍', '登录'], ['锛岃', '，请'], ['閲嶈瘯', '重试'], ['鍙栨秷', '取消'], ['鎻愪氦', '提交'], ['澶辫触', '失败'], ['鏈煡閿欒', '未知错误'],
-      ['鐓х墖璇︽儏', '照片详情'], ['鐓х墖淇℃伅', '照片信息'], ['浣滆€?', '作者'], ['浣滆€', '作者'], ['鏃堕棿', '时间'], ['澶у皬', '大小'], ['鏂囦欢淇℃伅', '文件信息']
+      ['鍙戦€佷簡涓€寮犲浘鐗?视频', '发送了一张图片/视频'], ['鍙戦€佷簡涓€寮犲浘鐗?', '发送了一张图片'],
+      ['鈴?/div><div>', ''], ['鈴?', ''], ['鈴', ''], ['馃挰', ''], ['馃摥', ''], ['鈿狅笍', ''], ['鉂わ笍', '❤️'],
+      ['请先鐧诲綍', '请先登录'], ['宸茶', '已读'], ['鏈', '未读'],
+      ['纭删除', '确认删除'], ['纭', '确认'], ['缂栬緫', '编辑'], ['鍒犻櫎', '删除'], ['鐐硅禐', '点赞'], ['璇勮', '评论'], ['娴忚', '浏览'],
+      ['鏆傛棤', '暂无'], ['鏃犳潈', '无权'], ['甯栧瓙', '帖子'], ['鐧诲綍', '登录'], ['锛岃', '，请'], ['閲嶈瘯', '重试'], ['鍙栨秷', '取消'], ['鎻愪氦', '提交'], ['澶辫触', '失败'], ['鏈煡閿欒', '未知错误'],
+      ['鐓х墖璇︽儏', '照片详情'], ['鐓х墖淇℃伅', '照片信息'], ['浣滆€?', '作者'], ['浣滆€', '作者'], ['鏃堕棿', '时间'], ['澶у皬', '大小'], ['鏂囦欢淇℃伅', '文件信息'],
+      ['鍏憡', '公告'], ['鏇存柊内容', '更新内容'], ['淇内容', '修复内容'], ['浼樺寲内容', '优化内容'], ['鏆傛棤鍏憡', '暂无公告']
     ].forEach(function (p) { s = s.split(p[0]).join(p[1]); });
+
+    s = s.replace(/鏄\s*ㄥ\s*ぉ/g, '昨天');
+    s = s.replace(/鑽\s*(?:ㄥ|ん)\s*お/g, '昨天');
+    s = s.replace(/昨天\s+/g, '昨天 ');
     return s;
   }
 
   function bad(v) {
-    return /(加载涓|加载娑|鍔犺浇|鈴|馃|鈿|鉂|刷新瀹|姝ｅ湪刷新|鏆傛棤娑|鍙戦€|娑堟伅|鐧诲綍|缂栬緫|鐐硅禐|璇勮|鍒犻櫎|纭|鐓х墖|浣滆|鏃堕棿|澶у皬)/.test(String(v || ''));
+    return /(鏄ㄥぉ|鏄\s*ㄥ\s*ぉ|鑽|んお|加载涓|加载娑|鍔犺浇|鈴|馃|鈿|鉂|刷新瀹|姝ｅ湪刷新|鏆傛棤娑|鍙戦€|娑堟伅|鐧诲綍|缂栬緫|鐐硅禐|璇勮|鍒犻櫎|纭|鐓х墖|浣滆|鏃堕棿|澶у皬|鍏憡|鏇存柊|淇|浼樺寲)/.test(String(v || ''));
   }
 
   function addStyle() {
@@ -58,20 +73,22 @@
       if (!node || !node.querySelector('.xtj-chat-loader')) return;
       if (node.id === 'dockChatList' && chatListSnapshot) node.innerHTML = chatListSnapshot;
       else node.innerHTML = emptyHtml(node.id === 'dockChatMessages' ? 'detail' : 'list');
+      repairVisibleText(node);
     }, 2600);
   }
 
   function repairChatArea(el) {
     if (!el) return;
-    if (el.querySelector('.chat-list-item')) { if (el.id === 'dockChatList') chatListSnapshot = el.innerHTML; return; }
-    if (el.querySelector('.chat-msg')) return;
+    if (el.querySelector('.chat-list-item')) { if (el.id === 'dockChatList') chatListSnapshot = el.innerHTML; repairVisibleText(el); return; }
+    if (el.querySelector('.chat-msg')) { repairVisibleText(el); return; }
     if (el.querySelector('.xtj-chat-loader')) { capLoading(el); return; }
-    if (el.querySelector('.xtj-chat-empty')) return;
+    if (el.querySelector('.xtj-chat-empty')) { repairVisibleText(el); return; }
     var raw = el.innerHTML || '';
     var text = fixText(el.textContent || '').trim();
     if (/加载中|正在刷新/.test(text) || /加载涓|加载娑|鍔犺浇|鈴|馃挰|ce-icon/.test(raw)) { el.innerHTML = loaderHtml('加载中...'); capLoading(el); return; }
-    if (/暂无消息|发送第一条消息吧|在帖子页面点击头像/.test(text) || /鏆傛棤娑堟伅|鍙戦€佺/.test(raw)) { el.innerHTML = emptyHtml(el.id === 'dockChatMessages' ? 'detail' : 'list'); return; }
+    if (/暂无消息|发送第一条消息吧|在帖子页面点击头像/.test(text) || /鏆傛棤娑堟伅|鍙戦€佺/.test(raw)) { el.innerHTML = emptyHtml(el.id === 'dockChatMessages' ? 'detail' : 'list'); repairVisibleText(el); return; }
     if (bad(raw)) el.innerHTML = fixText(raw);
+    repairVisibleText(el);
   }
 
   function repairChat() {
@@ -115,13 +132,21 @@
     }
   }
 
-  function basicTextGuard(root) {
+  function repairVisibleText(root) {
     root = root || document.body;
     if (!root) return;
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: function (n) { var p = n.parentElement; if (!p || /^(SCRIPT|STYLE|TEXTAREA|PRE|CODE)$/.test(p.tagName)) return NodeFilter.FILTER_REJECT; return bad(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP; } });
     var nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
     nodes.forEach(function (n) { n.nodeValue = fixText(n.nodeValue); });
+    if (root.querySelectorAll) {
+      root.querySelectorAll('[title],[aria-label],[placeholder]').forEach(function (el) {
+        ['title', 'aria-label', 'placeholder'].forEach(function (attr) {
+          var v = el.getAttribute(attr);
+          if (bad(v)) el.setAttribute(attr, fixText(v));
+        });
+      });
+    }
   }
 
   function photoInfoAnim() {
@@ -131,7 +156,7 @@
     function m() { return document.getElementById('ppInfoModal'); }
     function c(x) { return x ? x.querySelector('.pp-info-modal-content') : null; }
     function close(x) { x = x || m(); var y = c(x); if (!x) return; x.classList.remove('active'); x.style.display = 'flex'; x.style.pointerEvents = 'none'; x.style.transition = 'opacity 220ms ease-in'; x.style.opacity = '1'; if (y) { y.style.transition = 'transform 260ms cubic-bezier(.55,0,1,.45), opacity 180ms ease-in, filter 220ms ease-in'; y.style.transform = 'translate3d(0,14px,0) scale(.94)'; y.style.opacity = '0'; y.style.filter = 'blur(6px)'; } requestAnimationFrame(function () { x.style.opacity = '0'; }); setTimeout(function () { x.style.display = 'none'; if (y) { y.style.transition = ''; y.style.transform = ''; y.style.opacity = ''; y.style.filter = ''; } }, 280); }
-    window.showPhotoInfo = function () { var x = m(); if (x && x.style.display !== 'none' && x.classList.contains('active')) { close(x); return; } nativeShow.apply(this, arguments); setTimeout(function () { x = m(); var y = c(x); basicTextGuard(x || document.body); if (!x || !y) return; x.style.display = 'flex'; x.style.pointerEvents = 'none'; x.style.opacity = '0'; y.style.pointerEvents = 'auto'; y.style.transition = 'none'; y.style.transform = 'translate3d(0,18px,0) scale(.92)'; y.style.opacity = '0'; y.style.filter = 'blur(8px)'; void y.offsetHeight; requestAnimationFrame(function () { x.style.opacity = '1'; y.style.transition = 'transform 360ms cubic-bezier(.16,1,.3,1), opacity 240ms ease-out, filter 320ms ease-out'; y.style.transform = 'translate3d(0,0,0) scale(1)'; y.style.opacity = '1'; y.style.filter = 'blur(0)'; }); }, 0); };
+    window.showPhotoInfo = function () { var x = m(); if (x && x.style.display !== 'none' && x.classList.contains('active')) { close(x); return; } nativeShow.apply(this, arguments); setTimeout(function () { x = m(); var y = c(x); repairVisibleText(x || document.body); if (!x || !y) return; x.style.display = 'flex'; x.style.pointerEvents = 'none'; x.style.opacity = '0'; y.style.pointerEvents = 'auto'; y.style.transition = 'none'; y.style.transform = 'translate3d(0,18px,0) scale(.92)'; y.style.opacity = '0'; y.style.filter = 'blur(8px)'; void y.offsetHeight; requestAnimationFrame(function () { x.style.opacity = '1'; y.style.transition = 'transform 360ms cubic-bezier(.16,1,.3,1), opacity 240ms ease-out, filter 320ms ease-out'; y.style.transform = 'translate3d(0,0,0) scale(1)'; y.style.opacity = '1'; y.style.filter = 'blur(0)'; }); }, 0); };
     window.closePhotoInfo = function () { close(m()); };
   }
 
@@ -144,11 +169,12 @@
   }
 
   function boot() {
-    addStyle(); patchToast(); patchChat(); reportsAndProfile(); photoInfoAnim(); basicTextGuard(document.body); repairChat(); repairToasts();
-    var obs = new MutationObserver(function () { clearTimeout(obs._t); obs._t = setTimeout(function () { basicTextGuard(document.body); repairChat(); repairToasts(); patchChat(); patchToast(); photoInfoAnim(); }, 60); });
-    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
-    setTimeout(function () { repairChat(); repairToasts(); }, 160);
-    setTimeout(function () { repairChat(); repairToasts(); }, 700);
+    addStyle(); patchToast(); patchChat(); reportsAndProfile(); photoInfoAnim(); repairVisibleText(document.body); repairChat(); repairToasts();
+    var obs = new MutationObserver(function () { clearTimeout(obs._t); obs._t = setTimeout(function () { repairVisibleText(document.body); repairChat(); repairToasts(); patchChat(); patchToast(); photoInfoAnim(); }, 60); });
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['title', 'aria-label', 'placeholder'] });
+    setTimeout(function () { repairVisibleText(document.body); repairChat(); repairToasts(); }, 160);
+    setTimeout(function () { repairVisibleText(document.body); repairChat(); repairToasts(); }, 700);
+    setInterval(function () { repairVisibleText(document.body); repairChat(); repairToasts(); }, 1800);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
