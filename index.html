@@ -103,16 +103,23 @@
                         <button class="btn btn-ghost post-filter-clear" type="button" onclick="clearPostFilters()" id="filterClearBtn">清除筛选</button>
                     </div>
                     <div class="post-filter-panel" id="postFilterPanel">
-                        <div class="post-filter-row">
+                        <div class="post-filter-row post-filter-row--top">
                             <input id="postSearchInput" class="post-search-input" type="search" placeholder="搜索帖子、用户、评论..." autocomplete="off" />
-                            <input id="postUserFilter" class="post-filter-input" type="text" placeholder="筛选用户" autocomplete="off" />
                             <select id="postVisibilityFilter" class="post-filter-select">
                                 <option value="all">全部可见性</option>
                                 <option value="public">公开</option>
                                 <option value="private">私密</option>
                             </select>
                         </div>
-                        <div class="post-filter-row">
+                        <div class="post-filter-user-block">
+                            <div class="post-filter-user-head">
+                                <span class="post-filter-user-label">筛选用户</span>
+                                <button class="post-filter-user-reset" id="postUserFilterReset" type="button" onclick="selectPostFilterUser('')">清空</button>
+                            </div>
+                            <input id="postUserFilter" type="hidden" value="" />
+                            <div class="post-user-quick-list" id="postUserQuickList"></div>
+                        </div>
+                        <div class="post-filter-row post-filter-row--dates">
                             <input id="postStartDate" class="post-filter-input" type="date" />
                             <input id="postEndDate" class="post-filter-input" type="date" />
                             <label class="post-filter-toggle">

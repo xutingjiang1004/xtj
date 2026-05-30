@@ -544,6 +544,18 @@
             gap: 10px;
             flex-wrap: wrap;
         }
+        .post-filter-row--top {
+            display: grid;
+            grid-template-columns: minmax(0, 1.7fr) minmax(136px, 0.8fr);
+            align-items: stretch;
+            gap: 12px;
+        }
+        .post-filter-row--dates {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+            align-items: stretch;
+            gap: 12px;
+        }
         .post-search-input,
         .post-filter-input,
         .post-filter-select {
@@ -567,6 +579,106 @@
         .post-filter-select {
             flex: 0 1 auto;
             cursor: pointer;
+        }
+        .post-filter-user-block {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 14px;
+            border-radius: 18px;
+            background: rgba(255,255,255,0.42);
+            border: 1px solid rgba(255,255,255,0.58);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.34);
+        }
+        .post-filter-user-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .post-filter-user-label {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+        .post-filter-user-reset {
+            border: 0;
+            background: transparent;
+            color: var(--primary);
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+            padding: 0;
+            visibility: hidden;
+        }
+        .post-filter-user-reset:hover {
+            color: #047857;
+        }
+        .post-user-quick-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+            gap: 10px;
+            max-height: 232px;
+            overflow: auto;
+            padding-right: 4px;
+        }
+        .post-user-chip {
+            min-height: 52px;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.62);
+            background: rgba(255,255,255,0.56);
+            color: var(--text-main);
+            cursor: pointer;
+            transition: var(--trans-smooth);
+            text-align: left;
+        }
+        .post-user-chip:hover {
+            transform: translateY(-1px);
+            border-color: rgba(5,150,105,0.22);
+            background: rgba(255,255,255,0.72);
+        }
+        .post-user-chip.is-active {
+            border-color: rgba(5,150,105,0.34);
+            background: rgba(5,150,105,0.1);
+            box-shadow: 0 8px 18px rgba(5,150,105,0.08);
+        }
+        .post-user-chip.is-empty {
+            justify-content: center;
+            color: var(--text-muted);
+            cursor: default;
+        }
+        .post-user-chip-avatar {
+            width: 30px;
+            height: 30px;
+            flex: 0 0 30px;
+            border-radius: 50%;
+            overflow: hidden;
+            display: grid;
+            place-items: center;
+            background: linear-gradient(135deg, rgba(5,150,105,0.16), rgba(255,255,255,0.88));
+            color: var(--primary);
+            font-size: 12px;
+            font-weight: 700;
+            border: 1px solid rgba(255,255,255,0.8);
+        }
+        .post-user-chip-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .post-user-chip-name {
+            min-width: 0;
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .post-search-input:focus,
         .post-filter-input:focus,
@@ -661,6 +773,18 @@
             padding-top: 8px;
             border-top: 1px solid rgba(0,0,0,0.06);
             animation: filterPanelIn 0.2s ease-out;
+        }
+        @media (max-width: 720px) {
+            .post-filter-row--top,
+            .post-filter-row--dates {
+                grid-template-columns: minmax(0, 1fr);
+            }
+            .post-user-quick-list {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .actions {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
         }
         @keyframes filterPanelIn {
             from { opacity: 0; transform: translateY(-6px); }
@@ -807,13 +931,19 @@
 
         .post-stats-text { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; }
 
-        .actions { display: flex; gap: 8px; flex-wrap: wrap; position: relative; }
+        .actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+            gap: 10px;
+            position: relative;
+            align-items: stretch;
+        }
         .action-btn {
             background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.7);
-            padding: 6px 16px; border-radius: 99px; font-size: 13px; color: var(--text-muted);
+            padding: 0 16px; border-radius: 99px; font-size: 13px; color: var(--text-muted);
             cursor: pointer; transition: var(--trans-smooth); font-weight: 600;
             position: relative; overflow: visible !important;
-            min-width: 86px; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
+            min-width: 86px; min-height: 44px; width: 100%; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
             box-shadow: 0 1px 4px rgba(0,0,0,0.02);
         }
         .action-btn:hover { background: rgba(255,255,255,0.7); }
@@ -846,7 +976,7 @@
             100% { transform: translate(var(--tx), var(--ty)) scale(0) rotate(30deg); opacity: 0; }
         }
 
-        .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: auto; }
+        .action-btn.del { background: transparent; border-color: transparent; color: #ff3b60; margin-left: 0; }
         .action-btn.del:hover { background: rgba(255,59,96,0.06); }
         .action-btn.pin {
             color: #b45309;
