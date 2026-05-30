@@ -1,4 +1,4 @@
-﻿(function() {
+(function() {
     var photoWallInitialized = false;
 
     window.initPhotoWall = async function() {
@@ -175,25 +175,25 @@
                 overlay.innerHTML =
                     '<div class="pp-ambient-bg" id="ppAmbientBg"></div>' +
                     '<div class="pp-dots" id="ppDots"></div>' +
-                    '<button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="鍏抽棴棰勮">' + icon('close') + '</button>' +
-                    '<button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="涓婁竴寮?>' + icon('prev') + '</button>' +
-                    '<button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="涓嬩竴寮?>' + icon('next') + '</button>' +
+                    '<button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">' + icon('close') + '</button>' +
+                    '<button class="pp-nav-arrow pp-nav-prev" id="ppPrevBtn" onclick="window.ppPrevPhoto()" aria-label="上一张">' + icon('prev') + '</button>' +
+                    '<button class="pp-nav-arrow pp-nav-next" id="ppNextBtn" onclick="window.ppNextPhoto()" aria-label="下一张">' + icon('next') + '</button>' +
                     '<div class="photo-preview-image-wrapper" id="ppImageWrapper"><div id="ppSlideTrack" class="pp-slide-track">' +
                     '<div class="pp-slide-slot pp-prev-slot"><img id="ppPrevImg" class="pp-slide-img" alt="prev"></div>' +
                     '<div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"></div>' +
                     '<div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"></div>' +
                     '</div></div>' +
-                    '<button class="pp-info-btn" id="ppInfoBtn" title="鐓х墖淇℃伅" onclick="showPhotoInfo()">' + icon('info') + '</button>' +
-                    '<button class="pp-share-btn" id="ppShareBtn" title="鍒嗕韩" onclick="window.shareCurrentPhoto()">' + icon('share') + '</button>' +
-                    '<button class="pp-rotate-btn" id="ppRotateBtn" title="鏃嬭浆 90 搴? onclick="window.ppRotatePhoto()">' + icon('rotate') + '</button>' +
+                    '<button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + icon('info') + '</button>' +
+                    '<button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + icon('share') + '</button>' +
+                    '<button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + icon('rotate') + '</button>' +
                     '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + icon('delete') + '</button>' +
                     '<div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg><span id="photoPreviewViewsCount">0</span></span></div>' +
-                    '<div class="pp-current-loading" id="ppCurrentLoading">鍔犺浇楂樻竻涓?..</div>';
+                    '<div class="pp-current-loading" id="ppCurrentLoading">加载高清中...</div>';
             } else if (!overlay.querySelector('#ppCurrentLoading')) {
                 var loading = document.createElement('div');
                 loading.className = 'pp-current-loading';
                 loading.id = 'ppCurrentLoading';
-                loading.textContent = '鍔犺浇楂樻竻涓?..';
+                loading.textContent = '加载高清中...';
                 overlay.appendChild(loading);
             }
 
@@ -343,7 +343,7 @@
             var userEl = document.getElementById('photoPreviewUser');
             var timeEl = document.getElementById('photoPreviewTime');
             var viewsEl = document.getElementById('photoPreviewViewsCount');
-            if (userEl) userEl.textContent = photo ? (photo.username || '鏈煡鐢ㄦ埛') : '';
+            if (userEl) userEl.textContent = photo ? (photo.username || '未知用户') : '';
             if (timeEl) {
                 var d = photo && photo.timestamp ? new Date(photo.timestamp) : null;
                 timeEl.textContent = d ? d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
@@ -413,7 +413,7 @@
             if (window.updateAmbientBackground) window.updateAmbientBackground(fallback || full);
 
             if (full && full !== fallback) {
-                setLoading(true, '鍔犺浇楂樻竻涓?..');
+                setLoading(true, '加载高清中...');
                 loadImage(full, 12000).then(function() {
                     if (!state.active || curImg._xtjLoadToken !== token) return;
                     curImg.classList.add('pp-hotfix-fading');
@@ -431,7 +431,7 @@
                         var now = Date.now();
                         if (window.showToast && now - state.fullToastAt > 8000) {
                             state.fullToastAt = now;
-                            window.showToast('楂樻竻鍥惧姞杞藉け璐ワ紝宸叉樉绀洪瑙堝浘');
+                            window.showToast('高清图加载失败，已显示预览图');
                         }
                     } else {
                         curImg.classList.add('pp-placeholder');
@@ -507,7 +507,7 @@
             if (state.active || state.closing) return;
             state.photos = keepList && state.photos.length ? state.photos : getPhotos();
             if (!state.photos.length) {
-                if (window.showToast) window.showToast('鏆傛棤鐓х墖');
+                if (window.showToast) window.showToast('暂无照片');
                 return;
             }
             if (index < 0) index = 0;
@@ -677,7 +677,7 @@
                 modal = document.createElement('div');
                 modal.id = 'ppInfoModal';
                 modal.className = 'pp-info-modal';
-                modal.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">鐓х墖璇︽儏</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>';
+                modal.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>';
                 document.body.appendChild(modal);
                 modal.addEventListener('click', function(e) {
                     if (e.target === modal) window.closePhotoInfo();
@@ -689,18 +689,18 @@
                 sizeStr = photo.fileSize >= 1048576 ? (photo.fileSize / 1048576).toFixed(2) + ' MB' : (photo.fileSize / 1024).toFixed(1) + ' KB';
             }
             var rows = '';
-            rows += infoRow('浣滆€', photo.username || '鏈煡鐢ㄦ埛');
-            rows += infoRow('鏃堕棿', photo.timestamp ? new Date(photo.timestamp).toLocaleString('zh-CN') : '--');
-            rows += infoRow('娴忚', photo.views || 0);
-            rows += infoRow('澶у皬', sizeStr);
+            rows += infoRow('作者', photo.username || '未知用户');
+            rows += infoRow('时间', photo.timestamp ? new Date(photo.timestamp).toLocaleString('zh-CN') : '--');
+            rows += infoRow('浏览', photo.views || 0);
+            rows += infoRow('大小', sizeStr);
             if (photo.exif) {
-                rows += infoRow('璁惧', photo.exif.model || photo.exif.make || '--');
-                if (photo.exif.fNumber) rows += infoRow('鍏夊湀', 'f/' + photo.exif.fNumber);
-                if (photo.exif.exposureTime) rows += infoRow('蹇棬', photo.exif.exposureTime);
+                rows += infoRow('设备', photo.exif.model || photo.exif.make || '--');
+                if (photo.exif.fNumber) rows += infoRow('光圈', 'f/' + photo.exif.fNumber);
+                if (photo.exif.exposureTime) rows += infoRow('快门', photo.exif.exposureTime);
                 if (photo.exif.iso) rows += infoRow('ISO', photo.exif.iso);
-                if (photo.exif.focalLength) rows += infoRow('鐒﹁窛', photo.exif.focalLength + 'mm');
+                if (photo.exif.focalLength) rows += infoRow('焦距', photo.exif.focalLength + 'mm');
             }
-            if (body) body.innerHTML = '<div class="pp-info-section"><div class="pp-info-section-title">鐓х墖淇℃伅</div>' + rows + '</div>';
+            if (body) body.innerHTML = '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + rows + '</div>';
             modal.classList.remove('closing');
             modal.style.display = 'flex';
             requestAnimationFrame(function() { modal.classList.add('active'); });
@@ -725,7 +725,7 @@
             var photo = state.current;
             if (!photo) return;
             if (!(window.currentUser === 'xxz' || window.currentUser === photo.username)) {
-                if (window.showToast) window.showToast('浠呬笂浼犺€呭彲鍒犻櫎');
+                if (window.showToast) window.showToast('仅上传者可删除');
                 return;
             }
             var doDelete = async function() {
@@ -734,7 +734,7 @@
                 try {
                     var res = window.deletePhotoWallPhoto ? await window.deletePhotoWallPhoto(photo, { render: false }) : { ok: false };
                     if (!res || !res.ok) {
-                        if (window.showToast) window.showToast('鍒犻櫎澶辫触');
+                        if (window.showToast) window.showToast('删除失败');
                         return;
                     }
                     state.photos = state.photos.filter(function(item) { return String(item.id) !== String(photo.id); });
@@ -751,8 +751,8 @@
                 }
             };
             if (window.showConfirm) {
-                window.showConfirm('鍒犻櫎鐓х墖', '纭畾鍒犻櫎杩欏紶鐓х墖鍚楋紵', '纭鍒犻櫎', doDelete);
-            } else if (confirm('纭畾鍒犻櫎杩欏紶鐓х墖鍚楋紵')) {
+                window.showConfirm('删除照片', '确定删除这张照片吗？', '确认删除', doDelete);
+            } else if (confirm('确定删除这张照片吗？')) {
                 doDelete();
             }
         };
