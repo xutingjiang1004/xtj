@@ -5055,6 +5055,31 @@
             will-change: transform;
             transition: opacity 0.2s ease;
         }
+        .photo-preview-overlay.pp-closing {
+            pointer-events: none;
+            background: #000;
+            transform: translateZ(0);
+            -webkit-transform: translateZ(0);
+            will-change: opacity, transform;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
+        .photo-preview-overlay.pp-closing,
+        .photo-preview-overlay.pp-closing * {
+            -webkit-backdrop-filter: none !important;
+            backdrop-filter: none !important;
+        }
+        .photo-preview-image-wrapper,
+        .pp-slide-track,
+        .pp-slide-slot,
+        .pp-slide-img,
+        #photoPreviewImage {
+            transform: translateZ(0);
+            -webkit-transform: translateZ(0);
+            will-change: transform, opacity;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+        }
         .pp-ambient-bg {
             position: absolute;
             top: 0; right: 0; bottom: 0; left: 0;
