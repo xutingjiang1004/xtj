@@ -1428,6 +1428,7 @@
     }
 
     function bindPreviewEvents(overlay) {
+        if (window.__xtjPhotoPreviewHotfixInstalled) return;
         var wrapper = overlay.querySelector('.photo-preview-image-wrapper');
 
         var startX, startY, startTime;
