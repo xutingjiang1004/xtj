@@ -106,12 +106,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         function normalizePost(post) {
             var parsed = parsePostContent(post || {});
             var meta = Object.assign({}, POST_META_DEFAULTS, parsed.meta || {});
+            var hasMeta = parsed.meta && typeof parsed.meta === "object";
             return Object.assign({}, post, {
                 content: parsed.text || "",
-                visibility: post && post.visibility ? post.visibility : (meta.visibility || "public"),
-                is_pinned: post && (post.is_pinned === true || post.is_pinned === false) ? !!post.is_pinned : !!meta.is_pinned,
-                pinned_at: post && post.pinned_at ? post.pinned_at : (meta.pinned_at || null),
-                updated_at: post && post.updated_at ? post.updated_at : (meta.updated_at || null),
+                visibility: hasMeta ? (meta.visibility || "public") : (post && post.visibility ? post.visibility : (meta.visibility || "public")),
+                is_pinned: hasMeta ? !!meta.is_pinned : (post && (post.is_pinned === true || post.is_pinned === false) ? !!post.is_pinned : !!meta.is_pinned),
+                pinned_at: hasMeta ? (meta.pinned_at || null) : (post && post.pinned_at ? post.pinned_at : (meta.pinned_at || null)),
+                updated_at: hasMeta ? (meta.updated_at || null) : (post && post.updated_at ? post.updated_at : (meta.updated_at || null)),
                 _contentMeta: meta
             });
         }
@@ -2312,13 +2313,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var panel = document.getElementById("postFilterPanel");
                 var btn = document.getElementById("filterToggleBtn");
                 if (!panel) return;
-                var isOpen = panel.style.display !== "none";
-                if (isOpen) {
+                if (panel.style.display === "none") {
+                    panel.style.display = "flex";
+                    if (btn) btn.classList.add("active");
+                } else {
                     panel.style.display = "none";
                     if (btn) btn.classList.remove("active");
-                } else {
-                    panel.style.display = "";
-                    if (btn) btn.classList.add("active");
                 }
             };
 
