@@ -357,57 +357,7 @@
 
     window.triggerPhotoUpload = function() {
         if (!window.currentUser) {
-            window.showToast('请先登录');
-            return;
-        }
-        var input = document.getElementById('photoFileInput');
-        if (input) input.click();
-    };
-
-    window.handlePhotoUpload = async function(e) {
-        var files = e.target.files && Array.from(e.target.files);
-        console.log('[photo-upload] selected files', files);
-        if (!files || files.length === 0) return;
-        
-        if (!window.currentUser) {
-            window.showToast('请先登录');
-            e.target.value = '';
-            return;
-        }
-        
-        // 过滤有效图片
-        var validFiles = [];
-        for (var i = 0; i < files.length; i++) {
-            var f = files[i];
-            if (!f.type.startsWith('image/')) {
-                window.showToast('仅支持上传图片文件');
-                continue;
-            }
-            if (f.size > 50 * 1024 * 1024) {
-                window.showToast('单张图片大小不能超过 50MB');
-                continue;
-            }
-            if (f.name.toLowerCase().endsWith('.heic') || f.name.toLowerCase().endsWith('.heif')) {
-                window.showToast('iOS HEIC格式请先在设置中改为"兼容性最佳"');
-                continue;
-            }
-            validFiles.push(f);
-        }
-        
-        if (validFiles.length === 0) {
-            e.target.value = '';
-            return;
-        }
-        console.log('[photo-upload] valid files', validFiles);
-        
-        var successCount = 0;
-        var failCount = 0;
-        
-        try {
-            var sb = window.sb;
-            if (!sb) {
-                window.showToast('网络连接异常');
-                e.target.value = '';
+            window.showToast('成功上传 ' + successCount + ' 张照片');
                 return;
             }
             
@@ -556,19 +506,6 @@
                 hideUploadProgress();
                 if (successCount > 0 && failCount === 0) {
                     window.showToast('成功上传 ' + successCount + ' 张照片');
-                } else if (successCount > 0 && failCount > 0) {
-                    window.showToast('上传失败，请重试');
-                } else {
-                    window.showToast('上传失败，请重试');
-                }
-            }, 500);
-            
-        } catch (err) {
-            console.error('上传异常:', err);
-            hideUploadProgress();
-            window.showToast(err.message || '上传失败，请重试');
-        } finally {
-            e.target.value = '';
         }
     };
 

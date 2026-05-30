@@ -78,6 +78,8 @@
                 });
                 break;
             case 'size':
+                sorted.sort(function(a, b) { return (b.fileSize || 0) - (a.fileSize || 0); });
+                break;
             case 'views':
                 sorted.sort(function(a, b) { return (b.views || 0) - (a.views || 0); });
                 break;
