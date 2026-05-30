@@ -3272,6 +3272,40 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
             window.escapeHtml = escapeHtml;
 
+            function buildMagicLoadingHtml(title, subtitle, variant) {
+                var cls = variant ? ' ' + variant : '';
+                return [
+                    '<div class="loading loading--magic' + cls + '">',
+                    '<div class="magic-loader" aria-hidden="true">',
+                    '<div class="skill-name-float magic-loader-name">回响折光</div>',
+                    '<div class="arena-floor"></div>',
+                    '<div class="ultimate-aura"></div>',
+                    '<div class="wide-wave"></div>',
+                    '<div class="impact-flare"></div>',
+                    '<div class="screen-crack"></div>',
+                    '<div class="mega-beam"></div>',
+                    '<div class="magic-core">',
+                    '<div class="rune-ring"></div>',
+                    '<div class="absorb-field"></div>',
+                    '<div class="shockwave"></div>',
+                    '<div class="mirror"></div>',
+                    '</div>',
+                    '<div class="incoming-bolt"></div>',
+                    '<div class="reflected-bolt"></div>',
+                    '<div class="counter-blade"></div>',
+                    '<div class="blind-flash"></div>',
+                    '<div class="glass-shard s1"></div>',
+                    '<div class="glass-shard s2"></div>',
+                    '<div class="glass-shard s3"></div>',
+                    '<div class="glass-shard s4"></div>',
+                    '</div>',
+                    '<div class="loading-text">' + escapeHtml(title || '加载中') + '</div>',
+                    '<div class="loading-subtitle">' + escapeHtml(subtitle || '法阵正在聚能') + '</div>',
+                    '</div>'
+                ].join('');
+            }
+            window.xtjMagicLoadingHtml = buildMagicLoadingHtml;
+
             function formatMsgTime(dateStr) {
                 var d = new Date(dateStr);
                 var now = new Date();
@@ -3533,28 +3567,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let dockChatMsgsUser = null;
             let _dockPreviewUrl = null;
 
-                        function renderChatLoadingState(el, options) {
+                                                function renderChatLoadingState(el, options) {
                 if (!el) return;
-                const title = options && options.title ? options.title : '加载中';
-                const subtitle = options && options.subtitle ? options.subtitle : '正在同步聊天内容';
-                const variant = options && options.variant ? ' chat-loading-card--' + options.variant : '';
-                el.innerHTML = `
-                    <div class="chat-loading-card${variant}">
-                        <div class="chat-loading-orb" aria-hidden="true">
-                            <span class="chat-loading-aura"></span>
-                            <span class="chat-loading-ring"></span>
-                            <span class="chat-loading-ring chat-loading-ring--late"></span>
-                            <span class="chat-loading-core"></span>
-                            <span class="chat-loading-glyph">✦</span>
-                        </div>
-                        <div class="chat-loading-text">
-                            <div class="chat-loading-title">${escapeHtml(title)}</div>
-                            <div class="chat-loading-subtitle">${escapeHtml(subtitle)}</div>
-                        </div>
-                    </div>`;
+                var title = options && options.title ? options.title : '加载中';
+                var subtitle = options && options.subtitle ? options.subtitle : '正在同步聊天内容';
+                var variant = options && options.variant ? 'loading--' + String(options.variant).replace(/^loading--/, '') : 'loading--detail';
+                el.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml(title, subtitle, variant) : ('<div class="loading loading--magic"><div class="loading-text">' + escapeHtml(title) + '</div><div class="loading-subtitle">' + escapeHtml(subtitle) + '</div></div>');
             }
-
-            function dockChatGoBack() {
+function dockChatGoBack() {
                 dockChatActiveUser = null;
                 document.getElementById('dockChatDetailView').classList.add('hidden');
                 document.getElementById('dockChatListView').classList.remove('hidden');
@@ -5785,7 +5805,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             renderChatLoadingState = function(el, options) {
                 if (!el) return;
                 var title = options && options.title ? options.title : '加载中';
-                var subtitle = options && options.subtitle ? options.subtitle : '法阵正在聚能';
+                var subtitle = options && options.subtitle ? options.subtitle : '正在同步聊天内容';
                 var variant = options && options.variant ? ' chat-loading-card--' + options.variant : '';
                 el.innerHTML = [
                     '<div class="chat-loading-card' + variant + '">',
