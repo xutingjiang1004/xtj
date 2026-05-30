@@ -3979,7 +3979,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
-                    version: 'v0.0.62',
+                    version: 'v0.0.61',
                     date: '2026-05-30',
                     content: `
                         <h4>更新内容</h4>
