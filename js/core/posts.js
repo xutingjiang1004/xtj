@@ -1,4 +1,4 @@
-﻿(function() {
+(function() {
     var delPostId = null, delOwnerKey = null;
     var activePostId = null;
     var viewTracked = new Set();
@@ -382,7 +382,6 @@
                     '<button class="action-btn' + (isLiked ? ' liked' : '') + '" onclick="toggleLike(this, \'' + window.escapeHtml(p.id).replace(/'/g, "\\'") + '\')">' + (isLiked ? '❤️' : '点赞') + '</button>' +
                     '<button class="action-btn" onclick="openComment(\'' + window.escapeHtml(p.id).replace(/'/g, "\\'") + '\')">评论</button>' +
                     (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + window.escapeHtml(p.id).replace(/'/g, "\\'") + '\', \'' + window.escapeHtml(p.actor_key).replace(/'/g, "\\'") + '\')">删除</button>' : '') +
-                    '<button class="action-btn report-btn" style="margin-left:auto;" onclick="window.openReport&&window.openReport(\'post\',\'' + window.escapeHtml(p.id).replace(/'/g, "\\'") + '\',\'' + window.escapeHtml(p.user_name).replace(/'/g, "\\'") + '\')">举报</button>' +
                 '</div>' +
                 (pComms.length ? '<div class="comments">' + pComms.map(function(c) {
                     return '<div class="comment-item" data-comment-id="' + window.escapeHtml(c.id) + '"><div><b>' + window.escapeHtml(c.user_name) + ':</b> ' + window.escapeHtml(c.content) + '</div></div>';
@@ -533,7 +532,6 @@
                     '<button class="action-btn' + (isLiked ? ' liked' : '') + '" onclick="toggleLike(this, \'' + window.escapeHtml(p.id).replace(/'/g, "\\'") + '\')">' + (isLiked ? '❤️' : '点赞') + '</button>' +
                     '<button class="action-btn" onclick="openComment(\'' + window.escapeHtml(p.id).replace(/'/g, "\\'") + '\')">评论</button>' +
                     (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + window.escapeHtml(p.id).replace(/'/g, "\\'") + '\', \'' + window.escapeHtml(p.actor_key).replace(/'/g, "\\'") + '\')">删除</button>' : '') +
-                    '<button class="action-btn report-btn" style="margin-left:auto;" onclick="window.openReport&&window.openReport(\'post\',\'' + window.escapeHtml(p.id).replace(/'/g, "\\'") + '\',\'' + window.escapeHtml(p.user_name).replace(/'/g, "\\'") + '\')">举报</button>' +
                 '</div>' +
                 (pComms.length ? '<div class="comments">' + pComms.map(function(c) {
                     return '<div class="comment-item" data-comment-id="' + window.escapeHtml(c.id) + '"><div><b>' + window.escapeHtml(c.user_name) + ':</b> ' + window.escapeHtml(c.content) + '</div></div>';

@@ -38,15 +38,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
         let delPostId = null, delOwnerKey = null;
         let activePostId = null;
-        
-        var _openReportOrigStub = function(targetType, targetId, targetUser) {
-            if (window.openReport !== _openReportOrigStub) {
-                window.openReport(targetType, targetId, targetUser);
-            } else {
-                setTimeout(function() { _openReportOrigStub(targetType, targetId, targetUser); }, 200);
-            }
-        };
-        if (!window.openReport) window.openReport = _openReportOrigStub;
         const viewTracked = new Set();
         let postVisibilityObserver = null;
         function getPostVisibilityObserver() {
@@ -118,7 +109,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             return Object.assign({}, post, {
                 content: parsed.text || "",
                 visibility: post && post.visibility ? post.visibility : (meta.visibility || "public"),
-                is_pinned: post ? !!post.is_pinned : !!meta.is_pinned,
+                is_pinned: post && (post.is_pinned === true || post.is_pinned === false) ? !!post.is_pinned : !!meta.is_pinned,
                 pinned_at: post && post.pinned_at ? post.pinned_at : (meta.pinned_at || null),
                 updated_at: post && post.updated_at ? post.updated_at : (meta.updated_at || null),
                 _contentMeta: meta
@@ -232,7 +223,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             var el = document.getElementById("postFilterSummary");
             if (!el) return;
             var state = getPostSearchState();
-            var hasFilters = !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
+            var activeCount = 0;
+            if (state.keyword) activeCount++;
+            if (state.user) activeCount++;
+            if (state.startDate || state.endDate) activeCount++;
+            if (state.onlyMine) activeCount++;
+            if (state.visibility && state.visibility !== "all") activeCount++;
+            var badge = document.getElementById("filterActiveBadge");
+            if (badge) {
+                badge.textContent = activeCount;
+                badge.style.display = activeCount > 0 ? "inline-flex" : "none";
+            }
+            var clearBtn = document.getElementById("filterClearBtn");
+            if (clearBtn) clearBtn.style.display = activeCount > 0 ? "" : "none";
+            var hasFilters = activeCount > 0;
             if (!hasFilters) {
                 el.textContent = "全部帖子";
             } else if (!count) {
@@ -1857,7 +1861,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
-                    <button class="action-btn report-btn" style="margin-left:auto;" data-id="${escapeHtml(p.id)}" data-user="${escapeHtml(p.user_name)}">举报</button>
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -2026,7 +2029,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
-                    <button class="action-btn report-btn" style="margin-left:auto;" data-id="${escapeHtml(p.id)}" data-user="${escapeHtml(p.user_name)}">举报</button>
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -2039,7 +2041,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   `:''}
                 </div>
               `;
-                }).join('') : `<div class="loading">快来����第一条动态吧~</div>`;
+                }).join('') : `<div class="loading">快来发布第一条动态吧~</div>`;
 
                 initPostScrollAnimation();
             }
@@ -2149,12 +2151,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (!direct.data || (Array.isArray(direct.data) && direct.data.length === 0)) {
                         return { ok: false, error: new Error("数据库未更新任何记录，可能是 Supabase RLS/update policy 拦截。") };
                     }
-                    return { ok: true, fallback: false };
+                    var saved = Array.isArray(direct.data) ? direct.data[0] : direct.data;
+                    var hasVisibility = saved && Object.prototype.hasOwnProperty.call(saved, "visibility") && String(saved.visibility) === String(nextVisibility);
+                    var hasPinned = saved && Object.prototype.hasOwnProperty.call(saved, "is_pinned") && !!saved.is_pinned === nextPinned;
+                    if (hasVisibility && hasPinned) {
+                        return { ok: true, fallback: false };
+                    }
                 }
 
-                var message = String(direct.error.message || "");
-                var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message);
-                if (!maybeSchemaIssue) return { ok: false, error: direct.error };
+                var message = direct.error ? String(direct.error.message || "") : "";
+                var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message) || !direct.error;
+                if (direct.error && !maybeSchemaIssue) return { ok: false, error: direct.error };
 
                 var fallbackContent = buildPostStorageContent(normalized, nextContent, {
                     visibility: nextVisibility,
@@ -2205,7 +2212,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (canDelete) {
                     actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + id + '\', \'' + actorKey + '\')">删除</button>');
                 }
-                actions.push('<button class="action-btn report-btn" style="margin-left:auto;" data-id="' + escapeHtml(String(post.id)) + '" data-user="' + escapeHtml(post.user_name || "") + '">举报</button>');
                 return actions.join("");
             }
 
@@ -2282,6 +2288,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 };
                 feedPage = 0;
                 feedEndReached = false;
+                var panel = document.getElementById("postFilterPanel");
+                if (panel) panel.style.display = "none";
+                var btn = document.getElementById("filterToggleBtn");
+                if (btn) btn.classList.remove("active");
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
 
@@ -2297,6 +2307,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     });
                 });
             }
+
+            window.toggleFilterPanel = function() {
+                var panel = document.getElementById("postFilterPanel");
+                var btn = document.getElementById("filterToggleBtn");
+                if (!panel) return;
+                var isOpen = panel.style.display !== "none";
+                if (isOpen) {
+                    panel.style.display = "none";
+                    if (btn) btn.classList.remove("active");
+                } else {
+                    panel.style.display = "";
+                    if (btn) btn.classList.add("active");
+                }
+            };
 
             window.openEditPost = function(postId) {
                 var target = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
@@ -3979,6 +4003,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
+                    version: 'v0.62',
+                    date: '2026-05-30',
+                    content: `
+                        <h4>功能优化</h4>
+                        <ul>
+                            <li>筛选功能优化：将内联筛选控件整合为折叠式"筛选"按钮面板，支持活跃筛选计数徽章</li>
+                            <li>移除帖子举报按钮及全部相关代码，清理前端残留</li>
+                        </ul>
+                        <h4>Bug修复</h4>
+                        <ul>
+                            <li>修复编辑帖子时公开/私密选项不真正生效的问题</li>
+                            <li>修复帖子置顶功能不生效的问题</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.0.61',
                     date: '2026-05-30',
                     content: `
@@ -4136,13 +4176,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>举报按钮修复</strong>
-                                <ul>
-                                    <li>将举报按钮直接嵌入帖子模板HTML（renderFeedWithAvatars 和 appendMorePosts），替代脆弱的DOM打补丁方式</li>
-                                    <li>移除features.js中的MutationObserver补丁代码，按钮随帖子初始加载一并渲染，杜绝消失问题</li>
-                                    <li>举报按钮右对齐置底，通过inline onclick调用window.openReport，兼容所有设备和屏幕尺寸</li>
-                                </ul>
-                            </li>
                             <li><strong>照片全屏预览双指放大性能优化</strong>
                                 <ul>
                                     <li>CSS层面启用GPU硬件加速：backface-visibility: hidden + transform: translateZ(0) + will-change: transform</li>
