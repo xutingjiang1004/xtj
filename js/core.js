@@ -93,7 +93,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 '<span class="post-user-loader-core"></span>',
                 '<span class="post-user-loader-spark"></span>',
                 '</span>',
-                '<span class="post-user-chip-name">加载中...</span>',
+                '<span class="post-user-chip-name">加载中</span>',
                 '</div>'
             ].join('');
         }
@@ -728,7 +728,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             window.openUserProfile = async function(userName) {
                 upcTargetUser = userName;
                 document.getElementById('upcName').textContent = userName;
-                document.getElementById('upcLogin').textContent = '最近登录：加载中..';
+                document.getElementById('upcLogin').textContent = '最近登录：加载中';
                 
                 var avatarEl = document.getElementById('upcAvatar');
                 // localStorage权威����：当前用户先棢�查本地缓�?
@@ -1776,7 +1776,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中...</span></div>`;
+                if (!forceRefresh) feed.innerHTML = `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中</span></div>`;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -2670,7 +2670,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
-                    feed.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中...</span></div>';
+                    feed.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中</span></div>';
                 }
                 try {
                     var results = await Promise.all([
@@ -2884,7 +2884,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                document.getElementById('statModalBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
+                document.getElementById('statModalBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
@@ -2934,7 +2934,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             window.openPostDetail = async function(postId) {
                 document.getElementById('postDetailTitle').textContent = '帖子详情';
-                document.getElementById('postDetailBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
+                document.getElementById('postDetailBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
                 document.getElementById('postDetailModal').classList.add('active');
 
                 try {
@@ -3533,9 +3533,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let dockChatMsgsUser = null;
             let _dockPreviewUrl = null;
 
-            function renderChatLoadingState(el, options) {
+                        function renderChatLoadingState(el, options) {
                 if (!el) return;
-                const title = options && options.title ? options.title : '加载中...';
+                const title = options && options.title ? options.title : '加载中';
                 const subtitle = options && options.subtitle ? options.subtitle : '正在同步聊天内容';
                 const variant = options && options.variant ? ' chat-loading-card--' + options.variant : '';
                 el.innerHTML = `
@@ -3551,7 +3551,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             <div class="chat-loading-title">${escapeHtml(title)}</div>
                             <div class="chat-loading-subtitle">${escapeHtml(subtitle)}</div>
                         </div>
-                        <div class="chat-loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>
                     </div>`;
             }
 
@@ -3587,9 +3586,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
-                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中...</div></div>';
+                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中</div></div>';
                 renderChatLoadingState(document.getElementById('dockChatMessages'), {
-                    title: '加载中...',
+                    title: '加载中',
                     subtitle: '正在打开聊天通道',
                     variant: 'detail'
                 });
@@ -3607,10 +3606,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!el) return;
                 if (Date.now() - dockChatListCacheTime < DOCK_CHAT_CACHE_DURATION) return;
                 dockChatListCacheTime = Date.now();
-                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">💬</div><div>加载中...</div></div>';
+                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">💬</div><div>加载中</div></div>';
                 try {
                     renderChatLoadingState(el, {
-                        title: '加载中...',
+                        title: '加载中',
                         subtitle: '正在召回最近消息'
                     });
                     const { data: allMsgs, error } = await sb.from("posts")
@@ -5370,7 +5369,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ['提交', '提交'],
                 ['验证涓?..', '验证中...'],
                 ['发布涓?..', '发布中...'],
-                ['加载中..', '加载中...'],
+                ['加载中..', '加载中'],
                 ['删除中...', '删除中...'],
                 ['提交中...', '提交中...'],
                 ['评论成功！', '评论成功！'],
@@ -5426,7 +5425,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ['寮犵収鐗?', '张照片'],
                 ['上传失败，请重试', '上传失败，请重试'],
                 ['上传寮傚父', '上传异常'],
-                ['加载中...', '加载中...'],
+                ['加载中', '加载中'],
                 ['棣冩尠', '💬'],
                 ['瀹歌尪顕?', '已读'],
                 ['閺堫亣顕?', '未读'],
@@ -5665,7 +5664,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var body = document.getElementById('postDetailBody');
                 var modal = document.getElementById('postDetailModal');
                 if (title) title.textContent = '帖子详情';
-                if (body) body.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
+                if (body) body.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
                 if (modal) modal.classList.add('active');
 
                 try {
@@ -5715,7 +5714,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                if (body) body.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
+                if (body) body.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -5785,7 +5784,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             renderChatLoadingState = function(el, options) {
                 if (!el) return;
-                var title = options && options.title ? options.title : '加载中...';
+                var title = options && options.title ? options.title : '加载中';
                 var subtitle = options && options.subtitle ? options.subtitle : '法阵正在聚能';
                 var variant = options && options.variant ? ' chat-loading-card--' + options.variant : '';
                 el.innerHTML = [
@@ -5813,7 +5812,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     '<span class="post-user-loader-core"></span>',
                     '<span class="post-user-loader-spark"></span>',
                     '</span>',
-                    '<span class="post-user-chip-name">加载中...</span>',
+                    '<span class="post-user-chip-name">加载中</span>',
                     '</div>'
                 ].join('');
             };
@@ -5832,14 +5831,25 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     pinned_at: nextPinnedAt,
                     updated_at: nextUpdatedAt
                 };
+                var expectedState = {
+                    content: nextContent,
+                    visibility: nextVisibility,
+                    is_pinned: nextPinned,
+                    pinned_at: nextPinnedAt
+                };
                 var direct = await sb.from("posts").update(directPayload).eq("id", post.id);
                 if (!direct.error) {
-                    return { ok: true, fallback: false };
+                    try {
+                        var verifiedDirect = await sb.from("posts").select("*").eq("id", post.id).maybeSingle();
+                        if (!verifiedDirect.error && matchesPostExpectation(verifiedDirect.data, expectedState)) {
+                            return { ok: true, fallback: false };
+                        }
+                    } catch (_) {}
                 }
 
-                var message = String(direct.error.message || "");
-                var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message);
-                if (!maybeSchemaIssue) return { ok: false, error: direct.error };
+                var message = direct.error ? String(direct.error.message || "") : "";
+                var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message) || !direct.error;
+                if (direct.error && !maybeSchemaIssue) return { ok: false, error: direct.error };
 
                 var fallbackContent = buildPostStorageContent(normalized, nextContent, {
                     visibility: nextVisibility,
@@ -5849,6 +5859,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 });
                 var fallback = await sb.from("posts").update({ content: fallbackContent }).eq("id", post.id);
                 if (fallback.error) return { ok: false, error: fallback.error };
+                try {
+                    var verifiedFallback = await sb.from("posts").select("*").eq("id", post.id).maybeSingle();
+                    if (verifiedFallback.error || !matchesPostExpectation(verifiedFallback.data, expectedState)) {
+                        return { ok: false, error: new Error("帖子状态未实际保存") };
+                    }
+                } catch (verifyFallbackError) {
+                    return { ok: false, error: verifyFallbackError };
+                }
                 return { ok: true, fallback: true };
             };
 
@@ -5916,7 +5934,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     renderStatByType(type);
                     if (statPollTimer) clearInterval(statPollTimer);
                     statPollTimer = setInterval(refreshStatModal, 15000);
-                    fetchStatSnapshotWithTimeout(1800).then(function(snapshot) {
+                    fetchStatSnapshotWithTimeout(4500).then(function(snapshot) {
                         if (!snapshot || !modal || !modal.classList.contains('active') || statCurrentType !== type) return;
                         applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
                         renderStatByType(type);
@@ -5924,8 +5942,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                if (body) body.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
-                var snapshot = await fetchStatSnapshotWithTimeout(2200);
+                if (body) body.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                var snapshot = await fetchStatSnapshotWithTimeout(5000);
                 if (snapshot) {
                     applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
                     renderStatByType(type);
