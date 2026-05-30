@@ -140,6 +140,8 @@
             style.id = 'xtjPhotoPreviewHotfixStyle';
             style.textContent = [
                 '.photo-preview-overlay.pp-hotfix-closing{pointer-events:none;}',
+                '.photo-preview-overlay.pp-closing{pointer-events:none;background:#000;transform:translateZ(0);-webkit-transform:translateZ(0);will-change:opacity,transform;backface-visibility:hidden;-webkit-backface-visibility:hidden;}',
+                '.photo-preview-overlay.pp-closing,.photo-preview-overlay.pp-closing *{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;}',
                 '.photo-preview-overlay.pp-hotfix-loading .pp-current-loading{opacity:1;transform:translate(-50%,0);}',
                 '.pp-current-loading{position:absolute;left:50%;bottom:calc(48px + env(safe-area-inset-bottom,0px));z-index:20;transform:translate(-50%,8px);opacity:0;transition:opacity .22s ease,transform .22s ease;padding:7px 12px;border-radius:999px;background:rgba(15,23,42,.34);border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:rgba(255,255,255,.86);font-size:12px;pointer-events:none;}',
                 '.pp-slide-img.pp-hotfix-fading{opacity:.72;}',
@@ -566,7 +568,14 @@
         }
 
         window.openPhotoPreview = function(index, keepList) {
-            if (state.active || state.closing) return;
+            if (state.active || state.closing) {
+                var overlay = document.getElementById('photoPreviewOverlay');
+                if (overlay && overlay.classList.contains('active')) {
+                    finishClose(null, true);
+                } else {
+                    return;
+                }
+            }
             state.photos = keepList && state.photos.length ? state.photos : getPhotos();
             if (!state.photos.length) {
                 if (window.showToast) window.showToast('暂无照片');
@@ -587,11 +596,11 @@
             setupTrack();
             overlay._xtjOriginRect = originRect;
             overlay._xtjOriginImg = thumbImg;
-            overlay.classList.remove('pp-hotfix-closing', 'pp-hotfix-basic-close');
-            overlay.classList.add('pp-info-hidden', 'active');
-            document.body.classList.add('photo-previewing');
             state.active = true;
             state.closing = false;
+            overlay.classList.remove('pp-closing', 'pp-hotfix-closing', 'pp-hotfix-basic-close');
+            overlay.classList.add('pp-info-hidden', 'active');
+            document.body.classList.add('photo-previewing');
 
             var track = document.getElementById('ppSlideTrack');
             if (track) {
@@ -609,64 +618,120 @@
         };
 
         window.closePhotoPreview = function() {
-            if (!state.active || state.closing) return;
+            if (!state.active || state.closing) {
+                var overlay = document.getElementById('photoPreviewOverlay');
+                if (overlay && overlay.classList.contains('active')) {
+                    finishClose();
+                }
+                return;
+            }
             state.closing = true;
+
             var overlay = document.getElementById('photoPreviewOverlay');
             var curImg = document.getElementById('photoPreviewImage');
+
             if (!overlay) {
                 finishClose();
                 return;
             }
 
+            if (state._closingSafetyTimer) clearTimeout(state._closingSafetyTimer);
+            state._closingSafetyTimer = setTimeout(function() {
+                if (state.closing) {
+                    finishClose();
+                }
+            }, 3000);
+
             setLoading(false);
+
+            overlay.classList.add('pp-closing');
             overlay.classList.add('pp-hotfix-closing');
+
             var originImg = findThumb(state.current) || overlay._xtjOriginImg;
             var originRect = null;
+
             if (originImg) {
                 var r = originImg.getBoundingClientRect();
                 if (r.width > 0 && r.height > 0) originRect = r;
             }
+
             var curRect = curImg ? curImg.getBoundingClientRect() : null;
             var canFlip = originRect && curRect && curRect.width > 0 && curRect.height > 0 && state.scale <= 1.01;
+
+            var closed = false;
+            function done() {
+                if (closed) return;
+                closed = true;
+                requestAnimationFrame(function() {
+                    finishClose(originImg);
+                });
+            }
+
+            clearTimeout(overlay._xtjCloseTimer);
+            overlay._xtjCloseTimer = setTimeout(done, canFlip ? 380 : 320);
 
             if (canFlip && curImg) {
                 if (originImg) {
                     originImg.style.transition = 'none';
                     originImg.style.opacity = '0';
                 }
+
                 var dx = originRect.left - curRect.left;
                 var dy = originRect.top - curRect.top;
                 var scale = Math.min(originRect.width / curRect.width, originRect.height / curRect.height);
+
                 curImg.style.transition = 'none';
                 curImg.style.transformOrigin = 'top left';
-                curImg.style.transform = 'translate(0,0) scale(1) rotate(' + state.rotation + 'deg)';
-                void curImg.offsetHeight;
-                overlay.style.transition = 'opacity .28s cubic-bezier(.16,1,.3,1)';
-                curImg.style.transition = 'transform .3s cubic-bezier(.16,1,.3,1), border-radius .3s cubic-bezier(.16,1,.3,1), opacity .26s ease';
-                curImg.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(' + scale + ') rotate(0deg)';
-                curImg.style.borderRadius = (16 / Math.max(scale, 0.2)) + 'px';
-                overlay.style.opacity = '0';
-                setTimeout(function() { finishClose(originImg); }, 320);
+                curImg.style.transform = 'translate3d(0,0,0) scale(1) rotate(' + state.rotation + 'deg)';
+                curImg.style.opacity = '1';
+
+                requestAnimationFrame(function() {
+                    overlay.style.transition = 'opacity 260ms cubic-bezier(.16,1,.3,1)';
+                    overlay.style.opacity = '0.001';
+
+                    curImg.style.transition = 'transform 300ms cubic-bezier(.16,1,.3,1), border-radius 300ms cubic-bezier(.16,1,.3,1), opacity 220ms ease';
+                    curImg.style.transform = 'translate3d(' + dx + 'px,' + dy + 'px,0) scale(' + scale + ') rotate(0deg)';
+                    curImg.style.borderRadius = (16 / Math.max(scale, 0.2)) + 'px';
+
+                    curImg.addEventListener('transitionend', done, { once: true });
+                });
             } else {
                 overlay.classList.add('pp-hotfix-basic-close');
-                overlay.style.transition = 'opacity .24s cubic-bezier(.16,1,.3,1)';
-                overlay.style.opacity = '0';
-                if (curImg) {
-                    curImg.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1), opacity .2s ease';
-                    curImg.style.transform = 'translate3d(0,0,0) scale(.985)';
-                    curImg.style.opacity = '0';
-                }
-                setTimeout(function() { finishClose(originImg); }, 260);
+
+                requestAnimationFrame(function() {
+                    overlay.style.transition = 'opacity 240ms cubic-bezier(.16,1,.3,1)';
+                    overlay.style.opacity = '0.001';
+
+                    if (curImg) {
+                        curImg.style.transition = 'transform 240ms cubic-bezier(.16,1,.3,1), opacity 180ms ease';
+                        curImg.style.transform = 'translate3d(0,12px,0) scale(.985) rotate(' + state.rotation + 'deg)';
+                        curImg.style.opacity = '0.001';
+                    }
+
+                    overlay.addEventListener('transitionend', done, { once: true });
+                });
             }
         };
 
-        function finishClose(originImg) {
+        function finishClose(originImg, skipBodyUnlock) {
+            if (state._closingSafetyTimer) {
+                clearTimeout(state._closingSafetyTimer);
+                state._closingSafetyTimer = null;
+            }
+
             var overlay = document.getElementById('photoPreviewOverlay');
             var curImg = document.getElementById('photoPreviewImage');
+
+            if (overlay && overlay._xtjCloseTimer) {
+                clearTimeout(overlay._xtjCloseTimer);
+                overlay._xtjCloseTimer = null;
+            }
+
             if (originImg) {
                 originImg.style.transition = '';
                 originImg.style.opacity = '';
             }
+
             if (curImg) {
                 curImg.style.transition = '';
                 curImg.style.transform = '';
@@ -675,17 +740,32 @@
                 curImg.style.opacity = '';
                 curImg.classList.remove('pp-placeholder', 'pp-hotfix-fading');
             }
+
             if (overlay) {
                 overlay.style.transition = '';
                 overlay.style.opacity = '';
-                overlay.classList.remove('active', 'pp-hotfix-closing', 'pp-hotfix-basic-close', 'pp-hotfix-loading');
+                overlay.classList.remove(
+                    'active',
+                    'pp-closing',
+                    'pp-hotfix-closing',
+                    'pp-hotfix-basic-close',
+                    'pp-hotfix-loading'
+                );
             }
-            document.body.classList.remove('photo-previewing');
+
             state.active = false;
             state.closing = false;
             state.current = null;
-            resetZoom({ resetRotation: true });
             window.photoPreviewCurrent = null;
+            resetZoom({ resetRotation: true });
+
+            if (!skipBodyUnlock) {
+                requestAnimationFrame(function() {
+                    requestAnimationFrame(function() {
+                        document.body.classList.remove('photo-previewing');
+                    });
+                });
+            }
         }
 
         window.ppPrevPhoto = function() {
@@ -1122,6 +1202,13 @@
                 }
             }, { passive: false });
         }
+
+        document.addEventListener('keydown', function ppKeyHandler(e) {
+            if (e.key === 'Escape' && state.active) {
+                e.preventDefault();
+                window.closePhotoPreview();
+            }
+        });
     }
 
     wrapPhotoWallRenderers();
