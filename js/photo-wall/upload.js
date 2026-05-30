@@ -419,7 +419,7 @@
                     var progressStart = (idx / validFiles.length) * 80;
                     var progressEnd = ((idx + 1) / validFiles.length) * 80;
                     
-                    updateUploadProgress(progressStart, '正在处理第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片...');
+                    updateUploadProgress(progressStart, '正在处理', '第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片');
                     
                     var ts = Date.now() + '_' + Math.random().toString(36).substring(2, 10);
                     var ext = file.type === 'image/png' ? '.png' : '.jpg';
@@ -433,7 +433,7 @@
                     console.log('[photo-upload] compression end', file.name, compressed && compressed.size);
                     var finalSize = compressed.size;
                     
-                    updateUploadProgress(progressStart + (progressEnd - progressStart) * 0.25, '正在上传第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片...');
+                    updateUploadProgress(progressStart + (progressEnd - progressStart) * 0.25, '正在上传', '第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片');
                     
                     // 上传主图
                     console.log('[photo-upload] upload start', origPath);
@@ -450,7 +450,7 @@
                         continue;
                     }
                     
-                    updateUploadProgress(progressStart + (progressEnd - progressStart) * 0.6, '正在处理第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片...');
+                    updateUploadProgress(progressStart + (progressEnd - progressStart) * 0.6, '正在处理', '第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片');
                     
                     var imageUrl = sb.storage.from('uploads').getPublicUrl(origPath).data.publicUrl;
                     
@@ -493,7 +493,7 @@
                     
                     var thumbUrl = !thumbResult.error ? sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl : '';
                     
-                    updateUploadProgress(progressStart + (progressEnd - progressStart) * 0.9, '正在保存第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片...');
+                    updateUploadProgress(progressStart + (progressEnd - progressStart) * 0.9, '正在保存', '第 ' + (idx + 1) + '/' + validFiles.length + ' 张图片');
                     
                     // 插入数据库记录
                     var contentJson = JSON.stringify({ 
@@ -550,7 +550,7 @@
                 await withTimeout(window.renderPhotoWall(), UPLOAD_TIMEOUTS.render, 'photo wall render');
             }
             
-            updateUploadProgress(100, '上传完成');
+            updateUploadProgress(100, '上传完成', successCount + ' 张已完成');
             
             setTimeout(function() {
                 hideUploadProgress();
@@ -644,7 +644,7 @@
                 var text = document.getElementById('uploadProgressText');
                 if (text) text.textContent = '0%';
                 var titleEl = document.getElementById('uploadProgressTitle');
-                if (titleEl) titleEl.textContent = '正在准备上传';
+                if (titleEl) titleEl.textContent = '准备上传';
                 setUploadStatusText('正在整理照片内容...');
                 __xtjHideUploadProgressTimer = null;
             }, 350);
