@@ -1,6 +1,8 @@
 (function() {
     var BROKEN_PHOTO_KEY = 'xtj_photos_broken_media';
     var pwPlaceholder = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"%3E%3Crect fill="%23f0f0f0" width="400" height="400"/%3E%3Cpath fill="%23c9d5cf" d="M86 285h228L248 198l-42 55-31-39-89 71Z"/%3E%3Ccircle cx="132" cy="128" r="28" fill="%23bccbc4"/%3E%3C/svg%3E';
+    window.pwAlbumView = false;
+    window.pwAlbumGroupKey = '';
 
     function safeEsc(value) {
         if (window.escapeHtml) return window.escapeHtml(String(value == null ? '' : value));
@@ -160,6 +162,96 @@
         return html;
     }
 
+    function getAlbumDateKey(ts) {
+        var d = new Date(ts || Date.now());
+        if (isNaN(d.getTime())) d = new Date();
+        var y = d.getFullYear();
+        var m = String(d.getMonth() + 1).padStart(2, '0');
+        var day = String(d.getDate()).padStart(2, '0');
+        return y + '-' + m + '-' + day;
+    }
+
+    function groupPhotosByAlbum(sorted) {
+        var groups = [];
+        var map = {};
+        (sorted || []).forEach(function(photo) {
+            if (!photo) return;
+            var key = getAlbumDateKey(photo.timestamp);
+            if (!map[key]) {
+                map[key] = {
+                    key: key,
+                    title: key,
+                    photos: []
+                };
+                groups.push(map[key]);
+            }
+            map[key].photos.push(photo);
+        });
+        return groups;
+    }
+
+    function renderAlbumCards(groups) {
+        if (!groups.length) return getPhotoWallEmptyHtml();
+        return groups.map(function(group) {
+            var cover = group.photos[0];
+            var src = cover ? (cover.thumbUrl || cover.imageUrl || pwPlaceholder) : pwPlaceholder;
+            return '' +
+                '<button type="button" class="pw-album-card" onclick="openPhotoAlbumGroup(\'' + safeEsc(group.key) + '\')">' +
+                    '<img class="pw-album-cover" src="' + safeEsc(src) + '" alt="album">' +
+                    '<div class="pw-album-title">' + safeEsc(group.title) + '</div>' +
+                    '<div class="pw-album-count">' + group.photos.length + ' 张照片</div>' +
+                '</button>';
+        }).join('');
+    }
+
+    function renderAlbumGroupGrid(group) {
+        var header = '' +
+            '<div class="pw-album-toolbar">' +
+                '<button type="button" class="pw-album-back-btn" onclick="openPhotoAlbumGroup(\'\')">返回相册</button>' +
+                '<div class="pw-album-toolbar-meta"><strong>' + safeEsc(group.title) + '</strong><span>' + group.photos.length + ' 张照片</span></div>' +
+            '</div>';
+        return header + renderPhotoWallHtml(group.photos, 0);
+    }
+
+    function renderPhotoWallCurrentView(sorted) {
+        var grid = document.getElementById('photoGrid');
+        if (!grid) return;
+        var toggleBtn = document.getElementById('pwAlbumToggle');
+        if (toggleBtn) toggleBtn.classList.toggle('active', !!window.pwAlbumView);
+        if (!window.pwAlbumView) {
+            window.pwCurrentSortedPhotos = sorted.slice();
+            if (!sorted.length) {
+                grid.innerHTML = getPhotoWallEmptyHtml();
+                return;
+            }
+            grid.innerHTML = renderPhotoWallHtml(sorted);
+            animatePhotoCards(grid);
+            setupInfiniteScroll();
+            pwObserveLazyImages(grid);
+            return;
+        }
+
+        var groups = groupPhotosByAlbum(sorted);
+        if (!window.pwAlbumGroupKey) {
+            window.pwCurrentSortedPhotos = sorted.slice();
+            grid.innerHTML = renderAlbumCards(groups);
+            return;
+        }
+
+        var activeGroup = groups.find(function(group) { return group.key === window.pwAlbumGroupKey; });
+        if (!activeGroup) {
+            window.pwAlbumGroupKey = '';
+            window.pwCurrentSortedPhotos = sorted.slice();
+            grid.innerHTML = renderAlbumCards(groups);
+            return;
+        }
+
+        window.pwCurrentSortedPhotos = activeGroup.photos.slice();
+        grid.innerHTML = renderAlbumGroupGrid(activeGroup);
+        animatePhotoCards(grid);
+        pwObserveLazyImages(grid);
+    }
+
     var renderLock = false;
     var pendingRender = false;
 
@@ -178,18 +270,7 @@
         await window.loadPhotoWallData();
         var sortKey = window.pwSortKey || 'date_desc';
         var sorted = sortPhotoWallData(window.photoWallData, sortKey);
-        window.pwCurrentSortedPhotos = sorted.slice();
-
-        if (sorted.length === 0) {
-            grid.innerHTML = getPhotoWallEmptyHtml();
-            renderLock = false;
-            return;
-        }
-
-        grid.innerHTML = renderPhotoWallHtml(sorted);
-        animatePhotoCards(grid);
-        setupInfiniteScroll();
-        pwObserveLazyImages(grid);
+        renderPhotoWallCurrentView(sorted);
         renderLock = false;
         if (pendingRender) {
             pendingRender = false;
@@ -203,16 +284,28 @@
         if (!grid) return;
         var sortKey = window.pwSortKey || 'date_desc';
         var sorted = sortPhotoWallData(window.photoWallData, sortKey);
-        window.pwCurrentSortedPhotos = sorted.slice();
-        if (sorted.length === 0) {
-            grid.innerHTML = getPhotoWallEmptyHtml();
-            return;
-        }
-        grid.innerHTML = renderPhotoWallHtml(sorted);
-        animatePhotoCards(grid);
-        pwObserveLazyImages(grid);
+        renderPhotoWallCurrentView(sorted);
     }
     window.renderPhotoWallWithoutReload = renderPhotoWallWithoutReload;
+
+    window.openPhotoAlbumGroup = function(groupKey) {
+        window.pwAlbumGroupKey = groupKey || '';
+        renderPhotoWallWithoutReload();
+    };
+
+    window.toggleAlbumView = function() {
+        window.pwAlbumView = !window.pwAlbumView;
+        window.pwAlbumGroupKey = '';
+        var btn = document.getElementById('pwAlbumToggle');
+        if (btn) btn.classList.toggle('active', !!window.pwAlbumView);
+        renderPhotoWallWithoutReload();
+    };
+
+    window.switchPhotoWallView = function() {
+        var select = document.getElementById('pwAlbumSort');
+        window.pwSortKey = select ? select.value : (window.pwSortKey || 'date_desc');
+        renderPhotoWallWithoutReload();
+    };
 
     function animatePhotoCards(grid) {
         requestAnimationFrame(function() {
