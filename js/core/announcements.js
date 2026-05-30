@@ -328,13 +328,6 @@
             content: `
                 <h4>更新内容</h4>
                 <ul>
-                    <li><strong>举报按钮修复</strong>
-                        <ul>
-                            <li>将举报按钮直接嵌入帖子模板HTML（renderFeedWithAvatars 和 appendMorePosts），替代脆弱的DOM打补丁方式</li>
-                            <li>移除features.js中的MutationObserver补丁代码，按钮随帖子初始加载一并渲染，杜绝消失问题</li>
-                            <li>举报按钮右对齐置底，通过inline onclick调用window.openReport，兼容所有设备和屏幕尺寸</li>
-                        </ul>
-                    </li>
                     <li><strong>照片全屏预览双指放大性能优化</strong>
                         <ul>
                             <li>CSS层面启用GPU硬件加速：backface-visibility: hidden + transform: translateZ(0) + will-change: transform</li>
