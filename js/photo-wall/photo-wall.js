@@ -84,6 +84,10 @@
             ty: 0,
             startX: 0,
             startY: 0,
+            baseTx: 0,
+            baseTy: 0,
+            tapX: 0,
+            tapY: 0,
             moved: false,
             dragging: false,
             dismissY: 0,
@@ -91,7 +95,11 @@
             fullToastAt: 0,
             pinchStartDist: 0,
             pinchStartScale: 1,
-            pinchActive: false
+            pinchActive: false,
+            pinchAx: 0,
+            pinchAy: 0,
+            pinchCx: 0,
+            pinchCy: 0
         };
 
         var imageCache = new Map();
@@ -540,6 +548,10 @@
             showCurrentPhoto(index, { thumbImg: thumbImg, instant: true });
             var curImg = document.getElementById('photoPreviewImage');
             runOpenAnimation(overlay, curImg, originRect, thumbImg);
+            var photo = state.current;
+            if (photo && window.syncPhotoViewCount) {
+                setTimeout(function() { window.syncPhotoViewCount(photo); }, 300);
+            }
         };
 
         window.closePhotoPreview = function() {
@@ -646,6 +658,10 @@
                 setupTrack();
                 showCurrentPhoto(nextIndex, { instant: false });
                 if (track) track.classList.remove('snapping');
+                var photo = state.current;
+                if (photo && window.syncPhotoViewCount) {
+                    setTimeout(function() { window.syncPhotoViewCount(photo); }, 200);
+                }
             }, 290);
         }
 
@@ -767,6 +783,8 @@
                 if (e.target.closest('button,.pp-info-modal-content')) return;
                 state.startX = e.clientX;
                 state.startY = e.clientY;
+                state.baseTx = state.tx;
+                state.baseTy = state.ty;
                 state.moved = false;
                 state.dragging = true;
                 state.dismissY = 0;
@@ -781,8 +799,8 @@
                 if (Math.abs(dx) + Math.abs(dy) > 12) state.moved = true;
                 var curImg = document.getElementById('photoPreviewImage');
                 if (state.scale > 1.01) {
-                    state.tx = dx;
-                    state.ty = dy;
+                    state.tx = state.baseTx + dx;
+                    state.ty = state.baseTy + dy;
                     if (curImg) {
                         curImg.style.transition = 'none';
                         applyTransform(curImg);
@@ -808,8 +826,6 @@
                 }
                 overlay.style.opacity = '1';
                 if (state.scale > 1.01 && state.moved) {
-                    state.tx = 0;
-                    state.ty = 0;
                     if (curImg) {
                         curImg.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
                         applyTransform(curImg);
@@ -825,6 +841,8 @@
                     return;
                 }
                 var now = Date.now();
+                state.tapX = e.clientX;
+                state.tapY = e.clientY;
                 if (!state.moved && now - state.lastTap < 300) {
                     toggleZoom();
                     state.lastTap = 0;
@@ -842,8 +860,23 @@
         function toggleZoom() {
             var img = document.getElementById('photoPreviewImage');
             if (!img) return;
-            state.scale = state.scale > 1.01 ? 1 : 2.5;
-            if (state.scale <= 1.01) { state.tx = 0; state.ty = 0; }
+            if (state.scale > 1.01) {
+                state.scale = 1;
+                state.tx = 0;
+                state.ty = 0;
+                img.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
+                applyTransform(img);
+                setTimeout(function() { if (img) img.style.transition = ''; }, 260);
+                return;
+            }
+            var targetScale = 2.5;
+            var cx = state.tapX || window.innerWidth / 2;
+            var cy = state.tapY || window.innerHeight / 2;
+            var vw2 = window.innerWidth / 2;
+            var vh2 = window.innerHeight / 2;
+            state.tx = (vw2 - cx) * (1 - targetScale);
+            state.ty = (vh2 - cy) * (1 - targetScale);
+            state.scale = targetScale;
             img.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
             applyTransform(img);
             setTimeout(function() { if (img) img.style.transition = ''; }, 260);
@@ -861,12 +894,20 @@
                     var dy = e.touches[0].clientY - e.touches[1].clientY;
                     state.pinchStartDist = Math.sqrt(dx * dx + dy * dy);
                     state.pinchStartScale = state.scale;
+                    var cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                    var cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                    state.pinchCx = cx;
+                    state.pinchCy = cy;
+                    state.pinchAx = (cx - window.innerWidth / 2 - state.tx) / (state.scale || 1);
+                    state.pinchAy = (cy - window.innerHeight / 2 - state.ty) / (state.scale || 1);
                     state.dragging = false;
                     state.moved = false;
                 } else if (e.touches.length === 1) {
                     var touch = e.touches[0];
                     state.startX = touch.clientX;
                     state.startY = touch.clientY;
+                    state.baseTx = state.tx;
+                    state.baseTy = state.ty;
                     state.moved = false;
                     state.dragging = true;
                     state.dismissY = 0;
@@ -880,7 +921,12 @@
                     var dy = e.touches[0].clientY - e.touches[1].clientY;
                     var dist = Math.sqrt(dx * dx + dy * dy);
                     if (state.pinchStartDist > 0) {
-                        state.scale = Math.max(0.5, Math.min(6, state.pinchStartScale * (dist / state.pinchStartDist)));
+                        var newScale = Math.max(0.5, Math.min(6, state.pinchStartScale * (dist / state.pinchStartDist)));
+                        var cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+                        var cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+                        state.tx = cx - window.innerWidth / 2 - state.pinchAx * newScale;
+                        state.ty = cy - window.innerHeight / 2 - state.pinchAy * newScale;
+                        state.scale = newScale;
                         var img = document.getElementById('photoPreviewImage');
                         if (img) {
                             img.style.transition = 'none';
@@ -897,8 +943,8 @@
                 e.preventDefault();
                 var curImg = document.getElementById('photoPreviewImage');
                 if (state.scale > 1.01) {
-                    state.tx = dx;
-                    state.ty = dy;
+                    state.tx = state.baseTx + dx;
+                    state.ty = state.baseTy + dy;
                     if (curImg) {
                         curImg.style.transition = 'none';
                         applyTransform(curImg);
@@ -937,8 +983,6 @@
                 }
                 overlay.style.opacity = '1';
                 if (state.scale > 1.01 && state.moved) {
-                    state.tx = 0;
-                    state.ty = 0;
                     if (curImg) {
                         curImg.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
                         applyTransform(curImg);
@@ -954,6 +998,8 @@
                     return;
                 }
                 var now = Date.now();
+                state.tapX = touch ? touch.clientX : window.innerWidth / 2;
+                state.tapY = touch ? touch.clientY : window.innerHeight / 2;
                 if (!state.moved && now - state.lastTap < 300) {
                     toggleZoom();
                     state.lastTap = 0;
