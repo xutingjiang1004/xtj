@@ -5139,6 +5139,11 @@
             0% { opacity: 0; transform: translateY(10px); }
             100% { opacity: 1; transform: translateY(0); }
         }
+        .photo-preview-overlay.active .pp-compact-btn,
+        .photo-preview-overlay.active .pp-zoom-btn {
+            opacity: 1;
+            transform: translateY(0);
+        }
         .pp-info-btn:hover,
         .pp-share-btn:hover,
         .pp-rotate-btn:hover,
