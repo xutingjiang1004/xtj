@@ -74,6 +74,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         let postFilterUsersLoaded = false;
         let postFilterUsersLoading = false;
         let postFilterUsers = [];
+        let postFilterUsersLoadSeq = 0;
+        let postFilterUsersLoadTimer = null;
+
+        function stopPostFilterUsersLoading() {
+            if (postFilterUsersLoadTimer) {
+                clearTimeout(postFilterUsersLoadTimer);
+                postFilterUsersLoadTimer = null;
+            }
+            postFilterUsersLoading = false;
+        }
+
+        function renderPostFilterUserLoader() {
+            return [
+                '<div class="post-user-chip post-user-chip--loading is-empty">',
+                '<span class="post-user-loader" aria-hidden="true">',
+                '<span class="post-user-loader-ring"></span>',
+                '<span class="post-user-loader-core"></span>',
+                '<span class="post-user-loader-spark"></span>',
+                '</span>',
+                '<span class="post-user-chip-name">加载中...</span>',
+                '</div>'
+            ].join('');
+        }
 
         function isAdmin() { return currentUser === ADMIN_NAME; }
 
@@ -2024,7 +2047,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var activeUser = String(input.value || "").trim();
                 if (resetBtn) resetBtn.style.visibility = activeUser ? "visible" : "hidden";
                 if (postFilterUsersLoading && !postFilterUsers.length) {
-                    list.innerHTML = '<div class="post-user-chip is-empty">\u52a0\u8f7d\u4e2d...</div>';
+                    list.innerHTML = renderPostFilterUserLoader();
                     return;
                 }
                 var users = Array.isArray(postFilterUsers) ? postFilterUsers : [];
@@ -2056,8 +2079,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     renderPostFilterUsers();
                     return;
                 }
+                var loadSeq = ++postFilterUsersLoadSeq;
                 postFilterUsersLoading = true;
                 renderPostFilterUsers();
+                if (postFilterUsersLoadTimer) clearTimeout(postFilterUsersLoadTimer);
+                postFilterUsersLoadTimer = setTimeout(function() {
+                    if (loadSeq !== postFilterUsersLoadSeq) return;
+                    postFilterUsersLoading = false;
+                    renderPostFilterUsers();
+                }, 2400);
                 try {
                     var authRes = await sb.from("posts")
                         .select("user_name")
@@ -2075,10 +2105,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }).sort(function(a, b) {
                         return a.localeCompare(b, "zh-Hans-CN");
                     });
-                    if (postFilterUsers.length) {
-                        await loadAvatarsForUsers(postFilterUsers);
-                    }
                     postFilterUsersLoaded = true;
+                    if (postFilterUsers.length) {
+                        await Promise.race([
+                            loadAvatarsForUsers(postFilterUsers),
+                            new Promise(function(resolve) { setTimeout(resolve, 1800); })
+                        ]);
+                    }
                 } catch (e) {
                     console.error("[post-filter-users] load failed", e);
                     if (!postFilterUsers.length) {
@@ -2094,7 +2127,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         });
                     }
                 } finally {
-                    postFilterUsersLoading = false;
+                    if (loadSeq === postFilterUsersLoadSeq) {
+                        stopPostFilterUsersLoading();
+                    }
                     renderPostFilterUsers();
                 }
             }
@@ -5470,5 +5505,238 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             });
 
             window.__xtjUiTextRepair = repairNode;
+        })();
+
+        (function installCleanStatUiOverrides() {
+            if (window.__xtjStatUiOverridesV1) return;
+            window.__xtjStatUiOverridesV1 = true;
+
+            function statPostDetailMarkup(post, likes, comments) {
+                var vc = (post.views || 0) + 1;
+                var mediaHtml = post.media_url ? (
+                    post.media_type === 'video'
+                        ? '<video src="' + escapeHtml(post.media_url) + '" controls preload="none"></video>'
+                        : '<img src="' + escapeHtml(post.media_url) + '" onclick="openImageViewer(\'' + escapeHtml(post.media_url).replace(/'/g, "\\'") + '\')" loading="lazy" />'
+                ) : '';
+                return [
+                    '<div class="post-detail-header"><div class="pdh-left">',
+                    '<div class="pdh-name">' + escapeHtml(post.user_name) + '</div>',
+                    '<div class="pdh-time">' + new Date(post.created_at).toLocaleString() + '</div>',
+                    '</div></div>',
+                    post.content ? '<div class="post-detail-content">' + escapeHtml(post.content) + '</div>' : '',
+                    mediaHtml ? '<div class="post-detail-media">' + mediaHtml + '</div>' : '',
+                    '<div class="post-detail-stats">浏览 ' + vc + ' 次 · 点赞 ' + likes.length + ' 次 · 评论 ' + comments.length + ' 次</div>',
+                    '<div class="stat-two-col">',
+                    '<div class="stat-col"><div class="stat-section-title">❤️ 点赞用户 ' + likes.length + '</div>' +
+                        (likes.length ? likes.map(function(l) {
+                            return '<div class="stat-like-item"><div class="sli-info"><div class="sli-user">' + escapeHtml(l.user_name) + '</div></div><span class="sli-time">' + new Date(l.created_at).toLocaleString() + '</span></div>';
+                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>') +
+                    '</div>',
+                    '<div class="stat-col"><div class="stat-section-title">💬 评论用户 ' + comments.length + '</div>' +
+                        (comments.length ? comments.map(function(c) {
+                            return '<div class="stat-comment-item"><div class="sci-info"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><div class="sci-target">' + escapeHtml(c.content) + '</div></div><span class="sci-time">' + new Date(c.created_at).toLocaleString() + '</span></div>';
+                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无评论</div>') +
+                    '</div>',
+                    '</div>'
+                ].join('');
+            }
+
+            renderPostDetail = function(post, likes, comments) {
+                var body = document.getElementById('postDetailBody');
+                if (!body) return;
+                body.innerHTML = statPostDetailMarkup(post, likes, comments);
+            };
+
+            function statPostItemMarkup(post) {
+                var text = post.content || '';
+                var hasImg = post.media_url && post.media_type === 'image';
+                var hasVid = post.media_url && post.media_type === 'video';
+                var tag = hasImg ? '<span class="spi-img-tag">📷 图片</span>' : (hasVid ? '<span class="spi-img-tag">🎬 视频</span>' : '');
+                var summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
+                var display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
+                var onclick = "openPostDetail('" + String(post.id).replace(/'/g, "\\'") + "')";
+                return [
+                    '<div class="stat-post-item">',
+                    '<span class="spi-content" onclick="' + onclick + '" title="点击查看帖子详情">' + escapeHtml(display) + tag + '</span>',
+                    hasImg ? '<img class="spi-thumb" src="' + escapeHtml(post.media_url) + '" onclick="' + onclick + '" title="点击查看帖子详情" />' : '',
+                    '<span class="spi-time">' + new Date(post.created_at).toLocaleString() + '</span>',
+                    '</div>'
+                ].join('');
+            }
+
+            renderPostStats = function() {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var userMap = {};
+                statAllPosts.forEach(function(p) {
+                    if (!userMap[p.user_name]) userMap[p.user_name] = [];
+                    userMap[p.user_name].push(p);
+                });
+                var entries = Object.entries(userMap).sort(function(a, b) { return b[1].length - a[1].length; });
+                if (!entries.length) {
+                    body.innerHTML = '<div class="stat-empty">暂无动态数据</div>';
+                    return;
+                }
+                body.innerHTML = entries.map(function(entry) {
+                    var name = entry[0];
+                    var posts = entry[1];
+                    return '<div class="stat-user-group">' +
+                        '<div class="stat-user-header"><div class="suh-left"><div class="suh-avatar">' + escapeHtml(name).slice(0, 1).toUpperCase() + '</div><span class="suh-name">' + escapeHtml(name) + '</span></div><span class="suh-count">' + posts.length + ' 条</span></div>' +
+                        '<div class="stat-user-posts">' +
+                            posts.slice(0, 3).map(function(p) { return statPostItemMarkup(p); }).join('') +
+                            (posts.length > 3 ? '<div style="text-align:center; padding:8px 0;"><button class="stat-view-btn" onclick="loadUserAllPosts(\'' + String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">查看全部 ' + posts.length + ' 条</button></div>' : '') +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+            };
+
+            window.loadUserAllPosts = function(userName) {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var userPosts = statAllPosts.filter(function(p) { return p.user_name === userName; });
+                body.innerHTML = [
+                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">← 返回总动态</button>',
+                    '<div style="font-weight:700; font-size:15px; margin-bottom:12px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.1);">',
+                    escapeHtml(userName) + ' 的全部帖子（' + userPosts.length + ' 条）',
+                    '</div>',
+                    userPosts.map(function(p) { return statPostItemMarkup(p); }).join('')
+                ].join('');
+            };
+
+            renderViewStats = function() {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var history = getViewHistory();
+                if (!history.length) {
+                    body.innerHTML = [
+                        '<div class="stat-empty">',
+                        '<div style="font-size:16px; margin-bottom:8px;">📊 浏览记录</div>',
+                        '<div style="font-size:13px;">暂无浏览详情数据</div>',
+                        '<div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>',
+                        '<div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数：' + (document.getElementById('sViews') ? document.getElementById('sViews').textContent : '0') + ' 次</div>',
+                        '</div>'
+                    ].join('');
+                    return;
+                }
+                body.innerHTML = history.map(function(v) {
+                    return '<div class="stat-view-item"><div class="svi-info"><div class="svi-user">' + escapeHtml(v.user_name) + '</div><div class="svi-target">浏览了 <b>' + escapeHtml(v.post_author) + '</b> 的帖子：' + escapeHtml(v.post_content) + '</div></div><span class="svi-time">' + new Date(v.viewed_at).toLocaleString() + '</span></div>';
+                }).join('');
+            };
+
+            renderLikeStats = function() {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var postMap = {};
+                statAllPosts.forEach(function(p) { postMap[p.id] = p; });
+
+                function buildLikesCol() {
+                    var h = '<div class="stat-section-title">❤️ 点赞记录</div>';
+                    if (statAllLikes.length) {
+                        h += statAllLikes.slice(0, 200).map(function(l) {
+                            var post = postMap[l.post_id];
+                            var postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(已删除帖子)';
+                            return '<div class="stat-like-item"><div class="sli-info"><div class="sli-user">' + escapeHtml(l.user_name) + '</div><div class="sli-target">点赞了 ' + postContent + '</div></div><span class="sli-time">' + new Date(l.created_at).toLocaleString() + '</span></div>';
+                        }).join('');
+                    } else {
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无点赞记录</div>';
+                    }
+                    return h;
+                }
+
+                function buildCommentsCol() {
+                    var h = '<div class="stat-section-title">💬 评论记录</div>';
+                    if (statAllComments.length) {
+                        h += statAllComments.slice().reverse().slice(0, 200).map(function(c) {
+                            var post = postMap[c.post_id];
+                            var postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(已删除帖子)';
+                            return '<div class="stat-comment-item"><div class="sci-info"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><div class="sci-target">评论了 ' + postContent + '：' + escapeHtml(c.content) + '</div></div><span class="sci-time">' + new Date(c.created_at).toLocaleString() + '</span></div>';
+                        }).join('');
+                    } else {
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
+                    }
+                    return h;
+                }
+
+                body.innerHTML = '<div class="stat-two-col"><div class="stat-col">' + buildLikesCol() + '</div><div class="stat-col">' + buildCommentsCol() + '</div></div>';
+            };
+
+            window.openPostDetail = async function(postId) {
+                var title = document.getElementById('postDetailTitle');
+                var body = document.getElementById('postDetailBody');
+                var modal = document.getElementById('postDetailModal');
+                if (title) title.textContent = '帖子详情';
+                if (body) body.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
+                if (modal) modal.classList.add('active');
+
+                try {
+                    const [postRes, commRes, likeRes] = await Promise.all([
+                        sb.from("posts").select("*").eq("id", postId).maybeSingle(),
+                        sb.from("comments").select("*").eq("post_id", postId).order("created_at"),
+                        sb.from("likes").select("*").eq("post_id", postId).order("created_at", {ascending: false})
+                    ]);
+                    const post = normalizePost(postRes.data);
+                    if (!post) {
+                        if (body) body.innerHTML = '<div class="stat-empty">帖子不存在或已删除</div>';
+                        return;
+                    }
+                    if (!canViewPost(post)) {
+                        if (body) body.innerHTML = '<div class="stat-empty">无权查看这条帖子</div>';
+                        return;
+                    }
+                    renderPostDetail(post, likeRes.data || [], commRes.data || []);
+                } catch (e) {
+                    if (body) body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
+                    console.error(e);
+                }
+            };
+
+            window.openStatDetail = async function(type) {
+                statCurrentType = type;
+                var titles = {
+                    posts: '总动态 - 按用户分组',
+                    views: '总浏览 - 浏览记录',
+                    likes: '点赞和评论 - 记录'
+                };
+                var title = document.getElementById('statModalTitle');
+                var body = document.getElementById('statModalBody');
+                var modal = document.getElementById('statModal');
+                if (title) title.textContent = titles[type] || '统计详情';
+                if (modal) modal.classList.add('active');
+
+                if (statAllPosts.length > 0 && Date.now() - statCacheTime < STAT_CACHE_DURATION) {
+                    renderStatByType(type);
+                    if (statPollTimer) clearInterval(statPollTimer);
+                    statPollTimer = setInterval(refreshStatModal, 15000);
+                    prefetchStatData().then(function() {
+                        if (modal && modal.classList.contains('active') && statCurrentType === type) {
+                            renderStatByType(type);
+                        }
+                    });
+                    return;
+                }
+
+                if (body) body.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
+                try {
+                    const [postRes, commRes, likeRes] = await Promise.all([
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("comments").select("*").order("created_at"),
+                        sb.from("likes").select("*").order("created_at", { ascending: false })
+                    ]);
+                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) {
+                        return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__' && canViewPost(p);
+                    });
+                    var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
+                    statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
+                    statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
+                    statCacheTime = Date.now();
+                    renderStatByType(type);
+                } catch (e) {
+                    if (body) body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
+                    console.error('stat error', e);
+                }
+
+                if (statPollTimer) clearInterval(statPollTimer);
+                statPollTimer = setInterval(refreshStatModal, 15000);
+            };
         })();
 
