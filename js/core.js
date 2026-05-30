@@ -3350,6 +3350,28 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let dockChatMsgsUser = null;
             let _dockPreviewUrl = null;
 
+            function renderChatLoadingState(el, options) {
+                if (!el) return;
+                const title = options && options.title ? options.title : '加载中...';
+                const subtitle = options && options.subtitle ? options.subtitle : '正在同步聊天内容';
+                const variant = options && options.variant ? ' chat-loading-card--' + options.variant : '';
+                el.innerHTML = `
+                    <div class="chat-loading-card${variant}">
+                        <div class="chat-loading-orb" aria-hidden="true">
+                            <span class="chat-loading-aura"></span>
+                            <span class="chat-loading-ring"></span>
+                            <span class="chat-loading-ring chat-loading-ring--late"></span>
+                            <span class="chat-loading-core"></span>
+                            <span class="chat-loading-glyph">✦</span>
+                        </div>
+                        <div class="chat-loading-text">
+                            <div class="chat-loading-title">${escapeHtml(title)}</div>
+                            <div class="chat-loading-subtitle">${escapeHtml(subtitle)}</div>
+                        </div>
+                        <div class="chat-loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+                    </div>`;
+            }
+
             function dockChatGoBack() {
                 dockChatActiveUser = null;
                 document.getElementById('dockChatDetailView').classList.add('hidden');
@@ -3383,6 +3405,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 dockChatActiveUser = userName;
                 document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载涓?..</div></div>';
+                renderChatLoadingState(document.getElementById('dockChatMessages'), {
+                    title: '加载中...',
+                    subtitle: '正在打开聊天通道',
+                    variant: 'detail'
+                });
                 document.getElementById('dockChatListView').classList.add('hidden');
                 document.getElementById('dockChatDetailView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'flex';
@@ -3399,6 +3426,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 dockChatListCacheTime = Date.now();
                 el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">鈴?/div><div>加载涓?..</div></div>';
                 try {
+                    renderChatLoadingState(el, {
+                        title: '加载中...',
+                        subtitle: '正在召回最近消息'
+                    });
                     const { data: allMsgs, error } = await sb.from("posts")
                         .select("id, user_name, media_url, content, created_at")
                         .eq("media_type", DM_MARKER)
@@ -5292,3 +5323,4 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             window.__xtjUiTextRepair = repairNode;
         })();
+
