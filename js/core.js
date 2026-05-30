@@ -3979,20 +3979,37 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // ========== 更新日志系统 ==========
             const changelogData = [
                 {
+                    version: 'v0.0.62',
+                    date: '2026-05-30',
+                    content: `
+                        <h4>更新内容</h4>
+                        <ul>
+                            <li>删除所有冗余备份文件、临时修复脚本和测试脚本</li>
+                            <li>全面检查：HTML引用完整性、JS语法（全部通过）、乱码扫描、后端服务验证</li>
+                        </ul>
+                    
+                        <h4>项目优化</h4>
+                        <ul>
+                            <li>清理 js 备份文件、scripts 目录、root 修复脚本等约 110+ 冗余文件</li>
+                            <li>修复更新日志页面乱码问题</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.0.60',
                     date: '2026-05-28',
                     content: `
-                        <h4>修内容</h4>
+                        <h4>修复内容</h4>
                         <ul>
-                            <li>修复�༭帖子����/˽��不真正生效问�?/li>
-                            <li>修复统计����泄露˽��帖子互动</li>
-                            <li>修复��ƬԤ����双击缩小/双指缩放不稳�?/li>
+                            <li>修复编辑帖子公开/私密不真正生效问题</li>
+                            <li>修复统计详情泄露私密帖子互动</li>
+                            <li>修复照片预览双击缩小/双指缩放不稳定</li>
                         </ul>
                         <h4>优化内容</h4>
                         <ul>
-                            <li>��Ƭ墙预览新增双指缩�?/li>
-                            <li>标记废弃函数避免误修�?/li>
-                            <li>upload.js select 字段完整性提�?/li>
+                            <li>照片墙预览新增双指缩放</li>
+                            <li>标记废弃函数避免误修改</li>
+                            <li>upload.js select 字段完整性提升</li>
                         </ul>
                     `
                 },
@@ -4000,18 +4017,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.59',
                     date: '2026-05-27',
                     content: `
-                        <h4>修内容</h4>
+                        <h4>修复内容</h4>
                         <ul>
-                            <li>修复�ٱ�按钮点击无响应问�?/li>
-                            <li>修复�ٱ��ύ字段名匹配，添加 fallback 机制</li>
-                            <li>修复֪ͨ弢��?localStorage key 不一�?/li>
-                            <li>修复统计����泄露˽��帖子互动</li>
-                            <li>修复帖子详情页无隐私权限检查</li>
-                            <li>修复发帖�ļ��ϴ�未检查错�?/li>
+                            <li>修复举报按钮点击无响应问题</li>
+                            <li>修复举报提交字段名匹配，添加 fallback 机制</li>
+                            <li>修复通知开关 localStorage key 不一致</li>
+                            <li>修复统计详情泄露私密帖子互动</li>
+                            <li>修复帖子详情页无私密权限检查</li>
+                            <li>修复发帖文件上传未检查错误</li>
                         </ul>
                         <h4>优化内容</h4>
                         <ul>
-                            <li>��Ƭ墙缩略图����速度提升</li>
+                            <li>照片墙缩略图加载速度提升</li>
                             <li>去除 index.html UTF-8 BOM</li>
                         </ul>
                     `
@@ -4022,91 +4039,95 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>ͼƬ分辨率一致��优�?/strong>
+                            <li><strong>图片分辨率一致化优化</strong>
                                 <ul>
-                                    <li>统一缩略图生成参数为1200x1200分辨率��?.85ѹ��质量，确保封面缩略图与实际内容照片分辨率比例和清晰度标准完全丢��?/li>
-                                    <li>覆盖��Ƭ墙两套上传流程（upload.js + features.js），保证���Љ新建照片均按统丢�标准生成高质量缩略图</li>
+                                    <li>统一缩略图生成参数为1200x1200分辨率，0.85压缩质量，确保封面缩略图与实际内容照片分辨率比例和清晰度标准完全一致</li>
+                                    <li>覆盖照片墙两套上传流程（upload.js + features.js），保证所有新建照片均按统一标准生成高质量缩略图</li>
                                 </ul>
                             </li>
-                            <li><strong>删除功能UI涓庝氦浜掍紭鍖?/strong>
+                            <li><strong>删除功能UI与交互优化</strong>
                                 <ul>
-                                    <li>将系统级window.confirmɾ��确认弹窗替换为自定义玻璃磨砂弹窗，整体UI风格统一</li>
-                                    <li>弹窗采用透明玻璃效果 + backdrop-filter: blur(28px) saturate(200%) ��ǿ磨砂质感</li>
-                                    <li>弹窗弹出时从scale(0.9) translateY(20px)平滑过渡到正常位置，动画曲线cubic-bezier弹��缓�?/li>
-                                    <li>确认ɾ��后弹窗以scale(0.88)淡出动画消失，遮罩层ͬ����淡化</li>
-                                    <li>按钮在动画期间禁用防重复点击，点击遮罩层外部可取�?/li>
-                                    <li>���Љ交互流程自动清理回调引用，避免内存泄漏</li>
+                                    <li>将系统级window.confirm删除确认弹窗替换为自定义玻璃磨砂弹窗，整体UI风格统一</li>
+                                    <li>弹窗采用透明玻璃效果 + backdrop-filter: blur(28px) saturate(200%) 增强磨砂质感</li>
+                                    <li>弹窗弹出时从scale(0.9) translateY(20px)平滑过渡到正常位置，动画曲线cubic-bezier弹性缓动</li>
+                                    <li>确认删除后弹窗以scale(0.88)淡出动画消失，遮罩层同步淡化</li>
+                                    <li>按钮在动画期间禁用防重复点击，点击遮罩层外部可取消</li>
+                                    <li>所有交互流程自动清理回调引用，避免内存泄漏</li>
                                 </ul>
                             </li>
                         </ul>
+                    
                     `
                 },
                 {
                     version: 'v0.0.55',
                     date: '2026-05-26',
                     content: `
-                        <h4>修内容</h4>
+                        <h4>修复内容</h4>
                         <ul>
-                            <li><strong>��Ƭ墙封面显示修�?/strong>
+                            <li><strong>照片墙封面显示修复</strong>
                                 <ul>
-                                    <li>箢��?photo-wall-item伪元素视觉效果，�Ƴ�多层渐变叠加，避免用户感知多张图�?/li>
-                                    <li>脉冲圆环正确居中定位，消除视觉混�?/li>
+                                    <li>优化photo-wall-item伪元素视觉效果，移除多层渐变叠加，避免用户感知多张图片</li>
+                                    <li>脉冲圆环正确居中定位，消除视觉混乱</li>
                                 </ul>
                             </li>
-                            <li><strong>照片鐐瑰嚮预览修</strong>
+                            <li><strong>照片点击预览修复</strong>
                                 <ul>
-                                    <li>�Ƴ�冲突的CSS动画ppTrackEnter，避免与JS transform时序冲突</li>
-                                    <li>openPhotoPreview中添加预定位逻辑，确保轨道在遮罩层可见前已就�?/li>
+                                    <li>移除冲突的CSS动画ppTrackEnter，避免与JS transform时序冲突</li>
+                                    <li>openPhotoPreview中添加预定位逻辑，确保轨道在遮罩层可见前已就位</li>
                                     <li>修复相册视图ppSortedPhotos被覆盖的Bug</li>
                                 </ul>
                             </li>
                         </ul>
+                    
                     `
                 },
                 {
                     version: 'v0.0.54',
                     date: '2026-05-25',
                     content: `
-                        <h4>修复与优�?/h4>
+                        <h4>修复与优化</h4>
                         <ul>
-                            <li><strong>閾炬帴复制优化</strong>
+                            <li><strong>链接复制优化</strong>
                                 <ul>
-                                    <li>优先浣跨敤同步API锛?lt;10ms锛夛紝鐐瑰嚮鍗虫椂显示缁胯壊🤍?寮规€у姩鐢?/li>
+                                    <li>优先使用同步API（&lt;10ms），点击即时显示绿色弹跳动画</li>
                                 </ul>
                             </li>
-                            <li><strong>缩放与手势优�?/strong>
+                            <li><strong>缩放与手势优化</strong>
                                 <ul>
-                                    <li>ppResetZoom完整重置锚点状��，防止跨图残留</li>
+                                    <li>ppResetZoom完整重置锚点状态，防止跨图残留</li>
                                     <li>双指间距变化&lt;10px判定为无效操作，防误识别</li>
                                 </ul>
                             </li>
-                            <li><strong>稳定性修�?/strong>
+                            <li><strong>稳定性修复</strong>
                                 <ul>
-                                    <li>新增safeLocalStorageGetJSON锛?5澶勬浛鎹㈡潨缁漧ocalStorage宕╂簝</li>
-                                    <li>�Ƴ��ٱ�弹窗内联display:none，统丢�CSS class控制</li>
+                                    <li>新增safeLocalStorageGetJSON，15处替换杜绝localStorage崩溃</li>
+                                    <li>移除举报弹窗内联display:none，统一CSS class控制</li>
                                 </ul>
                             </li>
                         </ul>
+                    
                     `
                 },
                 {
                     version: 'v0.0.53',
                     date: '2026-05-25',
                     content: `
-                        <h4>修内容</h4>
+                        <h4>修复内容</h4>
                         <ul>
                             <li><strong>封面闭包陷阱修复</strong>
                                 <ul>
-                                    <li>IIFE包裹确保每张ͼƬ独立绑定，全部正确加�?/li>
+                                    <li>IIFE包裹确保每张图片独立绑定，全部正确加载</li>
                                 </ul>
                             </li>
-                            <li><strong>预期姞杞戒紭鍖?/strong>
+                            <li><strong>预加载优化</strong>
                                 <ul>
-                                    <li>延迟到滑动动画结束后执行，避免资源竞�?/li>
-                                    <li>精准控制Ԥ�ڊ�载数量为3张，提升����命中�?/li>
+                                    <li>延迟到滑动动画结束后执行，避免资源竞争</li>
+                                    <li>精准控制预加载数量为3张，提升缓存命中率</li>
                                 </ul>
                             </li>
                         </ul>
+                    
                     `
                 },
                 {
@@ -4115,28 +4136,28 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>�ٱ�按钮修复</strong>
+                            <li><strong>举报按钮修复</strong>
                                 <ul>
-                                    <li>将举报按钮直接嵌入帖子模板HTML（renderFeedWithAvatars �?appendMorePosts），替代脆弱的DOM打补丁方�?/li>
-                                    <li>�Ƴ�features.js中的MutationObserver补丁代码，按钮随帖子初始����丢�并渲染，杜绝消失问题</li>
-                                    <li>�ٱ�按钮右对齐置底，通过inline onclick调用window.openReport，兼容所有设备和屏幕尺寸</li>
+                                    <li>将举报按钮直接嵌入帖子模板HTML（renderFeedWithAvatars 和 appendMorePosts），替代脆弱的DOM打补丁方式</li>
+                                    <li>移除features.js中的MutationObserver补丁代码，按钮随帖子初始加载一并渲染，杜绝消失问题</li>
+                                    <li>举报按钮右对齐置底，通过inline onclick调用window.openReport，兼容所有设备和屏幕尺寸</li>
                                 </ul>
                             </li>
-                            <li><strong>照片全屏预览鍙屾寚鏀惧ぇ鎬ц兘优化</strong>
+                            <li><strong>照片全屏预览双指放大性能优化</strong>
                                 <ul>
-                                    <li>CSS层面启用GPU硬件加��：backface-visibility: hidden + transform: translateZ(0) + will-change: transform</li>
-                                    <li>����ϵͳ�ع�：预分配PinchPre对象避免每帧Array.from分配，降低GC压力</li>
-                                    <li>新增灞忓箷刷新鐜囪嚜鍔ㄦ娴嬶紙rAF涓€兼硶锛夛紝鑷€傚簲120Hz/90Hz/60Hz甯ч绠?/li>
-                                    <li>viewport中心点预计算����，减少每帧布屢�查询</li>
+                                    <li>CSS层面启用GPU硬件加速：backface-visibility: hidden + transform: translateZ(0) + will-change: transform</li>
+                                    <li>手势系统重构：预分配PinchPre对象避免每帧Array.from分配，降低GC压力</li>
+                                    <li>新增屏幕刷新率自动检测（rAF中值法），自适应120Hz/90Hz/60Hz帧预算</li>
+                                    <li>viewport中心点预计算缓存，减少每帧布局查询</li>
                                 </ul>
                             </li>
-                            <li><strong>照片上传鑷姩压缩</strong>
+                            <li><strong>照片上传自动压缩</strong>
                                 <ul>
-                                    <li>������compressToMaxSize函数：文�?10MB时自动压缩至~10MB，多级降级策略（2560�?048�?920�?280�?00像素�?/li>
-                                    <li>100MB超大型照片也能自动压缩后�ϴ�，不再直接拒�?/li>
-                                    <li>ѹ��ʧ��时回逢�策略：≤50MB直接�ϴ�原文件，>50MB且压缩失败则跳过</li>
-                                    <li>ѹ��前后尺寸均记录（fileSize + originalSize），����透明可追�?/li>
-                                    <li>Supabase免费版限制已确认：文件存�?GB，单�ļ�50MB，月带宽5GB</li>
+                                    <li>新增compressToMaxSize函数：文件>10MB时自动压缩至~10MB，多级降级策略（2560→2048→1920→1280→800像素）</li>
+                                    <li>100MB超大型照片也能自动压缩后上传，不再直接拒绝</li>
+                                    <li>压缩失败时回退策略：≤50MB直接上传原文件，>50MB且压缩失败则跳过</li>
+                                    <li>压缩前后尺寸均记录（fileSize + originalSize），数据透明可追溯</li>
+                                    <li>Supabase免费版限制已确认：文件存储1GB，单文件50MB，月带宽5GB</li>
                                 </ul>
                             </li>
                         </ul>
@@ -4146,44 +4167,45 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.52',
                     date: '2026-05-25',
                     content: `
-                        <h4>修内容</h4>
+                        <h4>修复内容</h4>
                         <ul>
-                            <li><strong>��Ƭ墙数据丢失问题彻底修�?/strong>
+                            <li><strong>照片墙数据丢失问题彻底修复</strong>
                                 <ul>
                                     <li>根因定位：features.js中renderPhotoWall补丁覆盖了render.js的正确实现，导致永远从空数组[]渲染</li>
-                                    <li>移除错误鐨勮ˉ涓佷唬鐮侊紝恢复render.js涓畬鏁寸殑加载+排序+娓叉煋娴佹按绾?/li>
-                                    <li>修复features.js中多个IIFE作用域越界调用（formatPhotoTime、escapeHtml等全屢�函数引用修复�?/li>
+                                    <li>移除错误的补丁代码，恢复render.js中完整的加载+排序+渲染流水线</li>
+                                    <li>修复features.js中多个IIFE作用域越界调用（formatPhotoTime、escapeHtml等全局函数引用修复）</li>
                                 </ul>
                             </li>
-                            <li><strong>筛��排序功能修�?/strong>
+                            <li><strong>筛选排序功能修复</strong>
                                 <ul>
-                                    <li>日期、名称��热度三种排序条件现在能正确组合生效</li>
-                                    <li>排序切换鍚庣収鐗囧实时更新锛岀粨鏋滅鍚堥鏈熼€昏緫</li>
-                                    <li>ɾ��操作后重新渲染保持当前排序键，不再重置为Ĭ�Ϯ�����</li>
+                                    <li>日期、名称、热度三种排序条件现在能正确组合生效</li>
+                                    <li>排序切换后照片实时更新，结果符合预期逻辑</li>
+                                    <li>删除操作后重新渲染保持当前排序键，不再重置为默认排序</li>
                                 </ul>
                             </li>
                             <li><strong>相册视图空白修复</strong>
                                 <ul>
-                                    <li>���ݼ���链路修复后，相册视图在有��Ƭ时能正确渲染"按日期分�?的相册列�?/li>
-                                    <li>仅在确实无照片数据时才显�?暂无��Ƭ"��ʾ</li>
+                                    <li>数据链路修复后，相册视图在有照片时能正确渲染"按日期分组"的相册列表</li>
+                                    <li>仅在确实无照片数据时才显示"暂无照片"提示</li>
                                 </ul>
                             </li>
-                            <li><strong>全屏预览浜や簰优化</strong>
+                            <li><strong>全屏预览交互优化</strong>
                                 <ul>
-                                    <li>双指缩放：新增ppApplyPinchTransformImmediate直接应用transform，跳过rAF延迟，提升跟手��?/li>
-                                    <li>自��应帧预算：3轮�?0帧中值采样检�?20Hz/90Hz/60Hzˢ��率，精准分配帧预�?/li>
-                                    <li>ͼƬ�л�消除黑屏：ppDecodeImageԤ�ڊ��?img.decode()确保解码���后再��ʾ，opacity平滑过渡</li>
-                                    <li>前后�?张照片提前预����，实现顺滑的即时�л�</li>
+                                    <li>双指缩放：新增ppApplyPinchTransformImmediate直接应用transform，跳过rAF延迟，提升跟手感</li>
+                                    <li>自适应帧预算：3轮10帧中值采样检测120Hz/90Hz/60Hz刷新率，精准分配帧预算</li>
+                                    <li>图片切换消除黑屏：ppDecodeImage预加载 + img.decode()确保解码完成后再显示，opacity平滑过渡</li>
+                                    <li>前后各2张照片提前预加载，实现顺滑的即时切换</li>
                                 </ul>
                             </li>
-                            <li><strong>��Ƭ墙模块重构稳定��修�?/strong>
+                            <li><strong>照片墙模块重构稳定性修复</strong>
                                 <ul>
-                                    <li>photo-wall.js中initPhotoWall函数通过window对象����，core.js调用时增加typeof��ȫ棢��?/li>
-                                    <li>preview.js中修复ppEventsBound标志位，确保静��HTML覆盖层事件正确绑�?/li>
-                                    <li>修复photocurImg拼写����为curImg</li>
+                                    <li>photo-wall.js中initPhotoWall函数通过window对象暴露，core.js调用时增加typeof安全检测</li>
+                                    <li>preview.js中修复ppEventsBound标志位，确保静态HTML覆盖层事件正确绑定</li>
+                                    <li>修复photocurImg拼写错误为curImg</li>
                                 </ul>
                             </li>
                         </ul>
+                    
                     `
                 },
                 {
@@ -4192,19 +4214,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>��Ƭ墙功能全面完�?/strong>
+                            <li><strong>照片墙功能全面完善</strong>
                                 <ul>
-                                    <li>������按日期��名称��热度三种条件的筛��排序功能，�л�后立即响�?/li>
-                                    <li>修复相册视图��ʾ"暂无��Ƭ"的空白问题，点击相册按钮正确����对应����</li>
-                                    <li>导航鏍忛殢涓婁笅滑动鑷姩闅愯棌/显示，欢祻瑙堢収鐗囨椂涓嶅啀閬尅内容</li>
+                                    <li>新增按日期、名称、热度三种条件的筛选排序功能，切换后立即响应</li>
+                                    <li>修复相册视图显示"暂无照片"的空白问题，点击相册按钮正确加载对应内容</li>
+                                    <li>导航栏随上下滑动自动隐藏/显示，浏览照片时不再遮挡内容</li>
                                 </ul>
                             </li>
-                            <li><strong>照片预览浜や簰优化</strong>
+                            <li><strong>照片预览交互优化</strong>
                                 <ul>
-                                    <li>修复ȫ��Ԥ����下单点���出与双击放大的冲突问题，两种操作互不干扰</li>
-                                    <li>ɾ��按钮图标�?x"替换为垃圾桶SVG图标，与�ر�按钮清晰区分</li>
-                                    <li>优化左右滑动预览鏃剁殑图片加载策略，欢秷闄ら粦灞忥紝閲囩敤图片缓存+寤惰繜加载鍓嶅悗图片优先绾ф柟妗?/li>
-                                    <li>ͼƬ����时显示脉冲动画背景，替代纯黑背景，提升视觉体�?/li>
+                                    <li>修复全屏预览下单点退出与双击放大的冲突问题，两种操作互不干扰</li>
+                                    <li>删除按钮图标由"x"替换为垃圾桶SVG图标，与关闭按钮清晰区分</li>
+                                    <li>优化左右滑动预览时的图片加载策略，消除黑屏，采用图片缓存+延迟加载前后图片优先级方案</li>
+                                    <li>图片加载时显示脉冲动画背景，替代纯黑背景，提升视觉体验</li>
                                 </ul>
                             </li>
                         </ul>
@@ -4216,39 +4238,39 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>UI瑙嗚优化</strong>
+                            <li><strong>UI视觉优化</strong>
                                 <ul>
-                                    <li>底部����栏去框融合：�Ƴ�背景、边框��阴影，仅保留四个按钮可见，按钮间区域可穿��点�?/li>
-                                    <li>统一面板/页面背景为中性色（浅�?深灰），�Ƴ�绿色色调，解决iOS底部绿色透显问题</li>
+                                    <li>底部导航栏去框融合：移除背景、边框、阴影，仅保留四个按钮可见，按钮间区域可穿透点击</li>
+                                    <li>统一面板/页面背景为中性色（浅灰/深灰），移除绿色色调，解决iOS底部绿色透显问题</li>
                                 </ul>
                             </li>
-                            <li><strong>��Ƭ墙功能增�?/strong>
+                            <li><strong>照片墙功能增强</strong>
                                 <ul>
-                                    <li>新增全屏浏览左右滑动切换图片功能，欢敮鎸佹墜鍔挎嫋鎷藉鑸?/li>
-                                    <li>首尾边界处理：第丢�张不能左滑，朢�后一张不能右滑，带阻力反馈和弹回动画</li>
-                                    <li>ȡ��过渡闪烁：修复切换图片时的位置跳跃和闪白bug</li>
-                                    <li>双指缩放�Ż�：移除RAF批处理延迟，直接应用transform实现原生级跟手流畅度</li>
-                                    <li>整体����流畅度优化：will-change、transition精细化控�?/li>
+                                    <li>新增全屏浏览左右滑动切换图片功能，支持手势拖拽导航</li>
+                                    <li>首尾边界处理：第一张不能左滑，最后一张不能右滑，带阻力反馈和弹回动画</li>
+                                    <li>取消过渡闪烁：修复切换图片时的位置跳跃和闪白bug</li>
+                                    <li>双指缩放优化：移除RAF批处理延迟，直接应用transform实现原生级跟手流畅度</li>
+                                    <li>整体滑动流畅度优化：will-change、transition精细化控制</li>
                                 </ul>
                             </li>
-                            <li><strong>响应寮忛€傞厤</strong>
+                            <li><strong>响应式适配</strong>
                                 <ul>
-                                    <li>平板�?68px+）：容器满宽、更大的间距和字体��文章卡片居�?/li>
-                                    <li>桌面�?024px+）：��Ƭ�?列��文章卡片更宽��字体更�?/li>
-                                    <li>瀹藉睆锛?280px+锛夛細照片澧?鍒椼€佹洿澶氱暀鐧?/li>
-                                    <li>横屏手机�Ż�：缩小底部导航栏占用空间</li>
+                                    <li>平板（768px+）：容器满宽、更大的间距和字体、文章卡片居中</li>
+                                    <li>桌面（1024px+）：照片墙3列、文章卡片更宽、字体更大</li>
+                                    <li>宽屏（1280px+）：照片墙4列、更多留白</li>
+                                    <li>横屏手机优化：缩小底部导航栏占用空间</li>
                                 </ul>
                             </li>
-                            <li><strong>浠ｇ爜清理</strong>
+                            <li><strong>代码清理</strong>
                                 <ul>
-                                    <li>ɾ��遗留的i18n翻译代码（translations字典、translatePage函数、语訢�选择UI�?/li>
-                                    <li>精简syncProfileUser等函数，�Ƴ�对翻译字典的依赖</li>
-                                    <li>�Ƴ�profile-lang-tabs相关CSS样式</li>
+                                    <li>删除遗留的i18n翻译代码（translations字典、translatePage函数、语言选择UI）</li>
+                                    <li>精简syncProfileUser等函数，移除对翻译字典的依赖</li>
+                                    <li>移除profile-lang-tabs相关CSS样式</li>
                                 </ul>
                             </li>
                             <li><strong>Bug修复</strong>
                                 <ul>
-                                    <li>修复����员发公告时在帖子流中自动����帖子的bug（feed查询未过滤ANN_MARKER�?/li>
+                                    <li>修复管理员发公告时在帖子流中自动创建帖子的bug（feed查询未过滤ANN_MARKER）</li>
                                 </ul>
                             </li>
                         </ul>
@@ -4260,12 +4282,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>浠ｇ爜清理涓庣簿绠€</strong>
+                            <li><strong>代码清理与精简</strong>
                                 <ul>
-                                    <li>彻底�Ƴ�雅��单词学习系统全部代码（CSS样式、JS逻辑、HTML结构�?/li>
-                                    <li>ɾ��设置页中的英�?韩语�л�选项，仅保留中文</li>
-                                    <li>�������Љ废弃的翻译文本和语訢��л�相关JS逻辑</li>
-                                    <li>修复scroll handler中对旧vocab-container的错误引�?/li>
+                                    <li>彻底移除雅思单词学习系统全部代码（CSS样式、JS逻辑、HTML结构）</li>
+                                    <li>删除设置页中的英语/韩语切换选项，仅保留中文</li>
+                                    <li>清理所有废弃的翻译文本和语言切换相关JS逻辑</li>
+                                    <li>修复scroll handler中对旧vocab-container的错误引用</li>
                                 </ul>
                             </li>
                         </ul>
@@ -4277,17 +4299,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>雅��单词版块全面重做为��Ƭ墙（相册�����?/strong>
+                            <li><strong>雅思单词版块全面重做为照片墙（相册功能）</strong>
                                 <ul>
-                                    <li>完全替换panelAi面板为照片墙HTML结构，移除所有单词学习界�?/li>
-                                    <li>每位�û�可独立上传照片（base64存储至localStorage，单张限�?0MB�?/li>
-                                    <li>横排5张网格布屢�（grid-template-columns: repeat(5, 1fr)），竖排无限滚动排列</li>
-                                    <li>��Ƭ卡片hover时显示发布��名称��发布时间��浏览量</li>
-                                    <li>点击任意��Ƭ����ȫ��Ԥ����：固定定位遮罩层，原画质居中չʾ</li>
-                                    <li>Ԥ����页显示发布用户��发布时间��浏览量（点击自�?1计数�?/li>
-                                    <li>��Ƭ按上传时间��序排列（最������前），支持智能时间格式化</li>
-                                    <li>完整CSS样式：照片墙容器�?列网格��卡片交互��全屏预览��深色模式��配</li>
-                                    <li>Ԥ����层点击背景区域或�ر�按钮均可�ر�</li>
+                                    <li>完全替换panelAi面板为照片墙HTML结构，移除所有单词学习界面</li>
+                                    <li>每位用户可独立上传照片（base64存储至localStorage，单张限制20MB）</li>
+                                    <li>横排5张网格布局（grid-template-columns: repeat(5, 1fr)），竖排无限滚动排列</li>
+                                    <li>照片卡片hover时显示发布者名称、发布时间、浏览量</li>
+                                    <li>点击任意照片进入全屏预览：固定定位遮罩层，原画质居中展示</li>
+                                    <li>预览页显示发布用户、发布时间、浏览量（点击自动+1计数）</li>
+                                    <li>照片按上传时间倒序排列（最新在前），支持智能时间格式化</li>
+                                    <li>完整CSS样式：照片墙容器、5列网格、卡片交互、全屏预览、深色模式适配</li>
+                                    <li>预览层点击背景区域或关闭按钮均可关闭</li>
                                 </ul>
                             </li>
                         </ul>
@@ -4299,14 +4321,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>彻底修复���Љ问题，实现极致的液态玻璃效�?/strong>
+                            <li><strong>彻底修复所有问题，实现极致的液态玻璃效果</strong>
                                 <ul>
                                     <li>给单词页面添加复杂渐变纹理背景，让backdrop-filter能真正发挥出玻璃效果</li>
                                     <li>把dock-panel的滚动禁用，让单词页面自己管理滚动，解决排版混乱问题</li>
-                                    <li>卡片、��项、反馈面板都添加极致的玻璃质感：多层边框、内高光、外��Ӱ、高强度blur</li>
-                                    <li>���Љ元素加伪元素高光层，增强玻璃的通��和立体�?/li>
-                                    <li>������面板移回vocab-scroll里，解决遮挡选项的问�?/li>
-                                    <li>暗色ģʽͬ��������，背景用深色渐变+玻璃元素</li>
+                                    <li>卡片、选项、反馈面板都添加极致的玻璃质感：多层边框、内高光、外阴影、高强度blur</li>
+                                    <li>所有元素加伪元素高光层，增强玻璃的通透和立体感</li>
+                                    <li>反馈面板移回vocab-scroll里，解决遮挡选项的问题</li>
+                                    <li>暗色模式同步升级，背景用深色渐变+玻璃元素</li>
                                 </ul>
                             </li>
                         </ul>
@@ -4318,25 +4340,25 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>修复对错音效不生效问�?/strong>
+                            <li><strong>修复对错音效不生效问题</strong>
                                 <ul>
-                                    <li>修复AudioContext被浏览器挂起导致无声（增加resume()唤醒�?/li>
-                                    <li>提高音效音量（gain�?.1提升�?.18），����音改用triangle波更清晰</li>
-                                    <li>页面首次点击自动解锁音频上下�?/li>
+                                    <li>修复AudioContext被浏览器挂起导致无声（增加resume()唤醒）</li>
+                                    <li>提高音效音量（gain从0.1提升至0.18），错误音改用triangle波更清晰</li>
+                                    <li>页面首次点击自动解锁音频上下文</li>
                                 </ul>
                             </li>
                             <li><strong>修复继续按钮位置靠上</strong>
                                 <ul>
-                                    <li>容器底部内边距增加至16px，��项区底部间隙增加至20px</li>
-                                    <li>底部flex间隙�?0px提升�?6px，按钮行����上边�?/li>
+                                    <li>容器底部内边距增加至16px，选项区底部间隙增加至20px</li>
+                                    <li>底部flex间隙从10px提升至16px，按钮行增加上边距</li>
                                 </ul>
                             </li>
-                            <li><strong>液��玻璃效果大幅增�?/strong>
+                            <li><strong>液态玻璃效果大幅增强</strong>
                                 <ul>
-                                    <li>卡片：rgba 0.85 + blur(32px) saturate(220%)，阴影翻�?/li>
+                                    <li>卡片：rgba 0.85 + blur(32px) saturate(220%)，阴影翻倍</li>
                                     <li>选项：rgba 0.72 + blur(16px) saturate(180%)</li>
-                                    <li>反馈面板锛歳gba 0.82 + blur(30px) saturate(220%)</li>
-                                    <li>鏆楄壊模式同步增强</li>
+                                    <li>反馈面板：rgba 0.82 + blur(30px) saturate(220%)</li>
+                                    <li>暗色模式同步增强</li>
                                 </ul>
                             </li>
                         </ul>
@@ -4348,21 +4370,21 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>雅��单词页面全面重构优�?/strong>
+                            <li><strong>雅思单词页面全面重构优化</strong>
                                 <ul>
-                                    <li>修复继续按钮位置靠上问题，反馈面板移至底部紧邻继续按�?/li>
-                                    <li>对错������仿不背单词风格重做：大图�?单词音标+释义+例句独立չʾ</li>
-                                    <li>����对错音效（Web Audio API 生成短促��ʾ音，正确升调/����降调�?/li>
-                                    <li>替换�л�动画为缩�?淡入淡出组合，更加流畅自�?/li>
-                                    <li>��ǿ液��玻璃效果：背景透明度提高至0.78，模糊提升至26px</li>
+                                    <li>修复继续按钮位置靠上问题，反馈面板移至底部紧邻继续按钮</li>
+                                    <li>对错反馈仿不背单词风格重做：大图标+单词音标+释义+例句独立展示</li>
+                                    <li>增加对错音效（Web Audio API 生成短促提示音，正确升调/错误降调）</li>
+                                    <li>替换切换动画为缩放+淡入淡出组合，更加流畅自然</li>
+                                    <li>增强液态玻璃效果：背景透明度提高至0.78，模糊提升至26px</li>
                                     <li>修复单词重复问题：改为随机队列洗牌算法，确保200词全部轮完才重复</li>
                                 </ul>
                             </li>
-                            <li><strong>TTS语音进一步优�?/strong>
+                            <li><strong>TTS语音进一步优化</strong>
                                 <ul>
-                                    <li>����选择Google在线语音（最自然），其次回���到系统语�?/li>
-                                    <li>Google语音速率0.9/音调1.0，非Google语音速率0.95/音调1.1减少机械�?/li>
-                                    <li>语音选择结果localStorage持久化，避免重复����</li>
+                                    <li>优先选择Google在线语音（最自然），其次回退到系统语音</li>
+                                    <li>Google语音速率0.9/音调1.0，非Google语音速率0.95/音调1.1减少机械感</li>
+                                    <li>语音选择结果localStorage持久化，避免重复查找</li>
                                 </ul>
                             </li>
                         </ul>
@@ -4374,37 +4396,37 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>雅��单词系统全面优�?/strong>
+                            <li><strong>雅思单词系统全面优化</strong>
                                 <ul>
-                                    <li>排版����设计，模拟不背单�?百词斩风格，干净白底无悬浮效�?/li>
-                                    <li>TTS语音�Ż�，自动��择朢�自然英文语音，语速更真实</li>
-                                    <li>����对错数量��¼（localStorage持久化），正确率进度条显�?/li>
+                                    <li>排版重新设计，模拟不背单词/百词斩风格，干净白底无悬浮效果</li>
+                                    <li>TTS语音优化，自动选择最自然英文语音，语速更真实</li>
+                                    <li>增加对错数量记录（localStorage持久化），正确率进度条显示</li>
                                     <li>卡片滑入/滑出过渡动画，提升交互流畅度</li>
-                                    <li>选项改为2列网格布屢�，答案正�?����边框颜色������</li>
+                                    <li>选项改为2列网格布局，答案正确/错误边框颜色反馈</li>
                                 </ul>
                             </li>
-                            <li><strong>清理閬楃暀鏃т唬鐮?/strong>
+                            <li><strong>清理遗留旧代码</strong>
                                 <ul>
-                                    <li>�Ƴ�旧的 toggleAIChat 无用函数</li>
-                                    <li>ɾ�����Љ旧AI模板相关的翻译键（aiWelcome、enterYourQuestion、send�?/li>
-                                    <li>ɾ��旧AI气泡CSS样式�?ai-msg�?/li>
-                                    <li>ɾ��Taylor Swift画廊旧代码（initTSGallery�?/li>
+                                    <li>移除旧的 toggleAIChat 无用函数</li>
+                                    <li>删除所有旧AI模板相关的翻译键（aiWelcome、enterYourQuestion、send）</li>
+                                    <li>删除旧AI气泡CSS样式（.ai-msg）</li>
+                                    <li>删除Taylor Swift画廊旧代码（initTSGallery）</li>
                                 </ul>
                             </li>
                             <li><strong>修复Git合并冲突导致网站崩溃</strong>
                                 <ul>
-                                    <li>修复4处残留的合并冲突标记（CSS/HTML/JS），页面�ָ���正常</li>
+                                    <li>修复4处残留的合并冲突标记（CSS/HTML/JS），页面恢复正常</li>
                                 </ul>
                             </li>
-                            <li><strong>雅��单词页面液态玻璃风格重�?/strong>
+                            <li><strong>雅思单词页面液态玻璃风格重做</strong>
                                 <ul>
-                                    <li>发音按钮从emoji改为SVG喇叭图标+声波动画+液��玻璃容�?/li>
-                                    <li>TTS语音优��?2种自然语音（Google UK Female/Microsoft Zira等），语�?.85音调1.05</li>
+                                    <li>发音按钮从emoji改为SVG喇叭图标+声波动画+液态玻璃容器</li>
+                                    <li>TTS语音优选12种自然语音（Google UK Female/Microsoft Zira等），语速0.85音调1.05</li>
                                     <li>去掉例句朗读，只朗读单词本身</li>
-                                    <li>卡片/选项/������面板全部改为液��玻璃效果（backdrop-filter毛玻璃）</li>
-                                    <li>閫夐」鐐瑰嚮姘存尝绾瑰姩鐢?姝ｇ‘寮规€у脊璺?错误鎶栧姩反馈</li>
-                                    <li>瀵归敊反馈标题鍖哄垎显示锛堚渽姝ｇ‘/❤岀瓟妗堟槸锛?/li>
-                                    <li>分数数字点击弹��放大动�?/li>
+                                    <li>卡片/选项/反馈面板全部改为液态玻璃效果（backdrop-filter毛玻璃）</li>
+                                    <li>选项点击水波纹动画+正确弹性弹跳+错误抖动反馈</li>
+                                    <li>对错反馈标题区分显示（✅正确/❌答案是）</li>
+                                    <li>分数数字点击弹性放大动画</li>
                                 </ul>
                             </li>
                         </ul>
@@ -4416,12 +4438,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li><strong>闆呮€濊瘝姹囧簱兼ㄩ潰升级</strong>
+                            <li><strong>雅思词汇库全面升级</strong>
                                 <ul>
-                                    <li>将原有初中水平基硢�词汇全面替换为雅思高频��点单词</li>
-                                    <li>词库扩充�?00+个真正的雅��核心词�?/li>
-                                    <li>词汇涵盖 abandon �?yield 等雅思必备词�?/li>
-                                    <li>每个单词均包含标准音标��英文例句及中文翻译</li>
+                                    <li>将原有初中水平基础词汇全面替换为雅思高频考点单词</li>
+                                    <li>词库扩充至200+个真正的雅思核心词汇</li>
+                                    <li>词汇涵盖 abandon 到 yield 等雅思必备词汇</li>
+                                    <li>每个单词均包含标准音标、英文例句及中文翻译</li>
                                 </ul>
                             </li>
                         </ul>
@@ -4433,23 +4455,23 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         &lt;h4&gt;更新内容&lt;/h4&gt;
                         &lt;ul&gt;
-                            &lt;li&gt;&lt;strong&gt;Taylor Swift &amp; Jennie专题画廊替换为雅思单词学习系�?lt;/strong&gt;
+                            &lt;li&gt;&lt;strong&gt;Taylor Swift &amp; Jennie专题画廊替换为雅思单词学习系统&lt;/strong&gt;
                                 &lt;ul&gt;
-                                    &lt;li&gt;ɾ�����Љ原专题页的CSS样式�?idol-�?ts-弢�头样式）&lt;/li&gt;
-                                    &lt;li&gt;������雅��单词学习系统完整样式（.vocab-命名空间�?lt;/li&gt;
-                                    &lt;li&gt;替换panelAi面板HTML结构为单词学习界�?lt;/li&gt;
-                                    &lt;li&gt;������200个雅思核心词库，包含单词、音标��释义��例�?lt;/li&gt;
+                                    &lt;li&gt;删除所有原专题页的CSS样式（.idol-、.ts-开头样式）&lt;/li&gt;
+                                    &lt;li&gt;新增雅思单词学习系统完整样式（.vocab-命名空间）&lt;/li&gt;
+                                    &lt;li&gt;替换panelAi面板HTML结构为单词学习界面&lt;/li&gt;
+                                    &lt;li&gt;新增200个雅思核心词库，包含单词、音标、释义、例句&lt;/li&gt;
                                 &lt;/ul&gt;
                             &lt;/li&gt;
-                            &lt;li&gt;&lt;strong&gt;雅��单词学习系统功�?lt;/strong&gt;
+                            &lt;li&gt;&lt;strong&gt;雅思单词学习系统功能&lt;/strong&gt;
                                 &lt;ul&gt;
-                                    &lt;li&gt;双模式学习：英译中模式��中译英ģʽ&lt;/li&gt;
-                                    &lt;li&gt;点击🔊按钮可朗读英文单�?lt;/li&gt;
+                                    &lt;li&gt;双模式学习：英译中模式、中译英模式&lt;/li&gt;
+                                    &lt;li&gt;点击🔊按钮可朗读英文单词&lt;/li&gt;
                                     &lt;li&gt;答完题自动朗读单词和英文例句&lt;/li&gt;
-                                    &lt;li&gt;每次随机生成4个��项供��择&lt;/li&gt;
-                                    &lt;li&gt;正确答案绿色高亮，错误答案红色抖�?lt;/li&gt;
+                                    &lt;li&gt;每次随机生成4个选项供选择&lt;/li&gt;
+                                    &lt;li&gt;正确答案绿色高亮，错误答案红色抖动&lt;/li&gt;
                                     &lt;li&gt;答题后显示详细解析和例句&lt;/li&gt;
-                                    &lt;li&gt;完全支持深色/浅色���⢘自动适配&lt;/li&gt;
+                                    &lt;li&gt;完全支持深色/浅色主题自动适配&lt;/li&gt;
                                 &lt;/ul&gt;
                             &lt;/li&gt;
                         &lt;/ul&gt;
@@ -4461,19 +4483,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         &lt;h4&gt;更新内容&lt;/h4&gt;
                         &lt;ul&gt;
-                            &lt;li&gt;&lt;strong&gt;Taylor Swift专题页视觉与架构全面�ع�&lt;/strong&gt;
+                            &lt;li&gt;&lt;strong&gt;Taylor Swift专题页视觉与架构全面重构&lt;/strong&gt;
                                 &lt;ul&gt;
-                                    &lt;li&gt;删除所有夋棫鐨?.ts- 寮€澶碈SS样式&lt;/li&gt;
-                                    &lt;li&gt;������双人专辑չʾ墙样式（.idol- 命名空间�?lt;/li&gt;
-                                    &lt;li&gt;引入Google Fonts Great Vibes手写�?lt;/li&gt;
-                                    &lt;li&gt;专辑卡片hover时缩�?磨砂玻璃遮罩效果&lt;/li&gt;
+                                    &lt;li&gt;删除所有旧的 .ts- 开头CSS样式&lt;/li&gt;
+                                    &lt;li&gt;新增双人专辑展示墙样式（.idol- 命名空间）&lt;/li&gt;
+                                    &lt;li&gt;引入Google Fonts Great Vibes手写体&lt;/li&gt;
+                                    &lt;li&gt;专辑卡片hover时缩放+磨砂玻璃遮罩效果&lt;/li&gt;
                                     &lt;li&gt;SVG签名描边动画+实心填充淡入&lt;/li&gt;
                                 &lt;/ul&gt;
                             &lt;/li&gt;
-                            &lt;li&gt;&lt;strong&gt;浠ｇ爜清理优化&lt;/strong&gt;
+                            &lt;li&gt;&lt;strong&gt;代码清理优化&lt;/strong&gt;
                                 &lt;ul&gt;
-                                    &lt;li&gt;ɾ��全部Taylor Swift画廊JavaScript代码&lt;/li&gt;
-                                    &lt;li&gt;�Ƴ�二级菜单相关废弃函数调用&lt;/li&gt;
+                                    &lt;li&gt;删除全部Taylor Swift画廊JavaScript代码&lt;/li&gt;
+                                    &lt;li&gt;移除二级菜单相关废弃函数调用&lt;/li&gt;
                                     &lt;li&gt;替换干净的switchDockTab函数&lt;/li&gt;
                                     &lt;li&gt;代码架构更加清晰&lt;/li&gt;
                                 &lt;/ul&gt;
@@ -4487,13 +4509,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>Taylor Swift专题页交互升�?/li>
+                            <li>Taylor Swift专题页交互升级</li>
                             <ul>
-                                <li>签名手写动画����专题页时����播放，并每隔数秒循环播放</li>
-                                <li>12张专辑海报改为按ʱ��倒序չʾ（最新专辑在前）</li>
-                                <li>姣忓紶涓撹緫鏀寔鐐瑰嚮进入详情椤?/li>
-                                <li>专辑����页新增专辑封靃6�9��时期照片��专辑故事��歌曲列表��背景故�?/li>
-                                <li>专辑封面和详情照片加入动态漂�ƶ��?/li>
+                                <li>签名手写动画进入专题页时重新播放，并每隔数秒循环播放</li>
+                                <li>12张专辑海报改为按时间倒序展示（最新专辑在前）</li>
+                                <li>每张专辑支持点击进入详情页</li>
+                                <li>专辑详情页新增专辑封面、时期照片、专辑故事、歌曲列表、背景故事</li>
+                                <li>专辑封面和详情照片加入动态漂移动画</li>
                             </ul>
                         </ul>
                     `
@@ -4504,14 +4526,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>Taylor Swift专题页升级为完整12张录音室专辑海报�?/li>
+                            <li>Taylor Swift专题页升级为完整12张录音室专辑海报墙</li>
                             <ul>
-                                <li>新增evermore銆丮idnights銆乀he Tortured Poets Department銆乀he Life of a Showgirl</li>
+                                <li>新增evermore、Midnights、The Tortured Poets Department、The Life of a Showgirl</li>
                                 <li>顶部Taylor Swift签名改为模拟真实手写描边动画</li>
-                                <li>专辑卡片加入真实封面图��海报式排版、渐入和悬停过渡</li>
-                                <li>新增公开鐜板満照片鍖哄煙锛屽寮轰笓棰橀〉瑙嗚灞傛</li>
+                                <li>专辑卡片加入真实封面图、海报式排版、渐入和悬停过渡</li>
+                                <li>新增公开现场照片区域，增强专题页视觉层次</li>
                             </ul>
-                            <li>����“我的��页面版本号为v0.0.28</li>
+                            <li>更新"我的"页面版本号为v0.0.28</li>
                         </ul>
                     `
                 },
@@ -4521,17 +4543,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>AI����全面替换为Taylor Swift专题画廊</li>
+                            <li>AI聊天全面替换为Taylor Swift专题画廊</li>
                             <ul>
-                                <li>移除DeepSeek AI聊天鍙夾PI瀵嗛挜</li>
-                                <li>新增Taylor Swift绛惧悕SVG标题</li>
-                                <li>8张专辑卡片画廊（Debut至folklore�?/li>
+                                <li>移除DeepSeek AI聊天及API密钥</li>
+                                <li>新增Taylor Swift签名SVG标题</li>
+                                <li>8张专辑卡片画廊（Debut至folklore）</li>
                                 <li>每张卡片渐入动画+悬停放大效果</li>
-                                <li>专辑专属渐变�?SVG装饰图标</li>
+                                <li>专辑专属渐变色+SVG装饰图标</li>
                             </ul>
                             <li>全面代码审计修复9项Bug</li>
-                            <li>修复����输入框在iOS上位置异�?/li>
-                            <li>移除所有堿I鐩稿叧浠ｇ爜</li>
+                            <li>修复聊天输入框在iOS上位置异常</li>
+                            <li>移除所有AI相关代码</li>
                         </ul>
                     `
                 },
@@ -4541,12 +4563,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修复PC���器打弢�空白页问�?/li>
-                            <li>修复iOS灵动�?刘海屏区域视觉��配</li>
-                            <li>修登录时间涓嶆洿鏂伴棶棰?/li>
-                            <li>修注册时间/登录时间显示涓?-"鐨勯棶棰?/li>
-                            <li>iOS Safari浏览鍣ㄥ畬鏁撮€傞厤</li>
-                            <li>修复底部�����?֪ͨ/Toast在iOS刘海屏下位置异常</li>
+                            <li>修复PC浏览器打开空白页问题</li>
+                            <li>修复iOS灵动岛/刘海屏区域视觉适配</li>
+                            <li>修复登录时间不更新问题</li>
+                            <li>修复注册时间/登录时间显示为"-"的问题</li>
+                            <li>iOS Safari浏览器完整适配</li>
+                            <li>修复底部导航栏/通知/Toast在iOS刘海屏下位置异常</li>
                         </ul>
                     `
                 },
@@ -4556,7 +4578,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>统一公告列表/����/������־的样式大小（字体/间距都统丢�跟更新日志一致）</li>
+                            <li>统一公告列表/详情/更新日志的样式大小（字体/间距都统一跟更新日志一致）</li>
                         </ul>
                     `
                 },
@@ -4566,8 +4588,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>彻底修复ͷ��查询：所有头像查询强制加 actor_key=__avatar__，彻底排除旧����干扰</li>
-                            <li>修复手机底部����徢�上飘（position:fixed+适配��ȫ区域�?/li>
+                            <li>彻底修复头像查询：所有头像查询强制加 actor_key=__avatar__，彻底排除旧数据干扰</li>
+                            <li>修复手机底部导航往上飘（position:fixed+适配安全区域）</li>
                         </ul>
                     `
                 },
@@ -4577,9 +4599,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修兼憡发布失败bug锛堜笉鐢╰itle鍒楋紝JSON瀛榗ontent锛?/li>
-                            <li>修复点击ͷ��/个人������ʾ旧头像（maybeSingle→limit(1)+�ϴ�先删后插，杜绝重复记录）</li>
-                            <li>修聊天鍒楄〃加载鎱紙limit 1000鈫?00锛岀紦瀛?0绉掆啋120绉掞級</li>
+                            <li>修复公告发布失败bug（不用title列，JSON存content）</li>
+                            <li>修复点击头像/个人资料显示旧头像（maybeSingle→limit(1)+上传先删后插，杜绝重复记录）</li>
+                            <li>修复聊天列表加载慢（limit 1000→200，缓存30秒→120秒）</li>
                         </ul>
                     `
                 },
@@ -4589,10 +4611,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修兼朵粬用户鐪嬩笉鍒版渶新增ご鍍忥紙loadAvatarsForUsers排序鍙栨渶鏂帮級</li>
-                            <li>修复底部����栏可被滑动问题（touch-action禁止�����?/li>
-                            <li>彻底去掉页面右侧竖滑动条（html/body overflow:hidden�?/li>
-                            <li>修登录时间涓嶆洿鏂癰ug锛堟瘡娆℃墦寮€页面刷新登录时间锛?/li>
+                            <li>修复其他用户看不到最新头像（loadAvatarsForUsers排序取最新）</li>
+                            <li>修复底部导航栏可被滑动问题（touch-action禁止手势）</li>
+                            <li>彻底去掉页面右侧竖滑动条（html/body overflow:hidden）</li>
+                            <li>修复登录时间不更新bug（每次打开页面刷新登录时间）</li>
                         </ul>
                     `
                 },
@@ -4602,8 +4624,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修复ͷ��过一会儿自动回���bug（localStorage权威����，DB不再覆盖�?/li>
-                            <li>鍘绘帀评论头像锛屽彧显示鍚嶅瓧</li>
+                            <li>修复头像过一会儿自动回退bug（localStorage权威优先，DB不再覆盖）</li>
+                            <li>去掉评论头像，只显示名字</li>
                         </ul>
                     `
                 },
@@ -4613,10 +4635,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修聊天鍒楄〃打开绌虹櫧/加载鎱㈤棶棰?/li>
-                            <li>����列表后台Ԥ�ڊ�载，点开秒出</li>
+                            <li>修复聊天列表打开空白/加载慢问题</li>
+                            <li>聊天列表后台预加载，点开秒出</li>
                             <li>彻底去掉帖子列表右侧竖滑动条</li>
-                            <li>修甯栧瓙滑动鍗￠】/鎶芥悙鎶栧姩锛堜粎娣″叆涓€娆?图片加载优化锛?/li>
+                            <li>修复帖子滑动卡顿/抽搐抖动（仅淡入一次+图片加载优化）</li>
                         </ul>
                     `
                 },
@@ -4626,10 +4648,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修复ˢ��网页后头像回逢�bug</li>
-                            <li>头像照片压缩杩涗竴姝ュ噺灏忥紙80x80 @0.4锛?/li>
-                            <li>修更换头像鍚庝笉更新鐨刡ug</li>
-                            <li>帖子划入划出动画重设计：淡入+上移、淡�?下移</li>
+                            <li>修复刷新网页后头像回退bug</li>
+                            <li>头像照片压缩进一步减小（80x80 @0.4）</li>
+                            <li>修复更换头像后不更新的bug</li>
+                            <li>帖子划入划出动画重设计：淡入+上移、淡出+下移</li>
                             <li>去掉帖子和评论的hover悬浮效果</li>
                         </ul>
                     `
@@ -4640,11 +4662,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>修更换头像鍚庝笉更新鐨刡ug锛堝交搴曚慨澶嶏級</li>
-                            <li>去掉底部����栏点击时的黑色框（彻底修复）</li>
-                            <li>帖子����动画从滑入改成淡�?/li>
-                            <li>修复ע��ʱ��与登录时间相同的bug（彻底修复）</li>
-                            <li>头像上传压缩优化锛?28x128锛?/li>
+                            <li>修复更换头像后不更新的bug（彻底修复）</li>
+                            <li>去掉底部导航栏点击时的黑色框（彻底修复）</li>
+                            <li>帖子加载动画从滑入改成淡入</li>
+                            <li>修复注册时间与登录时间相同的bug（彻底修复）</li>
+                            <li>头像上传压缩优化（128x128）</li>
                         </ul>
                     `
                 },
@@ -4654,11 +4676,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>动画效果减半�Ż�</li>
+                            <li>动画效果减半优化</li>
                             <ul>
                                 <li>帖子滑入动画速度减半，translateY距离减半</li>
-                                <li>���Љ按钮hover动画幅度减半（底部导航栏除外�?/li>
-                                <li>包括hover上浮、缩放��旋转等动画均减�?/li>
+                                <li>所有按钮hover动画幅度减半（底部导航栏除外）</li>
+                                <li>包括hover上浮、缩放、旋转等动画均减半</li>
                             </ul>
                         </ul>
                     `
@@ -4669,22 +4691,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>头像鐐瑰嚮琛屼负优化</li>
+                            <li>头像点击行为优化</li>
                             <ul>
-                                <li>点击帖子和评论中的头像不再直接跳转聊�?/li>
-                                <li>新增用户资料卡片弹窗，欢樉绀哄ご鍍忋€佺敤鎴峰悕銆佹渶杩戠櫥褰曟椂闂?/li>
-                                <li>����卡片中点�?发消息?按钮才跳转到����对话</li>
+                                <li>点击帖子和评论中的头像不再直接跳转聊天</li>
+                                <li>新增用户资料卡片弹窗，显示头像、用户名、最近登录时间</li>
+                                <li>资料卡片中点击"发消息"按钮才跳转到聊天对话</li>
                             </ul>
-                            <li>统计鐗堝潡加载閫熷害优化</li>
+                            <li>统计版块加载速度优化</li>
                             <ul>
-                                <li>统计数据增加30绉掑唴瀛樼紦瀛橈紝浜屾打开绉掑嚭</li>
-                                <li>后台Ԥ�ڊ�载统计数据，首次��也更�?/li>
+                                <li>统计数据增加30秒内存缓存，二次打开秒出</li>
+                                <li>后台预加载统计数据，首次打开也更快</li>
                             </ul>
                             <li>聊天功能头像显示</li>
                             <ul>
-                                <li>用户聊天娑堟伅增加鍙屾柟头像显示</li>
-                                <li>聊天鍒楄〃显示鑱旂郴浜虹湡瀹炲ご鍍?/li>
-                                <li>AI对话中显示用户真实头�?/li>
+                                <li>用户聊天消息增加双方头像显示</li>
+                                <li>聊天列表显示联系人真实头像</li>
+                                <li>AI对话中显示用户真实头像</li>
                             </ul>
                         </ul>
                     `
@@ -4697,20 +4719,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         <ul>
                             <li>头像上传压缩优化</li>
                             <ul>
-                                <li>ͷ���ϴ�前自动压缩至256x256，JPEG质量0.7</li>
-                                <li>大幅减少base64体积，防止存储溢出和����ʧ��</li>
-                                <li>上传大小闄愬埗鏀惧鑷?0MB</li>
+                                <li>头像上传前自动压缩至256x256，JPEG质量0.7</li>
+                                <li>大幅减少base64体积，防止存储溢出和加载失败</li>
+                                <li>上传大小限制放宽至10MB</li>
                             </ul>
-                            <li>用户注册/登录时间褰诲簳修</li>
+                            <li>用户注册/登录时间彻底修复</li>
                             <ul>
-                                <li>�ع��û�信息存取为统丢�saveUserInfo函数</li>
-                                <li>updateʧ��时自动fallback到delete+insert</li>
-                                <li>����员登录同样正确记录登录时�?/li>
-                                <li>后台帖子计数排除�û�信息��¼</li>
+                                <li>重构用户信息存取为统一saveUserInfo函数</li>
+                                <li>update失败时自动fallback到delete+insert</li>
+                                <li>管理员登录同样正确记录登录时间</li>
+                                <li>后台帖子计数排除用户信息记录</li>
                             </ul>
-                            <li>����库RLS策略完善</li>
+                            <li>数据库RLS策略完善</li>
                             <ul>
-                                <li>新增fix_user_info_rls.sql纭繚UPDATE/DELETE策略瀛樺湪</li>
+                                <li>新增fix_user_info_rls.sql确保UPDATE/DELETE策略存在</li>
                                 <li>扩大actor_key和content长度限制</li>
                             </ul>
                         </ul>
@@ -4722,13 +4744,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>ͷ���ϴ�导致的连锁问题修�?/li>
+                            <li>头像上传导致的连锁问题修复</li>
                             <ul>
-                                <li>修上传头像鍚庡笘瀛愰〉涓€鐩存樉绀?加载失败，刷新重试?鐨勪弗閲峛ug</li>
-                                <li>修复ͷ��base64����撑爆localStorage导致页面崩溃</li>
-                                <li>修复"我的页面"ͷ��不显示的问题</li>
-                                <li>修复�˳��登录后旧缓存干扰的问题</li>
-                                <li>�Ż�����查询，排除头像记录减少响应体�?/li>
+                                <li>修复上传头像后帖子页一直显示"加载失败，刷新重试"的严重bug</li>
+                                <li>修复头像base64数据撑爆localStorage导致页面崩溃</li>
+                                <li>修复"我的页面"头像不显示的问题</li>
+                                <li>修复退出登录后旧缓存干扰的问题</li>
+                                <li>优化数据查询，排除头像记录减少响应体积</li>
                             </ul>
                         </ul>
                     `
@@ -4739,25 +4761,25 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>头像功能修</li>
+                            <li>头像功能修复</li>
                             <ul>
-                                <li>修复ͷ���ϴ�后作为帖子显示的问题</li>
-                                <li>修复ˢ��页面后头像消失的问题</li>
-                                <li>头像上传成功鍚庤嚜鍔ㄥ埛鏂癴eed显示新增ご鍍?/li>
-                                <li>����ͷ�񻺴�机制，确保头像正确显�?/li>
+                                <li>修复头像上传后作为帖子显示的问题</li>
+                                <li>修复刷新页面后头像消失的问题</li>
+                                <li>头像上传成功后自动刷新feed显示新头像</li>
+                                <li>更新头像缓存机制，确保头像正确显示</li>
                             </ul>
-                            <li>鎬ц兘优化</li>
+                            <li>性能优化</li>
                             <ul>
-                                <li>�Ż�帖子渲染性能，预构建����和点赞映射表</li>
+                                <li>优化帖子渲染性能，预构建评论和点赞映射表</li>
                                 <li>提升整体流畅度，减少卡顿</li>
                             </ul>
-                            <li>兼憡系统优化</li>
+                            <li>公告系统优化</li>
                             <ul>
-                                <li>修复公告����区域固定不动的问题，现在会随����滚动</li>
+                                <li>修复公告发布区域固定不动的问题，现在会随内容滚动</li>
                             </ul>
-                            <li>鍚庡彴管理优化</li>
+                            <li>后台管理优化</li>
                             <ul>
-                                <li>修复�û�ע��和登录时间保存问题，添加actor_key确保����正确写入</li>
+                                <li>修复用户注册和登录时间保存问题，添加actor_key确保数据正确写入</li>
                             </ul>
                         </ul>
                     `
@@ -4768,23 +4790,23 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>新增娑堟伅通知功能</li>
+                            <li>新增消息通知功能</li>
                             <ul>
-                                <li>收到新消息时顶部弹出液��玻璃风格��知</li>
-                                <li>显示发送佽€呭ご鍍忋€佺敤鎴峰悕鍜屾秷鎭唴瀹?/li>
-                                <li>֪ͨ3秒后自动淡出收回</li>
-                                <li>点击֪ͨ直接跳转到对应聊天对�?/li>
-                                <li>智能判断：已在聊天时不重复弹�?/li>
+                                <li>收到新消息时顶部弹出液态玻璃风格通知</li>
+                                <li>显示发送者头像、用户名和消息内容</li>
+                                <li>通知3秒后自动淡出收回</li>
+                                <li>点击通知直接跳转到对应聊天对话</li>
+                                <li>智能判断：已在聊天时不重复弹出</li>
                             </ul>
-                            <li>鍚庡彴管理功能修</li>
+                            <li>后台管理功能修复</li>
                             <ul>
                                 <li>修复新注册用户（无发帖记录）不显示的问题</li>
-                                <li>确保���Љ注册用户都能在后台正确չʾ</li>
+                                <li>确保所有注册用户都能在后台正确展示</li>
                             </ul>
-                            <li>统计页面�Ż�</li>
+                            <li>统计页面优化</li>
                             <ul>
-                                <li>修评论记录时间排序闂</li>
-                                <li>朢�新评论现在显示在朢�上方</li>
+                                <li>修复评论记录时间排序问题</li>
+                                <li>最新评论现在显示在最上方</li>
                             </ul>
                         </ul>
                     `
@@ -4795,26 +4817,26 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>涓汉资料系统兼ㄩ潰升级</li>
+                            <li>个人资料系统全面升级</li>
                             <ul>
-                                <li>新增涓汉资料详情椤碉紙澶уご鍍忋€佺敤鎴峰悕銆佺敤鎴稩D銆佹敞鍐屾椂闂达級</li>
-                                <li>支持自定义头像上传（朢��?MB�?/li>
-                                <li>帖子和评论区域显示用户自定义ͷ��</li>
-                                <li>涓汉资料椤垫柊澧為€€鍑虹櫥褰曟寜閽?/li>
+                                <li>新增个人资料详情页（大头像、用户名、用户ID、注册时间）</li>
+                                <li>支持自定义头像上传（最大5MB）</li>
+                                <li>帖子和评论区域显示用户自定义头像</li>
+                                <li>个人资料页新增退出登录按钮</li>
                             </ul>
-                            <li>游客ģʽ完善</li>
+                            <li>游客模式完善</li>
                             <ul>
-                                <li>鏈櫥褰曠敤鎴峰彧鑳芥煡鐪嬶紝不能发布/点赞/评论</li>
-                                <li>未登录时����区域自动隐藏</li>
-                                <li>点击操作时自动提示登�?/li>
+                                <li>未登录用户只能查看，不能发布/点赞/评论</li>
+                                <li>未登录时发布区域自动隐藏</li>
+                                <li>点击操作时自动提示登录</li>
                             </ul>
-                            <li>公告ϵͳ修复</li>
+                            <li>公告系统修复</li>
                             <ul>
-                                <li>修复公告����页面����不显示的问题</li>
+                                <li>修复公告详情页面内容不显示的问题</li>
                             </ul>
-                            <li>鍚庡彴管理功能增强</li>
+                            <li>后台管理功能增强</li>
                             <ul>
-                                <li>新增用户注册时间鍜屾渶杩戠櫥褰曟椂闂存樉绀?/li>
+                                <li>新增用户注册时间和最近登录时间显示</li>
                             </ul>
                         </ul>
                     `
@@ -4825,29 +4847,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>新增銆屾垜鐨勩€嶉〉闈?/li>
+                            <li>新增「我的」页面</li>
                             <ul>
-                                <li>深色/浅色ģʽ�л�弢��?/li>
-                                <li>璇█切换功能</li>
-                                <li>֪ͨ设置选项</li>
+                                <li>深色/浅色模式切换开关</li>
+                                <li>语言切换功能</li>
+                                <li>通知设置选项</li>
                                 <li>关于应用信息</li>
                                 <li>统一白色磨砂风格设计</li>
                             </ul>
-                            <li>「我的��按钮动画优�?/li>
+                            <li>「我的」按钮动画优化</li>
                             <ul>
-                                <li>点击按钮时显�?条彩色光波从小人脑袋上方散射的动�?/li>
+                                <li>点击按钮时显示5条彩色光波从小人脑袋上方散射的动画</li>
                             </ul>
-                            <li>搴曢儴导航鏍忔暣浣撲紭鍖?/li>
+                            <li>底部导航栏整体优化</li>
                             <ul>
                                 <li>AI花朵按钮点击范围对齐</li>
-                                <li>四按钮大小统丢�规范</li>
-                                <li>视觉平衡度提�?/li>
+                                <li>四按钮大小统一规范</li>
+                                <li>视觉平衡度提升</li>
                             </ul>
-                            <li>AI页面鍔ㄧ敾升级</li>
+                            <li>AI页面动画升级</li>
                             <ul>
-                                <li>花朵动画改为逐瓣飞散效果（与����栏按钮保持一致）</li>
-                                <li>闪电�л�按钮改为SVG图标，视觉更精致</li>
-                                <li>动画过渡更流畅自�?/li>
+                                <li>花朵动画改为逐瓣飞散效果（与导航栏按钮保持一致）</li>
+                                <li>闪电切换按钮改为SVG图标，视觉更精致</li>
+                                <li>动画过渡更流畅自然</li>
                             </ul>
                         </ul>
                     `
@@ -4858,14 +4880,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>兼憡系统功能增强</li>
+                            <li>公告系统功能增强</li>
                             <ul>
-                                <li>����员发布公告时可��择输入标题和内容（不强制，至少填写丢�项）</li>
-                                <li>�û��鿴公告列表时展示公告标�?/li>
-                                <li>兼憡详情椤垫柊澧炲彂甯冭€呬俊鎭睍绀猴紙头像 + 用户鍚嶏級</li>
-                                <li>管理鍚庡彴兼憡鍒楄〃新增标题銆佸彂甯冭€呭垪显示</li>
-                                <li>管理鍚庡彴新增标题杈撳叆妗?/li>
-                                <li>适配深色/浅色���⢘</li>
+                                <li>管理员发布公告时可选择输入标题和内容（不强制，至少填写一项）</li>
+                                <li>用户查看公告列表时展示公告标题</li>
+                                <li>公告详情页新增发布者信息展示（头像 + 用户名）</li>
+                                <li>管理后台公告列表新增标题、发布者列显示</li>
+                                <li>管理后台新增标题输入框</li>
+                                <li>适配深色/浅色主题</li>
                                 <li>保持原有白色磨砂风格统一</li>
                             </ul>
                         </ul>
@@ -4877,31 +4899,31 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>公告ϵͳ视觉与交互优�?/li>
+                            <li>公告系统视觉与交互优化</li>
                             <ul>
-                                <li>公告模��框改为与��动态��浏览完全一致的白色磨砂风格</li>
-                                <li>公告列表项样式统丢�为白色磨砂效�?/li>
-                                <li>完全�Ƴ�公告����区域的滚动条</li>
+                                <li>公告模态框改为与总动态总浏览完全一致的白色磨砂风格</li>
+                                <li>公告列表项样式统一为白色磨砂效果</li>
+                                <li>完全移除公告内容区域的滚动条</li>
                                 <li>禁止公告区域横向拖拽滚动</li>
-                                <li>兼憡详情澶撮儴优化布局锛屼慨澶嶅垹闄ゆ寜閽綅缃?/li>
+                                <li>公告详情头部优化布局，修复删除按钮位置</li>
                             </ul>
-                            <li>����与AI区域视觉统一</li>
+                            <li>聊天与AI区域视觉统一</li>
                             <ul>
-                                <li>����输入区域背景改为透明，与背景色一�?/li>
-                                <li>AI容器背景完全透明�?/li>
-                                <li>AI输入框��模式切换按钮��AI气泡统一为磨砂风�?/li>
-                                <li>�Ż�AI消息气泡与����过程卡片样�?/li>
+                                <li>聊天输入区域背景改为透明，与背景色一致</li>
+                                <li>AI容器背景完全透明化</li>
+                                <li>AI输入框、模式切换按钮、AI气泡统一为磨砂风格</li>
+                                <li>优化AI消息气泡与思考过程卡片样式</li>
                             </ul>
-                            <li>深色/浅色���⢘全面适配</li>
+                            <li>深色/浅色主题全面适配</li>
                             <ul>
-                                <li>公告ϵͳ深色ģʽ完全对齐�ܶ�̬�风�?/li>
-                                <li>���Љ元素支持主题自动切�?/li>
+                                <li>公告系统深色模式完全对齐总动态风格</li>
+                                <li>所有元素支持主题自动切换</li>
                             </ul>
-                            <li>性能与流畅度�Ż�</li>
+                            <li>性能与流畅度优化</li>
                             <ul>
-                                <li>�Ż�公告列表动画效果</li>
-                                <li>添加will-change属��提升渲染��能</li>
-                                <li>�Ż�事件处理逻辑</li>
+                                <li>优化公告列表动画效果</li>
+                                <li>添加will-change属性提升渲染性能</li>
+                                <li>优化事件处理逻辑</li>
                             </ul>
                         </ul>
                     `
@@ -4912,22 +4934,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>新增兼憡通知系统</li>
+                            <li>新增公告通知系统</li>
                             <ul>
-                                <li>公告铃铛按钮（登录后可见�?/li>
-                                <li>未读公告计数��ʾ</li>
-                                <li>公告����鿴与列表返回功�?/li>
-                                <li>公告����与删除管理权�?/li>
+                                <li>公告铃铛按钮（登录后可见）</li>
+                                <li>未读公告计数提示</li>
+                                <li>公告详情查看与列表返回功能</li>
+                                <li>公告发布与删除管理权限</li>
                             </ul>
-                            <li>新增鐙珛管理鍚庡彴页面</li>
+                            <li>新增独立管理后台页面</li>
                             <ul>
-                                <li>多维度数据管理面�?/li>
-                                <li>兼憡发布管理</li>
-                                <li>�û�及内容数据查�?/li>
-                                <li>响应寮忚璁￠€傞厤</li>
+                                <li>多维度数据管理面板</li>
+                                <li>公告发布管理</li>
+                                <li>用户及内容数据查看</li>
+                                <li>响应式设计适配</li>
                             </ul>
-                            <li>公告����与主应用完全互��?/li>
-                            <li>�Ż�交互过渡动画提升流畅�?/li>
+                            <li>公告数据与主应用完全互通</li>
+                            <li>优化交互过渡动画提升流畅度</li>
                         </ul>
                     `
                 },
@@ -4937,10 +4959,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>优化椤堕儴导航鏍忎氦浜?/li>
+                            <li>优化顶部导航栏交互</li>
                             <ul>
-                                <li>去除重复����入口</li>
-                                <li>�Ż�底部 Dock 栏点击区域，允许框外区域交互</li>
+                                <li>去除重复聊天入口</li>
+                                <li>优化底部 Dock 栏点击区域，允许框外区域交互</li>
                             </ul>
                         </ul>
                     `
@@ -4951,12 +4973,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>三大核心����按钮SVG动画�Ż�</li>
+                            <li>三大核心功能按钮SVG动画优化</li>
                             <ul>
-                                <li>����设计帖子按钮钢笔绘制动画</li>
-                                <li>重新设计聊天按钮姘旀场鍔ㄧ敾</li>
-                                <li>AI按钮����为花朵绽放与花瓣归位动画</li>
-                                <li>���Љ动画支持按钮外区域��ʾ</li>
+                                <li>重新设计帖子按钮钢笔绘制动画</li>
+                                <li>重新设计聊天按钮气泡动画</li>
+                                <li>AI按钮更换为花朵绽放与花瓣归位动画</li>
+                                <li>所有动画支持按钮外区域显示</li>
                                 <li>严格使用CSS @keyframes实现</li>
                             </ul>
                         </ul>
@@ -4968,13 +4990,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>更新内容</h4>
                         <ul>
-                            <li>三大核心����按钮全新SVG动画实现</li>
+                            <li>三大核心功能按钮全新SVG动画实现</li>
                             <ul>
-                                <li>帖子按钮钢笔路径绘制�?.5秒）</li>
-                                <li>����按钮打字点与气泡动画�?秒）</li>
-                                <li>AI按钮脉冲发光效果�?.8秒）</li>
-                                <li>使用stroke-dasharray/dashoffset抢��?/li>
-                                <li>纯CSS实现，无定时器依�?/li>
+                                <li>帖子按钮钢笔路径绘制（1.5秒）</li>
+                                <li>聊天按钮打字点与气泡动画（2秒）</li>
+                                <li>AI按钮脉冲发光效果（1.8秒）</li>
+                                <li>使用stroke-dasharray/dashoffset技术</li>
+                                <li>纯CSS实现，无定时器依赖</li>
                             </ul>
                         </ul>
                     `
@@ -4985,13 +5007,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>初始版本</h4>
                         <ul>
-                            <li>基础����框架搭建</li>
+                            <li>基础功能框架搭建</li>
                             <li>用户认证系统</li>
-                            <li>甯栧瓙发布涓庢祻瑙?/li>
-                            <li>评论涓庣偣璧炲姛鑳?/li>
-                            <li>绉佷俊聊天系统</li>
-                            <li>AI瀵硅瘽功能</li>
-                            <li>娣辫壊/娴呰壊主题切换</li>
+                            <li>帖子发布与浏览</li>
+                            <li>评论与点赞功能</li>
+                            <li>私信聊天系统</li>
+                            <li>AI对话功能</li>
+                            <li>深色/浅色主题切换</li>
                         </ul>
                     `
                 }
