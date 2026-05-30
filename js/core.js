@@ -71,6 +71,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             onlyMine: false
         };
         let editPostId = null;
+        let postFilterUsersLoaded = false;
+        let postFilterUsersLoading = false;
+        let postFilterUsers = [];
 
         function isAdmin() { return currentUser === ADMIN_NAME; }
 
@@ -2004,6 +2007,105 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             // DEPRECATED_DO_NOT_EDIT ====== [已废弃] 下方�?520行有����版本 ======
+            function getPostFilterUserAvatar(username) {
+                var safeName = escapeHtml(username || "");
+                var avatarUrl = avatarCache[username];
+                if (avatarUrl) {
+                    return '<span class="post-user-chip-avatar"><img src="' + escapeHtml(avatarUrl) + '" alt="' + safeName + '"></span>';
+                }
+                return '<span class="post-user-chip-avatar">' + escapeHtml((username || "?").slice(0, 1).toUpperCase()) + '</span>';
+            }
+
+            function renderPostFilterUsers() {
+                var list = document.getElementById("postUserQuickList");
+                var input = document.getElementById("postUserFilter");
+                var resetBtn = document.getElementById("postUserFilterReset");
+                if (!list || !input) return;
+                var activeUser = String(input.value || "").trim();
+                if (resetBtn) resetBtn.style.visibility = activeUser ? "visible" : "hidden";
+                if (postFilterUsersLoading && !postFilterUsers.length) {
+                    list.innerHTML = '<div class="post-user-chip is-empty">\u52a0\u8f7d\u4e2d...</div>';
+                    return;
+                }
+                var users = Array.isArray(postFilterUsers) ? postFilterUsers : [];
+                if (!users.length) {
+                    list.innerHTML = '<div class="post-user-chip is-empty">\u6682\u65e0\u53ef\u7b5b\u9009\u7528\u6237</div>';
+                    return;
+                }
+                var html = [
+                    '<button type="button" class="post-user-chip' + (!activeUser ? ' is-active' : '') + '" onclick="selectPostFilterUser(\'\')">' +
+                        '<span class="post-user-chip-avatar">\u5168</span>' +
+                        '<span class="post-user-chip-name">\u5168\u90e8\u7528\u6237</span>' +
+                    '</button>'
+                ];
+                users.forEach(function(username) {
+                    var safeJsName = String(username).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+                    html.push(
+                        '<button type="button" class="post-user-chip' + (activeUser === username ? ' is-active' : '') + '" onclick="selectPostFilterUser(\'' + safeJsName + '\')">' +
+                            getPostFilterUserAvatar(username) +
+                            '<span class="post-user-chip-name">' + escapeHtml(username) + '</span>' +
+                        '</button>'
+                    );
+                });
+                list.innerHTML = html.join("");
+            }
+
+            async function loadPostFilterUsers(forceRefresh) {
+                if (postFilterUsersLoading) return;
+                if (postFilterUsersLoaded && !forceRefresh) {
+                    renderPostFilterUsers();
+                    return;
+                }
+                postFilterUsersLoading = true;
+                renderPostFilterUsers();
+                try {
+                    var authRes = await sb.from("posts")
+                        .select("user_name")
+                        .eq("media_type", AUTH_MARKER)
+                        .eq("actor_key", AUTH_MARKER)
+                        .order("created_at", { ascending: false });
+                    if (authRes.error) throw authRes.error;
+                    var seen = {};
+                    postFilterUsers = (authRes.data || []).map(function(row) {
+                        return row && row.user_name ? String(row.user_name).trim() : "";
+                    }).filter(function(name) {
+                        if (!name || seen[name]) return false;
+                        seen[name] = true;
+                        return true;
+                    }).sort(function(a, b) {
+                        return a.localeCompare(b, "zh-Hans-CN");
+                    });
+                    if (postFilterUsers.length) {
+                        await loadAvatarsForUsers(postFilterUsers);
+                    }
+                    postFilterUsersLoaded = true;
+                } catch (e) {
+                    console.error("[post-filter-users] load failed", e);
+                    if (!postFilterUsers.length) {
+                        var fallbackSeen = {};
+                        postFilterUsers = (feedAllPosts || []).map(function(post) {
+                            return post && post.user_name ? String(post.user_name).trim() : "";
+                        }).filter(function(name) {
+                            if (!name || fallbackSeen[name]) return false;
+                            fallbackSeen[name] = true;
+                            return true;
+                        }).sort(function(a, b) {
+                            return a.localeCompare(b, "zh-Hans-CN");
+                        });
+                    }
+                } finally {
+                    postFilterUsersLoading = false;
+                    renderPostFilterUsers();
+                }
+            }
+
+            window.selectPostFilterUser = function(userName) {
+                var input = document.getElementById("postUserFilter");
+                if (input) input.value = userName || "";
+                renderPostFilterUsers();
+                window.applyPostFilters();
+            };
+
             function renderFeedWithAvatars(visiblePosts, comments, likes) {
                 const feed = document.getElementById("feed");
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
@@ -2133,6 +2235,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return buildPostContentPayload(nextText, meta);
             }
 
+            function matchesPostExpectation(post, expected) {
+                if (!post) return false;
+                var normalized = normalizePost(post);
+                if (typeof expected.content === "string" && String(normalized.content || "") !== String(expected.content)) return false;
+                if (expected.visibility != null && String(normalized.visibility || "public") !== String(expected.visibility)) return false;
+                if (expected.is_pinned != null && !!normalized.is_pinned !== !!expected.is_pinned) return false;
+                if (Object.prototype.hasOwnProperty.call(expected, "pinned_at") && String(normalized.pinned_at || "") !== String(expected.pinned_at || "")) return false;
+                return true;
+            }
+
+            async function fetchPostSnapshot(postId) {
+                var fetched = await sb.from("posts").select("*").eq("id", postId).maybeSingle();
+                if (fetched.error) throw fetched.error;
+                return fetched.data || null;
+            }
+
             async function updatePostRecord(post, updates) {
                 var normalized = normalizePost(post);
                 var nextVisibility = updates.visibility != null ? updates.visibility : normalized.visibility;
@@ -2147,7 +2265,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     pinned_at: nextPinnedAt,
                     updated_at: nextUpdatedAt
                 };
+                var expectedState = {
+                    content: nextContent,
+                    visibility: nextVisibility,
+                    is_pinned: nextPinned,
+                    pinned_at: nextPinnedAt
+                };
                 var direct = await sb.from("posts").update(directPayload).eq("id", post.id).select("*");
+                if (!direct.error && (!direct.data || (Array.isArray(direct.data) && direct.data.length === 0))) {
+                    try {
+                        var fetchedDirectRow = await fetchPostSnapshot(post.id);
+                        if (fetchedDirectRow) direct.data = [fetchedDirectRow];
+                    } catch (verifyDirectRowsError) {}
+                }
                 if (!direct.error) {
                     if (!direct.data || (Array.isArray(direct.data) && direct.data.length === 0)) {
                         return { ok: false, error: new Error("数据库未更新任何记录，可能是 Supabase RLS/update policy 拦截。") };
@@ -2158,6 +2288,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (hasVisibility && hasPinned) {
                         return { ok: true, fallback: false };
                     }
+                    try {
+                        var verifiedDirect = await fetchPostSnapshot(post.id);
+                        if (matchesPostExpectation(verifiedDirect, expectedState)) {
+                            return { ok: true, fallback: false };
+                        }
+                    } catch (verifyDirectError) {}
                 }
 
                 var message = direct.error ? String(direct.error.message || "") : "";
@@ -2172,6 +2308,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 });
                 var fallback = await sb.from("posts").update({ content: fallbackContent }).eq("id", post.id);
                 if (fallback.error) return { ok: false, error: fallback.error };
+                try {
+                    var verifiedFallback = await fetchPostSnapshot(post.id);
+                    if (!matchesPostExpectation(verifiedFallback, expectedState)) {
+                        return { ok: false, error: new Error("帖子更新后状态未实际保存") };
+                    }
+                } catch (verifyFallbackError) {
+                    return { ok: false, error: verifyFallbackError };
+                }
                 return { ok: true, fallback: true };
             }
 
@@ -2293,6 +2437,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (panel) panel.style.display = "none";
                 var btn = document.getElementById("filterToggleBtn");
                 if (btn) btn.classList.remove("active");
+                renderPostFilterUsers();
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
 
@@ -2313,9 +2458,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var panel = document.getElementById("postFilterPanel");
                 var btn = document.getElementById("filterToggleBtn");
                 if (!panel) return;
-                if (panel.style.display === "none") {
+                var isHidden = panel.style.display === "none" || window.getComputedStyle(panel).display === "none";
+                if (isHidden) {
                     panel.style.display = "flex";
                     if (btn) btn.classList.add("active");
+                    loadPostFilterUsers(true);
+                    renderPostFilterUsers();
                 } else {
                     panel.style.display = "none";
                     if (btn) btn.classList.remove("active");
