@@ -5289,6 +5289,20 @@
         .pp-rotate-btn {
             right: calc(68px + env(safe-area-inset-right, 0px));
         }
+        .pp-zoom-in {
+            left: calc(120px + env(safe-area-inset-left, 0px));
+        }
+        .pp-zoom-out {
+            left: calc(68px + env(safe-area-inset-left, 0px));
+        }
+        .pp-compact-btn {
+            right: calc(120px + env(safe-area-inset-right, 0px));
+        }
+        @media (max-width: 480px) {
+            .pp-zoom-in { left: calc(100px + env(safe-area-inset-left, 0px)); }
+            .pp-zoom-out { left: calc(56px + env(safe-area-inset-left, 0px)); }
+            .pp-compact-btn { right: calc(100px + env(safe-area-inset-right, 0px)); }
+        }
         /* 删除确认弹窗 */
         .pw-confirm-dialog {
             position: fixed;
