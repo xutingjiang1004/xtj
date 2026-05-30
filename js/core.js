@@ -1776,7 +1776,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载涓?..</span></div>`;
+                if (!forceRefresh) feed.innerHTML = `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中...</span></div>`;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -2670,7 +2670,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
-                    feed.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载涓?..</span></div>';
+                    feed.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中...</span></div>';
                 }
                 try {
                     var results = await Promise.all([
@@ -2884,7 +2884,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                document.getElementById('statModalBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载涓?..</span></div>';
+                document.getElementById('statModalBody').innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
@@ -3587,7 +3587,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
-                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载涓?..</div></div>';
+                document.getElementById('dockChatMessages').innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中...</div></div>';
                 renderChatLoadingState(document.getElementById('dockChatMessages'), {
                     title: '加载中...',
                     subtitle: '正在打开聊天通道',
@@ -3607,7 +3607,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!el) return;
                 if (Date.now() - dockChatListCacheTime < DOCK_CHAT_CACHE_DURATION) return;
                 dockChatListCacheTime = Date.now();
-                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">鈴?/div><div>加载涓?..</div></div>';
+                el.innerHTML = '<div class="chat-empty"><div class="ce-icon" style="animation:spin 1s linear infinite">💬</div><div>加载中...</div></div>';
                 try {
                     renderChatLoadingState(el, {
                         title: '加载中...',
@@ -5740,3 +5740,199 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
         })();
 
+        (function installFinalUiAndDataOverrides() {
+            if (window.__xtjFinalUiOverridesV1) return;
+            window.__xtjFinalUiOverridesV1 = true;
+
+            function sleep(ms) {
+                return new Promise(function(resolve) { setTimeout(resolve, ms); });
+            }
+
+            function applyStatSnapshot(posts, comments, likes) {
+                var visiblePosts = normalizePosts(Array.isArray(posts) ? posts : []).filter(function(p) {
+                    return p && p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__photo_wall__' && canViewPost(p);
+                });
+                var visiblePostIds = new Set(visiblePosts.map(function(p) { return String(p.id); }));
+                statAllPosts = visiblePosts;
+                statAllComments = (Array.isArray(comments) ? comments : []).filter(function(c) {
+                    return c && visiblePostIds.has(String(c.post_id));
+                });
+                statAllLikes = (Array.isArray(likes) ? likes : []).filter(function(l) {
+                    return l && visiblePostIds.has(String(l.post_id));
+                });
+                statCacheTime = Date.now();
+            }
+
+            async function fetchStatSnapshotWithTimeout(timeoutMs) {
+                var timeout = new Promise(function(resolve) {
+                    setTimeout(function() { resolve(null); }, timeoutMs);
+                });
+                var request = Promise.all([
+                    sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                    sb.from("comments").select("*").order("created_at"),
+                    sb.from("likes").select("*").order("created_at", { ascending: false })
+                ]).then(function(results) {
+                    return {
+                        posts: results[0].data || [],
+                        comments: results[1].data || [],
+                        likes: results[2].data || []
+                    };
+                }).catch(function() {
+                    return null;
+                });
+                return Promise.race([request, timeout]);
+            }
+
+            renderChatLoadingState = function(el, options) {
+                if (!el) return;
+                var title = options && options.title ? options.title : '加载中...';
+                var subtitle = options && options.subtitle ? options.subtitle : '法阵正在聚能';
+                var variant = options && options.variant ? ' chat-loading-card--' + options.variant : '';
+                el.innerHTML = [
+                    '<div class="chat-loading-card' + variant + '">',
+                    '<div class="chat-loading-orb" aria-hidden="true">',
+                    '<span class="chat-loading-aura"></span>',
+                    '<span class="chat-loading-ring"></span>',
+                    '<span class="chat-loading-ring chat-loading-ring--late"></span>',
+                    '<span class="chat-loading-core"></span>',
+                    '<span class="chat-loading-glyph">✦</span>',
+                    '</div>',
+                    '<div class="chat-loading-text">',
+                    '<div class="chat-loading-title">' + escapeHtml(title) + '</div>',
+                    '<div class="chat-loading-subtitle">' + escapeHtml(subtitle) + '</div>',
+                    '</div>',
+                    '</div>'
+                ].join('');
+            };
+
+            renderPostFilterUserLoader = function() {
+                return [
+                    '<div class="post-user-chip post-user-chip--loading is-empty">',
+                    '<span class="post-user-loader" aria-hidden="true">',
+                    '<span class="post-user-loader-ring"></span>',
+                    '<span class="post-user-loader-core"></span>',
+                    '<span class="post-user-loader-spark"></span>',
+                    '</span>',
+                    '<span class="post-user-chip-name">加载中...</span>',
+                    '</div>'
+                ].join('');
+            };
+
+            updatePostRecord = async function(post, updates) {
+                var normalized = normalizePost(post);
+                var nextVisibility = updates.visibility != null ? updates.visibility : normalized.visibility;
+                var nextPinned = updates.is_pinned != null ? !!updates.is_pinned : !!normalized.is_pinned;
+                var nextPinnedAt = Object.prototype.hasOwnProperty.call(updates, "pinned_at") ? updates.pinned_at : normalized.pinned_at;
+                var nextUpdatedAt = Object.prototype.hasOwnProperty.call(updates, "updated_at") ? updates.updated_at : normalized.updated_at;
+                var nextContent = typeof updates.content === "string" ? updates.content : normalized.content;
+                var directPayload = {
+                    content: nextContent,
+                    visibility: nextVisibility,
+                    is_pinned: nextPinned,
+                    pinned_at: nextPinnedAt,
+                    updated_at: nextUpdatedAt
+                };
+                var direct = await sb.from("posts").update(directPayload).eq("id", post.id);
+                if (!direct.error) {
+                    return { ok: true, fallback: false };
+                }
+
+                var message = String(direct.error.message || "");
+                var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message);
+                if (!maybeSchemaIssue) return { ok: false, error: direct.error };
+
+                var fallbackContent = buildPostStorageContent(normalized, nextContent, {
+                    visibility: nextVisibility,
+                    is_pinned: nextPinned,
+                    pinned_at: nextPinnedAt,
+                    updated_at: nextUpdatedAt
+                });
+                var fallback = await sb.from("posts").update({ content: fallbackContent }).eq("id", post.id);
+                if (fallback.error) return { ok: false, error: fallback.error };
+                return { ok: true, fallback: true };
+            };
+
+            window.saveEditPost = async function() {
+                if (!editPostId) return;
+                var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(editPostId); });
+                if (!post || !canEditPost(post)) {
+                    showToast("无权编辑这条帖子");
+                    return;
+                }
+                var input = document.getElementById("editPostInp");
+                var visibility = document.getElementById("editPostVisibility");
+                var btn = document.getElementById("saveEditPostBtn");
+                var nextContent = input ? input.value.trim() : "";
+                var nextVisibility = visibility ? visibility.value : "public";
+                if (!nextContent) {
+                    showToast("请输入帖子内容");
+                    return;
+                }
+                btn.disabled = true;
+                btn.textContent = "保存中...";
+                try {
+                    var result = await updatePostRecord(post, {
+                        content: nextContent.slice(0, 2000),
+                        visibility: nextVisibility,
+                        updated_at: new Date().toISOString()
+                    });
+                    if (!result.ok) {
+                        showToast("保存失败: " + ((result.error && result.error.message) || "未知错误"));
+                        return;
+                    }
+                    clearFeedCache();
+                    closeModal("editPostModal");
+                    editPostId = null;
+                    await loadFeed(true);
+                    showToast(nextVisibility === "private" ? "已改为私密" : "已改为公开");
+                } catch (e) {
+                    console.error("[edit-post] save failed", e);
+                    showToast("保存失败: " + (e && e.message ? e.message : "网络错误"));
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = "保存修改";
+                }
+            };
+
+            window.openStatDetail = async function(type) {
+                statCurrentType = type;
+                var titles = {
+                    posts: '总动态 - 按用户分组',
+                    views: '总浏览 - 浏览记录',
+                    likes: '点赞和评论 - 记录'
+                };
+                var title = document.getElementById('statModalTitle');
+                var body = document.getElementById('statModalBody');
+                var modal = document.getElementById('statModal');
+                if (title) title.textContent = titles[type] || '统计详情';
+                if (modal) modal.classList.add('active');
+
+                var sourcePosts = Array.isArray(feedAllPosts) && feedAllPosts.length ? feedAllPosts : statAllPosts;
+                var sourceComments = Array.isArray(feedAllComments) && feedAllComments.length ? feedAllComments : statAllComments;
+                var sourceLikes = Array.isArray(feedAllLikes) && feedAllLikes.length ? feedAllLikes : statAllLikes;
+
+                if (sourcePosts.length || sourceComments.length || sourceLikes.length) {
+                    applyStatSnapshot(sourcePosts, sourceComments, sourceLikes);
+                    renderStatByType(type);
+                    if (statPollTimer) clearInterval(statPollTimer);
+                    statPollTimer = setInterval(refreshStatModal, 15000);
+                    fetchStatSnapshotWithTimeout(1800).then(function(snapshot) {
+                        if (!snapshot || !modal || !modal.classList.contains('active') || statCurrentType !== type) return;
+                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
+                        renderStatByType(type);
+                    });
+                    return;
+                }
+
+                if (body) body.innerHTML = '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中...</span></div>';
+                var snapshot = await fetchStatSnapshotWithTimeout(2200);
+                if (snapshot) {
+                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
+                    renderStatByType(type);
+                } else if (body) {
+                    body.innerHTML = '<div class="stat-empty">暂无可用数据</div>';
+                }
+                if (statPollTimer) clearInterval(statPollTimer);
+                statPollTimer = setInterval(refreshStatModal, 15000);
+            };
+        })();
