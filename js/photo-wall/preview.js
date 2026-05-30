@@ -1,4 +1,4 @@
-﻿
+
 (function() {
     var photoPreviewActive = false;
     var photoPreviewCurrent = null;
@@ -702,7 +702,7 @@
             return;
         }
 
-        // 璋冪敤娓呯悊鍑芥暟闃叉鍐呭瓨娉勬紡
+        // 调用清理函数防止内存泄漏
         if (overlay._cleanupPreview) {
             overlay._cleanupPreview();
         }
@@ -1341,7 +1341,7 @@
                 try { navigator.vibrate(10); } catch (e) {}
             }
 
-            // 妯℃嫙杩涘害鍔ㄧ敾
+            // 模拟进度动画
             var dlTimer = setInterval(function() {
                 var bar = document.getElementById('ppDownloadProgressBar');
                 if (!bar) { clearInterval(dlTimer); return; }
@@ -1368,7 +1368,7 @@
             ppHideDownloadOverlay();
             ppDownloadActive = false;
 
-            // 闄嶇骇锛氱洿鎺ユ墦寮€鍥剧墖閾炬帴
+            // 降级：直接打开图片链接
             try {
                 var a = document.createElement('a');
                 a.href = photo.imageUrl;
