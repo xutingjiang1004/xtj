@@ -157,7 +157,8 @@
                 '.pp-compact-btn{right:calc(120px + env(safe-area-inset-right,0px));}',
                 '.pp-compact-btn.active{background:rgba(52,211,153,0.2);border-color:rgba(52,211,153,0.45);color:#34d399;}',
                 '@media (max-width:480px){.pp-compact-btn,.pp-zoom-btn{width:36px;height:36px;}.pp-zoom-in{right:calc(12px + env(safe-area-inset-right,0px));}.pp-zoom-out{right:calc(56px + env(safe-area-inset-right,0px));}.pp-compact-btn{right:calc(100px + env(safe-area-inset-right,0px));}}',
-                '@media (prefers-reduced-motion: reduce){.pp-current-loading,.photo-preview-overlay.pp-hotfix-basic-close .photo-preview-image-wrapper{transition:none!important;}}'
+                '@media (prefers-reduced-motion: reduce){.pp-current-loading,.photo-preview-overlay.pp-hotfix-basic-close .photo-preview-image-wrapper{transition:none!important;}}',
+                '@keyframes ppBottomBtnEnter{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}'
             ].join('\n');
             style.setAttribute('data-max-zoom', MAX_ZOOM);
             document.head.appendChild(style);
