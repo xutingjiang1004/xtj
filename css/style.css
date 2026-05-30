@@ -1644,6 +1644,9 @@
         .chat-loading-dots {
             display: none;
         }
+        .xtj-chat-loader-dots {
+            display: none !important;
+        }
         .chat-loading-dots span {
             width: 7px;
             height: 7px;
