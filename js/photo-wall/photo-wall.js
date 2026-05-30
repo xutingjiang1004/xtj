@@ -148,14 +148,15 @@
                 '.photo-preview-overlay.pp-hotfix-basic-close .photo-preview-image-wrapper{transition:transform .24s cubic-bezier(.16,1,.3,1);transform:scale(.985);}',
                 '.pp-compact-btn,.pp-zoom-btn{position:absolute;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:15;width:40px;height:40px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.05);backdrop-filter:blur(14px) saturate(120%);-webkit-backdrop-filter:blur(14px) saturate(120%);color:rgba(255,255,255,.80);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .2s cubic-bezier(.16,1,.3,1),background .2s ease,opacity .2s ease,box-shadow .2s ease;pointer-events:auto;box-shadow:0 4px 16px rgba(0,0,0,.10);opacity:0;transform:translateY(10px);}',
                 '.photo-preview-overlay.active .pp-compact-btn,.photo-preview-overlay.active .pp-zoom-btn{animation:ppBottomBtnEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.22s forwards;}',
-                '.pp-compact-btn:hover,.pp-zoom-btn:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.25);transform:translateY(-1px) scale(1.05);box-shadow:0 6px 24px rgba(0,0,0,.16);color:white;}',
+                '.pp-compact-btn:hover,.pp-zoom-btn:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.25);color:white;}',
                 '.pp-compact-btn:active,.pp-zoom-btn:active{transform:scale(.92);}',
                 '.pp-zoom-btn:disabled{opacity:.3;cursor:not-allowed;transform:none!important;pointer-events:none;}',
-                '.pp-compact-btn{left:calc(68px + env(safe-area-inset-left,0px));}',
-                '.pp-zoom-out{left:calc(120px + env(safe-area-inset-left,0px));}',
-                '.pp-zoom-in{left:calc(172px + env(safe-area-inset-left,0px));}',
+                '.pp-zoom-btn{transform-origin:center center;}',
+                '.pp-zoom-in{right:calc(16px + env(safe-area-inset-right,0px));}',
+                '.pp-zoom-out{right:calc(68px + env(safe-area-inset-right,0px));}',
+                '.pp-compact-btn{right:calc(120px + env(safe-area-inset-right,0px));}',
                 '.pp-compact-btn.active{background:rgba(52,211,153,0.2);border-color:rgba(52,211,153,0.45);color:#34d399;}',
-                '@media (max-width:480px){.pp-compact-btn,.pp-zoom-btn{width:36px;height:36px;}.pp-compact-btn{left:calc(60px + env(safe-area-inset-left,0px));}.pp-zoom-out{left:calc(104px + env(safe-area-inset-left,0px));}.pp-zoom-in{left:calc(148px + env(safe-area-inset-left,0px));}}',
+                '@media (max-width:480px){.pp-compact-btn,.pp-zoom-btn{width:36px;height:36px;}.pp-zoom-in{right:calc(12px + env(safe-area-inset-right,0px));}.pp-zoom-out{right:calc(56px + env(safe-area-inset-right,0px));}.pp-compact-btn{right:calc(100px + env(safe-area-inset-right,0px));}}',
                 '@media (prefers-reduced-motion: reduce){.pp-current-loading,.photo-preview-overlay.pp-hotfix-basic-close .photo-preview-image-wrapper{transition:none!important;}}'
             ].join('\n');
             style.setAttribute('data-max-zoom', MAX_ZOOM);
@@ -752,7 +753,7 @@
                 modal.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>';
                 document.body.appendChild(modal);
                 modal.addEventListener('click', function(e) {
-                    if (e.target === modal) window.closePhotoInfo();
+                    if (!e.target.closest('.pp-info-modal-content')) window.closePhotoInfo();
                 });
             }
             var body = document.getElementById('ppInfoModalBody');
@@ -940,8 +941,8 @@
             var cy = state.tapY || window.innerHeight / 2;
             var vw2 = window.innerWidth / 2;
             var vh2 = window.innerHeight / 2;
-            state.tx = (vw2 - cx) * (1 - targetScale);
-            state.ty = (vh2 - cy) * (1 - targetScale);
+            state.tx = (cx - vw2) * (1 - targetScale);
+            state.ty = (cy - vh2) * (1 - targetScale);
             state.scale = targetScale;
             img.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
             applyTransform(img);
@@ -961,10 +962,6 @@
             if (!img || !state.active) return;
             var newScale = Math.min(MAX_ZOOM, state.scale * 1.5);
             if (newScale <= state.scale) return;
-            var vw2 = window.innerWidth / 2;
-            var vh2 = window.innerHeight / 2;
-            state.tx = vw2 - (vw2 - state.tx) * (newScale / state.scale);
-            state.ty = vh2 - (vh2 - state.ty) * (newScale / state.scale);
             state.scale = newScale;
             img.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
             applyTransform(img);
@@ -977,10 +974,6 @@
             if (!img || !state.active) return;
             var newScale = Math.max(1, state.scale / 1.5);
             if (newScale >= state.scale) return;
-            var vw2 = window.innerWidth / 2;
-            var vh2 = window.innerHeight / 2;
-            state.tx = vw2 - (vw2 - state.tx) * (newScale / state.scale);
-            state.ty = vh2 - (vh2 - state.ty) * (newScale / state.scale);
             if (newScale <= 1) {
                 state.tx = 0;
                 state.ty = 0;
