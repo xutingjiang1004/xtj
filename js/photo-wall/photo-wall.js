@@ -72,6 +72,8 @@
         if (window.__xtjPhotoPreviewHotfixInstalled) return;
         window.__xtjPhotoPreviewHotfixInstalled = true;
 
+        var MAX_ZOOM = 12;
+
         var state = {
             active: false,
             closing: false,
@@ -124,7 +126,10 @@
                 rotate: '<path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path>',
                 delete: '<path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path>',
                 prev: '<path d="M15 18 9 12l6-6"></path>',
-                next: '<path d="m9 18 6-6-6-6"></path>'
+                next: '<path d="m9 18 6-6-6-6"></path>',
+                'zoom-in': '<circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path><path d="M11 8v6"></path><path d="M8 11h6"></path>',
+                'zoom-out': '<circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path><path d="M8 11h6"></path>',
+                compact: '<circle cx="12" cy="12" r="10"></circle><path d="M9 12h6"></path>'
             };
             return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (paths[type] || '') + '</svg></span>';
         }
@@ -138,10 +143,22 @@
                 '.photo-preview-overlay.pp-hotfix-loading .pp-current-loading{opacity:1;transform:translate(-50%,0);}',
                 '.pp-current-loading{position:absolute;left:50%;bottom:calc(48px + env(safe-area-inset-bottom,0px));z-index:20;transform:translate(-50%,8px);opacity:0;transition:opacity .22s ease,transform .22s ease;padding:7px 12px;border-radius:999px;background:rgba(15,23,42,.34);border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:rgba(255,255,255,.86);font-size:12px;pointer-events:none;}',
                 '.pp-slide-img.pp-hotfix-fading{opacity:.72;}',
+                '.pp-slide-img:not([src]),.pp-slide-img[src=""]{min-width:80px;min-height:80px;}',
                 '.pp-slide-img.pp-placeholder{background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.02));}',
                 '.photo-preview-overlay.pp-hotfix-basic-close .photo-preview-image-wrapper{transition:transform .24s cubic-bezier(.16,1,.3,1);transform:scale(.985);}',
+                '.pp-compact-btn,.pp-zoom-btn{position:absolute;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:15;width:40px;height:40px;border-radius:999px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.05);backdrop-filter:blur(14px) saturate(120%);-webkit-backdrop-filter:blur(14px) saturate(120%);color:rgba(255,255,255,.80);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:transform .2s cubic-bezier(.16,1,.3,1),background .2s ease,opacity .2s ease,box-shadow .2s ease;pointer-events:auto;box-shadow:0 4px 16px rgba(0,0,0,.10);opacity:0;transform:translateY(10px);}',
+                '.photo-preview-overlay.active .pp-compact-btn,.photo-preview-overlay.active .pp-zoom-btn{animation:ppBottomBtnEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.22s forwards;}',
+                '.pp-compact-btn:hover,.pp-zoom-btn:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.25);transform:translateY(-1px) scale(1.05);box-shadow:0 6px 24px rgba(0,0,0,.16);color:white;}',
+                '.pp-compact-btn:active,.pp-zoom-btn:active{transform:scale(.92);}',
+                '.pp-zoom-btn:disabled{opacity:.3;cursor:not-allowed;transform:none!important;pointer-events:none;}',
+                '.pp-compact-btn{left:calc(68px + env(safe-area-inset-left,0px));}',
+                '.pp-zoom-out{left:calc(120px + env(safe-area-inset-left,0px));}',
+                '.pp-zoom-in{left:calc(172px + env(safe-area-inset-left,0px));}',
+                '.pp-compact-btn.active{background:rgba(52,211,153,0.2);border-color:rgba(52,211,153,0.45);color:#34d399;}',
+                '@media (max-width:480px){.pp-compact-btn,.pp-zoom-btn{width:36px;height:36px;}.pp-compact-btn{left:calc(60px + env(safe-area-inset-left,0px));}.pp-zoom-out{left:calc(104px + env(safe-area-inset-left,0px));}.pp-zoom-in{left:calc(148px + env(safe-area-inset-left,0px));}}',
                 '@media (prefers-reduced-motion: reduce){.pp-current-loading,.photo-preview-overlay.pp-hotfix-basic-close .photo-preview-image-wrapper{transition:none!important;}}'
             ].join('\n');
+            style.setAttribute('data-max-zoom', MAX_ZOOM);
             document.head.appendChild(style);
         }
 
@@ -175,7 +192,7 @@
             if (!overlay) {
                 overlay = document.createElement('div');
                 overlay.id = 'photoPreviewOverlay';
-                overlay.className = 'photo-preview-overlay';
+                overlay.className = 'photo-preview-overlay pp-info-hidden';
                 document.body.appendChild(overlay);
             }
 
@@ -195,14 +212,46 @@
                     '<button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + icon('share') + '</button>' +
                     '<button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + icon('rotate') + '</button>' +
                     '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + icon('delete') + '</button>' +
+                    '<button class="pp-compact-btn" id="ppCompactBtn" title="照片简洁" onclick="togglePhotoInfo()">' + icon('compact') + '</button>' +
+                    '<button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()">' + icon('zoom-out') + '</button>' +
+                    '<button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()">' + icon('zoom-in') + '</button>' +
                     '<div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg><span id="photoPreviewViewsCount">0</span></span></div>' +
                     '<div class="pp-current-loading" id="ppCurrentLoading">加载高清中...</div>';
-            } else if (!overlay.querySelector('#ppCurrentLoading')) {
-                var loading = document.createElement('div');
-                loading.className = 'pp-current-loading';
-                loading.id = 'ppCurrentLoading';
-                loading.textContent = '加载高清中...';
-                overlay.appendChild(loading);
+            } else {
+                if (!overlay.querySelector('#ppCurrentLoading')) {
+                    var loading = document.createElement('div');
+                    loading.className = 'pp-current-loading';
+                    loading.id = 'ppCurrentLoading';
+                    loading.textContent = '加载高清中...';
+                    overlay.appendChild(loading);
+                }
+                if (!overlay.querySelector('#ppCompactBtn')) {
+                    var compactBtn = document.createElement('button');
+                    compactBtn.className = 'pp-compact-btn';
+                    compactBtn.id = 'ppCompactBtn';
+                    compactBtn.title = '照片简洁';
+                    compactBtn.onclick = togglePhotoInfo;
+                    compactBtn.innerHTML = icon('compact');
+                    overlay.appendChild(compactBtn);
+                }
+                if (!overlay.querySelector('#ppZoomOutBtn')) {
+                    var zoomOutBtn = document.createElement('button');
+                    zoomOutBtn.className = 'pp-zoom-btn pp-zoom-out';
+                    zoomOutBtn.id = 'ppZoomOutBtn';
+                    zoomOutBtn.title = '缩小';
+                    zoomOutBtn.onclick = function() { window.zoomOut(); };
+                    zoomOutBtn.innerHTML = icon('zoom-out');
+                    overlay.appendChild(zoomOutBtn);
+                }
+                if (!overlay.querySelector('#ppZoomInBtn')) {
+                    var zoomInBtn = document.createElement('button');
+                    zoomInBtn.className = 'pp-zoom-btn pp-zoom-in';
+                    zoomInBtn.id = 'ppZoomInBtn';
+                    zoomInBtn.title = '放大';
+                    zoomInBtn.onclick = function() { window.zoomIn(); };
+                    zoomInBtn.innerHTML = icon('zoom-in');
+                    overlay.appendChild(zoomInBtn);
+                }
             }
 
             bindHotfixEvents(overlay);
@@ -312,6 +361,7 @@
                     requestAnimationFrame(function() { if (img) img.style.transition = ''; });
                 }
             }
+            updateZoomButtons();
         }
 
         function updateSideImages() {
@@ -406,40 +456,41 @@
             var curImg = document.getElementById('photoPreviewImage');
             if (!photo || !curImg) return;
 
-            var thumbImg = options.thumbImg || findThumb(photo);
-            var fallback = getPreviewSrc(photo, thumbImg);
-            var full = photo.imageUrl || fallback;
+            var full = photo.imageUrl || '';
             var token = Date.now() + '_' + Math.random().toString(36).slice(2);
             curImg._xtjLoadToken = token;
             curImg.style.transition = options.instant ? 'none' : 'opacity .18s ease, transform .26s cubic-bezier(.16,1,.3,1)';
-            curImg.style.opacity = '1';
+            curImg.style.opacity = '0';
             curImg.classList.remove('pp-placeholder');
 
-            if (fallback) setImg(curImg, fallback, true);
+            var wrapper = document.getElementById('ppImageWrapper');
+            if (wrapper) {
+                wrapper.style.background = 'transparent';
+            }
+
             applyTransform(curImg);
             updateInfo();
-            if (window.updateAmbientBackground) window.updateAmbientBackground(fallback || full);
 
-            if (full && full !== fallback) {
-                setLoading(true, '加载高清中...');
+            if (full) {
+                setLoading(true, '加载中...');
                 loadImage(full, 12000).then(function() {
                     if (!state.active || curImg._xtjLoadToken !== token) return;
-                    curImg.classList.add('pp-hotfix-fading');
-                    requestAnimationFrame(function() {
-                        setImg(curImg, full, false);
-                        curImg.classList.remove('pp-hotfix-fading');
-                        setLoading(false);
-                        if (window.updateAmbientBackground) window.updateAmbientBackground(full);
-                    });
+                    curImg.style.opacity = '1';
+                    setImg(curImg, full, false);
+                    setLoading(false);
+                    if (window.updateAmbientBackground) window.updateAmbientBackground(full);
                 }).catch(function() {
                     if (!state.active || curImg._xtjLoadToken !== token) return;
                     setLoading(false);
-                    if (fallback) {
-                        setImg(curImg, fallback, false);
+                    var thumbImg = options.thumbImg || findThumb(photo);
+                    var alt = getPreviewSrc(photo, thumbImg);
+                    if (alt && alt !== full) {
+                        setImg(curImg, alt, false);
+                        curImg.style.opacity = '1';
                         var now = Date.now();
                         if (window.showToast && now - state.fullToastAt > 8000) {
                             state.fullToastAt = now;
-                            window.showToast('高清图加载失败，已显示预览图');
+                            window.showToast('原图加载失败，已显示预览图');
                         }
                     } else {
                         curImg.classList.add('pp-placeholder');
@@ -448,6 +499,8 @@
                 });
             } else {
                 setLoading(false);
+                curImg.style.opacity = '1';
+                curImg.classList.add('pp-placeholder');
             }
 
             scheduleIdle(updateSideImages, 650);
@@ -534,7 +587,7 @@
             overlay._xtjOriginRect = originRect;
             overlay._xtjOriginImg = thumbImg;
             overlay.classList.remove('pp-hotfix-closing', 'pp-hotfix-basic-close');
-            overlay.classList.add('active');
+            overlay.classList.add('pp-info-hidden', 'active');
             document.body.classList.add('photo-previewing');
             state.active = true;
             state.closing = false;
@@ -664,6 +717,9 @@
                 }
             }, 290);
         }
+
+        window.zoomIn = zoomIn;
+        window.zoomOut = zoomOut;
 
         window.ppRotatePhoto = function() {
             if (!state.active) return;
@@ -855,6 +911,16 @@
                 if (!state.active) return;
                 setupTrack();
             });
+
+            overlay.addEventListener('click', function(e) {
+                var info = document.querySelector('.photo-preview-info');
+                var btn = document.getElementById('ppCompactBtn');
+                if (!info || overlay.classList.contains('pp-info-hidden')) return;
+                if (!info.contains(e.target) && btn && !btn.contains(e.target)) {
+                    overlay.classList.add('pp-info-hidden');
+                    btn.classList.remove('active');
+                }
+            });
         }
 
         function toggleZoom() {
@@ -880,6 +946,60 @@
             img.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
             applyTransform(img);
             setTimeout(function() { if (img) img.style.transition = ''; }, 260);
+            updateZoomButtons();
+        }
+
+        function updateZoomButtons() {
+            var zoomInBtn = document.getElementById('ppZoomInBtn');
+            var zoomOutBtn = document.getElementById('ppZoomOutBtn');
+            if (zoomInBtn) zoomInBtn.disabled = state.scale >= MAX_ZOOM;
+            if (zoomOutBtn) zoomOutBtn.disabled = state.scale <= 1;
+        }
+
+        function zoomIn() {
+            var img = document.getElementById('photoPreviewImage');
+            if (!img || !state.active) return;
+            var newScale = Math.min(MAX_ZOOM, state.scale * 1.5);
+            if (newScale <= state.scale) return;
+            var vw2 = window.innerWidth / 2;
+            var vh2 = window.innerHeight / 2;
+            state.tx = vw2 - (vw2 - state.tx) * (newScale / state.scale);
+            state.ty = vh2 - (vh2 - state.ty) * (newScale / state.scale);
+            state.scale = newScale;
+            img.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
+            applyTransform(img);
+            setTimeout(function() { if (img) img.style.transition = ''; }, 260);
+            updateZoomButtons();
+        }
+
+        function zoomOut() {
+            var img = document.getElementById('photoPreviewImage');
+            if (!img || !state.active) return;
+            var newScale = Math.max(1, state.scale / 1.5);
+            if (newScale >= state.scale) return;
+            var vw2 = window.innerWidth / 2;
+            var vh2 = window.innerHeight / 2;
+            state.tx = vw2 - (vw2 - state.tx) * (newScale / state.scale);
+            state.ty = vh2 - (vh2 - state.ty) * (newScale / state.scale);
+            if (newScale <= 1) {
+                state.tx = 0;
+                state.ty = 0;
+            }
+            state.scale = newScale;
+            img.style.transition = 'transform .24s cubic-bezier(.16,1,.3,1)';
+            applyTransform(img);
+            setTimeout(function() { if (img) img.style.transition = ''; }, 260);
+            updateZoomButtons();
+        }
+
+        function togglePhotoInfo() {
+            var info = document.querySelector('.photo-preview-info');
+            var btn = document.getElementById('ppCompactBtn');
+            var overlay = document.getElementById('photoPreviewOverlay');
+            if (!info || !overlay) return;
+            var hidden = overlay.classList.contains('pp-info-hidden');
+            overlay.classList.toggle('pp-info-hidden', !hidden);
+            if (btn) btn.classList.toggle('active', !hidden);
         }
 
         function addPinchEvents(wrapper) {
@@ -921,7 +1041,7 @@
                     var dy = e.touches[0].clientY - e.touches[1].clientY;
                     var dist = Math.sqrt(dx * dx + dy * dy);
                     if (state.pinchStartDist > 0) {
-                        var newScale = Math.max(0.5, Math.min(6, state.pinchStartScale * (dist / state.pinchStartDist)));
+                        var newScale = Math.max(0.5, Math.min(MAX_ZOOM, state.pinchStartScale * (dist / state.pinchStartDist)));
                         var cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
                         var cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
                         state.tx = cx - window.innerWidth / 2 - state.pinchAx * newScale;
@@ -968,6 +1088,7 @@
                             applyTransform(img);
                             setTimeout(function() { if (img) img.style.transition = ''; }, 260);
                         }
+                        updateZoomButtons();
                     }
                     return;
                 }
