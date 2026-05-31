@@ -428,6 +428,8 @@
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            transform: translateZ(0);
+            will-change: transform;
         }
         .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
         .btn-primary {
@@ -460,6 +462,7 @@
             background: rgba(255,255,255,0.3);
             border: 1px solid rgba(255,255,255,0.4);
             box-shadow: 0 8px 28px rgba(0,0,0,0.08);
+            will-change: transform, opacity;
         }
         .publish-box::before {
             content: ''; position: absolute; inset: -1px; border-radius: inherit;
@@ -517,6 +520,7 @@
             transition: var(--trans-smooth);
             cursor: pointer;
             line-height: 1.6;
+            will-change: transform;
         }
         .file-label:hover {
             background: rgba(255,255,255,0.28);
@@ -636,6 +640,7 @@
             cursor: pointer;
             transition: var(--trans-smooth);
             text-align: left;
+            will-change: transform;
         }
         .post-user-chip:hover {
             transform: translateY(-1px);
@@ -785,6 +790,7 @@
             cursor: pointer;
             transition: var(--trans-smooth);
             white-space: nowrap;
+            will-change: transform;
         }
         .filter-toggle-btn:hover {
             background: rgba(255,255,255,0.72);
@@ -838,7 +844,7 @@
         }
 
         .stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 4px; }
-        .stat-card { padding: 12px 10px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); cursor: pointer; box-shadow: 0 4px 16px rgba(5, 150, 105, 0.06); min-width: 0; }
+        .stat-card { padding: 12px 10px; border-radius: var(--radius-sm); text-align: center; transition: var(--trans-spring); cursor: pointer; box-shadow: 0 4px 16px rgba(5, 150, 105, 0.06); min-width: 0; will-change: transform; transform: translateZ(0); }
         .stat-card:hover { transform: translateY(-3px) scale(1.015); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.18), 0 4px 12px rgba(5, 150, 105, 0.1); }
         .stat-card b { display: block; font-size: 18px; color: var(--primary); font-weight: 800; line-height: 1.1; }
         .stat-card span { font-size: 12px; color: var(--text-muted); }
@@ -850,12 +856,15 @@
             margin-bottom: 16px; cursor: pointer;
             transition: var(--trans-spring);
             overflow: hidden;
+            will-change: transform;
+            transform: translateZ(0);
         }
         .chat-entry-bar:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(5, 150, 105, 0.2), 0 4px 12px rgba(5, 150, 105, 0.1); }
         .chat-entry-bar:active { transform: scale(0.99); }
         .ceb-icon {
             font-size: 26px; flex-shrink: 0;
             transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+            will-change: transform;
         }
         .chat-entry-bar:hover .ceb-icon { transform: scale(1.075) rotate(-2.5deg); }
         .ceb-label { font-size: 15px; font-weight: 600; color: var(--text-main); }
@@ -921,6 +930,7 @@
             width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
             background: linear-gradient(135deg, #059669, #34d399); color: white; font-weight: bold; font-size: 16px;
             transition: var(--trans-spring);
+            will-change: transform;
         }
         .avatar.admin { background: linear-gradient(135deg, #ff9f0a, #ff3b60); box-shadow: 0 4px 12px rgba(255, 159, 10, 0.3); }
         .avatar:hover { transform: scale(1.05); }
@@ -992,6 +1002,8 @@
             min-width: 0; min-height: 40px; width: 100%; display: inline-flex; justify-content: center; align-items: center; box-sizing: border-box;
             box-shadow: 0 1px 4px rgba(0,0,0,0.02);
             white-space: nowrap;
+            will-change: transform;
+            transform: translateZ(0);
         }
         .action-btn:hover { background: rgba(255,255,255,0.7); }
 
@@ -1006,6 +1018,7 @@
             background: rgba(255, 59, 96, 0.15); color: var(--like-color);
             border-color: rgba(255, 59, 96, 0.3);
             animation: likePulse 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            will-change: transform;
         }
 
         .heart-particle {
@@ -1015,6 +1028,7 @@
             animation: heartFly 1.2s ease-out forwards;
             z-index: 9999;
             text-shadow: 0 0 12px rgba(255, 59, 96, 0.6);
+            will-change: transform, opacity;
         }
         @keyframes heartFly {
             0%   { transform: translate(0,0) scale(0) rotate(0deg); opacity: 1; }
@@ -1045,6 +1059,7 @@
             display: flex; align-items: center; justify-content: center; z-index: 100;
             opacity: 0; pointer-events: none;
             transition: opacity 0.5s cubic-bezier(0.16,1,0.3,1);
+            will-change: opacity;
         }
         .modal-overlay.active { opacity: 1; pointer-events: all; }
         .modal-box {
@@ -1054,6 +1069,7 @@
             box-shadow: 0 20px 60px rgba(0,0,0,0.2);
             transform: translateY(35px) scale(0.96); opacity: 0; transition: var(--trans-ppt);
             contain: layout paint style;
+            will-change: transform, opacity;
         }
         .modal-overlay.active .modal-box { transform: translateY(0) scale(1); opacity: 1; }
         .post-edit-modal {
@@ -1603,6 +1619,7 @@
         }
         .xtj-echo-particle {
             animation: particleFly .9s ease-out forwards;
+            will-change: transform, opacity;
         }
         .xtj-chat-loader-title {
             margin-top: 6px;
@@ -1634,19 +1651,23 @@
         .upload-progress-halo {
             background: radial-gradient(circle, rgba(255,231,160,0.20), transparent 66%);
             animation: magicAuraPulse 4.2s ease-in-out infinite;
+            will-change: transform, opacity;
         }
         .upload-progress-ring {
             border-top-color: rgba(255,248,220,.95);
             border-bottom-color: rgba(125,211,252,.68);
             animation: magicSpin 3.2s linear infinite;
+            will-change: transform;
         }
         .upload-progress-ring-delayed {
             animation: magicSpinReverse 2.4s linear infinite;
+            will-change: transform;
         }
         .upload-progress-shutter {
             background: radial-gradient(circle, rgba(255,255,255,.95), rgba(255,227,154,.36) 36%, transparent 70%);
             clip-path: polygon(50% 0,61% 39%,100% 50%,61% 61%,50% 100%,39% 61%,0 50%,39% 39%);
             animation: magicGlyphFlicker 1.6s ease-in-out infinite;
+            will-change: transform, opacity;
         }
         .post-user-loader {
             position: relative;
@@ -1662,11 +1683,13 @@
             border-top-color: rgba(255,248,220,.95);
             border-bottom-color: rgba(125,211,252,.64);
             animation: magicSpin 3.2s linear infinite;
+            will-change: transform;
         }
         .post-user-loader-core {
             background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(167,243,208,.92) 46%, rgba(56,189,248,.92));
             box-shadow: 0 0 0 8px rgba(45,212,191,.08), 0 0 22px rgba(125,211,252,.2);
             animation: magicPulseCore 1.8s ease-in-out infinite;
+            will-change: transform, opacity;
         }
         .post-user-loader-spark {
             background: rgba(255,248,220,.96);
@@ -1803,6 +1826,7 @@
             display: flex; align-items: center; justify-content: center;
             transition: background 0.25s; flex-shrink: 0;
             display: none;
+            will-change: background;
         }
         .chat-header .back-btn:hover { background: rgba(255,255,255,0.4); }
         .chat-header h3 { margin: 0; font-size: 17px; font-weight: 700; flex: 1; }
@@ -1812,6 +1836,7 @@
             font-size: 18px; cursor: pointer; color: var(--text-muted);
             display: flex; align-items: center; justify-content: center;
             transition: background 0.25s; flex-shrink: 0;
+            will-change: background;
         }
         .chat-header .chat-close-btn:hover { background: rgba(255,255,255,0.4); }
         .chat-view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
@@ -1822,6 +1847,7 @@
             padding: 12px 20px; cursor: pointer;
             transition: background 0.25s cubic-bezier(0.25, 1, 0.3, 1), transform 0.25s cubic-bezier(0.25, 1, 0.3, 1); position: relative;
             border-bottom: 1px solid rgba(255,255,255,0.04);
+            will-change: transform;
         }
         .chat-list-item:hover { background: rgba(255,255,255,0.12); transform: translateX(2px); }
         .chat-list-item:active { background: rgba(255,255,255,0.18); transform: translateX(2px); }
@@ -1998,6 +2024,7 @@
             background: linear-gradient(135deg, #059669, #10b981);
             color: white; font-size: 18px;
             transition: transform 0.3s, box-shadow 0.3s, opacity 0.3s;
+            will-change: transform;
         }
         .send-btn:hover { transform: scale(1.03); box-shadow: 0 4px 14px rgba(5,150,105,0.3); }
         .send-btn:disabled { opacity: 0.4; transform: none !important; }
@@ -2007,6 +2034,7 @@
             display: flex; align-items: center; justify-content: center;
             background: rgba(255,255,255,0.1); font-size: 18px;
             transition: background 0.3s, transform 0.3s;
+            will-change: transform;
         }
         .chat-img-btn:hover { background: rgba(255,255,255,0.25); transform: scale(1.03); }
         /* iMessage 风格发送动画 */
@@ -2018,6 +2046,7 @@
         }
         .chat-msg.sent-anim {
             animation: msgSend 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            will-change: transform, opacity;
         }
         @keyframes msgSlide {
             0% { transform: translateY(10px) scale(0.96); opacity: 0; }
@@ -2211,6 +2240,7 @@
             display: flex; align-items: center; justify-content: center;
             transition: transform 0.3s, background 0.3s;
             padding: 0; margin: 0;
+            will-change: transform;
         }
         .theme-toggle-btn:hover { transform: scale(1.05); background: rgba(255,255,255,0.28); }
         [data-theme="dark"] .theme-toggle-btn {
@@ -2508,8 +2538,8 @@
             padding-right: calc(16px + env(safe-area-inset-right, 0px));
             padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px));
             background: var(--panel-bg);
+            contain: layout style paint;
         }
-        .dock-panel.active { will-change: opacity, transform; }
         /* 照片墙页面面板样式 */
         .dock-panel#panelAi {
             overflow-y: auto;
@@ -2537,6 +2567,7 @@
         .dock-panel.active {
             opacity: 1; pointer-events: all;
             transform: translate3d(0, 0, 0) scale(1);
+            will-change: opacity, transform;
         }
         .dock-bar {
             position: fixed; bottom: 0; left: 0; right: 0;
@@ -2903,6 +2934,9 @@
             background: transparent;
             box-shadow: none !important;
             transition: color 0.24s ease, transform 0.24s cubic-bezier(0.16,1,0.3,1);
+            -webkit-transform: translateZ(0);
+            transform: translateZ(0);
+            will-change: transform;
         }
         .dock-tab::before,
         .dock-tab::after {
@@ -2930,7 +2964,8 @@
         }
         .dock-tab.active {
             color: #059669;
-            transform: translateY(-3px);
+            transform: translateY(-3px) translateZ(0);
+            -webkit-transform: translateY(-3px) translateZ(0);
             background: transparent;
             border-color: transparent;
             box-shadow: none !important;
@@ -2949,7 +2984,11 @@
             filter: drop-shadow(0 4px 8px rgba(5,150,105,0.25));
         }
         .dock-tab.active .dt-label { font-weight: 700; }
-        .dock-tab:active { transform: scale(0.97); }
+        .dock-tab:active { transform: scale3d(0.97, 0.97, 1); }
+        .dock-tab.anim-post:active,
+        .dock-tab.anim-chat:active,
+        .dock-tab.anim-ai:active,
+        .dock-tab.anim-profile:active { transform: none; }
         .dock-tab:focus,
         .dock-tab:focus-visible,
         .dock-tab:focus-within,
@@ -2967,7 +3006,7 @@
         .dock-tab::-moz-focus-inner {
             border: 0 !important;
         }
-        .dock-tab.active:active { transform: translateY(-3px) scale(0.97); }
+        .dock-tab.active:active { transform: translateY(-3px) translateZ(0) scale3d(0.97, 0.97, 1); }
         .dock-tab .dt-icon { transition: none; }
         .ui-icon {
             display: inline-flex;
@@ -3126,17 +3165,24 @@
             position: absolute;
             top: 50%;
             left: 50%;
-            transform: translate(-50%, -50%);
+            transform: translate(-50%, -50%) translateZ(0);
+            -webkit-transform: translate(-50%, -50%) translateZ(0);
             width: 60px;
             height: 50px;
             opacity: 0;
             pointer-events: none;
             z-index: 10;
             will-change: transform, opacity;
+            backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
+            perspective: 1000;
+            -webkit-perspective: 1000;
             overflow: visible;
         }
         .dock-tab .anim-layer svg {
             overflow: visible;
+            transform: translateZ(0);
+            -webkit-transform: translateZ(0);
         }
         .dock-tab .dt-svg {
             display: block;
@@ -3160,6 +3206,29 @@
         .dock-tab.anim-ai .dt-icon {
             position: relative;
             z-index: 1;
+        }
+
+        /* GPU hardware acceleration for all SVG animation child elements */
+        .dock-tab .anim-layer .al-path,
+        .dock-tab .anim-layer .al-pen,
+        .dock-tab .anim-layer .al-bubble-1,
+        .dock-tab .anim-layer .al-bubble-2,
+        .dock-tab .anim-layer .al-bubble-3,
+        .dock-tab .anim-layer .al-dot-1,
+        .dock-tab .anim-layer .al-dot-2,
+        .dock-tab .anim-layer .al-dot-3,
+        .dock-tab .anim-layer .al-petal-g,
+        .dock-tab .anim-layer .al-flower,
+        .dock-tab .anim-layer .al-flash,
+        .dock-tab .anim-layer .al-flower-center,
+        .dock-tab .anim-layer .al-person-head,
+        .dock-tab .anim-layer .al-person-body,
+        .dock-tab .anim-layer .al-wave-0,
+        .dock-tab .anim-layer .al-wave-1,
+        .dock-tab .anim-layer .al-wave-2,
+        .dock-tab .anim-layer .al-wave-3,
+        .dock-tab .anim-layer .al-wave-4 {
+            will-change: transform, opacity;
         }
 
         /* ---- Initial click effects on original icon ---- */
@@ -3618,6 +3687,7 @@
             justify-content: center;
             transition: var(--trans-smooth);
             backdrop-filter: blur(4px);
+            will-change: transform;
         }
         .announcement-btn:hover {
             background: rgba(255,255,255,0.35);
@@ -3734,6 +3804,7 @@
             font-weight: 600;
             color: var(--text-main);
             transition: var(--trans-smooth);
+            will-change: transform;
         }
         .announcement-tab:hover {
             background: rgba(255,255,255,0.4);
@@ -3765,6 +3836,7 @@
             border-radius: var(--radius-sm);
             padding: 16px;
             transition: var(--trans-smooth);
+            will-change: transform;
         }
         .changelog-item:hover {
             background: rgba(255,255,255,0.95);
@@ -3977,6 +4049,7 @@
             color: var(--text-main);
             transition: var(--trans-smooth);
             margin-bottom: 16px;
+            will-change: transform;
         }
         .announcement-back-btn:hover {
             background: rgba(255,255,255,0.35);
@@ -4068,6 +4141,7 @@
             font-weight: 600;
             cursor: pointer;
             transition: var(--trans-smooth);
+            will-change: transform;
         }
         .announcement-admin-btn.primary {
             background: linear-gradient(135deg, var(--primary), #34d399);
@@ -4341,9 +4415,10 @@
             background: #ccc;
             border-radius: 24px;
             transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: background;
         }
         .profile-switch input:checked + .profile-slider { background: #059669 !important; }
-        .profile-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+        .profile-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); will-change: transform; }
         .profile-switch input:checked + .profile-slider:before { transform: translateX(20px); }
 
         [data-theme="dark"] .dock-profile-container { background: transparent !important; }
@@ -4479,6 +4554,7 @@
             font-weight: 600;
             cursor: pointer;
             transition: var(--trans-smooth);
+            will-change: transform;
         }
         .profile-detail-logout-btn:hover {
             background: rgba(255,59,96,0.2);
@@ -4553,6 +4629,7 @@
             font-weight: 600;
             cursor: pointer;
             transition: var(--trans-smooth);
+            will-change: transform;
         }
         .upc-msg-btn:hover {
             transform: scale(1.02);
@@ -4771,6 +4848,7 @@
             cursor: pointer;
             transition: transform 0.25s ease, background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
             box-shadow: 0 10px 26px rgba(5,150,105,.28);
+            will-change: transform;
         }
         .photo-wall-upload-btn svg {
             width: 18px;
@@ -4804,6 +4882,7 @@
             font-weight: 600;
             cursor: pointer;
             transition: background 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+            will-change: transform;
         }
         .photo-wall-btn:hover {
             background: rgba(128,128,128,0.12);
@@ -5223,6 +5302,7 @@
             box-shadow: 0 6px 24px rgba(0,0,0,.18);
         }
         .photo-preview-close:active { transform: scale(.92); }
+        .photo-preview-close { will-change: transform; }
         /* 预览左右切换箭头 */
         .pp-nav-arrow {
             position: absolute;
@@ -5245,6 +5325,7 @@
             transform: translateY(-50%);
             opacity: 0;
             box-shadow: 0 4px 16px rgba(0,0,0,.10);
+            will-change: transform;
         }
         .photo-preview-overlay.active .pp-nav-arrow {
             animation: ppNavEnter 0.4s cubic-bezier(0.16,1,0.3,1) 0.15s forwards;
@@ -5319,6 +5400,7 @@
             transform: translateZ(0) scale(.985);
             filter: saturate(.96);
             transition: transform .3s cubic-bezier(0.33, 1, 0.68, 1), filter .3s ease;
+            will-change: transform;
         }
         /* 每张图的槽位：占满一屏宽 */
         .pp-slide-slot {
@@ -5611,11 +5693,13 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+            will-change: transform;
         }
         .pp-cancel-btn {
             background: rgba(255,255,255,0.12);
             color: white;
             border: 1px solid rgba(255,255,255,0.2);
+            will-change: transform;
         }
         .pp-cancel-btn:hover {
             background: rgba(255,255,255,0.22);
@@ -5630,6 +5714,7 @@
             color: white;
             border: 1px solid rgba(59,130,246,0.5);
             box-shadow: 0 8px 24px rgba(59,130,246,0.35);
+            will-change: transform;
         }
         .pp-confirm-btn:hover {
             background: linear-gradient(135deg, #0284c7, #2563eb);
@@ -5912,6 +5997,7 @@
             box-shadow: 0 4px 16px rgba(0,0,0,.10);
             opacity: 0;
             transform: translateY(10px);
+            will-change: transform;
         }
         .pp-info-btn svg,
         .pp-share-btn svg,
