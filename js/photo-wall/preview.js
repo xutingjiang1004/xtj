@@ -394,7 +394,7 @@
         var timeEl = document.getElementById('photoPreviewTime');
         var viewsEl = document.getElementById('photoPreviewViewsCount');
 
-        if (userEl) userEl.textContent = photo.username || 'δ֪�û�';
+        if (userEl) userEl.textContent = photo.username || '未知用户';
         if (timeEl) {
             var date = new Date(photo.timestamp);
             timeEl.textContent = date.toLocaleString('zh-CN', {
@@ -413,7 +413,7 @@
             var isOwner = window.currentUser === photo.username;
             if (isAdmin || isOwner) {
                 deleteBtn.style.display = 'flex';
-                deleteBtn.title = 'ɾ��';
+                deleteBtn.title = '删除';
             } else {
                 deleteBtn.style.display = 'none';
             }
@@ -702,7 +702,7 @@
             return;
         }
 
-        // ��������������ֹ�ڴ�й©
+        // 清理预览资源，防止内存泄漏
         if (overlay._cleanupPreview) {
             overlay._cleanupPreview();
         }
@@ -811,7 +811,7 @@
             modalEl.innerHTML =
                 '<div class="pp-info-modal-content">' +
                 '<div class="pp-info-modal-header">' +
-                '<span class="pp-info-modal-title">��Ƭ����</span>' +
+                '<span class="pp-info-modal-title">照片详情</span>' +
                 '<button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button>' +
                 '</div>' +
                 '<div class="pp-info-modal-body" id="ppInfoModalBody"></div>' +
@@ -856,40 +856,40 @@
         }
 
         var metadataRows = '';
-        metadataRows += infoRow('����', safeValue(photo.username, '--'));
-        metadataRows += infoRow('ʱ��', safeValue(dateStr, '--'));
-        metadataRows += infoRow('���', safeValue(photo.views || 0, '0'));
+        metadataRows += infoRow('作者', safeValue(photo.username, '--'));
+        metadataRows += infoRow('时间', safeValue(dateStr, '--'));
+        metadataRows += infoRow('浏览', safeValue(photo.views || 0, '0'));
 
         var fileRows = '';
-        fileRows += infoRow('��С', safeValue(sizeStr, '--'));
+        fileRows += infoRow('大小', safeValue(sizeStr, '--'));
 
         var exifRows = '';
         if (photo.exif) {
             if (photo.exif.make || photo.exif.model) {
-                exifRows += infoRow('�豸', safeValue(photo.exif.model || photo.exif.make, '--'));
+                exifRows += infoRow('设备', safeValue(photo.exif.model || photo.exif.make, '--'));
             }
             if (photo.exif.fNumber) {
-                exifRows += infoRow('��Ȧ', safeValue('f/' + photo.exif.fNumber, '--'));
+                exifRows += infoRow('光圈', safeValue('f/' + photo.exif.fNumber, '--'));
             }
             if (photo.exif.exposureTime) {
-                exifRows += infoRow('����', safeValue(photo.exif.exposureTime, '--'));
+                exifRows += infoRow('快门', safeValue(photo.exif.exposureTime, '--'));
             }
             if (photo.exif.iso) {
                 exifRows += infoRow('ISO', safeValue(photo.exif.iso, '--'));
             }
             if (photo.exif.focalLength) {
-                exifRows += infoRow('����', safeValue(photo.exif.focalLength + 'mm', '--'));
+                exifRows += infoRow('焦距', safeValue(photo.exif.focalLength + 'mm', '--'));
             }
         }
 
         var bodyHtml =
             '<div class="pp-info-section">' +
-            '<div class="pp-info-section-title">��Ƭ��Ϣ</div>' +
+            '<div class="pp-info-section-title">照片信息</div>' +
             metadataRows +
             '</div>' +
             '<div class="pp-info-divider"></div>' +
             '<div class="pp-info-section">' +
-            '<div class="pp-info-section-title">�ļ���Ϣ</div>' +
+            '<div class="pp-info-section-title">文件信息</div>' +
             fileRows +
             '</div>';
 
@@ -897,7 +897,7 @@
             bodyHtml +=
                 '<div class="pp-info-divider"></div>' +
                 '<div class="pp-info-section">' +
-                '<div class="pp-info-section-title">�������</div>' +
+                '<div class="pp-info-section-title">EXIF 数据</div>' +
                 exifRows +
                 '</div>';
         }
@@ -1146,7 +1146,7 @@
             };
         }
 
-        window.showConfirm('ɾ����Ƭ', 'ɾ�����޷��ָ���ȷ��������', 'ȷ��ɾ��', async function() {
+        window.showConfirm('删除照片', '删除后无法恢复，确定删除吗？', '确定删除', async function() {
             var currentPhotos = ppSortedPhotos;
             if (ppPhotoIdx < 0 || ppPhotoIdx >= currentPhotos.length) return;
             var photo = currentPhotos[ppPhotoIdx];
@@ -1157,7 +1157,7 @@
             if (deleteBtn) deleteBtn.disabled = true;
             if (confirmOkBtn) confirmOkBtn.disabled = true;
 
-            window.showToast('����ɾ��...');
+            window.showToast('正在删除...');
             var deleteResult = { ok: true };
             if (window.deletePhotoWallPhoto) {
                 deleteResult = await window.deletePhotoWallPhoto(photo, { render: false });
@@ -1174,7 +1174,7 @@
                 } else if (window.renderPhotoWall) {
                     window.renderPhotoWall();
                 }
-                window.showToast('��Ƭ�Ѵ���Ƭǽɾ��');
+                window.showToast('照片已从照片墙删除');
             } else {
                 if (deleteBtn) deleteBtn.disabled = false;
                 if (confirmOkBtn) confirmOkBtn.disabled = false;
@@ -1341,7 +1341,7 @@
                 try { navigator.vibrate(10); } catch (e) {}
             }
 
-            // ģ����ȶ���
+            // 模拟下载进度
             var dlTimer = setInterval(function() {
                 var bar = document.getElementById('ppDownloadProgressBar');
                 if (!bar) { clearInterval(dlTimer); return; }
@@ -1368,7 +1368,7 @@
             ppHideDownloadOverlay();
             ppDownloadActive = false;
 
-            // ������ֱ�Ӵ�ͼƬ����
+            // 尝试直接从图片下载
             try {
                 var a = document.createElement('a');
                 a.href = photo.imageUrl;
