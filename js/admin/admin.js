@@ -173,6 +173,22 @@
         return d.innerHTML;
     }
 
+    function getDisplayContent(content) {
+        if (!content) return '';
+        try {
+            var parsed = JSON.parse(content);
+            if (parsed && typeof parsed === 'object') {
+                if (parsed.type === 'photo_wall') {
+                    return '[照片] ' + (parsed.fileSize ? (parsed.fileSize / 1024).toFixed(0) + 'KB' : '');
+                }
+                if (parsed.text) return parsed.text;
+                if (parsed.content) return parsed.content;
+                if (parsed.title) return parsed.title;
+            }
+        } catch(e) {}
+        return content;
+    }
+
     function formatTime(d) {
         if (!d) return '';
         return new Date(d).toLocaleString();
@@ -247,7 +263,7 @@
     }
 
     function renderPostsTab(el) {
-        var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER; });
+        var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__'; });
         var h = '<div class="card"><h3>📝 帖子管理（' + visiblePosts.length + '条）</h3>';
         h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
         var filtered = visiblePosts;
@@ -261,8 +277,9 @@
         else {
             h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>内容</th><th>浏览</th><th>时间</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(p) {
-                var content = (p.content || '').slice(0, 50);
-                if (p.content && p.content.length > 50) content += '...';
+                var displayText = getDisplayContent(p.content);
+                var content = (displayText || '').slice(0, 50);
+                if (displayText && displayText.length > 50) content += '...';
                 h += '<tr><td>' + escapeHtml(p.user_name || '') + '</td>';
                 h += '<td>' + escapeHtml(content) + (p.media_url ? ' 📎' : '') + '</td>';
                 h += '<td>' + (p.views || 0) + '</td>';
@@ -283,7 +300,10 @@
             var recentLikes = allLikes.slice(0, 500);
             recentLikes.forEach(function(l) {
                 var post = allPosts.find(function(p) { return p.id === l.post_id; });
-                var postContent = post ? ((post.content || '').slice(0, 30) + (post.content && post.content.length > 30 ? '...' : '')) : '(已删除)';
+                var rawContent = post ? (post.content || '') : '(已删除)';
+                var displayText = post ? getDisplayContent(post.content) : '(已删除)';
+                var postContent = (displayText || '').slice(0, 30);
+                if (displayText && displayText.length > 30) postContent += '...';
                 h += '<tr><td>' + escapeHtml(l.user_name || '') + '</td>';
                 h += '<td>' + escapeHtml((post && post.user_name) || '') + '</td>';
                 h += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(postContent) + '</td>';
@@ -380,8 +400,9 @@
 
     window.deleteAdminPost = function(id) {
         var post = allPosts.find(function(x) { return x.id === id; });
-        var preview = post ? (post.content || '').slice(0, 50) : '';
-        if (preview && post.content && post.content.length > 50) preview += '...';
+        var displayText = post ? getDisplayContent(post.content) : '';
+        var preview = (displayText || '').slice(0, 50);
+        if (displayText && displayText.length > 50) preview += '...';
         
         showConfirm(
             '⚠️ 删除帖子',
