@@ -355,7 +355,7 @@
         });
     }
 
-    window.triggerPhotoUpload = function() {
+    window.triggerPhotoUpload = async function() {
         if (!window.currentUser) {
             window.showToast('成功上传 ' + successCount + ' 张照片');
                 return;
@@ -506,8 +506,9 @@
                 hideUploadProgress();
                 if (successCount > 0 && failCount === 0) {
                     window.showToast('成功上传 ' + successCount + ' 张照片');
-        }
-    };
+                }
+            }, 100);
+        };
 
     (function() {
         var originalHandlePhotoUpload = window.handlePhotoUpload;
