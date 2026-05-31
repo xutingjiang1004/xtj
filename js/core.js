@@ -1019,7 +1019,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     // 鑾峰彇 Public URL
                     const avatarUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
                     
-                    // 鍒犻櫎鎵€鏈夊妫ご鍍忚褰?
+                    // 删除鎵€鏈夊妫ご鍍忚褰?
                     var oldIds = await sb.from("posts")
                         .select("id")
                         .eq("user_name", currentUser)
@@ -1358,7 +1358,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 } catch (e) { showToast("发布失败: " + (e.message || "网络错误")); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
             };
 
-            // ===================== 鐐硅禐 =====================
+            // ===================== 点赞 =====================
             window.toggleLike = async function (btn, postId) {
                 if (!currentUser) { showToast("请先登录"); return; }
                 const isLiked = btn.classList.contains("liked");
@@ -1370,7 +1370,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     btn.classList.add("liked");
                     createHeartParticles(btn);
                 }
-                btn.textContent = isLiked ? "鐐硅禐" : "鉂わ笍";
+                btn.textContent = isLiked ? "点赞" : "❤️";
 
                 try {
                     if (isLiked) {
@@ -1378,10 +1378,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     } else {
                         await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
                     }
-                    const match = statsText.textContent.match(/鐐硅禐 (\d+)/);
+                    const match = statsText.textContent.match(/点赞 (\d+)/);
                     if (match) {
                         const num = parseInt(match[1]);
-                        statsText.innerHTML = statsText.innerHTML.replace(/鐐硅禐 \d+/, `鐐硅禐 ${isLiked ? num-1 : num+1}`);
+                        statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num-1 : num+1}`);
                     }
                     updateFeedStats();
                     refreshStatModal();
@@ -1392,7 +1392,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
-                const emojis = ["鉂わ笍","棣冩寗","棣冩寙","馃","棣冩寘","棣冩寑"];
+                const emojis = ["❤️","棣冩寗","棣冩寙","馃","棣冩寘","棣冩寑"];
                 for (let i=0; i<8; i++) {
                     const heart = document.createElement('div');
                     heart.className = 'heart-particle';
@@ -1452,7 +1452,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
 
-            // ===================== 鍒犻櫎鐢牕鐡?=====================
+            // ===================== 删除鐢牕鐡?=====================
             window.openDelete = function (postId, ownerKey) {
                 delPostId = postId;
                 delOwnerKey = ownerKey;
@@ -1462,7 +1462,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!delPostId) return;
                 const btn = document.getElementById("delBtn");
                 btn.disabled = true;
-                btn.textContent = "鍒犻櫎涓?..";
+                btn.textContent = "删除涓?..";
                 try {
                     const key = isAdmin() ? delOwnerKey : deviceId;
                     const { error } = await sb.rpc("delete_post_with_actor", {
@@ -1482,7 +1482,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     console.error(e);
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "纭鍒犻櫎";
+                    btn.textContent = "纭删除";
                 }
             };
 
@@ -1800,7 +1800,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('内容加载中', '正在召回数据', 'feed') : `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中</span></div>`;
+                if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中</span></div>`;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -1906,11 +1906,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   </div>
                   <div class="content">${escapeHtml(p.content)}</div>
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(p.media_url).replace(/'/g, "\\'")}')">`}</div>`:''}
-                  <div class="post-stats-text">娴忚 ${p.views||0} 璺?鐐硅禐 ${pLikes.length} 璺?璇勮 ${pComms.length}</div>
+                  <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'鉂わ笍':'鐐硅禐'}</button>
-                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">璇勮</button>
-                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">鍒犻櫎</button>`:''}
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
+                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
+                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -1925,7 +1925,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
               `;
                 }).join('');
                 
-                // 閸?sentinel 涔嬪墠鎻掑叆鏂板笘瀛?
+                // 在 sentinel 之前插入新帖子
                 const sentinel = document.getElementById('feedSentinel');
                 const tempContainer = document.createElement('div');
                 tempContainer.innerHTML = postsHtml;
@@ -2184,11 +2184,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   </div>
                   <div class="content">${escapeHtml(p.content)}</div>
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(p.media_url).replace(/'/g, "\\'")}')">`}</div>`:''}
-                  <div class="post-stats-text">娴忚 ${p.views||0} 璺?鐐硅禐 ${pLikes.length} 璺?璇勮 ${pComms.length}</div>
+                  <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'鉂わ笍':'鐐硅禐'}</button>
-                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">璇勮</button>
-                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">鍒犻櫎</button>`:''}
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
+                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
+                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -2216,9 +2216,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var totalLikes = 0, totalComments = 0, totalViews = 0;
                 posts.forEach(function(p) {
                     var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
-                    var vm = text.match(/娴忚 (\d+)/);
-                    var lm = text.match(/鐐硅禐 (\d+)/);
-                    var cm = text.match(/璇勮 (\d+)/);
+                    var vm = text.match(/浏览 (\d+)/);
+                    var lm = text.match(/点赞 (\d+)/);
+                    var cm = text.match(/评论 (\d+)/);
                     if (vm) totalViews += parseInt(vm[1]);
                     if (lm) totalLikes += parseInt(lm[1]);
                     if (cm) totalComments += parseInt(cm[1]);
@@ -2393,8 +2393,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function buildPostBadges(post) {
                 var normalized = normalizePost(post);
                 var bits = [];
-                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '馃敀 绉佸瘑' : '馃敁 鍏紑') + '</span>');
-                if (normalized.is_pinned) bits.push('<span class="post-pin-badge">馃搶 缃《</span>');
+                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '🔒 私密' : '🔓 公开') + '</span>');
+                if (normalized.is_pinned) bits.push('<span class="post-pin-badge">📌 置顶</span>');
                 return bits.join("");
             }
 
@@ -2402,17 +2402,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var id = escapeHtml(String(post.id)).replace(/'/g, "\\'");
                 var actorKey = escapeHtml(String(post.actor_key || "")).replace(/'/g, "\\'");
                 var actions = [
-                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" onclick="toggleLike(this, \'' + id + '\')">' + (isLiked ? '鉂わ笍' : '鐐硅禐') + '</button>',
-                    '<button class="action-btn" onclick="openComment(\'' + id + '\')">璇勮</button>'
+                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" onclick="toggleLike(this, \'' + id + '\')">' + (isLiked ? '❤️' : '点赞') + '</button>',
+                    '<button class="action-btn" onclick="openComment(\'' + id + '\')">评论</button>'
                 ];
                 if (canEditPost(post)) {
-                    actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + id + '\')">缂栬緫</button>');
+                    actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + id + '\')">编辑</button>');
                 }
                 if (canPinPost(post)) {
-                    actions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + id + '\')">' + (normalizePost(post).is_pinned ? '鍙栨秷缃《' : '缃《') + '</button>');
+                    actions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + id + '\')">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canDelete) {
-                    actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + id + '\', \'' + actorKey + '\')">鍒犻櫎</button>');
+                    actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + id + '\', \'' + actorKey + '\')">删除</button>');
                 }
                 return actions.join("");
             }
@@ -2437,7 +2437,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   </div>
                   <div class="content">${escapeHtml(normalized.content || "")}</div>
                   ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none"></video>` : `<img src="${escapeHtml(normalized.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(normalized.media_url).replace(/'/g, "\\'")}')">`}</div>` : ''}
-                  <div class="post-stats-text">娴忚 ${normalized.views || 0} 璺?鐐硅禐 ${pLikes.length} 璺?璇勮 ${pComms.length}</div>
+                  <div class="post-stats-text">浏览 ${normalized.views || 0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${pComms.length ? `<div class="comments">${pComms.map(function(c) {
                     return `<div class="comment-item" data-comment-id="${escapeHtml(c.id)}"><div><b>${escapeHtml(c.user_name)}:</b> ${escapeHtml(c.content)}</div></div>`;
@@ -2691,7 +2691,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
-                    feed.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('内容加载中', '正在召回数据', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中</span></div>';
+                    feed.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中</span></div>';
                 }
                 try {
                     var results = await Promise.all([
@@ -2818,7 +2818,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!delPostId) return;
                 var btn = document.getElementById("delBtn");
                 btn.disabled = true;
-                btn.textContent = "鍒犻櫎涓?..";
+                btn.textContent = "删除涓?..";
                 try {
                     var key = isAdmin() ? delOwnerKey : deviceId;
                     var result = await sb.rpc("delete_post_with_actor", {
@@ -2839,7 +2839,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     console.error(e);
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "纭鍒犻櫎";
+                    btn.textContent = "纭删除";
                 }
             };
 
@@ -2909,7 +2909,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                document.getElementById('statModalBody').innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '正在召回数据', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                document.getElementById('statModalBody').innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
@@ -2959,7 +2959,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             window.openPostDetail = async function(postId) {
                 document.getElementById('postDetailTitle').textContent = '帖子详情';
-                document.getElementById('postDetailBody').innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '正在打开帖子详情', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                document.getElementById('postDetailBody').innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
                 document.getElementById('postDetailModal').classList.add('active');
 
                 try {
@@ -3000,10 +3000,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     </div>
                     ${post.content ? `<div class="post-detail-content">${escapeHtml(post.content)}</div>` : ''}
                     ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${escapeHtml(post.media_url)}" controls preload="none"></video>`:`<img src="${escapeHtml(post.media_url)}" onclick="openImageViewer('${escapeHtml(post.media_url).replace(/'/g, "\\'")}')" loading="lazy" />`}</div>` : ''}
-                    <div class="post-detail-stats">娴忚 ${vc} 璺?鐐硅禐 ${likes.length} 璺?璇勮 ${comments.length}</div>
+                    <div class="post-detail-stats">娴忚 ${vc} 璺?点赞 ${likes.length} 璺?璇勮 ${comments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
-                            <div class="stat-section-title">鉂わ笍 鐐硅禐鐢ㄦ埛閿?{likes.length}锛?/div>
+                            <div class="stat-section-title">❤️ 点赞鐢ㄦ埛閿?{likes.length}锛?/div>
                             ${likes.length ? likes.map(l => `
                                 <div class="stat-like-item">
                                     <div class="sli-info">
@@ -3011,7 +3011,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     </div>
                                     <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                                 </div>
-                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤鐐硅禐</div>'}
+                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤点赞</div>'}
                         </div>
                         <div class="stat-col">
                             <div class="stat-section-title">馃挰 璇勮閸掓銆冮敍?{comments.length}锛?/div>
@@ -3048,11 +3048,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const onclick = `openPostDetail('${escapeHtml(p.id).replace(/'/g, "\\'")}')`;
                 return `
                     <div class="stat-post-item">
-                        <span class="spi-content" onclick="${onclick}" title="鐐瑰嚮鏌ョ湅甯栧瓙璇︽儏">
+                        <span class="spi-content" onclick="${onclick}" title="点击查看帖子详情">
                             ${escapeHtml(fmt.display)}
                             ${fmt.tag}
                         </span>
-                        ${fmt.thumbUrl ? `<img class="spi-thumb" src="${escapeHtml(fmt.thumbUrl)}" onclick="${onclick}" title="鐐瑰嚮鏌ョ湅甯栧瓙璇︽儏" />` : ''}
+                        ${fmt.thumbUrl ? `<img class="spi-thumb" src="${escapeHtml(fmt.thumbUrl)}" onclick="${onclick}" title="点击查看帖子详情" />` : ''}
                         <span class="spi-time">${new Date(p.created_at).toLocaleString()}</span>
                     </div>
                 `;
@@ -3144,7 +3144,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statAllPosts.forEach(p => { postMap[p.id] = p; });
 
                 function buildLikesCol() {
-                    let h = '<div class="stat-section-title">鉂わ笍 鐐硅禐璁板綍</div>';
+                    let h = '<div class="stat-section-title">❤️ 点赞璁板綍</div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(l => {
                             const post = postMap[l.post_id];
@@ -3153,14 +3153,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         <div class="stat-like-item">
                             <div class="sli-info">
                                 <div class="sli-user">${escapeHtml(l.user_name)}</div>
-                                <div class="sli-target">鐐硅禐浜嗗棴绱?{postContent}</div>
+                                <div class="sli-target">点赞浜嗗棴绱?{postContent}</div>
                             </div>
                             <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                         </div>
                     `;
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">鏆傛棤鐐硅禐璁板綍</div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">鏆傛棤点赞璁板綍</div>';
                     }
                     return h;
                 }
@@ -4109,7 +4109,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (isAdmin()) {
                     const delBtn = document.createElement('button');
                     delBtn.className = 'announcement-delete-btn';
-                    delBtn.textContent = '鍒犻櫎鍏憡';
+                    delBtn.textContent = '删除鍏憡';
                     delBtn.onclick = function(e) { e.stopPropagation(); deleteAnnouncement(ann); };
                     const header = detail.querySelector('.announcement-detail-header');
                     if (header) header.appendChild(delBtn);
@@ -4290,7 +4290,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         </ul>
                         <h4>Bug淇</h4>
                         <ul>
-                            <li>淇缂栬緫甯栧瓙鏃跺叕寮€/绉佸瘑閫夐」涓嶇湡姝ｇ敓鏁堢殑闂</li>
+                            <li>淇编辑甯栧瓙鏃跺叕寮€/绉佸瘑閫夐」涓嶇湡姝ｇ敓鏁堢殑闂</li>
                             <li>淇甯栧瓙缃《鍔熻兘涓嶇敓鏁堢殑闂</li>
                         </ul>
                     `
@@ -4301,7 +4301,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>鏇存柊鍐呭</h4>
                         <ul>
-                            <li>鍒犻櫎鎵€鏈夊啑浣欏浠芥枃浠躲€佷复鏃朵慨澶嶈剼鏈拰娴嬭瘯鑴氭湰</li>
+                            <li>删除鎵€鏈夊啑浣欏浠芥枃浠躲€佷复鏃朵慨澶嶈剼鏈拰娴嬭瘯鑴氭湰</li>
                             <li>鍏ㄩ潰妫€鏌ワ細HTML寮曠敤瀹屾暣鎬с€丣S璇硶锛堝叏閮ㄩ€氳繃锛夈€佷贡鐮佹壂鎻忋€佸悗绔湇鍔￠獙璇?/li>
                         </ul>
                     
@@ -4318,7 +4318,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: `
                         <h4>淇鍐呭</h4>
                         <ul>
-                            <li>淇缂栬緫甯栧瓙鍏紑/绉佸瘑涓嶇湡姝ｇ敓鏁堥棶棰?/li>
+                            <li>淇编辑甯栧瓙鍏紑/绉佸瘑涓嶇湡姝ｇ敓鏁堥棶棰?/li>
                             <li>淇缁熻璇︽儏娉勯湶绉佸瘑甯栧瓙浜掑姩</li>
                             <li>淇鐓х墖棰勮鍙屽嚮缂╁皬/鍙屾寚缂╂斁涓嶇ǔ瀹?/li>
                         </ul>
@@ -4362,12 +4362,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     <li>瑕嗙洊鐓х墖澧欎袱濂椾笂浼犳祦绋嬶紙upload.js + features.js锛夛紝淇濊瘉鎵€鏈夋柊寤虹収鐗囧潎鎸夌粺涓€鏍囧噯鐢熸垚楂樿川閲忕缉鐣ュ浘</li>
                                 </ul>
                             </li>
-                            <li><strong>鍒犻櫎鍔熻兘UI涓庝氦浜掍紭鍖?/strong>
+                            <li><strong>删除鍔熻兘UI涓庝氦浜掍紭鍖?/strong>
                                 <ul>
-                                    <li>灏嗙郴缁熺骇window.confirm鍒犻櫎纭寮圭獥鏇挎崲涓鸿嚜瀹氫箟鐜荤拑纾ㄧ爞寮圭獥锛屾暣浣揢I椋庢牸缁熶竴</li>
+                                    <li>灏嗙郴缁熺骇window.confirm删除纭寮圭獥鏇挎崲涓鸿嚜瀹氫箟鐜荤拑纾ㄧ爞寮圭獥锛屾暣浣揢I椋庢牸缁熶竴</li>
                                     <li>寮圭獥閲囩敤閫忔槑鐜荤拑鏁堟灉 + backdrop-filter: blur(28px) saturate(200%) 澧炲己纾ㄧ爞璐ㄦ劅</li>
                                     <li>寮圭獥寮瑰嚭鏃朵粠scale(0.9) translateY(20px)骞虫粦杩囨浮鍒版甯镐綅缃紝鍔ㄧ敾鏇茬嚎cubic-bezier寮规€х紦鍔?/li>
-                                    <li>纭鍒犻櫎鍚庡脊绐椾互scale(0.88)娣″嚭鍔ㄧ敾娑堝け锛岄伄缃╁眰鍚屾娣″寲</li>
+                                    <li>纭删除鍚庡脊绐椾互scale(0.88)娣″嚭鍔ㄧ敾娑堝け锛岄伄缃╁眰鍚屾娣″寲</li>
                                     <li>鎸夐挳鍦ㄥ姩鐢绘湡闂寸鐢ㄩ槻閲嶅鐐瑰嚮锛岀偣鍑婚伄缃╁眰澶栭儴鍙彇娑?/li>
                                     <li>鎵€鏈変氦浜掓祦绋嬭嚜鍔ㄦ竻鐞嗗洖璋冨紩鐢紝閬垮厤鍐呭瓨娉勬紡</li>
                                 </ul>
@@ -4490,7 +4490,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 <ul>
                                     <li>鏃ユ湡銆佸悕绉般€佺儹搴︿笁绉嶆帓搴忔潯浠剁幇鍦ㄨ兘姝ｇ‘缁勫悎鐢熸晥</li>
                                     <li>鎺掑簭鍒囨崲鍚庣収鐗囧疄鏃舵洿鏂帮紝缁撴灉绗﹀悎棰勬湡閫昏緫</li>
-                                    <li>鍒犻櫎鎿嶄綔鍚庨噸鏂版覆鏌撲繚鎸佸綋鍓嶆帓搴忛敭锛屼笉鍐嶉噸缃负榛樿鎺掑簭</li>
+                                    <li>删除鎿嶄綔鍚庨噸鏂版覆鏌撲繚鎸佸綋鍓嶆帓搴忛敭锛屼笉鍐嶉噸缃负榛樿鎺掑簭</li>
                                 </ul>
                             </li>
                             <li><strong>鐩稿唽瑙嗗浘绌虹櫧淇</strong>
@@ -4534,7 +4534,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             <li><strong>鐓х墖棰勮浜や簰浼樺寲</strong>
                                 <ul>
                                     <li>淇鍏ㄥ睆棰勮涓嬪崟鐐归€€鍑轰笌鍙屽嚮鏀惧ぇ鐨勫啿绐侀棶棰橈紝涓ょ鎿嶄綔浜掍笉骞叉壈</li>
-                                    <li>鍒犻櫎鎸夐挳鍥炬爣鐢?x"鏇挎崲涓哄瀮鍦炬《SVG鍥炬爣锛屼笌鍏抽棴鎸夐挳娓呮櫚鍖哄垎</li>
+                                    <li>删除鎸夐挳鍥炬爣鐢?x"鏇挎崲涓哄瀮鍦炬《SVG鍥炬爣锛屼笌鍏抽棴鎸夐挳娓呮櫚鍖哄垎</li>
                                     <li>浼樺寲宸﹀彸婊戝姩棰勮鏃剁殑鍥剧墖鍔犺浇绛栫暐锛屾秷闄ら粦灞忥紝閲囩敤鍥剧墖缂撳瓨+寤惰繜鍔犺浇鍓嶅悗鍥剧墖浼樺厛绾ф柟妗?/li>
                                     <li>鍥剧墖鍔犺浇鏃舵樉绀鸿剦鍐插姩鐢昏儗鏅紝鏇夸唬绾粦鑳屾櫙锛屾彁鍗囪瑙変綋楠?/li>
                                 </ul>
@@ -4573,7 +4573,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             </li>
                             <li><strong>浠ｇ爜娓呯悊</strong>
                                 <ul>
-                                    <li>鍒犻櫎閬楃暀鐨刬18n缈昏瘧浠ｇ爜锛坱ranslations瀛楀吀銆乼ranslatePage鍑芥暟銆佽瑷€閫夋嫨UI锛?/li>
+                                    <li>删除閬楃暀鐨刬18n缈昏瘧浠ｇ爜锛坱ranslations瀛楀吀銆乼ranslatePage鍑芥暟銆佽瑷€閫夋嫨UI锛?/li>
                                     <li>绮剧畝syncProfileUser绛夊嚱鏁帮紝绉婚櫎瀵圭炕璇戝瓧鍏哥殑渚濊禆</li>
                                     <li>绉婚櫎profile-lang-tabs鐩稿叧CSS鏍峰紡</li>
                                 </ul>
@@ -4595,7 +4595,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             <li><strong>浠ｇ爜娓呯悊涓庣簿绠€</strong>
                                 <ul>
                                     <li>褰诲簳绉婚櫎闆呮€濆崟璇嶅涔犵郴缁熷叏閮ㄤ唬鐮侊紙CSS鏍峰紡銆丣S閫昏緫銆丠TML缁撴瀯锛?/li>
-                                    <li>鍒犻櫎璁剧疆椤典腑鐨勮嫳璇?闊╄鍒囨崲閫夐」锛屼粎淇濈暀涓枃</li>
+                                    <li>删除璁剧疆椤典腑鐨勮嫳璇?闊╄鍒囨崲閫夐」锛屼粎淇濈暀涓枃</li>
                                     <li>娓呯悊鎵€鏈夊簾寮冪殑缈昏瘧鏂囨湰鍜岃瑷€鍒囨崲鐩稿叧JS閫昏緫</li>
                                     <li>淇scroll handler涓鏃ocab-container鐨勯敊璇紩鐢?/li>
                                 </ul>
@@ -4718,9 +4718,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             <li><strong>娓呯悊閬楃暀鏃т唬鐮?/strong>
                                 <ul>
                                     <li>绉婚櫎鏃х殑 toggleAIChat 鏃犵敤鍑芥暟</li>
-                                    <li>鍒犻櫎鎵€鏈夋棫AI妯℃澘鐩稿叧鐨勭炕璇戦敭锛坅iWelcome銆乪nterYourQuestion銆乻end锛?/li>
-                                    <li>鍒犻櫎鏃I姘旀场CSS鏍峰紡锛?ai-msg锛?/li>
-                                    <li>鍒犻櫎Taylor Swift鐢诲粖鏃т唬鐮侊紙initTSGallery锛?/li>
+                                    <li>删除鎵€鏈夋棫AI妯℃澘鐩稿叧鐨勭炕璇戦敭锛坅iWelcome銆乪nterYourQuestion銆乻end锛?/li>
+                                    <li>删除鏃I姘旀场CSS鏍峰紡锛?ai-msg锛?/li>
+                                    <li>删除Taylor Swift鐢诲粖鏃т唬鐮侊紙initTSGallery锛?/li>
                                 </ul>
                             </li>
                             <li><strong>淇Git鍚堝苟鍐茬獊瀵艰嚧缃戠珯宕╂簝</strong>
@@ -4767,7 +4767,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         &lt;ul&gt;
                             &lt;li&gt;&lt;strong&gt;Taylor Swift &amp; Jennie涓撻鐢诲粖鏇挎崲涓洪泤鎬濆崟璇嶅涔犵郴缁?lt;/strong&gt;
                                 &lt;ul&gt;
-                                    &lt;li&gt;鍒犻櫎鎵€鏈夊師涓撻椤电殑CSS鏍峰紡锛?idol-銆?ts-寮€澶存牱寮忥級&lt;/li&gt;
+                                    &lt;li&gt;删除鎵€鏈夊師涓撻椤电殑CSS鏍峰紡锛?idol-銆?ts-寮€澶存牱寮忥級&lt;/li&gt;
                                     &lt;li&gt;鏂板闆呮€濆崟璇嶅涔犵郴缁熷畬鏁存牱寮忥紙.vocab-鍛藉悕绌洪棿锛?lt;/li&gt;
                                     &lt;li&gt;鏇挎崲panelAi闈㈡澘HTML缁撴瀯涓哄崟璇嶅涔犵晫闈?lt;/li&gt;
                                     &lt;li&gt;鏂板200涓泤鎬濇牳蹇冭瘝搴擄紝鍖呭惈鍗曡瘝銆侀煶鏍囥€侀噴涔夈€佷緥鍙?lt;/li&gt;
@@ -4795,7 +4795,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         &lt;ul&gt;
                             &lt;li&gt;&lt;strong&gt;Taylor Swift涓撻椤佃瑙変笌鏋舵瀯鍏ㄩ潰閲嶆瀯&lt;/strong&gt;
                                 &lt;ul&gt;
-                                    &lt;li&gt;鍒犻櫎鎵€鏈夋棫鐨?.ts- 寮€澶碈SS鏍峰紡&lt;/li&gt;
+                                    &lt;li&gt;删除鎵€鏈夋棫鐨?.ts- 寮€澶碈SS鏍峰紡&lt;/li&gt;
                                     &lt;li&gt;鏂板鍙屼汉涓撹緫灞曠ず澧欐牱寮忥紙.idol- 鍛藉悕绌洪棿锛?lt;/li&gt;
                                     &lt;li&gt;寮曞叆Google Fonts Great Vibes鎵嬪啓浣?lt;/li&gt;
                                     &lt;li&gt;涓撹緫鍗＄墖hover鏃剁缉鏀?纾ㄧ爞鐜荤拑閬僵鏁堟灉&lt;/li&gt;
@@ -4804,7 +4804,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             &lt;/li&gt;
                             &lt;li&gt;&lt;strong&gt;浠ｇ爜娓呯悊浼樺寲&lt;/strong&gt;
                                 &lt;ul&gt;
-                                    &lt;li&gt;鍒犻櫎鍏ㄩ儴Taylor Swift鐢诲粖JavaScript浠ｇ爜&lt;/li&gt;
+                                    &lt;li&gt;删除鍏ㄩ儴Taylor Swift鐢诲粖JavaScript浠ｇ爜&lt;/li&gt;
                                     &lt;li&gt;绉婚櫎浜岀骇鑿滃崟鐩稿叧搴熷純鍑芥暟璋冪敤&lt;/li&gt;
                                     &lt;li&gt;鏇挎崲骞插噣鐨剆witchDockTab鍑芥暟&lt;/li&gt;
                                     &lt;li&gt;浠ｇ爜鏋舵瀯鏇村姞娓呮櫚&lt;/li&gt;
@@ -5136,7 +5136,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             </ul>
                             <li>娓稿妯″紡瀹屽杽</li>
                             <ul>
-                                <li>鏈櫥褰曠敤鎴峰彧鑳芥煡鐪嬶紝涓嶈兘鍙戝竷/鐐硅禐/璇勮</li>
+                                <li>鏈櫥褰曠敤鎴峰彧鑳芥煡鐪嬶紝涓嶈兘鍙戝竷/点赞/璇勮</li>
                                 <li>鏈櫥褰曟椂鍙戝竷鍖哄煙鑷姩闅愯棌</li>
                                 <li>鐐瑰嚮鎿嶄綔鏃惰嚜鍔ㄦ彁绀虹櫥褰?/li>
                             </ul>
@@ -5522,7 +5522,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (typeof magicHtml !== 'function') {
                 magicHtml = function(title, subtitle, variant) {
                     var extra = variant ? ' ' + variant : '';
-                    return '<div class="xtj-magic-loading xtj-echo-loader' + extra + '" role="status" aria-live="polite"><div class="xtj-echo-stage" aria-hidden="true"><div class="xtj-echo-aura"></div><div class="xtj-echo-rune"></div><div class="xtj-echo-rune xtj-echo-rune--inner"></div><div class="xtj-echo-field"></div><div class="xtj-echo-mirror"><div class="xtj-echo-mirror-line"></div></div><div class="xtj-echo-shock"></div><div class="xtj-echo-bolt xtj-echo-bolt--in"></div><div class="xtj-echo-bolt xtj-echo-bolt--out"></div><div class="xtj-echo-blade"></div><div class="xtj-echo-shard xtj-echo-shard--1"></div><div class="xtj-echo-shard xtj-echo-shard--2"></div><div class="xtj-echo-shard xtj-echo-shard--3"></div><div class="xtj-echo-shard xtj-echo-shard--4"></div><div class="xtj-echo-particle xtj-echo-particle--1"></div><div class="xtj-echo-particle xtj-echo-particle--2"></div><div class="xtj-echo-particle xtj-echo-particle--3"></div></div><div class="xtj-magic-loading-title">' + escapeHtml(title || '加载中') + '</div><div class="xtj-magic-loading-subtitle">' + escapeHtml(subtitle || '法阵正在聚能') + '</div><div class="xtj-magic-loading-dots" aria-hidden="true"><span></span><span></span><span></span></div></div>';
+                    return '<div class="xtj-magic-loading xtj-echo-loader' + extra + '" role="status" aria-live="polite"><div class="xtj-echo-stage" aria-hidden="true"><div class="xtj-echo-aura"></div><div class="xtj-echo-rune"></div><div class="xtj-echo-rune xtj-echo-rune--inner"></div><div class="xtj-echo-field"></div><div class="xtj-echo-mirror"><div class="xtj-echo-mirror-line"></div></div><div class="xtj-echo-shock"></div><div class="xtj-echo-bolt xtj-echo-bolt--in"></div><div class="xtj-echo-bolt xtj-echo-bolt--out"></div><div class="xtj-echo-blade"></div><div class="xtj-echo-shard xtj-echo-shard--1"></div><div class="xtj-echo-shard xtj-echo-shard--2"></div><div class="xtj-echo-shard xtj-echo-shard--3"></div><div class="xtj-echo-shard xtj-echo-shard--4"></div><div class="xtj-echo-particle xtj-echo-particle--1"></div><div class="xtj-echo-particle xtj-echo-particle--2"></div><div class="xtj-echo-particle xtj-echo-particle--3"></div><div class="xtj-spark xtj-spark--1"></div><div class="xtj-spark xtj-spark--2"></div><div class="xtj-spark xtj-spark--3"></div><div class="xtj-spark xtj-spark--4"></div><div class="xtj-spark xtj-spark--5"></div><div class="xtj-spark xtj-spark--6"></div><div class="xtj-spark xtj-spark--7"></div><div class="xtj-spark xtj-spark--8"></div></div><div class="xtj-magic-loading-title">' + escapeHtml(title || '加载中') + '</div><div class="xtj-magic-loading-subtitle">' + escapeHtml(subtitle || '法阵正在聚能') + '</div><div class="xtj-magic-loading-dots" aria-hidden="true"><span></span><span></span><span></span></div></div>';
                 };
             }
 
@@ -5544,7 +5544,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = prevLoadFeed.apply(this, arguments);
                     var feed = document.getElementById('feed');
                     if (feed && /loading-spinner|loading-text|内容加载中/.test(feed.innerHTML || '')) {
-                        feed.innerHTML = magicHtml(forceRefresh ? '内容刷新中' : '内容加载中', '正在召回数据', 'feed');
+                        feed.innerHTML = magicHtml(forceRefresh ? '内容刷新中' : '加载中', '加载中', 'feed');
                     }
                     return r;
                 };
@@ -5570,7 +5570,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = prevOpenPostDetail.apply(this, arguments);
                     var body = document.getElementById('postDetailBody');
                     if (body && /loading-spinner|loading-text|加载中/.test(body.innerHTML || '')) {
-                        body.innerHTML = magicHtml('加载中', '正在打开帖子详情', 'feed');
+                        body.innerHTML = magicHtml('加载中', '加载中', 'feed');
                     }
                     return r;
                 };
@@ -5583,7 +5583,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = prevOpenStatDetail.apply(this, arguments);
                     var body = document.getElementById('statModalBody');
                     if (body && /loading-spinner|loading-text|加载中/.test(body.innerHTML || '')) {
-                        body.innerHTML = magicHtml('加载中', '正在召回数据', 'feed');
+                        body.innerHTML = magicHtml('加载中', '加载中', 'feed');
                     }
                     return r;
                 };
@@ -5616,33 +5616,45 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 st.id = 'xtjMagicLoadingStyle';
                 st.textContent = `
 .xtj-magic-loading{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:260px;padding:28px 16px 24px;text-align:center;isolation:isolate;overflow:hidden}
-.xtj-magic-loading::before{content:"";position:absolute;inset:-20% -10%;background:radial-gradient(circle at 50% 42%,rgba(255,255,255,.18),transparent 24%),radial-gradient(circle at 45% 48%,rgba(123,213,255,.10),transparent 36%),radial-gradient(circle at 58% 56%,rgba(255,227,154,.10),transparent 38%);filter:blur(18px);opacity:.96;pointer-events:none;animation:xtjEchoAura 4.2s ease-in-out infinite}
+.xtj-magic-loading::before{content:"";position:absolute;inset:-20% -10%;background:radial-gradient(circle at 50% 42%,rgba(255,255,255,.18),transparent 24%),radial-gradient(circle at 45% 48%,rgba(123,213,255,.10),transparent 36%),radial-gradient(circle at 58% 56%,rgba(255,227,154,.10),transparent 38%),radial-gradient(circle at 50% 50%,rgba(181,156,255,.12),transparent 60%);filter:blur(18px);opacity:.96;pointer-events:none;animation:xtjEchoAura 4.2s ease-in-out infinite}
 .xtj-magic-loading::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.28) 1px,transparent 1.6px),radial-gradient(circle,rgba(255,227,154,.24) 1px,transparent 1.6px);background-size:92px 92px,146px 146px;background-position:0 0,28px 38px;opacity:.14;pointer-events:none;animation:xtjMagicGridDrift 14s linear infinite}
 .xtj-magic-loading.xtj-magic-loading--compact{min-height:108px;padding:10px 10px 8px;gap:8px;align-items:flex-start}
 .xtj-magic-loading.xtj-magic-loading--compact .xtj-echo-stage{width:min(40vw,126px);height:min(40vw,126px);margin-left:6px}
 .xtj-magic-loading.xtj-magic-loading--compact .xtj-magic-loading-title{font-size:14px}
 .xtj-magic-loading.xtj-magic-loading--compact .xtj-magic-loading-subtitle{font-size:11px}
 .xtj-echo-stage{position:relative;width:min(72vw,320px);aspect-ratio:1;display:grid;place-items:center;z-index:1;animation:xtjEchoFloat 4.8s ease-in-out infinite;filter:drop-shadow(0 30px 80px rgba(123,213,255,.22))}
-.xtj-echo-aura{position:absolute;inset:10%;border-radius:50%;background:radial-gradient(circle at 50% 48%,rgba(255,255,255,.78),rgba(255,227,154,.16) 26%,rgba(123,213,255,.11) 42%,transparent 70%);filter:blur(10px);opacity:.96;animation:xtjEchoAura 4.2s ease-in-out infinite}
-.xtj-echo-rune{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(255,227,154,.32);box-shadow:0 0 0 1px rgba(123,213,255,.10),0 0 38px rgba(255,227,154,.08);animation:xtjRuneSpin 12s linear infinite}
-.xtj-echo-rune--inner{inset:15%;border-style:dashed;border-color:rgba(123,213,255,.34);animation:xtjRuneSpinReverse 8s linear infinite}
-.xtj-echo-field{position:absolute;inset:18%;border-radius:50%;background:conic-gradient(from 0deg,rgba(255,227,154,.06),rgba(123,213,255,.22),rgba(181,156,255,.12),rgba(255,227,154,.06));filter:blur(.5px);animation:xtjAbsorbSwirl 5.6s ease-in-out infinite}
-.xtj-echo-mirror{position:absolute;inset:26%;border-radius:42% 58% 52% 48%/54% 54% 46% 46%;background:linear-gradient(135deg,rgba(255,255,255,.62),rgba(255,255,255,.16) 32%,rgba(123,213,255,.18) 68%,rgba(255,227,154,.20));border:1px solid rgba(255,247,214,.72);box-shadow:0 0 0 1px rgba(255,255,255,.16),0 16px 50px rgba(123,213,255,.16),inset 0 0 28px rgba(255,255,255,.18);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);transform:perspective(900px) rotateY(-12deg) rotateX(5deg);animation:xtjMirrorFloat 4.8s ease-in-out infinite}
-.xtj-echo-mirror-line{position:absolute;inset:14% 18%;border-radius:inherit;border-top:1px solid rgba(255,255,255,.54);border-bottom:1px solid rgba(255,227,154,.18);opacity:.72}
-.xtj-echo-shock{position:absolute;width:28%;aspect-ratio:1;border-radius:50%;border:2px solid rgba(255,227,154,.60);opacity:0;animation:xtjShockLoop 3.2s ease-out infinite}
+.xtj-echo-aura{position:absolute;inset:8%;border-radius:50%;background:radial-gradient(circle at 50% 48%,rgba(255,255,255,.88),rgba(255,227,154,.22) 22%,rgba(123,213,255,.16) 44%,rgba(181,156,255,.08) 60%,transparent 72%);filter:blur(8px);opacity:.96;animation:xtjEchoAura 4.2s ease-in-out infinite}
+.xtj-echo-rune{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,227,154,.38);box-shadow:0 0 0 2px rgba(123,213,255,.08),0 0 60px rgba(255,227,154,.12),inset 0 0 20px rgba(255,227,154,.06);animation:xtjRuneSpin 12s linear infinite}
+.xtj-echo-rune--inner{inset:14%;border-style:dashed;border-width:1.5px;border-color:rgba(123,213,255,.42);box-shadow:0 0 0 2px rgba(181,156,255,.06),0 0 30px rgba(123,213,255,.14);animation:xtjRuneSpinReverse 7s linear infinite}
+.xtj-echo-field{position:absolute;inset:16%;border-radius:50%;background:conic-gradient(from 0deg,rgba(255,227,154,.08),rgba(123,213,255,.26),rgba(181,156,255,.16),rgba(255,227,154,.12),rgba(123,213,255,.20),rgba(255,227,154,.08));filter:blur(.5px);animation:xtjAbsorbSwirl 5.6s ease-in-out infinite}
+.xtj-echo-mirror{position:absolute;inset:24%;border-radius:42% 58% 52% 48%/54% 54% 46% 46%;background:linear-gradient(135deg,rgba(255,255,255,.72),rgba(255,255,255,.18) 28%,rgba(123,213,255,.22) 62%,rgba(255,227,154,.24),rgba(181,156,255,.14));border:1.5px solid rgba(255,247,214,.78);box-shadow:0 0 0 1.5px rgba(255,255,255,.22),0 20px 60px rgba(123,213,255,.22),inset 0 0 36px rgba(255,255,255,.22);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);transform:perspective(900px) rotateY(-12deg) rotateX(5deg);animation:xtjMirrorFloat 4.8s ease-in-out infinite}
+.xtj-echo-mirror-line{position:absolute;inset:14% 18%;border-radius:inherit;border-top:1.5px solid rgba(255,255,255,.62);border-bottom:1.5px solid rgba(255,227,154,.22);opacity:.78}
+.xtj-echo-shock{position:absolute;width:24%;aspect-ratio:1;border-radius:50%;border:2.5px solid rgba(255,227,154,.70);box-shadow:0 0 24px rgba(255,227,154,.28);opacity:0;animation:xtjShockLoop 3.2s ease-out infinite}
 .xtj-echo-bolt{position:absolute;height:7px;border-radius:999px;opacity:0;pointer-events:none;z-index:7}
-.xtj-echo-bolt--in{right:-28%;top:48%;width:50%;background:linear-gradient(90deg,transparent,#ff7a9c,#ffd1dc,#fff);box-shadow:0 0 20px rgba(255,111,141,.78),0 0 50px rgba(255,111,141,.40);transform:rotate(180deg);animation:xtjIncoming 3.6s ease-in infinite}
-.xtj-echo-bolt--out{left:46%;top:44%;width:58%;background:linear-gradient(90deg,transparent,#83ddff,#fff1b4,#fff);box-shadow:0 0 22px rgba(123,213,255,.78),0 0 62px rgba(255,227,154,.38);transform:rotate(-24deg);animation:xtjReflected 3.6s ease-out infinite}
-.xtj-echo-blade{position:absolute;left:40%;top:52%;width:70%;height:10px;border-radius:999px;background:linear-gradient(90deg,transparent,#fff,#ffe39a,transparent);box-shadow:0 0 28px rgba(255,227,154,.82),0 0 80px rgba(255,227,154,.42);clip-path:polygon(0 46%,70% 0,100% 50%,70% 100%,0 54%);opacity:0;transform:rotate(-8deg);animation:xtjBladeSlash 4.8s cubic-bezier(.12,.78,.2,1) infinite;z-index:9}
-.xtj-echo-shard{position:absolute;width:16px;height:42px;background:linear-gradient(180deg,rgba(255,255,255,.92),rgba(255,218,138,.08));border:1px solid rgba(255,255,255,.42);clip-path:polygon(45% 0,100% 72%,40% 100%,0 24%);filter:drop-shadow(0 0 12px rgba(255,222,140,.62));opacity:.72;z-index:6;animation:xtjShardOrbit 8s linear infinite}
+.xtj-echo-bolt--in{right:-26%;top:48%;width:48%;background:linear-gradient(90deg,transparent,#ff7a9c,#ffd1dc,#fff);box-shadow:0 0 22px rgba(255,111,141,.82),0 0 54px rgba(255,111,141,.46);transform:rotate(180deg);animation:xtjIncoming 3.6s ease-in infinite}
+.xtj-echo-bolt--out{left:44%;top:44%;width:56%;background:linear-gradient(90deg,transparent,#83ddff,#fff1b4,#fff);box-shadow:0 0 24px rgba(123,213,255,.82),0 0 68px rgba(255,227,154,.42);transform:rotate(-24deg);animation:xtjReflected 3.6s ease-out infinite}
+.xtj-echo-blade{position:absolute;left:38%;top:52%;width:68%;height:10px;border-radius:999px;background:linear-gradient(90deg,transparent,#fff,#ffe39a,transparent);box-shadow:0 0 32px rgba(255,227,154,.88),0 0 88px rgba(255,227,154,.48);clip-path:polygon(0 46%,70% 0,100% 50%,70% 100%,0 54%);opacity:0;transform:rotate(-8deg);animation:xtjBladeSlash 4.8s cubic-bezier(.12,.78,.2,1) infinite;z-index:9}
+.xtj-echo-shard{position:absolute;width:14px;height:38px;background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(255,218,138,.10));border:1px solid rgba(255,255,255,.48);clip-path:polygon(45% 0,100% 72%,40% 100%,0 24%);filter:drop-shadow(0 0 14px rgba(255,222,140,.68));opacity:.76;z-index:6;animation:xtjShardOrbit 8s linear infinite}
 .xtj-echo-shard--1{top:13%;left:18%;animation-delay:-1s}
 .xtj-echo-shard--2{top:19%;right:11%;animation-delay:-3.2s;transform:scale(.82)}
 .xtj-echo-shard--3{bottom:17%;left:11%;animation-delay:-5.5s;transform:scale(1.12)}
 .xtj-echo-shard--4{bottom:11%;right:23%;animation-delay:-6.8s;transform:scale(.78)}
-.xtj-echo-particle{position:absolute;width:8px;height:8px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.98) 0,rgba(255,227,154,.92) 38%,rgba(255,227,154,.08) 76%);box-shadow:0 0 16px rgba(255,227,154,.9);pointer-events:none;z-index:13;animation:xtjParticlePulse 2.4s ease-in-out infinite}
+.xtj-echo-particle{position:absolute;width:7px;height:7px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.98) 0,rgba(255,227,154,.94) 36%,rgba(255,227,154,.06) 74%);box-shadow:0 0 18px rgba(255,227,154,.92);pointer-events:none;z-index:13;animation:xtjParticlePulse 2.4s ease-in-out infinite}
 .xtj-echo-particle--1{top:22%;left:24%;animation-delay:-.4s}
 .xtj-echo-particle--2{bottom:22%;right:22%;animation-delay:-1.2s}
 .xtj-echo-particle--3{bottom:16%;left:50%;margin-left:-4px;animation-delay:-1.8s}
+.xtj-spark{position:absolute;width:5px;height:5px;border-radius:50%;background:#fff;box-shadow:0 0 12px rgba(181,156,255,.9),0 0 28px rgba(123,213,255,.6);pointer-events:none;z-index:14;animation:xtjSparkDrift 3.6s ease-in-out infinite}
+.xtj-spark--1{top:10%;left:62%;animation-delay:-.3s;width:4px;height:4px}
+.xtj-spark--2{top:28%;right:4%;animation-delay:-1.1s;width:6px;height:6px}
+.xtj-spark--3{bottom:8%;left:34%;animation-delay:-2.0s;width:4px;height:4px}
+.xtj-spark--4{top:58%;left:6%;animation-delay:-2.6s;width:5px;height:5px}
+.xtj-spark--5{bottom:28%;right:8%;animation-delay:-3.1s;width:4px;height:4px}
+.xtj-spark--6{top:42%;right:16%;animation-delay:-1.6s;width:6px;height:6px}
+.xtj-spark--7{bottom:42%;left:22%;animation-delay:-2.4s;width:4px;height:4px}
+.xtj-spark--8{top:14%;left:34%;animation-delay:-3.4s;width:5px;height:5px}
+.xtj-cast-spark{position:absolute;width:5px;height:5px;border-radius:50%;pointer-events:none;z-index:15;animation:xtjCastBurst .9s ease-out forwards}
+@keyframes xtjSparkDrift{0%,100%{transform:translate(0,0) scale(.6);opacity:.3}25%{transform:translate(14px,-18px) scale(1.2);opacity:.9}50%{transform:translate(-8px,-32px) scale(.7);opacity:.6}75%{transform:translate(-16px,-14px) scale(1.1);opacity:.88}}
+@keyframes xtjCastBurst{0%{transform:translate(0,0) scale(.4);opacity:0}20%{opacity:1;transform:translate(var(--bx),var(--by)) scale(1.4)}100%{opacity:0;transform:translate(var(--bx),var(--by)) scale(0);filter:blur(3px)}}
 .xtj-magic-loading-title{position:relative;z-index:1;margin-top:2px;font-size:20px;font-weight:850;letter-spacing:.06em;color:#ffe39a;text-shadow:0 0 28px rgba(255,227,154,.34),0 0 48px rgba(123,213,255,.16)}
 .xtj-magic-loading-subtitle{position:relative;z-index:1;font-size:12px;color:rgba(31,41,55,.44)}
 .xtj-magic-loading-dots{display:flex;gap:7px;position:relative;z-index:1;margin-top:2px}
@@ -5690,6 +5702,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     '<div class="xtj-echo-particle xtj-echo-particle--1"></div>',
                     '<div class="xtj-echo-particle xtj-echo-particle--2"></div>',
                     '<div class="xtj-echo-particle xtj-echo-particle--3"></div>',
+                    '<div class="xtj-spark xtj-spark--1"></div>',
+                    '<div class="xtj-spark xtj-spark--2"></div>',
+                    '<div class="xtj-spark xtj-spark--3"></div>',
+                    '<div class="xtj-spark xtj-spark--4"></div>',
+                    '<div class="xtj-spark xtj-spark--5"></div>',
+                    '<div class="xtj-spark xtj-spark--6"></div>',
+                    '<div class="xtj-spark xtj-spark--7"></div>',
+                    '<div class="xtj-spark xtj-spark--8"></div>',
                     '</div>',
                     '<div class="xtj-magic-loading-title">' + (window.escapeHtml ? escapeHtml(title || '加载中') : String(title || '加载中')) + '</div>',
                     '<div class="xtj-magic-loading-subtitle">' + (window.escapeHtml ? escapeHtml(subtitle || '法阵正在聚能') : String(subtitle || '娉曢樀姝ｅ湪鑱氳兘')) + '</div>',
@@ -5734,7 +5754,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = originalLoadFeed.apply(this, arguments);
                     var feed = document.getElementById('feed');
                     if (feed && /loading-spinner|loading-text|内容加载中/.test(feed.innerHTML || '')) {
-                        feed.innerHTML = magicLoadingHtml(forceRefresh ? '内容刷新中' : '内容加载中', '正在召回数据', 'feed');
+                        feed.innerHTML = magicLoadingHtml(forceRefresh ? '内容刷新中' : '加载中', '加载中', 'feed');
                     }
                     return r;
                 };
@@ -5747,7 +5767,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = originalOpenPostDetail.apply(this, arguments);
                     var body = document.getElementById('postDetailBody');
                     if (body && /loading-spinner|loading-text|加载中/.test(body.innerHTML || '')) {
-                        body.innerHTML = magicLoadingHtml('加载中', '正在召回数据', 'feed');
+                        body.innerHTML = magicLoadingHtml('加载中', '加载中', 'feed');
                     }
                     return r;
                 };
@@ -5760,7 +5780,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = originalOpenStatDetail.apply(this, arguments);
                     var body = document.getElementById('statModalBody');
                     if (body && /loading-spinner|loading-text|加载中/.test(body.innerHTML || '')) {
-                        body.innerHTML = magicLoadingHtml('加载中', '正在召回数据', 'feed');
+                        body.innerHTML = magicLoadingHtml('加载中', '加载中', 'feed');
                     }
                     return r;
                 };
@@ -5831,12 +5851,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     '</div></div>',
                     post.content ? '<div class="post-detail-content">' + escapeHtml(post.content) + '</div>' : '',
                     mediaHtml ? '<div class="post-detail-media">' + mediaHtml + '</div>' : '',
-                    '<div class="post-detail-stats">娴忚 ' + vc + ' 娆?路 鐐硅禐 ' + likes.length + ' 娆?路 璇勮 ' + comments.length + ' 娆?/div>',
+                    '<div class="post-detail-stats">娴忚 ' + vc + ' 娆?路 点赞 ' + likes.length + ' 娆?路 璇勮 ' + comments.length + ' 娆?/div>',
                     '<div class="stat-two-col">',
-                    '<div class="stat-col"><div class="stat-section-title">鉂わ笍 鐐硅禐鐢ㄦ埛 ' + likes.length + '</div>' +
+                    '<div class="stat-col"><div class="stat-section-title">❤️ 点赞鐢ㄦ埛 ' + likes.length + '</div>' +
                         (likes.length ? likes.map(function(l) {
                             return '<div class="stat-like-item"><div class="sli-info"><div class="sli-user">' + escapeHtml(l.user_name) + '</div></div><span class="sli-time">' + new Date(l.created_at).toLocaleString() + '</span></div>';
-                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤鐐硅禐</div>') +
+                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤点赞</div>') +
                     '</div>',
                     '<div class="stat-col"><div class="stat-section-title">馃挰 璇勮鐢ㄦ埛 ' + comments.length + '</div>' +
                         (comments.length ? comments.map(function(c) {
@@ -5863,8 +5883,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var onclick = "openPostDetail('" + String(post.id).replace(/'/g, "\\'") + "')";
                 return [
                     '<div class="stat-post-item">',
-                    '<span class="spi-content" onclick="' + onclick + '" title="鐐瑰嚮鏌ョ湅甯栧瓙璇︽儏">' + escapeHtml(display) + tag + '</span>',
-                    hasImg ? '<img class="spi-thumb" src="' + escapeHtml(post.media_url) + '" onclick="' + onclick + '" title="鐐瑰嚮鏌ョ湅甯栧瓙璇︽儏" />' : '',
+                    '<span class="spi-content" onclick="' + onclick + '" title="点击查看帖子详情">' + escapeHtml(display) + tag + '</span>',
+                    hasImg ? '<img class="spi-thumb" src="' + escapeHtml(post.media_url) + '" onclick="' + onclick + '" title="点击查看帖子详情" />' : '',
                     '<span class="spi-time">' + new Date(post.created_at).toLocaleString() + '</span>',
                     '</div>'
                 ].join('');
@@ -5942,15 +5962,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statAllPosts.forEach(function(p) { postMap[p.id] = p; });
 
                 function buildLikesCol() {
-                    var h = '<div class="stat-section-title">鉂わ笍 鐐硅禐璁板綍</div>';
+                    var h = '<div class="stat-section-title">❤️ 点赞璁板綍</div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(function(l) {
                             var post = postMap[l.post_id];
                             var postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(鍥剧墖/瑙嗛)') : '(宸插垹闄ゅ笘瀛?';
-                            return '<div class="stat-like-item"><div class="sli-info"><div class="sli-user">' + escapeHtml(l.user_name) + '</div><div class="sli-target">鐐硅禐浜?' + postContent + '</div></div><span class="sli-time">' + new Date(l.created_at).toLocaleString() + '</span></div>';
+                            return '<div class="stat-like-item"><div class="sli-info"><div class="sli-user">' + escapeHtml(l.user_name) + '</div><div class="sli-target">点赞浜?' + postContent + '</div></div><span class="sli-time">' + new Date(l.created_at).toLocaleString() + '</span></div>';
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">鏆傛棤鐐硅禐璁板綍</div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">鏆傛棤点赞璁板綍</div>';
                     }
                     return h;
                 }
@@ -5977,7 +5997,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var body = document.getElementById('postDetailBody');
                 var modal = document.getElementById('postDetailModal');
                 if (title) title.textContent = '帖子详情';
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '正在打开帖子详情', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                if (body) body.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
                 if (modal) modal.classList.add('active');
 
                 try {
@@ -6028,7 +6048,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '正在召回数据', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                if (body) body.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -6242,7 +6262,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '正在召回数据', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                if (body) body.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
                 var snapshot = await fetchStatSnapshotWithTimeout(5000);
                 if (snapshot) {
                     applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
