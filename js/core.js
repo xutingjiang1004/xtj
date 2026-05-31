@@ -2754,9 +2754,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var maps = buildPostMaps(scopedComments, likes);
                 var state = getPostSearchState();
                 var hasFilters = !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
-                feed.innerHTML = visiblePosts.length ? visiblePosts.map(function(post) {
-                    return renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
-                }).join("") : "<div class=\"loading\">" + (hasFilters ? "娌℃湁鎵惧埌鐩稿叧甯栧瓙" : "蹇潵鍙戝竷绗竴鏉″姩鎬佸惂~") + "</div>";
+                if (visiblePosts.length) {
+                    feed.innerHTML = visiblePosts.map(function(post) {
+                        return renderPostCard(post, maps.commentMap, maps.likeMap, maps.likeUserMap);
+                    }).join("");
+                } else {
+                    feed.innerHTML = '<div class="loading">' + (hasFilters ? '暂无匹配的帖子' : '快去发布第一条动态吧~') + '</div>';
+                }
                 initPostScrollAnimation();
             };
 
@@ -5829,21 +5833,28 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (!userMap[p.user_name]) userMap[p.user_name] = [];
                     userMap[p.user_name].push(p);
                 });
-                var entries = Object.entries(userMap).sort(function(a, b) { return b[1].length - a[1].length; });
+                var entries = Object.entries(userMap).sort(function(a, b) {
+                    return b[1].length - a[1].length;
+                });
                 if (!entries.length) {
-                    body.innerHTML = '<div class="stat-empty">鏆傛棤鍔ㄦ€佹暟鎹?/div>';
+                    body.innerHTML = '<div class="stat-empty">暂无动态数据</div>';
                     return;
                 }
                 body.innerHTML = entries.map(function(entry) {
                     var name = entry[0];
                     var posts = entry[1];
-                    return '<div class="stat-user-group">' +
-                        '<div class="stat-user-header"><div class="suh-left"><div class="suh-avatar">' + escapeHtml(name).slice(0, 1).toUpperCase() + '</div><span class="suh-name">' + escapeHtml(name) + '</span></div><span class="suh-count">' + posts.length + ' 鏉?/span></div>' +
-                        '<div class="stat-user-posts">' +
-                            posts.slice(0, 3).map(function(p) { return statPostItemMarkup(p); }).join('') +
-                            (posts.length > 3 ? '<div style="text-align:center; padding:8px 0;"><button class="stat-view-btn" onclick="loadUserAllPosts(\'' + String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">鏌ョ湅鍏ㄩ儴 ' + posts.length + ' 鏉?/button></div>' : '') +
-                        '</div>' +
-                    '</div>';
+                    var moreButton = posts.length > 3
+                        ? '<div style="text-align:center; padding:8px 0;"><button class="stat-view-btn" onclick="loadUserAllPosts(\'' + String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">查看全部 ' + posts.length + ' 条</button></div>'
+                        : '';
+                    return [
+                        '<div class="stat-user-group">',
+                        '<div class="stat-user-header"><div class="suh-left"><div class="suh-avatar">' + escapeHtml(name).slice(0, 1).toUpperCase() + '</div><span class="suh-name">' + escapeHtml(name) + '</span></div><span class="suh-count">' + posts.length + ' 条</span></div>',
+                        '<div class="stat-user-posts">',
+                        posts.slice(0, 3).map(function(p) { return statPostItemMarkup(p); }).join(''),
+                        moreButton,
+                        '</div>',
+                        '</div>'
+                    ].join('');
                 }).join('');
             };
 
@@ -5905,7 +5916,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         h += statAllComments.slice().reverse().slice(0, 200).map(function(c) {
                             var post = postMap[c.post_id];
                             var postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(鍥剧墖/瑙嗛)') : '(宸插垹闄ゅ笘瀛?';
-                            return '<div class="stat-comment-item"><div class="sci-info"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><div class="sci-target">璇勮浜?' + postContent + '锛? + escapeHtml(c.content) + '</div></div><span class="sci-time">' + new Date(c.created_at).toLocaleString() + '</span></div>';
+                            return '<div class="stat-comment-item"><div class="sci-info"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><div class="sci-target">评论于' + postContent + '：' + escapeHtml(c.content) + '</div></div><span class="sci-time">' + new Date(c.created_at).toLocaleString() + '</span></div>';
                         }).join('');
                     } else {
                         h += '<div class="stat-empty" style="padding:12px 0;">鏆傛棤璇勮璁板綍</div>';
@@ -6159,9 +6170,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             window.openStatDetail = async function(type) {
                 statCurrentType = type;
                 var titles = {
-                    posts: '鎬诲姩鎬?- 鎸夌敤鎴峰垎缁?,
-                    views: '鎬绘祻瑙?- 娴忚璁板綍',
-                    likes: '鐐硅禐鍜岃瘎璁?- 璁板綍'
+                    posts: '总动态 - 按用户分组',
+                    views: '总浏览 - 浏览记录',
+                    likes: '点赞和评论 - 记录'
                 };
                 var title = document.getElementById('statModalTitle');
                 var body = document.getElementById('statModalBody');
