@@ -1,3 +1,12 @@
 {"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H2","location":"core.js:14","msg":"[DEBUG] sb created, window.sb = true","data":{},"ts":1780202285025}
 {"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H2","location":"core.js:2","msg":"[DEBUG] Outer IIFE entered","data":{"ts":1780202285019},"ts":1780202285019}
 {"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H1","location":"core.js:6","msg":"[DEBUG] window.supabase = object","data":{"type":"object","hasScript":true},"ts":1780202285020}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H2","location":"core.js:14","msg":"[DEBUG] sb created, window.sb = true","data":{},"ts":1780203925309}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H2","location":"core.js:2","msg":"[DEBUG] Outer IIFE entered","data":{"ts":1780203925304},"ts":1780203925304}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H1","location":"core.js:6","msg":"[DEBUG] window.supabase = object","data":{"type":"object","hasScript":true},"ts":1780203925305}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H2","location":"core.js:2","msg":"[DEBUG] Outer IIFE entered","data":{"ts":1780204016223},"ts":1780204016223}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H1","location":"core.js:6","msg":"[DEBUG] window.supabase = object","data":{"type":"object","hasScript":true},"ts":1780204016224}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H2","location":"core.js:14","msg":"[DEBUG] sb created, window.sb = true","data":{},"ts":1780204016228}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H2","location":"core.js:2","msg":"[DEBUG] Outer IIFE entered","data":{"ts":1780204565994},"ts":1780204565994}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H1","location":"core.js:6","msg":"[DEBUG] window.supabase = object","data":{"type":"object","hasScript":true},"ts":1780204565995}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H2","location":"core.js:14","msg":"[DEBUG] sb created, window.sb = true","data":{},"ts":1780204565998}
