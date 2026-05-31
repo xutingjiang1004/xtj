@@ -1559,7 +1559,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             document.addEventListener('keydown', function (e) {
-                if (e.key === 'Escape') closeImageViewer();
+                if (e.key !== 'Escape') return;
+                var iv = document.getElementById('imgViewer');
+                if (iv && iv.classList.contains('active')) { closeImageViewer(); return; }
+                var am = document.getElementById('announcementModal');
+                if (am && am.classList.contains('active')) { closeAnnouncementModal(); return; }
+                var sm = document.getElementById('statModal');
+                if (sm && sm.classList.contains('active')) { sm.classList.remove('active'); return; }
+                var cm = document.getElementById('commentModal');
+                if (cm && cm.classList.contains('active')) { closeModal('commentModal'); return; }
             });
 
             const ivViewerEl = document.getElementById('imgViewer');
@@ -3425,6 +3433,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let isRefreshing = {};
             window.switchDockTab = function(tab, skipReturn) {
                 if (tab === 'chat' && !currentUser) { showToast('璇峰厛鐧诲綍'); return; }
+                if (tab !== currentDockTab) {
+                    try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
+                    try { var am = document.getElementById('announcementModal'); if (am && am.classList.contains('active')) closeAnnouncementModal(); } catch(e) {}
+                    try { var sm = document.getElementById('statModal'); if (sm && sm.classList.contains('active')) sm.classList.remove('active'); } catch(e) {}
+                    try { var cm = document.getElementById('commentModal'); if (cm && cm.classList.contains('active')) closeModal('commentModal'); } catch(e) {}
+                    document.body.style.overflow = '';
+                }
                 // 鍏堣Е鍙戠偣鍑诲姩鐢伙紙鍗充娇宸茬粡鍦ㄥ綋鍓峵ab涔熻鎾斁锟?
                 var btn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
                 if (btn) triggerTabAnimation(btn, tab);
