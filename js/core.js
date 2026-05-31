@@ -1,4 +1,6 @@
 (function () {
+// 注入魔法加载器CSS，确保在任何加载前可用
+(function(){if(document.getElementById('xtjMagicLoadingStyleEager'))return;var s=document.createElement('style');s.id='xtjMagicLoadingStyleEager';s.textContent='.xtj-magic-loading{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:260px;padding:28px 16px 24px;text-align:center;isolation:isolate;overflow:hidden}.xtj-magic-loading::before{content:"";position:absolute;inset:-20% -10%;background:radial-gradient(circle at 50% 42%,rgba(255,255,255,.18),transparent 24%),radial-gradient(circle at 45% 48%,rgba(123,213,255,.10),transparent 36%),radial-gradient(circle at 58% 56%,rgba(255,227,154,.10),transparent 38%),radial-gradient(circle at 50% 50%,rgba(181,156,255,.12),transparent 60%);filter:blur(18px);opacity:.96;pointer-events:none;animation:xtjEchoAura 4.2s ease-in-out infinite}.xtj-magic-loading::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.28) 1px,transparent 1.6px),radial-gradient(circle,rgba(255,227,154,.24) 1px,transparent 1.6px);background-size:92px 92px,146px 146px;background-position:0 0,28px 38px;opacity:.14;pointer-events:none;animation:xtjMagicGridDrift 14s linear infinite}.xtj-echo-stage{position:relative;width:min(72vw,320px);aspect-ratio:1;display:grid;place-items:center;z-index:1;animation:xtjEchoFloat 4.8s ease-in-out infinite;filter:drop-shadow(0 30px 80px rgba(123,213,255,.22))}.xtj-echo-aura{position:absolute;inset:8%;border-radius:50%;background:radial-gradient(circle at 50% 48%,rgba(255,255,255,.88),rgba(255,227,154,.22) 22%,rgba(123,213,255,.16) 44%,rgba(181,156,255,.08) 60%,transparent 72%);filter:blur(8px);opacity:.96;animation:xtjEchoAura 4.2s ease-in-out infinite}.xtj-echo-rune{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,227,154,.38);box-shadow:0 0 0 2px rgba(123,213,255,.08),0 0 60px rgba(255,227,154,.12),inset 0 0 20px rgba(255,227,154,.06);animation:xtjRuneSpin 12s linear infinite}.xtj-echo-rune--inner{inset:14%;border-style:dashed;border-width:1.5px;border-color:rgba(123,213,255,.42);box-shadow:0 0 0 2px rgba(181,156,255,.06),0 0 30px rgba(123,213,255,.14);animation:xtjRuneSpinReverse 7s linear infinite}.xtj-echo-field{position:absolute;inset:16%;border-radius:50%;background:conic-gradient(from 0deg,rgba(255,227,154,.08),rgba(123,213,255,.26),rgba(181,156,255,.16),rgba(255,227,154,.12),rgba(123,213,255,.20),rgba(255,227,154,.08));filter:blur(.5px);animation:xtjAbsorbSwirl 5.6s ease-in-out infinite}.xtj-echo-mirror{position:absolute;inset:24%;border-radius:42% 58% 52% 48%/54% 54% 46% 46%;background:linear-gradient(135deg,rgba(255,255,255,.72),rgba(255,255,255,.18) 28%,rgba(123,213,255,.22) 62%,rgba(255,227,154,.24),rgba(181,156,255,.14));border:1.5px solid rgba(255,247,214,.78);box-shadow:0 0 0 1.5px rgba(255,255,255,.22),0 20px 60px rgba(123,213,255,.22),inset 0 0 36px rgba(255,255,255,.22);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);transform:perspective(900px) rotateY(-12deg) rotateX(5deg);animation:xtjMirrorFloat 4.8s ease-in-out infinite}.xtj-echo-mirror-line{position:absolute;inset:14% 18%;border-radius:inherit;border-top:1.5px solid rgba(255,255,255,.62);border-bottom:1.5px solid rgba(255,227,154,.22);opacity:.78}.xtj-echo-shock{position:absolute;width:24%;aspect-ratio:1;border-radius:50%;border:2.5px solid rgba(255,227,154,.70);box-shadow:0 0 24px rgba(255,227,154,.28);opacity:0;animation:xtjShockLoop 3.2s ease-out infinite}.xtj-echo-bolt{position:absolute;height:7px;border-radius:999px;opacity:0;pointer-events:none;z-index:7}.xtj-echo-bolt--in{right:-26%;top:48%;width:48%;background:linear-gradient(90deg,transparent,#ff7a9c,#ffd1dc,#fff);box-shadow:0 0 22px rgba(255,111,141,.82),0 0 54px rgba(255,111,141,.46);transform:rotate(180deg);animation:xtjIncoming 3.6s ease-in infinite}.xtj-echo-bolt--out{left:44%;top:44%;width:56%;background:linear-gradient(90deg,transparent,#83ddff,#fff1b4,#fff);box-shadow:0 0 24px rgba(123,213,255,.82),0 0 68px rgba(255,227,154,.42);transform:rotate(-24deg);animation:xtjReflected 3.6s ease-out infinite}.xtj-echo-blade{position:absolute;left:38%;top:52%;width:68%;height:10px;border-radius:999px;background:linear-gradient(90deg,transparent,#fff,#ffe39a,transparent);box-shadow:0 0 32px rgba(255,227,154,.88),0 0 88px rgba(255,227,154,.48);clip-path:polygon(0 46%,70% 0,100% 50%,70% 100%,0 54%);opacity:0;transform:rotate(-8deg);animation:xtjBladeSlash 4.8s cubic-bezier(.12,.78,.2,1) infinite;z-index:9}.xtj-echo-shard{position:absolute;width:14px;height:38px;background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(255,218,138,.10));border:1px solid rgba(255,255,255,.48);clip-path:polygon(45% 0,100% 72%,40% 100%,0 24%);filter:drop-shadow(0 0 14px rgba(255,222,140,.68));opacity:.76;z-index:6;animation:xtjShardOrbit 8s linear infinite}.xtj-echo-shard--1{top:13%;left:18%;animation-delay:-1s}.xtj-echo-shard--2{top:19%;right:11%;animation-delay:-3.2s;transform:scale(.82)}.xtj-echo-shard--3{bottom:17%;left:11%;animation-delay:-5.5s;transform:scale(1.12)}.xtj-echo-shard--4{bottom:11%;right:23%;animation-delay:-6.8s;transform:scale(.78)}.xtj-echo-particle{position:absolute;width:7px;height:7px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.98) 0,rgba(255,227,154,.94) 36%,rgba(255,227,154,.06) 74%);box-shadow:0 0 18px rgba(255,227,154,.92);pointer-events:none;z-index:13;animation:xtjParticlePulse 2.4s ease-in-out infinite}.xtj-echo-particle--1{top:22%;left:24%;animation-delay:-.4s}.xtj-echo-particle--2{bottom:22%;right:22%;animation-delay:-1.2s}.xtj-echo-particle--3{bottom:16%;left:50%;margin-left:-4px;animation-delay:-1.8s}.xtj-spark{position:absolute;width:5px;height:5px;border-radius:50%;background:#fff;box-shadow:0 0 12px rgba(181,156,255,.9),0 0 28px rgba(123,213,255,.6);pointer-events:none;z-index:14;animation:xtjSparkDrift 3.6s ease-in-out infinite}.xtj-spark--1{top:10%;left:62%;animation-delay:-.3s;width:4px;height:4px}.xtj-spark--2{top:28%;right:4%;animation-delay:-1.1s;width:6px;height:6px}.xtj-spark--3{bottom:8%;left:34%;animation-delay:-2.0s;width:4px;height:4px}.xtj-spark--4{top:58%;left:6%;animation-delay:-2.6s;width:5px;height:5px}.xtj-spark--5{bottom:28%;right:8%;animation-delay:-3.1s;width:4px;height:4px}.xtj-spark--6{top:42%;right:16%;animation-delay:-1.6s;width:6px;height:6px}.xtj-spark--7{bottom:42%;left:22%;animation-delay:-2.4s;width:4px;height:4px}.xtj-spark--8{top:14%;left:34%;animation-delay:-3.4s;width:5px;height:5px}.xtj-magic-loading-title{position:relative;z-index:1;margin-top:2px;font-size:20px;font-weight:850;letter-spacing:.06em;color:#ffe39a;text-shadow:0 0 28px rgba(255,227,154,.34),0 0 48px rgba(123,213,255,.16)}.xtj-magic-loading-dots{display:flex;gap:7px;position:relative;z-index:1;margin-top:2px}.xtj-magic-loading-dots span{width:6px;height:6px;border-radius:50%;background:rgba(255,227,154,.72);box-shadow:0 0 14px rgba(255,227,154,.30);animation:xtjDot 1.1s ease-in-out infinite}.xtj-magic-loading-dots span:nth-child(2){animation-delay:.14s;background:rgba(123,213,255,.72)}.xtj-magic-loading-dots span:nth-child(3){animation-delay:.28s;background:rgba(181,156,255,.70)}@keyframes xtjMagicGridDrift{to{background-position:0 -90px,28px -52px}}@keyframes xtjEchoAura{0%,100%{transform:scale(.94);opacity:.58}50%{transform:scale(1.06);opacity:1}}@keyframes xtjEchoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}@keyframes xtjMirrorFloat{0%,100%{transform:perspective(900px) rotateY(-12deg) rotateX(5deg) translateY(0)}50%{transform:perspective(900px) rotateY(-7deg) rotateX(7deg) translateY(-16px)}}@keyframes xtjRuneSpin{to{transform:rotate(360deg)}}@keyframes xtjRuneSpinReverse{to{transform:rotate(-360deg)}}@keyframes xtjAbsorbSwirl{0%,100%{opacity:.42;transform:rotate(0deg) scale(.92)}50%{opacity:.82;transform:rotate(180deg) scale(1.06)}}@keyframes xtjShockLoop{0%,70%{opacity:0;transform:scale(.18)}77%{opacity:.65;transform:scale(.35)}100%{opacity:0;transform:scale(2.8);filter:blur(3px)}}@keyframes xtjIncoming{0%,54%{opacity:0;transform:translateX(0) rotate(180deg) scaleX(.8)}60%{opacity:1}82%{opacity:1;transform:translateX(calc(var(--s)*-.86)) rotate(180deg) scaleX(1.1)}100%{opacity:0;transform:translateX(calc(var(--s)*-.93)) rotate(180deg) scaleX(.25)}}@keyframes xtjReflected{0%,66%{opacity:0;transform:rotate(-24deg) translateX(0) scaleX(.3)}72%{opacity:1}100%{opacity:0;transform:rotate(-24deg) translateX(calc(var(--s)*.78)) scaleX(1.1)}}@keyframes xtjBladeSlash{0%,72%{opacity:0;transform:rotate(-8deg) translateX(-70px) scaleX(.25);filter:blur(4px)}78%{opacity:1;filter:blur(0)}91%{opacity:1;transform:rotate(-8deg) translateX(160px) scaleX(1.18)}100%{opacity:0;transform:rotate(-8deg) translateX(300px) scaleX(.38);filter:blur(2px)}}@keyframes xtjShardOrbit{0%{transform:translateY(0) rotate(0deg);opacity:.26}40%{opacity:.95}100%{transform:translateY(-38px) rotate(360deg);opacity:.26}}@keyframes xtjParticlePulse{0%,100%{opacity:.36;transform:scale(.68)}50%{opacity:1;transform:scale(1.16)}}@keyframes xtjSparkDrift{0%,100%{transform:translate(0,0) scale(.6);opacity:.3}25%{transform:translate(14px,-18px) scale(1.2);opacity:.9}50%{transform:translate(-8px,-32px) scale(.7);opacity:.6}75%{transform:translate(-16px,-14px) scale(1.1);opacity:.88}}@keyframes xtjDot{0%,100%{transform:translateY(0);opacity:.42}50%{transform:translateY(-5px);opacity:1}}@media (prefers-reduced-motion: reduce){.xtj-echo-loader,.xtj-echo-loader *{animation:none!important}}';document.head.appendChild(s);})();
 // #region debug-point H5:onerror
 window.__dbg = window.__dbg || {}; window.__dbg.errors = [];
 window.onerror = function(m, s, l, c, e) { window.__dbg.errors.push({msg:m,src:s,line:l,col:c,err:e && e.stack,ts:Date.now()}); fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"page-unresponsive",runId:"pre",hypothesisId:"H5",location:"onerror",msg:"[DEBUG] Uncaught: "+m,data:{stack:e&&e.stack?e.stack.substring(0,500):""},ts:Date.now()})}).catch(function(){}); };
@@ -13,7 +15,7 @@ fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionI
 // #endregion
             if (typeof window.supabase === 'undefined') {
                 var feedEl = document.getElementById('feed');
-                if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">鏈嶅姟鍔犺浇澶辫触锛岃鍒锋柊椤甸潰閲嶈瘯</div>';
+                if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
 // #region debug-point H1:supabase-undefined
 fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"page-unresponsive",runId:"pre",hypothesisId:"H1",location:"core.js:9",msg:"[DEBUG] supabase UNDEFINED - returning early",data:{},ts:Date.now()})}).catch(function(){});
 // #endregion
@@ -632,13 +634,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 const btn = document.getElementById("loginSubmitBtn");
                 btn.disabled = true;
-                btn.textContent = "楠岃瘉涓?..";
+                btn.textContent = "验证中...";
 
                 try {
                     if (name === ADMIN_NAME) {
                         if (pw !== "xxz123") {
-                            showToast("瀵嗙爜閿欒");
-                            btn.disabled = false; btn.textContent = "鐧诲綍";
+                            showToast("密码错误");
+                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                     } else {
@@ -650,8 +652,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                         const inputHash = await hashPassword(pw);
                         if (inputHash !== authRec.media_url) {
-                            showToast("瀵嗙爜閿欒");
-                            btn.disabled = false; btn.textContent = "鐧诲綍";
+                            showToast("密码错误");
+                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                     }
@@ -659,7 +661,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
-                    showToast("鐧诲綍鎴愬姛锛屾杩庡洖鏉ワ紒" + name);
+                    showToast("登录成功，欢迎回来！" + name);
                     closeModal('loginModal');
                     
                     // 鏇存柊閺堚偓鏉╂垹娅ヨぐ鏇熸闂?
@@ -669,10 +671,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     initialLoad(true);
                 } catch (e) {
                     console.error(e);
-                    showToast("鐧诲綍澶辫触锛岃閲嶈瘯");
+                    showToast("登录失败，请重试");
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "鐧诲綍";
+                    btn.textContent = "登录";
                 }
             }
             window.doLogin = doLogin;
@@ -721,7 +723,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
-                    showToast("娉ㄥ唽鎴愬姛锛屾杩庯紒" + name);
+                    showToast("注册成功，欢迎！" + name);
                     closeModal('registerModal');
                     
                     // 淇濆瓨鐢ㄦ埛娉ㄥ唽淇剝浼?
@@ -731,10 +733,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     initialLoad(true);
                 } catch (e) {
                     console.error(e);
-                    showToast("娉ㄥ唽澶辫触锛岃閲嶈瘯");
+                    showToast("注册失败，请重试");
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "娉ㄥ唽";
+                    btn.textContent = "注册";
                 }
             }
 
@@ -1370,7 +1372,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     btn.classList.add("liked");
                     createHeartParticles(btn);
                 }
-                btn.textContent = isLiked ? "点赞" : "❤️";
+                btn.textContent = isLiked ? "❤️" : "点赞";
 
                 try {
                     if (isLiked) {
@@ -1392,7 +1394,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
-                const emojis = ["❤️","棣冩寗","棣冩寙","馃","棣冩寘","棣冩寑"];
+                const emojis = ["❤️","💕","💖","🤍","💗","💘"];
                 for (let i=0; i<8; i++) {
                     const heart = document.createElement('div');
                     heart.className = 'heart-particle';
@@ -1800,7 +1802,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : `<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中</span></div>`;
+                if (!forceRefresh) feed.innerHTML = '<div class="xtj-magic-loading xtj-echo-loader feed" role="status"><div class="xtj-echo-stage" aria-hidden="true"><div class="xtj-echo-aura"></div><div class="xtj-echo-rune"></div><div class="xtj-echo-rune xtj-echo-rune--inner"></div><div class="xtj-echo-field"></div><div class="xtj-echo-mirror"><div class="xtj-echo-mirror-line"></div></div><div class="xtj-echo-shock"></div><div class="xtj-echo-bolt xtj-echo-bolt--in"></div><div class="xtj-echo-bolt xtj-echo-bolt--out"></div><div class="xtj-echo-blade"></div><div class="xtj-echo-shard xtj-echo-shard--1"></div><div class="xtj-echo-shard xtj-echo-shard--2"></div><div class="xtj-echo-shard xtj-echo-shard--3"></div><div class="xtj-echo-shard xtj-echo-shard--4"></div><div class="xtj-echo-particle xtj-echo-particle--1"></div><div class="xtj-echo-particle xtj-echo-particle--2"></div><div class="xtj-echo-particle xtj-echo-particle--3"></div><div class="xtj-spark xtj-spark--1"></div><div class="xtj-spark xtj-spark--2"></div><div class="xtj-spark xtj-spark--3"></div><div class="xtj-spark xtj-spark--4"></div><div class="xtj-spark xtj-spark--5"></div><div class="xtj-spark xtj-spark--6"></div><div class="xtj-spark xtj-spark--7"></div><div class="xtj-spark xtj-spark--8"></div></div><div class="xtj-magic-loading-title">内容加载中</div><div class="xtj-magic-loading-dots"><span></span><span></span><span></span></div></div>';
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -2565,7 +2567,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         updated_at: new Date().toISOString()
                     });
                     if (!result.ok) {
-                        showToast("保存失败: " + ((result.error && result.error.message) || "鏈煡閿欒"));
+                        showToast("保存失败: " + ((result.error && result.error.message) || "未知错误"));
                         return;
                     }
                     var fetched = await sb.from("posts").select("*").eq("id", editPostId).maybeSingle();
@@ -2585,7 +2587,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast(nextVisibility === "private" ? "已改为私密" : "已改为公开");
                 } catch (e) {
                     console.error("[edit-post] save failed", e);
-                    showToast("保存失败: " + (e && e.message ? e.message : "缃戠粶閿欒"));
+                    showToast("保存失败: " + (e && e.message ? e.message : "网络错误"));
                 } finally {
                     btn.disabled = false;
                     btn.textContent = "淇濆瓨淇敼";
@@ -2691,7 +2693,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
-                    feed.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">内容加载中</span></div>';
+                    feed.innerHTML = '<div class="xtj-magic-loading xtj-echo-loader feed" role="status"><div class="xtj-echo-stage" aria-hidden="true"><div class="xtj-echo-aura"></div><div class="xtj-echo-rune"></div><div class="xtj-echo-rune xtj-echo-rune--inner"></div><div class="xtj-echo-field"></div><div class="xtj-echo-mirror"><div class="xtj-echo-mirror-line"></div></div><div class="xtj-echo-shock"></div><div class="xtj-echo-bolt xtj-echo-bolt--in"></div><div class="xtj-echo-bolt xtj-echo-bolt--out"></div><div class="xtj-echo-blade"></div><div class="xtj-echo-shard xtj-echo-shard--1"></div><div class="xtj-echo-shard xtj-echo-shard--2"></div><div class="xtj-echo-shard xtj-echo-shard--3"></div><div class="xtj-echo-shard xtj-echo-shard--4"></div><div class="xtj-echo-particle xtj-echo-particle--1"></div><div class="xtj-echo-particle xtj-echo-particle--2"></div><div class="xtj-echo-particle xtj-echo-particle--3"></div><div class="xtj-spark xtj-spark--1"></div><div class="xtj-spark xtj-spark--2"></div><div class="xtj-spark xtj-spark--3"></div><div class="xtj-spark xtj-spark--4"></div><div class="xtj-spark xtj-spark--5"></div><div class="xtj-spark xtj-spark--6"></div><div class="xtj-spark xtj-spark--7"></div><div class="xtj-spark xtj-spark--8"></div></div><div class="xtj-magic-loading-title">内容加载中</div><div class="xtj-magic-loading-dots"><span></span><span></span><span></span></div></div>';
                 }
                 try {
                     var results = await Promise.all([
