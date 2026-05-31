@@ -1,6 +1,8 @@
 (function () {
 // 注入魔法加载器CSS，确保在任何加载前可用
 (function(){if(document.getElementById('xtjMagicLoadingStyleEager'))return;var s=document.createElement('style');s.id='xtjMagicLoadingStyleEager';s.textContent='.xtj-magic-loading{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:260px;padding:28px 16px 24px;text-align:center;isolation:isolate;overflow:hidden}.xtj-magic-loading::before{content:"";position:absolute;inset:-20% -10%;background:radial-gradient(circle at 50% 42%,rgba(255,255,255,.18),transparent 24%),radial-gradient(circle at 45% 48%,rgba(123,213,255,.10),transparent 36%),radial-gradient(circle at 58% 56%,rgba(255,227,154,.10),transparent 38%),radial-gradient(circle at 50% 50%,rgba(181,156,255,.12),transparent 60%);filter:blur(18px);opacity:.96;pointer-events:none;animation:xtjEchoAura 4.2s ease-in-out infinite}.xtj-magic-loading::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.28) 1px,transparent 1.6px),radial-gradient(circle,rgba(255,227,154,.24) 1px,transparent 1.6px);background-size:92px 92px,146px 146px;background-position:0 0,28px 38px;opacity:.14;pointer-events:none;animation:xtjMagicGridDrift 14s linear infinite}.xtj-echo-stage{position:relative;width:min(72vw,320px);aspect-ratio:1;display:grid;place-items:center;z-index:1;animation:xtjEchoFloat 4.8s ease-in-out infinite;filter:drop-shadow(0 30px 80px rgba(123,213,255,.22))}.xtj-echo-aura{position:absolute;inset:8%;border-radius:50%;background:radial-gradient(circle at 50% 48%,rgba(255,255,255,.88),rgba(255,227,154,.22) 22%,rgba(123,213,255,.16) 44%,rgba(181,156,255,.08) 60%,transparent 72%);filter:blur(8px);opacity:.96;animation:xtjEchoAura 4.2s ease-in-out infinite}.xtj-echo-rune{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,227,154,.38);box-shadow:0 0 0 2px rgba(123,213,255,.08),0 0 60px rgba(255,227,154,.12),inset 0 0 20px rgba(255,227,154,.06);animation:xtjRuneSpin 12s linear infinite}.xtj-echo-rune--inner{inset:14%;border-style:dashed;border-width:1.5px;border-color:rgba(123,213,255,.42);box-shadow:0 0 0 2px rgba(181,156,255,.06),0 0 30px rgba(123,213,255,.14);animation:xtjRuneSpinReverse 7s linear infinite}.xtj-echo-field{position:absolute;inset:16%;border-radius:50%;background:conic-gradient(from 0deg,rgba(255,227,154,.08),rgba(123,213,255,.26),rgba(181,156,255,.16),rgba(255,227,154,.12),rgba(123,213,255,.20),rgba(255,227,154,.08));filter:blur(.5px);animation:xtjAbsorbSwirl 5.6s ease-in-out infinite}.xtj-echo-mirror{position:absolute;inset:24%;border-radius:42% 58% 52% 48%/54% 54% 46% 46%;background:linear-gradient(135deg,rgba(255,255,255,.72),rgba(255,255,255,.18) 28%,rgba(123,213,255,.22) 62%,rgba(255,227,154,.24),rgba(181,156,255,.14));border:1.5px solid rgba(255,247,214,.78);box-shadow:0 0 0 1.5px rgba(255,255,255,.22),0 20px 60px rgba(123,213,255,.22),inset 0 0 36px rgba(255,255,255,.22);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);transform:perspective(900px) rotateY(-12deg) rotateX(5deg);animation:xtjMirrorFloat 4.8s ease-in-out infinite}.xtj-echo-mirror-line{position:absolute;inset:14% 18%;border-radius:inherit;border-top:1.5px solid rgba(255,255,255,.62);border-bottom:1.5px solid rgba(255,227,154,.22);opacity:.78}.xtj-echo-shock{position:absolute;width:24%;aspect-ratio:1;border-radius:50%;border:2.5px solid rgba(255,227,154,.70);box-shadow:0 0 24px rgba(255,227,154,.28);opacity:0;animation:xtjShockLoop 3.2s ease-out infinite}.xtj-echo-bolt{position:absolute;height:7px;border-radius:999px;opacity:0;pointer-events:none;z-index:7}.xtj-echo-bolt--in{right:-26%;top:48%;width:48%;background:linear-gradient(90deg,transparent,#ff7a9c,#ffd1dc,#fff);box-shadow:0 0 22px rgba(255,111,141,.82),0 0 54px rgba(255,111,141,.46);transform:rotate(180deg);animation:xtjIncoming 3.6s ease-in infinite}.xtj-echo-bolt--out{left:44%;top:44%;width:56%;background:linear-gradient(90deg,transparent,#83ddff,#fff1b4,#fff);box-shadow:0 0 24px rgba(123,213,255,.82),0 0 68px rgba(255,227,154,.42);transform:rotate(-24deg);animation:xtjReflected 3.6s ease-out infinite}.xtj-echo-blade{position:absolute;left:38%;top:52%;width:68%;height:10px;border-radius:999px;background:linear-gradient(90deg,transparent,#fff,#ffe39a,transparent);box-shadow:0 0 32px rgba(255,227,154,.88),0 0 88px rgba(255,227,154,.48);clip-path:polygon(0 46%,70% 0,100% 50%,70% 100%,0 54%);opacity:0;transform:rotate(-8deg);animation:xtjBladeSlash 4.8s cubic-bezier(.12,.78,.2,1) infinite;z-index:9}.xtj-echo-shard{position:absolute;width:14px;height:38px;background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(255,218,138,.10));border:1px solid rgba(255,255,255,.48);clip-path:polygon(45% 0,100% 72%,40% 100%,0 24%);filter:drop-shadow(0 0 14px rgba(255,222,140,.68));opacity:.76;z-index:6;animation:xtjShardOrbit 8s linear infinite}.xtj-echo-shard--1{top:13%;left:18%;animation-delay:-1s}.xtj-echo-shard--2{top:19%;right:11%;animation-delay:-3.2s;transform:scale(.82)}.xtj-echo-shard--3{bottom:17%;left:11%;animation-delay:-5.5s;transform:scale(1.12)}.xtj-echo-shard--4{bottom:11%;right:23%;animation-delay:-6.8s;transform:scale(.78)}.xtj-echo-particle{position:absolute;width:7px;height:7px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.98) 0,rgba(255,227,154,.94) 36%,rgba(255,227,154,.06) 74%);box-shadow:0 0 18px rgba(255,227,154,.92);pointer-events:none;z-index:13;animation:xtjParticlePulse 2.4s ease-in-out infinite}.xtj-echo-particle--1{top:22%;left:24%;animation-delay:-.4s}.xtj-echo-particle--2{bottom:22%;right:22%;animation-delay:-1.2s}.xtj-echo-particle--3{bottom:16%;left:50%;margin-left:-4px;animation-delay:-1.8s}.xtj-spark{position:absolute;width:5px;height:5px;border-radius:50%;background:#fff;box-shadow:0 0 12px rgba(181,156,255,.9),0 0 28px rgba(123,213,255,.6);pointer-events:none;z-index:14;animation:xtjSparkDrift 3.6s ease-in-out infinite}.xtj-spark--1{top:10%;left:62%;animation-delay:-.3s;width:4px;height:4px}.xtj-spark--2{top:28%;right:4%;animation-delay:-1.1s;width:6px;height:6px}.xtj-spark--3{bottom:8%;left:34%;animation-delay:-2.0s;width:4px;height:4px}.xtj-spark--4{top:58%;left:6%;animation-delay:-2.6s;width:5px;height:5px}.xtj-spark--5{bottom:28%;right:8%;animation-delay:-3.1s;width:4px;height:4px}.xtj-spark--6{top:42%;right:16%;animation-delay:-1.6s;width:6px;height:6px}.xtj-spark--7{bottom:42%;left:22%;animation-delay:-2.4s;width:4px;height:4px}.xtj-spark--8{top:14%;left:34%;animation-delay:-3.4s;width:5px;height:5px}.xtj-magic-loading-title{position:relative;z-index:1;margin-top:2px;font-size:20px;font-weight:850;letter-spacing:.06em;color:#ffe39a;text-shadow:0 0 28px rgba(255,227,154,.34),0 0 48px rgba(123,213,255,.16)}.xtj-magic-loading-dots{display:flex;gap:7px;position:relative;z-index:1;margin-top:2px}.xtj-magic-loading-dots span{width:6px;height:6px;border-radius:50%;background:rgba(255,227,154,.72);box-shadow:0 0 14px rgba(255,227,154,.30);animation:xtjDot 1.1s ease-in-out infinite}.xtj-magic-loading-dots span:nth-child(2){animation-delay:.14s;background:rgba(123,213,255,.72)}.xtj-magic-loading-dots span:nth-child(3){animation-delay:.28s;background:rgba(181,156,255,.70)}@keyframes xtjMagicGridDrift{to{background-position:0 -90px,28px -52px}}@keyframes xtjEchoAura{0%,100%{transform:scale(.94);opacity:.58}50%{transform:scale(1.06);opacity:1}}@keyframes xtjEchoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}@keyframes xtjMirrorFloat{0%,100%{transform:perspective(900px) rotateY(-12deg) rotateX(5deg) translateY(0)}50%{transform:perspective(900px) rotateY(-7deg) rotateX(7deg) translateY(-16px)}}@keyframes xtjRuneSpin{to{transform:rotate(360deg)}}@keyframes xtjRuneSpinReverse{to{transform:rotate(-360deg)}}@keyframes xtjAbsorbSwirl{0%,100%{opacity:.42;transform:rotate(0deg) scale(.92)}50%{opacity:.82;transform:rotate(180deg) scale(1.06)}}@keyframes xtjShockLoop{0%,70%{opacity:0;transform:scale(.18)}77%{opacity:.65;transform:scale(.35)}100%{opacity:0;transform:scale(2.8);filter:blur(3px)}}@keyframes xtjIncoming{0%,54%{opacity:0;transform:translateX(0) rotate(180deg) scaleX(.8)}60%{opacity:1}82%{opacity:1;transform:translateX(calc(var(--s)*-.86)) rotate(180deg) scaleX(1.1)}100%{opacity:0;transform:translateX(calc(var(--s)*-.93)) rotate(180deg) scaleX(.25)}}@keyframes xtjReflected{0%,66%{opacity:0;transform:rotate(-24deg) translateX(0) scaleX(.3)}72%{opacity:1}100%{opacity:0;transform:rotate(-24deg) translateX(calc(var(--s)*.78)) scaleX(1.1)}}@keyframes xtjBladeSlash{0%,72%{opacity:0;transform:rotate(-8deg) translateX(-70px) scaleX(.25);filter:blur(4px)}78%{opacity:1;filter:blur(0)}91%{opacity:1;transform:rotate(-8deg) translateX(160px) scaleX(1.18)}100%{opacity:0;transform:rotate(-8deg) translateX(300px) scaleX(.38);filter:blur(2px)}}@keyframes xtjShardOrbit{0%{transform:translateY(0) rotate(0deg);opacity:.26}40%{opacity:.95}100%{transform:translateY(-38px) rotate(360deg);opacity:.26}}@keyframes xtjParticlePulse{0%,100%{opacity:.36;transform:scale(.68)}50%{opacity:1;transform:scale(1.16)}}@keyframes xtjSparkDrift{0%,100%{transform:translate(0,0) scale(.6);opacity:.3}25%{transform:translate(14px,-18px) scale(1.2);opacity:.9}50%{transform:translate(-8px,-32px) scale(.7);opacity:.6}75%{transform:translate(-16px,-14px) scale(1.1);opacity:.88}}@keyframes xtjDot{0%,100%{transform:translateY(0);opacity:.42}50%{transform:translateY(-5px);opacity:1}}@media (prefers-reduced-motion: reduce){.xtj-echo-loader,.xtj-echo-loader *{animation:none!important}}';document.head.appendChild(s);})();
+// 注入GPU加速覆盖CSS，确保60/120fps平滑动画
+(function(){if(document.getElementById('xtjGPUAccelStyle'))return;var s=document.createElement('style');s.id='xtjGPUAccelStyle';s.textContent='.xtj-magic-loading,.xtj-magic-loading::before,.xtj-magic-loading::after,.xtj-echo-stage,.xtj-echo-aura,.xtj-echo-rune,.xtj-echo-rune--inner,.xtj-echo-field,.xtj-echo-mirror,.xtj-echo-shock,.xtj-echo-bolt,.xtj-echo-blade,.xtj-echo-shard,.xtj-echo-particle,.xtj-spark,.loading,.loading::before,.loading::after,.loading-spinner,.loading-spinner::before,.loading-spinner::after,.loading-spinner .inner-ring,.loading-spinner .magic-glow,.loading-spinner .magic-core,.loading-dots span,.xtj-echo-loader *{will-change:transform,opacity;backface-visibility:hidden;-webkit-backface-visibility:hidden;perspective:1000px;-webkit-perspective:1000px}.xtj-echo-bolt--in,.xtj-echo-bolt--out,.xtj-echo-blade,.xtj-echo-shard{will-change:transform,opacity,filter}.xtj-magic-loading::before,.loading::before{will-change:transform,opacity}.xtj-magic-loading::after,.loading::after{will-change:transform}.loading-spinner .magic-core{backface-visibility:visible}';document.head.appendChild(s);})();
 // #region debug-point H5:onerror
 window.__dbg = window.__dbg || {}; window.__dbg.errors = [];
 window.onerror = function(m, s, l, c, e) { window.__dbg.errors.push({msg:m,src:s,line:l,col:c,err:e && e.stack,ts:Date.now()}); fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"page-unresponsive",runId:"pre",hypothesisId:"H5",location:"onerror",msg:"[DEBUG] Uncaught: "+m,data:{stack:e&&e.stack?e.stack.substring(0,500):""},ts:Date.now()})}).catch(function(){}); };
@@ -111,7 +113,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 '<span class="post-user-loader-core"></span>',
                 '<span class="post-user-loader-spark"></span>',
                 '</span>',
-                '<span class="post-user-chip-name">鍔犺浇涓?/span>',
+                '<span class="post-user-chip-name">加载中</span>',
                 '</div>'
             ].join('');
         }
@@ -585,7 +587,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 .eq("id", latest.data[0].id);
                             if (!updRes.error) {
                                 updated = true;
-                                console.log("saveUserInfo 馃?" + name + " 鐧诲綍鏃堕棿瀹稿弶娲块弬?UPDATE): " + userInfo.last_login);
+                                console.log("saveUserInfo [更新] " + name + " 登录时间 (UPDATE): " + userInfo.last_login);
                             }
                         }
                     } catch(e) {}
@@ -601,7 +603,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (insertRes.error) {
                             console.error("saveUserInfo insert澶辫触:", insertRes.error.message);
                         } else {
-                            console.log("saveUserInfo 馃?" + name + " 鐧诲綍鏃堕棿瀹稿弶娲块弬?INSERT): " + userInfo.last_login);
+                            console.log("saveUserInfo [插入] " + name + " 登录时间 (INSERT): " + userInfo.last_login);
                         }
                     }
                 } catch(e) {
@@ -646,8 +648,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     } else {
                         const authRec = await findAuthRecord(name);
                         if (!authRec) {
-                            showToast("璐﹀彿涓嶅瓨鍦紝璇峰厛娉ㄥ唽");
-                            btn.disabled = false; btn.textContent = "鐧诲綍";
+                            showToast("账号不存在，请先注册");
+                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                         const inputHash = await hashPassword(pw);
@@ -841,7 +843,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細-';
                     }
                 } catch(e) {
-                    document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細鍔犺浇澶辫触';
+                    document.getElementById('upcLogin').textContent = '最近登录：加载失败';
                 }
             };
 
@@ -936,7 +938,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
                     }
                 } catch(e) {
-                    console.error("鍔犺浇澶村儚澶辫触:", e);
+                    console.error("加载头像失败:", e);
                 }
             }
 
@@ -1006,7 +1008,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
                 
-                showToast('姝ｅ湪鍘嬬缉骞朵笂浼犲ご鍍?..');
+                showToast('正在压缩并上传头像..');
                 
                 try {
                     // 浠诲姟2锛氶噸鏋勪负锟较达拷锟?Supabase Storage 锟?avatars/ 鐩綍
@@ -1228,7 +1230,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     
                     // 鏇存柊鎴戠殑椤甸潰鏄剧ず閿涘牊婀櫥褰曢敍?
                     profileName.textContent = "未登录";
-                    profileStatus.textContent = "鐐瑰嚮鐧诲綍";
+                    profileStatus.textContent = "点击登录";
                     
                     // 闂呮劘妫屽彂甯冮崠鍝勭厵
                     if (publishBox) publishBox.style.display = "none";
@@ -1446,10 +1448,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (postEl) postEl.classList.add('visible');
                     });
                 } catch (e) {
-                    showToast("璇勮澶辫触: " + (e.message || "鏈煡閿欒"));
+                    showToast("评论失败: " + (e.message || "未知错误"));
                     console.error(e);
                 } finally {
-                    btn.textContent = "鍙戝竷璇勮";
+                    btn.textContent = "发布评论";
                     btn.disabled = false;
                 }
             };
@@ -1826,7 +1828,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     // 鍚姩鏃犻檺婊氬姩锟桔诧拷
                     setupFeedInfiniteScroll();
                 } catch(e) {
-                    feed.innerHTML = `<div class="loading" style="color:#ff3b60;">鍔犺浇澶辫触锛屽埛鏂伴噸璇?/div>`;
+                    feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，刷新重试</div>`;
                     console.error(e);
                 }
             }
@@ -2370,7 +2372,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 try {
                     var verifiedFallback = await fetchPostSnapshot(post.id);
                     if (!matchesPostExpectation(verifiedFallback, expectedState)) {
-                        return { ok: false, error: new Error("甯栧瓙鏇存柊鍚庣姸鎬佹湭瀹為檯淇濆瓨") };
+                        return { ok: false, error: new Error("帖子更新后状态未实际保存") };
                     }
                 } catch (verifyFallbackError) {
                     return { ok: false, error: verifyFallbackError };
@@ -2559,7 +2561,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
                 btn.disabled = true;
-                btn.textContent = "淇濆瓨涓?..";
+                btn.textContent = "保存中...";
                 try {
                     var result = await updatePostRecord(post, {
                         content: nextContent.slice(0, 2000),
@@ -2574,11 +2576,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (fetched.error) throw fetched.error;
                     var fetchedPost = fetched.data || null;
                     if (!fetchedPost) {
-                        throw new Error("淇濆瓨澶辫触锛氬叕寮€/绉佸瘑鐘舵€佹湭瀹為檯淇濆瓨");
+                        throw new Error("保存失败：公开/秘密状态未实际保存");
                     }
                     var verified = normalizePost(fetchedPost);
                     if (String(verified.visibility) !== String(nextVisibility)) {
-                        throw new Error("淇濆瓨澶辫触锛氬叕寮€/绉佸瘑鐘舵€佹湭瀹為檯淇濆瓨");
+                        throw new Error("保存失败：公开/秘密状态未实际保存");
                     }
                     clearFeedCache();
                     closeModal("editPostModal");
@@ -2590,7 +2592,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast("保存失败: " + (e && e.message ? e.message : "网络错误"));
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "淇濆瓨淇敼";
+                    btn.textContent = "保存修改";
                 }
             };
             window.togglePostPin = async function(postId) {
@@ -2649,7 +2651,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var fallbackContent = buildPostContentPayload(plainText, metadata);
                     var insertRes = await insertPostRecord(payload, fallbackContent);
                     if (!insertRes.ok) {
-                        showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "鏈煡閿欒"));
+                        showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
                         return;
                     }
                     clearFeedCache();
@@ -2723,7 +2725,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
                     setupFeedInfiniteScroll();
                 } catch (e) {
-                    if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">鍔犺浇澶辫触锛岃鍒锋柊閲嶈瘯</div>';
+                    if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
                     console.error(e);
                 }
             };
@@ -2911,7 +2913,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                document.getElementById('statModalBody').innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                document.getElementById('statModalBody').innerHTML = window.xtjMagicLoadingHtml('加载中', '加载中', 'feed');
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
@@ -2927,7 +2929,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                     renderStatByType(type);
                 } catch(e) {
-                    document.getElementById('statModalBody').innerHTML = '<div class="stat-empty">鍔犺浇澶辫触锛岃閲嶈瘯</div>';
+                    document.getElementById('statModalBody').innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
                     console.error('stat error', e);
                 }
 
@@ -2961,7 +2963,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             window.openPostDetail = async function(postId) {
                 document.getElementById('postDetailTitle').textContent = '帖子详情';
-                document.getElementById('postDetailBody').innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                document.getElementById('postDetailBody').innerHTML = window.xtjMagicLoadingHtml('加载中', '加载中', 'feed');
                 document.getElementById('postDetailModal').classList.add('active');
 
                 try {
@@ -2984,7 +2986,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     const comments = commRes.data || [];
                     renderPostDetail(post, likes, comments);
                 } catch(e) {
-                    document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">鍔犺浇澶辫触锛岃閲嶈瘯</div>';
+                    document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
                     console.error(e);
                 }
             };
@@ -3002,10 +3004,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     </div>
                     ${post.content ? `<div class="post-detail-content">${escapeHtml(post.content)}</div>` : ''}
                     ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${escapeHtml(post.media_url)}" controls preload="none"></video>`:`<img src="${escapeHtml(post.media_url)}" onclick="openImageViewer('${escapeHtml(post.media_url).replace(/'/g, "\\'")}')" loading="lazy" />`}</div>` : ''}
-                    <div class="post-detail-stats">娴忚 ${vc} 璺?点赞 ${likes.length} 璺?璇勮 ${comments.length}</div>
+                    <div class="post-detail-stats">浏览 ${vc} · 点赞 ${likes.length} · 评论 ${comments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
-                            <div class="stat-section-title">❤️ 点赞鐢ㄦ埛閿?{likes.length}锛?/div>
+                            <div class="stat-section-title">❤️ 点赞用户（${likes.length}）</div>
                             ${likes.length ? likes.map(l => `
                                 <div class="stat-like-item">
                                     <div class="sli-info">
@@ -3013,10 +3015,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     </div>
                                     <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                                 </div>
-                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤点赞</div>'}
+                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
                         </div>
                         <div class="stat-col">
-                            <div class="stat-section-title">馃挰 璇勮閸掓銆冮敍?{comments.length}锛?/div>
+                            <div class="stat-section-title">💬 评论列表（${comments.length}）</div>
                             ${comments.length ? comments.map(c => `
                                 <div class="stat-comment-item">
                                     <div class="sci-info">
@@ -3025,26 +3027,26 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     </div>
                                     <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                                 </div>
-                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤璇勮</div>'}
+                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无评论</div>'}
                         </div>
                     </div>
                 `;
             }
 
-            // 鏍煎紡鍖栧笘瀛愬唴瀹规憳瑕侊紙鐢ㄤ簬展示锟?
+            // 格式化帖子内容摘要（用于展示）
             function formatPostSummary(p) {
                 const text = p.content || '';
                 const hasImg = p.media_url && p.media_type === 'image';
                 const hasVid = p.media_url && p.media_type === 'video';
                 let tag = '';
-                if (hasImg) tag = '<span class="spi-img-tag">馃柤 鍥剧墖</span>';
-                if (hasVid) tag = '<span class="spi-img-tag">馃帪 瑙嗛</span>';
+                if (hasImg) tag = '<span class="spi-img-tag">📷 图片</span>';
+                if (hasVid) tag = '<span class="spi-img-tag">🎬 视频</span>';
                 const summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
                 const display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
                 return { display, tag, hasImg, hasVid, thumbUrl: hasImg ? p.media_url : null };
             }
 
-            // 鐢熸垚甯栧瓙鏉＄洰鐨凥TML锛堝彲鐐瑰嚮璺宠浆锟?
+            // 生成帖子条目的HTML（可点击跳转）
             function renderPostItemHTML(p) {
                 const fmt = formatPostSummary(p);
                 const onclick = `openPostDetail('${escapeHtml(p.id).replace(/'/g, "\\'")}')`;
@@ -3060,10 +3062,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 `;
             }
 
-            // 濞撳弶鐓嬫€诲姩鎬佷胶绮虹拋鈽呯礄鎸夌敤鎴峰垎缁勫嫸绱?
+            // 渲染总动态统计（按用户分组）
             function renderPostStats() {
                 const body = document.getElementById('statModalBody');
-                // 锟?user_name 鍒嗙粍缁熻
+                // 按 user_name 分组统计
                 const userMap = {};
                 statAllPosts.forEach(p => {
                     if (!userMap[p.user_name]) userMap[p.user_name] = [];
@@ -3072,7 +3074,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const entries = Object.entries(userMap).sort((a, b) => b[1].length - a[1].length);
                 
                 if (!entries.length) {
-                    body.innerHTML = '<div class="stat-empty">鏆傛棤鍔拷锟芥暟锟?/div>';
+                    body.innerHTML = '<div class="stat-empty">暂无动态数据</div>';
                     return;
                 }
 
@@ -3083,13 +3085,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 <div class="suh-avatar">${escapeHtml(name)[0].toUpperCase()}</div>
                                 <span class="suh-name">${escapeHtml(name)}</span>
                             </div>
-                            <span class="suh-count">$${posts.length} 条閺?/span>
+                            <span class="suh-count">${posts.length} 条</span>
                         </div>
                         <div class="stat-user-posts">
                             ${posts.slice(0, 3).map(p => renderPostItemHTML(p)).join('')}
                             ${posts.length > 3 ? `
                                 <div style="text-align:center; padding:8px 0;">
-                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${escapeHtml(name).replace(/'/g, "\\'")}')">锟介看鍏ㄩ儴 $${posts.length} 条锟?/button>
+                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${escapeHtml(name).replace(/'/g, "\\'")}')">查看全部 ${posts.length} 条</button>
                                 </div>
                             ` : ''}
                         </div>
@@ -3097,20 +3099,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 `).join('');
             }
 
-            // 锟介看鎸囧畾锟矫伙拷鐨勬墍鏈夊笘锟?
+            // 查看指定用户的所有帖子
             window.loadUserAllPosts = function(userName) {
                 const body = document.getElementById('statModalBody');
                 const userPosts = statAllPosts.filter(p => p.user_name === userName);
                 body.innerHTML = `
-                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">鈫?杩斿洖鎬诲姩鎬?/button>
+                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">← 返回总动态</button>
                     <div style="font-weight:700; font-size:15px; margin-bottom:12px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.1);">
-                        ${userName} 鐨勫叏閮ㄥ笘瀛愶紙锟?${userPosts.length} 鏉★級
+                        ${userName} 的全部帖子（${userPosts.length} 条）
                     </div>
                     ${userPosts.map(p => renderPostItemHTML(p)).join('')}
                 `;
             };
 
-            // 娓叉煋鎬绘祻瑙堢粺璁★紙锟?localStorage 璇诲彇锟斤拷锟藉巻鍙诧拷?
+            // 渲染总浏览统计（从 localStorage 读取浏览历史）
             function renderViewStats() {
                 const body = document.getElementById('statModalBody');
                 const history = getViewHistory();
@@ -3118,10 +3120,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!history.length) {
                     body.innerHTML = `
                         <div class="stat-empty">
-                            <div style="font-size:16px; margin-bottom:8px;">棣冩惓 娴忚璁板綍</div>
-                            <div style="font-size:13px;">鏆傛棤娴忚璇︽儏鏁版嵁</div>
-                            <div style="font-size:12px; margin-top:12px; opacity:0.7;">娴忚璁板綍浼氬湪浣犳煡鐪嬪笘瀛愭椂鑷姩淇濆瓨</div>
-                            <div style="font-size:12px; margin-top:8px; opacity:0.7;">褰撳墠宸茶褰曟€绘祻瑙堟暟锛?{document.getElementById('sViews').textContent} 濞?/div>
+                            <div style="font-size:16px; margin-bottom:8px;">📋 浏览记录</div>
+                            <div style="font-size:13px;">暂无浏览详情数据</div>
+                            <div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>
+                            <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
                         </div>
                     `;
                     return;
@@ -3131,14 +3133,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     <div class="stat-view-item">
                         <div class="svi-info">
                             <div class="svi-user">${escapeHtml(v.user_name)}</div>
-                            <div class="svi-target">娴忚浜?<b>${escapeHtml(v.post_author)}</b> 閻ㄥ嫬绗樼€涙劧绱?{escapeHtml(v.post_content)}</div>
+                            <div class="svi-target">浏览了<b>${escapeHtml(v.post_author)}</b> 的帖子：${escapeHtml(v.post_content)}</div>
                         </div>
                         <span class="svi-time">${new Date(v.viewed_at).toLocaleString()}</span>
                     </div>
                 `).join('');
             }
 
-            // 濞撳弶鐓嬬偣璧為崪宀冪槑鐠佽櫣绮虹拋?
+            // 渲染点赞和评论统计
             function renderLikeStats() {
                 const body = document.getElementById('statModalBody');
 
@@ -3146,45 +3148,45 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statAllPosts.forEach(p => { postMap[p.id] = p; });
 
                 function buildLikesCol() {
-                    let h = '<div class="stat-section-title">❤️ 点赞璁板綍</div>';
+                    let h = '<div class="stat-section-title">❤️ 点赞记录</div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(l => {
                             const post = postMap[l.post_id];
-                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(鍥剧墖/瑙嗛)') : '(瀹告彃鍨归梽?';
+                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(已删除帖子)';
                             return `
                         <div class="stat-like-item">
                             <div class="sli-info">
                                 <div class="sli-user">${escapeHtml(l.user_name)}</div>
-                                <div class="sli-target">点赞浜嗗棴绱?{postContent}</div>
+                                <div class="sli-target">点赞了：${postContent}</div>
                             </div>
                             <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                         </div>
                     `;
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">鏆傛棤点赞璁板綍</div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无点赞记录</div>';
                     }
                     return h;
                 }
 
                 function buildCommentsCol() {
-                    let h = '<div class="stat-section-title">馃挰 璇勮璁板綍</div>';
+                    let h = '<div class="stat-section-title">💬 评论记录</div>';
                     if (statAllComments.length) {
                         h += [...statAllComments].reverse().slice(0, 200).map(c => {
                             const post = postMap[c.post_id];
-                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(鍥剧墖/瑙嗛)') : '(瀹告彃鍨归梽?';
+                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(已删除帖子)';
                             return `
                         <div class="stat-comment-item">
                             <div class="sci-info">
                                 <div class="sci-user">${escapeHtml(c.user_name)}</div>
-                                <div class="sci-target">璇勮浜嗗棎鈧?{postContent}閵嗗稄绱?{escapeHtml(c.content)}</div>
+                                <div class="sci-target">评论了「${postContent}」：${escapeHtml(c.content)}</div>
                             </div>
                             <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                         </div>
                     `;
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">鏆傛棤璇勮璁板綍</div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
                     }
                     return h;
                 }
@@ -3603,7 +3605,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var title = options && options.title ? options.title : '加载中';
                 var subtitle = options && options.subtitle ? options.subtitle : '法阵正在聚能';
                 var variant = options && options.variant ? String(options.variant) : '';
-                el.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml(title, subtitle, variant) : '<div class="xtj-magic-loading"><div class="xtj-magic-loading-title">' + escapeHtml(title) + '</div><div class="xtj-magic-loading-subtitle">' + escapeHtml(subtitle) + '</div></div>';
+                el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant);
             }
 
             function dockChatGoBack() {
@@ -3638,7 +3640,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
-                document.getElementById('dockChatMessages').innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '正在打开聊天通道', 'chat-detail') : '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中</div></div>';
+                document.getElementById('dockChatMessages').innerHTML = window.xtjMagicLoadingHtml('加载中', '正在打开聊天通道', 'chat-detail');
                 renderChatLoadingState(document.getElementById('dockChatMessages'), {
                     title: '加载中',
                     subtitle: '正在打开聊天通道',
@@ -3658,7 +3660,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!el) return;
                 if (Date.now() - dockChatListCacheTime < DOCK_CHAT_CACHE_DURATION) return;
                 dockChatListCacheTime = Date.now();
-                el.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '正在召回最近消息', 'chat-list') : '<div class="chat-empty"><div class="ce-icon">💬</div><div>加载中</div></div>';
+                el.innerHTML = window.xtjMagicLoadingHtml('加载中', '正在召回最近消息', 'chat-list');
                 try {
                     renderChatLoadingState(el, {
                         title: '加载中',
@@ -3883,7 +3885,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const thumb = document.getElementById('dockCfpThumb'), name = document.getElementById('dockCfpName');
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
                 const xBtn = thumb.querySelector('.cfp-x'); thumb.innerHTML = '';
-                if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">馃帪</span>'; }
+                if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">🎬</span>'; }
                 else { const img = document.createElement('img'); _dockPreviewUrl = URL.createObjectURL(file); img.src = _dockPreviewUrl; thumb.appendChild(img); }
                 if (xBtn) thumb.appendChild(xBtn);
                 name.textContent = file.name; input.classList.add('hidden'); preview.classList.remove('hidden');
@@ -3968,7 +3970,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     localStorage.setItem('xtj-theme', 'dark');
                 } else {
                     htmlEl.removeAttribute('data-theme');
-                    if (themeBtn) themeBtn.textContent = '馃寵';
+                    if (themeBtn) themeBtn.textContent = '☀️';
                     localStorage.setItem('xtj-theme', 'light');
                 }
             }
@@ -4136,7 +4138,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         loadAvatarsForUsers(Array.from(publishers));
                     }
                 } catch(e) {
-                    console.error('鍔犺浇鍏兼啞澶辫触:', e);
+                    console.error('加载失败:', e);
                 }
             }
 
@@ -4156,7 +4158,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!listEl) return;
 
                 if (!announcements.length) {
-                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">馃摥</div><div>鏆傛棤鍏憡</div></div>';
+                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">📬</div><div>暂无公告</div></div>';
                     return;
                 }
 
@@ -4200,7 +4202,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const content = contentInput.value.trim();
                 
                 if (!title && !content) {
-                    showToast('璇疯嚦灏戝～鍐欐爣棰樻垨鍐呭');
+                    showToast('请至少填写标题或内容');
                     return;
                 }
 
@@ -4765,25 +4767,25 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.31',
                     date: '2026-05-12',
                     content: `
-                        &lt;h4&gt;鏇存柊鍐呭&lt;/h4&gt;
+                        &lt;h4&gt;更新内容&lt;/h4&gt;
                         &lt;ul&gt;
-                            &lt;li&gt;&lt;strong&gt;Taylor Swift &amp; Jennie涓撻鐢诲粖鏇挎崲涓洪泤鎬濆崟璇嶅涔犵郴缁?lt;/strong&gt;
+                            &lt;li&gt;&lt;strong&gt;Taylor Swift &amp; Jennie专题画册更换为雅思单词学习系统&lt;/strong&gt;
                                 &lt;ul&gt;
-                                    &lt;li&gt;删除鎵€鏈夊師涓撻椤电殑CSS鏍峰紡锛?idol-銆?ts-寮€澶存牱寮忥級&lt;/li&gt;
-                                    &lt;li&gt;鏂板闆呮€濆崟璇嶅涔犵郴缁熷畬鏁存牱寮忥紙.vocab-鍛藉悕绌洪棿锛?lt;/li&gt;
-                                    &lt;li&gt;鏇挎崲panelAi闈㈡澘HTML缁撴瀯涓哄崟璇嶅涔犵晫闈?lt;/li&gt;
-                                    &lt;li&gt;鏂板200涓泤鎬濇牳蹇冭瘝搴擄紝鍖呭惈鍗曡瘝銆侀煶鏍囥€侀噴涔夈€佷緥鍙?lt;/li&gt;
+                                    &lt;li&gt;删除所有原专题页面的CSS样式（idol-、ts-开头样式）&lt;/li&gt;
+                                    &lt;li&gt;新增雅思单词学习系统完整样式（.vocab-命名空间）&lt;/li&gt;
+                                    &lt;li&gt;替换panelAi面板HTML结构为单词学习界面&lt;/li&gt;
+                                    &lt;li&gt;新增200个雅思核心词库，包含单词、音标、释义、例句&lt;/li&gt;
                                 &lt;/ul&gt;
                             &lt;/li&gt;
-                            &lt;li&gt;&lt;strong&gt;闆呮€濆崟璇嶅涔犵郴缁熷姛鑳?lt;/strong&gt;
+                            &lt;li&gt;&lt;strong&gt;雅思单词学习系统功能&lt;/strong&gt;
                                 &lt;ul&gt;
-                                    &lt;li&gt;鍙屾ā寮忓涔狅細鑻辫瘧涓ā寮忋€佷腑璇戣嫳妯″紡&lt;/li&gt;
-                                    &lt;li&gt;鐐瑰嚮馃攰鎸夐挳鍙湕璇昏嫳鏂囧崟璇?lt;/li&gt;
-                                    &lt;li&gt;绛斿畬棰樿嚜鍔ㄦ湕璇诲崟璇嶅拰鑻辨枃渚嬪彞&lt;/li&gt;
-                                    &lt;li&gt;姣忔闅忔満鐢熸垚4涓€夐」渚涢€夋嫨&lt;/li&gt;
-                                    &lt;li&gt;姝ｇ‘绛旀缁胯壊楂樹寒锛岄敊璇瓟妗堢孩鑹叉姈鍔?lt;/li&gt;
-                                    &lt;li&gt;绛旈鍚庢樉绀鸿缁嗚В鏋愬拰渚嬪彞&lt;/li&gt;
-                                    &lt;li&gt;瀹屽叏鏀寔娣辫壊/娴呰壊涓婚鑷姩閫傞厤&lt;/li&gt;
+                                    &lt;li&gt;双模式学习：英译中模式、中译英模式&lt;/li&gt;
+                                    &lt;li&gt;点击🔘按钮可朗读英文单词&lt;/li&gt;
+                                    &lt;li&gt;答完题自动朗读单词和英文例句&lt;/li&gt;
+                                    &lt;li&gt;每次随机生成4个选项供选择&lt;/li&gt;
+                                    &lt;li&gt;正确答案绿色高亮，错误答案红色抖动&lt;/li&gt;
+                                    &lt;li&gt;答题后显示详细解析和例句&lt;/li&gt;
+                                    &lt;li&gt;完全支持深色/浅色主题自动适配&lt;/li&gt;
                                 &lt;/ul&gt;
                             &lt;/li&gt;
                         &lt;/ul&gt;
@@ -5617,39 +5619,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var st = document.createElement('style');
                 st.id = 'xtjMagicLoadingStyle';
                 st.textContent = `
-.xtj-magic-loading{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:260px;padding:28px 16px 24px;text-align:center;isolation:isolate;overflow:hidden}
-.xtj-magic-loading::before{content:"";position:absolute;inset:-20% -10%;background:radial-gradient(circle at 50% 42%,rgba(255,255,255,.18),transparent 24%),radial-gradient(circle at 45% 48%,rgba(123,213,255,.10),transparent 36%),radial-gradient(circle at 58% 56%,rgba(255,227,154,.10),transparent 38%),radial-gradient(circle at 50% 50%,rgba(181,156,255,.12),transparent 60%);filter:blur(18px);opacity:.96;pointer-events:none;animation:xtjEchoAura 4.2s ease-in-out infinite}
-.xtj-magic-loading::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.28) 1px,transparent 1.6px),radial-gradient(circle,rgba(255,227,154,.24) 1px,transparent 1.6px);background-size:92px 92px,146px 146px;background-position:0 0,28px 38px;opacity:.14;pointer-events:none;animation:xtjMagicGridDrift 14s linear infinite}
 .xtj-magic-loading.xtj-magic-loading--compact{min-height:108px;padding:10px 10px 8px;gap:8px;align-items:flex-start}
 .xtj-magic-loading.xtj-magic-loading--compact .xtj-echo-stage{width:min(40vw,126px);height:min(40vw,126px);margin-left:6px}
 .xtj-magic-loading.xtj-magic-loading--compact .xtj-magic-loading-title{font-size:14px}
 .xtj-magic-loading.xtj-magic-loading--compact .xtj-magic-loading-subtitle{font-size:11px}
-.xtj-echo-stage{position:relative;width:min(72vw,320px);aspect-ratio:1;display:grid;place-items:center;z-index:1;animation:xtjEchoFloat 4.8s ease-in-out infinite;filter:drop-shadow(0 30px 80px rgba(123,213,255,.22))}
-.xtj-echo-aura{position:absolute;inset:8%;border-radius:50%;background:radial-gradient(circle at 50% 48%,rgba(255,255,255,.88),rgba(255,227,154,.22) 22%,rgba(123,213,255,.16) 44%,rgba(181,156,255,.08) 60%,transparent 72%);filter:blur(8px);opacity:.96;animation:xtjEchoAura 4.2s ease-in-out infinite}
-.xtj-echo-rune{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,227,154,.38);box-shadow:0 0 0 2px rgba(123,213,255,.08),0 0 60px rgba(255,227,154,.12),inset 0 0 20px rgba(255,227,154,.06);animation:xtjRuneSpin 12s linear infinite}
-.xtj-echo-rune--inner{inset:14%;border-style:dashed;border-width:1.5px;border-color:rgba(123,213,255,.42);box-shadow:0 0 0 2px rgba(181,156,255,.06),0 0 30px rgba(123,213,255,.14);animation:xtjRuneSpinReverse 7s linear infinite}
-.xtj-echo-field{position:absolute;inset:16%;border-radius:50%;background:conic-gradient(from 0deg,rgba(255,227,154,.08),rgba(123,213,255,.26),rgba(181,156,255,.16),rgba(255,227,154,.12),rgba(123,213,255,.20),rgba(255,227,154,.08));filter:blur(.5px);animation:xtjAbsorbSwirl 5.6s ease-in-out infinite}
-.xtj-echo-mirror{position:absolute;inset:24%;border-radius:42% 58% 52% 48%/54% 54% 46% 46%;background:linear-gradient(135deg,rgba(255,255,255,.72),rgba(255,255,255,.18) 28%,rgba(123,213,255,.22) 62%,rgba(255,227,154,.24),rgba(181,156,255,.14));border:1.5px solid rgba(255,247,214,.78);box-shadow:0 0 0 1.5px rgba(255,255,255,.22),0 20px 60px rgba(123,213,255,.22),inset 0 0 36px rgba(255,255,255,.22);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);transform:perspective(900px) rotateY(-12deg) rotateX(5deg);animation:xtjMirrorFloat 4.8s ease-in-out infinite}
-.xtj-echo-mirror-line{position:absolute;inset:14% 18%;border-radius:inherit;border-top:1.5px solid rgba(255,255,255,.62);border-bottom:1.5px solid rgba(255,227,154,.22);opacity:.78}
-.xtj-echo-shock{position:absolute;width:24%;aspect-ratio:1;border-radius:50%;border:2.5px solid rgba(255,227,154,.70);box-shadow:0 0 24px rgba(255,227,154,.28);opacity:0;animation:xtjShockLoop 3.2s ease-out infinite}
-.xtj-echo-bolt{position:absolute;height:7px;border-radius:999px;opacity:0;pointer-events:none;z-index:7}
-.xtj-echo-bolt--in{right:-26%;top:48%;width:48%;background:linear-gradient(90deg,transparent,#ff7a9c,#ffd1dc,#fff);box-shadow:0 0 22px rgba(255,111,141,.82),0 0 54px rgba(255,111,141,.46);transform:rotate(180deg);animation:xtjIncoming 3.6s ease-in infinite}
-.xtj-echo-bolt--out{left:44%;top:44%;width:56%;background:linear-gradient(90deg,transparent,#83ddff,#fff1b4,#fff);box-shadow:0 0 24px rgba(123,213,255,.82),0 0 68px rgba(255,227,154,.42);transform:rotate(-24deg);animation:xtjReflected 3.6s ease-out infinite}
-.xtj-echo-blade{position:absolute;left:38%;top:52%;width:68%;height:10px;border-radius:999px;background:linear-gradient(90deg,transparent,#fff,#ffe39a,transparent);box-shadow:0 0 32px rgba(255,227,154,.88),0 0 88px rgba(255,227,154,.48);clip-path:polygon(0 46%,70% 0,100% 50%,70% 100%,0 54%);opacity:0;transform:rotate(-8deg);animation:xtjBladeSlash 4.8s cubic-bezier(.12,.78,.2,1) infinite;z-index:9}
-.xtj-echo-shard{position:absolute;width:14px;height:38px;background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(255,218,138,.10));border:1px solid rgba(255,255,255,.48);clip-path:polygon(45% 0,100% 72%,40% 100%,0 24%);filter:drop-shadow(0 0 14px rgba(255,222,140,.68));opacity:.76;z-index:6;animation:xtjShardOrbit 8s linear infinite}
-.xtj-echo-shard--1{top:13%;left:18%;animation-delay:-1s}
-.xtj-echo-shard--2{top:19%;right:11%;animation-delay:-3.2s;transform:scale(.82)}
-.xtj-echo-shard--3{bottom:17%;left:11%;animation-delay:-5.5s;transform:scale(1.12)}
-.xtj-echo-shard--4{bottom:11%;right:23%;animation-delay:-6.8s;transform:scale(.78)}
-.xtj-echo-particle{position:absolute;width:7px;height:7px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.98) 0,rgba(255,227,154,.94) 36%,rgba(255,227,154,.06) 74%);box-shadow:0 0 18px rgba(255,227,154,.92);pointer-events:none;z-index:13;animation:xtjParticlePulse 2.4s ease-in-out infinite}
-.xtj-echo-particle--1{top:22%;left:24%;animation-delay:-.4s}
-.xtj-echo-particle--2{bottom:22%;right:22%;animation-delay:-1.2s}
-.xtj-echo-particle--3{bottom:16%;left:50%;margin-left:-4px;animation-delay:-1.8s}
-.xtj-spark{position:absolute;width:5px;height:5px;border-radius:50%;background:#fff;box-shadow:0 0 12px rgba(181,156,255,.9),0 0 28px rgba(123,213,255,.6);pointer-events:none;z-index:14;animation:xtjSparkDrift 3.6s ease-in-out infinite}
-.xtj-spark--1{top:10%;left:62%;animation-delay:-.3s;width:4px;height:4px}
-.xtj-spark--2{top:28%;right:4%;animation-delay:-1.1s;width:6px;height:6px}
-.xtj-spark--3{bottom:8%;left:34%;animation-delay:-2.0s;width:4px;height:4px}
-.xtj-spark--4{top:58%;left:6%;animation-delay:-2.6s;width:5px;height:5px}
 .xtj-spark--5{bottom:28%;right:8%;animation-delay:-3.1s;width:4px;height:4px}
 .xtj-spark--6{top:42%;right:16%;animation-delay:-1.6s;width:6px;height:6px}
 .xtj-spark--7{bottom:42%;left:22%;animation-delay:-2.4s;width:4px;height:4px}
@@ -5830,9 +5803,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             });
             magicLoaderObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-            setInterval(function() {
-                patchStaticLoadingNodes(document);
-            }, 800);
+            var patchRafPending = false;
+            function rafPatchStatic() {
+                if (patchRafPending) return;
+                patchRafPending = true;
+                requestAnimationFrame(function() {
+                    patchRafPending = false;
+                    patchStaticLoadingNodes(document);
+                });
+            }
+            var patchIntervalWorker = setInterval(function() {
+                rafPatchStatic();
+            }, 2000);
         })();
 
         (function installCleanStatUiOverrides() {
@@ -5853,17 +5835,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     '</div></div>',
                     post.content ? '<div class="post-detail-content">' + escapeHtml(post.content) + '</div>' : '',
                     mediaHtml ? '<div class="post-detail-media">' + mediaHtml + '</div>' : '',
-                    '<div class="post-detail-stats">娴忚 ' + vc + ' 娆?路 点赞 ' + likes.length + ' 娆?路 璇勮 ' + comments.length + ' 娆?/div>',
+                    '<div class="post-detail-stats">浏览 ' + vc + ' 次 · 点赞 ' + likes.length + ' 次 · 评论 ' + comments.length + ' 次</div>',
                     '<div class="stat-two-col">',
-                    '<div class="stat-col"><div class="stat-section-title">❤️ 点赞鐢ㄦ埛 ' + likes.length + '</div>' +
+                    '<div class="stat-col"><div class="stat-section-title">❤️ 点赞用户 ' + likes.length + '</div>' +
                         (likes.length ? likes.map(function(l) {
                             return '<div class="stat-like-item"><div class="sli-info"><div class="sli-user">' + escapeHtml(l.user_name) + '</div></div><span class="sli-time">' + new Date(l.created_at).toLocaleString() + '</span></div>';
-                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤点赞</div>') +
+                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>') +
                     '</div>',
-                    '<div class="stat-col"><div class="stat-section-title">馃挰 璇勮鐢ㄦ埛 ' + comments.length + '</div>' +
+                    '<div class="stat-col"><div class="stat-section-title">💬 评论用户 ' + comments.length + '</div>' +
                         (comments.length ? comments.map(function(c) {
                             return '<div class="stat-comment-item"><div class="sci-info"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><div class="sci-target">' + escapeHtml(c.content) + '</div></div><span class="sci-time">' + new Date(c.created_at).toLocaleString() + '</span></div>';
-                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤璇勮</div>') +
+                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无评论</div>') +
                     '</div>',
                     '</div>'
                 ].join('');
@@ -5879,7 +5861,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var text = post.content || '';
                 var hasImg = post.media_url && post.media_type === 'image';
                 var hasVid = post.media_url && post.media_type === 'video';
-                var tag = hasImg ? '<span class="spi-img-tag">馃摲 鍥剧墖</span>' : (hasVid ? '<span class="spi-img-tag">馃幀 瑙嗛</span>' : '');
+                var tag = hasImg ? '<span class="spi-img-tag">📷 图片</span>' : (hasVid ? '<span class="spi-img-tag">🎬 视频</span>' : '');
                 var summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
                 var display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
                 var onclick = "openPostDetail('" + String(post.id).replace(/'/g, "\\'") + "')";
@@ -5930,9 +5912,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!body) return;
                 var userPosts = statAllPosts.filter(function(p) { return p.user_name === userName; });
                 body.innerHTML = [
-                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">鈫?杩斿洖鎬诲姩鎬?/button>',
+                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">← 返回总动态</button>',
                     '<div style="font-weight:700; font-size:15px; margin-bottom:12px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.1);">',
-                    escapeHtml(userName) + ' 鐨勫叏閮ㄥ笘瀛愶紙' + userPosts.length + ' 鏉★級',
+                    escapeHtml(userName) + ' 的全部帖子（' + userPosts.length + ' 条）',
                     '</div>',
                     userPosts.map(function(p) { return statPostItemMarkup(p); }).join('')
                 ].join('');
@@ -5945,15 +5927,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!history.length) {
                     body.innerHTML = [
                         '<div class="stat-empty">',
-                        '<div style="font-size:16px; margin-bottom:8px;">馃搳 娴忚璁板綍</div>',
-                        '<div style="font-size:13px;">鏆傛棤娴忚璇︽儏鏁版嵁</div>',
-                        '<div style="font-size:12px; margin-top:12px; opacity:0.7;">娴忚璁板綍浼氬湪浣犳煡鐪嬪笘瀛愭椂鑷姩淇濆瓨</div>',
+                        '<div style="font-size:16px; margin-bottom:8px;">📋 浏览记录</div>',
+                        '<div style="font-size:13px;">暂无浏览详情数据</div>',
+                        '<div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>',
                         '<div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览：已加载</div>'
                     ].join('');
                     return;
                 }
                 body.innerHTML = history.map(function(v) {
-                    return '<div class="stat-view-item"><div class="svi-info"><div class="svi-user">' + escapeHtml(v.user_name) + '</div><div class="svi-target">娴忚浜?<b>' + escapeHtml(v.post_author) + '</b> 鐨勫笘瀛愶細' + escapeHtml(v.post_content) + '</div></div><span class="svi-time">' + new Date(v.viewed_at).toLocaleString() + '</span></div>';
+                    return '<div class="stat-view-item"><div class="svi-info"><div class="svi-user">' + escapeHtml(v.user_name) + '</div><div class="svi-target">浏览了<b>' + escapeHtml(v.post_author) + '</b> 的帖子：' + escapeHtml(v.post_content) + '</div></div><span class="svi-time">' + new Date(v.viewed_at).toLocaleString() + '</span></div>';
                 }).join('');
             };
 
@@ -5964,29 +5946,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statAllPosts.forEach(function(p) { postMap[p.id] = p; });
 
                 function buildLikesCol() {
-                    var h = '<div class="stat-section-title">❤️ 点赞璁板綍</div>';
+                    var h = '<div class="stat-section-title">❤️ 点赞记录</div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(function(l) {
                             var post = postMap[l.post_id];
-                            var postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(鍥剧墖/瑙嗛)') : '(宸插垹闄ゅ笘瀛?';
-                            return '<div class="stat-like-item"><div class="sli-info"><div class="sli-user">' + escapeHtml(l.user_name) + '</div><div class="sli-target">点赞浜?' + postContent + '</div></div><span class="sli-time">' + new Date(l.created_at).toLocaleString() + '</span></div>';
+                            var postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(已删除帖子)';
+                            return '<div class="stat-like-item"><div class="sli-info"><div class="sli-user">' + escapeHtml(l.user_name) + '</div><div class="sli-target">点赞了：' + postContent + '</div></div><span class="sli-time">' + new Date(l.created_at).toLocaleString() + '</span></div>';
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">鏆傛棤点赞璁板綍</div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无点赞记录</div>';
                     }
                     return h;
                 }
 
                 function buildCommentsCol() {
-                    var h = '<div class="stat-section-title">馃挰 璇勮璁板綍</div>';
+                    var h = '<div class="stat-section-title">💬 评论记录</div>';
                     if (statAllComments.length) {
                         h += statAllComments.slice().reverse().slice(0, 200).map(function(c) {
                             var post = postMap[c.post_id];
-                            var postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(鍥剧墖/瑙嗛)') : '(宸插垹闄ゅ笘瀛?';
-                            return '<div class="stat-comment-item"><div class="sci-info"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><div class="sci-target">评论于' + postContent + '：' + escapeHtml(c.content) + '</div></div><span class="sci-time">' + new Date(c.created_at).toLocaleString() + '</span></div>';
+                            var postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(已删除帖子)';
+                            return '<div class="stat-comment-item"><div class="sci-info"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><div class="sci-target">评论了' + postContent + '：' + escapeHtml(c.content) + '</div></div><span class="sci-time">' + new Date(c.created_at).toLocaleString() + '</span></div>';
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">鏆傛棤璇勮璁板綍</div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
                     }
                     return h;
                 }
@@ -5999,7 +5981,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var body = document.getElementById('postDetailBody');
                 var modal = document.getElementById('postDetailModal');
                 if (title) title.textContent = '帖子详情';
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载中', '加载中', 'feed');
                 if (modal) modal.classList.add('active');
 
                 try {
@@ -6035,7 +6017,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var title = document.getElementById('statModalTitle');
                 var body = document.getElementById('statModalBody');
                 var modal = document.getElementById('statModal');
-                if (title) title.textContent = titles[type] || '缁熻璇︽儏';
+                if (title) title.textContent = titles[type] || '统计详情';
                 if (modal) modal.classList.add('active');
 
                 if (statAllPosts.length > 0 && Date.now() - statCacheTime < STAT_CACHE_DURATION) {
@@ -6050,7 +6032,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载中', '加载中', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -6123,7 +6105,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var title = options && options.title ? options.title : '加载中';
                 var subtitle = options && options.subtitle ? options.subtitle : '法阵正在聚能';
                 var variant = options && options.variant ? String(options.variant) : '';
-                el.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml(title, subtitle, variant) : '<div class="xtj-magic-loading"><div class="xtj-magic-loading-title">' + escapeHtml(title) + '</div><div class="xtj-magic-loading-subtitle">' + escapeHtml(subtitle) + '</div></div>';
+                el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant);
             };
 
             renderPostFilterUserLoader = function() {
@@ -6209,7 +6191,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
                 btn.disabled = true;
-                btn.textContent = "淇濆瓨涓?..";
+                btn.textContent = "保存中...";
                 try {
                     var result = await updatePostRecord(post, {
                         content: nextContent.slice(0, 2000),
@@ -6217,7 +6199,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         updated_at: new Date().toISOString()
                     });
                     if (!result.ok) {
-                        showToast("保存失败: " + ((result.error && result.error.message) || "鏈煡閿欒"));
+                        showToast("保存失败: " + ((result.error && result.error.message) || "未知错误"));
                         return;
                     }
                     clearFeedCache();
@@ -6227,10 +6209,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast(nextVisibility === "private" ? "已改为私密" : "已改为公开");
                 } catch (e) {
                     console.error("[edit-post] save failed", e);
-                    showToast("保存失败: " + (e && e.message ? e.message : "缃戠粶閿欒"));
+                    showToast("保存失败: " + (e && e.message ? e.message : "网络错误"));
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "淇濆瓨淇敼";
+                    btn.textContent = "保存修改";
                 }
             };
 
@@ -6244,7 +6226,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var title = document.getElementById('statModalTitle');
                 var body = document.getElementById('statModalBody');
                 var modal = document.getElementById('statModal');
-                if (title) title.textContent = titles[type] || '缁熻璇︽儏';
+                if (title) title.textContent = titles[type] || '统计详情';
                 if (modal) modal.classList.add('active');
 
                 var sourcePosts = Array.isArray(feedAllPosts) && feedAllPosts.length ? feedAllPosts : statAllPosts;
@@ -6264,13 +6246,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml ? window.xtjMagicLoadingHtml('加载中', '加载中', 'feed') : '<div class="loading"><div class="loading-spinner"></div><span class="loading-text">加载中</span></div>';
+                if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载中', '加载中', 'feed');
                 var snapshot = await fetchStatSnapshotWithTimeout(5000);
                 if (snapshot) {
                     applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
                     renderStatByType(type);
                 } else if (body) {
-                    body.innerHTML = '<div class="stat-empty">鏆傛棤鍙敤鏁版嵁</div>';
+                    body.innerHTML = '<div class="stat-empty">暂无可用数据</div>';
                 }
                 if (statPollTimer) clearInterval(statPollTimer);
                 statPollTimer = setInterval(refreshStatModal, 15000);
