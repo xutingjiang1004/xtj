@@ -1,0 +1,3 @@
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H2","location":"core.js:14","msg":"[DEBUG] sb created, window.sb = true","data":{},"ts":1780202285025}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H2","location":"core.js:2","msg":"[DEBUG] Outer IIFE entered","data":{"ts":1780202285019},"ts":1780202285019}
+{"sessionId":"page-unresponsive","runId":"pre","hypothesisId":"H1","location":"core.js:6","msg":"[DEBUG] window.supabase = object","data":{"type":"object","hasScript":true},"ts":1780202285020}
