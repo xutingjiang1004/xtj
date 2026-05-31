@@ -2459,8 +2459,7 @@
             border: none !important;
             box-shadow: none !important;
             z-index: 100;
-            pointer-events: none;
-            touch-action: none;
+            pointer-events: auto;
         }
         .dock-bar::before,
         .dock-bar::after {
