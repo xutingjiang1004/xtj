@@ -327,8 +327,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         function showConfirm(title, message, confirmText, callback) {
             var overlay = document.getElementById('ppConfirmOverlay');
             if (!overlay) return;
-            document.getElementById('ppConfirmTitle').textContent = title || '纭操作';
-            document.getElementById('ppConfirmMsg').textContent = message || '纭畾瑕佹墽琛屾操作鍚楋紵';
+            document.getElementById('ppConfirmTitle').textContent = title || '确认操作';
+            document.getElementById('ppConfirmMsg').textContent = message || '确定要执行此操作吗？';
             document.getElementById('ppConfirmOkBtn').textContent = confirmText || '确认';
             window._confirmCallback = callback;
             if (overlay._closeTimer) {
@@ -673,7 +673,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     initialLoad(true);
                 } catch (e) {
                     console.error(e);
-                    showToast("鐧诲綍失败，请閲嶈瘯");
+                    showToast("登录失败，请重试");
                 } finally {
                     btn.disabled = false;
                     btn.textContent = "登录";
@@ -717,7 +717,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         actor_key: AUTH_MARKER
                     }]);
                     if (error) {
-                        showToast("娉ㄥ唽失败: " + error.message);
+                        showToast("注册失败: " + error.message);
                         btn.disabled = false; btn.textContent = "注册失败";
                         return;
                     }
@@ -843,7 +843,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         document.getElementById('upcLogin').textContent = '最近登录：-';
                     }
                 } catch(e) {
-                    document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細加载失败';
+                    document.getElementById('upcLogin').textContent = '最近登录：加载失败';
                 }
             };
 
@@ -1062,7 +1062,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     } catch(e) {}
                     updateAllAvatarElements(avatarUrl);
                     
-                    showToast('澶村儚更新鎴愬姛');
+                    showToast('头像更新成功');
                     localStorage.removeItem(CACHE_KEY);
                     await loadFeed(true);
                     avatarCache[currentUser] = avatarUrl;
@@ -1448,10 +1448,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (postEl) postEl.classList.add('visible');
                     });
                 } catch (e) {
-                    showToast("评论失败: " + (e.message || "鏈煡閿欒"));
+                    showToast("评论失败: " + (e.message || "未知错误"));
                     console.error(e);
                 } finally {
-                    btn.textContent = "鍙戝竷评论";
+                    btn.textContent = "发布评论";
                     btn.disabled = false;
                 }
             };
@@ -1828,7 +1828,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     // 閸氼垰濮╅弮鐘绘濠婃艾濮╅敓妗旇鎷?
                     setupFeedInfiniteScroll();
                 } catch(e) {
-                    feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败锛屽埛鏂伴噸详/div>`;
+                    feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>`;
                     console.error(e);
                 }
             }
@@ -2190,7 +2190,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(p.media_url).replace(/'/g, "\\'")}')">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'鉂わ笍':'点赞'}</button>
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                   </div>
@@ -2372,7 +2372,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 try {
                     var verifiedFallback = await fetchPostSnapshot(post.id);
                     if (!matchesPostExpectation(verifiedFallback, expectedState)) {
-                        return { ok: false, error: new Error("甯栧瓙更新鍚庣姸鎬佹湭瀹為檯淇濆瓨") };
+                        return { ok: false, error: new Error("帖子更新后状态未实际保存") };
                     }
                 } catch (verifyFallbackError) {
                     return { ok: false, error: verifyFallbackError };
@@ -2406,7 +2406,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var id = escapeHtml(String(post.id)).replace(/'/g, "\\'");
                 var actorKey = escapeHtml(String(post.actor_key || "")).replace(/'/g, "\\'");
                 var actions = [
-                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" onclick="toggleLike(this, \'' + id + '\')">' + (isLiked ? '鉂わ笍' : '点赞') + '</button>',
+                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" onclick="toggleLike(this, \'' + id + '\')">' + (isLiked ? '❤️' : '点赞') + '</button>',
                     '<button class="action-btn" onclick="openComment(\'' + id + '\')">评论</button>'
                 ];
                 if (canEditPost(post)) {
@@ -2569,7 +2569,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         updated_at: new Date().toISOString()
                     });
                     if (!result.ok) {
-                        showToast("淇濆瓨失败: " + ((result.error && result.error.message) || "鏈煡閿欒"));
+                        showToast("保存失败: " + ((result.error && result.error.message) || "未知错误"));
                         return;
                     }
                     var fetched = await sb.from("posts").select("*").eq("id", editPostId).maybeSingle();
@@ -2580,7 +2580,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                     var verified = normalizePost(fetchedPost);
                     if (String(verified.visibility) !== String(nextVisibility)) {
-                        throw new Error("淇濆瓨失败锛氬叕寮€/绉樺瘑鐘舵€佹湭瀹為檯淇濆瓨");
+                        throw new Error("保存失败：公开/私密状态未实际保存");
                     }
                     clearFeedCache();
                     closeModal("editPostModal");
@@ -2624,7 +2624,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
                 var btn = document.getElementById("pubBtn");
                 btn.disabled = true;
-                btn.textContent = "鍙戝竷涓?..";
+                btn.textContent = "发布中...";
                 try {
                     var media_url = "";
                     var media_type = "";
@@ -2708,7 +2708,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var likeRes = results[2];
                     if (postRes.error || commRes.error || likeRes.error) {
                         var err = postRes.error || commRes.error || likeRes.error;
-                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败: ' + escapeHtml(err.message || "鏈煡閿欒") + '</div>';
+                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败: ' + escapeHtml(err.message || "未知错误") + '</div>';
                         return;
                     }
                     feedAllPosts = normalizePosts(postRes.data || []);
@@ -2725,7 +2725,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
                     setupFeedInfiniteScroll();
                 } catch (e) {
-                    if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请鍒锋柊閲嶈瘯</div>';
+                    if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
                     console.error(e);
                 }
             };
@@ -2822,7 +2822,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!delPostId) return;
                 var btn = document.getElementById("delBtn");
                 btn.disabled = true;
-                btn.textContent = "鍒犻櫎娑?..";
+                btn.textContent = "删除中...";
                 try {
                     var key = isAdmin() ? delOwnerKey : deviceId;
                     var result = await sb.rpc("delete_post_with_actor", {
@@ -5656,7 +5656,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var text = (node.textContent || '').replace(/\s+/g, '');
                     if (!text && !node.classList.contains('post-user-chip--loading')) return;
                     var variant = node.classList.contains('post-user-chip--loading') ? 'xtj-magic-loading--compact' : ((node.id === 'dockChatMessages' || node.id === 'dockChatList' || node.classList.contains('xtj-chat-loader')) ? 'xtj-magic-loading--chat' : 'xtj-magic-loading--panel');
-                    node.outerHTML = magicHtml('加载中...', node.classList.contains('post-user-chip--loading') ? '绛涢€夌敤鎴锋鍦ㄨ仛合 : '法阵正在聚能', variant);
+                    node.outerHTML = magicHtml('加载中...', node.classList.contains('post-user-chip--loading') ? '筛选用户加载中' : '法阵正在聚能', variant);
                 });
             }
 
@@ -5767,7 +5767,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var el = document.getElementById('dockChatMessages');
                     if (el && (el.querySelector('.chat-empty') || /加载中.../.test(el.textContent || ''))) {
                         window.renderChatLoadingState(el, {
-                            title: '加载中...,
+                            title: '加载中...',
                             subtitle: '正在打开聊天通道',
                             variant: 'chat-detail'
                         });
@@ -6019,7 +6019,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         h += statAllComments.slice().reverse().slice(0, 200).map(function(c) {
                             var post = postMap[c.post_id];
                             var postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(已删除帖子)';
-                            return '<div class="stat-comment-item"><div class="sci-info"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><div class="sci-target">评论了 + postContent + '： + escapeHtml(c.content) + '</div></div><span class="sci-time">' + new Date(c.created_at).toLocaleString() + '</span></div>';
+                            return '<div class="stat-comment-item"><div class="sci-info"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><div class="sci-target">评论于 ' + postContent + '：' + escapeHtml(c.content) + '</div></div><span class="sci-time">' + new Date(c.created_at).toLocaleString() + '</span></div>';
                         }).join('');
                     } else {
                         h += '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
@@ -6260,7 +6260,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     closeModal("editPostModal");
                     editPostId = null;
                     await loadFeed(true);
-                    showToast(nextVisibility === "private" ? "宸叉敼涓虹瀵? : "宸叉敼涓哄叕寮€");
+                    showToast(nextVisibility === "private" ? "已改为私密" : "已改为公开");
                 } catch (e) {
                     console.error("[edit-post] save failed", e);
                     showToast("淇濆瓨失败: " + (e && e.message ? e.message : "网络閿欒"));
@@ -6273,9 +6273,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             window.openStatDetail = async function(type) {
                 statCurrentType = type;
                 var titles = {
-                    posts: '总动态- 按用户分组,
-                    views: '鎬绘祻瑙?- 浏览记录',
-                    likes: '点赞和评论- 记录'
+                    posts: '总动态 - 按用户分组',
+                    views: '总浏览 - 浏览记录',
+                    likes: '点赞和评论 - 记录'
                 };
                 var title = document.getElementById('statModalTitle');
                 var body = document.getElementById('statModalBody');
