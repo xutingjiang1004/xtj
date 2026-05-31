@@ -339,7 +339,7 @@
                     h += '<td>-</td>';
                 } else {
                     h += '<td><span class="badge badge-green">正常</span></td>';
-                    h += '<td><button class="btn-sm del" onclick="deleteAdminComment(' + c.id + ', \'' + (c.actor_key || '') + '\')">删除</button></td>';
+                    h += '<td><button class="btn-sm del" onclick="deleteAdminComment(\'' + c.id + '\', \'' + (c.actor_key || '') + '\')">删除</button></td>';
                 }
                 h += '</tr>';
             });
@@ -495,7 +495,10 @@
         }
     }
 
-    function renderReportsTab(el) {
+    async function renderReportsTab(el) {
+        if (!reportsData.length) {
+            await loadReportsData();
+        }
         var h = '<div class="stats-row">';
         var pending = reportsData.filter(function(r) { return r.status === 'pending'; }).length;
         h += '<div class="stat-box"><div class="val">' + reportsData.length + '</div><div class="lbl">总举报数</div></div>';
@@ -576,7 +579,10 @@
         }
     }
 
-    function renderBansTab(el) {
+    async function renderBansTab(el) {
+        if (!bansData.length) {
+            await loadBansData();
+        }
         var active = bansData.filter(function(b) { return b.is_active; }).length;
         var h = '<div class="stats-row">';
         h += '<div class="stat-box"><div class="val">' + bansData.length + '</div><div class="lbl">总封禁记录</div></div>';
@@ -666,7 +672,10 @@
         }
     }
 
-    function renderBlacklistTab(el) {
+    async function renderBlacklistTab(el) {
+        if (!blacklistData.length) {
+            await loadBlacklistData();
+        }
         var h = '<div class="card"><h3>⛔ 添加黑名单</h3>';
         h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
         h += '<input id="blUserName" placeholder="用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
@@ -725,14 +734,17 @@
 
     async function loadPhotosAdminData() {
         try {
-            var res = await sb.from('photos').select('*').order('created_at', { ascending: false }).limit(500);
+            var res = await sb.from('posts').select('id,user_name,media_url,content,created_at,views,actor_key').eq('media_type', '__photo_wall__').order('created_at', { ascending: false }).limit(500);
             photosAdminData = res.data || [];
         } catch(e) {
             photosAdminData = [];
         }
     }
 
-    function renderPhotosTab(el) {
+    async function renderPhotosTab(el) {
+        if (!photosAdminData.length) {
+            await loadPhotosAdminData();
+        }
         var h = '<div class="stats-row">';
         h += '<div class="stat-box"><div class="val">' + photosAdminData.length + '</div><div class="lbl">总照片数</div></div>';
         h += '</div>';
@@ -741,17 +753,18 @@
         if (!photosAdminData.length) {
             h += '<div class="empty">暂无照片数据</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>缩略图</th><th>用户</th><th>相册日期</th><th>封面</th><th>大小</th><th>浏览</th><th>上传时间</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>缩略图</th><th>用户</th><th>大小</th><th>浏览</th><th>上传时间</th><th>操作</th></tr></thead><tbody>';
             photosAdminData.forEach(function(p) {
-                var thumbHtml = p.public_url ? '<img src="' + p.public_url + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px;">' : '-';
+                var extra = {};
+                try { extra = JSON.parse(p.content || '{}'); } catch(e) {}
+                var thumbUrl = extra.thumb || p.media_url || '';
+                var thumbHtml = thumbUrl ? '<img src="' + thumbUrl + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px;" loading="lazy">' : '-';
                 h += '<tr><td>' + thumbHtml + '</td>';
-                h += '<td>' + escapeHtml(p.user_name) + '</td>';
-                h += '<td>' + (p.album_date || '-') + '</td>';
-                h += '<td>' + (p.is_cover ? '⭐' : '-') + '</td>';
-                h += '<td>' + (p.file_size ? (p.file_size / 1024).toFixed(0) + 'KB' : '-') + '</td>';
+                h += '<td>' + escapeHtml(p.user_name || '') + '</td>';
+                h += '<td>' + (extra.fileSize ? (extra.fileSize / 1024).toFixed(0) + 'KB' : '-') + '</td>';
                 h += '<td>' + (p.views || 0) + '</td>';
                 h += '<td>' + formatTime(p.created_at) + '</td>';
-                h += '<td><button class="btn-sm del" onclick="deleteAdminPhoto(\'' + p.id + '\')">删除</button></td></tr>';
+                h += '<td><button class="btn-sm del" onclick="deleteAdminPhoto(\'' + p.id + '\', \'' + (p.actor_key || '') + '\')">删除</button></td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -759,10 +772,10 @@
         el.innerHTML = h;
     }
 
-    window.deleteAdminPhoto = function(id) {
+    window.deleteAdminPhoto = function(id, actorKey) {
         showConfirm('删除照片', '确认删除此照片？此操作不可恢复。', '确认删除', async function() {
             try {
-                await sb.from('photos').delete().eq('id', id);
+                await sb.from('posts').delete().eq('id', id);
                 await loadPhotosAdminData();
                 renderTab('photos');
                 showToast('照片已删除', 'success');
