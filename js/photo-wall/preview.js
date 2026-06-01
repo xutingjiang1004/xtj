@@ -49,7 +49,7 @@
             return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span>';
         }
         if (type === 'rotate') {
-            return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></svg></span>';
+            return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><g transform="translate(-1.5,0)"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></g></svg></span>';
         }
         if (type === 'delete') {
             return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span>';
@@ -491,9 +491,6 @@
         if (photoPreviewActive) {
             return;
         }
-        if (window.__xtjPhotoPreviewHotfixInstalled) {
-            return window.openPhotoPreview && window.openPhotoPreview(index, keepList);
-        }
 
         if (!keepList) {
             ppSortedPhotos = window.pwCurrentSortedPhotos ? window.pwCurrentSortedPhotos.slice() : (window.photoWallData ? window.photoWallData.slice() : []);
@@ -791,9 +788,6 @@
     window.closePhotoPreview = closePhotoPreview;
 
     function showPhotoInfo() {
-        if (window.__xtjPhotoPreviewHotfixInstalled) {
-            return window.showPhotoInfo && window.showPhotoInfo();
-        }
         var photo = photoPreviewCurrent;
         if (!photo) return;
 
@@ -1182,15 +1176,14 @@
         });
     };
     window.ppRotatePhoto = function() {
-        if (window.__xtjPhotoPreviewHotfixInstalled) {
-            return window.ppRotatePhoto && window.ppRotatePhoto();
-        }
-        var imgs = document.querySelectorAll('.pp-slide-img');
         ppCurrentRotation = (ppCurrentRotation + 90) % 360;
-        var rotateStyle = 'rotate(' + ppCurrentRotation + 'deg)';
+        var imgs = document.querySelectorAll('.pp-slide-img');
         imgs.forEach(function(img) {
-            img.style.transform = rotateStyle;
+            if (img && img.style) {
+                img.style.transform = 'rotate(' + ppCurrentRotation + 'deg)';
+            }
         });
+        if (window.showToast) window.showToast('已旋转 ' + ppCurrentRotation + '°');
     };
 
     function ppShowDownloadOverlay() {
@@ -1428,7 +1421,6 @@
     }
 
     function bindPreviewEvents(overlay) {
-        if (window.__xtjPhotoPreviewHotfixInstalled) return;
         var wrapper = overlay.querySelector('.photo-preview-image-wrapper');
 
         var startX, startY, startTime;
