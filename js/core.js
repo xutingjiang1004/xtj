@@ -1940,8 +1940,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return { commentMap, likeMap, likeUserMap };
             }
 
-            // 缂撳瓨澶村儚URL
-            const avatarCache = {};
+            // 缓存头像URL
 
             async function loadAvatarsForUsers(usernames) {
                 if (!usernames || usernames.length === 0) return;
