@@ -1859,7 +1859,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   <div class="actions">
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" onclick="togglePostPin('${escapeHtml(p.id).replace(/'/g, "\\'")}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id).replace(/'/g, "\\'")}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
@@ -2137,7 +2137,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   <div class="actions">
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" onclick="togglePostPin('${escapeHtml(p.id).replace(/'/g, "\\'")}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id).replace(/'/g, "\\'")}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
@@ -2357,8 +2357,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ];
                 if (canEditPost(post)) {
                     actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + id + '\')">编辑</button>');
-                    var isPrivate = normalizePost(post).visibility === 'private';
-                    actions.push('<button type="button" class="action-btn visibility" onclick="togglePostVisibility(\'' + id + '\', this)">' + (isPrivate ? '🔓 设为公开' : '🔒 设为私密') + '</button>');
                 }
                 if (canPinPost(post)) {
                     actions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + id + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
@@ -2613,6 +2611,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
                 }
             };
+            document.addEventListener('click', function(e) {
+                var btn = e.target.closest('.action-btn.pin');
+                if (btn) {
+                    var postId = btn.getAttribute('data-post-id');
+                    if (postId) {
+                        togglePostPin(postId, btn);
+                    }
+                }
+            });
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
                 var content = document.getElementById("postInp").value.trim();
@@ -5658,10 +5665,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var canDel = canEdit && (post.actor_key === deviceId || post.actor_key === currentUser || isAdmin());
                 var detailActions = [];
                 if (canPinPost(post)) {
-                    detailActions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + String(post.id).replace(/'/g, "\\'") + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                    detailActions.push('<button type="button" class="action-btn pin" data-post-id="' + String(post.id).replace(/'/g, "\\'") + '">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canEdit) {
-                    detailActions.push('<button type="button" class="action-btn visibility" onclick="togglePostVisibility(\'' + String(post.id).replace(/'/g, "\\'") + '\', this)">' + (normalizePost(post).visibility === 'private' ? '🔓 设为公开' : '🔒 设为私密') + '</button>');
                 }
                 if (canDel) {
                     detailActions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + String(post.id).replace(/'/g, "\\'") + '\', \'' + String(post.actor_key || "").replace(/'/g, "\\'") + '\')">删除</button>');
