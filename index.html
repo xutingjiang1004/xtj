@@ -1,4 +1,4 @@
-﻿﻿﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
@@ -407,7 +407,7 @@
     <div class="photo-preview-overlay" id="photoPreviewOverlay">
         <div class="pp-ambient-bg" id="ppAmbientBg"></div>
         <div class="pp-dots" id="ppDots"></div>
-        <button class="photo-preview-close" onclick="closePhotoPreview()" aria-label="关闭预览">
+        <button class="photo-preview-close" onclick="window.closePhotoPreview()" aria-label="关闭预览">
             <span class="ui-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M18 6 6 18"></path>
@@ -428,17 +428,17 @@
                 <div class="pp-slide-slot"><img class="pp-slide-img" id="ppNextImg" src="" alt="" draggable="false" loading="eager"></div>
             </div>
         </div>
-        <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span></button>
+        <button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="window.showPhotoInfo()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 12v4"></path><path d="M12 8h.01"></path></svg></span></button>
         <button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="m8.6 13.5 6.8 4"></path><path d="m15.4 6.5-6.8 4"></path></svg></span></button>
         <button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path></svg></span></button>
-        <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="deleteCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span></button>
+        <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="window.deleteCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span></button>
         
         <!-- 照片信息弹窗 -->
         <div class="pp-info-modal" id="ppInfoModal" style="display:none;">
             <div class="pp-info-modal-content">
                 <div class="pp-info-modal-header">
                     <span class="pp-info-modal-title">照片详情</span>
-                    <button class="pp-info-modal-close" onclick="closePhotoInfo()">×</button>
+                    <button class="pp-info-modal-close" onclick="window.closePhotoInfo()">×</button>
                 </div>
                 <div class="pp-info-modal-body" id="ppInfoModalBody">
                 </div>
@@ -529,7 +529,7 @@
     </div>
 
     <div class="img-viewer" id="imgViewer">
-        <button class="iv-close" onclick="closeImageViewer()">&times;</button>
+        <button id="ivClose" class="iv-close" onclick="window.closeImageViewer()">&times;</button>
         <div class="iv-wrapper" id="ivWrapper">
             <img id="ivImg" src="" alt="预览" draggable="false" />
         </div>
