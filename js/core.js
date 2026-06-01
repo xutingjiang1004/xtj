@@ -3307,7 +3307,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
             window.escapeHtml = escapeHtml;
 
-                        function buildMagicLoadingHtml(title, subtitle, variant) {
+            function buildMagicLoadingTitle(title) {
+                var text = String(title || '加载中...');
+                if (text === '内容加载中...' || text === '内容刷新中...') text = '加载中...';
+                if (text === '加载中...') {
+                    return '<span class="xtj-magic-title-wave" aria-label="' + escapeHtml(text) + '">' +
+                        Array.from(text).map(function(char, index) {
+                            return '<span style="--wave-index:' + index + '" aria-hidden="true">' + escapeHtml(char) + '</span>';
+                        }).join('') +
+                    '</span>';
+                }
+                return escapeHtml(text);
+            }
+
+            function buildMagicLoadingHtml(title, subtitle, variant) {
                 var extra = variant ? ' ' + variant : '';
                 return [
                     '<div class="xtj-magic-loader' + extra + '">',
@@ -3326,7 +3339,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     '<div class="xtj-magic-particle"></div>',
                     '</div>',
                     '<div class="xtj-magic-text">',
-                    '<div class="xtj-magic-title">' + escapeHtml(title || '加载中...') + '</div>',
+                    '<div class="xtj-magic-title">' + buildMagicLoadingTitle(title) + '</div>',
                     '<div class="xtj-magic-subtitle">' + escapeHtml(subtitle || '魔法粒子正在聚合') + '</div>',
                     '</div>',
                     '<div class="xtj-magic-dots" aria-hidden="true"><span></span><span></span><span></span></div>',
@@ -5637,7 +5650,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function patchNode(root) {
                 root = root || document;
                 if (!root.querySelectorAll) return;
-                root.querySelectorAll('.xtj-chat-loader, #feed .loading, #statModalBody .loading, #postDetailBody .loading, #dockChatMessages .chat-empty, #dockChatList .chat-empty, #postUserQuickList .post-user-chip--loading').forEach(function(node) {
+                root.querySelectorAll('.xtj-magic-loading, .xtj-chat-loader, #feed .loading, #statModalBody .loading, #postDetailBody .loading, #dockChatMessages .chat-empty, #dockChatList .chat-empty, #postUserQuickList .post-user-chip--loading').forEach(function(node) {
                     if (!node || node.querySelector('.xtj-magic-loader')) return;
                     var text = (node.textContent || '').replace(/\s+/g, '');
                     if (!text && !node.classList.contains('post-user-chip--loading')) return;

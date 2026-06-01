@@ -77,6 +77,8 @@
         var state = {
             active: false,
             closing: false,
+            navBusy: false,
+            navToken: 0,
             photos: [],
             index: -1,
             current: null,
@@ -143,7 +145,7 @@
                 '.photo-preview-overlay.pp-closing{pointer-events:none;background:#000;transform:translateZ(0);-webkit-transform:translateZ(0);will-change:opacity,transform;backface-visibility:hidden;-webkit-backface-visibility:hidden;}',
                 '.photo-preview-overlay.pp-closing,.photo-preview-overlay.pp-closing *{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;}',
                 '.photo-preview-overlay.pp-hotfix-loading .pp-current-loading{opacity:1;transform:translate(-50%,0);}',
-                '.pp-current-loading{position:absolute;left:50%;bottom:calc(48px + env(safe-area-inset-bottom,0px));z-index:20;transform:translate(-50%,8px);opacity:0;transition:opacity .22s ease,transform .22s ease;padding:7px 12px;border-radius:999px;background:rgba(15,23,42,.34);border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:rgba(255,255,255,.86);font-size:12px;pointer-events:none;}',
+                '.pp-current-loading{position:absolute;left:50%;bottom:calc(88px + env(safe-area-inset-bottom,0px));z-index:20;transform:translate(-50%,8px);opacity:0;transition:opacity .22s ease,transform .22s ease;padding:7px 12px;border-radius:999px;background:rgba(15,23,42,.34);border:1px solid rgba(255,255,255,.14);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:rgba(255,255,255,.86);font-size:12px;pointer-events:none;}',
                 '.pp-slide-img.pp-hotfix-fading{opacity:.72;}',
                 '.pp-slide-img:not([src]),.pp-slide-img[src=""]{min-width:80px;min-height:80px;}',
                 '.pp-slide-img.pp-placeholder{background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.02));}',
@@ -158,8 +160,20 @@
                 '.pp-zoom-out{left:calc(68px + env(safe-area-inset-left,0px));}',
                 '.pp-compact-btn{right:calc(120px + env(safe-area-inset-right,0px));}',
                 '.pp-compact-btn.active{background:rgba(52,211,153,0.2);border-color:rgba(52,211,153,0.45);color:#34d399;}',
+                '#photoPreviewOverlay .pp-preview-toolbar{position:absolute;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));z-index:18;display:flex;align-items:center;justify-content:center;gap:8px;padding:7px;border-radius:999px;background:rgba(12,18,28,.32);border:1px solid rgba(255,255,255,.12);box-shadow:0 10px 34px rgba(0,0,0,.18);backdrop-filter:blur(16px) saturate(130%);-webkit-backdrop-filter:blur(16px) saturate(130%);transform:translate3d(-50%,10px,0);opacity:0;transition:opacity .28s ease,transform .28s cubic-bezier(.16,1,.3,1);}',
+                '#photoPreviewOverlay.active .pp-preview-toolbar{opacity:1;transform:translate3d(-50%,0,0);}',
+                '#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-compact-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn{position:relative!important;inset:auto!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;width:38px!important;height:38px!important;min-width:38px!important;min-height:38px!important;padding:0!important;margin:0!important;opacity:1!important;transform:none!important;animation:none!important;border-radius:999px!important;background:rgba(255,255,255,.055)!important;border:1px solid rgba(255,255,255,.11)!important;color:rgba(255,255,255,.82)!important;box-shadow:none!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}',
+                '#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn{color:#fecaca!important;background:rgba(127,29,29,.22)!important;border-color:rgba(248,113,113,.22)!important;}',
+                '#photoPreviewOverlay .pp-preview-toolbar button:hover{background:rgba(255,255,255,.13)!important;border-color:rgba(255,255,255,.22)!important;color:#fff!important;transform:translate3d(0,-1px,0)!important;}',
+                '#photoPreviewOverlay .pp-preview-toolbar button:active{transform:scale(.92)!important;}',
+                '#photoPreviewOverlay .pp-preview-toolbar button[hidden]{display:none!important;}',
+                '#photoPreviewOverlay .pp-preview-toolbar button:disabled{opacity:.28!important;cursor:not-allowed!important;pointer-events:none!important;}',
+                '#photoPreviewOverlay .pp-preview-toolbar .pp-compact-btn.active{color:#6ee7b7!important;background:rgba(16,185,129,.16)!important;border-color:rgba(110,231,183,.3)!important;}',
+                '#photoPreviewOverlay .pp-slide-track.snapping .pp-slide-img{filter:none!important;transition:transform .24s cubic-bezier(.33,1,.68,1),opacity .16s ease!important;}',
+                '#photoPreviewOverlay .pp-ambient-bg{transition:opacity .24s ease!important;}',
                 '@media (max-width:480px){.pp-compact-btn,.pp-zoom-btn{width:36px;height:36px;}.pp-zoom-in{left:calc(100px + env(safe-area-inset-left,0px));}.pp-zoom-out{left:calc(56px + env(safe-area-inset-left,0px));}.pp-compact-btn{right:calc(100px + env(safe-area-inset-right,0px));}}',
-                '@media (prefers-reduced-motion: reduce){.pp-current-loading,.photo-preview-overlay.pp-hotfix-basic-close .photo-preview-image-wrapper{transition:none!important;}.pp-compact-btn,.pp-zoom-btn{transition:none!important;}}'
+                '@media (max-width:480px){#photoPreviewOverlay .pp-preview-toolbar{gap:5px;padding:6px;}#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-compact-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn{width:34px!important;height:34px!important;min-width:34px!important;min-height:34px!important;}}',
+                '@media (prefers-reduced-motion: reduce){.pp-current-loading,.photo-preview-overlay.pp-hotfix-basic-close .photo-preview-image-wrapper,.pp-preview-toolbar{transition:none!important;}.pp-compact-btn,.pp-zoom-btn{transition:none!important;}}'
             ].join('\n');
             style.setAttribute('data-max-zoom', MAX_ZOOM);
             document.head.appendChild(style);
@@ -259,7 +273,19 @@
 
             bindHotfixEvents(overlay);
             addPinchEvents(overlay);
+            ensurePreviewToolbar(overlay);
             return overlay;
+        }
+
+        function ensurePreviewToolbar(overlay) {
+            if (!overlay || overlay.querySelector('.pp-preview-toolbar')) return;
+            var toolbar = document.createElement('div');
+            toolbar.className = 'pp-preview-toolbar';
+            ['ppZoomOutBtn', 'ppZoomInBtn', 'ppInfoBtn', 'ppRotateBtn', 'ppShareBtn', 'ppCompactBtn', 'ppDeleteBtn'].forEach(function(id) {
+                var btn = document.getElementById(id);
+                if (btn) toolbar.appendChild(btn);
+            });
+            overlay.appendChild(toolbar);
         }
 
         function setupTrack() {
@@ -334,6 +360,7 @@
             if (!img || !src) return;
             img.classList.remove('pp-placeholder');
             if (instant) img.style.transition = 'none';
+            else if (img.style.transition === 'none') img.style.transition = '';
             img.style.opacity = '1';
             img.src = src;
             img._xtjCurrentSrc = src;
@@ -384,15 +411,18 @@
                 img.removeAttribute('src');
                 img.style.opacity = '0';
                 img._xtjCurrentSrc = '';
+                img._xtjPhotoId = '';
                 return;
             }
             var fallback = photo.thumbUrl || photo.imageUrl || '';
             if (!fallback) return;
+            var photoId = String(photo.id);
+            img._xtjPhotoId = photoId;
             setImg(img, fallback, true);
             if (photo.imageUrl && photo.imageUrl !== fallback) {
                 scheduleIdle(function() {
                     loadImage(photo.imageUrl, 12000).then(function() {
-                        if (state.active && img && state.photos.indexOf(photo) >= 0) setImg(img, photo.imageUrl, false);
+                        if (state.active && img && img._xtjPhotoId === photoId) setImg(img, photo.imageUrl, false);
                     }).catch(function() {});
                 }, 800);
             }
@@ -414,6 +444,7 @@
             var delBtn = document.getElementById('ppDeleteBtn');
             if (delBtn && photo) {
                 var canDelete = window.currentUser === 'xxz' || window.currentUser === photo.username;
+                delBtn.hidden = !canDelete;
                 delBtn.style.display = canDelete ? 'flex' : 'none';
             }
 
@@ -462,8 +493,8 @@
             var full = photo.imageUrl || '';
             var token = Date.now() + '_' + Math.random().toString(36).slice(2);
             curImg._xtjLoadToken = token;
-            curImg.style.transition = options.instant ? 'none' : 'opacity .18s ease, transform .26s cubic-bezier(.16,1,.3,1)';
-            curImg.style.opacity = '0';
+            curImg.style.transition = options.instant ? 'none' : 'opacity .16s ease, transform .24s cubic-bezier(.16,1,.3,1)';
+            curImg.style.opacity = options.instant ? '0' : '.96';
             curImg.classList.remove('pp-placeholder');
 
             var wrapper = document.getElementById('ppImageWrapper');
@@ -473,6 +504,9 @@
 
             applyTransform(curImg);
             updateInfo();
+            var thumbImg = options.thumbImg || findThumb(photo);
+            var preview = getPreviewSrc(photo, thumbImg);
+            if (preview) setImg(curImg, preview, true);
 
             if (full) {
                 setLoading(true, '加载中...');
@@ -485,7 +519,6 @@
                 }).catch(function() {
                     if (!state.active || curImg._xtjLoadToken !== token) return;
                     setLoading(false);
-                    var thumbImg = options.thumbImg || findThumb(photo);
                     var alt = getPreviewSrc(photo, thumbImg);
                     if (alt && alt !== full) {
                         setImg(curImg, alt, false);
@@ -506,8 +539,10 @@
                 curImg.classList.add('pp-placeholder');
             }
 
-            scheduleIdle(updateSideImages, 650);
-            scheduleIdle(function() { preloadAround(index); }, 900);
+            updateSideImages();
+            scheduleIdle(function() {
+                if (state.active && state.index === index) preloadAround(index);
+            }, 900);
         }
 
         function preloadAround(index) {
@@ -598,6 +633,8 @@
             overlay._xtjOriginImg = thumbImg;
             state.active = true;
             state.closing = false;
+            state.navBusy = false;
+            state.navToken += 1;
             overlay.classList.remove('pp-closing', 'pp-hotfix-closing', 'pp-hotfix-basic-close');
             overlay.classList.add('pp-info-hidden', 'active');
             document.body.classList.add('photo-previewing');
@@ -626,6 +663,10 @@
                 return;
             }
             state.closing = true;
+            state.navBusy = false;
+            state.navToken += 1;
+            var slideTrack = document.getElementById('ppSlideTrack');
+            if (slideTrack) slideTrack.classList.remove('snapping');
 
             var overlay = document.getElementById('photoPreviewOverlay');
             var curImg = document.getElementById('photoPreviewImage');
@@ -755,6 +796,7 @@
 
             state.active = false;
             state.closing = false;
+            state.navBusy = false;
             state.current = null;
             window.photoPreviewCurrent = null;
             resetZoom({ resetRotation: true });
@@ -777,17 +819,23 @@
         };
 
         function navigate(direction) {
-            if (!state.active || state.closing) return;
+            if (!state.active || state.closing || state.navBusy) return;
             var nextIndex = state.index + direction;
             if (nextIndex < 0 || nextIndex >= state.photos.length) return;
+            state.navBusy = true;
+            var navToken = ++state.navToken;
             var track = document.getElementById('ppSlideTrack');
             var offset = direction > 0 ? -2 * window.innerWidth : 0;
-            if (track) {
-                track.classList.add('snapping');
-                track.style.transition = 'transform .28s cubic-bezier(.33,1,.68,1)';
-                track.style.transform = 'translate3d(' + offset + 'px,0,0)';
-            }
-            setTimeout(function() {
+            var settled = false;
+            var timer = null;
+            function finishNavigation() {
+                if (settled) return;
+                settled = true;
+                if (timer) clearTimeout(timer);
+                if (track) track.removeEventListener('transitionend', onTrackTransition);
+                if (navToken !== state.navToken) return;
+                state.navBusy = false;
+                if (!state.active || state.closing) return;
                 state.index = nextIndex;
                 setupTrack();
                 showCurrentPhoto(nextIndex, { instant: false });
@@ -796,7 +844,17 @@
                 if (photo && window.syncPhotoViewCount) {
                     setTimeout(function() { window.syncPhotoViewCount(photo); }, 200);
                 }
-            }, 290);
+            }
+            function onTrackTransition(event) {
+                if (event.target === track && event.propertyName === 'transform') finishNavigation();
+            }
+            if (track) {
+                track.classList.add('snapping');
+                track.style.transition = 'transform .24s cubic-bezier(.33,1,.68,1)';
+                track.style.transform = 'translate3d(' + offset + 'px,0,0)';
+                track.addEventListener('transitionend', onTrackTransition);
+            }
+            timer = setTimeout(finishNavigation, track ? 360 : 0);
         }
 
         window.zoomIn = zoomIn;
