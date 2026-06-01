@@ -1,35 +1,279 @@
 (function () {
-// 注入魔法粒子加载器关键CSS，确保渲染前立即可用
-(function(){if(document.getElementById('xtjMagicLoadingStyleEager'))return;var s=document.createElement('style');s.id='xtjMagicLoadingStyleEager';s.textContent='.xtj-magic-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;min-height:260px;padding:40px 20px;text-align:center;animation:mglFadeIn .35s ease-out}.xtj-magic-stage{position:relative;width:96px;height:96px;flex-shrink:0}.xtj-magic-core{position:absolute;top:50%;left:50%;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:radial-gradient(circle at 35% 35%,rgba(255,255,255,.95),rgba(167,243,208,.88) 55%,rgba(56,189,248,.65));box-shadow:0 0 18px rgba(123,213,255,.55),0 0 40px rgba(110,231,183,.28);animation:mglCorePulse 1.8s ease-in-out infinite}.xtj-magic-ring{position:absolute;top:50%;left:50%;border-radius:50%;border:1px solid transparent}.xtj-magic-ring:nth-of-type(1){width:52px;height:52px;margin:-26px 0 0 -26px;border-top-color:rgba(110,231,183,.45);animation:mglSpin 3.6s linear infinite}.xtj-magic-ring:nth-of-type(2){width:64px;height:64px;margin:-32px 0 0 -32px;border-bottom-color:rgba(255,227,154,.35);animation:mglSpinRev 5s linear infinite}.xtj-magic-particle{position:absolute;top:50%;left:50%;width:5px;height:5px;border-radius:50%}.xtj-magic-particle:nth-child(4){animation:mglParticleOrbit1 2.6s linear infinite;background:rgba(110,231,183,.9);box-shadow:0 0 6px rgba(110,231,183,.55)}.xtj-magic-particle:nth-child(5){animation:mglParticleOrbit1 2.6s linear infinite;animation-delay:-.65s;background:rgba(123,213,255,.85)}.xtj-magic-particle:nth-child(6){animation:mglParticleOrbit1 2.6s linear infinite;animation-delay:-1.3s;background:rgba(167,243,208,.88)}.xtj-magic-particle:nth-child(7){animation:mglParticleOrbit1 2.6s linear infinite;animation-delay:-1.95s;background:rgba(255,227,154,.82)}.xtj-magic-particle:nth-child(8){animation:mglParticleOrbit2 3.4s linear infinite;background:rgba(110,231,183,.85);width:4px;height:4px}.xtj-magic-particle:nth-child(9){animation:mglParticleOrbit2 3.4s linear infinite;animation-delay:-1.13s;background:rgba(181,156,255,.8);width:4px;height:4px}.xtj-magic-particle:nth-child(10){animation:mglParticleOrbit2 3.4s linear infinite;animation-delay:-2.27s;background:rgba(123,213,255,.82);width:4px;height:4px}.xtj-magic-particle:nth-child(11){animation:mglParticleOrbit3 4.8s linear infinite;background:rgba(255,227,154,.75);width:3px;height:3px}.xtj-magic-particle:nth-child(12){animation:mglParticleOrbit3 4.8s linear infinite;animation-delay:-2.4s;background:rgba(110,231,183,.78);width:3px;height:3px}.xtj-magic-text{display:flex;flex-direction:column;align-items:center;gap:6px}.xtj-magic-title{font-size:15px;font-weight:700;color:var(--text-main,#1f2937)}.xtj-magic-subtitle{font-size:12px;color:var(--text-muted,#6b7280)}.xtj-magic-dots{display:flex;gap:5px;margin-top:2px}.xtj-magic-dots span{width:5px;height:5px;border-radius:50%;background:rgba(110,231,183,.7);animation:mglSpanPulse 1.2s ease-in-out infinite}.xtj-magic-dots span:nth-child(2){animation-delay:.15s;background:rgba(123,213,255,.7)}.xtj-magic-dots span:nth-child(3){animation-delay:.3s;background:rgba(255,227,154,.7)}.xtj-magic-progress{width:140px;height:3px;border-radius:3px;background:rgba(110,231,183,.12);overflow:hidden}.xtj-magic-bar{display:block;width:35%;height:100%;border-radius:inherit;background:linear-gradient(90deg,transparent,rgba(110,231,183,.55),rgba(123,213,255,.55),transparent);animation:mglProgressIndeterminate 1.8s ease-in-out infinite}@keyframes mglFadeIn{from{opacity:0}to{opacity:1}}@keyframes mglSpin{to{transform:rotate(360deg)}}@keyframes mglSpinRev{to{transform:rotate(-360deg)}}@keyframes mglCorePulse{0%,100%{transform:scale(.82);opacity:.6}50%{transform:scale(1.08);opacity:1}}@keyframes mglParticleOrbit1{0%{transform:translate(-50%,-50%) rotate(0deg) translateX(22px) rotate(0deg) scale(1);opacity:.85}25%{transform:translate(-50%,-50%) rotate(90deg) translateX(24px) rotate(-90deg) scale(1.15);opacity:1}50%{transform:translate(-50%,-50%) rotate(180deg) translateX(20px) rotate(-180deg) scale(1);opacity:.75}75%{transform:translate(-50%,-50%) rotate(270deg) translateX(24px) rotate(-270deg) scale(1.1);opacity:1}100%{transform:translate(-50%,-50%) rotate(360deg) translateX(22px) rotate(-360deg) scale(1);opacity:.85}}@keyframes mglParticleOrbit2{0%{transform:translate(-50%,-50%) rotate(0deg) translateX(32px) rotate(0deg) scale(.9);opacity:.7}33%{transform:translate(-50%,-50%) rotate(120deg) translateX(36px) rotate(-120deg) scale(1.05);opacity:1}66%{transform:translate(-50%,-50%) rotate(240deg) translateX(30px) rotate(-240deg) scale(.95);opacity:.65}100%{transform:translate(-50%,-50%) rotate(360deg) translateX(32px) rotate(-360deg) scale(.9);opacity:.7}}@keyframes mglParticleOrbit3{0%{transform:translate(-50%,-50%) rotate(0deg) translateX(42px) rotate(0deg) scale(.75);opacity:.55}50%{transform:translate(-50%,-50%) rotate(180deg) translateX(48px) rotate(-180deg) scale(.85);opacity:.95}100%{transform:translate(-50%,-50%) rotate(360deg) translateX(42px) rotate(-360deg) scale(.75);opacity:.55}}@keyframes mglSpanPulse{0%,100%{opacity:.4;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}@keyframes mglProgressIndeterminate{0%{transform:translateX(-100%)}50%{transform:translateX(200%)}100%{transform:translateX(400%)}}@media (prefers-reduced-motion:reduce){.xtj-magic-loader,.xtj-magic-loader *{animation:none!important}}';document.head.appendChild(s);})();
-// 注入GPU硬件加速CSS（仅关键动画元素，避免iOS GPU内存压力）
-(function(){if(document.getElementById('xtjGPUAccelStyle'))return;var s=document.createElement('style');s.id='xtjGPUAccelStyle';s.textContent='.xtj-magic-stage{will-change:transform}.xtj-magic-particle{will-change:transform,opacity}.xtj-magic-core{will-change:transform,opacity}';document.head.appendChild(s);})();
-// #region debug-point H5:onerror
-window.__dbg = window.__dbg || {}; window.__dbg.errors = [];
-function dbg(hypothesisId, location, msg, data) { try { var p = JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:hypothesisId,location:location,msg:msg,data:data||{},ts:Date.now()}); navigator.sendBeacon("http://127.0.0.1:7777/event", p); } catch(e) {} }
-window.onerror = function(m, s, l, c, e) { window.__dbg.errors.push({msg:m,src:s,line:l,col:c,err:e && e.stack,ts:Date.now()}); dbg("H5","onerror","[DEBUG] Uncaught: "+m,{stack:e&&e.stack?e.stack.substring(0,500):""}); };
-// #endregion
-// #region debug-point H2:iife-start
-dbg("H2","core.js:2","[DEBUG] Outer IIFE entered",{ts:Date.now()});
-// #endregion
+// 注入春日法阵加载器关键 CSS，保证首屏替换时立即可用
+(function() {
+    if (document.getElementById('xtjSpringUltStyleEager')) return;
+    var s = document.createElement('style');
+    s.id = 'xtjSpringUltStyleEager';
+    s.textContent = `
+.xtj-spring-ult{
+    --xtj-spring-ult-size:clamp(158px,25vw,214px);
+    --xtj-spring-ult-leaf:#95d47e;
+    --xtj-spring-ult-leaf-soft:rgba(182,236,164,.62);
+    --xtj-spring-ult-gold:#f2dfa4;
+    --xtj-spring-ult-white:#fffef7;
+    min-height:320px;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:16px;
+    padding:38px 18px;
+    position:relative;
+    text-align:center;
+    pointer-events:none;
+    user-select:none;
+    isolation:isolate;
+    contain:layout style paint;
+    animation:xtjSpringUltFade .42s ease-out;
+}
+.xtj-spring-ult,.xtj-spring-ult *{pointer-events:none}
+.xtj-spring-ult--feed{min-height:264px;padding:30px 16px}
+.xtj-spring-ult--chat-list{min-height:50vh}
+.xtj-spring-ult--chat-detail{min-height:58vh}
+.xtj-spring-ult--post-user{--xtj-spring-ult-size:clamp(132px,20vw,176px);min-height:126px;padding:18px 10px}
+.xtj-spring-ult__stage{
+    position:relative;
+    width:var(--xtj-spring-ult-size);
+    height:var(--xtj-spring-ult-size);
+    display:grid;
+    place-items:center;
+    isolation:isolate;
+}
+.xtj-spring-ult__mist,
+.xtj-spring-ult__settle,
+.xtj-spring-ult__flash,
+.xtj-spring-ult__wave,
+.xtj-spring-ult__ring,
+.xtj-spring-ult__canvas,
+.xtj-spring-ult__flora{
+    position:absolute;
+    inset:0;
+}
+.xtj-spring-ult__mist{
+    border-radius:50%;
+    background:
+        radial-gradient(circle at 50% 46%, rgba(255,255,255,.9), rgba(255,255,255,0) 22%),
+        radial-gradient(circle, rgba(174,233,154,.36), rgba(174,233,154,0) 58%),
+        radial-gradient(circle at 50% 62%, rgba(242,223,164,.22), rgba(242,223,164,0) 66%);
+    filter:blur(12px);
+    opacity:.84;
+    transform:scale(.78);
+    animation:xtjSpringUltMist 5.8s ease-in-out infinite;
+}
+.xtj-spring-ult__settle{
+    inset:26%;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(255,255,255,.84), rgba(242,223,164,.26) 38%, rgba(149,212,126,0) 72%);
+    filter:blur(8px);
+    opacity:0;
+    transform:scale(1.26);
+    animation:xtjSpringUltSettle 5.8s ease-in-out infinite;
+}
+.xtj-spring-ult__flash{
+    inset:32%;
+    border-radius:50%;
+    background:radial-gradient(circle, rgba(255,255,255,.98), rgba(255,245,214,.94) 34%, rgba(255,245,214,0) 72%);
+    mix-blend-mode:screen;
+    opacity:0;
+    transform:scale(.2);
+    animation:xtjSpringUltFlash 5.8s cubic-bezier(.16,1,.3,1) infinite;
+}
+.xtj-spring-ult__wave{
+    inset:14%;
+    border-radius:50%;
+    border:2px solid rgba(152,214,122,.52);
+    box-shadow:0 0 0 1px rgba(242,223,164,.26) inset;
+    opacity:0;
+    transform:scale(.38);
+    animation:xtjSpringUltWave 5.8s ease-out infinite;
+}
+.xtj-spring-ult__wave--alt{
+    inset:18%;
+    border-color:rgba(242,223,164,.44);
+    animation-delay:.24s;
+}
+.xtj-spring-ult__ring{
+    border-radius:50%;
+    left:50%;
+    top:50%;
+    transform:translate(-50%,-50%) scale(.6);
+    transform-origin:center;
+}
+.xtj-spring-ult__ring--outer{
+    width:100%;
+    height:100%;
+    border:1px solid rgba(242,223,164,.55);
+    box-shadow:0 0 0 1px rgba(242,223,164,.12) inset,0 0 28px rgba(242,223,164,.18);
+    animation:xtjSpringUltOuterPhase 5.8s ease-in-out infinite, xtjSpringUltOuterSpin 12s linear infinite;
+}
+.xtj-spring-ult__ring--middle{
+    width:78%;
+    height:78%;
+    background:radial-gradient(circle, rgba(195,242,176,.24), rgba(195,242,176,.08) 48%, rgba(195,242,176,0) 66%);
+    border:1px solid rgba(149,212,126,.42);
+    box-shadow:0 0 34px rgba(149,212,126,.22), inset 0 0 34px rgba(206,241,188,.12);
+    animation:xtjSpringUltMiddlePhase 5.8s ease-in-out infinite;
+}
+.xtj-spring-ult__ring--inner{
+    width:52%;
+    height:52%;
+    background:radial-gradient(circle, rgba(255,255,255,.82), rgba(255,250,232,.45) 34%, rgba(255,250,232,.12) 62%, rgba(255,250,232,0) 74%);
+    box-shadow:0 0 18px rgba(255,253,244,.78), 0 0 38px rgba(242,223,164,.22);
+    animation:xtjSpringUltInnerPhase 5.8s ease-in-out infinite;
+}
+.xtj-spring-ult__flora{
+    overflow:visible;
+    opacity:.92;
+}
+.xtj-spring-ult__vine{
+    fill:none;
+    stroke-linecap:round;
+    stroke-linejoin:round;
+    vector-effect:non-scaling-stroke;
+    stroke-dasharray:220;
+    stroke-dashoffset:220;
+    animation:xtjSpringUltVineGrow 5.8s cubic-bezier(.16,1,.3,1) infinite;
+}
+.xtj-spring-ult__vine--a{stroke:rgba(149,212,126,.74);stroke-width:2.4}
+.xtj-spring-ult__vine--b{stroke:rgba(242,223,164,.66);stroke-width:2;animation-delay:.12s}
+.xtj-spring-ult__vine--c{stroke:rgba(255,255,255,.54);stroke-width:1.6;animation-delay:.2s}
+.xtj-spring-ult__canvas{
+    mix-blend-mode:screen;
+    opacity:.96;
+}
+.xtj-spring-ult__text{
+    position:relative;
+    z-index:2;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:6px;
+}
+.xtj-spring-ult__title{
+    font-size:16px;
+    font-weight:800;
+    line-height:1.1;
+    letter-spacing:.04em;
+    color:#2a5e35;
+    text-shadow:0 0 18px rgba(255,255,255,.55),0 0 28px rgba(194,241,179,.32);
+}
+.xtj-spring-ult__title-wave{
+    display:inline-flex;
+    gap:1px;
+}
+.xtj-spring-ult__title-wave > span{
+    display:inline-block;
+    will-change:transform,opacity;
+    animation:xtjSpringUltTitleWave 1.9s ease-in-out infinite;
+    animation-delay:calc(var(--wave-index) * 88ms);
+}
+@keyframes xtjSpringUltFade{from{opacity:0;transform:translate3d(0,10px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes xtjSpringUltFlash{
+    0%,100%{opacity:0;transform:scale(.2)}
+    7%{opacity:1;transform:scale(1.28)}
+    15%{opacity:.2;transform:scale(1.7)}
+    28%{opacity:.46;transform:scale(.92)}
+    64%{opacity:.24;transform:scale(1.04)}
+    82%{opacity:.1;transform:scale(.94)}
+}
+@keyframes xtjSpringUltWave{
+    0%,100%{opacity:0;transform:scale(.34)}
+    8%{opacity:.72;transform:scale(.74)}
+    22%{opacity:.14;transform:scale(1.2)}
+    40%{opacity:.22;transform:scale(.94)}
+    68%{opacity:.08;transform:scale(1.04)}
+}
+@keyframes xtjSpringUltOuterPhase{
+    0%,100%{opacity:0;transform:translate(-50%,-50%) scale(.5)}
+    16%{opacity:.94;transform:translate(-50%,-50%) scale(1.02)}
+    54%{opacity:.74;transform:translate(-50%,-50%) scale(1)}
+    82%{opacity:.46;transform:translate(-50%,-50%) scale(.96)}
+}
+@keyframes xtjSpringUltMiddlePhase{
+    0%,100%{opacity:0;transform:translate(-50%,-50%) scale(.56)}
+    18%{opacity:.92;transform:translate(-50%,-50%) scale(1)}
+    48%{opacity:.76;transform:translate(-50%,-50%) scale(1.05)}
+    74%{opacity:.62;transform:translate(-50%,-50%) scale(.98)}
+    88%{opacity:.38;transform:translate(-50%,-50%) scale(.92)}
+}
+@keyframes xtjSpringUltInnerPhase{
+    0%,100%{opacity:0;transform:translate(-50%,-50%) scale(.28)}
+    14%{opacity:1;transform:translate(-50%,-50%) scale(1.08)}
+    38%{opacity:.9;transform:translate(-50%,-50%) scale(.92)}
+    68%{opacity:.72;transform:translate(-50%,-50%) scale(1.04)}
+    88%{opacity:.42;transform:translate(-50%,-50%) scale(.82)}
+}
+@keyframes xtjSpringUltMist{
+    0%,100%{opacity:.08;transform:scale(.46)}
+    14%{opacity:.9;transform:scale(1.08)}
+    48%{opacity:.78;transform:scale(.98)}
+    78%{opacity:.44;transform:scale(.9)}
+    92%{opacity:.16;transform:scale(.72)}
+}
+@keyframes xtjSpringUltSettle{
+    0%,74%{opacity:0;transform:scale(1.26)}
+    82%{opacity:.14;transform:scale(1.02)}
+    90%{opacity:.48;transform:scale(.76)}
+    100%{opacity:.06;transform:scale(.4)}
+}
+@keyframes xtjSpringUltOuterSpin{to{rotate:360deg}}
+@keyframes xtjSpringUltVineGrow{
+    0%,100%{stroke-dashoffset:220;opacity:0}
+    12%{opacity:.92}
+    26%{stroke-dashoffset:0;opacity:1}
+    66%{stroke-dashoffset:0;opacity:.84}
+    88%{stroke-dashoffset:-40;opacity:.28}
+}
+@keyframes xtjSpringUltTitleWave{
+    0%,100%{opacity:.46;transform:translate3d(0,0,0) scale(.96)}
+    42%{opacity:1;transform:translate3d(0,-4px,0) scale(1.08)}
+    68%{opacity:.8;transform:translate3d(0,0,0) scale(1)}
+}
+@media (max-width:768px){
+    .xtj-spring-ult{
+        --xtj-spring-ult-size:clamp(142px,44vw,184px);
+        gap:14px;
+        padding:26px 12px;
+    }
+    .xtj-spring-ult__title{font-size:15px}
+}
+@media (prefers-reduced-motion:reduce){
+    .xtj-spring-ult{animation:none}
+    .xtj-spring-ult__flash,
+    .xtj-spring-ult__wave,
+    .xtj-spring-ult__ring,
+    .xtj-spring-ult__vine,
+    .xtj-spring-ult__title-wave > span{
+        animation:none!important;
+    }
+    .xtj-spring-ult__canvas{opacity:0!important}
+    .xtj-spring-ult__mist{animation:none!important;opacity:.52;transform:scale(1)}
+    .xtj-spring-ult__ring--outer,
+    .xtj-spring-ult__ring--middle,
+    .xtj-spring-ult__ring--inner{opacity:.78;transform:translate(-50%,-50%) scale(1)}
+    .xtj-spring-ult__vine{stroke-dashoffset:0;opacity:.7}
+}
+`;
+    document.head.appendChild(s);
+})();
+// 关键元素 GPU 优化
+(function() {
+    if (document.getElementById('xtjSpringUltGpuStyle')) return;
+    var s = document.createElement('style');
+    s.id = 'xtjSpringUltGpuStyle';
+    s.textContent = '.xtj-spring-ult__stage,.xtj-spring-ult__flash,.xtj-spring-ult__wave,.xtj-spring-ult__ring,.xtj-spring-ult__title-wave>span{will-change:transform,opacity}';
+    document.head.appendChild(s);
+})();
+
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
             const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
-// #region debug-point H1+H3:check-supabase
-dbg("H1","core.js:6","[DEBUG] window.supabase = "+typeof window.supabase,{type:typeof window.supabase});
-// #endregion
             if (typeof window.supabase === 'undefined') {
                 var feedEl = document.getElementById('feed');
                 if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
-// #region debug-point H1:supabase-undefined
-dbg("H1","core.js:9","[DEBUG] supabase UNDEFINED");
-// #endregion
                 return;
             }
             const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 window.sb = sb;
-// #region debug-point H2:sb-created
-dbg("H2","core.js:14","[DEBUG] sb created, window.sb = "+!!window.sb);
-// #endregion
-try { dbg("CP","cp:line31","CP1:line31"); document.title = "CP1-line31"; } catch(e) {}
 window.safeLocalStorageGetJSON = function(key, fallback) {
     try {
         var v = localStorage.getItem(key);
@@ -691,8 +935,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             document.getElementById('regNickInp').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') document.getElementById('regPwInp').focus();
             });
-            try { document.title = "CP3-afterRegBindings"; } catch(e) {}
-
             async function doRegister() {
                 const name = document.getElementById("regNickInp").value.trim();
                 const pw = document.getElementById("regPwInp").value;
@@ -1751,7 +1993,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中...', '魔法粒子正在聚合', 'feed');
+                if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中...', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -2267,64 +2509,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var nextPinnedAt = Object.prototype.hasOwnProperty.call(updates, "pinned_at") ? updates.pinned_at : normalized.pinned_at;
                 var nextUpdatedAt = Object.prototype.hasOwnProperty.call(updates, "updated_at") ? updates.updated_at : normalized.updated_at;
                 var nextContent = typeof updates.content === "string" ? updates.content : normalized.content;
-                var directPayload = {
-                    content: nextContent,
-                    visibility: nextVisibility,
-                    is_pinned: nextPinned,
-                    pinned_at: nextPinnedAt,
-                    updated_at: nextUpdatedAt
-                };
-                var expectedState = {
-                    content: nextContent,
-                    visibility: nextVisibility,
-                    is_pinned: nextPinned,
-                    pinned_at: nextPinnedAt
-                };
-                var direct = await sb.from("posts").update(directPayload).eq("id", post.id).select("*");
-                if (!direct.error && (!direct.data || (Array.isArray(direct.data) && direct.data.length === 0))) {
-                    try {
-                        var fetchedDirectRow = await fetchPostSnapshot(post.id);
-                        if (fetchedDirectRow) direct.data = [fetchedDirectRow];
-                    } catch (verifyDirectRowsError) {}
-                }
-                if (!direct.error) {
-                    if (!direct.data || (Array.isArray(direct.data) && direct.data.length === 0)) {
-                        return { ok: false, error: new Error("数据库未更新任何记录，可能是 Supabase RLS/update policy 拦截") };
-                    }
-                    var saved = Array.isArray(direct.data) ? direct.data[0] : direct.data;
-                    var hasVisibility = saved && Object.prototype.hasOwnProperty.call(saved, "visibility") && String(saved.visibility) === String(nextVisibility);
-                    var hasPinned = saved && Object.prototype.hasOwnProperty.call(saved, "is_pinned") && !!saved.is_pinned === nextPinned;
-                    if (hasVisibility && hasPinned) {
-                        return { ok: true, fallback: false };
-                    }
-                    try {
-                        var verifiedDirect = await fetchPostSnapshot(post.id);
-                        if (matchesPostExpectation(verifiedDirect, expectedState)) {
-                            return { ok: true, fallback: false };
-                        }
-                    } catch (verifyDirectError) {}
-                }
 
-                var message = direct.error ? String(direct.error.message || "") : "";
-                var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message) || !direct.error;
-                if (direct.error && !maybeSchemaIssue) return { ok: false, error: direct.error };
-
-                var fallbackContent = buildPostStorageContent(normalized, nextContent, {
+                var newContent = buildPostStorageContent(normalized, nextContent, {
                     visibility: nextVisibility,
                     is_pinned: nextPinned,
                     pinned_at: nextPinnedAt,
                     updated_at: nextUpdatedAt
                 });
-                var fallback = await sb.from("posts").update({ content: fallbackContent }).eq("id", post.id);
-                if (fallback.error) return { ok: false, error: fallback.error };
-                try {
-                    var verifiedFallback = await fetchPostSnapshot(post.id);
-                    if (!matchesPostExpectation(verifiedFallback, expectedState)) {
-                        return { ok: false, error: new Error("帖子更新后状态未实际保存") };
-                    }
-                } catch (verifyFallbackError) {
-                    return { ok: false, error: verifyFallbackError };
-                }
+
+                var result = await sb.from("posts").update({ content: newContent }).eq("id", post.id);
+                if (result.error) return { ok: false, error: result.error };
                 return { ok: true, fallback: true };
             }
 
@@ -2547,10 +2741,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var post;
                 var nextPinned;
                 try {
-                    var __dbg = {runId:"pre",hypothesisId:"H2",location:"togglePostPin:enter",msg:"[DEBUG] togglePostPin called",data:{postId:postId,currentUser:currentUser,feedAllPostsLen:feedAllPosts?feedAllPosts.length:0,typeofTogglePostPin:typeof window.togglePostPin}};
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H2",location:"togglePostPin:enter",msg:"[DEBUG] togglePostPin called,postId="+postId+",currentUser="+currentUser,data:{postId:postId,currentUser:currentUser,feedAllPostsLen:feedAllPosts?feedAllPosts.length:0,typeofTogglePostPin:typeof window.togglePostPin},ts:Date.now()})}).catch(function(){});
                     post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostPin:findPost",msg:"[DEBUG] post found = "+(post?"yes":"NO"),data:{postFound:!!post,postId:postId,canPin:post?canPinPost(post):false,typeofCanPinPost:typeof canPinPost},ts:Date.now()})}).catch(function(){});
                     if (!post || !canPinPost(post)) {
                         showToast("无权置顶这条帖子");
                         return;
@@ -2560,12 +2751,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         btn.textContent = post.is_pinned ? "取消中..." : "置顶中...";
                     }
                     nextPinned = !post.is_pinned;
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostPin:beforeUpdate",msg:"[DEBUG] about to updatePostRecord",data:{nextPinned:nextPinned,postIsPinned:post.is_pinned,postId:postId},ts:Date.now()})}).catch(function(){});
                     var result = await updatePostRecord(post, {
                         is_pinned: nextPinned,
                         pinned_at: nextPinned ? new Date().toISOString() : null
                     });
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostPin:afterUpdate",msg:"[DEBUG] updatePostRecord result.ok = "+result.ok,data:{ok:result.ok,error:result.error?result.error.message:"",resultKeys:Object.keys(result).join(",")},ts:Date.now()})}).catch(function(){});
                     if (!result.ok) {
                         if (btn) { btn.disabled = false; btn.textContent = post.is_pinned ? "取消置顶" : "置顶"; }
                         showToast("置顶操作失败: " + ((result.error && result.error.message) || "未知错误"));
@@ -2576,7 +2765,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     await loadFeed(true);
                 } catch (e) {
                     console.error("togglePostPin error:", e);
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostPin:catch",msg:"[DEBUG] togglePostPin threw: "+e.message,data:{stack:(e.stack||"").substring(0,500)},ts:Date.now()})}).catch(function(){});
                     if (btn) {
                         btn.disabled = false;
                         btn.textContent = post && typeof post.is_pinned !== 'undefined' ? (post.is_pinned ? "取消置顶" : "置顶") : "置顶";
@@ -2588,9 +2776,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var post;
                 var nextVisibility;
                 try {
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H2",location:"togglePostVisibility:enter",msg:"[DEBUG] togglePostVisibility called",data:{postId:postId,currentUser:currentUser},ts:Date.now()})}).catch(function(){});
                     post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostVisibility:findPost",msg:"[DEBUG] post found = "+(post?"yes":"NO"),data:{postFound:!!post,postId:postId,canEdit:post?canEditPost(post):false},ts:Date.now()})}).catch(function(){});
                     if (!post || !canEditPost(post)) {
                         showToast("无权修改这条帖子的隐私状态");
                         return;
@@ -2600,12 +2786,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         btn.textContent = "处理中...";
                     }
                     nextVisibility = post.visibility === "private" ? "public" : "private";
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostVisibility:beforeUpdate",msg:"[DEBUG] about to updatePostRecord visibility",data:{nextVisibility:nextVisibility,postId:postId},ts:Date.now()})}).catch(function(){});
                     var result = await updatePostRecord(post, {
-                        visibility: nextVisibility,
-                        visibility_set_at: new Date().toISOString()
+                        visibility: nextVisibility
                     });
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostVisibility:afterUpdate",msg:"[DEBUG] updatePostRecord visibility result.ok = "+result.ok,data:{ok:result.ok,error:result.error?result.error.message:"",resultKeys:Object.keys(result).join(",")},ts:Date.now()})}).catch(function(){});
                     if (!result.ok) {
                         if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🔒 设为私密" : "🔓 设为公开"; }
                         showToast("操作失败: " + ((result.error && result.error.message) || "未知错误"));
@@ -2616,7 +2799,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     await loadFeed(true);
                 } catch (e) {
                     console.error("togglePostVisibility error:", e);
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostVisibility:catch",msg:"[DEBUG] togglePostVisibility threw: "+e.message,data:{stack:(e.stack||"").substring(0,500)},ts:Date.now()})}).catch(function(){});
                     if (btn) {
                         btn.disabled = false;
                         btn.textContent = "🔒 设为私密";
@@ -2625,12 +2807,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
             document.addEventListener('click', function(e) {
-                fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H4",location:"delegation:click",msg:"[DEBUG] document click fired",data:{targetTag:e.target.tagName,targetClass:e.target.className,hasClosestPinBtn:!!e.target.closest},ts:Date.now()})}).catch(function(){});
                 var btn = e.target.closest('.action-btn.pin');
-                fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H4",location:"delegation:closest",msg:"[DEBUG] closest(.action-btn.pin) = "+(btn?"found":"null"),data:{btnFound:!!btn,btnText:btn?btn.textContent:"",dataPostId:btn?btn.getAttribute("data-post-id"):""},ts:Date.now()})}).catch(function(){});
                 if (btn) {
                     var postId = btn.getAttribute('data-post-id');
-                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H4",location:"delegation:found",msg:"[DEBUG] PIN button clicked, postId="+postId,data:{postId:postId,btnText:btn.textContent},ts:Date.now()})}).catch(function(){});
                     if (postId) {
                         togglePostPin(postId, btn);
                     }
@@ -2717,7 +2896,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
-                    feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中...', '魔法粒子正在聚合', 'feed');
+                    feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中...', '', 'feed');
                 }
                 try {
                     var results = await Promise.all([
@@ -3323,11 +3502,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
             window.escapeHtml = escapeHtml;
 
-            function buildMagicLoadingTitle(title) {
+            var springUltLoaderSeq = 0;
+
+            function normalizeMagicLoadingTitle(title) {
                 var text = String(title || '加载中...');
-                if (text === '内容加载中...' || text === '内容刷新中...') text = '加载中...';
+                if (/加载中|刷新中/.test(text)) return '加载中...';
+                return text;
+            }
+
+            function buildMagicLoadingTitle(title) {
+                var text = normalizeMagicLoadingTitle(title);
                 if (text === '加载中...') {
-                    return '<span class="xtj-magic-title-wave" aria-label="' + escapeHtml(text) + '">' +
+                    return '<span class="xtj-spring-ult__title-wave" aria-label="' + escapeHtml(text) + '">' +
                         Array.from(text).map(function(char, index) {
                             return '<span style="--wave-index:' + index + '" aria-hidden="true">' + escapeHtml(char) + '</span>';
                         }).join('') +
@@ -3337,32 +3523,214 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             function buildMagicLoadingHtml(title, subtitle, variant) {
-                var extra = variant ? ' ' + variant : '';
+                var safeTitle = normalizeMagicLoadingTitle(title);
+                var safeVariant = String(variant || 'feed');
+                springUltLoaderSeq += 1;
                 return [
-                    '<div class="xtj-magic-loader' + extra + '">',
-                    '<div class="xtj-magic-stage" aria-hidden="true">',
-                    '<div class="xtj-magic-core"></div>',
-                    '<div class="xtj-magic-ring"></div>',
-                    '<div class="xtj-magic-ring"></div>',
-                    '<div class="xtj-magic-particle"></div>',
-                    '<div class="xtj-magic-particle"></div>',
-                    '<div class="xtj-magic-particle"></div>',
-                    '<div class="xtj-magic-particle"></div>',
-                    '<div class="xtj-magic-particle"></div>',
-                    '<div class="xtj-magic-particle"></div>',
-                    '<div class="xtj-magic-particle"></div>',
-                    '<div class="xtj-magic-particle"></div>',
-                    '<div class="xtj-magic-particle"></div>',
+                    '<div class="xtj-spring-ult xtj-spring-ult--' + safeVariant + '" data-xtj-spring-ult="' + springUltLoaderSeq + '" data-xtj-spring-variant="' + safeVariant + '" role="status" aria-live="polite" aria-label="' + escapeHtml(safeTitle) + '">',
+                    '<div class="xtj-spring-ult__stage" aria-hidden="true">',
+                    '<div class="xtj-spring-ult__mist"></div>',
+                    '<div class="xtj-spring-ult__settle"></div>',
+                    '<div class="xtj-spring-ult__flash"></div>',
+                    '<div class="xtj-spring-ult__wave"></div>',
+                    '<div class="xtj-spring-ult__wave xtj-spring-ult__wave--alt"></div>',
+                    '<div class="xtj-spring-ult__ring xtj-spring-ult__ring--outer"></div>',
+                    '<div class="xtj-spring-ult__ring xtj-spring-ult__ring--middle"></div>',
+                    '<div class="xtj-spring-ult__ring xtj-spring-ult__ring--inner"></div>',
+                    '<svg class="xtj-spring-ult__flora" viewBox="0 0 200 200" aria-hidden="true" focusable="false">',
+                    '<path class="xtj-spring-ult__vine xtj-spring-ult__vine--a" d="M100 22c-10 14-14 28-12 42 3 17 17 25 17 38 0 9-5 17-17 25"></path>',
+                    '<path class="xtj-spring-ult__vine xtj-spring-ult__vine--b" d="M36 116c18-2 34-10 44-24 9-12 12-26 20-34 8-8 18-13 38-16"></path>',
+                    '<path class="xtj-spring-ult__vine xtj-spring-ult__vine--c" d="M60 52c10 8 18 19 22 31 6 18 3 34-8 54"></path>',
+                    '</svg>',
+                    '<canvas class="xtj-spring-ult__canvas" aria-hidden="true"></canvas>',
                     '</div>',
-                    '<div class="xtj-magic-text">',
-                    '<div class="xtj-magic-title">' + buildMagicLoadingTitle(title) + '</div>',
-                    '<div class="xtj-magic-subtitle">' + escapeHtml(subtitle || '魔法粒子正在聚合') + '</div>',
-                    '</div>',
-                    '<div class="xtj-magic-dots" aria-hidden="true"><span></span><span></span><span></span></div>',
-                    '<div class="xtj-magic-progress"><div class="xtj-magic-bar"></div></div>',
+                    '<div class="xtj-spring-ult__text"><div class="xtj-spring-ult__title">' + buildMagicLoadingTitle(safeTitle) + '</div></div>',
                     '</div>'
                 ].join('');
-            }window.xtjMagicLoadingHtml = buildMagicLoadingHtml;
+            }
+            window.xtjMagicLoadingHtml = buildMagicLoadingHtml;
+
+            function isSpringUltReducedMotion() {
+                return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+            }
+
+            function getSpringUltParticleCount(loader) {
+                var variant = loader && loader.getAttribute('data-xtj-spring-variant');
+                var mobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+                var base = mobile ? 28 : 64;
+                if (variant === 'post-user') return mobile ? 20 : 36;
+                if (variant === 'chat-detail') return mobile ? 32 : 72;
+                return base;
+            }
+
+            function buildSpringUltParticles(count) {
+                var types = [];
+                var profile = count <= 36
+                    ? { petal: 8, leaf: 5, pollen: 10, butterfly: 2, dew: 3 }
+                    : { petal: 18, leaf: 14, pollen: 20, butterfly: 5, dew: 7 };
+                Object.keys(profile).forEach(function(type) {
+                    for (var i = 0; i < profile[type]; i++) types.push(type);
+                });
+                while (types.length < count) types.push('pollen');
+                return types.slice(0, count).map(function(type, index) {
+                    var phase = Math.random() * Math.PI * 2;
+                    return {
+                        type: type,
+                        phase: phase,
+                        radius: 24 + Math.random() * 62,
+                        driftX: 8 + Math.random() * 22,
+                        driftY: 6 + Math.random() * 18,
+                        speed: 0.18 + Math.random() * 0.18,
+                        orbitScale: 0.72 + Math.random() * 0.42,
+                        size: type === 'pollen' ? 1.4 + Math.random() * 1.8 : type === 'dew' ? 2.2 + Math.random() * 2.2 : type === 'butterfly' ? 5.2 + Math.random() * 2.2 : 4 + Math.random() * 3.4,
+                        seed: (index + 1) / (count + 2),
+                        tint: (function() {
+                            if (type === 'petal') return 'rgba(255,242,247,';
+                            if (type === 'leaf') return 'rgba(165,224,142,';
+                            if (type === 'dew') return 'rgba(236,252,255,';
+                            if (type === 'butterfly') return 'rgba(252,241,197,';
+                            return 'rgba(255,247,206,';
+                        })()
+                    };
+                });
+            }
+
+            function drawSpringUltParticle(ctx, particle, x, y, alpha, time) {
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.rotate(Math.sin(time * particle.speed * 1.2 + particle.phase) * 0.7);
+                ctx.globalAlpha = alpha;
+                if (particle.type === 'pollen') {
+                    ctx.fillStyle = particle.tint + (0.42 + alpha * 0.5) + ')';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, particle.size, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (particle.type === 'dew') {
+                    ctx.fillStyle = particle.tint + (0.32 + alpha * 0.4) + ')';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, particle.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = 'rgba(255,255,255,' + Math.min(0.9, alpha + 0.18) + ')';
+                    ctx.beginPath();
+                    ctx.arc(-particle.size * 0.3, -particle.size * 0.35, particle.size * 0.35, 0, Math.PI * 2);
+                    ctx.fill();
+                } else if (particle.type === 'leaf') {
+                    ctx.fillStyle = particle.tint + (0.28 + alpha * 0.46) + ')';
+                    ctx.beginPath();
+                    ctx.moveTo(0, -particle.size);
+                    ctx.quadraticCurveTo(particle.size * 0.82, 0, 0, particle.size);
+                    ctx.quadraticCurveTo(-particle.size * 0.66, 0, 0, -particle.size);
+                    ctx.fill();
+                } else if (particle.type === 'butterfly') {
+                    ctx.fillStyle = particle.tint + (0.24 + alpha * 0.5) + ')';
+                    ctx.beginPath();
+                    ctx.ellipse(-particle.size * 0.28, 0, particle.size * 0.72, particle.size * 0.48, -0.4, 0, Math.PI * 2);
+                    ctx.ellipse(particle.size * 0.28, 0, particle.size * 0.72, particle.size * 0.48, 0.4, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(120,94,46,' + Math.min(0.72, alpha + 0.1) + ')';
+                    ctx.lineWidth = 1.1;
+                    ctx.beginPath();
+                    ctx.moveTo(0, -particle.size * 0.6);
+                    ctx.lineTo(0, particle.size * 0.7);
+                    ctx.stroke();
+                } else {
+                    ctx.fillStyle = particle.tint + (0.24 + alpha * 0.52) + ')';
+                    ctx.beginPath();
+                    ctx.moveTo(0, -particle.size);
+                    ctx.quadraticCurveTo(particle.size * 0.9, -particle.size * 0.2, 0, particle.size);
+                    ctx.quadraticCurveTo(-particle.size * 0.9, -particle.size * 0.2, 0, -particle.size);
+                    ctx.fill();
+                }
+                ctx.restore();
+            }
+
+            function initSpringUltLoader(loader) {
+                if (!loader || loader.getAttribute('data-xtj-spring-init')) return;
+                loader.setAttribute('data-xtj-spring-init', '1');
+                var canvas = loader.querySelector('.xtj-spring-ult__canvas');
+                var stage = loader.querySelector('.xtj-spring-ult__stage');
+                if (!canvas || !stage) return;
+                if (isSpringUltReducedMotion()) {
+                    canvas.style.opacity = '0';
+                    return;
+                }
+                var ctx = canvas.getContext('2d');
+                if (!ctx) return;
+                var particles = buildSpringUltParticles(getSpringUltParticleCount(loader));
+                var rafId = 0;
+                var size = { width: 0, height: 0 };
+                var dpr = Math.min(window.devicePixelRatio || 1, 2);
+                var start = performance.now();
+
+                function resizeCanvas() {
+                    var rect = stage.getBoundingClientRect();
+                    if (!rect.width || !rect.height) return;
+                    size.width = rect.width;
+                    size.height = rect.height;
+                    canvas.width = Math.round(rect.width * dpr);
+                    canvas.height = Math.round(rect.height * dpr);
+                    canvas.style.width = rect.width + 'px';
+                    canvas.style.height = rect.height + 'px';
+                    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                }
+
+                function frame(now) {
+                    if (!document.body.contains(loader)) return;
+                    if (!size.width || !size.height) resizeCanvas();
+                    var width = size.width;
+                    var height = size.height;
+                    var cx = width / 2;
+                    var cy = height / 2;
+                    var time = (now - start) / 1000;
+                    var cycle = ((now - start) % 5800) / 5800;
+                    var stageAlpha = cycle < 0.14 ? cycle / 0.14 : (cycle > 0.82 ? Math.max(0.36, 1 - (cycle - 0.82) / 0.18 * 0.48) : 1);
+                    ctx.clearRect(0, 0, width, height);
+                    particles.forEach(function(particle) {
+                        var angle = time * particle.speed + particle.phase;
+                        var bloom = 0.78 + 0.22 * Math.sin(time * 0.72 + particle.seed * Math.PI * 2);
+                        var radius = particle.radius * particle.orbitScale * bloom;
+                        var x = cx + Math.cos(angle) * radius + Math.sin(time * 0.44 + particle.phase) * particle.driftX;
+                        var y = cy + Math.sin(angle * 0.84 + particle.phase * 0.4) * radius * 0.66 + Math.cos(time * 0.38 + particle.phase) * particle.driftY;
+                        var alpha = stageAlpha * (0.24 + 0.58 * (0.5 + 0.5 * Math.sin(time * (0.48 + particle.seed) + particle.phase)));
+                        drawSpringUltParticle(ctx, particle, x, y, alpha, time);
+                    });
+                    rafId = requestAnimationFrame(frame);
+                }
+
+                resizeCanvas();
+                if (window.ResizeObserver) {
+                    loader._xtjSpringUltResizeObserver = new ResizeObserver(resizeCanvas);
+                    loader._xtjSpringUltResizeObserver.observe(stage);
+                } else {
+                    window.addEventListener('resize', resizeCanvas, { passive: true });
+                    loader._xtjSpringUltResizeFallback = resizeCanvas;
+                }
+                rafId = requestAnimationFrame(frame);
+                loader._xtjSpringUltDispose = function() {
+                    cancelAnimationFrame(rafId);
+                    if (loader._xtjSpringUltResizeObserver) loader._xtjSpringUltResizeObserver.disconnect();
+                    if (loader._xtjSpringUltResizeFallback) window.removeEventListener('resize', loader._xtjSpringUltResizeFallback);
+                };
+            }
+
+            function initSpringUltLoaders(root) {
+                root = root || document;
+                if (!root.querySelectorAll) return;
+                root.querySelectorAll('.xtj-spring-ult').forEach(initSpringUltLoader);
+            }
+            window.xtjInitSpringUltLoaders = initSpringUltLoaders;
+
+            function disposeSpringUltLoaders(root) {
+                if (!root) return;
+                var nodes = root.matches && root.matches('.xtj-spring-ult') ? [root] : (root.querySelectorAll ? Array.prototype.slice.call(root.querySelectorAll('.xtj-spring-ult')) : []);
+                nodes.forEach(function(node) {
+                    if (node && typeof node._xtjSpringUltDispose === 'function') {
+                        node._xtjSpringUltDispose();
+                        node._xtjSpringUltDispose = null;
+                    }
+                });
+            }
+            window.xtjDisposeSpringUltLoaders = disposeSpringUltLoaders;
 
             function formatMsgTime(dateStr) {
                 var d = new Date(dateStr);
@@ -3650,7 +4018,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                                             function renderChatLoadingState(el, options) {
                 if (!el) return;
                 var title = options && options.title ? options.title : '加载中...';
-                var subtitle = options && options.subtitle ? options.subtitle : '法阵正在聚能';
+                var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
                 el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant);
             }
@@ -3945,7 +4313,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 preview.classList.add('hidden'); input.classList.remove('hidden'); fileInput.value = ''; input.focus();
             }
 
-            fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H5",location:"checkpoint:before-dock-bindings",msg:"[DEBUG] checkpoint BEFORE dock element bindings",data:{ts:Date.now()},ts:Date.now()})}).catch(function(){});
             try {
                 var _dsb = document.getElementById('dockChatSendBtn'); if (_dsb) _dsb.addEventListener('click', sendDockChatMessage);
                 var _dci = document.getElementById('dockChatInput'); if (_dci) _dci.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDockChatMessage(); } });
@@ -3953,9 +4320,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var _dfi = document.getElementById('dockChatFileInp'); if (_dfi) _dfi.addEventListener('change', function() { if (this.files.length) showDockChatFilePreview(this.files[0]); });
                 var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
             } catch(e) {
-                fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H5",location:"checkpoint:dock-bindings-error",msg:"[DEBUG] dock bindings threw: "+e.message,data:{stack:(e.stack||"").substring(0,300)},ts:Date.now()})}).catch(function(){});
             }
-            fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H5",location:"checkpoint:after-dock-bindings",msg:"[DEBUG] checkpoint AFTER dock element bindings",data:{ts:Date.now()},ts:Date.now()})}).catch(function(){});
 
             window.addEventListener('DOMContentLoaded', async function() {
                 // iOS 闁款喚娲忓鐟板毉娣囶喖顦? 闁灝鍘?dock-bar 鐞氼偊鏁惄姗€銆婃稉濠傚箵
@@ -5608,13 +5973,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             renderChatLoadingState = window.renderChatLoadingState = function(el, options) {
                 if (!el) return;
                 var title = options && options.title ? options.title : '加载中...';
-                var subtitle = options && options.subtitle ? options.subtitle : '魔法粒子正在聚合';
                 var variant = options && options.variant ? String(options.variant) : 'chat-detail';
-                el.innerHTML = magicHtml(title, subtitle, variant);
+                el.innerHTML = magicHtml(title, '', variant);
+                initSpringUltLoaders(el);
             };
 
             renderPostFilterUserLoader = window.renderPostFilterUserLoader = function() {
-                return magicHtml('加载中...', '筛选用户正在聚合...', 'post-user');
+                return magicHtml('加载中...', '', 'post-user');
             };
 
             if (typeof loadFeed === 'function' && !loadFeed.__xtjMagicLoaderV4) {
@@ -5623,7 +5988,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = orig.apply(this, arguments);
                     var feed = document.getElementById('feed');
                     if (feed && /loading-spinner|loading-text|内容加载中.../.test(feed.innerHTML || '')) {
-                        feed.innerHTML = magicHtml(forceRefresh ? '内容刷新中...' : '加载中...', '魔法粒子正在聚合', 'feed');
+                        feed.innerHTML = magicHtml(forceRefresh ? '内容刷新中...' : '加载中...', '', 'feed');
+                        initSpringUltLoaders(feed);
                     }
                     return r;
                 };
@@ -5636,7 +6002,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = origChat.apply(this, arguments);
                     var el = document.getElementById('dockChatMessages');
                     if (el && (el.querySelector('.chat-empty') || /加载中.../.test(el.textContent || ''))) {
-                        renderChatLoadingState(el, { title: '加载中...', subtitle: '正在打开聊天通道', variant: 'chat-detail' });
+                        renderChatLoadingState(el, { title: '加载中...', variant: 'chat-detail' });
                     }
                     return r;
                 };
@@ -5649,7 +6015,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = origPd.apply(this, arguments);
                     var body = document.getElementById('postDetailBody');
                     if (body && /loading-spinner|loading-text|加载中.../.test(body.innerHTML || '')) {
-                        body.innerHTML = magicHtml('加载中...', '魔法粒子正在聚合', 'feed');
+                        body.innerHTML = magicHtml('加载中...', '', 'feed');
+                        initSpringUltLoaders(body);
                     }
                     return r;
                 };
@@ -5662,7 +6029,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = origSd.apply(this, arguments);
                     var body = document.getElementById('statModalBody');
                     if (body && /loading-spinner|loading-text|加载中.../.test(body.innerHTML || '')) {
-                        body.innerHTML = magicHtml('加载中...', '魔法粒子正在聚合', 'feed');
+                        body.innerHTML = magicHtml('加载中...', '', 'feed');
+                        initSpringUltLoaders(body);
                     }
                     return r;
                 };
@@ -5673,12 +6041,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 root = root || document;
                 if (!root.querySelectorAll) return;
                 root.querySelectorAll('.xtj-magic-loading, .xtj-chat-loader, #feed .loading, #statModalBody .loading, #postDetailBody .loading, #dockChatMessages .chat-empty, #dockChatList .chat-empty, #postUserQuickList .post-user-chip--loading').forEach(function(node) {
-                    if (!node || node.querySelector('.xtj-magic-loader')) return;
+                    if (!node || node.querySelector('.xtj-spring-ult')) return;
                     var text = (node.textContent || '').replace(/\s+/g, '');
                     if (!text && !node.classList.contains('post-user-chip--loading')) return;
                     var variant = node.classList.contains('post-user-chip--loading') ? 'post-user' : ((node.id === 'dockChatMessages' || node.id === 'dockChatList' || node.classList.contains('xtj-chat-loader')) ? 'chat-list' : 'feed');
-                    node.outerHTML = magicHtml('加载中...', node.classList.contains('post-user-chip--loading') ? '筛选用户加载中' : '魔法粒子正在聚合', variant);
+                    node.outerHTML = magicHtml('加载中...', '', variant);
                 });
+                initSpringUltLoaders(root === document ? document : (root.parentNode || root));
             }
 
             patchNode(document);
@@ -5985,7 +6354,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         renderChatLoadingState = function(el, options) {
                 if (!el) return;
                 var title = options && options.title ? options.title : '加载中...';
-                var subtitle = options && options.subtitle ? options.subtitle : '法阵正在聚能';
+                var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
                 el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant);
             };
@@ -6045,6 +6414,5 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statPollTimer = setInterval(refreshStatModal, 15000);
             };
         })();
-fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H5",location:"IIFE:end",msg:"[DEBUG] IIFE fully executed",data:{hasSupabase:!!window.sb,currentUser:currentUser,feedAllPostsLen:feedAllPosts?feedAllPosts.length:0},ts:Date.now()})}).catch(function(){});
 })();
 
