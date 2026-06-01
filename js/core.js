@@ -1856,8 +1856,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(p.media_url).replace(/'/g, "\\'")}')">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'👍':'点赞'}</button>
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" onclick="togglePostPin('${escapeHtml(p.id).replace(/'/g, "\\'")}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
@@ -2135,6 +2136,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   <div class="actions">
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" onclick="togglePostPin('${escapeHtml(p.id).replace(/'/g, "\\'")}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
@@ -2354,10 +2356,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ];
                 if (canEditPost(post)) {
                     actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + id + '\')">编辑</button>');
-                }
-                if (canEditPost(post)) {
-                    var isPrivate = normalizePost(post).visibility === 'private';
-                    actions.push('<button type="button" class="action-btn visibility" onclick="togglePostVisibility(\'' + id + '\', this)">' + (isPrivate ? '🔓 设为公开' : '🔒 设为私密') + '</button>');
                 }
                 if (canPinPost(post)) {
                     actions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + id + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
@@ -5634,10 +5632,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var canEdit = canEditPost(post);
                 var canDel = canEdit && (post.actor_key === deviceId || post.actor_key === currentUser || isAdmin());
                 var detailActions = [];
-                if (canEdit) {
-                    var isPrivate = normalizePost(post).visibility === 'private';
-                    detailActions.push('<button type="button" class="action-btn visibility" onclick="togglePostVisibility(\'' + String(post.id).replace(/'/g, "\\'") + '\', this)">' + (isPrivate ? '🔓 设为公开' : '🔒 设为私密') + '</button>');
-                }
                 if (canPinPost(post)) {
                     detailActions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + String(post.id).replace(/'/g, "\\'") + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
