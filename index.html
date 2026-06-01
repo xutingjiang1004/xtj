@@ -807,6 +807,7 @@
         var cx = W / 2, cy = H / 2;
         var radius = 64;
         var TAU = Math.PI * 2;
+        var startTime = performance.now();
 
         function getVinePoint(angle, strand, time) {
             var wrap = Math.sin((angle + Math.PI / 2) * 5.2 + strand.phase + time * 0.8) * strand.wave;
@@ -1053,7 +1054,7 @@
                 var depth = (Math.sin(angle) + 1) / 2;
                 var size = butterfly.size * (0.80 + depth * 0.20);
                 var alpha = (0.58 + depth * 0.24) * appear;
-                for (var g = 3; g >= 1; g--) {
+                for (var g = 1; g >= 1; g--) {
                     var ghostAngle = angle - g * 0.024;
                     var ghostPos = pointOnCircle(cx, cy, ghostAngle, r);
                     drawButterfly(ghostPos.x, ghostPos.y, size * (1 - g * 0.08), butterflyAngle(ghostAngle), butterfly.color, 0.040 * (4 - g) * appear, true, time + butterfly.phase);
@@ -1100,6 +1101,7 @@
 
         function animate(ms) {
             if (!canvas.isConnected) return;
+            if (ms - startTime > 4000) return;
             var time = ms * 0.001;
             ctx.clearRect(0, 0, W, H);
             var headAngle = -Math.PI / 2 + (time / CYCLE) * TAU;
