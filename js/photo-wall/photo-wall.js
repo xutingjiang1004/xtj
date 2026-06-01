@@ -133,7 +133,11 @@
                 'zoom-out': '<circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path><path d="M8 11h6"></path>',
                 compact: '<circle cx="12" cy="12" r="10"></circle><path d="M9 12h6"></path>'
             };
-            return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + (paths[type] || '') + '</svg></span>';
+            var svgContent = paths[type] || '';
+            if (type === 'rotate') {
+                svgContent = '<g transform="translate(-1.5,0)">' + svgContent + '</g>';
+            }
+            return '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + svgContent + '</svg></span>';
         }
 
         function injectPreviewHotfixStyle() {
@@ -861,9 +865,23 @@
         window.zoomOut = zoomOut;
 
         window.ppRotatePhoto = function() {
-            if (!state.active) return;
-            state.rotation = (state.rotation + 90) % 360;
-            applyTransform(document.getElementById('photoPreviewImage'));
+            if (state.active) {
+                state.rotation = (state.rotation + 90) % 360;
+                applyTransform(document.getElementById('photoPreviewImage'));
+            } else {
+                var imgs = document.querySelectorAll('.pp-slide-img');
+                var cur = 0;
+                imgs.forEach(function(img) {
+                    if (img && img.style && img.src && img.src !== window.location.href) {
+                        if (img._xtjRotate !== undefined) {
+                            cur = (img._xtjRotate + 90) % 360;
+                        }
+                        img._xtjRotate = cur;
+                        img.style.transform = 'rotate(' + cur + 'deg)';
+                    }
+                });
+            }
+            if (window.showToast) window.showToast('\u5df2\u65cb\u8f6c');
         };
 
         window.shareCurrentPhoto = async function() {
@@ -881,6 +899,11 @@
         };
 
         window.showPhotoInfo = function() {
+            var existingModal = document.getElementById('ppInfoModal');
+            if (existingModal && existingModal.style.display !== 'none' && (existingModal.classList.contains('active') || existingModal.style.display === 'flex')) {
+                window.closePhotoInfo();
+                return;
+            }
             var photo = state.current;
             if (!photo) return;
             var modal = document.getElementById('ppInfoModal');
@@ -891,7 +914,7 @@
                 modal.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">照片详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>';
                 document.body.appendChild(modal);
                 modal.addEventListener('click', function(e) {
-                    if (!e.target.closest('.pp-info-modal-content')) window.closePhotoInfo();
+                    if (e.target === modal || !e.target.closest('.pp-info-modal-content')) window.closePhotoInfo();
                 });
             }
             var body = document.getElementById('ppInfoModalBody');

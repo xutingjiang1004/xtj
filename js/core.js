@@ -5,30 +5,31 @@
 (function(){if(document.getElementById('xtjGPUAccelStyle'))return;var s=document.createElement('style');s.id='xtjGPUAccelStyle';s.textContent='.xtj-magic-stage{will-change:transform}.xtj-magic-particle{will-change:transform,opacity}.xtj-magic-core{will-change:transform,opacity}';document.head.appendChild(s);})();
 // #region debug-point H5:onerror
 window.__dbg = window.__dbg || {}; window.__dbg.errors = [];
-window.onerror = function(m, s, l, c, e) { window.__dbg.errors.push({msg:m,src:s,line:l,col:c,err:e && e.stack,ts:Date.now()}); fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"page-unresponsive",runId:"pre",hypothesisId:"H5",location:"onerror",msg:"[DEBUG] Uncaught: "+m,data:{stack:e&&e.stack?e.stack.substring(0,500):""},ts:Date.now()})}).catch(function(){}); };
+function dbg(hypothesisId, location, msg, data) { try { var p = JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:hypothesisId,location:location,msg:msg,data:data||{},ts:Date.now()}); navigator.sendBeacon("http://127.0.0.1:7777/event", p); } catch(e) {} }
+window.onerror = function(m, s, l, c, e) { window.__dbg.errors.push({msg:m,src:s,line:l,col:c,err:e && e.stack,ts:Date.now()}); dbg("H5","onerror","[DEBUG] Uncaught: "+m,{stack:e&&e.stack?e.stack.substring(0,500):""}); };
 // #endregion
 // #region debug-point H2:iife-start
-fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"page-unresponsive",runId:"pre",hypothesisId:"H2",location:"core.js:2",msg:"[DEBUG] Outer IIFE entered",data:{ts:Date.now()},ts:Date.now()})}).catch(function(){});
+dbg("H2","core.js:2","[DEBUG] Outer IIFE entered",{ts:Date.now()});
 // #endregion
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
             const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
 // #region debug-point H1+H3:check-supabase
-fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"page-unresponsive",runId:"pre",hypothesisId:"H1",location:"core.js:6",msg:"[DEBUG] window.supabase = "+typeof window.supabase,data:{type:typeof window.supabase,hasScript:!!document.querySelector('script[src*=\"supabase\"]')},ts:Date.now()})}).catch(function(){});
+dbg("H1","core.js:6","[DEBUG] window.supabase = "+typeof window.supabase,{type:typeof window.supabase});
 // #endregion
             if (typeof window.supabase === 'undefined') {
                 var feedEl = document.getElementById('feed');
                 if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
 // #region debug-point H1:supabase-undefined
-fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"page-unresponsive",runId:"pre",hypothesisId:"H1",location:"core.js:9",msg:"[DEBUG] supabase UNDEFINED - returning early",data:{},ts:Date.now()})}).catch(function(){});
+dbg("H1","core.js:9","[DEBUG] supabase UNDEFINED");
 // #endregion
                 return;
             }
             const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 window.sb = sb;
 // #region debug-point H2:sb-created
-fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"page-unresponsive",runId:"pre",hypothesisId:"H2",location:"core.js:14",msg:"[DEBUG] sb created, window.sb = "+!!window.sb,data:{},ts:Date.now()})}).catch(function(){});
+dbg("H2","core.js:14","[DEBUG] sb created, window.sb = "+!!window.sb);
 // #endregion
-
+try { dbg("CP","cp:line31","CP1:line31"); document.title = "CP1-line31"; } catch(e) {}
 window.safeLocalStorageGetJSON = function(key, fallback) {
     try {
         var v = localStorage.getItem(key);
@@ -690,6 +691,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             document.getElementById('regNickInp').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') document.getElementById('regPwInp').focus();
             });
+            try { document.title = "CP3-afterRegBindings"; } catch(e) {}
 
             async function doRegister() {
                 const name = document.getElementById("regNickInp").value.trim();
@@ -2545,7 +2547,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var post;
                 var nextPinned;
                 try {
+                    var __dbg = {runId:"pre",hypothesisId:"H2",location:"togglePostPin:enter",msg:"[DEBUG] togglePostPin called",data:{postId:postId,currentUser:currentUser,feedAllPostsLen:feedAllPosts?feedAllPosts.length:0,typeofTogglePostPin:typeof window.togglePostPin}};
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H2",location:"togglePostPin:enter",msg:"[DEBUG] togglePostPin called,postId="+postId+",currentUser="+currentUser,data:{postId:postId,currentUser:currentUser,feedAllPostsLen:feedAllPosts?feedAllPosts.length:0,typeofTogglePostPin:typeof window.togglePostPin},ts:Date.now()})}).catch(function(){});
                     post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostPin:findPost",msg:"[DEBUG] post found = "+(post?"yes":"NO"),data:{postFound:!!post,postId:postId,canPin:post?canPinPost(post):false,typeofCanPinPost:typeof canPinPost},ts:Date.now()})}).catch(function(){});
                     if (!post || !canPinPost(post)) {
                         showToast("无权置顶这条帖子");
                         return;
@@ -2555,10 +2560,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         btn.textContent = post.is_pinned ? "取消中..." : "置顶中...";
                     }
                     nextPinned = !post.is_pinned;
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostPin:beforeUpdate",msg:"[DEBUG] about to updatePostRecord",data:{nextPinned:nextPinned,postIsPinned:post.is_pinned,postId:postId},ts:Date.now()})}).catch(function(){});
                     var result = await updatePostRecord(post, {
                         is_pinned: nextPinned,
                         pinned_at: nextPinned ? new Date().toISOString() : null
                     });
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostPin:afterUpdate",msg:"[DEBUG] updatePostRecord result.ok = "+result.ok,data:{ok:result.ok,error:result.error?result.error.message:"",resultKeys:Object.keys(result).join(",")},ts:Date.now()})}).catch(function(){});
                     if (!result.ok) {
                         if (btn) { btn.disabled = false; btn.textContent = post.is_pinned ? "取消置顶" : "置顶"; }
                         showToast("置顶操作失败: " + ((result.error && result.error.message) || "未知错误"));
@@ -2569,6 +2576,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     await loadFeed(true);
                 } catch (e) {
                     console.error("togglePostPin error:", e);
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostPin:catch",msg:"[DEBUG] togglePostPin threw: "+e.message,data:{stack:(e.stack||"").substring(0,500)},ts:Date.now()})}).catch(function(){});
                     if (btn) {
                         btn.disabled = false;
                         btn.textContent = post && typeof post.is_pinned !== 'undefined' ? (post.is_pinned ? "取消置顶" : "置顶") : "置顶";
@@ -2580,7 +2588,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var post;
                 var nextVisibility;
                 try {
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H2",location:"togglePostVisibility:enter",msg:"[DEBUG] togglePostVisibility called",data:{postId:postId,currentUser:currentUser},ts:Date.now()})}).catch(function(){});
                     post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostVisibility:findPost",msg:"[DEBUG] post found = "+(post?"yes":"NO"),data:{postFound:!!post,postId:postId,canEdit:post?canEditPost(post):false},ts:Date.now()})}).catch(function(){});
                     if (!post || !canEditPost(post)) {
                         showToast("无权修改这条帖子的隐私状态");
                         return;
@@ -2590,10 +2600,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         btn.textContent = "处理中...";
                     }
                     nextVisibility = post.visibility === "private" ? "public" : "private";
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostVisibility:beforeUpdate",msg:"[DEBUG] about to updatePostRecord visibility",data:{nextVisibility:nextVisibility,postId:postId},ts:Date.now()})}).catch(function(){});
                     var result = await updatePostRecord(post, {
                         visibility: nextVisibility,
                         visibility_set_at: new Date().toISOString()
                     });
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostVisibility:afterUpdate",msg:"[DEBUG] updatePostRecord visibility result.ok = "+result.ok,data:{ok:result.ok,error:result.error?result.error.message:"",resultKeys:Object.keys(result).join(",")},ts:Date.now()})}).catch(function(){});
                     if (!result.ok) {
                         if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🔒 设为私密" : "🔓 设为公开"; }
                         showToast("操作失败: " + ((result.error && result.error.message) || "未知错误"));
@@ -2604,6 +2616,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     await loadFeed(true);
                 } catch (e) {
                     console.error("togglePostVisibility error:", e);
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H3",location:"togglePostVisibility:catch",msg:"[DEBUG] togglePostVisibility threw: "+e.message,data:{stack:(e.stack||"").substring(0,500)},ts:Date.now()})}).catch(function(){});
                     if (btn) {
                         btn.disabled = false;
                         btn.textContent = "🔒 设为私密";
@@ -2612,9 +2625,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
             document.addEventListener('click', function(e) {
+                fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H4",location:"delegation:click",msg:"[DEBUG] document click fired",data:{targetTag:e.target.tagName,targetClass:e.target.className,hasClosestPinBtn:!!e.target.closest},ts:Date.now()})}).catch(function(){});
                 var btn = e.target.closest('.action-btn.pin');
+                fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H4",location:"delegation:closest",msg:"[DEBUG] closest(.action-btn.pin) = "+(btn?"found":"null"),data:{btnFound:!!btn,btnText:btn?btn.textContent:"",dataPostId:btn?btn.getAttribute("data-post-id"):""},ts:Date.now()})}).catch(function(){});
                 if (btn) {
                     var postId = btn.getAttribute('data-post-id');
+                    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H4",location:"delegation:found",msg:"[DEBUG] PIN button clicked, postId="+postId,data:{postId:postId,btnText:btn.textContent},ts:Date.now()})}).catch(function(){});
                     if (postId) {
                         togglePostPin(postId, btn);
                     }
@@ -3929,11 +3945,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 preview.classList.add('hidden'); input.classList.remove('hidden'); fileInput.value = ''; input.focus();
             }
 
-            document.getElementById('dockChatSendBtn').addEventListener('click', sendDockChatMessage);
-            document.getElementById('dockChatInput').addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDockChatMessage(); } });
-            document.getElementById('dockChatImgBtn').addEventListener('click', function() { document.getElementById('dockChatFileInp').click(); });
-            document.getElementById('dockChatFileInp').addEventListener('change', function() { if (this.files.length) showDockChatFilePreview(this.files[0]); });
-            document.getElementById('dockCfpRemove').addEventListener('click', clearDockChatFilePreview);
+            fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H5",location:"checkpoint:before-dock-bindings",msg:"[DEBUG] checkpoint BEFORE dock element bindings",data:{ts:Date.now()},ts:Date.now()})}).catch(function(){});
+            try {
+                var _dsb = document.getElementById('dockChatSendBtn'); if (_dsb) _dsb.addEventListener('click', sendDockChatMessage);
+                var _dci = document.getElementById('dockChatInput'); if (_dci) _dci.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDockChatMessage(); } });
+                var _dib = document.getElementById('dockChatImgBtn'); if (_dib) _dib.addEventListener('click', function() { document.getElementById('dockChatFileInp').click(); });
+                var _dfi = document.getElementById('dockChatFileInp'); if (_dfi) _dfi.addEventListener('change', function() { if (this.files.length) showDockChatFilePreview(this.files[0]); });
+                var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
+            } catch(e) {
+                fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H5",location:"checkpoint:dock-bindings-error",msg:"[DEBUG] dock bindings threw: "+e.message,data:{stack:(e.stack||"").substring(0,300)},ts:Date.now()})}).catch(function(){});
+            }
+            fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H5",location:"checkpoint:after-dock-bindings",msg:"[DEBUG] checkpoint AFTER dock element bindings",data:{ts:Date.now()},ts:Date.now()})}).catch(function(){});
 
             window.addEventListener('DOMContentLoaded', async function() {
                 // iOS 闁款喚娲忓鐟板毉娣囶喖顦? 闁灝鍘?dock-bar 鐞氼偊鏁惄姗€銆婃稉濠傚箵
@@ -5981,101 +6003,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ].join('');
             };
 
-            updatePostRecord = async function(post, updates) {
-                var normalized = normalizePost(post);
-                var nextVisibility = updates.visibility != null ? updates.visibility : normalized.visibility;
-                var nextPinned = updates.is_pinned != null ? !!updates.is_pinned : !!normalized.is_pinned;
-                var nextPinnedAt = Object.prototype.hasOwnProperty.call(updates, "pinned_at") ? updates.pinned_at : normalized.pinned_at;
-                var nextUpdatedAt = Object.prototype.hasOwnProperty.call(updates, "updated_at") ? updates.updated_at : normalized.updated_at;
-                var nextContent = typeof updates.content === "string" ? updates.content : normalized.content;
-                var directPayload = {
-                    content: nextContent,
-                    visibility: nextVisibility,
-                    is_pinned: nextPinned,
-                    pinned_at: nextPinnedAt,
-                    updated_at: nextUpdatedAt
-                };
-                var expectedState = {
-                    content: nextContent,
-                    visibility: nextVisibility,
-                    is_pinned: nextPinned,
-                    pinned_at: nextPinnedAt
-                };
-                var direct = await sb.from("posts").update(directPayload).eq("id", post.id);
-                if (!direct.error) {
-                    try {
-                        var verifiedDirect = await sb.from("posts").select("*").eq("id", post.id).maybeSingle();
-                        if (!verifiedDirect.error && matchesPostExpectation(verifiedDirect.data, expectedState)) {
-                            return { ok: true, fallback: false };
-                        }
-                    } catch (_) {}
-                }
-
-                var message = direct.error ? String(direct.error.message || "") : "";
-                var maybeSchemaIssue = /visibility|is_pinned|pinned_at|updated_at|column/i.test(message) || !direct.error;
-                if (direct.error && !maybeSchemaIssue) return { ok: false, error: direct.error };
-
-                var fallbackContent = buildPostStorageContent(normalized, nextContent, {
-                    visibility: nextVisibility,
-                    is_pinned: nextPinned,
-                    pinned_at: nextPinnedAt,
-                    updated_at: nextUpdatedAt
-                });
-                var fallback = await sb.from("posts").update({ content: fallbackContent }).eq("id", post.id);
-                if (fallback.error) return { ok: false, error: fallback.error };
-                try {
-                    var verifiedFallback = await sb.from("posts").select("*").eq("id", post.id).maybeSingle();
-                    if (verifiedFallback.error || !matchesPostExpectation(verifiedFallback.data, expectedState)) {
-                        return { ok: false, error: new Error("帖子状态未实际保存") };
-                    }
-                } catch (verifyFallbackError) {
-                    return { ok: false, error: verifyFallbackError };
-                }
-                return { ok: true, fallback: true };
-            };
-
-            window.saveEditPost = async function() {
-                if (!editPostId) return;
-                var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(editPostId); });
-                if (!post || !canEditPost(post)) {
-                    showToast("无权编辑这条帖子");
-                    return;
-                }
-                var input = document.getElementById("editPostInp");
-                var visibility = document.getElementById("editPostVisibility");
-                var btn = document.getElementById("saveEditPostBtn");
-                var nextContent = input ? input.value.trim() : "";
-                var nextVisibility = visibility ? visibility.value : "public";
-                if (!nextContent) {
-                    showToast("请输入帖子内容");
-                    return;
-                }
-                btn.disabled = true;
-                btn.textContent = "保存中...";
-                try {
-                    var result = await updatePostRecord(post, {
-                        content: nextContent.slice(0, 2000),
-                        visibility: nextVisibility,
-                        updated_at: new Date().toISOString()
-                    });
-                    if (!result.ok) {
-                        showToast("保存失败: " + ((result.error && result.error.message) || "未知错误"));
-                        return;
-                    }
-                    clearFeedCache();
-                    closeModal("editPostModal");
-                    editPostId = null;
-                    await loadFeed(true);
-                    showToast(nextVisibility === "private" ? "已改为私密" : "已改为公开");
-                } catch (e) {
-                    console.error("[edit-post] save failed", e);
-                    showToast("保存失败: " + (e && e.message ? e.message : "网络错误"));
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = "保存修改";
-                }
-            };
-
             window.openStatDetail = async function(type) {
                 statCurrentType = type;
                 var titles = {
@@ -6118,5 +6045,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statPollTimer = setInterval(refreshStatModal, 15000);
             };
         })();
+fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"pin-visibility-bug",runId:"pre",hypothesisId:"H5",location:"IIFE:end",msg:"[DEBUG] IIFE fully executed",data:{hasSupabase:!!window.sb,currentUser:currentUser,feedAllPostsLen:feedAllPosts?feedAllPosts.length:0},ts:Date.now()})}).catch(function(){});
 })();
 
