@@ -1,0 +1,12 @@
+.xtj-magic-loading,
+.xtj-magic-loading *,
+.spring-loader,
+.spring-loader *,
+.spring-canvas {
+  pointer-events: none !important;
+}
+
+.xtj-magic-loading {
+  position: relative !important;
+  z-index: 0 !important;
+}
