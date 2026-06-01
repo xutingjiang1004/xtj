@@ -4223,7 +4223,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     .subscribe();
             }
 
-            // ========== 閺囧瓨鏌婇弮銉ョ箶缁崵绮?==========
+            // 版本更新日志
+            const changelogData = [
                             {
                     version: 'v0.64',
                     date: '2026-05-31',
@@ -5263,6 +5264,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         </ul>
                     `
                 }
+            ];
 
             let currentAnnouncementTab = 'announcements';
             function switchAnnouncementTab(tab) {
