@@ -2355,8 +2355,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (canEditPost(post)) {
                     actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + id + '\')">编辑</button>');
                 }
+                if (canEditPost(post)) {
+                    var isPrivate = normalizePost(post).visibility === 'private';
+                    actions.push('<button type="button" class="action-btn visibility" onclick="togglePostVisibility(\'' + id + '\', this)">' + (isPrivate ? '🔓 设为公开' : '🔒 设为私密') + '</button>');
+                }
                 if (canPinPost(post)) {
-                    actions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + id + '\')">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                    actions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + id + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canDelete) {
                     actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + id + '\', \'' + actorKey + '\')">删除</button>');
@@ -2538,11 +2542,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     btn.textContent = "保存修改";
                 }
             };
-            window.togglePostPin = async function(postId) {
+            window.togglePostPin = async function(postId, btn) {
                 var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
                 if (!post || !canPinPost(post)) {
                     showToast("无权置顶这条帖子");
                     return;
+                }
+                if (btn) {
+                    btn.disabled = true;
+                    btn.textContent = post.is_pinned ? "取消中..." : "置顶中...";
                 }
                 var nextPinned = !post.is_pinned;
                 var result = await updatePostRecord(post, {
@@ -2550,11 +2558,36 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     pinned_at: nextPinned ? new Date().toISOString() : null
                 });
                 if (!result.ok) {
+                    if (btn) { btn.disabled = false; btn.textContent = post.is_pinned ? "取消置顶" : "置顶"; }
                     showToast("置顶操作失败: " + ((result.error && result.error.message) || "未知错误"));
                     return;
                 }
                 clearFeedCache();
-                showToast(nextPinned ? "帖子已置顶" : "已取消置顶");
+                showToast(nextPinned ? "✅ 帖子已置顶" : "✅ 已取消置顶");
+                await loadFeed(true);
+            };
+            window.togglePostVisibility = async function(postId, btn) {
+                var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
+                if (!post || !canEditPost(post)) {
+                    showToast("无权修改这条帖子的隐私状态");
+                    return;
+                }
+                if (btn) {
+                    btn.disabled = true;
+                    btn.textContent = "处理中...";
+                }
+                var nextVisibility = post.visibility === "private" ? "public" : "private";
+                var result = await updatePostRecord(post, {
+                    visibility: nextVisibility,
+                    visibility_set_at: new Date().toISOString()
+                });
+                if (!result.ok) {
+                    if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🔒 设为私密" : "🔓 设为公开"; }
+                    showToast("操作失败: " + ((result.error && result.error.message) || "未知错误"));
+                    return;
+                }
+                clearFeedCache();
+                showToast(nextVisibility === "private" ? "🔒 已设为私密，仅自己可见" : "🔓 已设为公开");
                 await loadFeed(true);
             };
             window.doPublish = async function () {
@@ -5598,13 +5631,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         ? '<video src="' + escapeHtml(post.media_url) + '" controls preload="none"></video>'
                         : '<img src="' + escapeHtml(post.media_url) + '" onclick="openImageViewer(\'' + escapeHtml(post.media_url).replace(/'/g, "\\'") + '\')" loading="lazy" />'
                 ) : '';
+                var canEdit = canEditPost(post);
+                var canDel = canEdit && (post.actor_key === deviceId || post.actor_key === currentUser || isAdmin());
+                var detailActions = [];
+                if (canEdit) {
+                    var isPrivate = normalizePost(post).visibility === 'private';
+                    detailActions.push('<button type="button" class="action-btn visibility" onclick="togglePostVisibility(\'' + String(post.id).replace(/'/g, "\\'") + '\', this)">' + (isPrivate ? '🔓 设为公开' : '🔒 设为私密') + '</button>');
+                }
+                if (canPinPost(post)) {
+                    detailActions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + String(post.id).replace(/'/g, "\\'") + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                }
+                if (canDel) {
+                    detailActions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + String(post.id).replace(/'/g, "\\'") + '\', \'' + String(post.actor_key || "").replace(/'/g, "\\'") + '\')">删除</button>');
+                }
                 return [
                     '<div class="post-detail-header"><div class="pdh-left">',
                     '<div class="pdh-name">' + escapeHtml(post.user_name) + '</div>',
                     '<div class="pdh-time">' + new Date(post.created_at).toLocaleString() + '</div>',
-                    '</div></div>',
+                    '</div>',
+                    '<div class="pdh-badges">' + buildPostBadges(post) + '</div>',
+                    '</div>',
                     post.content ? '<div class="post-detail-content">' + escapeHtml(post.content) + '</div>' : '',
                     mediaHtml ? '<div class="post-detail-media">' + mediaHtml + '</div>' : '',
+                    detailActions.length ? '<div class="post-detail-actions">' + detailActions.join("") + '</div>' : '',
                     '<div class="post-detail-stats">浏览 ' + vc + ' 次· 点赞 ' + likes.length + ' 次· 评论 ' + comments.length + ' 次</div>',
                     '<div class="stat-two-col">',
                     '<div class="stat-col"><div class="stat-section-title">✦ 点赞用户 ' + likes.length + '</div>' +

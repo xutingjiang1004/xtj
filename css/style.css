@@ -994,8 +994,20 @@
         .action-btn.pin {
             color: #b45309;
         }
+        .action-btn.pin:hover {
+            background: rgba(180,83,9,0.08);
+        }
+        .action-btn.visibility {
+            color: #7c3aed;
+        }
+        .action-btn.visibility:hover {
+            background: rgba(124,58,237,0.08);
+        }
         .action-btn.edit {
             color: #2563eb;
+        }
+        .action-btn.edit:hover {
+            background: rgba(37,99,235,0.06);
         }
 
         .comments { margin-top: 16px; padding-top: 16px; border-top: 1px solid rgba(0,0,0,0.06); display: grid; gap: 8px; }
@@ -2329,6 +2341,9 @@
         .post-detail-media img { border-radius:12px; max-height:300px; cursor:pointer; }
         .post-detail-media video { border-radius:12px; max-height:300px; width:100%; }
         .post-detail-stats { font-size:12px; color:var(--text-muted); margin-bottom:14px; }
+        .pdh-badges { display:flex; gap:6px; align-items:center; flex-shrink:0; margin-left:12px; }
+        .post-detail-actions { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+        .post-detail-actions .action-btn { font-size:12px; padding:4px 12px; }
 
         /* ========== App容器 / Dock / 面板 ========== */
         .app-container {

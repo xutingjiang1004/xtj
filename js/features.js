@@ -23,7 +23,7 @@
     ['璇█', '语言'], ['娴佺▼', '流程'], ['淇″彿', '信号'], ['寮傛', '异常'], ['璋冩暣', '调整'],
     ['浣撲細', '体验'], ['鍓嶇', '前端'], ['娓呯悊', '清理'], ['娈嬬暀', '残留'], ['涓婚', '主题'],
     ['昨天', '昨天'], ['� �� ��', '昨天'], ['昨�?', '昨天'], ['荨天', '昨天'], ['荤�', '昨天'],
-    ['加载中...', '加载中...'], ['加载中..', '加载中...'], ['加载中.', '加载中...'],
+
     ['</div><div>', ''], ['�?', ''], ['�', ''], ['💬', ''], ['📭', '?'], ['⚠️', ''], ['鈾?', '❤️'],
     ['宸茶禐', '已赞'], ['宸茶援', '已赞'], ['娉ㄥ唽', '注册'], ['閲嶈瘯', '重试'], ['姝ｅ湪', '正在'],
     ['鍘嬬缉', '压缩'], ['鍙戝竷', '发布'], ['淇濆瓨', '保存'], ['纭畾', '确定'],
@@ -32,7 +32,7 @@
   ];
 
   function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');}
-  function fixText(v){var s=String(v==null?'':v);MOJIBAKE_PAIRS.forEach(function(p){s=s.split(p[0]).join(p[1]);});s=s.replace(/加载\s*中/g,'加载中');s=s.replace(/加载\s+(?:高清|预览)/g,'加载高清');s=s.replace(/加载中\s+/g,'加载中');s=s.replace(/已读/g,'已读');s=s.replace(/未读/g,'未读');return s;} window.xtjFixText=fixText;
+  function fixText(v){var s=String(v==null?'':v);MOJIBAKE_PAIRS.forEach(function(p){s=s.split(p[0]).join(p[1]);});s=s.replace(/加载\s*中/g,'加载中');s=s.replace(/加载\s+(?:高清|预览)/g,'加载高清');s=s.replace(/加载中\s+/g,'加载中');s=s.replace(/(加载中)\.{2,}$/g,'$1...');s=s.replace(/已读/g,'已读');s=s.replace(/未读/g,'未读');return s;} window.xtjFixText=fixText;
   function bad(v){var s=String(v||'');if(/(�|�|��|加载$|发�|确�|作�|已�?$|未�?$|修�|字�|开$|�?$|—)/.test(s)||/无效|未知错误|网络错误/.test(s))return true;for(var i=0;i<MOJIBAKE_PAIRS.length;i++){var p=MOJIBAKE_PAIRS[i];if(p[0]!==p[1]&&p[0].length>=2&&s.indexOf(p[0])>=0)return true;}return false;}
 
   function addStyle(){var old=document.getElementById('xtjSafeFeatureFixStyle');if(old)old.remove();var st=document.createElement('style');st.id='xtjSafeFeatureFixStyle';st.textContent=`
