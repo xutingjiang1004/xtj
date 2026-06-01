@@ -311,6 +311,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
         function showToast(message) {
             const container = document.getElementById('toastContainer');
+            if (!container) { console.warn("showToast: toastContainer not found"); return; }
             const toast = document.createElement('div');
             toast.className = 'toast';
             if (typeof window.__xtjUiTextRepair === 'function') {
@@ -2356,6 +2357,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ];
                 if (canEditPost(post)) {
                     actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + id + '\')">编辑</button>');
+                    var isPrivate = normalizePost(post).visibility === 'private';
+                    actions.push('<button type="button" class="action-btn visibility" onclick="togglePostVisibility(\'' + id + '\', this)">' + (isPrivate ? '🔓 设为公开' : '🔒 设为私密') + '</button>');
                 }
                 if (canPinPost(post)) {
                     actions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + id + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
@@ -2541,52 +2544,74 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
             window.togglePostPin = async function(postId, btn) {
-                var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
-                if (!post || !canPinPost(post)) {
-                    showToast("无权置顶这条帖子");
-                    return;
+                var post;
+                var nextPinned;
+                try {
+                    post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
+                    if (!post || !canPinPost(post)) {
+                        showToast("无权置顶这条帖子");
+                        return;
+                    }
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.textContent = post.is_pinned ? "取消中..." : "置顶中...";
+                    }
+                    nextPinned = !post.is_pinned;
+                    var result = await updatePostRecord(post, {
+                        is_pinned: nextPinned,
+                        pinned_at: nextPinned ? new Date().toISOString() : null
+                    });
+                    if (!result.ok) {
+                        if (btn) { btn.disabled = false; btn.textContent = post.is_pinned ? "取消置顶" : "置顶"; }
+                        showToast("置顶操作失败: " + ((result.error && result.error.message) || "未知错误"));
+                        return;
+                    }
+                    clearFeedCache();
+                    showToast(nextPinned ? "✅ 帖子已置顶" : "✅ 已取消置顶");
+                    await loadFeed(true);
+                } catch (e) {
+                    console.error("togglePostPin error:", e);
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = post && typeof post.is_pinned !== 'undefined' ? (post.is_pinned ? "取消置顶" : "置顶") : "置顶";
+                    }
+                    showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
                 }
-                if (btn) {
-                    btn.disabled = true;
-                    btn.textContent = post.is_pinned ? "取消中..." : "置顶中...";
-                }
-                var nextPinned = !post.is_pinned;
-                var result = await updatePostRecord(post, {
-                    is_pinned: nextPinned,
-                    pinned_at: nextPinned ? new Date().toISOString() : null
-                });
-                if (!result.ok) {
-                    if (btn) { btn.disabled = false; btn.textContent = post.is_pinned ? "取消置顶" : "置顶"; }
-                    showToast("置顶操作失败: " + ((result.error && result.error.message) || "未知错误"));
-                    return;
-                }
-                clearFeedCache();
-                showToast(nextPinned ? "✅ 帖子已置顶" : "✅ 已取消置顶");
-                await loadFeed(true);
             };
             window.togglePostVisibility = async function(postId, btn) {
-                var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
-                if (!post || !canEditPost(post)) {
-                    showToast("无权修改这条帖子的隐私状态");
-                    return;
+                var post;
+                var nextVisibility;
+                try {
+                    post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
+                    if (!post || !canEditPost(post)) {
+                        showToast("无权修改这条帖子的隐私状态");
+                        return;
+                    }
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.textContent = "处理中...";
+                    }
+                    nextVisibility = post.visibility === "private" ? "public" : "private";
+                    var result = await updatePostRecord(post, {
+                        visibility: nextVisibility,
+                        visibility_set_at: new Date().toISOString()
+                    });
+                    if (!result.ok) {
+                        if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🔒 设为私密" : "🔓 设为公开"; }
+                        showToast("操作失败: " + ((result.error && result.error.message) || "未知错误"));
+                        return;
+                    }
+                    clearFeedCache();
+                    showToast(nextVisibility === "private" ? "🔒 已设为私密，仅自己可见" : "🔓 已设为公开");
+                    await loadFeed(true);
+                } catch (e) {
+                    console.error("togglePostVisibility error:", e);
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = "🔒 设为私密";
+                    }
+                    showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
                 }
-                if (btn) {
-                    btn.disabled = true;
-                    btn.textContent = "处理中...";
-                }
-                var nextVisibility = post.visibility === "private" ? "public" : "private";
-                var result = await updatePostRecord(post, {
-                    visibility: nextVisibility,
-                    visibility_set_at: new Date().toISOString()
-                });
-                if (!result.ok) {
-                    if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "🔒 设为私密" : "🔓 设为公开"; }
-                    showToast("操作失败: " + ((result.error && result.error.message) || "未知错误"));
-                    return;
-                }
-                clearFeedCache();
-                showToast(nextVisibility === "private" ? "🔒 已设为私密，仅自己可见" : "🔓 已设为公开");
-                await loadFeed(true);
             };
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
@@ -5634,6 +5659,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var detailActions = [];
                 if (canPinPost(post)) {
                     detailActions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + String(post.id).replace(/'/g, "\\'") + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                }
+                if (canEdit) {
+                    detailActions.push('<button type="button" class="action-btn visibility" onclick="togglePostVisibility(\'' + String(post.id).replace(/'/g, "\\'") + '\', this)">' + (normalizePost(post).visibility === 'private' ? '🔓 设为公开' : '🔒 设为私密') + '</button>');
                 }
                 if (canDel) {
                     detailActions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + String(post.id).replace(/'/g, "\\'") + '\', \'' + String(post.actor_key || "").replace(/'/g, "\\'") + '\')">删除</button>');
