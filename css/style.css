@@ -69,14 +69,6 @@
         }
 
         /* ========== 黑暗模式覆盖 ========== */
-        [data-theme="dark"] .rain-bg-container {
-            background: linear-gradient(135deg, #0d0d12 0%, #121218 50%, #16161d 100%);
-        }
-        [data-theme="dark"] .rain-glass-layer {
-            background: rgba(0,0,0,0.2);
-            backdrop-filter: blur(18px) saturate(110%);
-            -webkit-backdrop-filter: blur(18px) saturate(110%);
-        }
         [data-theme="dark"] nav {
             background: transparent;
         }
@@ -307,36 +299,6 @@
             -webkit-font-smoothing: antialiased;
             position: relative;
             isolation: isolate;
-        }
-
-        .rain-bg-container {
-            position: fixed;
-            inset: 0;
-            z-index: -999;
-            overflow: hidden;
-            pointer-events: none;
-            background: linear-gradient(135deg, #f0f2f5 0%, #e8ecf1 50%, #e2e5eb 100%);
-        }
-
-        #rainCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: block;
-            z-index: 1;
-            pointer-events: none;
-        }
-
-        .rain-glass-layer {
-            position: absolute;
-            inset: 0;
-            z-index: 2;
-            backdrop-filter: blur(18px) saturate(110%);
-            -webkit-backdrop-filter: blur(18px) saturate(110%);
-            background: rgba(255, 255, 255, 0.08);
-            pointer-events: none;
         }
 
         .toast-container {
@@ -5992,7 +5954,7 @@
         @media (hover: none) and (pointer: coarse) {
             .glass, .publish-box, .post, .modal-box, .chat-panel,
             .chat-entry-bar, .photo-wall-header,
-            .rain-glass-layer, .stat-detail-header,
+            .stat-detail-header,
             .profile-user-card {
                 backdrop-filter: blur(12px) saturate(120%) !important;
                 -webkit-backdrop-filter: blur(12px) saturate(120%) !important;
