@@ -1,269 +1,5 @@
-(function () {
-// 注入春日法阵加载器关键 CSS，保证首屏替换时立即可用
-(function() {
-    if (document.getElementById('xtjSpringUltStyleEager')) return;
-    var s = document.createElement('style');
-    s.id = 'xtjSpringUltStyleEager';
-    s.textContent = `
-.xtj-spring-ult{
-    --xtj-spring-ult-size:clamp(158px,25vw,214px);
-    --xtj-spring-ult-leaf:#95d47e;
-    --xtj-spring-ult-leaf-soft:rgba(182,236,164,.62);
-    --xtj-spring-ult-gold:#f2dfa4;
-    --xtj-spring-ult-white:#fffef7;
-    min-height:320px;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    justify-content:center;
-    gap:16px;
-    padding:38px 18px;
-    position:relative;
-    text-align:center;
-    pointer-events:none;
-    user-select:none;
-    isolation:isolate;
-    contain:layout style paint;
-    animation:xtjSpringUltFade .42s ease-out;
-}
-.xtj-spring-ult,.xtj-spring-ult *{pointer-events:none}
-.xtj-spring-ult--feed{min-height:264px;padding:30px 16px}
-.xtj-spring-ult--chat-list{min-height:50vh}
-.xtj-spring-ult--chat-detail{min-height:58vh}
-.xtj-spring-ult--post-user{--xtj-spring-ult-size:clamp(132px,20vw,176px);min-height:126px;padding:18px 10px}
-.xtj-spring-ult__stage{
-    position:relative;
-    width:var(--xtj-spring-ult-size);
-    height:var(--xtj-spring-ult-size);
-    display:grid;
-    place-items:center;
-    isolation:isolate;
-}
-.xtj-spring-ult__mist,
-.xtj-spring-ult__settle,
-.xtj-spring-ult__flash,
-.xtj-spring-ult__wave,
-.xtj-spring-ult__ring,
-.xtj-spring-ult__canvas,
-.xtj-spring-ult__flora{
-    position:absolute;
-    inset:0;
-}
-.xtj-spring-ult__mist{
-    border-radius:50%;
-    background:
-        radial-gradient(circle at 50% 46%, rgba(255,255,255,.9), rgba(255,255,255,0) 22%),
-        radial-gradient(circle, rgba(174,233,154,.36), rgba(174,233,154,0) 58%),
-        radial-gradient(circle at 50% 62%, rgba(242,223,164,.22), rgba(242,223,164,0) 66%);
-    filter:blur(12px);
-    opacity:.84;
-    transform:scale(.78);
-    animation:xtjSpringUltMist 5.8s ease-in-out infinite;
-}
-.xtj-spring-ult__settle{
-    inset:26%;
-    border-radius:50%;
-    background:radial-gradient(circle, rgba(255,255,255,.84), rgba(242,223,164,.26) 38%, rgba(149,212,126,0) 72%);
-    filter:blur(8px);
-    opacity:0;
-    transform:scale(1.26);
-    animation:xtjSpringUltSettle 5.8s ease-in-out infinite;
-}
-.xtj-spring-ult__flash{
-    inset:32%;
-    border-radius:50%;
-    background:radial-gradient(circle, rgba(255,255,255,.98), rgba(255,245,214,.94) 34%, rgba(255,245,214,0) 72%);
-    mix-blend-mode:screen;
-    opacity:0;
-    transform:scale(.2);
-    animation:xtjSpringUltFlash 5.8s cubic-bezier(.16,1,.3,1) infinite;
-}
-.xtj-spring-ult__wave{
-    inset:14%;
-    border-radius:50%;
-    border:2px solid rgba(152,214,122,.52);
-    box-shadow:0 0 0 1px rgba(242,223,164,.26) inset;
-    opacity:0;
-    transform:scale(.38);
-    animation:xtjSpringUltWave 5.8s ease-out infinite;
-}
-.xtj-spring-ult__wave--alt{
-    inset:18%;
-    border-color:rgba(242,223,164,.44);
-    animation-delay:.24s;
-}
-.xtj-spring-ult__ring{
-    border-radius:50%;
-    left:50%;
-    top:50%;
-    transform:translate(-50%,-50%) scale(.6);
-    transform-origin:center;
-}
-.xtj-spring-ult__ring--outer{
-    width:100%;
-    height:100%;
-    border:1px solid rgba(242,223,164,.55);
-    box-shadow:0 0 0 1px rgba(242,223,164,.12) inset,0 0 28px rgba(242,223,164,.18);
-    animation:xtjSpringUltOuterPhase 5.8s ease-in-out infinite, xtjSpringUltOuterSpin 12s linear infinite;
-}
-.xtj-spring-ult__ring--middle{
-    width:78%;
-    height:78%;
-    background:radial-gradient(circle, rgba(195,242,176,.24), rgba(195,242,176,.08) 48%, rgba(195,242,176,0) 66%);
-    border:1px solid rgba(149,212,126,.42);
-    box-shadow:0 0 34px rgba(149,212,126,.22), inset 0 0 34px rgba(206,241,188,.12);
-    animation:xtjSpringUltMiddlePhase 5.8s ease-in-out infinite;
-}
-.xtj-spring-ult__ring--inner{
-    width:52%;
-    height:52%;
-    background:radial-gradient(circle, rgba(255,255,255,.82), rgba(255,250,232,.45) 34%, rgba(255,250,232,.12) 62%, rgba(255,250,232,0) 74%);
-    box-shadow:0 0 18px rgba(255,253,244,.78), 0 0 38px rgba(242,223,164,.22);
-    animation:xtjSpringUltInnerPhase 5.8s ease-in-out infinite;
-}
-.xtj-spring-ult__flora{
-    overflow:visible;
-    opacity:.92;
-}
-.xtj-spring-ult__vine{
-    fill:none;
-    stroke-linecap:round;
-    stroke-linejoin:round;
-    vector-effect:non-scaling-stroke;
-    stroke-dasharray:220;
-    stroke-dashoffset:220;
-    animation:xtjSpringUltVineGrow 5.8s cubic-bezier(.16,1,.3,1) infinite;
-}
-.xtj-spring-ult__vine--a{stroke:rgba(149,212,126,.74);stroke-width:2.4}
-.xtj-spring-ult__vine--b{stroke:rgba(242,223,164,.66);stroke-width:2;animation-delay:.12s}
-.xtj-spring-ult__vine--c{stroke:rgba(255,255,255,.54);stroke-width:1.6;animation-delay:.2s}
-.xtj-spring-ult__canvas{
-    mix-blend-mode:screen;
-    opacity:.96;
-}
-.xtj-spring-ult__text{
-    position:relative;
-    z-index:2;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    gap:6px;
-}
-.xtj-spring-ult__title{
-    font-size:16px;
-    font-weight:800;
-    line-height:1.1;
-    letter-spacing:.04em;
-    color:#2a5e35;
-    text-shadow:0 0 18px rgba(255,255,255,.55),0 0 28px rgba(194,241,179,.32);
-}
-.xtj-spring-ult__title-wave{
-    display:inline-flex;
-    gap:1px;
-}
-.xtj-spring-ult__title-wave > span{
-    display:inline-block;
-    will-change:transform,opacity;
-    animation:xtjSpringUltTitleWave 1.9s ease-in-out infinite;
-    animation-delay:calc(var(--wave-index) * 88ms);
-}
-@keyframes xtjSpringUltFade{from{opacity:0;transform:translate3d(0,10px,0)}to{opacity:1;transform:translate3d(0,0,0)}}
-@keyframes xtjSpringUltFlash{
-    0%,100%{opacity:0;transform:scale(.2)}
-    7%{opacity:1;transform:scale(1.28)}
-    15%{opacity:.2;transform:scale(1.7)}
-    28%{opacity:.46;transform:scale(.92)}
-    64%{opacity:.24;transform:scale(1.04)}
-    82%{opacity:.1;transform:scale(.94)}
-}
-@keyframes xtjSpringUltWave{
-    0%,100%{opacity:0;transform:scale(.34)}
-    8%{opacity:.72;transform:scale(.74)}
-    22%{opacity:.14;transform:scale(1.2)}
-    40%{opacity:.22;transform:scale(.94)}
-    68%{opacity:.08;transform:scale(1.04)}
-}
-@keyframes xtjSpringUltOuterPhase{
-    0%,100%{opacity:0;transform:translate(-50%,-50%) scale(.5)}
-    16%{opacity:.94;transform:translate(-50%,-50%) scale(1.02)}
-    54%{opacity:.74;transform:translate(-50%,-50%) scale(1)}
-    82%{opacity:.46;transform:translate(-50%,-50%) scale(.96)}
-}
-@keyframes xtjSpringUltMiddlePhase{
-    0%,100%{opacity:0;transform:translate(-50%,-50%) scale(.56)}
-    18%{opacity:.92;transform:translate(-50%,-50%) scale(1)}
-    48%{opacity:.76;transform:translate(-50%,-50%) scale(1.05)}
-    74%{opacity:.62;transform:translate(-50%,-50%) scale(.98)}
-    88%{opacity:.38;transform:translate(-50%,-50%) scale(.92)}
-}
-@keyframes xtjSpringUltInnerPhase{
-    0%,100%{opacity:0;transform:translate(-50%,-50%) scale(.28)}
-    14%{opacity:1;transform:translate(-50%,-50%) scale(1.08)}
-    38%{opacity:.9;transform:translate(-50%,-50%) scale(.92)}
-    68%{opacity:.72;transform:translate(-50%,-50%) scale(1.04)}
-    88%{opacity:.42;transform:translate(-50%,-50%) scale(.82)}
-}
-@keyframes xtjSpringUltMist{
-    0%,100%{opacity:.08;transform:scale(.46)}
-    14%{opacity:.9;transform:scale(1.08)}
-    48%{opacity:.78;transform:scale(.98)}
-    78%{opacity:.44;transform:scale(.9)}
-    92%{opacity:.16;transform:scale(.72)}
-}
-@keyframes xtjSpringUltSettle{
-    0%,74%{opacity:0;transform:scale(1.26)}
-    82%{opacity:.14;transform:scale(1.02)}
-    90%{opacity:.48;transform:scale(.76)}
-    100%{opacity:.06;transform:scale(.4)}
-}
-@keyframes xtjSpringUltOuterSpin{to{rotate:360deg}}
-@keyframes xtjSpringUltVineGrow{
-    0%,100%{stroke-dashoffset:220;opacity:0}
-    12%{opacity:.92}
-    26%{stroke-dashoffset:0;opacity:1}
-    66%{stroke-dashoffset:0;opacity:.84}
-    88%{stroke-dashoffset:-40;opacity:.28}
-}
-@keyframes xtjSpringUltTitleWave{
-    0%,100%{opacity:.46;transform:translate3d(0,0,0) scale(.96)}
-    42%{opacity:1;transform:translate3d(0,-4px,0) scale(1.08)}
-    68%{opacity:.8;transform:translate3d(0,0,0) scale(1)}
-}
-@media (max-width:768px){
-    .xtj-spring-ult{
-        --xtj-spring-ult-size:clamp(142px,44vw,184px);
-        gap:14px;
-        padding:26px 12px;
-    }
-    .xtj-spring-ult__title{font-size:15px}
-}
-@media (prefers-reduced-motion:reduce){
-    .xtj-spring-ult{animation:none}
-    .xtj-spring-ult__flash,
-    .xtj-spring-ult__wave,
-    .xtj-spring-ult__ring,
-    .xtj-spring-ult__vine,
-    .xtj-spring-ult__title-wave > span{
-        animation:none!important;
-    }
-    .xtj-spring-ult__canvas{opacity:0!important}
-    .xtj-spring-ult__mist{animation:none!important;opacity:.52;transform:scale(1)}
-    .xtj-spring-ult__ring--outer,
-    .xtj-spring-ult__ring--middle,
-    .xtj-spring-ult__ring--inner{opacity:.78;transform:translate(-50%,-50%) scale(1)}
-    .xtj-spring-ult__vine{stroke-dashoffset:0;opacity:.7}
-}
-`;
-    document.head.appendChild(s);
-})();
-// 关键元素 GPU 优化
-(function() {
-    if (document.getElementById('xtjSpringUltGpuStyle')) return;
-    var s = document.createElement('style');
-    s.id = 'xtjSpringUltGpuStyle';
-    s.textContent = '.xtj-spring-ult__stage,.xtj-spring-ult__flash,.xtj-spring-ult__wave,.xtj-spring-ult__ring,.xtj-spring-ult__title-wave>span{will-change:transform,opacity}';
-    document.head.appendChild(s);
-})();
+// Spring loader CSS is now in style.css - old CSS removed
+
 
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
             const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
@@ -3502,235 +3238,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
             window.escapeHtml = escapeHtml;
 
-            var springUltLoaderSeq = 0;
 
-            function normalizeMagicLoadingTitle(title) {
-                var text = String(title || '加载中...');
-                if (/加载中|刷新中/.test(text)) return '加载中...';
-                return text;
-            }
 
-            function buildMagicLoadingTitle(title) {
-                var text = normalizeMagicLoadingTitle(title);
-                if (text === '加载中...') {
-                    return '<span class="xtj-spring-ult__title-wave" aria-label="' + escapeHtml(text) + '">' +
-                        Array.from(text).map(function(char, index) {
-                            return '<span style="--wave-index:' + index + '" aria-hidden="true">' + escapeHtml(char) + '</span>';
-                        }).join('') +
-                    '</span>';
-                }
-                return escapeHtml(text);
-            }
-
-            function buildMagicLoadingHtml(title, subtitle, variant) {
-                var safeTitle = normalizeMagicLoadingTitle(title);
-                var safeVariant = String(variant || 'feed');
-                springUltLoaderSeq += 1;
-                return [
-                    '<div class="xtj-spring-ult xtj-spring-ult--' + safeVariant + '" data-xtj-spring-ult="' + springUltLoaderSeq + '" data-xtj-spring-variant="' + safeVariant + '" role="status" aria-live="polite" aria-label="' + escapeHtml(safeTitle) + '">',
-                    '<div class="xtj-spring-ult__stage" aria-hidden="true">',
-                    '<div class="xtj-spring-ult__mist"></div>',
-                    '<div class="xtj-spring-ult__settle"></div>',
-                    '<div class="xtj-spring-ult__flash"></div>',
-                    '<div class="xtj-spring-ult__wave"></div>',
-                    '<div class="xtj-spring-ult__wave xtj-spring-ult__wave--alt"></div>',
-                    '<div class="xtj-spring-ult__ring xtj-spring-ult__ring--outer"></div>',
-                    '<div class="xtj-spring-ult__ring xtj-spring-ult__ring--middle"></div>',
-                    '<div class="xtj-spring-ult__ring xtj-spring-ult__ring--inner"></div>',
-                    '<svg class="xtj-spring-ult__flora" viewBox="0 0 200 200" aria-hidden="true" focusable="false">',
-                    '<path class="xtj-spring-ult__vine xtj-spring-ult__vine--a" d="M100 22c-10 14-14 28-12 42 3 17 17 25 17 38 0 9-5 17-17 25"></path>',
-                    '<path class="xtj-spring-ult__vine xtj-spring-ult__vine--b" d="M36 116c18-2 34-10 44-24 9-12 12-26 20-34 8-8 18-13 38-16"></path>',
-                    '<path class="xtj-spring-ult__vine xtj-spring-ult__vine--c" d="M60 52c10 8 18 19 22 31 6 18 3 34-8 54"></path>',
-                    '</svg>',
-                    '<canvas class="xtj-spring-ult__canvas" aria-hidden="true"></canvas>',
-                    '</div>',
-                    '<div class="xtj-spring-ult__text"><div class="xtj-spring-ult__title">' + buildMagicLoadingTitle(safeTitle) + '</div></div>',
-                    '</div>'
-                ].join('');
-            }
-            window.xtjMagicLoadingHtml = buildMagicLoadingHtml;
-
-            function isSpringUltReducedMotion() {
-                return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-            }
-
-            function getSpringUltParticleCount(loader) {
-                var variant = loader && loader.getAttribute('data-xtj-spring-variant');
-                var mobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
-                var base = mobile ? 28 : 64;
-                if (variant === 'post-user') return mobile ? 20 : 36;
-                if (variant === 'chat-detail') return mobile ? 32 : 72;
-                return base;
-            }
-
-            function buildSpringUltParticles(count) {
-                var types = [];
-                var profile = count <= 36
-                    ? { petal: 8, leaf: 5, pollen: 10, butterfly: 2, dew: 3 }
-                    : { petal: 18, leaf: 14, pollen: 20, butterfly: 5, dew: 7 };
-                Object.keys(profile).forEach(function(type) {
-                    for (var i = 0; i < profile[type]; i++) types.push(type);
-                });
-                while (types.length < count) types.push('pollen');
-                return types.slice(0, count).map(function(type, index) {
-                    var phase = Math.random() * Math.PI * 2;
-                    return {
-                        type: type,
-                        phase: phase,
-                        radius: 24 + Math.random() * 62,
-                        driftX: 8 + Math.random() * 22,
-                        driftY: 6 + Math.random() * 18,
-                        speed: 0.18 + Math.random() * 0.18,
-                        orbitScale: 0.72 + Math.random() * 0.42,
-                        size: type === 'pollen' ? 1.4 + Math.random() * 1.8 : type === 'dew' ? 2.2 + Math.random() * 2.2 : type === 'butterfly' ? 5.2 + Math.random() * 2.2 : 4 + Math.random() * 3.4,
-                        seed: (index + 1) / (count + 2),
-                        tint: (function() {
-                            if (type === 'petal') return 'rgba(255,242,247,';
-                            if (type === 'leaf') return 'rgba(165,224,142,';
-                            if (type === 'dew') return 'rgba(236,252,255,';
-                            if (type === 'butterfly') return 'rgba(252,241,197,';
-                            return 'rgba(255,247,206,';
-                        })()
-                    };
-                });
-            }
-
-            function drawSpringUltParticle(ctx, particle, x, y, alpha, time) {
-                ctx.save();
-                ctx.translate(x, y);
-                ctx.rotate(Math.sin(time * particle.speed * 1.2 + particle.phase) * 0.7);
-                ctx.globalAlpha = alpha;
-                if (particle.type === 'pollen') {
-                    ctx.fillStyle = particle.tint + (0.42 + alpha * 0.5) + ')';
-                    ctx.beginPath();
-                    ctx.arc(0, 0, particle.size, 0, Math.PI * 2);
-                    ctx.fill();
-                } else if (particle.type === 'dew') {
-                    ctx.fillStyle = particle.tint + (0.32 + alpha * 0.4) + ')';
-                    ctx.beginPath();
-                    ctx.arc(0, 0, particle.size, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.fillStyle = 'rgba(255,255,255,' + Math.min(0.9, alpha + 0.18) + ')';
-                    ctx.beginPath();
-                    ctx.arc(-particle.size * 0.3, -particle.size * 0.35, particle.size * 0.35, 0, Math.PI * 2);
-                    ctx.fill();
-                } else if (particle.type === 'leaf') {
-                    ctx.fillStyle = particle.tint + (0.28 + alpha * 0.46) + ')';
-                    ctx.beginPath();
-                    ctx.moveTo(0, -particle.size);
-                    ctx.quadraticCurveTo(particle.size * 0.82, 0, 0, particle.size);
-                    ctx.quadraticCurveTo(-particle.size * 0.66, 0, 0, -particle.size);
-                    ctx.fill();
-                } else if (particle.type === 'butterfly') {
-                    ctx.fillStyle = particle.tint + (0.24 + alpha * 0.5) + ')';
-                    ctx.beginPath();
-                    ctx.ellipse(-particle.size * 0.28, 0, particle.size * 0.72, particle.size * 0.48, -0.4, 0, Math.PI * 2);
-                    ctx.ellipse(particle.size * 0.28, 0, particle.size * 0.72, particle.size * 0.48, 0.4, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.strokeStyle = 'rgba(120,94,46,' + Math.min(0.72, alpha + 0.1) + ')';
-                    ctx.lineWidth = 1.1;
-                    ctx.beginPath();
-                    ctx.moveTo(0, -particle.size * 0.6);
-                    ctx.lineTo(0, particle.size * 0.7);
-                    ctx.stroke();
-                } else {
-                    ctx.fillStyle = particle.tint + (0.24 + alpha * 0.52) + ')';
-                    ctx.beginPath();
-                    ctx.moveTo(0, -particle.size);
-                    ctx.quadraticCurveTo(particle.size * 0.9, -particle.size * 0.2, 0, particle.size);
-                    ctx.quadraticCurveTo(-particle.size * 0.9, -particle.size * 0.2, 0, -particle.size);
-                    ctx.fill();
-                }
-                ctx.restore();
-            }
-
-            function initSpringUltLoader(loader) {
-                if (!loader || loader.getAttribute('data-xtj-spring-init')) return;
-                loader.setAttribute('data-xtj-spring-init', '1');
-                var canvas = loader.querySelector('.xtj-spring-ult__canvas');
-                var stage = loader.querySelector('.xtj-spring-ult__stage');
-                if (!canvas || !stage) return;
-                if (isSpringUltReducedMotion()) {
-                    canvas.style.opacity = '0';
-                    return;
-                }
-                var ctx = canvas.getContext('2d');
-                if (!ctx) return;
-                var particles = buildSpringUltParticles(getSpringUltParticleCount(loader));
-                var rafId = 0;
-                var size = { width: 0, height: 0 };
-                var dpr = Math.min(window.devicePixelRatio || 1, 2);
-                var start = performance.now();
-
-                function resizeCanvas() {
-                    var rect = stage.getBoundingClientRect();
-                    if (!rect.width || !rect.height) return;
-                    size.width = rect.width;
-                    size.height = rect.height;
-                    canvas.width = Math.round(rect.width * dpr);
-                    canvas.height = Math.round(rect.height * dpr);
-                    canvas.style.width = rect.width + 'px';
-                    canvas.style.height = rect.height + 'px';
-                    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-                }
-
-                function frame(now) {
-                    if (!document.body.contains(loader)) return;
-                    if (!size.width || !size.height) resizeCanvas();
-                    var width = size.width;
-                    var height = size.height;
-                    var cx = width / 2;
-                    var cy = height / 2;
-                    var time = (now - start) / 1000;
-                    var cycle = ((now - start) % 5800) / 5800;
-                    var stageAlpha = cycle < 0.14 ? cycle / 0.14 : (cycle > 0.82 ? Math.max(0.36, 1 - (cycle - 0.82) / 0.18 * 0.48) : 1);
-                    ctx.clearRect(0, 0, width, height);
-                    particles.forEach(function(particle) {
-                        var angle = time * particle.speed + particle.phase;
-                        var bloom = 0.78 + 0.22 * Math.sin(time * 0.72 + particle.seed * Math.PI * 2);
-                        var radius = particle.radius * particle.orbitScale * bloom;
-                        var x = cx + Math.cos(angle) * radius + Math.sin(time * 0.44 + particle.phase) * particle.driftX;
-                        var y = cy + Math.sin(angle * 0.84 + particle.phase * 0.4) * radius * 0.66 + Math.cos(time * 0.38 + particle.phase) * particle.driftY;
-                        var alpha = stageAlpha * (0.24 + 0.58 * (0.5 + 0.5 * Math.sin(time * (0.48 + particle.seed) + particle.phase)));
-                        drawSpringUltParticle(ctx, particle, x, y, alpha, time);
-                    });
-                    rafId = requestAnimationFrame(frame);
-                }
-
-                resizeCanvas();
-                if (window.ResizeObserver) {
-                    loader._xtjSpringUltResizeObserver = new ResizeObserver(resizeCanvas);
-                    loader._xtjSpringUltResizeObserver.observe(stage);
-                } else {
-                    window.addEventListener('resize', resizeCanvas, { passive: true });
-                    loader._xtjSpringUltResizeFallback = resizeCanvas;
-                }
-                rafId = requestAnimationFrame(frame);
-                loader._xtjSpringUltDispose = function() {
-                    cancelAnimationFrame(rafId);
-                    if (loader._xtjSpringUltResizeObserver) loader._xtjSpringUltResizeObserver.disconnect();
-                    if (loader._xtjSpringUltResizeFallback) window.removeEventListener('resize', loader._xtjSpringUltResizeFallback);
-                };
-            }
-
-            function initSpringUltLoaders(root) {
-                root = root || document;
-                if (!root.querySelectorAll) return;
-                root.querySelectorAll('.xtj-spring-ult').forEach(initSpringUltLoader);
-            }
-            window.xtjInitSpringUltLoaders = initSpringUltLoaders;
-
-            function disposeSpringUltLoaders(root) {
-                if (!root) return;
-                var nodes = root.matches && root.matches('.xtj-spring-ult') ? [root] : (root.querySelectorAll ? Array.prototype.slice.call(root.querySelectorAll('.xtj-spring-ult')) : []);
-                nodes.forEach(function(node) {
-                    if (node && typeof node._xtjSpringUltDispose === 'function') {
-                        node._xtjSpringUltDispose();
-                        node._xtjSpringUltDispose = null;
-                    }
-                });
-            }
-            window.xtjDisposeSpringUltLoaders = disposeSpringUltLoaders;
 
             function formatMsgTime(dateStr) {
                 var d = new Date(dateStr);
@@ -5963,23 +5472,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (window.__xtjMagicLoaderV4Installed) return;
             window.__xtjMagicLoaderV4Installed = true;
 
+            var springLoaderHtml = '<div class="xtj-magic-loading" role="status" aria-live="polite"><div class="spring-loader" aria-label="春日藤蔓蝴蝶加载动画"><canvas class="spring-canvas" width="220" height="220" aria-hidden="true"></canvas></div></div>';
+
+            window.xtjMagicLoadingHtml = function() {
+                return springLoaderHtml;
+            };
             var magicHtml = window.xtjMagicLoadingHtml;
-            if (typeof magicHtml !== 'function') {
-                magicHtml = window.xtjMagicLoadingHtml = function(t, s, v) {
-                    return buildMagicLoadingHtml(t, s, v);
-                };
-            }
+
+            window.xtjInitSpringUltLoaders = function(root) {
+                if (window.initAllSpringLoaders) {
+                    window.initAllSpringLoaders(root || document);
+                }
+            };
 
             renderChatLoadingState = window.renderChatLoadingState = function(el, options) {
                 if (!el) return;
-                var title = options && options.title ? options.title : '加载中...';
-                var variant = options && options.variant ? String(options.variant) : 'chat-detail';
-                el.innerHTML = magicHtml(title, '', variant);
-                initSpringUltLoaders(el);
+                el.innerHTML = magicHtml();
+                if (window.initAllSpringLoaders) {
+                    window.initAllSpringLoaders(el);
+                }
             };
 
             renderPostFilterUserLoader = window.renderPostFilterUserLoader = function() {
-                return magicHtml('加载中...', '', 'post-user');
+                return magicHtml();
             };
 
             if (typeof loadFeed === 'function' && !loadFeed.__xtjMagicLoaderV4) {
@@ -5988,8 +5503,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = orig.apply(this, arguments);
                     var feed = document.getElementById('feed');
                     if (feed && /loading-spinner|loading-text|内容加载中.../.test(feed.innerHTML || '')) {
-                        feed.innerHTML = magicHtml(forceRefresh ? '内容刷新中...' : '加载中...', '', 'feed');
-                        initSpringUltLoaders(feed);
+                        feed.innerHTML = magicHtml();
+                        if (window.initAllSpringLoaders) {
+                            window.initAllSpringLoaders(feed);
+                        }
                     }
                     return r;
                 };
@@ -6015,8 +5532,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = origPd.apply(this, arguments);
                     var body = document.getElementById('postDetailBody');
                     if (body && /loading-spinner|loading-text|加载中.../.test(body.innerHTML || '')) {
-                        body.innerHTML = magicHtml('加载中...', '', 'feed');
-                        initSpringUltLoaders(body);
+                        body.innerHTML = magicHtml();
+                        if (window.initAllSpringLoaders) {
+                            window.initAllSpringLoaders(body);
+                        }
                     }
                     return r;
                 };
@@ -6029,8 +5548,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var r = origSd.apply(this, arguments);
                     var body = document.getElementById('statModalBody');
                     if (body && /loading-spinner|loading-text|加载中.../.test(body.innerHTML || '')) {
-                        body.innerHTML = magicHtml('加载中...', '', 'feed');
-                        initSpringUltLoaders(body);
+                        body.innerHTML = magicHtml();
+                        if (window.initAllSpringLoaders) {
+                            window.initAllSpringLoaders(body);
+                        }
                     }
                     return r;
                 };
@@ -6041,13 +5562,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 root = root || document;
                 if (!root.querySelectorAll) return;
                 root.querySelectorAll('.xtj-magic-loading, .xtj-chat-loader, #feed .loading, #statModalBody .loading, #postDetailBody .loading, #dockChatMessages .chat-empty, #dockChatList .chat-empty, #postUserQuickList .post-user-chip--loading').forEach(function(node) {
-                    if (!node || node.querySelector('.xtj-spring-ult')) return;
-                    var text = (node.textContent || '').replace(/\s+/g, '');
-                    if (!text && !node.classList.contains('post-user-chip--loading')) return;
-                    var variant = node.classList.contains('post-user-chip--loading') ? 'post-user' : ((node.id === 'dockChatMessages' || node.id === 'dockChatList' || node.classList.contains('xtj-chat-loader')) ? 'chat-list' : 'feed');
-                    node.outerHTML = magicHtml('加载中...', '', variant);
+                    if (!node) return;
+                    if (node.querySelector('.spring-loader')) return;
+                    node.outerHTML = springLoaderHtml;
                 });
-                initSpringUltLoaders(root === document ? document : (root.parentNode || root));
+                if (window.initAllSpringLoaders) {
+                    window.initAllSpringLoaders(root === document ? document : (root.parentNode || root));
+                }
             }
 
             patchNode(document);

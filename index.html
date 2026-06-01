@@ -1135,6 +1135,16 @@
     for (var i = 0; i < canvases.length; i++) {
         initSpringCanvas(canvases[i]);
     }
+
+    window.initSpringCanvas = initSpringCanvas;
+    window.initAllSpringLoaders = function(root) {
+        (root || document).querySelectorAll('.spring-canvas').forEach(function(c) {
+            if (!c._xtjSpringInited) {
+                c._xtjSpringInited = true;
+                initSpringCanvas(c);
+            }
+        });
+    };
 })();
 </script>
 </body>
