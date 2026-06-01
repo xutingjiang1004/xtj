@@ -1,8 +1,8 @@
 (function () {
-// 注入魔法加载器CSS，确保在任何加载前可用
-(function(){if(document.getElementById('xtjMagicLoadingStyleEager'))return;var s=document.createElement('style');s.id='xtjMagicLoadingStyleEager';s.textContent='.xtj-magic-loading{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:260px;padding:28px 16px 24px;text-align:center;isolation:isolate;overflow:hidden}.xtj-magic-loading::before{content:"";position:absolute;inset:-20% -10%;background:radial-gradient(circle at 50% 42%,rgba(255,255,255,.18),transparent 24%),radial-gradient(circle at 45% 48%,rgba(123,213,255,.10),transparent 36%),radial-gradient(circle at 58% 56%,rgba(255,227,154,.10),transparent 38%),radial-gradient(circle at 50% 50%,rgba(181,156,255,.12),transparent 60%);filter:blur(18px);opacity:.96;pointer-events:none;animation:xtjEchoAura 4.2s ease-in-out infinite}.xtj-magic-loading::after{content:"";position:absolute;inset:0;background-image:radial-gradient(circle,rgba(255,255,255,.28) 1px,transparent 1.6px),radial-gradient(circle,rgba(255,227,154,.24) 1px,transparent 1.6px);background-size:92px 92px,146px 146px;background-position:0 0,28px 38px;opacity:.14;pointer-events:none;animation:xtjMagicGridDrift 14s linear infinite}.xtj-echo-stage{position:relative;width:min(72vw,320px);aspect-ratio:1;display:grid;place-items:center;z-index:1;animation:xtjEchoFloat 4.8s ease-in-out infinite;filter:drop-shadow(0 30px 80px rgba(123,213,255,.22))}.xtj-echo-aura{position:absolute;inset:8%;border-radius:50%;background:radial-gradient(circle at 50% 48%,rgba(255,255,255,.88),rgba(255,227,154,.22) 22%,rgba(123,213,255,.16) 44%,rgba(181,156,255,.08) 60%,transparent 72%);filter:blur(8px);opacity:.96;animation:xtjEchoAura 4.2s ease-in-out infinite}.xtj-echo-rune{position:absolute;inset:0;border-radius:50%;border:1.5px solid rgba(255,227,154,.38);box-shadow:0 0 0 2px rgba(123,213,255,.08),0 0 60px rgba(255,227,154,.12),inset 0 0 20px rgba(255,227,154,.06);animation:xtjRuneSpin 12s linear infinite}.xtj-echo-rune--inner{inset:14%;border-style:dashed;border-width:1.5px;border-color:rgba(123,213,255,.42);box-shadow:0 0 0 2px rgba(181,156,255,.06),0 0 30px rgba(123,213,255,.14);animation:xtjRuneSpinReverse 7s linear infinite}.xtj-echo-field{position:absolute;inset:16%;border-radius:50%;background:conic-gradient(from 0deg,rgba(255,227,154,.08),rgba(123,213,255,.26),rgba(181,156,255,.16),rgba(255,227,154,.12),rgba(123,213,255,.20),rgba(255,227,154,.08));filter:blur(.5px);animation:xtjAbsorbSwirl 5.6s ease-in-out infinite}.xtj-echo-mirror{position:absolute;inset:24%;border-radius:42% 58% 52% 48%/54% 54% 46% 46%;background:linear-gradient(135deg,rgba(255,255,255,.72),rgba(255,255,255,.18) 28%,rgba(123,213,255,.22) 62%,rgba(255,227,154,.24),rgba(181,156,255,.14));border:1.5px solid rgba(255,247,214,.78);box-shadow:0 0 0 1.5px rgba(255,255,255,.22),0 20px 60px rgba(123,213,255,.22),inset 0 0 36px rgba(255,255,255,.22);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);transform:perspective(900px) rotateY(-12deg) rotateX(5deg);animation:xtjMirrorFloat 4.8s ease-in-out infinite}.xtj-echo-mirror-line{position:absolute;inset:14% 18%;border-radius:inherit;border-top:1.5px solid rgba(255,255,255,.62);border-bottom:1.5px solid rgba(255,227,154,.22);opacity:.78}.xtj-echo-shock{position:absolute;width:24%;aspect-ratio:1;border-radius:50%;border:2.5px solid rgba(255,227,154,.70);box-shadow:0 0 24px rgba(255,227,154,.28);opacity:0;animation:xtjShockLoop 3.2s ease-out infinite}.xtj-echo-bolt{position:absolute;height:7px;border-radius:999px;opacity:0;pointer-events:none;z-index:7}.xtj-echo-bolt--in{right:-26%;top:48%;width:48%;background:linear-gradient(90deg,transparent,#ff7a9c,#ffd1dc,#fff);box-shadow:0 0 22px rgba(255,111,141,.82),0 0 54px rgba(255,111,141,.46);transform:rotate(180deg);animation:xtjIncoming 3.6s ease-in infinite}.xtj-echo-bolt--out{left:44%;top:44%;width:56%;background:linear-gradient(90deg,transparent,#83ddff,#fff1b4,#fff);box-shadow:0 0 24px rgba(123,213,255,.82),0 0 68px rgba(255,227,154,.42);transform:rotate(-24deg);animation:xtjReflected 3.6s ease-out infinite}.xtj-echo-blade{position:absolute;left:38%;top:52%;width:68%;height:10px;border-radius:999px;background:linear-gradient(90deg,transparent,#fff,#ffe39a,transparent);box-shadow:0 0 32px rgba(255,227,154,.88),0 0 88px rgba(255,227,154,.48);clip-path:polygon(0 46%,70% 0,100% 50%,70% 100%,0 54%);opacity:0;transform:rotate(-8deg);animation:xtjBladeSlash 4.8s cubic-bezier(.12,.78,.2,1) infinite;z-index:9}.xtj-echo-shard{position:absolute;width:14px;height:38px;background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(255,218,138,.10));border:1px solid rgba(255,255,255,.48);clip-path:polygon(45% 0,100% 72%,40% 100%,0 24%);filter:drop-shadow(0 0 14px rgba(255,222,140,.68));opacity:.76;z-index:6;animation:xtjShardOrbit 8s linear infinite}.xtj-echo-shard--1{top:13%;left:18%;animation-delay:-1s}.xtj-echo-shard--2{top:19%;right:11%;animation-delay:-3.2s;transform:scale(.82)}.xtj-echo-shard--3{bottom:17%;left:11%;animation-delay:-5.5s;transform:scale(1.12)}.xtj-echo-shard--4{bottom:11%;right:23%;animation-delay:-6.8s;transform:scale(.78)}.xtj-echo-particle{position:absolute;width:7px;height:7px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.98) 0,rgba(255,227,154,.94) 36%,rgba(255,227,154,.06) 74%);box-shadow:0 0 18px rgba(255,227,154,.92);pointer-events:none;z-index:13;animation:xtjParticlePulse 2.4s ease-in-out infinite}.xtj-echo-particle--1{top:22%;left:24%;animation-delay:-.4s}.xtj-echo-particle--2{bottom:22%;right:22%;animation-delay:-1.2s}.xtj-echo-particle--3{bottom:16%;left:50%;margin-left:-4px;animation-delay:-1.8s}.xtj-spark{position:absolute;width:5px;height:5px;border-radius:50%;background:#fff;box-shadow:0 0 12px rgba(181,156,255,.9),0 0 28px rgba(123,213,255,.6);pointer-events:none;z-index:14;animation:xtjSparkDrift 3.6s ease-in-out infinite}.xtj-spark--1{top:10%;left:62%;animation-delay:-.3s;width:4px;height:4px}.xtj-spark--2{top:28%;right:4%;animation-delay:-1.1s;width:6px;height:6px}.xtj-spark--3{bottom:8%;left:34%;animation-delay:-2.0s;width:4px;height:4px}.xtj-spark--4{top:58%;left:6%;animation-delay:-2.6s;width:5px;height:5px}.xtj-spark--5{bottom:28%;right:8%;animation-delay:-3.1s;width:4px;height:4px}.xtj-spark--6{top:42%;right:16%;animation-delay:-1.6s;width:6px;height:6px}.xtj-spark--7{bottom:42%;left:22%;animation-delay:-2.4s;width:4px;height:4px}.xtj-spark--8{top:14%;left:34%;animation-delay:-3.4s;width:5px;height:5px}.xtj-magic-loading-title{position:relative;z-index:1;margin-top:2px;font-size:20px;font-weight:850;letter-spacing:.06em;color:#ffe39a;text-shadow:0 0 28px rgba(255,227,154,.34),0 0 48px rgba(123,213,255,.16)}.xtj-magic-loading-dots{display:flex;gap:7px;position:relative;z-index:1;margin-top:2px}.xtj-magic-loading-dots span{width:6px;height:6px;border-radius:50%;background:rgba(255,227,154,.72);box-shadow:0 0 14px rgba(255,227,154,.30);animation:xtjDot 1.1s ease-in-out infinite}.xtj-magic-loading-dots span:nth-child(2){animation-delay:.14s;background:rgba(123,213,255,.72)}.xtj-magic-loading-dots span:nth-child(3){animation-delay:.28s;background:rgba(181,156,255,.70)}@keyframes xtjMagicGridDrift{to{background-position:0 -90px,28px -52px}}@keyframes xtjEchoAura{0%,100%{transform:scale(.94);opacity:.58}50%{transform:scale(1.06);opacity:1}}@keyframes xtjEchoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}@keyframes xtjMirrorFloat{0%,100%{transform:perspective(900px) rotateY(-12deg) rotateX(5deg) translateY(0)}50%{transform:perspective(900px) rotateY(-7deg) rotateX(7deg) translateY(-16px)}}@keyframes xtjRuneSpin{to{transform:rotate(360deg)}}@keyframes xtjRuneSpinReverse{to{transform:rotate(-360deg)}}@keyframes xtjAbsorbSwirl{0%,100%{opacity:.42;transform:rotate(0deg) scale(.92)}50%{opacity:.82;transform:rotate(180deg) scale(1.06)}}@keyframes xtjShockLoop{0%,70%{opacity:0;transform:scale(.18)}77%{opacity:.65;transform:scale(.35)}100%{opacity:0;transform:scale(2.8);filter:blur(3px)}}@keyframes xtjIncoming{0%,54%{opacity:0;transform:translateX(0) rotate(180deg) scaleX(.8)}60%{opacity:1}82%{opacity:1;transform:translateX(calc(var(--s)*-.86)) rotate(180deg) scaleX(1.1)}100%{opacity:0;transform:translateX(calc(var(--s)*-.93)) rotate(180deg) scaleX(.25)}}@keyframes xtjReflected{0%,66%{opacity:0;transform:rotate(-24deg) translateX(0) scaleX(.3)}72%{opacity:1}100%{opacity:0;transform:rotate(-24deg) translateX(calc(var(--s)*.78)) scaleX(1.1)}}@keyframes xtjBladeSlash{0%,72%{opacity:0;transform:rotate(-8deg) translateX(-70px) scaleX(.25);filter:blur(4px)}78%{opacity:1;filter:blur(0)}91%{opacity:1;transform:rotate(-8deg) translateX(160px) scaleX(1.18)}100%{opacity:0;transform:rotate(-8deg) translateX(300px) scaleX(.38);filter:blur(2px)}}@keyframes xtjShardOrbit{0%{transform:translateY(0) rotate(0deg);opacity:.26}40%{opacity:.95}100%{transform:translateY(-38px) rotate(360deg);opacity:.26}}@keyframes xtjParticlePulse{0%,100%{opacity:.36;transform:scale(.68)}50%{opacity:1;transform:scale(1.16)}}@keyframes xtjSparkDrift{0%,100%{transform:translate(0,0) scale(.6);opacity:.3}25%{transform:translate(14px,-18px) scale(1.2);opacity:.9}50%{transform:translate(-8px,-32px) scale(.7);opacity:.6}75%{transform:translate(-16px,-14px) scale(1.1);opacity:.88}}@keyframes xtjDot{0%,100%{transform:translateY(0);opacity:.42}50%{transform:translateY(-5px);opacity:1}}@media (prefers-reduced-motion: reduce){.xtj-echo-loader,.xtj-echo-loader *{animation:none!important}}';document.head.appendChild(s);})();
-// 注入GPU加速覆盖CSS，确保0/120fps平滑动画
-(function(){if(document.getElementById('xtjGPUAccelStyle'))return;var s=document.createElement('style');s.id='xtjGPUAccelStyle';s.textContent='.xtj-magic-loading,.xtj-magic-loading::before,.xtj-magic-loading::after,.xtj-echo-stage,.xtj-echo-aura,.xtj-echo-rune,.xtj-echo-rune--inner,.xtj-echo-field,.xtj-echo-mirror,.xtj-echo-shock,.xtj-echo-bolt,.xtj-echo-blade,.xtj-echo-shard,.xtj-echo-particle,.xtj-spark,.loading,.loading::before,.loading::after,.loading-spinner,.loading-spinner::before,.loading-spinner::after,.loading-spinner .inner-ring,.loading-spinner .magic-glow,.loading-spinner .magic-core,.loading-dots span,.xtj-echo-loader *{will-change:transform,opacity;backface-visibility:hidden;-webkit-backface-visibility:hidden;perspective:1000px;-webkit-perspective:1000px}.xtj-echo-bolt--in,.xtj-echo-bolt--out,.xtj-echo-blade,.xtj-echo-shard{will-change:transform,opacity,filter}.xtj-magic-loading::before,.loading::before{will-change:transform,opacity}.xtj-magic-loading::after,.loading::after{will-change:transform}.loading-spinner .magic-core{backface-visibility:visible}';document.head.appendChild(s);})();
+// 注入魔法粒子加载器关键CSS，确保渲染前立即可用
+(function(){if(document.getElementById('xtjMagicLoadingStyleEager'))return;var s=document.createElement('style');s.id='xtjMagicLoadingStyleEager';s.textContent='.xtj-magic-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;min-height:260px;padding:40px 20px;text-align:center;animation:mglFadeIn .35s ease-out}.xtj-magic-stage{position:relative;width:96px;height:96px;flex-shrink:0}.xtj-magic-core{position:absolute;top:50%;left:50%;width:18px;height:18px;margin:-9px 0 0 -9px;border-radius:50%;background:radial-gradient(circle at 35% 35%,rgba(255,255,255,.95),rgba(167,243,208,.88) 55%,rgba(56,189,248,.65));box-shadow:0 0 18px rgba(123,213,255,.55),0 0 40px rgba(110,231,183,.28);animation:mglCorePulse 1.8s ease-in-out infinite}.xtj-magic-ring{position:absolute;top:50%;left:50%;border-radius:50%;border:1px solid transparent}.xtj-magic-ring:nth-of-type(1){width:52px;height:52px;margin:-26px 0 0 -26px;border-top-color:rgba(110,231,183,.45);animation:mglSpin 3.6s linear infinite}.xtj-magic-ring:nth-of-type(2){width:64px;height:64px;margin:-32px 0 0 -32px;border-bottom-color:rgba(255,227,154,.35);animation:mglSpinRev 5s linear infinite}.xtj-magic-particle{position:absolute;top:50%;left:50%;width:5px;height:5px;border-radius:50%}.xtj-magic-particle:nth-child(4){animation:mglParticleOrbit1 2.6s linear infinite;background:rgba(110,231,183,.9);box-shadow:0 0 6px rgba(110,231,183,.55)}.xtj-magic-particle:nth-child(5){animation:mglParticleOrbit1 2.6s linear infinite;animation-delay:-.65s;background:rgba(123,213,255,.85)}.xtj-magic-particle:nth-child(6){animation:mglParticleOrbit1 2.6s linear infinite;animation-delay:-1.3s;background:rgba(167,243,208,.88)}.xtj-magic-particle:nth-child(7){animation:mglParticleOrbit1 2.6s linear infinite;animation-delay:-1.95s;background:rgba(255,227,154,.82)}.xtj-magic-particle:nth-child(8){animation:mglParticleOrbit2 3.4s linear infinite;background:rgba(110,231,183,.85);width:4px;height:4px}.xtj-magic-particle:nth-child(9){animation:mglParticleOrbit2 3.4s linear infinite;animation-delay:-1.13s;background:rgba(181,156,255,.8);width:4px;height:4px}.xtj-magic-particle:nth-child(10){animation:mglParticleOrbit2 3.4s linear infinite;animation-delay:-2.27s;background:rgba(123,213,255,.82);width:4px;height:4px}.xtj-magic-particle:nth-child(11){animation:mglParticleOrbit3 4.8s linear infinite;background:rgba(255,227,154,.75);width:3px;height:3px}.xtj-magic-particle:nth-child(12){animation:mglParticleOrbit3 4.8s linear infinite;animation-delay:-2.4s;background:rgba(110,231,183,.78);width:3px;height:3px}.xtj-magic-text{display:flex;flex-direction:column;align-items:center;gap:6px}.xtj-magic-title{font-size:15px;font-weight:700;color:var(--text-main,#1f2937)}.xtj-magic-subtitle{font-size:12px;color:var(--text-muted,#6b7280)}.xtj-magic-dots{display:flex;gap:5px;margin-top:2px}.xtj-magic-dots span{width:5px;height:5px;border-radius:50%;background:rgba(110,231,183,.7);animation:mglSpanPulse 1.2s ease-in-out infinite}.xtj-magic-dots span:nth-child(2){animation-delay:.15s;background:rgba(123,213,255,.7)}.xtj-magic-dots span:nth-child(3){animation-delay:.3s;background:rgba(255,227,154,.7)}.xtj-magic-progress{width:140px;height:3px;border-radius:3px;background:rgba(110,231,183,.12);overflow:hidden}.xtj-magic-bar{display:block;width:35%;height:100%;border-radius:inherit;background:linear-gradient(90deg,transparent,rgba(110,231,183,.55),rgba(123,213,255,.55),transparent);animation:mglProgressIndeterminate 1.8s ease-in-out infinite}@keyframes mglFadeIn{from{opacity:0}to{opacity:1}}@keyframes mglSpin{to{transform:rotate(360deg)}}@keyframes mglSpinRev{to{transform:rotate(-360deg)}}@keyframes mglCorePulse{0%,100%{transform:scale(.82);opacity:.6}50%{transform:scale(1.08);opacity:1}}@keyframes mglParticleOrbit1{0%{transform:translate(-50%,-50%) rotate(0deg) translateX(22px) rotate(0deg) scale(1);opacity:.85}25%{transform:translate(-50%,-50%) rotate(90deg) translateX(24px) rotate(-90deg) scale(1.15);opacity:1}50%{transform:translate(-50%,-50%) rotate(180deg) translateX(20px) rotate(-180deg) scale(1);opacity:.75}75%{transform:translate(-50%,-50%) rotate(270deg) translateX(24px) rotate(-270deg) scale(1.1);opacity:1}100%{transform:translate(-50%,-50%) rotate(360deg) translateX(22px) rotate(-360deg) scale(1);opacity:.85}}@keyframes mglParticleOrbit2{0%{transform:translate(-50%,-50%) rotate(0deg) translateX(32px) rotate(0deg) scale(.9);opacity:.7}33%{transform:translate(-50%,-50%) rotate(120deg) translateX(36px) rotate(-120deg) scale(1.05);opacity:1}66%{transform:translate(-50%,-50%) rotate(240deg) translateX(30px) rotate(-240deg) scale(.95);opacity:.65}100%{transform:translate(-50%,-50%) rotate(360deg) translateX(32px) rotate(-360deg) scale(.9);opacity:.7}}@keyframes mglParticleOrbit3{0%{transform:translate(-50%,-50%) rotate(0deg) translateX(42px) rotate(0deg) scale(.75);opacity:.55}50%{transform:translate(-50%,-50%) rotate(180deg) translateX(48px) rotate(-180deg) scale(.85);opacity:.95}100%{transform:translate(-50%,-50%) rotate(360deg) translateX(42px) rotate(-360deg) scale(.75);opacity:.55}}@keyframes mglSpanPulse{0%,100%{opacity:.4;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}@keyframes mglProgressIndeterminate{0%{transform:translateX(-100%)}50%{transform:translateX(200%)}100%{transform:translateX(400%)}}@media (prefers-reduced-motion:reduce){.xtj-magic-loader,.xtj-magic-loader *{animation:none!important}}';document.head.appendChild(s);})();
+// 注入GPU硬件加速CSS（仅关键动画元素，避免iOS GPU内存压力）
+(function(){if(document.getElementById('xtjGPUAccelStyle'))return;var s=document.createElement('style');s.id='xtjGPUAccelStyle';s.textContent='.xtj-magic-stage{will-change:transform}.xtj-magic-particle{will-change:transform,opacity}.xtj-magic-core{will-change:transform,opacity}';document.head.appendChild(s);})();
 // #region debug-point H5:onerror
 window.__dbg = window.__dbg || {}; window.__dbg.errors = [];
 window.onerror = function(m, s, l, c, e) { window.__dbg.errors.push({msg:m,src:s,line:l,col:c,err:e && e.stack,ts:Date.now()}); fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"page-unresponsive",runId:"pre",hypothesisId:"H5",location:"onerror",msg:"[DEBUG] Uncaught: "+m,data:{stack:e&&e.stack?e.stack.substring(0,500):""},ts:Date.now()})}).catch(function(){}); };
@@ -1804,7 +1804,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = '<div class="xtj-magic-loading xtj-echo-loader feed" role="status"><div class="xtj-echo-stage" aria-hidden="true"><div class="xtj-echo-aura"></div><div class="xtj-echo-rune"></div><div class="xtj-echo-rune xtj-echo-rune--inner"></div><div class="xtj-echo-field"></div><div class="xtj-echo-mirror"><div class="xtj-echo-mirror-line"></div></div><div class="xtj-echo-shock"></div><div class="xtj-echo-bolt xtj-echo-bolt--in"></div><div class="xtj-echo-bolt xtj-echo-bolt--out"></div><div class="xtj-echo-blade"></div><div class="xtj-echo-shard xtj-echo-shard--1"></div><div class="xtj-echo-shard xtj-echo-shard--2"></div><div class="xtj-echo-shard xtj-echo-shard--3"></div><div class="xtj-echo-shard xtj-echo-shard--4"></div><div class="xtj-echo-particle xtj-echo-particle--1"></div><div class="xtj-echo-particle xtj-echo-particle--2"></div><div class="xtj-echo-particle xtj-echo-particle--3"></div><div class="xtj-spark xtj-spark--1"></div><div class="xtj-spark xtj-spark--2"></div><div class="xtj-spark xtj-spark--3"></div><div class="xtj-spark xtj-spark--4"></div><div class="xtj-spark xtj-spark--5"></div><div class="xtj-spark xtj-spark--6"></div><div class="xtj-spark xtj-spark--7"></div><div class="xtj-spark xtj-spark--8"></div></div><div class="xtj-magic-loading-title">内容加载中.../div><div class="xtj-magic-loading-dots"><span></span><span></span><span></span></div></div>';
+                if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中...', '魔法粒子正在聚合', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -2695,7 +2695,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
-                    feed.innerHTML = '<div class="xtj-magic-loading xtj-echo-loader feed" role="status"><div class="xtj-echo-stage" aria-hidden="true"><div class="xtj-echo-aura"></div><div class="xtj-echo-rune"></div><div class="xtj-echo-rune xtj-echo-rune--inner"></div><div class="xtj-echo-field"></div><div class="xtj-echo-mirror"><div class="xtj-echo-mirror-line"></div></div><div class="xtj-echo-shock"></div><div class="xtj-echo-bolt xtj-echo-bolt--in"></div><div class="xtj-echo-bolt xtj-echo-bolt--out"></div><div class="xtj-echo-blade"></div><div class="xtj-echo-shard xtj-echo-shard--1"></div><div class="xtj-echo-shard xtj-echo-shard--2"></div><div class="xtj-echo-shard xtj-echo-shard--3"></div><div class="xtj-echo-shard xtj-echo-shard--4"></div><div class="xtj-echo-particle xtj-echo-particle--1"></div><div class="xtj-echo-particle xtj-echo-particle--2"></div><div class="xtj-echo-particle xtj-echo-particle--3"></div><div class="xtj-spark xtj-spark--1"></div><div class="xtj-spark xtj-spark--2"></div><div class="xtj-spark xtj-spark--3"></div><div class="xtj-spark xtj-spark--4"></div><div class="xtj-spark xtj-spark--5"></div><div class="xtj-spark xtj-spark--6"></div><div class="xtj-spark xtj-spark--7"></div><div class="xtj-spark xtj-spark--8"></div></div><div class="xtj-magic-loading-title">内容加载中.../div><div class="xtj-magic-loading-dots"><span></span><span></span><span></span></div></div>';
+                    feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中...', '魔法粒子正在聚合', 'feed');
                 }
                 try {
                     var results = await Promise.all([
@@ -3304,30 +3304,27 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         function buildMagicLoadingHtml(title, subtitle, variant) {
                 var extra = variant ? ' ' + variant : '';
                 return [
-                    '<div class="xtj-magic-loading' + extra + '">',
-                    '<div class="xtj-echo-stage" aria-hidden="true">',
-                    '<div class="xtj-echo-aura"></div>',
-                    '<div class="xtj-echo-rune"></div>',
-                    '<div class="xtj-echo-rune xtj-echo-rune--inner"></div>',
-                    '<div class="xtj-echo-field"></div>',
-                    '<div class="xtj-echo-mirror">',
-                    '<div class="xtj-echo-mirror-line"></div>',
+                    '<div class="xtj-magic-loader' + extra + '">',
+                    '<div class="xtj-magic-stage" aria-hidden="true">',
+                    '<div class="xtj-magic-core"></div>',
+                    '<div class="xtj-magic-ring"></div>',
+                    '<div class="xtj-magic-ring"></div>',
+                    '<div class="xtj-magic-particle"></div>',
+                    '<div class="xtj-magic-particle"></div>',
+                    '<div class="xtj-magic-particle"></div>',
+                    '<div class="xtj-magic-particle"></div>',
+                    '<div class="xtj-magic-particle"></div>',
+                    '<div class="xtj-magic-particle"></div>',
+                    '<div class="xtj-magic-particle"></div>',
+                    '<div class="xtj-magic-particle"></div>',
+                    '<div class="xtj-magic-particle"></div>',
                     '</div>',
-                    '<div class="xtj-echo-shock"></div>',
-                    '<div class="xtj-echo-bolt xtj-echo-bolt--in"></div>',
-                    '<div class="xtj-echo-bolt xtj-echo-bolt--out"></div>',
-                    '<div class="xtj-echo-blade"></div>',
-                    '<div class="xtj-echo-shard xtj-echo-shard--1"></div>',
-                    '<div class="xtj-echo-shard xtj-echo-shard--2"></div>',
-                    '<div class="xtj-echo-shard xtj-echo-shard--3"></div>',
-                    '<div class="xtj-echo-shard xtj-echo-shard--4"></div>',
-                    '<div class="xtj-echo-particle xtj-echo-particle--1"></div>',
-                    '<div class="xtj-echo-particle xtj-echo-particle--2"></div>',
-                    '<div class="xtj-echo-particle xtj-echo-particle--3"></div>',
+                    '<div class="xtj-magic-text">',
+                    '<div class="xtj-magic-title">' + escapeHtml(title || '加载中...') + '</div>',
+                    '<div class="xtj-magic-subtitle">' + escapeHtml(subtitle || '魔法粒子正在聚合') + '</div>',
                     '</div>',
-                    '<div class="xtj-magic-loading-title">' + escapeHtml(title || '加载中...') + '</div>',
-                    '<div class="xtj-magic-loading-subtitle">' + escapeHtml(subtitle || '法阵正在聚能') + '</div>',
-                    '<div class="xtj-magic-loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>',
+                    '<div class="xtj-magic-dots" aria-hidden="true"><span></span><span></span><span></span></div>',
+                    '<div class="xtj-magic-progress"><div class="xtj-magic-bar"></div></div>',
                     '</div>'
                 ].join('');
             }window.xtjMagicLoadingHtml = buildMagicLoadingHtml;
@@ -3580,6 +3577,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 animatingTabs[tab] = true;
                 // Use rAF to synchronize with iOS rendering pipeline for smooth 60fps compositing
                 requestAnimationFrame(function() {
+                    // Promote anim-layer to GPU only during animation to conserve GPU memory on iOS
+                    var animLayer = el.querySelector('.anim-layer');
+                    if (animLayer) animLayer.style.willChange = 'transform, opacity';
                     el.classList.add(cls);
                     // Clean up after animation duration + small buffer using rAF
                     var cleanupFrame = Math.round((animDurations[tab] + 50) / (1000 / 60));
@@ -3588,6 +3588,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         frames++;
                         if (frames >= cleanupFrame) {
                             el.classList.remove(cls);
+                            if (animLayer) animLayer.style.willChange = 'auto';
                             animatingTabs[tab] = false;
                         } else {
                             requestAnimationFrame(cleanup);
@@ -5572,23 +5573,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             window.__xtjUiTextRepair = repairNode;
         })();
 
-        (function installMagicLoaderV3() {
-            if (window.__xtjMagicLoaderV3Installed) return;
-            window.__xtjMagicLoaderV3Installed = true;
+        (function installMagicLoaderV4() {
+            if (window.__xtjMagicLoaderV4Installed) return;
+            window.__xtjMagicLoaderV4Installed = true;
 
             var magicHtml = window.xtjMagicLoadingHtml;
             if (typeof magicHtml !== 'function') {
-                magicHtml = function(title, subtitle, variant) {
-                    var extra = variant ? ' ' + variant : '';
-                    return '<div class="xtj-magic-loading xtj-echo-loader' + extra + '" role="status" aria-live="polite"><div class="xtj-echo-stage" aria-hidden="true"><div class="xtj-echo-aura"></div><div class="xtj-echo-rune"></div><div class="xtj-echo-rune xtj-echo-rune--inner"></div><div class="xtj-echo-field"></div><div class="xtj-echo-mirror"><div class="xtj-echo-mirror-line"></div></div><div class="xtj-echo-shock"></div><div class="xtj-echo-bolt xtj-echo-bolt--in"></div><div class="xtj-echo-bolt xtj-echo-bolt--out"></div><div class="xtj-echo-blade"></div><div class="xtj-echo-shard xtj-echo-shard--1"></div><div class="xtj-echo-shard xtj-echo-shard--2"></div><div class="xtj-echo-shard xtj-echo-shard--3"></div><div class="xtj-echo-shard xtj-echo-shard--4"></div><div class="xtj-echo-particle xtj-echo-particle--1"></div><div class="xtj-echo-particle xtj-echo-particle--2"></div><div class="xtj-echo-particle xtj-echo-particle--3"></div><div class="xtj-spark xtj-spark--1"></div><div class="xtj-spark xtj-spark--2"></div><div class="xtj-spark xtj-spark--3"></div><div class="xtj-spark xtj-spark--4"></div><div class="xtj-spark xtj-spark--5"></div><div class="xtj-spark xtj-spark--6"></div><div class="xtj-spark xtj-spark--7"></div><div class="xtj-spark xtj-spark--8"></div></div><div class="xtj-magic-loading-title">' + escapeHtml(title || '加载中...') + '</div><div class="xtj-magic-loading-subtitle">' + escapeHtml(subtitle || '法阵正在聚能') + '</div><div class="xtj-magic-loading-dots" aria-hidden="true"><span></span><span></span><span></span></div></div>';
+                magicHtml = window.xtjMagicLoadingHtml = function(t, s, v) {
+                    return buildMagicLoadingHtml(t, s, v);
                 };
             }
 
             renderChatLoadingState = window.renderChatLoadingState = function(el, options) {
                 if (!el) return;
                 var title = options && options.title ? options.title : '加载中...';
-                var subtitle = options && options.subtitle ? options.subtitle : '法阵正在聚能';
-                var variant = options && options.variant ? String(options.variant) : 'xtj-magic-loading--chat';
+                var subtitle = options && options.subtitle ? options.subtitle : '魔法粒子正在聚合';
+                var variant = options && options.variant ? String(options.variant) : 'chat-detail';
                 el.innerHTML = magicHtml(title, subtitle, variant);
             };
 
@@ -5596,279 +5596,72 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return magicHtml('加载中...', '筛选用户正在聚合...', 'post-user');
             };
 
-            if (typeof loadFeed === 'function' && !loadFeed.__xtjMagicLoaderV3) {
-                var prevLoadFeed = loadFeed;
+            if (typeof loadFeed === 'function' && !loadFeed.__xtjMagicLoaderV4) {
+                var orig = loadFeed;
                 loadFeed = window.loadFeed = function(forceRefresh) {
-                    var r = prevLoadFeed.apply(this, arguments);
+                    var r = orig.apply(this, arguments);
                     var feed = document.getElementById('feed');
                     if (feed && /loading-spinner|loading-text|内容加载中.../.test(feed.innerHTML || '')) {
-                        feed.innerHTML = magicHtml(forceRefresh ? '内容刷新中...' : '加载中...', '加载中...', 'feed');
+                        feed.innerHTML = magicHtml(forceRefresh ? '内容刷新中...' : '加载中...', '魔法粒子正在聚合', 'feed');
                     }
                     return r;
                 };
-                loadFeed.__xtjMagicLoaderV3 = true;
+                loadFeed.__xtjMagicLoaderV4 = true;
             }
 
-            if (typeof openChat === 'function' && !openChat.__xtjMagicLoaderV3) {
-                var prevOpenChat = openChat;
+            if (typeof openChat === 'function' && !openChat.__xtjMagicLoaderV4) {
+                var origChat = openChat;
                 openChat = window.openChat = function(userName) {
-                    var r = prevOpenChat.apply(this, arguments);
+                    var r = origChat.apply(this, arguments);
                     var el = document.getElementById('dockChatMessages');
                     if (el && (el.querySelector('.chat-empty') || /加载中.../.test(el.textContent || ''))) {
                         renderChatLoadingState(el, { title: '加载中...', subtitle: '正在打开聊天通道', variant: 'chat-detail' });
                     }
                     return r;
                 };
-                openChat.__xtjMagicLoaderV3 = true;
+                openChat.__xtjMagicLoaderV4 = true;
             }
 
-            if (typeof openPostDetail === 'function' && !openPostDetail.__xtjMagicLoaderV3) {
-                var prevOpenPostDetail = openPostDetail;
+            if (typeof openPostDetail === 'function' && !openPostDetail.__xtjMagicLoaderV4) {
+                var origPd = openPostDetail;
                 openPostDetail = window.openPostDetail = function(postId) {
-                    var r = prevOpenPostDetail.apply(this, arguments);
+                    var r = origPd.apply(this, arguments);
                     var body = document.getElementById('postDetailBody');
                     if (body && /loading-spinner|loading-text|加载中.../.test(body.innerHTML || '')) {
-                        body.innerHTML = magicHtml('加载中...', '加载中...', 'feed');
+                        body.innerHTML = magicHtml('加载中...', '魔法粒子正在聚合', 'feed');
                     }
                     return r;
                 };
-                openPostDetail.__xtjMagicLoaderV3 = true;
+                openPostDetail.__xtjMagicLoaderV4 = true;
             }
 
-            if (typeof openStatDetail === 'function' && !openStatDetail.__xtjMagicLoaderV3) {
-                var prevOpenStatDetail = openStatDetail;
+            if (typeof openStatDetail === 'function' && !openStatDetail.__xtjMagicLoaderV4) {
+                var origSd = openStatDetail;
                 openStatDetail = window.openStatDetail = function(type) {
-                    var r = prevOpenStatDetail.apply(this, arguments);
+                    var r = origSd.apply(this, arguments);
                     var body = document.getElementById('statModalBody');
                     if (body && /loading-spinner|loading-text|加载中.../.test(body.innerHTML || '')) {
-                        body.innerHTML = magicHtml('加载中...', '加载中...', 'feed');
+                        body.innerHTML = magicHtml('加载中...', '魔法粒子正在聚合', 'feed');
                     }
                     return r;
                 };
-                openStatDetail.__xtjMagicLoaderV3 = true;
+                openStatDetail.__xtjMagicLoaderV4 = true;
             }
 
-            function patchNodeLoading(root) {
+            function patchNode(root) {
                 root = root || document;
                 if (!root.querySelectorAll) return;
                 root.querySelectorAll('.xtj-chat-loader, #feed .loading, #statModalBody .loading, #postDetailBody .loading, #dockChatMessages .chat-empty, #dockChatList .chat-empty, #postUserQuickList .post-user-chip--loading').forEach(function(node) {
-                    if (!node || node.querySelector('.xtj-magic-loading')) return;
+                    if (!node || node.querySelector('.xtj-magic-loader')) return;
                     var text = (node.textContent || '').replace(/\s+/g, '');
                     if (!text && !node.classList.contains('post-user-chip--loading')) return;
-                    var variant = node.classList.contains('post-user-chip--loading') ? 'xtj-magic-loading--compact' : ((node.id === 'dockChatMessages' || node.id === 'dockChatList' || node.classList.contains('xtj-chat-loader')) ? 'xtj-magic-loading--chat' : 'xtj-magic-loading--panel');
-                    node.outerHTML = magicHtml('加载中...', node.classList.contains('post-user-chip--loading') ? '筛选用户加载中' : '法阵正在聚能', variant);
+                    var variant = node.classList.contains('post-user-chip--loading') ? 'post-user' : ((node.id === 'dockChatMessages' || node.id === 'dockChatList' || node.classList.contains('xtj-chat-loader')) ? 'chat-list' : 'feed');
+                    node.outerHTML = magicHtml('加载中...', node.classList.contains('post-user-chip--loading') ? '筛选用户加载中' : '魔法粒子正在聚合', variant);
                 });
             }
 
-            patchNodeLoading(document);
-            setInterval(function() { patchNodeLoading(document); }, 700);
-        })();
-
-        (function installMagicLoaderV2() {
-            if (window.__xtjMagicLoaderV2Installed) return;
-            window.__xtjMagicLoaderV2Installed = true;
-
-            function ensureMagicLoadingStyles() {
-                if (document.getElementById('xtjMagicLoadingStyle')) return;
-                var st = document.createElement('style');
-                st.id = 'xtjMagicLoadingStyle';
-                st.textContent = `
-.xtj-magic-loading.xtj-magic-loading--compact{min-height:108px;padding:10px 10px 8px;gap:8px;align-items:flex-start}
-.xtj-magic-loading.xtj-magic-loading--compact .xtj-echo-stage{width:min(40vw,126px);height:min(40vw,126px);margin-left:6px}
-.xtj-magic-loading.xtj-magic-loading--compact .xtj-magic-loading-title{font-size:14px}
-.xtj-magic-loading.xtj-magic-loading--compact .xtj-magic-loading-subtitle{font-size:11px}
-.xtj-spark--5{bottom:28%;right:8%;animation-delay:-3.1s;width:4px;height:4px}
-.xtj-spark--6{top:42%;right:16%;animation-delay:-1.6s;width:6px;height:6px}
-.xtj-spark--7{bottom:42%;left:22%;animation-delay:-2.4s;width:4px;height:4px}
-.xtj-spark--8{top:14%;left:34%;animation-delay:-3.4s;width:5px;height:5px}
-.xtj-cast-spark{position:absolute;width:5px;height:5px;border-radius:50%;pointer-events:none;z-index:15;animation:xtjCastBurst .9s ease-out forwards}
-@keyframes xtjSparkDrift{0%,100%{transform:translate(0,0) scale(.6);opacity:.3}25%{transform:translate(14px,-18px) scale(1.2);opacity:.9}50%{transform:translate(-8px,-32px) scale(.7);opacity:.6}75%{transform:translate(-16px,-14px) scale(1.1);opacity:.88}}
-@keyframes xtjCastBurst{0%{transform:translate(0,0) scale(.4);opacity:0}20%{opacity:1;transform:translate(var(--bx),var(--by)) scale(1.4)}100%{opacity:0;transform:translate(var(--bx),var(--by)) scale(0);filter:blur(3px)}}
-.xtj-magic-loading-title{position:relative;z-index:1;margin-top:2px;font-size:20px;font-weight:850;letter-spacing:.06em;color:#ffe39a;text-shadow:0 0 28px rgba(255,227,154,.34),0 0 48px rgba(123,213,255,.16)}
-.xtj-magic-loading-subtitle{position:relative;z-index:1;font-size:12px;color:rgba(31,41,55,.44)}
-.xtj-magic-loading-dots{display:flex;gap:7px;position:relative;z-index:1;margin-top:2px}
-.xtj-magic-loading-dots span{width:6px;height:6px;border-radius:50%;background:rgba(255,227,154,.72);box-shadow:0 0 14px rgba(255,227,154,.30);animation:xtjDot 1.1s ease-in-out infinite}
-.xtj-magic-loading-dots span:nth-child(2){animation-delay:.14s;background:rgba(123,213,255,.72)}
-.xtj-magic-loading-dots span:nth-child(3){animation-delay:.28s;background:rgba(181,156,255,.70)}
-@keyframes xtjMagicGridDrift{to{background-position:0 -90px,28px -52px}}
-@keyframes xtjEchoAura{0%,100%{transform:scale(.94);opacity:.58}50%{transform:scale(1.06);opacity:1}}
-@keyframes xtjEchoFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-12px)}}
-@keyframes xtjMirrorFloat{0%,100%{transform:perspective(900px) rotateY(-12deg) rotateX(5deg) translateY(0)}50%{transform:perspective(900px) rotateY(-7deg) rotateX(7deg) translateY(-16px)}}
-@keyframes xtjRuneSpin{to{transform:rotate(360deg)}}
-@keyframes xtjRuneSpinReverse{to{transform:rotate(-360deg)}}
-@keyframes xtjAbsorbSwirl{0%,100%{opacity:.42;transform:rotate(0deg) scale(.92)}50%{opacity:.82;transform:rotate(180deg) scale(1.06)}}
-@keyframes xtjShockLoop{0%,70%{opacity:0;transform:scale(.18)}77%{opacity:.65;transform:scale(.35)}100%{opacity:0;transform:scale(2.8);filter:blur(3px)}}
-@keyframes xtjIncoming{0%,54%{opacity:0;transform:translateX(0) rotate(180deg) scaleX(.8)}60%{opacity:1}82%{opacity:1;transform:translateX(calc(var(--s)*-.86)) rotate(180deg) scaleX(1.1)}100%{opacity:0;transform:translateX(calc(var(--s)*-.93)) rotate(180deg) scaleX(.25)}}
-@keyframes xtjReflected{0%,66%{opacity:0;transform:rotate(-24deg) translateX(0) scaleX(.3)}72%{opacity:1}100%{opacity:0;transform:rotate(-24deg) translateX(calc(var(--s)*.78)) scaleX(1.1)}}
-@keyframes xtjBladeSlash{0%,72%{opacity:0;transform:rotate(-8deg) translateX(-70px) scaleX(.25);filter:blur(4px)}78%{opacity:1;filter:blur(0)}91%{opacity:1;transform:rotate(-8deg) translateX(160px) scaleX(1.18)}100%{opacity:0;transform:rotate(-8deg) translateX(300px) scaleX(.38);filter:blur(2px)}}
-@keyframes xtjShardOrbit{0%{transform:translateY(0) rotate(0deg);opacity:.26}40%{opacity:.95}100%{transform:translateY(-38px) rotate(360deg);opacity:.26}}
-@keyframes xtjParticlePulse{0%,100%{opacity:.36;transform:scale(.68)}50%{opacity:1;transform:scale(1.16)}}
-@keyframes xtjDot{0%,100%{transform:translateY(0);opacity:.42}50%{transform:translateY(-5px);opacity:1}}
-@media (prefers-reduced-motion: reduce){.xtj-magic-loading,.xtj-magic-loading *,.xtj-echo-loader,.xtj-echo-loader *{animation:none!important}}
-                `;
-                document.head.appendChild(st);
-            }
-
-            function magicLoadingHtml(title, subtitle, variant) {
-                ensureMagicLoadingStyles();
-                var extra = variant ? ' ' + variant : '';
-                return [
-                    '<div class="xtj-magic-loading xtj-echo-loader' + extra + '" role="status" aria-live="polite">',
-                    '<div class="xtj-echo-stage" aria-hidden="true">',
-                    '<div class="xtj-echo-aura"></div>',
-                    '<div class="xtj-echo-rune"></div>',
-                    '<div class="xtj-echo-rune xtj-echo-rune--inner"></div>',
-                    '<div class="xtj-echo-field"></div>',
-                    '<div class="xtj-echo-mirror"><div class="xtj-echo-mirror-line"></div></div>',
-                    '<div class="xtj-echo-shock"></div>',
-                    '<div class="xtj-echo-bolt xtj-echo-bolt--in"></div>',
-                    '<div class="xtj-echo-bolt xtj-echo-bolt--out"></div>',
-                    '<div class="xtj-echo-blade"></div>',
-                    '<div class="xtj-echo-shard xtj-echo-shard--1"></div>',
-                    '<div class="xtj-echo-shard xtj-echo-shard--2"></div>',
-                    '<div class="xtj-echo-shard xtj-echo-shard--3"></div>',
-                    '<div class="xtj-echo-shard xtj-echo-shard--4"></div>',
-                    '<div class="xtj-echo-particle xtj-echo-particle--1"></div>',
-                    '<div class="xtj-echo-particle xtj-echo-particle--2"></div>',
-                    '<div class="xtj-echo-particle xtj-echo-particle--3"></div>',
-                    '<div class="xtj-spark xtj-spark--1"></div>',
-                    '<div class="xtj-spark xtj-spark--2"></div>',
-                    '<div class="xtj-spark xtj-spark--3"></div>',
-                    '<div class="xtj-spark xtj-spark--4"></div>',
-                    '<div class="xtj-spark xtj-spark--5"></div>',
-                    '<div class="xtj-spark xtj-spark--6"></div>',
-                    '<div class="xtj-spark xtj-spark--7"></div>',
-                    '<div class="xtj-spark xtj-spark--8"></div>',
-                    '</div>',
-                    '<div class="xtj-magic-loading-title">' + (window.escapeHtml ? escapeHtml(title || '加载中...') : String(title || '加载中...')) + '</div>',
-                    '<div class="xtj-magic-loading-subtitle">' + (window.escapeHtml ? escapeHtml(subtitle || '法阵正在聚能') : String(subtitle || '法阵正在聚能')) + '</div>',
-                    '<div class="xtj-magic-loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>',
-                    '</div>'
-                ].join('');
-            }
-
-            window.xtjMagicLoadingHtml = magicLoadingHtml;
-            renderChatLoadingState = window.renderChatLoadingState = function(el, options) {
-                if (!el) return;
-                var title = options && options.title ? options.title : '加载中...';
-                var subtitle = options && options.subtitle ? options.subtitle : '法阵正在聚能';
-                var variant = options && options.variant ? String(options.variant) : 'xtj-magic-loading--chat';
-                el.innerHTML = magicLoadingHtml(title, subtitle, variant);
-            };
-
-            renderPostFilterUserLoader = window.renderPostFilterUserLoader = function() {
-                return magicLoadingHtml('加载中...', '筛选用户正在聚合...', 'post-user');
-            };
-
-            if (typeof openChat === 'function' && !openChat.__xtjMagicLoaderV2) {
-                var originalOpenChat = openChat;
-                openChat = window.openChat = function(userName) {
-                    var r = originalOpenChat.apply(this, arguments);
-                    var el = document.getElementById('dockChatMessages');
-                    if (el && (el.querySelector('.chat-empty') || /加载中.../.test(el.textContent || ''))) {
-                        window.renderChatLoadingState(el, {
-                            title: '加载中...',
-                            subtitle: '正在打开聊天通道',
-                            variant: 'chat-detail'
-                        });
-                    }
-                    return r;
-                };
-                openChat.__xtjMagicLoaderV2 = true;
-            }
-
-            if (typeof loadFeed === 'function' && !loadFeed.__xtjMagicLoaderV2) {
-                var originalLoadFeed = loadFeed;
-                loadFeed = window.loadFeed = function(forceRefresh) {
-                    var r = originalLoadFeed.apply(this, arguments);
-                    var feed = document.getElementById('feed');
-                    if (feed && /loading-spinner|loading-text|内容加载中.../.test(feed.innerHTML || '')) {
-                        feed.innerHTML = magicLoadingHtml(forceRefresh ? '内容刷新中...' : '加载中...', '加载中...', 'feed');
-                    }
-                    return r;
-                };
-                loadFeed.__xtjMagicLoaderV2 = true;
-            }
-
-            if (typeof openPostDetail === 'function' && !openPostDetail.__xtjMagicLoaderV2) {
-                var originalOpenPostDetail = openPostDetail;
-                openPostDetail = window.openPostDetail = function(postId) {
-                    var r = originalOpenPostDetail.apply(this, arguments);
-                    var body = document.getElementById('postDetailBody');
-                    if (body && /loading-spinner|loading-text|加载中.../.test(body.innerHTML || '')) {
-                        body.innerHTML = magicLoadingHtml('加载中...', '加载中...', 'feed');
-                    }
-                    return r;
-                };
-                openPostDetail.__xtjMagicLoaderV2 = true;
-            }
-
-            if (typeof openStatDetail === 'function' && !openStatDetail.__xtjMagicLoaderV2) {
-                var originalOpenStatDetail = openStatDetail;
-                openStatDetail = window.openStatDetail = function(type) {
-                    var r = originalOpenStatDetail.apply(this, arguments);
-                    var body = document.getElementById('statModalBody');
-                    if (body && /loading-spinner|loading-text|加载中.../.test(body.innerHTML || '')) {
-                        body.innerHTML = magicLoadingHtml('加载中...', '加载中...', 'feed');
-                    }
-                    return r;
-                };
-                openStatDetail.__xtjMagicLoaderV2 = true;
-            }
-
-            function patchQuickUserLoader() {
-                var list = document.getElementById('postUserQuickList');
-                if (!list) return;
-                list.querySelectorAll('.post-user-chip--loading').forEach(function(node) {
-                    if (node.querySelector('.xtj-magic-loading')) return;
-                    node.innerHTML = magicLoadingHtml('加载中...', '筛选用户正在聚合...', 'post-user');
-                });
-            }
-
-            function patchStaticLoadingNodes(root) {
-                root = root || document;
-                if (!root.querySelectorAll) return;
-                var selectors = [
-                    '.xtj-chat-loader',
-                    '#feed .loading',
-                    '#statModalBody .loading',
-                    '#postDetailBody .loading',
-                    '#dockChatMessages .chat-empty',
-                    '#dockChatList .chat-empty'
-                ];
-                selectors.forEach(function(selector) {
-                    root.querySelectorAll(selector).forEach(function(node) {
-                        if (!node || node.querySelector('.xtj-magic-loading')) return;
-                        if (selector.indexOf('#dockChatList') >= 0 && !/加载中.../.test(node.textContent || '')) return;
-                        if (selector.indexOf('#dockChatMessages') >= 0 && !/加载中.../.test(node.textContent || '')) return;
-                        var variant = (selector.indexOf('dockChat') >= 0 || selector === '.xtj-chat-loader') ? 'xtj-magic-loading--chat' : 'xtj-magic-loading--panel';
-                        node.outerHTML = magicLoadingHtml('加载中...', '法阵正在聚能', variant);
-                    });
-                });
-                patchQuickUserLoader();
-            }
-
-            patchStaticLoadingNodes(document);
-            var magicLoaderObserver = new MutationObserver(function() {
-                clearTimeout(magicLoaderObserver._t);
-                magicLoaderObserver._t = setTimeout(function() {
-                    patchStaticLoadingNodes(document);
-                }, 40);
-            });
-            magicLoaderObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
-
-            var patchRafPending = false;
-            function rafPatchStatic() {
-                if (patchRafPending) return;
-                patchRafPending = true;
-                requestAnimationFrame(function() {
-                    patchRafPending = false;
-                    patchStaticLoadingNodes(document);
-                });
-            }
-            var patchIntervalWorker = setInterval(function() {
-                rafPatchStatic();
-            }, 2000);
+            patchNode(document);
+            setInterval(function() { patchNode(document); }, 700);
         })();
 
         (function installCleanStatUiOverrides() {
