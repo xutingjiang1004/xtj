@@ -30,44 +30,6 @@
         applyTheme(false);
     }
 
-    function initRainAnimation() {
-        var canvas = document.getElementById('rainCanvas');
-        if (!canvas) return;
-        var ctx = canvas.getContext('2d');
-        var w, h;
-        var drops = [];
-        var animId = null;
-        var resizeTimeout = null;
-
-        function resize() { w = canvas.width = window.innerWidth; h = canvas.height = window.innerHeight; }
-        window.addEventListener('resize', function() {
-            if (resizeTimeout) clearTimeout(resizeTimeout);
-            resizeTimeout = setTimeout(resize, 100);
-        });
-        resize();
-
-        for (var i = 0; i < 40; i++) drops.push({ x: Math.random()*w, y: Math.random()*h, len: Math.random()*8+6, xs: -0.5+Math.random()*1, ys: Math.random()*6+4 });
-
-        function draw() {
-            ctx.clearRect(0,0,w,h);
-            ctx.strokeStyle = 'rgba(180,190,210,0.3)';
-            ctx.lineCap = 'round';
-            ctx.lineWidth = 0.8;
-            ctx.beginPath();
-            for (var p of drops) {
-                ctx.moveTo(p.x, p.y);
-                ctx.lineTo(p.x+p.xs, p.y+p.ys);
-                p.x += p.xs; p.y += p.ys;
-                if (p.y>h || p.x>w || p.x<0) { p.x = Math.random()*w; p.y = -20; }
-            }
-            ctx.stroke();
-            animId = requestAnimationFrame(draw);
-        }
-        window._rainPause = function() { if (animId) { cancelAnimationFrame(animId); animId = null; } };
-        window._rainResume = function() { if (!animId) draw(); };
-        draw();
-    }
-
     var ivZoomState = { scale: 1, tx: 0, ty: 0 };
     var ivIsZooming = false;
     var ivIsPanning = false;
