@@ -6112,28 +6112,28 @@
 
         /* ========== View Transitions API ========== */
         
- 
- . p p - s l i d e - i m g   {   i m a g e - o r i e n t a t i o n :   n o n e ;   - w e b k i t - i m a g e - o r i e n t a t i o n :   n o n e ;   } 
- 
- 
- 
- . p p - r o t a t e - b t n   {   p o s i t i o n :   a b s o l u t e ;   r i g h t :   1 6 p x ;   b o t t o m :   1 0 0 p x ;   w i d t h :   4 4 p x ;   h e i g h t :   4 4 p x ;   b o r d e r - r a d i u s :   5 0 % ;   b a c k g r o u n d :   r g b a ( 0 , 0 , 0 , 0 . 5 ) ;   b a c k d r o p - f i l t e r :   b l u r ( 1 0 p x ) ;   c o l o r :   w h i t e ;   b o r d e r :   n o n e ;   f o n t - s i z e :   1 8 p x ;   c u r s o r :   p o i n t e r ;   d i s p l a y :   f l e x ;   a l i g n - i t e m s :   c e n t e r ;   j u s t i f y - c o n t e n t :   c e n t e r ;   t r a n s i t i o n :   a l l   0 . 2 s   e a s e ;   z - i n d e x :   1 0 0 ;   } 
- 
- . p p - r o t a t e - b t n : h o v e r   {   b a c k g r o u n d :   r g b a ( 0 , 0 , 0 , 0 . 7 ) ;   t r a n s f o r m :   s c a l e ( 1 . 1 ) ;   } 
- 
- . p p - r o t a t e - b t n : a c t i v e   {   t r a n s f o r m :   s c a l e ( 0 . 9 5 ) ;   } 
- 
- 
- 
- . p w - s k e l e t o n   {   w i d t h :   c a l c ( 3 3 . 3 3 3 %   -   8 p x ) ;   a s p e c t - r a t i o :   1 ;   b a c k g r o u n d :   l i n e a r - g r a d i e n t ( 9 0 d e g ,   # f 0 f 0 f 0   2 5 % ,   # e 0 e 0 e 0   5 0 % ,   # f 0 f 0 f 0   7 5 % ) ;   b a c k g r o u n d - s i z e :   2 0 0 %   1 0 0 % ;   a n i m a t i o n :   p w - s k e l e t o n - l o a d i n g   1 . 5 s   i n f i n i t e ;   b o r d e r - r a d i u s :   8 p x ;   } 
- 
- @ k e y f r a m e s   p w - s k e l e t o n - l o a d i n g   {   0 %   {   b a c k g r o u n d - p o s i t i o n :   2 0 0 %   0 ;   }   1 0 0 %   {   b a c k g r o u n d - p o s i t i o n :   - 2 0 0 %   0 ;   }   } 
- 
- . p w - l o a d - m o r e - s e n t i n e l   {   t e x t - a l i g n :   c e n t e r ;   p a d d i n g :   2 0 p x ;   c o l o r :   # 9 9 9 ;   } 
- 
- . p w - l o a d - m o r e - i n d i c a t o r   {   f o n t - s i z e :   1 4 p x ;   c o l o r :   # 9 9 9 ;   } 
- 
- 
+
+.pp-slide-img { image-orientation: none; -webkit-image-orientation: none; }
+
+
+
+.pp-rotate-btn { position: absolute; right: 16px; bottom: 100px; width: 44px; height: 44px; border-radius: 50%; background: rgba(0,0,0,0.5); backdrop-filter: blur(10px); color: white; border: none; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; z-index: 100; }
+
+.pp-rotate-btn:hover { background: rgba(0,0,0,0.7); transform: scale(1.1); }
+
+.pp-rotate-btn:active { transform: scale(0.95); }
+
+
+
+.pw-skeleton { width: calc(33.333% - 8px); aspect-ratio: 1; background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 200% 100%; animation: pw-skeleton-loading 1.5s infinite; border-radius: 8px; }
+
+@keyframes pw-skeleton-loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+.pw-load-more-sentinel { text-align: center; padding: 20px; color: #999; }
+
+.pw-load-more-indicator { font-size: 14px; color: #999; }
+
+
 
 /* ===== XTJ Magic Loading Wrapper ===== */
 .xtj-magic-loading {

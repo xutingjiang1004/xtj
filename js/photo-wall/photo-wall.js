@@ -229,11 +229,11 @@
                     '<div class="pp-slide-slot pp-cur-slot"><img id="photoPreviewImage" class="pp-slide-img" alt="current"></div>' +
                     '<div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"></div>' +
                     '</div></div>' +
-                    '<button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="showPhotoInfo()">' + icon('info') + '</button>' +
+                    '<button class="pp-info-btn" id="ppInfoBtn" title="照片信息" onclick="window.showPhotoInfo()">' + icon('info') + '</button>' +
                     '<button class="pp-share-btn" id="ppShareBtn" title="分享" onclick="window.shareCurrentPhoto()">' + icon('share') + '</button>' +
                     '<button class="pp-rotate-btn" id="ppRotateBtn" title="旋转 90 度" onclick="window.ppRotatePhoto()">' + icon('rotate') + '</button>' +
                     '<button id="ppDeleteBtn" class="pp-delete-btn" onclick="window.deletePhotoFromPreview()">' + icon('delete') + '</button>' +
-                    '<button class="pp-compact-btn" id="ppCompactBtn" title="照片简洁" onclick="togglePhotoInfo()">' + icon('compact') + '</button>' +
+                    '<button class="pp-compact-btn" id="ppCompactBtn" title="照片简洁" onclick="window.togglePhotoInfo()">' + icon('compact') + '</button>' +
                     '<button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="缩小" onclick="window.zoomOut()">' + icon('zoom-out') + '</button>' +
                     '<button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="放大" onclick="window.zoomIn()">' + icon('zoom-in') + '</button>' +
                     '<div class="photo-preview-info"><span class="pp-user" id="photoPreviewUser"></span><span class="pp-time" id="photoPreviewTime"></span><span class="pp-views" id="photoPreviewViews"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.8 12s3.2-5.5 9.2-5.5S21.2 12 21.2 12s-3.2 5.5-9.2 5.5S2.8 12 2.8 12Z"></path><circle cx="12" cy="12" r="2.6"></circle></svg><span id="photoPreviewViewsCount">0</span></span></div>' +
@@ -1155,6 +1155,7 @@
             overlay.classList.toggle('pp-info-hidden', !hidden);
             if (btn) btn.classList.toggle('active', !hidden);
         }
+        window.togglePhotoInfo = togglePhotoInfo;
 
         function addPinchEvents(wrapper) {
             if (wrapper._xtjPinchBound) return;
