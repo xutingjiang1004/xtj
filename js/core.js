@@ -1184,7 +1184,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (annRealtime) { sb.removeChannel(annRealtime); annRealtime = null; }
                 stopDMPolling();
                 _chatCache = {};
-                dockChatListCacheTime = 0;
+                window.dockChatListCacheTime = 0;
                 document.body.style.overflow = '';
                 Object.keys(avatarCache).forEach(k => delete avatarCache[k]);
                 showToast("已退出登录");
@@ -3527,32 +3527,33 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             function isMsgReadByMe(msg) {
-                var key = 'xtj_dmread_' + currentUser + '_' + msg.user_name;
+                var key = 'xtj_dmread_' + window.currentUser + '_' + msg.user_name;
                 var t = localStorage.getItem(key);
                 return t && new Date(msg.created_at) <= new Date(t);
             }
 
             function markMessagesRead(senderName) {
-                var key = 'xtj_dmread_' + currentUser + '_' + senderName;
+                var key = 'xtj_dmread_' + window.currentUser + '_' + senderName;
                 localStorage.setItem(key, new Date().toISOString());
+                window.dockChatListCacheTime = 0;
+                loadDockChatList();
                 updateUnreadBadge();
             }
 
             function subscribeToMessages() {
-                if (chatRealtime) { sb.removeChannel(chatRealtime); }
+                if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; }
                 chatRealtime = sb.channel('chat-dms')
                     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, function(payload) {
                         var m = payload.new;
-                        console.log('[CHAT-REALTIME] 鏀跺埌鏂版秷锟?', m);
                         if (m.media_type !== DM_MARKER) return;
-                        if (!currentUser) return;
-                        if (m.media_url !== currentUser) return;
-                        if (m.user_name === currentUser) return;
-                        console.log('[CHAT-REALTIME] 瑙﹀彂通知:', m.user_name, m.content);
-                        showNotification(m.user_name, m.content || '鍙戦€佷簡一张图片视频');
+                        if (!window.currentUser) return;
+                        if (m.media_url !== window.currentUser) return;
+                        if (m.user_name === window.currentUser) return;
+                        showNotification(m.user_name, m.content || '发送了一张图片视频');
                         if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser === m.user_name) {
                             loadDockChatMessages(m.user_name, false);
                         } else if (typeof dockChatActiveUser === 'undefined' || !dockChatActiveUser) {
+                            window.dockChatListCacheTime = 0;
                             loadDockChatList();
                             updateUnreadBadge();
                         } else {
@@ -3574,7 +3575,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 dmpollInterval = interval;
                 async function pollNow() {
-                    if (!currentUser) return;
+                    if (!window.currentUser) return;
                     try {
                         if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
                             await loadDockChatMessages(dockChatActiveUser, false);
@@ -3596,7 +3597,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var result = await sb.from('posts')
                         .select('id, user_name, created_at')
                         .eq('media_type', DM_MARKER)
-                        .eq('media_url', currentUser)
+                        .eq('media_url', window.currentUser)
                         .order('created_at', { ascending: false })
                         .limit(200);
 
@@ -3605,7 +3606,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (error) return;
                     var cnt = 0;
                     (data || []).forEach(function(m) {
-                        if (!isMsgReadByMe(m)) cnt++;
+                        if (!window.isMsgReadByMe(m)) cnt++;
                     });
                     var badge = document.getElementById('navChatBadge');
                     if (badge) {
@@ -3688,7 +3689,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         } else if (tab === 'chat') {
                             // 鑱婂ぉ妞ら潧鍩涢ʽ
                             window.showToast('正在刷新...');
-                            dockChatListCacheTime = 0;
+                            window.dockChatListCacheTime = 0;
                             loadDockChatList();
                             isRefreshing[tab] = false;
                             window.showToast('刷新完成');
@@ -3809,7 +3810,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 document.getElementById('dockChatListView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'none';
                 document.getElementById('dockChatTitle').textContent = '消息';
-                dockChatListCacheTime = 0;
+                window.dockChatListCacheTime = 0;
                 loadDockChatList();
                 startDMPolling(300000);
                 if (restorePostsScroll !== null) {
@@ -3829,8 +3830,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let restorePostsScroll = null;
 
             window.openChat = function(userName) {
-                if (!currentUser) { showToast('请先登录'); return; }
-                if (userName === currentUser) { switchDockTab('chat', true); return; }
+                if (!window.currentUser) { showToast('请先登录'); return; }
+                if (userName === window.currentUser) { switchDockTab('chat', true); return; }
                 if (currentDockTab === 'posts') {
                     const postsPanel = document.getElementById('panelPosts');
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
@@ -3854,8 +3855,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             async function loadDockChatList() {
                 const el = document.getElementById('dockChatList');
                 if (!el) return;
-                if (Date.now() - dockChatListCacheTime < DOCK_CHAT_CACHE_DURATION) return;
-                dockChatListCacheTime = Date.now();
+                if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
+                window.dockChatListCacheTime = Date.now();
                 el.innerHTML = window.xtjMagicLoadingHtml('加载中...', '正在召回最近消息', 'chat-list');
                 try {
                     renderChatLoadingState(el, {
@@ -3866,22 +3867,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     const { data: allMsgs, error } = await sb.from("posts")
                         .select("id, user_name, media_url, content, created_at")
                         .eq("media_type", DM_MARKER)
-                        .or(`user_name.eq.${currentUser},media_url.eq.${currentUser}`)
+                        .or(`user_name.eq.${window.currentUser},media_url.eq.${window.currentUser}`)
                         .order("created_at", { ascending: false })
                         .limit(200);
                     if (error) throw error;
                     if (!allMsgs || !allMsgs.length) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>暂无娑堟伅</div><div style="font-size:12px;">鍦ㄥ笘瀛愰〉闈㈢偣鍑诲ご鍍忓紑濮嬭亰澶?/div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>暂无娑堟伅</div><div style="font-size:12px;">鍦ㄥ笘瀛愰〉闈㈢偣鍑诲ご鍍忓紑濮嬭亰澶?</div></div>';
                         updateUnreadBadge();
                         return;
                     }
                     const convMap = {};
                     allMsgs.forEach(m => {
-                        const other = m.user_name === currentUser ? m.media_url : m.user_name;
+                        const other = m.user_name === window.currentUser ? m.media_url : m.user_name;
                         if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
                             convMap[other] = { other_user: other, last_message: m.content, last_time: m.created_at, unread: 0 };
                         }
-                        if (m.media_url === currentUser && !isMsgReadByMe(m)) {
+                        if (m.media_url === window.currentUser && !window.isMsgReadByMe(m)) {
                             convMap[other].unread = Math.min((convMap[other].unread || 0) + 1, 99);
                         }
                     });
@@ -3974,15 +3975,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 try {
                     const { data: msgs, error } = await sb.from("posts").select("id, user_name, media_url, content, created_at, views, actor_key")
                         .eq("media_type", DM_MARKER)
-                        .or(`and(user_name.eq.${currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${currentUser})`)
+                        .or(`and(user_name.eq.${window.currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${window.currentUser})`)
                         .order("created_at").limit(500);
                     if (error) throw error;
-                    // 缂傛挸鐡ㄦ繛鎴濈墛娴?
                     _chatCache[cacheKey] = msgs || [];
-                    const toMark = (msgs || []).filter(m => m.user_name === userName && m.media_url === currentUser && (m.views || 0) === 0);
+                    const toMark = (msgs || []).filter(m => m.user_name === userName && m.media_url === window.currentUser && (m.views || 0) === 0);
                     await Promise.all(toMark.map(m => sb.rpc("increment_post_views", { p_post_id: m.id }).catch(() => {})));
                     toMark.forEach(m => { m.views = 1; });
-                    markMessagesRead(userName);
+                    window.markMessagesRead(userName);
                     renderDockMessages(msgs || [], forceScroll);
                 } catch(e) {
                     if (!_chatCache[cacheKey]) {
