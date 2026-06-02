@@ -2352,6 +2352,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 updatePostFilterStateFromDom();
                 feedPage = 0;
                 feedEndReached = false;
+                var feed = document.getElementById("feed");
+                if (feed && window.xtjMagicLoadingHtml) {
+                    feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中...', '', 'feed');
+                }
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
 
