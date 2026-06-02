@@ -6116,6 +6116,9 @@
   width: 220px;
   height: 220px;
   display: block;
+  will-change: contents;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 @media (max-width: 480px) {
   .xtj-magic-loading {

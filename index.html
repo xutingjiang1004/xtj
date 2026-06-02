@@ -751,7 +751,7 @@
 
     function createTrailDecorations() {
         var list = [];
-        var count = 16;
+        var count = 12;
         for (var i = 0; i < count; i++) {
             var t = i / (count - 1);
             var roll = Math.random();
@@ -784,9 +784,9 @@
 
     function createPollens() {
         var list = [];
-        for (var i = 0; i < 14; i++) {
+        for (var i = 0; i < 8; i++) {
             list.push({
-                offsetRatio: 0.08 + (i / 13) * 0.84,
+                offsetRatio: 0.08 + (i / 7) * 0.84,
                 lane: rand(-9, 15),
                 drift: rand(-3, 3),
                 size: rand(0.7, 1.6),
@@ -810,7 +810,7 @@
     function syncSpringPerfProfile() {
         var profile = window.__xtjPerfProfile || 'full';
         _xtjSpringDetailLevel = profile === 'lite' ? 0 : (profile === 'balanced' ? 1 : 2);
-        _xtjSpringFrameMinGap = _xtjSpringDetailLevel === 0 ? (1000 / 30) : (_xtjSpringDetailLevel === 1 ? (1000 / 45) : (1000 / 60));
+        _xtjSpringFrameMinGap = _xtjSpringDetailLevel === 0 ? (1000 / 30) : (_xtjSpringDetailLevel === 1 ? (1000 / 45) : (1000 / 50));
     }
 
     syncSpringPerfProfile();
@@ -866,7 +866,7 @@
         function drawVinePath(start, end, strand, time, color, width, alpha) {
             if (alpha === undefined) alpha = 1;
             var total = Math.max(0.001, end - start);
-            var steps = Math.max(10, Math.ceil(total / TAU * (_xtjSpringDetailLevel === 0 ? 84 : (_xtjSpringDetailLevel === 1 ? 114 : 150))));
+            var steps = Math.max(10, Math.ceil(total / TAU * (_xtjSpringDetailLevel === 0 ? 56 : (_xtjSpringDetailLevel === 1 ? 76 : 100))));
             ctx.save();
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
@@ -874,7 +874,7 @@
             ctx.strokeStyle = color;
             ctx.lineWidth = width;
             ctx.shadowColor = COLORS.vineShadow;
-            ctx.shadowBlur = 4;
+            ctx.shadowBlur = 2;
             ctx.beginPath();
             for (var i = 0; i <= steps; i++) {
                 var t = i / steps;
@@ -890,14 +890,14 @@
         function drawTaperedVinePath(start, end, strand, time, color, tailWidth, headWidth, alpha) {
             if (alpha === undefined) alpha = 1;
             var total = Math.max(0.001, end - start);
-            var steps = Math.max(16, Math.ceil(total / TAU * (_xtjSpringDetailLevel === 0 ? 96 : (_xtjSpringDetailLevel === 1 ? 136 : 180))));
+            var steps = Math.max(16, Math.ceil(total / TAU * (_xtjSpringDetailLevel === 0 ? 64 : (_xtjSpringDetailLevel === 1 ? 90 : 120))));
             ctx.save();
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.globalAlpha = alpha;
             ctx.strokeStyle = color;
             ctx.shadowColor = COLORS.vineShadow;
-            ctx.shadowBlur = 5;
+            ctx.shadowBlur = 2;
             var prev = getVinePoint(start, strand, time);
             for (var i = 1; i <= steps; i++) {
                 var t = i / steps;
@@ -923,8 +923,8 @@
             ctx.strokeStyle = COLORS.tendril;
             ctx.globalAlpha = alpha;
             ctx.lineWidth = 0.75;
-            ctx.shadowColor = 'rgba(145, 220, 125, 0.16)';
-            ctx.shadowBlur = 3;
+            ctx.shadowColor = 'rgba(145, 220, 125, 0.08)';
+            ctx.shadowBlur = 1;
             for (var i = 0; i < count; i++) {
                 var angle = start + (span * i) / Math.max(1, count);
                 var n = normalAt(angle);
@@ -967,7 +967,7 @@
             ctx.rotate(rotation);
             ctx.globalAlpha = alpha;
             ctx.shadowColor = color;
-            ctx.shadowBlur = 5;
+            ctx.shadowBlur = 2;
             for (var i = 0; i < 5; i++) {
                 ctx.rotate(TAU / 5);
                 ctx.fillStyle = color;
@@ -1008,8 +1008,6 @@
             ctx.translate(x, y);
             ctx.rotate(rot);
             ctx.globalAlpha = alpha;
-            ctx.shadowColor = 'rgba(110, 180, 100, 0.10)';
-            ctx.shadowBlur = 2;
             for (var b = 0; b < blades.length; b++) {
                 var blade = blades[b];
                 var sway = Math.sin(time * 1.8 + blade.lean * 8) * scale * 0.09;
@@ -1095,7 +1093,7 @@
 
         function drawButterflies(headAngle, time) {
             var maxButterflies = _xtjSpringDetailLevel === 1 ? Math.min(4, sharedButterflies.length) : sharedButterflies.length;
-            var ghostPasses = _xtjSpringDetailLevel > 1 ? 3 : 1;
+            var ghostPasses = _xtjSpringDetailLevel > 1 ? 1 : 1;
             for (var bi = 0; bi < maxButterflies; bi++) {
                 var butterfly = sharedButterflies[bi];
                 var angle = headAngle - ACTIVE_SPAN * butterfly.offsetRatio;
