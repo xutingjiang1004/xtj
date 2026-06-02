@@ -1977,7 +1977,6 @@
             background: rgba(255, 255, 255, 0);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
-            will-change: background-color;
             transition: background-color 0.35s ease-in-out;
         }
 
@@ -3747,7 +3746,6 @@
             background: #ccc;
             border-radius: 24px;
             transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            will-change: background;
         }
         .profile-switch input:checked + .profile-slider { background: #059669 !important; }
         .profile-slider:before { content:""; position:absolute; height:18px; width:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.3s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 1px 3px rgba(0,0,0,0.2); will-change: transform; }
@@ -4770,7 +4768,7 @@
             object-fit: contain;
             box-shadow: none;
             transform-origin: center center;
-            will-change: transform, opacity, border-radius;
+            will-change: transform, opacity;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
             transform: translateZ(0);
@@ -6116,9 +6114,7 @@
   width: 220px;
   height: 220px;
   display: block;
-  will-change: contents;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
+  image-rendering: auto;
 }
 @media (max-width: 480px) {
   .xtj-magic-loading {
@@ -6146,6 +6142,12 @@
   -webkit-backdrop-filter: blur(10px) saturate(118%) !important;
 }
 
+.perf-balanced .glass,
+.perf-balanced .publish-box {
+  backdrop-filter: blur(12px) saturate(118%) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(118%) !important;
+}
+
 .perf-lite .glass,
 .perf-lite .publish-box,
 .perf-lite .post,
@@ -6165,6 +6167,7 @@
 .perf-balanced .photo-wall-item,
 .perf-lite .photo-wall-item {
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.10), 0 4px 12px rgba(15, 23, 42, 0.06) !important;
+  will-change: auto !important;
 }
 
 .perf-balanced .photo-wall-item.pw-stagger-enter,
@@ -6216,6 +6219,20 @@
 .perf-lite .upload-progress-icon * {
   box-shadow: none !important;
 }
+
+.perf-lite .xtj-echo-loader,
+.perf-lite .xtj-echo-loader *,
+.perf-lite .xtj-sigil-loader,
+.perf-lite .xtj-sigil-loader * {
+  animation: none !important;
+}
+
+.perf-balanced .xtj-echo-loader .xtj-echo-core {
+  box-shadow: 0 0 16px rgba(255,222,143,.22), inset 0 0 18px rgba(255,255,255,.15), 0 16px 40px rgba(73,169,255,.10) !important;
+}
+.perf-balanced .xtj-echo-bolt.in { box-shadow: 0 0 10px rgba(255,111,141,.48), 0 0 24px rgba(255,111,141,.20) !important; }
+.perf-balanced .xtj-echo-bolt.out { box-shadow: 0 0 10px rgba(123,213,255,.48), 0 0 28px rgba(255,227,154,.18) !important; }
+.perf-balanced .xtj-echo-blade { box-shadow: 0 0 14px rgba(255,227,154,.52), 0 0 36px rgba(255,227,154,.22) !important; }
 
 .perf-hz-120 .post,
 .perf-hz-120 .photo-wall-item,
