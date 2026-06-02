@@ -6144,15 +6144,18 @@
     min-height: 220px;
     padding: 20px;
     box-sizing: border-box;
+    position: relative;
 }
 
 /* ===== Spring Canvas Loader ===== */
 .spring-loader {
   width: 220px;
   height: 220px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
   position: relative;
+  margin: 0 auto;
 }
 .spring-loader canvas {
   width: 220px;
@@ -6160,6 +6163,9 @@
   display: block;
 }
 @media (max-width: 480px) {
+  .xtj-magic-loading {
+    min-height: 180px;
+  }
   .spring-loader,
   .spring-loader canvas {
     width: 180px;
