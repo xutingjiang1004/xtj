@@ -92,16 +92,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         }
 
         function renderPostFilterUserLoader() {
-            return [
-                '<div class="post-user-chip post-user-chip--loading is-empty">',
-                '<span class="post-user-loader" aria-hidden="true">',
-                '<span class="post-user-loader-ring"></span>',
-                '<span class="post-user-loader-core"></span>',
-                '<span class="post-user-loader-spark"></span>',
-                '</span>',
-                '<span class="post-user-chip-name">加载中.../span>',
-                '</div>'
-            ].join('');
+            return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;">' +
+                '<div class="spring-loader" style="width:120px;height:120px;margin:0 auto;">' +
+                '<canvas class="spring-canvas" width="120" height="120" style="width:120px;height:120px;" aria-hidden="true"></canvas>' +
+                '</div></div>';
         }
 
         function isAdmin() { return currentUser === ADMIN_NAME; }
@@ -2004,6 +1998,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (resetBtn) resetBtn.style.visibility = activeUser ? "visible" : "hidden";
                 if (postFilterUsersLoading && !postFilterUsers.length) {
                     list.innerHTML = renderPostFilterUserLoader();
+                    if (window.initAllSpringLoaders) window.initAllSpringLoaders(list);
                     return;
                 }
                 var users = Array.isArray(postFilterUsers) ? postFilterUsers : [];
@@ -6184,16 +6179,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             renderPostFilterUserLoader = function() {
-                return [
-                    '<div class="post-user-chip post-user-chip--loading is-empty">',
-                    '<span class="post-user-loader" aria-hidden="true">',
-                    '<span class="post-user-loader-ring"></span>',
-                    '<span class="post-user-loader-core"></span>',
-                    '<span class="post-user-loader-spark"></span>',
-                    '</span>',
-                    '<span class="post-user-chip-name">鍔犺浇涓?../span>',
-                    '</div>'
-                ].join('');
+                return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;">' +
+                    '<div class="spring-loader" style="width:120px;height:120px;margin:0 auto;">' +
+                    '<canvas class="spring-canvas" width="120" height="120" style="width:120px;height:120px;" aria-hidden="true"></canvas>' +
+                    '</div></div>';
             };
 
             window.openStatDetail = async function(type) {
