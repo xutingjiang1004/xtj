@@ -1,12 +1,13 @@
 (function() {
     var photoWallInitialized = false;
+    var thumbWarmTimer = null;
 
     window.initPhotoWall = async function() {
         if (photoWallInitialized) return;
         photoWallInitialized = true;
         await window.renderPhotoWall();
         window.bindPhotoWallScroll();
-        fastWarmVisibleThumbs();
+        scheduleThumbWarm();
     };
 
     function initPhotoWallHash() {
@@ -23,16 +24,20 @@
 
     function fastWarmVisibleThumbs() {
         var imgs = document.querySelectorAll('#photoGrid .photo-wall-item img[data-src]');
-        var limit = Math.min(imgs.length, 14);
+        var limit = Math.min(imgs.length, 6);
+        var viewportLimit = Math.max(window.innerHeight * 1.5, 900);
         for (var i = 0; i < limit; i++) {
             var img = imgs[i];
             var src = img.getAttribute('data-src');
             if (!src) continue;
+            var rect = img.getBoundingClientRect();
+            if (rect.top > viewportLimit || rect.bottom < -120) continue;
             img.src = src;
             img.removeAttribute('data-src');
             img.onload = function() {
                 this.classList.remove('pw-blur-in');
                 this.classList.add('pw-blur-done');
+                if (window.applyPhotoWallAspect) window.applyPhotoWallAspect(this);
             };
             img.onerror = function() {
                 this.classList.remove('pw-blur-in');
@@ -41,8 +46,20 @@
             if (img.complete && img.naturalWidth > 0) {
                 img.classList.remove('pw-blur-in');
                 img.classList.add('pw-blur-done');
+                if (window.applyPhotoWallAspect) window.applyPhotoWallAspect(img);
             }
         }
+    }
+
+    function scheduleThumbWarm() {
+        if (thumbWarmTimer) clearTimeout(thumbWarmTimer);
+        thumbWarmTimer = setTimeout(function() {
+            thumbWarmTimer = null;
+            var runner = window.requestIdleCallback || window.requestAnimationFrame;
+            runner(function() {
+                fastWarmVisibleThumbs();
+            });
+        }, 80);
     }
 
     function wrapPhotoWallRenderers() {
@@ -53,7 +70,7 @@
         if (typeof originalRender === 'function') {
             window.renderPhotoWall = async function() {
                 var result = await originalRender.apply(this, arguments);
-                setTimeout(fastWarmVisibleThumbs, 40);
+                scheduleThumbWarm();
                 return result;
             };
         }
@@ -62,7 +79,7 @@
         if (typeof originalRenderWithoutReload === 'function') {
             window.renderPhotoWallWithoutReload = function() {
                 var result = originalRenderWithoutReload.apply(this, arguments);
-                setTimeout(fastWarmVisibleThumbs, 40);
+                scheduleThumbWarm();
                 return result;
             };
         }

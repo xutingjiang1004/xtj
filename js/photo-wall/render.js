@@ -164,6 +164,17 @@
         return html;
     }
 
+    function canIncrementallyAppendPhotos() {
+        if (window.pwAlbumView) return false;
+        if ((window.pwSortKey || 'date_desc') !== 'date_desc') return false;
+        return !!document.getElementById('photoGrid');
+    }
+
+    function updateLoadMoreIndicator(text) {
+        var indicator = document.querySelector('.pw-load-more-sentinel .pw-load-more-indicator');
+        if (indicator) indicator.textContent = text;
+    }
+
     function getAlbumDateKey(ts) {
         var d = new Date(ts || Date.now());
         if (isNaN(d.getTime())) d = new Date();
@@ -312,21 +323,35 @@
     function animatePhotoCards(grid) {
         requestAnimationFrame(function() {
             var items = grid.querySelectorAll('.photo-wall-item.pw-stagger-enter');
-            items.forEach(function(item, index) {
-                setTimeout(function() {
-                    item.classList.add('pw-stagger-done');
-                    item.classList.remove('pw-stagger-enter');
-                }, index * 20);
+            if (!items.length) return;
+            var maxAnimated = Math.min(items.length, 12);
+            for (var i = 0; i < items.length; i++) {
+                if (i >= maxAnimated) items[i].style.animationDelay = '0ms';
+            }
+            requestAnimationFrame(function() {
+                for (var j = 0; j < items.length; j++) {
+                    items[j].classList.add('pw-stagger-done');
+                    items[j].classList.remove('pw-stagger-enter');
+                }
             });
         });
     }
 
     var pwLazyObserver = null;
     var imageLoadQueue = [];
+    var queuedImageSet = typeof WeakSet !== 'undefined' ? new WeakSet() : null;
     var isProcessingQueue = false;
     var imgCache = new Map();
     var activeLoadCount = 0;
     var MAX_CONCURRENT_LOADS = 4;
+
+    function finishLazyImage(img) {
+        if (!img) return;
+        if (queuedImageSet) queuedImageSet.delete(img);
+        img.classList.remove('pw-blur-in');
+        img.classList.add('pw-blur-done');
+        if (pwLazyObserver) pwLazyObserver.unobserve(img);
+    }
 
     function processImageQueue() {
         if (isProcessingQueue || imageLoadQueue.length === 0) return;
@@ -340,23 +365,19 @@
             var card = img.closest('.photo-wall-item');
             var photoId = card ? card.getAttribute('data-photo-id') : '';
             if (!realSrc) {
-                img.classList.remove('pw-blur-in');
-                img.classList.add('pw-blur-done');
-                if (pwLazyObserver) pwLazyObserver.unobserve(img);
+                finishLazyImage(img);
                 return;
             }
             if (imgCache.get(realSrc) === 'success') {
                 img.src = realSrc;
                 img.removeAttribute('data-src');
-                img.classList.remove('pw-blur-in');
-                img.classList.add('pw-blur-done');
+                finishLazyImage(img);
                 if (img.complete && img.naturalWidth > 0) applyPhotoAspect(img);
-                if (pwLazyObserver) pwLazyObserver.unobserve(img);
                 return;
             }
             if (imgCache.get(realSrc) === 'error') {
                 if (window.hideBrokenPhotoWallItem) window.hideBrokenPhotoWallItem(photoId, 'cached image error');
-                if (pwLazyObserver) pwLazyObserver.unobserve(img);
+                finishLazyImage(img);
                 return;
             }
             activeLoadCount++;
@@ -364,26 +385,22 @@
             img.removeAttribute('data-src');
             if (img.complete && img.naturalWidth > 0) {
                 imgCache.set(realSrc, 'success');
-                img.classList.remove('pw-blur-in');
-                img.classList.add('pw-blur-done');
+                finishLazyImage(img);
                 applyPhotoAspect(img);
                 activeLoadCount--;
-                if (pwLazyObserver) pwLazyObserver.unobserve(img);
                 processImageQueue();
             } else {
                 img.onload = function() {
                     imgCache.set(realSrc, 'success');
-                    img.classList.remove('pw-blur-in');
-                    img.classList.add('pw-blur-done');
+                    finishLazyImage(img);
                     applyPhotoAspect(img);
                     activeLoadCount--;
-                    if (pwLazyObserver) pwLazyObserver.unobserve(img);
                     processImageQueue();
                 };
                 img.onerror = function() {
                     imgCache.set(realSrc, 'error');
+                    finishLazyImage(img);
                     activeLoadCount--;
-                    if (pwLazyObserver) pwLazyObserver.unobserve(img);
                     if (window.hideBrokenPhotoWallItem) window.hideBrokenPhotoWallItem(photoId, 'image load error');
                     processImageQueue();
                 };
@@ -394,6 +411,7 @@
 
     function pwObserveLazyImages(grid) {
         imageLoadQueue = [];
+        queuedImageSet = typeof WeakSet !== 'undefined' ? new WeakSet() : null;
         if (pwLazyObserver) pwLazyObserver.disconnect();
         if (!window.IntersectionObserver) {
             var fallbackImgs = grid.querySelectorAll('.pw-blur-in');
@@ -412,15 +430,40 @@
         pwLazyObserver = new IntersectionObserver(function(entries) {
             var hasNewEntries = false;
             for (var e = 0; e < entries.length; e++) {
-                if (entries[e].isIntersecting) {
+                var target = entries[e].target;
+                if (entries[e].isIntersecting && (!queuedImageSet || !queuedImageSet.has(target))) {
                     imageLoadQueue.push(entries[e]);
+                    if (queuedImageSet) queuedImageSet.add(target);
                     hasNewEntries = true;
                 }
             }
             if (hasNewEntries) processImageQueue();
         }, { rootMargin: '500px 0px', threshold: 0.05 });
-        var imgs = grid.querySelectorAll('.pw-blur-in');
+        observeLazyImages(grid);
+    }
+
+    function observeLazyImages(root) {
+        if (!pwLazyObserver || !root || !root.querySelectorAll) return;
+        var imgs = root.querySelectorAll('.pw-blur-in');
         for (var j = 0; j < imgs.length; j++) pwLazyObserver.observe(imgs[j]);
+    }
+
+    function appendPhotoWallItems(photos) {
+        var grid = document.getElementById('photoGrid');
+        if (!grid || !photos || !photos.length) return false;
+        var sentinel = grid.querySelector('.pw-load-more-sentinel');
+        var wrapper = document.createElement('div');
+        var existingCount = grid.querySelectorAll('.photo-wall-item').length;
+        wrapper.innerHTML = renderPhotoWallHtml(photos, existingCount);
+        var nodes = Array.prototype.slice.call(wrapper.children);
+        if (!nodes.length) return false;
+        var frag = document.createDocumentFragment();
+        for (var i = 0; i < nodes.length; i++) frag.appendChild(nodes[i]);
+        grid.insertBefore(frag, sentinel || null);
+        window.pwCurrentSortedPhotos = (window.pwCurrentSortedPhotos || []).concat(photos);
+        animatePhotoCards(grid);
+        observeLazyImages(grid);
+        return true;
     }
 
     var infiniteScrollObserver = null;
@@ -441,9 +484,14 @@
                     isLoadingMore = true;
                     var indicator = sentinel.querySelector('.pw-load-more-indicator');
                     if (indicator) indicator.textContent = '加载中...';
+                    updateLoadMoreIndicator('鍔犺浇涓?..');
                     var newPhotos = await window.loadMorePhotos();
                     if (newPhotos && newPhotos.length > 0) {
-                        renderPhotoWallWithoutReload();
+                        if (!canIncrementallyAppendPhotos() || !appendPhotoWallItems(newPhotos)) {
+                            renderPhotoWallWithoutReload();
+                        } else if (!window.hasMorePhotos || !window.hasMorePhotos()) {
+                            updateLoadMoreIndicator('鏆傛棤鏇村');
+                        }
                     } else if (indicator) {
                         indicator.textContent = '暂无更多';
                     }
