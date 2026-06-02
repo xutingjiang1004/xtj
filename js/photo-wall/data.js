@@ -24,8 +24,24 @@
     var subscriptionRetryTimer = null;
     var syncChannel = null;
     var lastLocalStorageTs = 0;
+    var photoWallRenderDirty = false;
 
     window.PHOTO_WALL_MARKER = PHOTO_WALL_MARKER;
+
+    function isPhotoWallVisible() {
+        var panel = document.getElementById('panelAi');
+        return document.visibilityState === 'visible' && !!panel && panel.classList.contains('active');
+    }
+
+    function requestPhotoWallRender() {
+        if (!window.renderPhotoWallWithoutReload) return;
+        if (!isPhotoWallVisible()) {
+            photoWallRenderDirty = true;
+            return;
+        }
+        photoWallRenderDirty = false;
+        window.renderPhotoWallWithoutReload();
+    }
 
     function getSyncStatusElements() {
         return {
@@ -206,9 +222,7 @@
     function persistAndRender(renderNow) {
         saveLocalPhotoWallData();
         if (renderNow === false) return;
-        if (window.renderPhotoWallWithoutReload) {
-            window.renderPhotoWallWithoutReload();
-        }
+        requestPhotoWallRender();
     }
 
     function removePhotoLocallyById(photoId, options) {
@@ -746,7 +760,7 @@
         var changed = upsertPhotoLocally(photo, { render: false });
         if (changed) {
             saveLocalPhotoWallData();
-            if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();
+            requestPhotoWallRender();
         }
     }
 
@@ -761,7 +775,7 @@
         var changed = upsertPhotoLocally(photo, { render: false });
         if (changed) {
             saveLocalPhotoWallData();
-            if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();
+            requestPhotoWallRender();
         }
     }
 
@@ -861,8 +875,16 @@
             scheduleDeleteQueue(120);
             reconcilePhotoWallData();
             setupRealtimeSubscription();
+            if (photoWallRenderDirty) requestPhotoWallRender();
         }
     });
+
+    var panelAi = document.getElementById('panelAi');
+    if (panelAi && window.MutationObserver) {
+        new MutationObserver(function() {
+            if (photoWallRenderDirty && isPhotoWallVisible()) requestPhotoWallRender();
+        }).observe(panelAi, { attributes: true, attributeFilter: ['class'] });
+    }
 
     setInterval(function() {
         if (document.visibilityState !== 'visible') return;

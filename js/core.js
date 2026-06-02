@@ -5436,33 +5436,45 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             let repairQueued = false;
-            function scheduleRepair() {
+            let queuedRoots = [];
+            function scheduleRepair(root) {
+                queuedRoots.push(root || document.body);
                 if (repairQueued) return;
                 repairQueued = true;
                 requestAnimationFrame(function() {
                     repairQueued = false;
-                    repairNode(document.body);
+                    const roots = queuedRoots.length ? queuedRoots.splice(0) : [document.body];
+                    roots.forEach(function(target) {
+                        repairNode(target || document.body);
+                    });
                 });
             }
 
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', function() {
                     repairNode(document.body);
-                    scheduleRepair();
+                    scheduleRepair(document.body);
                 }, { once: true });
             } else {
                 repairNode(document.body);
             }
 
             const observer = new MutationObserver(function(records) {
-                let shouldRepair = false;
                 for (const record of records) {
-                    if (record.type === 'characterData' || record.addedNodes.length || record.attributeName) {
-                        shouldRepair = true;
-                        break;
+                    if (record.type === 'characterData') {
+                        scheduleRepair(record.target);
+                        continue;
+                    }
+                    if (record.type === 'attributes') {
+                        scheduleRepair(record.target);
+                        continue;
+                    }
+                    for (const node of Array.from(record.addedNodes || [])) {
+                        if (node && (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE)) {
+                            scheduleRepair(node);
+                        }
                     }
                 }
-                if (shouldRepair) scheduleRepair();
             });
 
             observer.observe(document.documentElement, {
