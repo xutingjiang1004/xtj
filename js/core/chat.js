@@ -212,6 +212,7 @@
         document.getElementById('dockChatListView').classList.remove('hidden');
         document.getElementById('dockChatBackBtn').style.display = 'none';
         document.getElementById('dockChatTitle').textContent = '消息';
+        window.dockChatListCacheTime = 0;
         loadDockChatList();
         startDMPolling(300000);
         if (restorePostsScroll !== null) {
