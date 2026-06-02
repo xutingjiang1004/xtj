@@ -1,4 +1,4 @@
-﻿(function() {
+(function() {
     // ===================== 聊天系统 (Dock 兼容版) =====================
     var chatRealtime = null;
     window.chatRealtime = chatRealtime;
@@ -22,27 +22,10 @@
 
     function renderChatLoading(el, options) {
         if (!el) return;
-        var title = options && options.title ? options.title : '正在加载';
-        var subtitle = options && options.subtitle ? options.subtitle : '请稍候';
-        var variant = options && options.variant ? ' chat-loading-card--' + options.variant : '';
-        var esc = window.escapeHtml || function(v) {
-            return String(v).replace(/[&<>"']/g, function(ch) {
-                return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch];
-            });
-        };
-        el.innerHTML =
-            '<div class="chat-loading-card' + variant + '">' +
-                '<div class="chat-loading-orb">' +
-                    '<span class="chat-loading-ring"></span>' +
-                    '<span class="chat-loading-ring chat-loading-ring--late"></span>' +
-                    '<span class="chat-loading-core"></span>' +
-                '</div>' +
-                '<div class="chat-loading-text">' +
-                    '<div class="chat-loading-title">' + esc(title) + '</div>' +
-                    '<div class="chat-loading-subtitle">' + esc(subtitle) + '</div>' +
-                '</div>' +
-                '<div class="chat-loading-dots" aria-hidden="true"><span></span><span></span><span></span></div>' +
-            '</div>';
+        el.innerHTML = window.xtjMagicLoadingHtml();
+        if (window.initAllSpringLoaders) {
+            window.initAllSpringLoaders(el);
+        }
     }
     window.renderChatLoading = renderChatLoading;
 

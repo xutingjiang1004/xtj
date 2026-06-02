@@ -5885,19 +5885,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
                 el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant);
+                if (window.initAllSpringLoaders) {
+                    window.initAllSpringLoaders(el);
+                }
             };
 
             renderPostFilterUserLoader = function() {
-                return [
-                    '<div class="post-user-chip post-user-chip--loading is-empty">',
-                    '<span class="post-user-loader" aria-hidden="true">',
-                    '<span class="post-user-loader-ring"></span>',
-                    '<span class="post-user-loader-core"></span>',
-                    '<span class="post-user-loader-spark"></span>',
-                    '</span>',
-                    '<span class="post-user-chip-name">加载中.../span>',
-                    '</div>'
-                ].join('');
+                return window.xtjMagicLoadingHtml();
             };
 
             window.openStatDetail = async function(type) {
