@@ -89,8 +89,7 @@
 
     function isMsgReadByMe(msg) {
         var key = 'xtj_dmread_' + window.currentUser + '_' + msg.user_name;
-        var t = localStorage.getItem(key);
-        return t && new Date(msg.created_at) <= new Date(t);
+        return !!localStorage.getItem(key);
     }
     window.isMsgReadByMe = isMsgReadByMe;
 
@@ -113,6 +112,7 @@
                 if (!window.currentUser) return;
                 if (m.media_url !== window.currentUser) return;
                 if (m.user_name === window.currentUser) return;
+                localStorage.removeItem('xtj_dmread_' + window.currentUser + '_' + m.user_name);
                 showNotification(m.user_name, m.content || '发送了一张图片/视频');
                 if (dockChatActiveUser === m.user_name) {
                     loadDockChatMessages(m.user_name, false);
