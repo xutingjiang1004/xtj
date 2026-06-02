@@ -6138,8 +6138,6 @@
 .perf-balanced .profile-user-card,
 .perf-balanced .toast,
 .perf-balanced .photo-wall-item,
-.perf-balanced .pw-item-info,
-.perf-balanced .photo-preview-info,
 .perf-balanced .pp-preview-toolbar {
   backdrop-filter: blur(10px) saturate(118%) !important;
   -webkit-backdrop-filter: blur(10px) saturate(118%) !important;
@@ -6155,8 +6153,6 @@
 .perf-lite .profile-user-card,
 .perf-lite .toast,
 .perf-lite .photo-wall-item,
-.perf-lite .pw-item-info,
-.perf-lite .photo-preview-info,
 .perf-lite .pp-preview-toolbar,
 .perf-lite .dock-bar {
   backdrop-filter: none !important;

@@ -5486,6 +5486,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             });
 
             window.__xtjUiTextRepair = repairNode;
+            window.__xtjUiTextRepairStop = function() {
+                observer.disconnect();
+                repairQueued = false;
+                queuedRoots = [];
+            };
         })();
 
         (function installMagicLoaderV4() {
