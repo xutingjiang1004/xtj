@@ -7,6 +7,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>xtj</title>
     <link rel="stylesheet" href="css/style.css" />
+    <link rel="stylesheet" href="css/loader-hotfix.css" />
 </head>
 <body>
     <div class="toast-container" id="toastContainer"></div>
@@ -800,6 +801,15 @@
     var sharedButterflies = createButterflies();
     var sharedPollens = createPollens();
 
+    var _xtjSpringList = [];
+    var _xtjSpringRaf = null;
+    function _xtjSpringLoop(ms) {
+        for (var _i = 0; _i < _xtjSpringList.length; _i++) {
+            _xtjSpringList[_i](ms);
+        }
+        _xtjSpringRaf = requestAnimationFrame(_xtjSpringLoop);
+    }
+
     function initSpringCanvas(canvas) {
         var ctx = canvas.getContext('2d');
         var W = 220, H = 220;
@@ -1099,7 +1109,7 @@
         }
 
         function animate(ms) {
-            if (!canvas.isConnected) return;
+            if (!canvas.isConnected || canvas.offsetWidth === 0) return;
             var time = ms * 0.001;
             ctx.clearRect(0, 0, W, H);
             var headAngle = -Math.PI / 2 + (time / CYCLE) * TAU;
@@ -1109,7 +1119,6 @@
             drawTrailPollens(headAngle, time);
             drawButterflies(headAngle, time);
             drawCenterBud(time);
-            requestAnimationFrame(animate);
         }
 
         function drawBaseRing() {
@@ -1128,12 +1137,16 @@
             ctx.restore();
         }
 
-        requestAnimationFrame(animate);
+        _xtjSpringList.push(animate);
     }
 
     var canvases = document.querySelectorAll('.spring-canvas');
     for (var i = 0; i < canvases.length; i++) {
         initSpringCanvas(canvases[i]);
+    }
+
+    if (_xtjSpringList.length > 0 && !_xtjSpringRaf) {
+        _xtjSpringRaf = requestAnimationFrame(_xtjSpringLoop);
     }
 
     window.initSpringCanvas = initSpringCanvas;
@@ -1144,6 +1157,9 @@
                 initSpringCanvas(c);
             }
         });
+        if (_xtjSpringList.length > 0 && !_xtjSpringRaf) {
+            _xtjSpringRaf = requestAnimationFrame(_xtjSpringLoop);
+        }
     };
 })();
 </script>
