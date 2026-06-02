@@ -105,6 +105,37 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         }
         window.clearFeedCache = clearFeedCache;
 
+        var _photoWallLoaded = false;
+        var _photoWallLoading = null;
+        function ensurePhotoWallLoaded() {
+            if (_photoWallLoaded) return Promise.resolve();
+            if (_photoWallLoading) return _photoWallLoading;
+            var scripts = [
+                'js/photo-wall/data.min.js',
+                'js/photo-wall/render.min.js',
+                'js/photo-wall/upload.min.js',
+                'js/photo-wall/preview.min.js',
+                'js/photo-wall/photo-wall.min.js'
+            ];
+            _photoWallLoading = new Promise(function(resolve, reject) {
+                function loadNext(idx) {
+                    if (idx >= scripts.length) {
+                        _photoWallLoaded = true;
+                        _photoWallLoading = null;
+                        resolve();
+                        return;
+                    }
+                    var s = document.createElement('script');
+                    s.src = scripts[idx];
+                    s.onload = function() { loadNext(idx + 1); };
+                    s.onerror = function() { reject(new Error('Failed to load ' + scripts[idx])); };
+                    document.body.appendChild(s);
+                }
+                loadNext(0);
+            });
+            return _photoWallLoading;
+        }
+
         function parsePostContent(post) {
             var raw = post && typeof post.content === "string" ? post.content : "";
             if (!raw) return { text: "", meta: {} };
@@ -1730,9 +1761,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中...', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
-                        sb.from("comments").select("*").order("created_at"),
-                        sb.from("likes").select("*")
+                        sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }).limit(500),
+                        sb.from("comments").select("*").order("created_at").limit(2000),
+                        sb.from("likes").select("*").limit(3000)
                     ]);
                     if (postRes.error || commRes.error || likeRes.error) {
                         const errMsg = (postRes.error || commRes.error || likeRes.error).message || '数据加载失败';
@@ -3623,21 +3654,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         lastTabTapCount[tab] = (lastTabTapCount[tab] || 0) + 1;
                         
                         if (tab === 'ai') {
-                            // 照片墙刷新
                             window.showToast('正在刷新照片墙...');
-                            if (typeof window.loadPhotoWallData === 'function') {
-                                window.loadPhotoWallData(true).then(function() {
-                                    if (typeof window.renderPhotoWall === 'function') {
-                                        window.renderPhotoWall();
-                                    }
-                                    isRefreshing[tab] = false;
-                                    window.showToast('刷新完成');
-                                }).catch(function() {
-                                    isRefreshing[tab] = false;
-                                });
-                            } else {
+                            ensurePhotoWallLoaded().then(function() {
+                                if (typeof window.loadPhotoWallData === 'function') {
+                                    return window.loadPhotoWallData(true).then(function() {
+                                        if (typeof window.renderPhotoWall === 'function') {
+                                            window.renderPhotoWall();
+                                        }
+                                    });
+                                }
+                            }).then(function() {
                                 isRefreshing[tab] = false;
-                            }
+                                window.showToast('刷新完成');
+                            }).catch(function() {
+                                isRefreshing[tab] = false;
+                                window.showToast('刷新失败');
+                            });
                         } else if (tab === 'posts') {
                             // 鐢牕鐡欐い闈涘煕閿?
                             window.showToast('正在刷新...');
@@ -3710,7 +3742,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (tab === 'posts') { if (window._rainResume) window._rainResume(); }
                 else { if (window._rainPause) window._rainPause(); }
                 if (tab === 'chat') { loadDockChatList(); startDMPolling(300000); }
-                if (tab === 'ai') { if (typeof window.initPhotoWall === 'function') window.initPhotoWall(); }
+                if (tab === 'ai') { ensurePhotoWallLoaded().then(function() { if (typeof window.initPhotoWall === 'function') window.initPhotoWall(); }); }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); }
             };
 
