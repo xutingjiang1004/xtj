@@ -5474,6 +5474,109 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             var springLoaderHtml = '<div class="xtj-magic-loading" role="status" aria-live="polite"><div class="spring-loader" aria-label="春日藤蔓蝴蝶加载动画"><canvas class="spring-canvas" width="220" height="220" aria-hidden="true"></canvas></div></div>';
 
+            window.initAllSpringLoaders = function(root) {
+                root = root || document;
+                var canvases = root.querySelectorAll ? root.querySelectorAll('.spring-canvas') : [];
+                if (!canvases.length && root.classList && root.classList.contains('spring-canvas')) {
+                    canvases = [root];
+                }
+                for (var i = 0; i < canvases.length; i++) {
+                    (function(canvas) {
+                        if (canvas.__springAnimating) return;
+                        canvas.__springAnimating = true;
+                        var ctx = canvas.getContext('2d');
+                        var W = canvas.width;
+                        var H = canvas.height;
+                        var cx = W / 2;
+                        var cy = H / 2;
+                        var particles = [];
+                        var ringCount = 3;
+                        var ringParticles = 8;
+                        var baseRadius = 30;
+                        var time = 0;
+                        for (var r = 0; r < ringCount; r++) {
+                            var radius = baseRadius + r * 24;
+                            var count = ringParticles + r * 4;
+                            for (var p = 0; p < count; p++) {
+                                var angle = (p / count) * Math.PI * 2;
+                                particles.push({
+                                    angle: angle,
+                                    radius: radius,
+                                    baseRadius: radius,
+                                    size: 2.2 + r * 0.6,
+                                    hue: 160 + r * 30,
+                                    speed: 0.6 + r * 0.3,
+                                    offset: Math.random() * Math.PI * 2
+                                });
+                            }
+                        }
+                        var orbParticles = [];
+                        for (var o = 0; o < 5; o++) {
+                            orbParticles.push({
+                                angle: (o / 5) * Math.PI * 2,
+                                radius: 16,
+                                size: 3.5,
+                                hue: 280,
+                                speed: 1.2
+                            });
+                        }
+                        var corePulse = 0;
+                        function draw() {
+                            if (!canvas.isConnected) {
+                                canvas.__springAnimating = false;
+                                return;
+                            }
+                            ctx.clearRect(0, 0, W, H);
+                            time += 0.016;
+                            corePulse = 0.8 + 0.2 * Math.sin(time * 3.5);
+                            ctx.save();
+                            ctx.translate(cx, cy);
+                            ctx.rotate(time * 0.15);
+                            ctx.globalAlpha = 0.55;
+                            ctx.strokeStyle = 'rgba(56,189,128,0.3)';
+                            ctx.lineWidth = 1;
+                            ctx.beginPath();
+                            ctx.arc(0, 0, baseRadius + 8, 0, Math.PI * 2);
+                            ctx.stroke();
+                            ctx.restore();
+                            for (var k = 0; k < particles.length; k++) {
+                                var pt = particles[k];
+                                var a = pt.angle + time * pt.speed * (pt.radius > baseRadius ? 0.7 : 1.2);
+                                var r = pt.baseRadius + Math.sin(time * 2.5 + pt.offset) * 6;
+                                var x = cx + Math.cos(a) * r;
+                                var y = cy + Math.sin(a) * r;
+                                ctx.beginPath();
+                                ctx.arc(x, y, pt.size * corePulse, 0, Math.PI * 2);
+                                ctx.fillStyle = 'hsla(' + pt.hue + ', 70%, 55%, ' + (0.5 + 0.3 * Math.sin(time * 3 + pt.offset)) + ')';
+                                ctx.fill();
+                            }
+                            for (var m = 0; m < orbParticles.length; m++) {
+                                var ob = orbParticles[m];
+                                var ax = Math.cos(ob.angle + time * ob.speed) * ob.radius;
+                                var ay = Math.sin(ob.angle + time * ob.speed) * ob.radius;
+                                ctx.beginPath();
+                                ctx.arc(cx + ax, cy + ay, ob.size, 0, Math.PI * 2);
+                                var grad = ctx.createRadialGradient(cx + ax, cy + ay, 0, cx + ax, cy + ay, ob.size);
+                                grad.addColorStop(0, 'hsla(280, 80%, 70%, 0.9)');
+                                grad.addColorStop(1, 'hsla(280, 80%, 50%, 0)');
+                                ctx.fillStyle = grad;
+                                ctx.fill();
+                            }
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, 6 * corePulse, 0, Math.PI * 2);
+                            var coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 6);
+                            coreGrad.addColorStop(0, 'hsla(160, 80%, 60%, 0.95)');
+                            coreGrad.addColorStop(0.5, 'hsla(160, 70%, 45%, 0.6)');
+                            coreGrad.addColorStop(1, 'hsla(160, 60%, 35%, 0)');
+                            ctx.fillStyle = coreGrad;
+                            ctx.fill();
+                            requestAnimationFrame(draw);
+                        }
+                        draw();
+                    })(canvases[i]);
+                }
+            };
+
             window.xtjMagicLoadingHtml = function() {
                 return springLoaderHtml;
             };
@@ -5572,7 +5675,25 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             patchNode(document);
-            setInterval(function() { patchNode(document); }, 700);
+
+            var patchObserver = new MutationObserver(function(mutations) {
+                var shouldPatch = false;
+                for (var i = 0; i < mutations.length; i++) {
+                    var m = mutations[i];
+                    if (m.addedNodes.length) {
+                        for (var j = 0; j < m.addedNodes.length; j++) {
+                            var node = m.addedNodes[j];
+                            if (node.nodeType === 1) {
+                                shouldPatch = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (shouldPatch) break;
+                }
+                if (shouldPatch) patchNode(document);
+            });
+            patchObserver.observe(document.body, { childList: true, subtree: true });
         })();
 
         (function installCleanStatUiOverrides() {
@@ -5935,5 +6056,4 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statPollTimer = setInterval(refreshStatModal, 15000);
             };
         })();
-})();
 
