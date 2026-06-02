@@ -1,5 +1,23 @@
 # 更新日志
 
+## v0.67 - 2026-06-02 — 性能大幅优化
+
+### 性能
+- 花草圈圈 Canvas 动画：阴影模糊降低60%、藤蔓分段减少33%、花粉减至8粒、蝴蝶残影减至1层、全模式帧率降至50fps
+- escapeHtml 改用纯字符串替换，避免每次创建DOM元素
+- fixText 从60+次 split/join 改为单次正则替换
+- 全局 pointerdown 加80ms节流，滚动时不触发
+- 移除 will-change:contents/border-radius/background 等反效果声明
+- perf-lite 彻底禁用 echo-loader 无限循环动画
+- perf-balanced 大幅降低 echo-loader box-shadow 和 backdrop-filter
+- 修复筛选用户加载动画乱码并替换为花草圈圈动画
+
+### 优化
+- 筛选用户加载器居中显示120px花草圈圈Canvas动画
+- photo-wall-item will-change 在 perf-lite/balanced 下移除
+
+---
+
 ## v0.64 - 2026-05-31 — 乱码修复与动画升级
 
 ### 修复

@@ -3464,10 +3464,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let dmpollTimer = null;
             let dmpollInterval = null;
 
+            var _escapeDiv = null;
             function escapeHtml(str) {
-                var d = document.createElement('div');
-                d.textContent = str;
-                return d.innerHTML;
+                var s = String(str == null ? '' : str);
+                if (s.length < 80) {
+                    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                }
+                if (!_escapeDiv) _escapeDiv = document.createElement('div');
+                _escapeDiv.textContent = s;
+                return _escapeDiv.innerHTML;
             }
             window.escapeHtml = escapeHtml;
 
@@ -3518,6 +3523,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             loadDockChatMessages(m.user_name, false);
                         } else if (typeof dockChatActiveUser === 'undefined' || !dockChatActiveUser) {
                             loadDockChatList();
+                            updateUnreadBadge();
                         } else {
                             updateUnreadBadge();
                         }
@@ -3771,6 +3777,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 document.getElementById('dockChatListView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'none';
                 document.getElementById('dockChatTitle').textContent = '消息';
+                dockChatListCacheTime = 0;
                 loadDockChatList();
                 startDMPolling(300000);
                 if (restorePostsScroll !== null) {
@@ -4430,6 +4437,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // 版本更新日志
             const changelogData = [
+                {
+                    version: 'v0.67',
+                    date: '2026-06-02',
+                    content: `
+                        <h4>性能大幅优化</h4>
+                        <ul>
+                            <li>花草圈圈 Canvas 动画全面优化：阴影模糊降低60%、藤蔓分段减少33%、花粉减至8粒、蝴蝶残影减至1层</li>
+                            <li>escapeHtml 改用纯字符串替换避免创建DOM元素；fixText 改为单次正则替换</li>
+                            <li>全局 pointerdown 加80ms节流；移除多个 will-change 反效果声明</li>
+                            <li>perf-lite 彻底禁用 echo-loader 无限循环动画；perf-balanced 大幅降低阴影和模糊</li>
+                            <li>筛选用户加载动画改为中心120px花草圈圈Canvas动画</li>
+                        </ul>
+                    `
+                },
                             {
                     version: 'v0.64',
                     date: '2026-05-31',
