@@ -3,13 +3,17 @@
 
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
             const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
-            if (typeof window.supabase === 'undefined') {
-                var feedEl = document.getElementById('feed');
-                if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
-                return;
+            var sb;
+            if (typeof window.supabase !== 'undefined') {
+                sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            } else {
+                console.error('Supabase SDK not loaded');
+                document.addEventListener('DOMContentLoaded', function() {
+                    var feedEl = document.getElementById('feed');
+                    if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">服务加载失败，请刷新页面重试</div>';
+                });
             }
-            const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-window.sb = sb;
+            window.sb = sb;
 window.safeLocalStorageGetJSON = function(key, fallback) {
     try {
         var v = localStorage.getItem(key);
