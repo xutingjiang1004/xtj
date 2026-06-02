@@ -97,6 +97,8 @@
     function markMessagesRead(senderName) {
         var key = 'xtj_dmread_' + window.currentUser + '_' + senderName;
         localStorage.setItem(key, new Date().toISOString());
+        window.dockChatListCacheTime = 0;
+        loadDockChatList();
         window.updateUnreadBadge();
     }
     window.markMessagesRead = markMessagesRead;
