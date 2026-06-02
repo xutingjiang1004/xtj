@@ -6,7 +6,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>xtj</title>
-    <link rel="stylesheet" href="css/style.css" />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" />
+    <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
+    <link rel="preconnect" href="https://pyrjkgqalmvgtozxkgbd.supabase.co" />
+    <link rel="dns-prefetch" href="https://pyrjkgqalmvgtozxkgbd.supabase.co" />
+    <link rel="stylesheet" href="css/style.min.css" />
     <link rel="stylesheet" href="css/loader-hotfix.css" />
 </head>
 <body>
@@ -314,6 +318,7 @@
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
                 </svg>
             </span>
+            <span id="navChatBadge" class="nav-chat-badge"></span>
             <span class="dt-label">聊天</span>
             <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
                 <!-- 3个气泡各自独立定位，明显分开 -->
@@ -665,27 +670,10 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-    <script src="js/performance.js"></script>
-    <script src="js/core.js"></script>
-
-    <script src="js/photo-wall/data.js"></script>
-    <script src="js/photo-wall/render.js"></script>
-    <script src="js/photo-wall/upload.js"></script>
-    <script src="js/photo-wall/preview.js"></script>
-    <script src="js/photo-wall/photo-wall.js"></script>
-
-    <!-- SVG Animation Path Length Calculator -->
-    
-
-    <!-- Profile Page Logic -->
-    
-
-    <!-- ============================================================ -->
-    <!-- 功能模块：用户管理 & 内容安全 / 照片墙增强 / 性能优化        -->
-    <!-- ============================================================ -->
-
-    <script src="js/features.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <script defer src="js/performance.min.js"></script>
+    <script defer src="js/core.min.js"></script>
+    <script defer src="js/features.min.js"></script>
 <script>
 (function() {
     var COLORS = {

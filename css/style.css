@@ -2274,6 +2274,27 @@
             font-size: 20px; line-height: 1;
             position: relative; z-index: 1;
         }
+        .nav-chat-badge {
+            position: absolute;
+            top: 1px;
+            right: calc(50% - 24px);
+            min-width: 16px; height: 16px;
+            border-radius: 8px;
+            background: var(--like-color, #ff3b60);
+            color: #fff;
+            font-size: 9px; font-weight: 700;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
+            z-index: 10;
+            pointer-events: none;
+            line-height: 1;
+            box-sizing: border-box;
+        }
+        .nav-chat-badge.show {
+            display: flex;
+        }
         .dock-tab .dt-label {
             font-weight: 500; letter-spacing: 0.3px;
             transition: color 0.3s;
