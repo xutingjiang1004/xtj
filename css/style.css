@@ -6127,3 +6127,102 @@
     height: 180px;
   }
 }
+
+.perf-balanced .glass,
+.perf-balanced .publish-box,
+.perf-balanced .post,
+.perf-balanced .modal-box,
+.perf-balanced .chat-panel,
+.perf-balanced .chat-entry-bar,
+.perf-balanced .photo-wall-header,
+.perf-balanced .profile-user-card,
+.perf-balanced .toast,
+.perf-balanced .photo-wall-item,
+.perf-balanced .pw-item-info,
+.perf-balanced .photo-preview-info,
+.perf-balanced .pp-preview-toolbar {
+  backdrop-filter: blur(10px) saturate(118%) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(118%) !important;
+}
+
+.perf-lite .glass,
+.perf-lite .publish-box,
+.perf-lite .post,
+.perf-lite .modal-box,
+.perf-lite .chat-panel,
+.perf-lite .chat-entry-bar,
+.perf-lite .photo-wall-header,
+.perf-lite .profile-user-card,
+.perf-lite .toast,
+.perf-lite .photo-wall-item,
+.perf-lite .pw-item-info,
+.perf-lite .photo-preview-info,
+.perf-lite .pp-preview-toolbar,
+.perf-lite .dock-bar {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.perf-balanced .photo-wall-item,
+.perf-lite .photo-wall-item {
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.10), 0 4px 12px rgba(15, 23, 42, 0.06) !important;
+}
+
+.perf-balanced .photo-wall-item.pw-stagger-enter,
+.perf-balanced .photo-wall-item img.pw-blur-in,
+.perf-lite .photo-wall-item.pw-stagger-enter,
+.perf-lite .photo-wall-item img.pw-blur-in {
+  filter: none !important;
+}
+
+.perf-balanced .photo-wall-item img.pw-blur-in,
+.perf-lite .photo-wall-item img.pw-blur-in {
+  opacity: .01;
+  transform: scale(1.008);
+}
+
+.perf-lite .photo-wall-item:hover,
+.perf-lite .publish-box:hover,
+.perf-lite .stat-card:hover {
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.10) !important;
+}
+
+.perf-lite .xtj-echo-core,
+.perf-lite .xtj-chat-empty-icon,
+.perf-lite .xtj-sigil-loader,
+.perf-lite .upload-progress-container {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+}
+
+.perf-balanced .xtj-echo-core,
+.perf-balanced .xtj-chat-empty-icon,
+.perf-balanced .xtj-sigil-loader,
+.perf-balanced .upload-progress-container {
+  backdrop-filter: blur(8px) saturate(115%) !important;
+  -webkit-backdrop-filter: blur(8px) saturate(115%) !important;
+}
+
+.perf-balanced .xtj-echo-loader,
+.perf-balanced .xtj-sigil-loader,
+.perf-lite .xtj-echo-loader,
+.perf-lite .xtj-sigil-loader,
+.perf-lite .upload-progress-icon {
+  filter: none !important;
+}
+
+.perf-lite .xtj-echo-loader *,
+.perf-lite .xtj-sigil-loader *,
+.perf-lite .upload-progress-icon * {
+  box-shadow: none !important;
+}
+
+.perf-hz-120 .post,
+.perf-hz-120 .photo-wall-item,
+.perf-hz-120 .photo-wall-item img,
+.perf-hz-120 .pp-slide-img,
+.perf-hz-120 .action-btn,
+.perf-hz-120 .stat-card {
+  transition-duration: 0.32s;
+}

@@ -14,6 +14,7 @@
     var feedAllComments = [];
     var feedAllLikes = [];
     var feedScrollObserver = null;
+    var postRevealObserver = null;
 
     var statCurrentType = null;
     var statAllPosts = [];
@@ -24,6 +25,19 @@
     var STAT_CACHE_DURATION = 30000;
 
     window.CACHE_KEY = CACHE_KEY;
+
+    function getPostRevealObserver() {
+        if (!postRevealObserver) {
+            postRevealObserver = new IntersectionObserver(function(entries) {
+                entries.forEach(function(entry) {
+                    if (!entry.isIntersecting) return;
+                    entry.target.classList.add('visible');
+                    postRevealObserver.unobserve(entry.target);
+                });
+            }, { threshold: 0.05, rootMargin: '120px 0px' });
+        }
+        return postRevealObserver;
+    }
 
     function getViewHistory() {
         try {
@@ -392,18 +406,12 @@
         var sentinel = document.getElementById('feedSentinel');
         var tempContainer = document.createElement('div');
         tempContainer.innerHTML = postsHtml;
+        var insertedPosts = Array.prototype.slice.call(tempContainer.querySelectorAll('.post'));
         while (tempContainer.firstChild) {
             feed.insertBefore(tempContainer.firstChild, sentinel);
         }
-        var newPosts = feed.querySelectorAll('.post:not(.visible)');
-        var observer = new IntersectionObserver(function(e) {
-            e.forEach(function(i) {
-                if (i.isIntersecting) {
-                    i.target.classList.add('visible');
-                }
-            });
-        }, { threshold: 0.05 });
-        newPosts.forEach(function(p) { observer.observe(p); });
+        var observer = getPostRevealObserver();
+        insertedPosts.forEach(function(post) { observer.observe(post); });
         updateFeedStats();
     }
 
@@ -543,14 +551,8 @@
     }
 
     function initPostScrollAnimation() {
-        var observer = new IntersectionObserver(function(e) {
-            e.forEach(function(i) {
-                if (i.isIntersecting) {
-                    i.target.classList.add('visible');
-                }
-            });
-        }, { threshold: 0.05 });
-        document.querySelectorAll('.post').forEach(function(p) { observer.observe(p); });
+        var observer = getPostRevealObserver();
+        document.querySelectorAll('.post:not(.visible)').forEach(function(post) { observer.observe(post); });
     }
 
     function updateFeedStats() {
