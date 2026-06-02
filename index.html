@@ -803,11 +803,40 @@
 
     var _xtjSpringList = [];
     var _xtjSpringRaf = null;
-    function _xtjSpringLoop(ms) {
-        for (var _i = 0; _i < _xtjSpringList.length; _i++) {
-            _xtjSpringList[_i](ms);
-        }
+    var _xtjSpringFrameMinGap = 1000 / 45;
+
+    function isSpringCanvasActive(canvas) {
+        if (!canvas || !canvas.isConnected || document.hidden) return false;
+        if (canvas.offsetWidth === 0 || canvas.offsetHeight === 0) return false;
+        var panel = canvas.closest('.dock-panel');
+        if (panel && !panel.classList.contains('active')) return false;
+        return canvas.getClientRects().length > 0;
+    }
+
+    function scheduleSpringLoop() {
+        if (_xtjSpringRaf || !_xtjSpringList.length || document.hidden) return;
         _xtjSpringRaf = requestAnimationFrame(_xtjSpringLoop);
+    }
+
+    function _xtjSpringLoop(ms) {
+        var activeCount = 0;
+        for (var _i = _xtjSpringList.length - 1; _i >= 0; _i--) {
+            var item = _xtjSpringList[_i];
+            if (!item || !item.canvas || !item.canvas.isConnected) {
+                _xtjSpringList.splice(_i, 1);
+                continue;
+            }
+            if (!isSpringCanvasActive(item.canvas)) continue;
+            activeCount++;
+            if (item.lastMs != null && ms - item.lastMs < _xtjSpringFrameMinGap) continue;
+            item.lastMs = ms;
+            item.animate(ms);
+        }
+        if (activeCount > 0 && !document.hidden) {
+            _xtjSpringRaf = requestAnimationFrame(_xtjSpringLoop);
+        } else {
+            _xtjSpringRaf = null;
+        }
     }
 
     function initSpringCanvas(canvas) {
@@ -1137,7 +1166,12 @@
             ctx.restore();
         }
 
-        _xtjSpringList.push(animate);
+        canvas._xtjSpringInited = true;
+        _xtjSpringList.push({
+            canvas: canvas,
+            animate: animate,
+            lastMs: null
+        });
     }
 
     var canvases = document.querySelectorAll('.spring-canvas');
@@ -1145,22 +1179,39 @@
         initSpringCanvas(canvases[i]);
     }
 
-    if (_xtjSpringList.length > 0 && !_xtjSpringRaf) {
-        _xtjSpringRaf = requestAnimationFrame(_xtjSpringLoop);
-    }
+    scheduleSpringLoop();
 
     window.initSpringCanvas = initSpringCanvas;
     window.initAllSpringLoaders = function(root) {
         (root || document).querySelectorAll('.spring-canvas').forEach(function(c) {
             if (!c._xtjSpringInited) {
-                c._xtjSpringInited = true;
                 initSpringCanvas(c);
             }
         });
-        if (_xtjSpringList.length > 0 && !_xtjSpringRaf) {
-            _xtjSpringRaf = requestAnimationFrame(_xtjSpringLoop);
-        }
+        scheduleSpringLoop();
     };
+
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) return;
+        for (var i = 0; i < _xtjSpringList.length; i++) {
+            _xtjSpringList[i].lastMs = null;
+        }
+        scheduleSpringLoop();
+    });
+
+    window.addEventListener('pageshow', scheduleSpringLoop);
+    window.addEventListener('resize', scheduleSpringLoop, { passive: true });
+
+    var springPanelsRoot = document.getElementById('dockPanels');
+    if (springPanelsRoot && window.MutationObserver) {
+        new MutationObserver(function() {
+            scheduleSpringLoop();
+        }).observe(springPanelsRoot, {
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'style']
+        });
+    }
 })();
 </script>
 </body>
