@@ -2906,6 +2906,236 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }, 350);
             };
 
+            function formatStatTime(value) {
+                try {
+                    return new Date(value).toLocaleString();
+                } catch (e) {
+                    return '';
+                }
+            }
+
+            function summarizeStatPost(post, limit) {
+                post = post || {};
+                var max = limit || 40;
+                var text = String(post.content || '').trim();
+                if (text) return text.length > max ? text.slice(0, max) + '...' : text;
+                if (post.media_type === 'image') return '图片动态';
+                if (post.media_type === 'video') return '视频动态';
+                return '无文字内容';
+            }
+
+            function statMetricMarkup(label, value) {
+                return [
+                    '<div class="stat-metric">',
+                    '<span class="stat-metric-value">' + escapeHtml(String(value)) + '</span>',
+                    '<span class="stat-metric-label">' + escapeHtml(String(label)) + '</span>',
+                    '</div>'
+                ].join('');
+            }
+
+            function statHeroMarkup(opts) {
+                opts = opts || {};
+                var metrics = Array.isArray(opts.metrics) ? opts.metrics : [];
+                return [
+                    '<section class="stat-hero stat-hero--' + escapeHtml(opts.tone || 'posts') + '">',
+                    opts.kicker ? '<div class="stat-hero-kicker">' + escapeHtml(opts.kicker) + '</div>' : '',
+                    '<div class="stat-hero-title">' + escapeHtml(opts.title || '') + '</div>',
+                    opts.copy ? '<div class="stat-hero-copy">' + escapeHtml(opts.copy) + '</div>' : '',
+                    metrics.length ? '<div class="stat-hero-metrics">' + metrics.map(function(metric) { return statMetricMarkup(metric.label, metric.value); }).join('') + '</div>' : '',
+                    '</section>'
+                ].join('');
+            }
+
+            function statEmptyMarkup(opts) {
+                opts = opts || {};
+                return [
+                    '<div class="stat-empty-rich stat-surface-card">',
+                    opts.kicker ? '<div class="stat-hero-kicker">' + escapeHtml(opts.kicker) + '</div>' : '',
+                    '<div class="stat-empty-title">' + escapeHtml(opts.title || '暂无数据') + '</div>',
+                    opts.copy ? '<div class="stat-empty-copy">' + escapeHtml(opts.copy) + '</div>' : '',
+                    opts.note ? '<div class="stat-empty-note">' + escapeHtml(opts.note) + '</div>' : '',
+                    '</div>'
+                ].join('');
+            }
+
+            function statPostItemMarkup(post) {
+                var hasImg = post.media_url && post.media_type === 'image';
+                var hasVid = post.media_url && post.media_type === 'video';
+                var tag = hasImg ? '<span class="spi-img-tag">图片</span>' : (hasVid ? '<span class="spi-img-tag">视频</span>' : '<span class="spi-img-tag spi-img-tag--text">文字</span>');
+                var display = summarizeStatPost(post, 38);
+                var onclick = "openPostDetail('" + String(post.id).replace(/'/g, "\\'") + "')";
+                return [
+                    '<div class="stat-post-item" onclick="' + onclick + '" title="点击查看帖子详情">',
+                    '<div class="spi-main">',
+                    '<div class="spi-content-row"><span class="spi-content">' + escapeHtml(display) + '</span>' + tag + '</div>',
+                    '<div class="spi-meta"><span class="spi-time">' + escapeHtml(formatStatTime(post.created_at)) + '</span><span class="spi-open">查看详情</span></div>',
+                    '</div>',
+                    hasImg ? '<img class="spi-thumb" src="' + escapeHtml(post.media_url) + '" alt="" />' : (hasVid ? '<div class="spi-thumb spi-thumb--video">VIDEO</div>' : ''),
+                    '</div>'
+                ].join('');
+            }
+
+            renderPostStats = function() {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var userMap = {};
+                statAllPosts.forEach(function(p) {
+                    if (!userMap[p.user_name]) userMap[p.user_name] = [];
+                    userMap[p.user_name].push(p);
+                });
+                var entries = Object.entries(userMap).sort(function(a, b) {
+                    return b[1].length - a[1].length;
+                });
+                if (!entries.length) {
+                    body.innerHTML = statEmptyMarkup({
+                        kicker: 'POSTS',
+                        title: '还没有动态统计',
+                        copy: '这里会按用户整理所有动态，方便你快速查看谁发得最多、最近发了什么。'
+                    });
+                    return;
+                }
+                body.innerHTML = statHeroMarkup({
+                    tone: 'posts',
+                    kicker: 'POSTS',
+                    title: '总动态总览',
+                    copy: '按用户分组展示，优先显示发帖更活跃的用户。',
+                    metrics: [
+                        { label: '动态总数', value: statAllPosts.length },
+                        { label: '活跃用户', value: entries.length },
+                        { label: '最近更新', value: entries[0] && entries[0][1] && entries[0][1][0] ? formatStatTime(entries[0][1][0].created_at).slice(0, 16) : '--' }
+                    ]
+                }) + '<div class="stat-stack">' + entries.map(function(entry) {
+                    var name = entry[0];
+                    var posts = entry[1];
+                    var latest = posts[0] ? formatStatTime(posts[0].created_at) : '--';
+                    var moreButton = posts.length > 3
+                        ? '<button class="stat-view-btn" onclick="loadUserAllPosts(\'' + String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">查看全部 ' + posts.length + ' 条</button>'
+                        : '';
+                    return [
+                        '<section class="stat-user-group stat-surface-card">',
+                        '<div class="stat-user-header"><div class="suh-left"><div class="suh-avatar">' + escapeHtml(name).slice(0, 1).toUpperCase() + '</div><div class="suh-copy"><span class="suh-name">' + escapeHtml(name) + '</span><span class="suh-sub">最近更新 ' + escapeHtml(latest) + '</span></div></div><div class="suh-right"><span class="suh-count">' + posts.length + ' 条</span>' + moreButton + '</div></div>',
+                        '<div class="stat-user-posts">',
+                        posts.slice(0, 3).map(function(p) { return statPostItemMarkup(p); }).join(''),
+                        '</div>',
+                        '</section>'
+                    ].join('');
+                }).join('') + '</div>';
+            };
+
+            window.loadUserAllPosts = function(userName) {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var userPosts = statAllPosts.filter(function(p) { return p.user_name === userName; });
+                body.innerHTML = [
+                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">返回总动态</button>',
+                    statHeroMarkup({
+                        tone: 'posts',
+                        kicker: 'USER POSTS',
+                        title: userName + ' 的全部动态',
+                        copy: '按时间倒序展示该用户发布过的所有内容。',
+                        metrics: [
+                            { label: '动态数量', value: userPosts.length },
+                            { label: '最新发布', value: userPosts[0] ? formatStatTime(userPosts[0].created_at).slice(0, 16) : '--' }
+                        ]
+                    }),
+                    '<div class="stat-stack">' + userPosts.map(function(p) { return statPostItemMarkup(p); }).join('') + '</div>'
+                ].join('');
+            };
+
+            renderViewStats = function() {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var history = getViewHistory();
+                if (!history.length) {
+                    body.innerHTML = statEmptyMarkup({
+                        kicker: 'VIEWS',
+                        title: '还没有浏览记录',
+                        copy: '当你查看帖子详情时，这里会自动记录谁看了哪条帖子，方便回看浏览轨迹。',
+                        note: '浏览记录保存在当前设备的本地缓存中。'
+                    });
+                    return;
+                }
+                body.innerHTML = statHeroMarkup({
+                    tone: 'views',
+                    kicker: 'VIEWS',
+                    title: '浏览记录',
+                    copy: '记录最近的帖子浏览轨迹，帮助你回看被访问的内容。',
+                    metrics: [
+                        { label: '记录条数', value: history.length },
+                        { label: '最近浏览', value: formatStatTime(history[0].viewed_at).slice(0, 16) },
+                        { label: '浏览总量', value: document.getElementById('sViews') ? document.getElementById('sViews').textContent : history.length }
+                    ]
+                }) + '<div class="stat-stack">' + history.map(function(v) {
+                    return [
+                        '<article class="stat-view-item">',
+                        '<div class="stat-record-head"><div class="svi-user">' + escapeHtml(v.user_name) + '</div><span class="svi-time">' + escapeHtml(formatStatTime(v.viewed_at)) + '</span></div>',
+                        '<div class="stat-record-title">浏览了 ' + escapeHtml(v.post_author) + ' 的帖子</div>',
+                        '<div class="stat-record-copy">' + escapeHtml(v.post_content || '无文字内容') + '</div>',
+                        '</article>'
+                    ].join('');
+                }).join('') + '</div>';
+            };
+
+            renderLikeStats = function() {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var postMap = {};
+                statAllPosts.forEach(function(p) { postMap[p.id] = p; });
+
+                function buildLikesCol() {
+                    var h = '<div class="stat-section-title"><span>点赞记录</span><span class="stat-section-count">' + statAllLikes.length + '</span></div>';
+                    if (statAllLikes.length) {
+                        h += statAllLikes.slice(0, 200).map(function(l) {
+                            var post = postMap[l.post_id];
+                            var postContent = post ? summarizeStatPost(post, 32) : '原帖已删除';
+                            return [
+                                '<article class="stat-like-item">',
+                                '<div class="stat-record-head"><div class="sli-user">' + escapeHtml(l.user_name) + '</div><span class="sli-time">' + escapeHtml(formatStatTime(l.created_at)) + '</span></div>',
+                                '<div class="stat-record-title">点赞了这条内容</div>',
+                                '<div class="stat-record-copy">' + escapeHtml(postContent) + '</div>',
+                                '</article>'
+                            ].join('');
+                        }).join('');
+                    } else {
+                        h += statEmptyMarkup({ title: '暂无点赞记录', copy: '当有人给帖子点赞后，这里会显示最近的互动。' });
+                    }
+                    return h;
+                }
+
+                function buildCommentsCol() {
+                    var h = '<div class="stat-section-title"><span>评论记录</span><span class="stat-section-count">' + statAllComments.length + '</span></div>';
+                    if (statAllComments.length) {
+                        h += statAllComments.slice().reverse().slice(0, 200).map(function(c) {
+                            var post = postMap[c.post_id];
+                            var postContent = post ? summarizeStatPost(post, 28) : '原帖已删除';
+                            return [
+                                '<article class="stat-comment-item">',
+                                '<div class="stat-record-head"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><span class="sci-time">' + escapeHtml(formatStatTime(c.created_at)) + '</span></div>',
+                                '<div class="stat-record-title">评论了这条内容</div>',
+                                '<div class="stat-record-copy">原帖：' + escapeHtml(postContent) + '</div>',
+                                '<div class="stat-record-note">' + escapeHtml(c.content || '无评论内容') + '</div>',
+                                '</article>'
+                            ].join('');
+                        }).join('');
+                    } else {
+                        h += statEmptyMarkup({ title: '暂无评论记录', copy: '评论互动出现后，这里会按时间整理出来。' });
+                    }
+                    return h;
+                }
+
+                body.innerHTML = statHeroMarkup({
+                    tone: 'likes',
+                    kicker: 'ENGAGEMENT',
+                    title: '点赞与评论',
+                    copy: '把两类互动拆开显示，便于快速看清谁在点赞、谁在发言。',
+                    metrics: [
+                        { label: '总互动', value: statAllLikes.length + statAllComments.length },
+                        { label: '点赞', value: statAllLikes.length },
+                        { label: '评论', value: statAllComments.length }
+                    ]
+                }) + '<div class="stat-two-col"><section class="stat-col">' + buildLikesCol() + '</section><section class="stat-col">' + buildCommentsCol() + '</section></div>';
+            };
+
             window.openPostDetail = async function(postId) {
                 document.getElementById('postDetailTitle').textContent = '帖子详情';
                 document.getElementById('postDetailBody').innerHTML = window.xtjMagicLoadingHtml('加载中...', '加载中...', 'feed');
@@ -5502,27 +5732,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             window.xtjMagicLoadingHtml = function() {
                 return springLoaderHtml;
             };
-            var magicHtml = window.xtjMagicLoadingHtml;
-
             window.xtjInitSpringUltLoaders = function(root) {
                 if (window.initAllSpringLoaders) {
                     window.initAllSpringLoaders(root || document);
                 }
             };
 
-            renderChatLoadingState = window.renderChatLoadingState = function(el, options) {
-                if (!el) return;
-                el.innerHTML = magicHtml();
-                if (window.initAllSpringLoaders) {
-                    window.initAllSpringLoaders(el);
-                }
-            };
-
-            renderPostFilterUserLoader = window.renderPostFilterUserLoader = function() {
-                return magicHtml();
-            };
-
-            if (typeof loadFeed === 'function' && !loadFeed.__xtjMagicLoaderV4) {
+            // Disabled on purpose: this global loader patch was replacing live content areas
+            // after render, which could cause feed/chat content loss and persistent jank.
+            if (false && typeof loadFeed === 'function' && !loadFeed.__xtjMagicLoaderV4) {
                 var orig = loadFeed;
                 loadFeed = window.loadFeed = function(forceRefresh) {
                     var r = orig.apply(this, arguments);
@@ -5538,7 +5756,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 loadFeed.__xtjMagicLoaderV4 = true;
             }
 
-            if (typeof openChat === 'function' && !openChat.__xtjMagicLoaderV4) {
+            if (false && typeof openChat === 'function' && !openChat.__xtjMagicLoaderV4) {
                 var origChat = openChat;
                 openChat = window.openChat = function(userName) {
                     var r = origChat.apply(this, arguments);
@@ -5551,7 +5769,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 openChat.__xtjMagicLoaderV4 = true;
             }
 
-            if (typeof openPostDetail === 'function' && !openPostDetail.__xtjMagicLoaderV4) {
+            if (false && typeof openPostDetail === 'function' && !openPostDetail.__xtjMagicLoaderV4) {
                 var origPd = openPostDetail;
                 openPostDetail = window.openPostDetail = function(postId) {
                     var r = origPd.apply(this, arguments);
@@ -5567,7 +5785,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 openPostDetail.__xtjMagicLoaderV4 = true;
             }
 
-            if (typeof openStatDetail === 'function' && !openStatDetail.__xtjMagicLoaderV4) {
+            if (false && typeof openStatDetail === 'function' && !openStatDetail.__xtjMagicLoaderV4) {
                 var origSd = openStatDetail;
                 openStatDetail = window.openStatDetail = function(type) {
                     var r = origSd.apply(this, arguments);
@@ -5584,6 +5802,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             function patchNode(root) {
+                // Keep explicit loaders, but do not rewrite arbitrary nodes into spring loaders.
+                return;
                 root = root || document;
                 if (!root.querySelectorAll) return;
                 root.querySelectorAll('.xtj-magic-loading, .xtj-chat-loader, #feed .loading, #statModalBody .loading, #postDetailBody .loading, #dockChatMessages .chat-empty, #dockChatList .chat-empty, #postUserQuickList .post-user-chip--loading').forEach(function(node) {
@@ -5656,6 +5876,58 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!body) return;
                 body.innerHTML = statPostDetailMarkup(post, likes, comments);
             };
+
+            function formatStatTime(value) {
+                try {
+                    return new Date(value).toLocaleString();
+                } catch (e) {
+                    return '';
+                }
+            }
+
+            function summarizeStatPost(post, limit) {
+                post = post || {};
+                var max = limit || 40;
+                var text = String(post.content || '').trim();
+                if (text) return text.length > max ? text.slice(0, max) + '...' : text;
+                if (post.media_type === 'image') return '图片动态';
+                if (post.media_type === 'video') return '视频动态';
+                return '无文字内容';
+            }
+
+            function statMetricMarkup(label, value) {
+                return [
+                    '<div class="stat-metric">',
+                    '<span class="stat-metric-value">' + escapeHtml(String(value)) + '</span>',
+                    '<span class="stat-metric-label">' + escapeHtml(String(label)) + '</span>',
+                    '</div>'
+                ].join('');
+            }
+
+            function statHeroMarkup(opts) {
+                opts = opts || {};
+                var metrics = Array.isArray(opts.metrics) ? opts.metrics : [];
+                return [
+                    '<section class="stat-hero stat-hero--' + escapeHtml(opts.tone || 'posts') + '">',
+                    opts.kicker ? '<div class="stat-hero-kicker">' + escapeHtml(opts.kicker) + '</div>' : '',
+                    '<div class="stat-hero-title">' + escapeHtml(opts.title || '') + '</div>',
+                    opts.copy ? '<div class="stat-hero-copy">' + escapeHtml(opts.copy) + '</div>' : '',
+                    metrics.length ? '<div class="stat-hero-metrics">' + metrics.map(function(metric) { return statMetricMarkup(metric.label, metric.value); }).join('') + '</div>' : '',
+                    '</section>'
+                ].join('');
+            }
+
+            function statEmptyMarkup(opts) {
+                opts = opts || {};
+                return [
+                    '<div class="stat-empty-rich stat-surface-card">',
+                    opts.kicker ? '<div class="stat-hero-kicker">' + escapeHtml(opts.kicker) + '</div>' : '',
+                    '<div class="stat-empty-title">' + escapeHtml(opts.title || '暂无数据') + '</div>',
+                    opts.copy ? '<div class="stat-empty-copy">' + escapeHtml(opts.copy) + '</div>' : '',
+                    opts.note ? '<div class="stat-empty-note">' + escapeHtml(opts.note) + '</div>' : '',
+                    '</div>'
+                ].join('');
+            }
 
             function statPostItemMarkup(post) {
                 var text = post.content || '';
@@ -5912,7 +6184,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             renderPostFilterUserLoader = function() {
-                return window.xtjMagicLoadingHtml();
+                return [
+                    '<div class="post-user-chip post-user-chip--loading is-empty">',
+                    '<span class="post-user-loader" aria-hidden="true">',
+                    '<span class="post-user-loader-ring"></span>',
+                    '<span class="post-user-loader-core"></span>',
+                    '<span class="post-user-loader-spark"></span>',
+                    '</span>',
+                    '<span class="post-user-chip-name">鍔犺浇涓?../span>',
+                    '</div>'
+                ].join('');
             };
 
             window.openStatDetail = async function(type) {
