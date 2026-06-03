@@ -6766,3 +6766,197 @@
     height: 140px;
   }
 }
+
+/* ===== Localized Photo Wall Upload Progress ===== */
+.pw-upload-local-overlay {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 16px;
+}
+
+.pw-upload-progress-container {
+  position: relative;
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 20px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(12, 16, 24, 0.88), rgba(8, 12, 18, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+
+.pw-upload-local-spinner {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pw-upload-local-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(167, 243, 208, 0.18);
+  animation: pwUploadSpin 2.4s linear infinite;
+}
+
+.pw-upload-local-ring--inner {
+  inset: 8px;
+  border-color: rgba(167, 243, 208, 0.32);
+  animation-duration: 1.8s;
+  animation-direction: reverse;
+}
+
+.pw-upload-local-icon {
+  position: relative;
+  z-index: 1;
+  color: rgba(167, 243, 208, 0.7);
+  width: 36px;
+  height: 36px;
+}
+
+@keyframes pwUploadSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.pw-upload-progress-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.9);
+  text-align: center;
+}
+
+.pw-upload-local-bar-wrap {
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.pw-upload-progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #059669, #10b981, #34d399);
+  transition: width 0.3s ease;
+  position: relative;
+}
+
+.pw-upload-progress-bar::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3));
+  animation: pwUploadBarShine 1.5s ease-in-out infinite;
+}
+
+@keyframes pwUploadBarShine {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.8; }
+}
+
+.pw-upload-progress-status {
+  font-size: 22px;
+  font-weight: 800;
+  color: #10b981;
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-upload-progress-text {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  text-align: center;
+}
+
+/* ===== Post Media Preview ===== */
+.post-media-preview {
+  padding: 10px 0 6px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  margin-top: 6px;
+}
+
+.post-media-preview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.post-media-preview-thumb {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
+}
+
+.post-media-preview-thumb img,
+.post-media-preview-thumb video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.post-media-preview-tag {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.post-media-preview-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.08);
+  color: #6b7280;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: default;
+}
+
+.post-media-preview-count {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 600;
+}
+
+/* Dark theme overrides */
+[data-theme="dark"] .post-media-preview {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .post-media-preview-thumb {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme="dark"] .post-media-preview-more {
+  background: rgba(255, 255, 255, 0.08);
+  color: #9ca3af;
+}
+
+[data-theme="dark"] .post-media-preview-count {
+  color: #9ca3af;
+}
