@@ -18,30 +18,7 @@
 
     <div class="notification-container" id="notificationContainer"></div>
 
-    <div class="upload-progress-overlay" id="uploadProgressOverlay" style="display:none;">
-        <div class="upload-progress-container">
-            <div class="upload-progress-icon">
-                <div class="upload-progress-halo"></div>
-                <div class="upload-progress-ring"></div>
-                <div class="upload-progress-ring upload-progress-ring-delayed"></div>
-                <div class="upload-progress-shutter"></div>
-                <svg class="camera-icon" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
-                    <circle cx="12" cy="13" r="4"></circle>
-                </svg>
-                <div class="upload-progress-spark upload-progress-spark-a"></div>
-                <div class="upload-progress-spark upload-progress-spark-b"></div>
-            </div>
-            <div class="upload-progress-title" id="uploadProgressTitle">准备上传</div>
-            <div class="upload-progress-bar-wrapper">
-                <div class="upload-progress-bar" id="uploadProgressBar" style="width:0%">
-                    <div class="upload-progress-bar-shine"></div>
-                </div>
-            </div>
-            <div class="upload-progress-text" id="uploadProgressText">0%</div>
-            <div class="upload-progress-status" id="uploadProgressStatus">正在整理照片内容...</div>
-        </div>
-    </div>
+    <!-- photo upload progress overlay moved to photo wall panel -->
 
     <div class="app-container">
 
@@ -78,6 +55,10 @@
             <div class="wrap" style="position:relative; z-index:2; margin:0; padding:16px 0; max-width:100%;">
                 <div class="publish-box glass" id="publishBox">
                     <textarea id="postInp" placeholder="分享一点新鲜事..."></textarea>
+                    <div class="post-media-preview" id="postMediaPreview" style="display:none;">
+                        <div class="post-media-preview-grid" id="postMediaPreviewGrid"></div>
+                        <div class="post-media-preview-count" id="postMediaPreviewCount">已选择 0 个文件</div>
+                    </div>
                     <div class="post-compose-row">
                         <label class="post-compose-label" for="postVisibility">可见范围</label>
                         <select id="postVisibility" class="post-filter-select post-visibility-select">
@@ -212,7 +193,7 @@
                             </span>
                             <span>相册</span>
                         </button>
-                        <button class="photo-wall-upload-btn" id="photoUploadBtn" onclick="triggerPhotoUpload()">
+                        <button class="photo-wall-upload-btn" id="photoUploadBtn" onclick="window.xtjUploadBtn()">
                             <span class="ui-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M7 18a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 1 1 .5 6.96H15"></path>
@@ -227,7 +208,25 @@
                 <div id="pwAlbumContainer" style="display:none;"></div>
                 <div class="photo-wall-grid" id="photoGrid"></div>
                 <input type="file" id="photoFileInput" accept="image/*" multiple style="position:fixed;top:-100px;left:-100px;width:1px;height:1px;opacity:0;pointer-events:none;">
-                <div id="pwUploadProgress" style="display:none;padding:12px;margin:8px 0;border-radius:12px;background:rgba(0,0,0,0.05);"></div>
+                <div id="pwUploadProgressOverlay" style="display:none;" class="pw-upload-local-overlay">
+                <div class="pw-upload-progress-container">
+                    <div class="pw-upload-local-spinner">
+                        <div class="pw-upload-local-ring"></div>
+                        <div class="pw-upload-local-ring pw-upload-local-ring--inner"></div>
+                        <svg class="pw-upload-local-icon" viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M7 18a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 1 1 .5 6.96H15"></path>
+                            <path d="M12 11v9"></path>
+                            <path d="m8.5 14.5 3.5-3.5 3.5 3.5"></path>
+                        </svg>
+                    </div>
+                    <div class="pw-upload-progress-title" id="pwUploadProgressTitle">准备上传</div>
+                    <div class="pw-upload-local-bar-wrap">
+                        <div class="pw-upload-progress-bar" id="pwUploadProgressBar" style="width:0%"></div>
+                    </div>
+                    <div class="pw-upload-progress-status" id="pwUploadProgressStatus">0%</div>
+                    <div class="pw-upload-progress-text" id="pwUploadProgressText">正在上传...</div>
+                </div>
+            </div>
 
             </div>
         </div>
@@ -1223,6 +1222,83 @@
             subtree: true,
             attributes: true,
             attributeFilter: ['class', 'style']
+        });
+    }
+})();
+
+/* ===== PHOTO WALL UPLOAD + POST MEDIA PREVIEW ===== */
+(function() {
+    /* -- Photo Wall Upload -- */
+    window.validFiles = [];
+    window.successCount = 0;
+    window.failCount = 0;
+
+    window.xtjUploadBtn = function() {
+        if (!window.currentUser) { window.showToast && window.showToast('请先登录'); return; }
+        var fi = document.getElementById('photoFileInput');
+        if (!fi) return;
+        fi.value = '';
+        fi.click();
+    };
+
+    window.handlePhotoUpload = function(e) {
+        var files = (e && e.target && e.target.files) ? e.target.files : [];
+        if (!files || !files.length) return;
+        window.validFiles = [];
+        for (var i = 0; i < files.length; i++) {
+            if (files[i] && /^image\//.test(files[i].type)) {
+                window.validFiles.push(files[i]);
+            }
+        }
+        if (!window.validFiles.length) {
+            window.showToast && window.showToast('未选择有效的图片文件');
+            return;
+        }
+        window.successCount = 0;
+        window.failCount = 0;
+        if (typeof window.triggerPhotoUpload === 'function') {
+            window.triggerPhotoUpload();
+        } else {
+            console.error('[photo-upload] triggerPhotoUpload not available');
+        }
+    };
+
+    /* -- Post Media Preview -- */
+    var fileInp = document.getElementById('fileInp');
+    var previewEl = document.getElementById('postMediaPreview');
+    var previewGrid = document.getElementById('postMediaPreviewGrid');
+    var previewCount = document.getElementById('postMediaPreviewCount');
+
+    if (fileInp && previewEl && previewGrid && previewCount) {
+        fileInp.addEventListener('change', function() {
+            var files = this.files || [];
+            previewGrid.innerHTML = '';
+            if (!files.length) {
+                previewEl.style.display = 'none';
+                return;
+            }
+            previewEl.style.display = 'block';
+            previewCount.textContent = '已选择 ' + files.length + ' 个文件';
+            var shown = Math.min(files.length, 12);
+            for (var i = 0; i < shown; i++) {
+                var f = files[i];
+                var url = URL.createObjectURL(f);
+                var isVideo = /^video\//.test(f.type);
+                var thumb = document.createElement('div');
+                thumb.className = 'post-media-preview-thumb';
+                if (isVideo) {
+                    thumb.innerHTML = '<video src="' + url + '" muted></video><span class="post-media-preview-tag">视频</span>';
+                } else {
+                    thumb.innerHTML = '<img src="' + url + '" alt="' + (f.name || '') + '">';
+                }
+                previewGrid.appendChild(thumb);
+            }
+            if (files.length > 12) {
+                var more = document.createElement('div');
+                more.className = 'post-media-preview-thumb post-media-preview-more';
+                more.textContent = '+' + (files.length - 12);
+                previewGrid.appendChild(more);
+            }
         });
     }
 })();
