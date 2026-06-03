@@ -59,7 +59,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             return postVisibilityObserver;
         }
         const CACHE_KEY = "xtj_feed_cache_v2";
-        const CACHE_DURATION = 5 * 60 * 1000; // 缂傛挸鐡?閸掑棝鎸?
+        const CACHE_DURATION = 5 * 60 * 1000; // 缂撳�?分��?
 
         const POST_METADATA_MARKER = "__xtj_post_v2__";
         const POST_META_DEFAULTS = {
@@ -305,7 +305,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         }
         window.renderFilterSummary = renderFilterSummary;
 
-        // ========== 鐘讹拷锟界鐞嗗懡鍚嶇┖闂达紙鍚戝悗鍏煎锟?==========
+        // ========== 鐘讹拷锟界鐞嗗懡鍚嶇┖间（向后兼�锟?==========
         window.appState = {
             get currentUser() { return window.currentUser; },
             set currentUser(v) { window.currentUser = v; },
@@ -348,10 +348,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 overlay._closeTimer = null;
             }
             
-            // FLIP Animation: Step 1 - First (锟斤拷录鎸夐挳浣嶇疆)
+            // FLIP Animation: Step 1 - First (��¼按钮位置)
             var origin = window._confirmOrigin;
             
-            // FLIP Animation: Step 2 - Last (璁剧疆鏈拷缁堢姸锟?
+            // FLIP Animation: Step 2 - Last (设置朢�终状�?
             overlay.classList.remove('closing');
             overlay.classList.add('active');
             var okBtn = document.getElementById('ppConfirmOkBtn');
@@ -366,7 +366,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             
             void dialog?.offsetHeight;
             
-            // FLIP Animation: Step 3 - Invert (鐠侊紕鐣诲顔肩磽楠炶泛寮介崥鎴濆綁閿?
+            // FLIP Animation: Step 3 - Invert (璁＄畻宸紓骞跺弽鍚戝彉�?
             if (origin && dialog) {
                 var dialogRect = dialog.getBoundingClientRect();
                 var dx = origin.btnCx - dialogRect.left - dialogRect.width / 2;
@@ -391,7 +391,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             
             void dialog?.offsetHeight;
             
-            // FLIP Animation: Step 4 - Play (鎾斁鍔ㄧ敾)
+            // FLIP Animation: Step 4 - Play (播放动画)
             if (origin && dialog) {
                 dialog.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
                 dialog.style.transform = 'translate(0, 0) scale(1)';
@@ -416,10 +416,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (okBtn) okBtn.disabled = true;
                     overlay.classList.add('closing');
                     
-                    // FLIP Animation for Close: 閼惧嘲褰囬敓鏂ゆ嫹鍓嶅鍦崶娴ｅ秶鐤?
+                    // FLIP Animation for Close: 获取锟斤拷前寮圭獥浣嶇�?
                     var dialogRect = dialog.getBoundingClientRect();
                     
-                    // 閼惧嘲褰囧垹閿熸枻鎷烽幐澶愭尦閿熸枻鎷峰墠娴ｅ秶鐤?
+                    // 获取删锟斤拷按钮锟斤拷前浣嶇�?
                     var deleteBtn = document.getElementById('ppDeleteBtn');
                     var btnRect = deleteBtn ? deleteBtn.getBoundingClientRect() : null;
                     
@@ -428,7 +428,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var targetScale = o.scale || 0.3;
                     
                     if (btnRect) {
-                        // 浣跨敤鎸夐挳锟斤拷前浣嶇疆璁＄畻鐩爣鍙樻崲
+                        // 使用按钮��ǰ位置�＄畻鐩��变换
                         targetDx = btnRect.left + btnRect.width / 2 - dialogRect.left - dialogRect.width / 2;
                         targetDy = btnRect.top + btnRect.height / 2 - dialogRect.top - dialogRect.height / 2;
                         
@@ -437,13 +437,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         targetScale = btnSize / dialogSize * 0.6;
                     }
                     
-                    // Step 3 - Invert: 娣囶喗绻冪€垫柨缍嬮崜宥囧Ц閹?
+                    // Step 3 - Invert: 淇繃瀵斿綋鍓嶇姸�?
                     dialog.style.transition = 'none';
                     dialog.style.transform = 'translate(0, 0) scale(1)';
                     dialog.style.opacity = '1';
                     void dialog.offsetHeight;
                     
-                    // Step 4 - Play: 閹绢厽鏂佹鐐叉礀閸斻劎鏁?
+                    // Step 4 - Play: 播放飞回动�??
                     dialog.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in';
                     dialog.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
                     dialog.style.opacity = '0';
@@ -523,7 +523,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }, 300);
         };
 
-            // ===================== 瀵嗙爜閸濆牆ͳ=====================
+            // ===================== 密码鍝堝?=====================
             async function hashPassword(password) {
                 const encoder = new TextEncoder();
                 const data = encoder.encode(password);
@@ -549,7 +549,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 try {
                     var regTime = null;
 
-                    // 娴兼ê鍘涙禒?__auth__ 鐠佹澘缍嶉懢宄板絿濞夈劌鍞介弮鍫曟？闁挎稑鐗婂〒鑸垫綀婵炰緤绱?
+                    // 优先从?__auth__ 记录获取注册时间锛堟渶权威�??
                     try {
                         var authRes = await sb.from("posts")
                             .select("created_at")
@@ -561,7 +561,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     } catch(e) {}
 
-                    // 閸氬骸顦敍姘矤閻滅増婀?__user_info__ 娑擃叀顕伴敓?reg_time閿涘牏鏁imit(1)閼板矂娼猰aybeSingle閿涘苯顔愰柨娆忣樋鐞涘矉绱?
+                    // 鍚庡锛氫粠鐜版�?__user_info__ 中读�?reg_time锛堢敤limit(1)閼板矂娼猰aybeSingle锛屽错�行��?
                     if (!regTime) {
                         try {
                             var existing = await sb.from("posts")
@@ -576,7 +576,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         } catch(e) {}
                     }
 
-                    // 閺堫澁鎷烽崥搴℃倵婢跺浄绱伴弬鎵暏閹撮鏁ら敓鏂ゆ嫹鍓嶆椂閿熸枻鎷?
+                    // 鏈拷鍚庡悗澶囷細鏂扮敤鎴风敤锟斤拷前时锟斤�?
                     if (!regTime && isNewUser) {
                         regTime = new Date().toISOString();
                     }
@@ -584,7 +584,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var userInfo = { reg_time: regTime, last_login: new Date().toISOString() };
                     var contentStr = JSON.stringify(userInfo);
 
-                    // 鐏忔繆鐦幍鎯у煂閺堫澁鎷烽弬棰佺閺壜ゎ唶瑜版洖鑻烾PDATE閿涘牊鐦瓺ELETE+INSERT閺囨潙褰查棃鐙呯礉闁灝鍘LS閹锋帞绮稤ELETE閿?
+                    // 尝试找到�拷鏂颁竴鏉¤褰曞苟UPDATE（比DELETE+INSERT閺囨潙褰查棃鐙呯礉闁灝鍘LS閹锋帞绮稤ELETE閿?
                     var updated = false;
                     try {
                         var latest = await sb.from("posts")
@@ -599,12 +599,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 .eq("id", latest.data[0].id);
                             if (!updRes.error) {
                                 updated = true;
-                                console.log("saveUserInfo [更新] " + name + " 鐧诲綍鏃堕棿 (UPDATE): " + userInfo.last_login);
+                                console.log("saveUserInfo [更新] " + name + " 登录时间 (UPDATE): " + userInfo.last_login);
                             }
                         }
                     } catch(e) {}
 
-                    // UPDATE澶辫触鎴栨棤璁板綍鏃讹紝INSERT涓€鏉℃柊璁板綍
+                    // UPDATE失败或无记录时，INSERT一条新记录
                     if (!updated) {
                         var insertRes = await sb.from("posts").insert([{
                             user_name: name,
@@ -678,7 +678,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast("登录成功，欢迎回来！" + name);
                     closeModal('loginModal');
                     
-                    // 鏇存柊閺堚偓鏉╂垹娅ヨぐ鏇熸闂?
+                    // 更新閺堚偓鏉╂垹娅ヨぐ曟�闂?
                     await saveUserInfo(name, false);
                     
                     await initUI();
@@ -753,7 +753,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // ========== 鏌ョ湅鍏兼湹绮敤鎴疯祫鏂欏崱鐗?==========
+            // ========== 查看兼朵粬用户资料卡�?==========
             let upcTargetUser = null;
 
             window.openUserProfile = async function(userName) {
@@ -762,7 +762,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 document.getElementById('upcLogin').textContent = '最近登录：加载中...';
                 
                 var avatarEl = document.getElementById('upcAvatar');
-                // localStorage鏉冨▉锟斤拷锟斤拷锛氬綋鍓嶇敤鎴峰厛妫拷鏌ユ湰鍦扮紦锟?
+                // localStorage权�▉锟斤拷锟斤拷锛氬綋鍓嶇敤鎴峰厛妫拷鏌ユ湰鍦扮紦锟?
                 var showAvatar = avatarCache[userName];
                 if (!showAvatar && userName === currentUser) {
                     try {
@@ -796,9 +796,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 
                 openModal('userProfileModal');
                 
-                // 鐎殿喖鍊归崝鐘烘祰婢舵潙鍎氶柛婊冪灱濞呫儴銇愰弴鐔割槯闂?
+                // 寮傛加载头像鍜岀櫥褰曟椂??
                 try {
-                    // 瑜版挸澧犻悽銊﹀煕娴兼ê鍘涘ù锝堟硶閺侇槖ocalStorage闁哄鍟埢澶岀处鐎?
+                    // 当前用户优先使用localStorage闁哄鍟埢澶岀处鐎?
                     if (userName === currentUser) {
                         try {
                             var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
@@ -820,7 +820,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         .limit(1);
                     
                     if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                        // 闈炲綋鍓嶇敤鎴锋墠鐢―B鍊兼洿鏂扮紦瀛橈紙锟斤拷前锟矫伙拷宸插湪涓婇潰鐢╨ocalStorage璁剧疆锟?
+                        // 非当前用户才用DB鍊兼洿鏂扮紦瀛橈紙锟斤拷前锟矫伙拷宸插湪涓婇潰鐢╨ocalStorage设置锟?
                         if (userName !== currentUser) {
                             avatarCache[userName] = avatarRes.data[0].media_url;
                         } else if (!avatarCache[currentUser]) {
@@ -864,7 +864,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 setTimeout(function() { openChat(upcTargetUser); }, 300);
             };
 
-            // ========== 娑撴眽璧勬枡璇︽儏鍔熻兘 ==========
+            // ========== 涓汉资料详情功能 ==========
             window.openProfileDetail = async function() {
                 if (!currentUser) {
                     openAuthModal('login');
@@ -875,7 +875,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 document.getElementById('profileDetailName').textContent = currentUser;
                 document.getElementById('profileDetailId').textContent = currentUser;
                 
-                // 鑾峰彇锟矫伙拷淇℃伅锛堟敞鍐屾椂闂寸瓑锟?
+                // 获取�û�信息（注册时间等�?
                 try {
                     const userInfoRes = await sb.from("posts")
                         .select("content")
@@ -899,11 +899,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         document.getElementById('profileDetailRegTime').textContent = '-';
                     }
                 } catch(e) {
-                    console.error("鑾峰彇鐢ㄦ埛淇℃伅澶辫触:", e);
+                    console.error("获取用户信息失败:", e);
                     document.getElementById('profileDetailRegTime').textContent = '-';
                 }
                 
-                // 鍔犺浇澶村儚
+                // 加载头像
                 loadProfileAvatar();
                 
                 openModal('profileDetailModal');
@@ -912,7 +912,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             async function loadProfileAvatar() {
                 const avatarEl = document.getElementById('profileDetailAvatar');
                 
-                // localStorage鏉冨▉锟斤拷锟斤拷锛氬厛妫拷鏌ユ湰鍦扮紦锟?
+                // localStorage权�▉锟斤拷锟斤拷锛氬厛妫拷鏌ユ湰鍦扮紦锟?
                 try {
                     var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                     if (cachedAvatars[currentUser]) {
@@ -922,7 +922,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 } catch(e) {}
                 
-                // 閸忕厧鐗忛弫銈夊礃閸涱厾鎽犵紓鎾崇摠閺勫墽銇?
+                // 兼堢�ら崘鍛摠缂撳瓨鏄剧�?
                 if (avatarCache[currentUser]) {
                     avatarEl.innerHTML = '<img src="' + avatarCache[currentUser] + '" alt="头像">';
                 }
@@ -949,7 +949,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
                     }
                 } catch(e) {
-                    console.error("加载澶村儚失败:", e);
+                    console.error("加载头像失败:", e);
                 }
             }
 
@@ -965,7 +965,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             w = Math.round(w * ratio);
                             h = Math.round(h * ratio);
                         }
-                        // 娴ｈ法鏁?createImageBitmap 鐏忓棗娴橀悧鍥掗敓?缂傗晜鏂侀崙杞板瘜缁捐法鈻?
+                        // 使��?createImageBitmap 将图��掗敓?缂傗晜鏂侀崙杞板瘜缁捐法鈻?
                         if (window.createImageBitmap) {
                             createImageBitmap(img, {
                                 resizeWidth: w,
@@ -1022,19 +1022,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 showToast('正在压缩并上传头像...');
                 
                 try {
-                    // 娴犺濮?閿涙岸鍣搁弸鍕礋閿熻緝杈炬嫹閿?Supabase Storage 閿?avatars/ 閻╊喖缍?
+                    // 娴犺濮?锛氶噸鏋勪负锟较达拷�?Supabase Storage 閿?avatars/ 閻╊喖缍?
                     const timestamp = Date.now();
                     const random = Math.floor(Math.random() * 1000);
                     const path = `avatars/${timestamp}_${random}_${file.name}`;
                     
-                    // 涓婁紶閸?Supabase Storage
+                    // 上传�?Supabase Storage
                     const { error: uploadErr } = await sb.storage.from('uploads').upload(path, file);
                     if (uploadErr) throw uploadErr;
                     
-                    // 閼惧嘲褰?Public URL
+                    // 鑾峰�?Public URL
                     const avatarUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
                     
-                    // 鍒犻櫎閹碘偓閺堝顦板Λ顐仈閸嶅繗顔囪ぐ?
+                    // 删除鎵€鏈�顦板Λ顐仈閸嶅繗顔囪ぐ?
                     var oldIds = await sb.from("posts")
                         .select("id")
                         .eq("user_name", currentUser)
@@ -1065,7 +1065,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                     
                     avatarCache[currentUser] = avatarUrl;
-                    // 淇濆瓨閸掔櫦ocalStorage閹镐椒绠欓崠?
+                    // 保存到localStorage持久化存储?
                     try {
                         var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                         cachedAvatars[currentUser] = avatarUrl;
@@ -1162,7 +1162,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     }
                 } catch(e) {
-                    console.error("鏇存柊澶村儚鏄剧ず澶辫触:", e);
+                    console.error("更新头像显示失败:", e);
                 }
             }
 
@@ -1192,13 +1192,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 initialLoad(true);
             };
 
-            // 婢跺嫮鎮婇幋鎴犳畱妞ょ敻娼伴敓鐭紮鎷烽崡锛勫閻愮懓鍤?
+            // 处理我的页面�û�卡片点�??
             window.handleProfileCardClick = function() {
                 if (currentUser) {
-                    // 鐎规瓕灏欏▍銉ㄣ亹閺囶亞绐楅幍鎾崇磻濞戞挻鐪界挧鍕灐鐠囷附鍎?
+                    // 瀹歌尙�▍銉ㄣ亹閺囶亞绐楅幍鎾崇磻濞戞挻鐪界挧鍕灐鐠囷附鍎?
                     openProfileDetail();
                 } else {
-                    // 閺堫亞娅ヨぐ鏇窗閿熸触寮€纰夋嫹褰?娉ㄩ敓鏂ゆ嫹妞ょ敻娼?
+                    // 鏈櫥褰曪細锟津开碉拷�?注锟斤拷椤甸�?
                     openAuthModal('login');
                 }
             };
@@ -1220,17 +1220,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     avatar.textContent = currentUser[0].toUpperCase();
                     avatar.className = "avatar";
                     
-                    // 鏇存柊鎴戠殑椤甸潰鏄剧ず
+                    // 更新我的页面显示
                     profileName.textContent = currentUser;
                     profileStatus.textContent = "查看资料";
                     
-                    // 鏄剧ず鍙戝竷閸栧搫鐓?
+                    // 显示发布鍖哄�?
                     if (publishBox) publishBox.style.display = "block";
                     
-                    // 鍔犺浇澶村儚
+                    // 加载头像
                     loadUserAvatar();
                     
-                    // 閿熸枻鎷烽敓鏂ゆ嫹閺堚偓鏉╂垹娅ヨぐ鏇熸闂傝揪绱欐い鐢告桨濮ｅ繑顐奸敓鏂ゆ嫹闁棄鍩涢弬甯礉韫囧懘銆廰wait绾喕绻氶崘娆忓弳閿?
+                    // 锟斤拷锟斤拷鏈€近登录时间（页面每�锟斤拷閮藉埛鏂帮紝蹇呴』await确保写入??
                     await saveUserInfo(currentUser, false);
                     
                     try { subscribeToMessages(); startDMPolling(); updateUnreadBadge(); loadAnnouncements(); subscribeToAnnouncements(); } catch(e) {}
@@ -1239,14 +1239,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     authUI.style.display = "none";
                     annBtnWrapper.style.display = "none";
                     
-                    // 閺囧瓨鏌婇幋鎴犳畱妞ょ敻娼伴弰鍓с仛闁挎稑鐗婂﹢顓犳瑜版洟鏁?
+                    // 更新我的页面显示锛堟湭登录�??
                     profileName.textContent = "未登录";
                     profileStatus.textContent = "点击登录";
                     
-                    // 闂呮劘妫屽彂甯冮崠鍝勭厵
+                    // 闅愯棌发布鍖哄煙
                     if (publishBox) publishBox.style.display = "none";
                     
-                    // 闂佹彃绉堕悿鍡椼仈閸?
+                    // 闁插秶鐤嗗ご�?
                     var profileAvatar = document.getElementById('profileAvatar');
                     if (profileAvatar) {
                         profileAvatar.innerHTML = '?';
@@ -1286,17 +1286,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     }
                 } catch(e) {
-                    console.error("加载澶村儚失败:", e);
+                    console.error("加载头像失败:", e);
                 }
             }
 
-            // DEPRECATED_DO_NOT_EDIT ===================== [瀹告彃绨惧鍍?娑撳鏌熼敓?361鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 =====================
+            // DEPRECATED_DO_NOT_EDIT ===================== [宸插簾寮�?涓嬫柟锟?361琛屾湁锟斤拷锟斤拷鐗堟湰 =====================
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
                 var content = document.getElementById("postInp").value.trim();
                 var file = document.getElementById("fileInp").files[0];
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
-                // 鏉堟挸鍙嗛弽锟犵崣閿涙岸妾洪崚鍫曟毐鎼达讣鎷烽敓钘夊箵闂勩倕宓勯梽鈺佸敶閿?
+                // 杈撳叆鏍￠獙锛氶檺鍒堕暱搴︼拷锟藉幓闄ゅ嵄闄╁唴�?
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
                 var btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中...";
                 try {
@@ -1464,7 +1464,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
 
-            // ===================== 閸ュ墽澧栭弻銉ф箙闁?=====================
+            // ===================== 图片�ョ湅�?=====================
             const ivZoomState = { scale: 1, tx: 0, ty: 0 };
             let ivIsZooming = false;
             let ivIsPanning = false;
@@ -1660,8 +1660,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }, { passive: false });
 
-            // ===================== 濞村繗顫嶉梺鎻掔箳缁櫣鎷?=====================
-            // 鍏ㄥ眬甯栧瓙淇℃伅锟斤拷锟斤拷锛岀敤浜庢祻瑙堣锟?
+            // ===================== 娴忚闁插繒绮虹�?=====================
+            // 鍏ㄥ��帖子�℃伅锟斤拷锟斤拷锛岀敤浜庢祻瑙堣锟?
             const postInfoCache = {};
             const VIEW_HISTORY_KEY = 'xtj_view_history';
 
@@ -1673,11 +1673,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             function saveViewHistory(entry) {
                 const history = getViewHistory();
-                // 闁灝鍘ら柌宥咁槻閿熸枻鎷峰綍閿涘牆鎮撴稉顫嫹閿熺煫浼欐嫹閸氬奔绔寸敮鏍х摍閸欘亣顔囪ぐ鏇氱濞嗏槄绱?
+                // 避免重复锟斤拷录锛堝悓涓拷锟矫伙拷鍚屼竴帖子鍙录一�★�?
                 const exists = history.some(h => h.post_id === entry.post_id && h.user_name === entry.user_name);
                 if (!exists) {
                     history.unshift(entry);
-                    // 閸欘亙绻氶悾娆愭付閿?00閿?
+                    // 只保留最??00�?
                     if (history.length > 500) history.length = 500;
                     localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
                 }
@@ -1718,8 +1718,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // ===================== 閸旂姾娴囬柛鏂诲妽閳?=====================
-            // 娴犺濮?閿涙艾鍨庢い闈涘鏉炵晫娴夐崗鍐插綁閿?
+            // ===================== 加载鍔ㄦ??=====================
+            // 娴犺�?：分页加载相关变�?
             let feedPage = 0;
             const FEED_PAGE_SIZE = 20;
             let feedEndReached = false;
@@ -1728,7 +1728,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let feedAllLikes = [];
             let feedScrollObserver = null;
 
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧鍍?娑撳鏌熼敓?412鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [宸插簾寮�?涓嬫柟锟?412琛屾湁锟斤拷锟斤拷鐗堟湰 ======
             async function loadFeed(forceRefresh = false) {
                 const now = Date.now();
                 if (forceRefresh) {
@@ -1745,12 +1745,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         try {
                             const parsed = JSON.parse(cached);
                             if (parsed?.data && now - parsed.timestamp < CACHE_DURATION) {
-                                // 缂傛挸鐡ㄩ崝鐘烘祰闁挎稑鑻幃鎾诲籍鐠哄搫鐏ュ┑顔碱儏鐎垫彃鍨庢い鐢靛Ц閹?
+                                // 缓存加载锛屽悓鏃跺垵濮嬪寲分页状??
                                 feedAllPosts = parsed.data.posts || [];
                                 feedAllComments = parsed.data.comments || [];
                                 feedAllLikes = parsed.data.likes || [];
                                 await renderFeed(parsed.data);
-                                // 閸氼垰濮╅弮鐘绘濠婃艾濮╅敓妗旇鎷?
+                                // 鍚姩鏃犻檺婊氬姩锟桔诧�?
                                 setupFeedInfiniteScroll();
                                 return;
                             }
@@ -1779,7 +1779,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__');
                     localStorage.setItem(CACHE_KEY, JSON.stringify({ data: { posts: cachePosts, comments: data.comments, likes: data.likes }, timestamp: now }));
                     await renderFeed(data);
-                    // 閸氼垰濮╅弮鐘绘濠婃艾濮╅敓妗旇鎷?
+                    // 鍚姩鏃犻檺婊氬姩锟桔诧�?
                     setupFeedInfiniteScroll();
                 } catch(e) {
                     feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>`;
@@ -1787,7 +1787,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // 娴犺濮?閿涙俺顔曠純顔芥￥闂勬劖绮撮崝銊潎鐎电喎娅?
+            // 浠诲�?：设置无限滚动观察�??
             function setupFeedInfiniteScroll() {
                 if (feedScrollObserver) feedScrollObserver.disconnect();
                 
@@ -1800,7 +1800,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     });
                 }, { rootMargin: '200px' });
                 
-                // 閿?feed 鎼存洟鍎村ǎ璇插娑擃澁鎷烽敓?sentinel 閸忓啰示
+                // 閿?feed 底部添加�拷锟?sentinel 閸忓啰示
                 let sentinel = document.getElementById('feedSentinel');
                 if (!sentinel) {
                     sentinel = document.createElement('div');
@@ -1812,7 +1812,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 feedScrollObserver = observer;
             }
 
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧鍍?娑撳鏌熼敓?479鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [宸插簾寮�?涓嬫柟锟?479琛屾湁锟斤拷锟斤拷鐗堟湰 ======
             function loadMoreFeedPosts() {
                 if (feedEndReached) return;
                 
@@ -1824,7 +1824,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 
                 if (startIdx >= visiblePosts.length) {
                     feedEndReached = true;
-                    // 閿熸枻鎷风ず濞屸剝婀侀弴鏉戭樋娴?
+                    // 锟斤拷示娌℃湁鏇村�?
                     let noMore = document.getElementById('feedNoMore');
                     if (!noMore) {
                         noMore = document.createElement('div');
@@ -1843,7 +1843,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 feedPage++;
             }
 
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧鍍?娑撳鏌熼敓?503鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [宸插簾寮�?涓嬫柟锟?503琛屾湁锟斤拷锟斤拷鐗堟湰 ======
             function appendMorePosts(posts, comments, likes) {
                 const feed = document.getElementById('feed');
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
@@ -1893,45 +1893,45 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     feed.insertBefore(tempContainer.firstChild, sentinel);
                 }
                 
-                // 涓烘柊甯栧瓙娣诲姞锟斤拷锟斤拷鍔ㄧ敾锟桔诧拷锛堝鐢ㄥ叏灞拷鄄锟藉櫒锛?
+                // 涓烘柊帖子娣诲姞锟斤拷锟斤拷鍔ㄧ敾锟桔诧拷锛堝鐢ㄥ叏灞拷鄄锟藉櫒锛?
                 const newPosts = feed.querySelectorAll('.post:not(.visible)');
                 newPosts.forEach(p => getPostVisibilityObserver().observe(p));
                 
-                // 鏇存柊缁熻
+                // 更新统计
                 updateFeedStats();
             }
 
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧鍍?娑撳鏌熼敓?532鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [宸插簾寮�?涓嬫柟锟?532琛屾湁锟斤拷锟斤拷鐗堟湰 ======
             async function renderFeed({ posts, comments, likes }) {
                 const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__ann__' && p.user_name);
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length + comments.length;
 
-                // 婵夘偄鍘栫敮鏍х摍娣団剝浼呯紓鎾崇摠闁挎稑濂旂欢鍨セ鐟欏牐顔囪ぐ鏇熸媴鐠恒劍鏆?
+                // 填充帖子信息缓存锛屼緵浏览记录浣跨�??
                 visiblePosts.forEach(p => {
                     postInfoCache[p.id] = { content: p.content, user_name: p.user_name };
                 });
 
-                // 閺€鍫曟肠閹碘偓閺堝娓剁憰浣搞仈閸嶅繒娈戦悽銊﹀煕閸?
+                // 閺€鍫曟肠閹碘偓閺堝渶瑕佸ご像的��﹀煕閸?
                 const allUsers = new Set();
                 visiblePosts.forEach(p => allUsers.add(p.user_name));
                 comments.forEach(c => allUsers.add(c.user_name));
 
-                // 缁涘绶熸径鏉戝剼閸旂姾娴囩€瑰本鍨氶崥搴″晙濞撳弶鐓?
+                // 缁涘绶熸径鏉戝剼閸旂姾娴囩€�屾垚鍚�″晙濞撳弶鐓?
                 await loadAvatarsForUsers(Array.from(allUsers));
                 
-                // 娴犺濮?閿涙艾褰у〒鍙夌厠缁楊兛绔存い鐢垫畱閿熸枻鎷烽敓鏂ゆ嫹閿涘苯鎮楃紒顓ㄦ嫹閿熷€熺箖閺冪娀妾哄姘З閿熸枻鎷烽敓鏂ゆ嫹
+                // 娴犺濮?锛氬彧娓叉煋绗竴椤电殑锟斤拷锟斤拷锛屽悗缁拷锟借繃鏃犻檺�?氬姩锟斤拷锟斤拷
                 const firstPage = visiblePosts.slice(0, FEED_PAGE_SIZE);
                 feedPage = 1;
                 renderFeedWithAvatars(firstPage, comments, likes);
                 
-                // 閸氬骸褰撮閿熻妭濠忔嫹鏉炵晫绮虹拋鈩冩殶閿?
+                // 鍚庡彴预锟节婏拷杞界粺璁℃暟�?
                 setTimeout(function() { prefetchStatData(); }, 1000);
             }
             window.renderFeed = renderFeed;
 
-            // 妫板嫭鐎楦跨槑鐠佸搫鎷伴敓鏂ゆ嫹閿熸枻鎷烽惃鍕Ё鐏忓嫯銆冮敍灞惧絹閸楀洦瑕嗛弻鎾粹偓褑鍏?
+            // 棰勬瀯寤鸿瘎璁哄拰锟斤拷锟斤拷鐨勬槧灏勮〃锛屾彁鍗囨覆鏌撴€ц�?
             function buildPostMaps(comments, likes) {
                 const commentMap = {};
                 const likeMap = {};
@@ -1957,7 +1957,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!usernames || usernames.length === 0) return;
                 try {
                     var allData = [];
-                    var batchSize = 80; // Supabase .in() 閺堚偓婢舵氨容00娑擃亪銆嶉敍宀嬫嫹?0娴ｆ瑩鍣?
+                    var batchSize = 80; // Supabase .in() 閺堚偓婢舵氨容00个项，�?0浣欓�?
                     for (var i = 0; i < usernames.length; i += batchSize) {
                         var batch = usernames.slice(i, i + batchSize);
                         var { data: batchData } = await sb.from("posts")
@@ -1987,7 +1987,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     }
                 } catch(e) {
-                    console.error("加载澶村儚失败:", e);
+                    console.error("加载头像失败:", e);
                 }
             }
 
@@ -1995,7 +1995,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var avatarUrl = avatarCache[username];
                 if (!avatarUrl) {
                     if (username === currentUser) {
-                        // 鍙粠localStorage閲屾嬁锟斤拷前锟矫伙拷鑷繁鐨勫ご锟?
+                        // 只从localStorage閲屾嬁锟斤拷前锟矫伙拷鑷繁鐨勫ご锟?
                         try {
                             var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                             avatarUrl = cachedAvatars[username];
@@ -2010,7 +2010,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧鍍?娑撳鏌熼敓?520鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [宸插簾寮�?涓嬫柟锟?520琛屾湁锟斤拷锟斤拷鐗堟湰 ======
             function getPostFilterUserAvatar(username) {
                 var safeName = escapeHtml(username || "");
                 var avatarUrl = avatarCache[username];
@@ -2818,7 +2818,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
 
-            // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧鍍?娑撳鏌熼敓?668鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
+            // DEPRECATED_DO_NOT_EDIT ====== [宸插簾寮�?涓嬫柟锟?668琛屾湁锟斤拷锟斤拷鐗堟湰 ======
             window.prefetchStatData = async function() {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
@@ -2836,17 +2836,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 } catch (e) {}
             };
 
-            // ===================== 鏁版嵁缁熻璇︽儏鍔熻兘 =====================
-            // 瀛樺偍锟斤拷前鐨勭粺璁¤鍥剧姸锟?
+            // ===================== 数据统计详情功能 =====================
+            // 存储��ǰ的统�¤图状�?
             let statCurrentType = null;
             let statAllPosts = [];
             let statAllComments = [];
             let statAllLikes = [];
             let statPollTimer = null;
             let statCacheTime = 0;
-            const STAT_CACHE_DURATION = 30000; // 30绉掔紦锟?
+            const STAT_CACHE_DURATION = 30000; // 30秒缓�?
 
-            // 閸氬骸褰撮閿熻妭濠忔嫹鏉炵晫绮虹拋鈩冩殶閿?
+            // 鍚庡彴预锟节婏拷杞界粺璁℃暟�?
             window.prefetchStatData = async function() {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
@@ -2870,12 +2870,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 document.getElementById('statModalTitle').textContent = titles[type] || '统计详情';
                 document.getElementById('statModal').classList.add('active');
 
-                // 婵″倹鐏夐張澶岀处鐎涙ɑ鏆熼幑顕嗙礉閿熸枻鎷烽敓鏂ゆ嫹濞撳弶鐓嬮敍灞芥倱閺冭泛绱撳銉ュ煕閿?
+                // 如果有缓存数�紝锟斤拷锟斤拷娓叉煋锛屽悓鏃跺紓姝ュ埛�?
                 if (statAllPosts.length > 0 && Date.now() - statCacheTime < STAT_CACHE_DURATION) {
                     renderStatByType(type);
                     if (statPollTimer) clearInterval(statPollTimer);
                     statPollTimer = setInterval(refreshStatModal, 15000);
-                    // 鍚庡彴闈欓粯刷锟斤拷
+                    // 后台静默ˢ��
                     prefetchStatData().then(function() {
                         if (document.getElementById('statModal').classList.contains('active') && statCurrentType === type) {
                             renderStatByType(type);
@@ -2918,7 +2918,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // 婊氬姩鍒版寚瀹氬笘瀛愬苟楂樹寒
+            // 滚动到指定帖子并高亮
             window.scrollToPost = function(postId) {
                 closeModal('statModal');
                 setTimeout(() => {
@@ -3234,7 +3234,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 `;
             }
 
-            // 鏍煎紡鍖栧笘瀛愬唴瀹规憳瑕侊紙鐢ㄤ于灞曠ず：
+            // 格式化帖子内容摘要（�ㄤ于灞曠ず：
             function formatPostSummary(p) {
                 const text = p.content || '';
                 const hasImg = p.media_url && p.media_type === 'image';
@@ -3247,7 +3247,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return { display, tag, hasImg, hasVid, thumbUrl: hasImg ? p.media_url : null };
             }
 
-            // 鐢熸垚甯栧瓙鏉＄洰鐨凥TML锛堝彲鐐瑰嚮璺宠浆：
+            // 生成帖子�＄洰鐨凥TML锛堝彲鐐瑰嚮璺宠浆：
             function renderPostItemHTML(p) {
                 const fmt = formatPostSummary(p);
                 const onclick = `openPostDetail('${escapeHtml(p.id).replace(/'/g, "\\'")}')`;
@@ -3266,7 +3266,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // 渲染总动态统计（按用户分组）
             function renderPostStats() {
                 const body = document.getElementById('statModalBody');
-                // 鎸?user_name 鍒嗙粍缁熻
+                // 鎸?user_name 分组统�
                 const userMap = {};
                 statAllPosts.forEach(p => {
                     if (!userMap[p.user_name]) userMap[p.user_name] = [];
@@ -3300,7 +3300,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 `).join('');
             }
 
-            // 鏌ョ湅鎸囧畾鐢ㄦ埛鐨勬墍鏈夊笘子
+            // 鏌ョ湅鎸囧畾用户鐨勬墍鏈夊笘子
             window.loadUserAllPosts = function(userName) {
                 const body = document.getElementById('statModalBody');
                 const userPosts = statAllPosts.filter(p => p.user_name === userName);
@@ -3463,7 +3463,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 container.appendChild(bubble);
 
-                // 瀵搫鍩楅敓鏂ゆ嫹閿熻棄娅掔€瑰本鍨氱敮鍐ㄩ浌閿熻棄鎮楅崘宥嗗潑閸旂垙how缁紮绱濈涵顔荤箽CSS transition濮濓絿鈥樼憴锕€褰?
+                // 强制锟斤拷锟藉櫒瀹屾垚甯冨雹锟藉悗鍐嶆坊鍔爏how缁紮绱濈涵顔荤箽CSS transition姝ｇ‘瑙﹀�?
                 bubble.offsetHeight; // force reflow
                 setTimeout(function() {
                     bubble.classList.add('show');
@@ -3482,7 +3482,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }, 3000);
             }
 
-            // ==== 濞村鐦€氱煡濡亜绠欓敍鍫熷付閸掕泛褰寸拫鍐暏閿涙estNotification()閿?====
+            // ==== 测试֪ͨ�箙锛堟帶鍒跺彴璋冪敤锛歵estNotification()閿?====
             window.testNotification = function() {
                 showNotification('张三', '这是一条测试消息，检查通知文本显示是否正常');
             };
@@ -3490,7 +3490,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 showNotification('李四', '这是一条非常非常长的测试消息，用来检查文本截断效果到底怎么样，超过300个字符也不会把字符串打坏');
             };
 
-            // ===================== 鑱婂ぉ绯荤粺 (Dock 鍏煎閻? =====================
+            // ===================== 鑱婂ぉ绯荤粺 (Dock 兼容�? =====================
             let chatRealtime = null;
             let dmpollTimer = null;
             let dmpollInterval = null;
@@ -3567,7 +3567,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             function startDMPolling(interval) {
-                // 娴犺濮?閿涙岸绮拋銈夋？閿?5 閸掑棝鎸撻敓?00000ms閿涘绱濋梽宥勭秵閿熸枻鎷烽敓鏂ゆ嫹鎼存捁顕Ч鍌氬竾閿?
+                // 娴犺濮?锛氶粯璁ら棿�?5 分钟�?00000ms锛夛紝闄嶄綆锟斤拷锟斤拷搴撹姹傚帇�?
                 interval = interval || 300000;
                 if (dmpollTimer) {
                     if (dmpollInterval === interval) return;
@@ -3640,17 +3640,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     try { var cm = document.getElementById('commentModal'); if (cm && cm.classList.contains('active')) closeModal('commentModal'); } catch(e) {}
                     document.body.style.overflow = '';
                 }
-                // 閸忓牐袝閸欐垹鍋ｉ崙璇插З閻紮绱欓崡鍏呭▏瀹歌尙绮￠崷銊ョ秼閸撳车ab娑旂喕顩﹂幘顓熸杹閿?
+                // 先�Е发点击动画（即使已经�ㄥ綋鍓峵ab也�鎾斁�?
                 var btn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
                 if (btn) triggerTabAnimation(btn, tab);
                 const now = Date.now();
                 
-                // 濡澁鎷烽弻銉︽Ц閸氾附妲搁崣灞藉毊鍒烽敓鏂ゆ嫹閿?00ms閸愬懎鍟€濞嗭紕鍋ｉ崙璇叉倱娑擃澁鎷穞ab閿?
+                // 妫拷鏌ユ槸鍚︽槸鍙屽嚮刷锟斤拷�?00ms内再�＄偣鍑诲悓涓拷tab�?
                 const isDoubleTap = (tab === currentDockTab) && lastTabTapTime[tab] && (now - lastTabTapTime[tab] < 300);
                 
                 if (tab === currentDockTab && !skipReturn) {
                     if (isDoubleTap && !isRefreshing[tab]) {
-                        // 鍙屽嚮锛氭墽琛屽埛锟?
+                        // 双击：执行刷�?
                         isRefreshing[tab] = true;
                         lastTabTapCount[tab] = (lastTabTapCount[tab] || 0) + 1;
                         
@@ -3672,16 +3672,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 window.showToast('刷新失败');
                             });
                         } else if (tab === 'posts') {
-                            // 鐢牕鐡欐い闈涘煕閿?
+                            // 帖子页刷??
                             window.showToast('正在刷新...');
-                            // 娓呴櫎缂撳瓨楠炲爼鍣告柊澧炲鏉?
+                            // 清除缂撳瓨楠炲爼鍣告柊澧炲鏉?
                             try {
                                 localStorage.removeItem(CACHE_KEY);
                             } catch(e) {}
                             if (typeof window.initialLoad === 'function') {
                                 window.initialLoad(true);
                             }
-                            // 鍥炲埌椤堕儴
+                            // 回到顶部
                             const panel = document.getElementById('panelPosts');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                             isRefreshing[tab] = false;
@@ -3694,7 +3694,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             isRefreshing[tab] = false;
                             window.showToast('刷新完成');
                         } else if (tab === 'profile') {
-                            // 娑擃亙姹夋い闈涘煕閿?
+                            // 个人页刷??
                             window.showToast('正在刷新...');
                             syncProfileUser();
                             if (currentUser) loadUserAvatar();
@@ -3702,14 +3702,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             window.showToast('刷新完成');
                         }
                     } else {
-                        // 鍗曞嚮锛氭墽琛岃繑锟?鍥為《鎿嶄綔
+                        // 单击：执行返�?回顶操作
                         lastTabTapCount[tab] = 1;
                         if (tab === 'posts') {
-                            // 甯栧瓙椤碉細鍥炲埌椤堕儴
+                            // 帖子页：回到顶部
                             const panel = document.getElementById('panelPosts');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         } else if (tab === 'chat') {
-                            // 閿熸枻鎷烽敓鏂ゆ嫹妞ょ绱版俊鍌涚亯閸︺劌顕拠婵呰厬閿涘矁绻戦崶鐐朵喊婢垛晛鍨悰顭掔幢閸氾箑鍨崶鐐插煂妞ゅ爼鍎?
+                            // 锟斤拷锟斤拷椤碉細濡傛灉鍦ㄥ话中，返回聊�╁垪琛紱鍚﹀垯鍥炲埌椤堕�?
                             if (dockChatActiveUser) {
                                 dockChatGoBack();
                             } else {
@@ -3720,7 +3720,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             const photoWallPage = document.getElementById('photoWallContainer');
                             if (photoWallPage) photoWallPage.scrollTo({ top: 0, behavior: 'smooth' });
                         } else if (tab === 'profile') {
-                            // 鎴戠殑椤碉細鍥炲埌椤堕儴
+                            // 我的页：回到顶部
                             const panel = document.getElementById('panelProfile');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         }
@@ -3729,7 +3729,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
                 
-                // 鍒囨崲閸掔増鏌妕ab
+                // �л�到新tab
                 lastTabTapTime[tab] = now;
                 lastTabTapCount[tab] = 1;
                 currentDockTab = tab;
@@ -3872,7 +3872,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         .limit(200);
                     if (error) throw error;
                     if (!allMsgs || !allMsgs.length) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>暂无娑堟伅</div><div style="font-size:12px;">鍦ㄥ笘瀛愰〉闈㈢偣鍑诲ご鍍忓紑濮嬭亰澶?</div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>暂无消息</div><div style="font-size:12px;">鍦ㄥ笘瀛愰〉闈㈢偣鍑诲ご像开始聊�?</div></div>';
                         updateUnreadBadge();
                         return;
                     }
@@ -3887,7 +3887,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     });
                     const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
-                    // 棰勯敓鑺傚鎷锋潪鍊熶喊婢垛晛鍨悰銊ャ仈閿?
+                    // 预锟节�?拷杞借亰澶╁垪琛ㄥご�?
                     var chatUsers = convs.map(function(c) { return c.other_user; });
                     if (chatUsers.length > 0) {
                         var uncachedUsers = chatUsers.filter(function(u) { return !avatarCache[u]; });
@@ -3928,12 +3928,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // 閼卞﹤銇夋繛鎴濈墛娴煎懘寮靛﹢瀵哥处鐎涙﹢鏁嶇仦鑲╃檶婵炲棌鍓濇晶锕€顕ｉ埀顒傜矓閹烘垵姣?
+            // 聊天消息鏈湴缓存锛屼簩娆℃墦寮€绉掑�??
             var _chatCache = {};
 
             async function loadDockChatMessages(userName, forceScroll) {
                 if (dockChatMsgsBusy && dockChatMsgsUser === userName) { dockChatMsgsDirty = userName; return; }
-                // 棰勯敓鑺傚鎷锋潪钘夊蓟閺傜懓銇旈敓?
+                // 预锟节�?拷杞藉弻鏂瑰ご锟?
                 var needAvatars = [];
                 if (currentUser && !avatarCache[currentUser]) needAvatars.push(currentUser);
                 if (userName && !avatarCache[userName]) needAvatars.push(userName);
@@ -3956,7 +3956,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     } catch(e) {}
                 }
-                // 瑜版挸澧犻悽銊﹀煕娴兼ê鍘涘ù锝堟硶閺侇槖ocalStorage闁哄鍟埢澶岀处鐎?
+                // 当前用户优先使用localStorage闁哄鍟埢澶岀处鐎?
                 if (currentUser) {
                     try {
                         var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
@@ -3965,7 +3965,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     } catch(e) {}
                 }
-                // 閺堝绱︾€涙ê鍘涚珛鍗虫樉绀?
+                // 鏈夌紦瀛樺厛立即显�?
                 var cacheKey = currentUser + '_' + userName;
                 if (_chatCache[cacheKey] && !forceScroll) {
                     renderDockMessages(_chatCache[cacheKey], true);
@@ -3997,11 +3997,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function renderDockMessages(msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
                 if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>'; return; }
-                // 濡澁鎷峰ù瀣暏閹撮攱妲搁崥锕€婀敓浠嬬湅閸樺棗褰堕敓鏂ゆ嫹褰曢敍鍫㈩瀲鎼存洟鍎撮敓鏂ゆ嫹閿熸枻鎷?00px鐟欏棔璐熼崷銊ф箙閸樺棗褰堕敓?
+                // 妫拷娴嬬敤鎴锋槸鍚﹀湪锟介看鍘嗗彶锟斤拷录锛堢搴曢儴锟斤拷锟斤�?00px瑙嗕负鍦�ф箙閸樺棗褰堕敓?
                 var isNearBottom = !el.scrollHeight || (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
                 var shouldAutoScroll = forceScroll || isNearBottom;
                 const isBulk = msgs.length > 2;
-                // 閸忓牓娈ｉ挊蹇擃啇閸ｎ煉绱濆〒鍙夌厠鐎瑰瞼娲块幒銉ュ煂鎼存洖鍟€閿熸枻鎷风ず閿涘矂浼╅崗宥勭矤妞ゅ爼鍎村鎴滅瑓閺夈儳娈戦梻顏嗗剨
+                // 先隐藏�鍣紝娓叉煋瀹岀洿鎺ュ埌搴曞啀锟斤拷示锛岄伩鍏嶄粠椤堕儴�?戜笅鏉ョ殑闂儊
                 var wasHidden = false;
                 if (shouldAutoScroll && isBulk) {
                     el.style.visibility = 'hidden';
@@ -4032,7 +4032,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (shouldAutoScroll) {
                     el.scrollTop = el.scrollHeight;
                 }
-                // 濞撳弶鐓嬬€瑰本鐦敍灞炬▔缁€鍝勵啇閿?
+                // 娓叉煋瀹屾瘯锛屾樉绀哄�?
                 if (wasHidden) {
                     el.style.visibility = '';
                 }
@@ -4104,7 +4104,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             window.addEventListener('DOMContentLoaded', async function() {
-                // iOS 闁款喚娲忓鐟板毉娣囶喖顦? 闁灝鍘?dock-bar 鐞氼偊鏁惄姗€銆婃稉濠傚箵
+                // iOS 闁款喚娲忓鐟板毉娣囶喖顦? 闁灝鍘?dock-bar 被键盘顶上去
                 (function() {
                     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
                     if (!isIOS) return;
@@ -4116,7 +4116,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     function handleFocus(e) {
                         if (dockBar) dockBar.style.display = 'none';
                         keyboardOpen = true;
-                        // 鐠佲晞绶崗銉︻攱閼奉亜濮╁姘煂閸欘垵顫嗛崠鍝勭厵
+                        // 让输入框自动??�到可见区域
                         setTimeout(() => {
                             if (e.target && e.target.scrollIntoViewIfNeeded) {
                                 e.target.scrollIntoViewIfNeeded(true);
@@ -4140,26 +4140,26 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     });
 
-                    // 娴犺濮?閿涙矮濞囬敓?100dvh 閺囧じ鍞?--vh 閺傝顢嶉敍宀€些閿?resize 閸ョ偠鐨熸稉顓犳畱 adjustIOSHeight
+                    // 娴犺濮?锛氫娇锟?100dvh 閺囧じ鍞?--vh 方案，移??resize 回调中的 adjustIOSHeight
                     // window.addEventListener('resize', function() {
                     //     if (!keyboardOpen) adjustIOSHeight();
                     // });
                 })();
 
-                // 娴犺濮?閿涙矮濞囬敓?100dvh 閺囧じ鍞?--vh 閺傝顢嶉敍宀€些闂勩倖妫敓?iOS 鐠嬪啯鏆ｆ禒锝囩垳
+                // 娴犺濮?锛氫娇锟?100dvh 閺囧じ鍞?--vh 方案，移除旧�?iOS 鐠嬪啯鏆ｆ禒锝囩垳
                 // adjustIOSHeight();
                 // window.addEventListener('resize', adjustIOSHeight);
                 // window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
 
                 await initUI(); initialLoad();
-                // 鎭㈠娑撳﹥淇濆瓨閻ㄥ嫭鐖ｇ粵楣冦€?
+                // 恢复涓婃保存鐨勬爣绛鹃�?
                 const savedTab = localStorage.getItem('xtj_current_tab');
                 if (savedTab && savedTab !== 'posts') {
                     switchDockTab(savedTab, true);
                 }
             });
 
-            // ========== 涓婚鍒囨崲 ==========
+            // ========== 主题切换 ==========
             const htmlEl = document.documentElement;
             const themeBtn = document.getElementById('themeToggle');
             function applyTheme(isDark) {
@@ -4179,7 +4179,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     applyTheme(!isDark);
                 });
             }
-            // 閸掓繂顫愰崠鏍﹀瘜妫版﹫绱伴敓鏂ゆ嫹閿熸枻鎷?localStorage閿涘苯鍙惧▎锛勯兇缂佺喎浜搁敓?
+            // 初�鍖栦富棰橈細锟斤拷锟斤�?localStorage，其�＄郴缁熷亸锟?
             const savedTheme = localStorage.getItem('xtj-theme');
             if (savedTheme === 'dark') {
                 applyTheme(true);
@@ -4189,7 +4189,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 applyTheme(false);
             }
 
-            // ========== 鍏憡系ͳ==========
+            // ========== 公告ϵ?==========
             const ANN_MARKER = '__ann__';
             const ANN_READ_KEY = 'xtj_ann_read';
             let announcements = [];
@@ -4272,7 +4272,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 detail.classList.remove('active');
                 detail.style.display = 'none';
                 currentAnnouncement = null;
-                // 閿熸枻鎷烽敓鏂ゆ嫹閸掓銆冮弮鑸典划婢跺秶顓搁悶鍡楁喅閻ㄥ嫬褰傜敮鍐ㄥ隘閿?
+                // 锟斤拷锟斤拷鍒楄〃鏃舵仮澶嶇理员的发布区�?
                 if (isAdmin()) {
                     document.getElementById('announcementAdminArea').style.display = 'block';
                 }
@@ -4284,7 +4284,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 currentAnnouncement = ann;
                 markAnnouncementRead(ann.id);
 
-                // 鏉╂稑鍙嗙拠锔藉剰闁哄啫鐖煎▓锝夋寠韫囨挸绲洪悽顖氬暙鐏忣垶宕?
+                // 进入详情鏃堕殣钘忓彂甯冨尯�??
                 document.getElementById('announcementAdminArea').style.display = 'none';
                 document.getElementById('announcementListContainer').style.display = 'none';
                 const detail = document.getElementById('announcementDetail');
@@ -4296,7 +4296,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 document.getElementById('announcementDetailTime').textContent = new Date(ann.created_at).toLocaleString('zh-CN');
                 document.getElementById('announcementDetailContent').textContent = annData.content;
                 
-                // 璁剧疆鍙戝竷閼板懍淇婇幁绱欐樉绀洪張鈧柊澧炪仈閸嶅骏绱?
+                // 设置发布鑰呬俊鎭紙显示鏈€新增ご鍍忥�?
                 const userInfoEl = document.getElementById('announcementDetailUserInfo');
                 if (userInfoEl) {
                     var avUrl = avatarCache[ann.user_name];
@@ -4306,7 +4306,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     userInfoEl.innerHTML = avatarHtml + '<div class="announcement-detail-name">' + escapeHtml(ann.user_name) + '</div>';
                 }
 
-                // 婵″倹鐏夐弰顖滎吀閻炲棗鎲抽敍灞惧潑閸旂姴鍨归梽銈嗗瘻閿?
+                // 如果�理员，添加删�ゆ寜�?
                 const existingDelBtn = detail.querySelector('.announcement-delete-btn');
                 if (existingDelBtn) existingDelBtn.remove();
                 if (isAdmin()) {
@@ -4318,7 +4318,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (header) header.appendChild(delBtn);
                 }
 
-                renderAnnouncementList(); // 閲嶆柊濞撳弶鐓嬮崚妤勩€冿紝娆㈡纯鏂板鍑＄拠鑽ゅЦ閹?
+                renderAnnouncementList(); // 重新娓叉煋鍒楄〃，欢洿新增凡璇荤姸�?
             }
 
             async function loadAnnouncements() {
@@ -4330,7 +4330,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (error) throw error;
                     announcements = data || [];
                     updateAnnouncementBadge();
-                    // 棰勬湡濮炴潪钘夊絺鐢啳鈧懎銇旈崓?
+                    // Ԥ�ڊ�载发布�€呭ご鍍?
                     if (announcements.length > 0) {
                         var publishers = new Set();
                         announcements.forEach(function(a) { publishers.add(a.user_name); });
@@ -4357,7 +4357,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!listEl) return;
 
                 if (!announcements.length) {
-                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">馃摤</div><div>暂无鍏憡</div></div>';
+                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">📢</div><div>暂无公告</div></div>';
                     return;
                 }
 
@@ -4406,7 +4406,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
 
                 try {
-                    // content鐎涙顔岀€涙クSON閿涙title, content}閿涘潷osts鐞涖劍鐥呴張濉糹tle閸掓绱?
+                    // content瀛楁瀛楯SON锛歿title, content}锛坧osts鐞涖劍鐥呴張濉糹tle閸掓绱?
                     const storeData = JSON.stringify({ title: title, content: content });
                     const { error } = await sb.from('posts').insert([{
                         user_name: ADMIN_NAME,
@@ -5577,7 +5577,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     switchAnnouncementTab(this.dataset.tab);
                 });
             });
-            // 娣囶喗鏁奸崢鐔告箒閿?showAnnouncementList 娴犮儲鏁幐浣哥秼閸撳秵鐖ｇ粵鍓уЦ閿?
+            // 淇敼鍘熸湁�?showAnnouncementList 以支持当前标签状??
             const originalShowAnnouncementList = showAnnouncementList;
             window.showAnnouncementList = function() {
                 if (currentAnnouncementTab !== 'announcements') {
@@ -5586,7 +5586,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 originalShowAnnouncementList();
             };
 
-            // 缂佹垵鐣鹃崗顒€鎲￠幐澶愭尦娴滃娆?
+            // 绑定公告按钮事�??
             const annBtn = document.getElementById('announcementBtn');
             if (annBtn) {
                 annBtn.addEventListener('click', function() {
@@ -5606,33 +5606,33 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ['瀹歌尪顕?', '已读'],
                 ['閺堫亣顕?', '未读'],
                 ['閸忋劑鍎寸敮鏍х摍', '全部帖子'],
-                ['濞屸剝婀侀幍鎯у煂閻╃鍙х敮鏍х摍', '没有找到相关帖子'],
+                ['娌℃湁找到鐩�?叧帖子', '没有找到相关帖子'],
                 ['绾喛顓婚幙宥勭稊', '确认操作'],
-                ['绾喖鐣剧憰浣瑰⒔鐞涘本顒濋幙宥勭稊閸氭绱?', '确定要执行此操作吗？'],
+                ['确定要执行此操作吗�??', '确定要执行此操作吗？'],
                 ['绾喛顓?', '确认'],
                 ['濞戝牊浼?', '消息'],
                 ['閸忣剙鎲?', '公告'],
-                ['娑撳﹣绱舵径杈Е閿涘矁顕柌宥堢槸', '上传失败，请重试'],
-                ['閺冪姵娼堢純顕€銆婃潻娆愭蒋鐢牕鐡?', '无权置顶这条帖子'],
+                ['上传失败，请重试', '上传失败，请重试'],
+                ['无权置顶这条帖�??', '无权置顶这条帖子'],
                 ['缂冾噣銆婇幙宥勭稊婢惰精瑙?', '置顶操作失败'],
                 ['閺堫亞鐓￠柨娆掝嚖', '未知错误'],
-                ['缂冩垹绮堕柨娆掝嚖', '网络错误'],
-                ['濮濓絽婀崚閿嬫煀閻撗呭婢?..', '正在刷新照片墙..'],
+                ['网络错误', '网络错误'],
+                ['正在刷新照片??..', '正在刷新照片墙..'],
                 ['閸欐垵绔烽幋鎰', '发布成功'],
-                ['閸掔娀娅庨崗顒€鎲?', '删除公告'],
+                ['删除��?', '删除公告'],
                 ['閸忣剙鎲￠崣鎴濈閹存劕濮?', '公告发布成功'],
                 ['閸欐垿鈧礁銇戠拹?', '发送失败'],
-                ['閸旂喕鍏樻导妯哄', '功能优化'],
+                ['功能优化', '功能优化'],
                 ['Bug娣囶喖顦?', 'Bug修复'],
-                ['閺傛澘顤?', '新增'],
-                ['閺€纭呯箻', '改进'],
+                ['鏂板�?', '新增'],
+                ['改进', '改进'],
                 ['娴ｆ挷绱?', '体验'],
                 ['鐠嬪啯鏆?', '调整'],
-                ['缁涙盯鈧?', '筛选'],
-                ['閹貉傛', '控件'],
+                ['筛�??', '??'],
+                ['控件', '控件'],
                 ['閹舵ê褰?', '折叠'],
-                ['闂堛垺婢?', '面板'],
-                ['閺佹澘绐樼粩', '徽章'],
+                ['闈㈡�?', '面板'],
+                ['数徽�', '徽章'],
                 ['濞叉槒绌?', '活跃'],
                 ['閺€顖涘瘮', '支持'],
                 ['妞ょ敻娼?', '页面'],
@@ -5642,37 +5642,37 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ['妫板嫯顫?', '预览'],
                 ['缂冾噣【', '置顶'],
                 ['閸旂姾娴?', '加载'],
-                ['娑撳﹣绱?', '上传'],
+                ['上��?', '上传'],
                 ['娣囨繂鐡?', '保存'],
-                ['閸掔娀娅?', '删除'],
-                ['缂傛牞绶?', '编辑'],
+                ['删��?', '删除'],
+                ['缂栬�?', '编辑'],
                 ['閺囧瓨鏌?', '更新'],
                 ['閻撗呭', '照片'],
                 ['閸欐垿鈧?', '发送'],
                 ['婢惰精瑙?', '失败'],
                 ['閹存劕濮?', '成功'],
                 ['闁挎瑨顕?', '错误'],
-                ['閻╃鍙?', '相关'],
-                ['缂冩垹绮?', '网络'],
-                ['鐎瑰鍙?', '安全'],
+                ['鐩�?�?', '相关'],
+                ['缃戠�?', '网络'],
+                ['瀹�鍙?', '安全'],
                 ['娣囶喖顦?', '修复'],
                 ['娴滄帒濮?', '互动'],
-                ['鐢牕鐡?', '帖子'],
+                ['帖��?', '帖子'],
                 ['閻劍鍩?', '用户'],
                 ['閸愬懎顔?', '内容'],
-                ['閹稿鎸?', '按钮'],
-                ['娑撶偓濮?', '举报'],
-                ['缁夊娅?', '移除'],
+                ['按��?', '按钮'],
+                ['举��?', '举报'],
+                ['绉�娅?', '移除'],
                 ['濞撳懐鎮?', '清理'],
                 ['閸撳秶顏?', '前端'],
                 ['濞堝鏆€', '残留'],
-                ['濡€崇础', '模式'],
+                ['妯″紡', 'ģʽ'],
                 ['娴狅絿鐖?', '代码'],
                 ['鐠囶叀鈻?', '语言'],
                 ['濞翠胶鈻?', '流程'],
                 ['閸掑棔闊?', '分享'],
                 ['閺嗘澹?', '暗色'],
-                ['娑撳顣?', '主题'],
+                ['主��?', '主题'],
                 ['妞ょ澹?', '颜色'],
                 ['妫版粏澹?', '颜色'],
                 ['娣団€冲娇', '信号'],
@@ -6049,7 +6049,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         '<div class="stat-empty">',
                         '<div style="font-size:16px; margin-bottom:8px;">📵 浏览记录</div>',
                         '<div style="font-size:13px;">暂无浏览详情数据</div>',
-                        '<div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录浼氬湪浣犳煡鐪嬪笘瀛愭椂自动保存</div>',
+                        '<div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>',
                         '<div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览：已加载</div>'
                     ].join('');
                     return;
@@ -6274,7 +6274,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
                     renderStatByType(type);
                 } else if (body) {
-                    body.innerHTML = '<div class="stat-empty">暂无鍙敤数据</div>';
+                    body.innerHTML = '<div class="stat-empty">暂无可用数据</div>';
                 }
                 if (statPollTimer) clearInterval(statPollTimer);
                 statPollTimer = setInterval(refreshStatModal, 15000);
