@@ -1029,15 +1029,42 @@
             justify-content: flex-end;
             gap: 10px;
         }
-        #editPostVisibility {
-            pointer-events: auto !important;
-            position: relative;
-            z-index: 20;
-            transform: translateZ(0);
-            -webkit-transform: translateZ(0);
-            isolation: isolate;
-            contain: none !important; /* Ensure native dropdown is not clipped */
+        .post-vis-toggle {
+            display: inline-flex;
+            border-radius: 10px;
+            overflow: hidden;
+            border: 1px solid rgba(0,0,0,0.1);
+            background: rgba(0,0,0,0.04);
         }
+        [data-theme="dark"] .post-vis-toggle {
+            border-color: rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.06);
+        }
+        .post-vis-toggle .vis-btn {
+            padding: 6px 16px;
+            font-size: 13px;
+            border: none;
+            cursor: pointer;
+            background: transparent;
+            color: var(--text-muted, #666);
+            transition: all 0.2s;
+            position: relative;
+            z-index: 1;
+            pointer-events: auto !important;
+        }
+        .post-vis-toggle .vis-btn.active {
+            background: var(--primary, #4F46E5);
+            color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(79,70,229,0.25);
+        }
+        .post-vis-toggle .vis-btn:not(.active):hover {
+            background: rgba(0,0,0,0.06);
+        }
+        [data-theme="dark"] .post-vis-toggle .vis-btn:not(.active):hover {
+            background: rgba(255,255,255,0.08);
+        }
+        /* Remove old select-based styles above — now a custom toggle */
         /* Ensure the edit modal box doesn't block select interaction via backdrop-filter */
         /* High specificity to override .perf-balanced .glass and .perf-lite .glass */
         .modal-box.post-edit-modal,

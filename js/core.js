@@ -1,4 +1,5 @@
 // Spring loader CSS is now in style.css - old CSS removed
+console.log('[XTJ] core.js loaded, starting...');
 
 
             const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
@@ -1868,7 +1869,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   <div class="actions">
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">评论</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}" onclick="window.togglePostPin('${safeJsStr(p.id)}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
@@ -2147,7 +2148,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   <div class="actions">
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">评论</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}" onclick="window.togglePostPin('${safeJsStr(p.id)}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
@@ -2322,7 +2323,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + idJs + '\')">编辑</button>');
                 }
                 if (canPinPost(post)) {
-                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '" onclick="window.togglePostPin(\'' + idJs + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canDelete) {
                     actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + idJs + '\', \'' + actorKeyJs + '\')">删除</button>');
@@ -2452,27 +2453,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 editPostId = String(target.id);
                 var input = document.getElementById("editPostInp");
-                var visibility = document.getElementById("editPostVisibility");
                 if (input) input.value = target.content || "";
-                if (visibility) {
-                    visibility.value = target.visibility || "public";
-                    // Force reflow to ensure select is interactive
-                    visibility.style.display = "none";
-                    void visibility.offsetHeight; // force reflow
-                    visibility.style.display = "";
-                }
+                // Update custom visibility toggle
+                var vis = target.visibility || "public";
+                document.getElementById("editPostVisibilityVal").value = vis;
+                var toggleBtns = document.querySelectorAll("#editPostVisibility .vis-btn");
+                toggleBtns.forEach(function(b) {
+                    b.classList.toggle("active", b.getAttribute("data-vis") === vis);
+                });
                 // Re-enable save button
                 var btn = document.getElementById("saveEditPostBtn");
                 if (btn) { btn.disabled = false; btn.textContent = "保存修改"; }
                 openModal("editPostModal");
-                // Focus on the select candidate after a short delay (helps mobile Safari)
-                setTimeout(function() {
-                    if (visibility) {
-                        visibility.style.pointerEvents = "auto";
-                        visibility.style.position = "relative";
-                        visibility.style.zIndex = "20";
-                    }
-                }, 50);
             };
 
             window.saveEditPost = async function() {
@@ -2483,10 +2475,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
                 var input = document.getElementById("editPostInp");
-                var visibility = document.getElementById("editPostVisibility");
                 var btn = document.getElementById("saveEditPostBtn");
                 var nextContent = input ? input.value.trim() : "";
-                var nextVisibility = visibility ? visibility.value : "public";
+                var nextVisibility = (document.getElementById("editPostVisibilityVal") || {}).value || "public";
                 if (!nextContent) {
                     showToast("请输入帖子内容");
                     return;
@@ -2528,45 +2519,44 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
             window.togglePostPin = async function(postId, btn) {
                 console.log('[togglePostPin] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
-                var post;
+                if (!postId) { alert('[BUG] togglePostPin: postId is empty'); return; }
                 var nextPinned;
+                var originalText;
+                if (btn) {
+                    originalText = btn.textContent;
+                    btn.disabled = true;
+                    btn.textContent = '处理中...';
+                }
                 try {
-                    // Try to find post from feedAllPosts; if not found, attempt a direct DB fetch
-                    post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
-                    if (!post) {
-                        var fetched = await sb.from("posts").select("*").eq("id", postId).maybeSingle();
-                        if (fetched.error) throw fetched.error;
-                        if (fetched.data) post = normalizePost(fetched.data);
-                    }
-                    if (!post || !canPinPost(post)) {
-                        showToast("无权置顶这条帖子");
-                        if (btn) { btn.disabled = false; btn.textContent = "置顶"; }
+                    // Fetch current post state directly from DB (most reliable)
+                    var fetchRes = await sb.from('posts').select('user_name,content,visibility,is_pinned,pinned_at').eq('id', postId).maybeSingle();
+                    if (fetchRes.error) { alert('查询失败: ' + fetchRes.error.message); throw fetchRes.error; }
+                    if (!fetchRes.data) { alert('未找到帖子 (id=' + postId + ')'); throw new Error('not found'); }
+                    var dbPost = fetchRes.data;
+                    // Check permission
+                    if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
+                        alert('无权置顶这条帖子 (当前: ' + currentUser + ', 作者: ' + dbPost.user_name + ')');
+                        showToast('无权置顶');
+                        if (btn) { btn.disabled = false; btn.textContent = originalText; }
                         return;
                     }
-                    if (btn) {
-                        btn.disabled = true;
-                        btn.textContent = post.is_pinned ? "取消中..." : "置顶中...";
-                    }
-                    nextPinned = !post.is_pinned;
-                    var result = await updatePostRecord(post, {
+                    nextPinned = !dbPost.is_pinned;
+                    btn.textContent = nextPinned ? '置顶中...' : '取消中...';
+                    // Update via Supabase directly
+                    var updateRes = await sb.from('posts').update({
                         is_pinned: nextPinned,
                         pinned_at: nextPinned ? new Date().toISOString() : null
-                    });
-                    if (!result.ok) {
-                        if (btn) { btn.disabled = false; btn.textContent = post.is_pinned ? "取消置顶" : "置顶"; }
-                        showToast("置顶操作失败: " + ((result.error && result.error.message) || "未知错误"));
-                        return;
-                    }
+                    }).eq('id', postId);
+                    if (updateRes.error) { alert('更新失败: ' + updateRes.error.message); throw updateRes.error; }
                     clearFeedCache();
-                    showToast(nextPinned ? "✅ 帖子已置顶" : "✅ 已取消置顶");
+                    showToast(nextPinned ? '✅ 帖子已置顶' : '✅ 已取消置顶');
                     await loadFeed(true);
                 } catch (e) {
-                    console.error("togglePostPin error:", e);
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.textContent = post && typeof post.is_pinned !== 'undefined' ? (post.is_pinned ? "取消置顶" : "置顶") : "置顶";
+                    console.error('[togglePostPin] error:', e);
+                    if (btn) { btn.disabled = false; btn.textContent = originalText || '置顶'; }
+                    if (!/^[\u4e00-\u9fa5]/.test(e && e.message || '')) {
+                        showToast('操作异常，请查看控制台');
                     }
-                    showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
                 }
             };
             window.togglePostVisibility = async function(postId, btn) {
@@ -2603,16 +2593,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
                 }
             };
-            // Delegate pin clicks with debugging
+            // ============== Global click delegation ==============
             document.addEventListener('click', function(e) {
-                var btn = e.target.closest('.action-btn.pin');
-                if (btn) {
-                    console.log('[pin] click detected, disabled:', btn.disabled, 'postId:', btn.getAttribute('data-post-id'));
-                    if (btn.disabled) return;
-                    var postId = btn.getAttribute('data-post-id') ||
-                        (btn.closest('.post') || {}).getAttribute('data-post-id');
-                    console.log('[pin] resolved postId:', postId);
-                    if (postId) window.togglePostPin(postId, btn);
+                // Pin button: delegate only (no inline onclick)
+                var pinBtn = e.target.closest('.action-btn.pin');
+                if (pinBtn) {
+                    if (pinBtn.disabled) { console.log('[pin] btn disabled, skip'); return; }
+                    var pid = pinBtn.getAttribute('data-post-id');
+                    if (!pid) { console.warn('[pin] no data-post-id'); return; }
+                    console.log('[pin] delegated click, postId:', pid);
+                    window.togglePostPin(pid, pinBtn);
+                    return;
+                }
+                // Visibility toggle in edit modal
+                var visBtn = e.target.closest('#editPostVisibility .vis-btn');
+                if (visBtn) {
+                    var vis = visBtn.getAttribute('data-vis');
+                    if (!vis) return;
+                    console.log('[vis-toggle] click, value:', vis);
+                    document.getElementById('editPostVisibilityVal').value = vis;
+                    document.querySelectorAll('#editPostVisibility .vis-btn').forEach(function(b) {
+                        b.classList.toggle('active', b.getAttribute('data-vis') === vis);
+                    });
+                    return;
                 }
             });
             window.doPublish = async function () {
@@ -5946,7 +5949,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var canDel = canEdit && (post.actor_key === deviceId || post.actor_key === currentUser || isAdmin());
                 var detailActions = [];
                 if (canPinPost(post)) {
-                    detailActions.push('<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(String(post.id)) + '" onclick="window.togglePostPin(\'' + safeJsStr(String(post.id)) + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                    detailActions.push('<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(String(post.id)) + '">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canEdit) {
                 }
