@@ -2452,8 +2452,25 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var input = document.getElementById("editPostInp");
                 var visibility = document.getElementById("editPostVisibility");
                 if (input) input.value = target.content || "";
-                if (visibility) visibility.value = target.visibility || "public";
+                if (visibility) {
+                    visibility.value = target.visibility || "public";
+                    // Force reflow to ensure select is interactive
+                    visibility.style.display = "none";
+                    void visibility.offsetHeight; // force reflow
+                    visibility.style.display = "";
+                }
+                // Re-enable save button
+                var btn = document.getElementById("saveEditPostBtn");
+                if (btn) { btn.disabled = false; btn.textContent = "保存修改"; }
                 openModal("editPostModal");
+                // Focus on the select candidate after a short delay (helps mobile Safari)
+                setTimeout(function() {
+                    if (visibility) {
+                        visibility.style.pointerEvents = "auto";
+                        visibility.style.position = "relative";
+                        visibility.style.zIndex = "20";
+                    }
+                }, 50);
             };
 
             window.saveEditPost = async function() {
@@ -2511,9 +2528,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var post;
                 var nextPinned;
                 try {
+                    // Try to find post from feedAllPosts; if not found, attempt a direct DB fetch
                     post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(postId); });
+                    if (!post) {
+                        var fetched = await sb.from("posts").select("*").eq("id", postId).maybeSingle();
+                        if (fetched.error) throw fetched.error;
+                        if (fetched.data) post = normalizePost(fetched.data);
+                    }
                     if (!post || !canPinPost(post)) {
                         showToast("无权置顶这条帖子");
+                        if (btn) { btn.disabled = false; btn.textContent = "置顶"; }
                         return;
                     }
                     if (btn) {
@@ -2576,20 +2600,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
                 }
             };
+            // Delegate pin clicks — only fires if inline onclick didn't already disable the button
             document.addEventListener('click', function(e) {
                 var btn = e.target.closest('.action-btn.pin');
                 if (btn) {
                     if (btn.disabled) return;
-                    var postId = btn.getAttribute('data-post-id');
-                    if (!postId) {
-                        var postEl = btn.closest('.post');
-                        if (postEl) {
-                            postId = postEl.getAttribute('data-post-id');
-                        }
-                    }
-                    if (postId) {
-                        togglePostPin(postId, btn);
-                    }
+                    var postId = btn.getAttribute('data-post-id') ||
+                        (btn.closest('.post') || {}).getAttribute('data-post-id');
+                    if (postId) window.togglePostPin(postId, btn);
                 }
             });
             window.doPublish = async function () {
