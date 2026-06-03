@@ -1028,6 +1028,11 @@
             justify-content: flex-end;
             gap: 10px;
         }
+        #editPostVisibility {
+            pointer-events: auto !important;
+            position: relative;
+            z-index: 10;
+        }
 
         .auth-form { display: flex; flex-direction: column; gap: 16px; }
         .auth-form .af-input {
