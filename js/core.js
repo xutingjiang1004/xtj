@@ -2354,6 +2354,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     '<span class="post-stats-visibility post-stats-visibility-' + visibilityClass + '">' + visibilityText + '</span>';
             }
 
+            buildPostBadges = function(post) {
+                var normalized = normalizePost(post);
+                return normalized.is_pinned ? '<span class="post-pin-badge">缃《</span>' : '';
+            };
+
             function buildPostActionHtml(post, isLiked, canDelete) {
                 var idJs = safeJsStr(String(post.id));
                 var idHtml = escapeHtml(String(post.id));
@@ -2697,6 +2702,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 });
             }
 
+            async function rebuildFeedFromCurrentState() {
+                feedPage = 0;
+                feedEndReached = false;
+                var noMore = document.getElementById('feedNoMore');
+                if (noMore) noMore.remove();
+                await renderFeedFromMemoryState();
+                if (typeof setupFeedInfiniteScroll === 'function') {
+                    setupFeedInfiniteScroll();
+                }
+            }
+
             async function refreshPostDetailIfActive(postId) {
                 if (!postId || String(activePostId || '') !== String(postId)) return;
                 if (typeof window.openPostDetail !== 'function') return;
@@ -2716,7 +2732,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     writeFeedCacheSnapshot();
                     if (!!normalized.is_pinned !== !!expectedPinned) {
                         if (synced) {
-                            await renderFeedFromMemoryState();
+                            await rebuildFeedFromCurrentState();
                             await refreshPostDetailIfActive(postId);
                         }
                         showToast('置顶状态已按服务器结果校正');
@@ -2724,6 +2740,40 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 } catch (e) {
                     console.error('[pin] background verify failed', e);
                     showToast('置顶已更新，但后台校验失败: ' + (e && e.message ? e.message : '未知错误'));
+                }
+            }
+
+            async function syncFeedDataInBackground() {
+                var requestId = ++feedLoadRequestId;
+                try {
+                    var postRes = await sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false });
+                    if (requestId !== feedLoadRequestId) return false;
+                    if (postRes.error) throw postRes.error;
+                    feedAllPosts = normalizePosts(postRes.data || []);
+                    writeFeedCacheSnapshot();
+                    if (currentDockTab === 'posts') {
+                        await rebuildFeedFromCurrentState();
+                    }
+
+                    var results = await Promise.all([
+                        sb.from("comments").select("*").order("created_at"),
+                        sb.from("likes").select("*")
+                    ]);
+                    if (requestId !== feedLoadRequestId) return false;
+                    var commRes = results[0];
+                    var likeRes = results[1];
+                    if (commRes.error || likeRes.error) {
+                        throw (commRes.error || likeRes.error);
+                    }
+                    feedAllComments = commRes.data || [];
+                    feedAllLikes = likeRes.data || [];
+                    writeFeedCacheSnapshot();
+                    if (currentDockTab === 'posts') {
+                        await rebuildFeedFromCurrentState();
+                    }
+                    return true;
+                } finally {
+                    isRefreshing.posts = false;
                 }
             }
 
@@ -2779,7 +2829,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var synced = syncPinnedPostIntoFeedState(updateRes.data || fallbackRow);
                     writeFeedCacheSnapshot();
                     if (synced) {
-                        await renderFeedFromMemoryState();
+                        await rebuildFeedFromCurrentState();
                         await refreshPostDetailIfActive(postId);
                     } else {
                         clearFeedCache();
@@ -3966,12 +4016,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 localStorage.removeItem(CACHE_KEY);
                             } catch(e) {}
                             if (typeof window.initialLoad === 'function') {
-                                window.initialLoad(true);
+                                rebuildFeedFromCurrentState()
+                                    .then(function() {
+                                        return syncFeedDataInBackground();
+                                    })
+                                    .catch(function(err) {
+                                        isRefreshing[tab] = false;
+                                        console.error('[posts] fast refresh failed', err);
+                                        window.showToast('鍒锋柊澶辫触');
+                                    });
                             }
                             // 回到顶部
                             const panel = document.getElementById('panelPosts');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
-                            isRefreshing[tab] = false;
                             window.showToast('刷新完成');
                         } else if (tab === 'chat') {
                             // 鑱婂ぉ妞ら潧鍩涢ʽ
@@ -4756,6 +4813,23 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // 版本更新日志
             const changelogData = [
+                {
+                    version: 'v0.68',
+                    date: '2026-06-03',
+                    content: `
+                        <h4>帖子交互修复</h4>
+                        <ul>
+                            <li>置顶和取消置顶改为即时重排，点击后列表会立刻更新</li>
+                            <li>帖子卡片右上角移除重复的公开/私密标记，仅保留统计行右侧显示</li>
+                            <li>双击帖子 Dock 刷新改为先本地显示、再后台静默同步，减少空白等待</li>
+                            <li>预览和上传链路继续收口，交互反馈更顺滑</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重做了帖子状态切换、刷新反馈和部分预览细节，整体更直接、更干净</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.67',
                     date: '2026-06-02',
