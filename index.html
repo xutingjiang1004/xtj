@@ -10,7 +10,7 @@
     <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
     <link rel="preconnect" href="https://pyrjkgqalmvgtozxkgbd.supabase.co" />
     <link rel="dns-prefetch" href="https://pyrjkgqalmvgtozxkgbd.supabase.co" />
-    <link rel="stylesheet" href="css/style.min.css" />
+    <link rel="stylesheet" href="css/style.css" />
     <link rel="stylesheet" href="css/loader-hotfix.css" />
 </head>
 <body>
@@ -27,7 +27,7 @@
             <nav>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <h1>xtj</h1>
-                    <button id="themeToggle" class="theme-toggle-btn" title="鍒囨崲涓婚">鈽€锔?/button>
+                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
                 </div>
                 <div id="announcement-btn-wrapper" style="display:none; margin-right: 8px;">
                     <button class="announcement-btn" id="announcementBtn" title="鍏憡">
@@ -67,9 +67,9 @@
                         </select>
                     </div>
                     <div class="publish-footer">
-                        <label for="fileInp" class="file-label">馃摲 閫夊彇鐓х墖鎴栬棰?/label>
+                        <label for="fileInp" class="file-label">📷 选取照片或视频</label>
                         <input type="file" id="fileInp" accept="image/*,video/*" style="display:none" />
-                        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">鍙戝竷鍔ㄦ€?/button>
+                        <button class="btn btn-primary" id="pubBtn" onclick="doPublish()">发布动态</button>
                     </div>
                 </div>
 
@@ -77,24 +77,24 @@
                     <div class="post-filter-toggle-row">
                         <button class="filter-toggle-btn" type="button" onclick="toggleFilterPanel()" id="filterToggleBtn">
                             <span class="filter-toggle-icon">馃攳</span>
-                            <span>绛涢€?/span>
+                            <span>筛选</span>
                             <span class="filter-active-badge" id="filterActiveBadge">0</span>
                         </button>
                         <span class="post-filter-summary" id="postFilterSummary">鍏ㄩ儴甯栧瓙</span>
-                        <button class="btn btn-ghost post-filter-clear" type="button" onclick="clearPostFilters()" id="filterClearBtn">娓呴櫎绛涢€?/button>
+                        <button class="btn btn-ghost post-filter-clear" type="button" onclick="clearPostFilters()" id="filterClearBtn">清除筛选</button>
                     </div>
                     <div class="post-filter-panel" id="postFilterPanel">
                         <div class="post-filter-row post-filter-row--top">
                             <input id="postSearchInput" class="post-search-input" type="search" placeholder="鎼滅储甯栧瓙銆佺敤鎴枫€佽瘎璁?.." autocomplete="off" />
                             <select id="postVisibilityFilter" class="post-filter-select">
-                                <option value="all">鍏ㄩ儴鍙鎬?/option>
+                                <option value="all">全部可见状态</option>
                                 <option value="public">鍏紑</option>
                                 <option value="private">绉佸瘑</option>
                             </select>
                         </div>
                         <div class="post-filter-user-block">
                             <div class="post-filter-user-head">
-                                <span class="post-filter-user-label">绛涢€夌敤鎴?/span>
+                                <span class="post-filter-user-label">筛选用户</span>
                                 <button class="post-filter-user-reset" id="postUserFilterReset" type="button" onclick="selectPostFilterUser('')">娓呯┖</button>
                             </div>
                             <input id="postUserFilter" type="hidden" value="" />
@@ -112,9 +112,9 @@
                 </div>
 
                 <div class="stats">
-                    <div class="stat-card glass" onclick="openStatDetail('posts')" title="鐐瑰嚮鏌ョ湅璇︽儏"><b id="sPosts">0</b><span>鎬诲姩鎬?/span></div>
-                    <div class="stat-card glass" onclick="openStatDetail('views')" title="鐐瑰嚮鏌ョ湅璇︽儏"><b id="sViews">0</b><span>鎬绘祻瑙?/span></div>
-                    <div class="stat-card glass" onclick="openStatDetail('likes')" title="鐐瑰嚮鏌ョ湅璇︽儏"><b id="sLikes">0</b><span>鐐硅禐鍜岃瘎璁?/span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('posts')" title="点击查看详情"><b id="sPosts">0</b><span>总动态</span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('views')" title="点击查看详情"><b id="sViews">0</b><span>总浏览</span></div>
+                    <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>点赞和评论</span></div>
                 </div>
 
                 <div id="feed" class="feed">
@@ -130,7 +130,7 @@
         <div class="dock-panel" id="panelChat">
             <div class="dock-chat-container" id="dockChatContainer">
                 <div class="chat-header">
-                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">鈥?/button>
+                    <button class="back-btn" id="dockChatBackBtn" onclick="dockChatGoBack()">←</button>
                     <h3 id="dockChatTitle">娑堟伅</h3>
                 </div>
                 <div id="dockChatListView" class="chat-view">
@@ -144,13 +144,13 @@
                                 <input id="dockChatInput" placeholder="杈撳叆娑堟伅..." maxlength="500" />
                                 <div id="dockChatFilePreview" class="chat-file-preview hidden">
                                     <div class="cfp-thumb" id="dockCfpThumb">
-                                        <button class="cfp-x" id="dockCfpRemove" title="绉婚櫎">鉁?/button>
+                                        <button class="cfp-x" id="dockCfpRemove" title="移除">✕</button>
                                     </div>
                                     <span class="cfp-name" id="dockCfpName"></span>
                                 </div>
                             </div>
-                            <button class="chat-img-btn" id="dockChatImgBtn" title="鍙戦€佸浘鐗?>馃摲</button>
-                            <button class="send-btn" id="dockChatSendBtn">鉃?/button>
+                            <button class="chat-img-btn" id="dockChatImgBtn" title="发送图片">📷</button>
+                            <button class="send-btn" id="dockChatSendBtn">➤</button>
                         </div>
                     </div>
                     <input type="file" id="dockChatFileInp" accept="image/*,video/*" style="display:none" />
@@ -169,20 +169,20 @@
                             </svg>
                         </span>
                         <span class="photo-wall-title-text">
-                            <span>鐓х墖澧?/span>
-                            <small>璁板綍鍏夊奖鍜屾棩甯?/small>
+                            <span>照片墙</span>
+                            <small>记录光影和日常</small>
                         </span>
                     </div>
                     <div class="photo-wall-sync-status is-idle" id="pwSyncStatus" aria-live="polite">
                         <span class="pw-sync-dot"></span>
-                        <span class="pw-sync-label" id="pwSyncLabel">宸插悓姝?/span>
+                        <span class="pw-sync-label" id="pwSyncLabel">已同步</span>
                     </div>
                     <div class="photo-wall-controls">
                         <select id="pwAlbumSort" class="photo-wall-select" onchange="switchPhotoWallView()">
-                            <option value="date_desc">鎸夋棩鏈?鈫?/option>
-                            <option value="date_asc">鎸夋棩鏈?鈫?/option>
-                            <option value="name">鎸夊悕绉?/option>
-                            <option value="size">鎸夊ぇ灏?/option>
+                            <option value="date_desc">按日期 ↓</option>
+                            <option value="date_asc">按日期 ↑</option>
+                            <option value="name">按名称</option>
+                            <option value="size">按大小</option>
                             <option value="views">鎸夌儹搴?/option>
                         </select>
                         <button class="photo-wall-btn" id="pwAlbumToggle" onclick="toggleAlbumView()" title="鐩稿唽瑙嗗浘">
@@ -258,10 +258,10 @@
                 <div class="profile-user-card" id="profileUserCard" onclick="handleProfileCardClick()">
                     <span class="avatar profile-avatar" id="profileAvatar">?</span>
                     <div class="profile-user-info">
-                        <div class="profile-user-name" id="profileName">鏈櫥褰?/div>
+                        <div class="profile-user-name" id="profileName">未登录</div>
                         <div class="profile-user-status" id="profileStatus">鐐瑰嚮鐧诲綍</div>
                     </div>
-                    <span class="profile-chevron">鈥?/span>
+                    <span class="profile-chevron">→</span>
                 </div>
                 <div class="profile-settings">
                     <div class="profile-setting-item">
@@ -494,8 +494,8 @@
 
     <div class="modal-overlay" id="delModal">
         <div class="modal-box glass" style="text-align: center;">
-            <h3 style="margin-top:0;">纭鍒犻櫎甯栧瓙锛?/h3>
-            <p style="color: var(--text-muted); margin-bottom:20px;">鍒犻櫎鍚庢棤娉曟仮澶?/p>
+            <h3 style="margin-top:0;">确认删除帖子？</h3>
+            <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢复</p>
             <div style="display: flex; gap: 10px;">
                 <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delModal')">鍙栨秷</button>
                 <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">纭鍒犻櫎</button>
@@ -514,7 +514,7 @@
                     <option value="private">绉佸瘑</option>
                 </select>
             </div>
-            <div class="post-edit-note">濯掍綋鏂囦欢浼氫繚鐣欙紝鏈鍙紪杈戞鏂囧拰鍙鑼冨洿銆?/div>
+            <div class="post-edit-note">媒体文件会保留，本次只编辑正文和可见范围。</div>
             <div class="post-edit-actions">
                 <button class="btn btn-ghost" type="button" onclick="closeModal('editPostModal')">鍙栨秷</button>
                 <button class="btn btn-primary" type="button" id="saveEditPostBtn" onclick="saveEditPost()">淇濆瓨淇敼</button>
@@ -562,14 +562,14 @@
         <div class="iv-wrapper" id="ivWrapper">
             <img id="ivImg" src="" alt="棰勮" draggable="false" />
         </div>
-        <div class="iv-zoom-hint" id="ivZoomHint">鎹忓悎鍙屾寚鍙缉鏀?/div>
+        <div class="iv-zoom-hint" id="ivZoomHint">双指捏合可缩放</div>
     </div>
 
     <div class="modal-overlay" id="statModal" onclick="if(event.target===this)closeModal('statModal')">
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
                 <h3 id="statModalTitle">缁熻璇︽儏</h3>
-                <button class="btn btn-ghost stat-close-btn" onclick="closeModal('statModal')" aria-label="鍏抽棴缁熻璇︽儏">鉁?/button>
+                <button class="btn btn-ghost stat-close-btn" onclick="closeModal('statModal')" aria-label="关闭统计详情">✕</button>
             </div>
             <div class="stat-detail-body" id="statModalBody">
                 <div class="xtj-magic-loading" role="status" aria-live="polite">
@@ -585,7 +585,7 @@
         <div class="modal-box glass stat-detail-modal" onclick="event.stopPropagation()">
             <div class="stat-detail-header">
                 <h3 id="postDetailTitle">甯栧瓙璇︽儏</h3>
-                <button class="btn btn-ghost stat-close-btn" onclick="closeModal('postDetailModal')" aria-label="鍏抽棴甯栧瓙璇︽儏">鉁?/button>
+                <button class="btn btn-ghost stat-close-btn" onclick="closeModal('postDetailModal')" aria-label="关闭帖子详情">✕</button>
             </div>
             <div class="stat-detail-body" id="postDetailBody">
                 <div class="xtj-magic-loading" role="status" aria-live="polite">
@@ -602,7 +602,7 @@
         <div class="modal-box glass profile-detail-modal" onclick="event.stopPropagation()">
             <div class="profile-detail-header">
                 <h3>涓汉璧勬枡</h3>
-                <button class="btn btn-ghost" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;">鉁?/button>
+                <button class="btn btn-ghost" onclick="closeModal('profileDetailModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="profile-detail-body">
                 <div class="profile-detail-avatar-wrapper">
@@ -614,7 +614,7 @@
                 </div>
                 <div class="profile-detail-info">
                     <div class="profile-detail-info-item">
-                        <span class="profile-detail-info-label">鐢ㄦ埛鍚?/span>
+                        <span class="profile-detail-info-label">用户名</span>
                         <span class="profile-detail-info-value" id="profileDetailName">-</span>
                     </div>
                     <div class="profile-detail-info-item">
@@ -626,7 +626,7 @@
                         <span class="profile-detail-info-value" id="profileDetailRegTime">-</span>
                     </div>
                 </div>
-                <button class="profile-detail-logout-btn" onclick="doLogoutFromProfile()">閫€鍑虹櫥褰?/button>
+                <button class="profile-detail-logout-btn" onclick="doLogoutFromProfile()">退出登录</button>
             </div>
         </div>
     </div>
@@ -636,15 +636,15 @@
         <div class="modal-box glass user-profile-card-modal" onclick="event.stopPropagation()">
             <div class="upc-header">
                 <h3>鐢ㄦ埛璧勬枡</h3>
-                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;">鉁?/button>
+                <button class="btn btn-ghost" onclick="closeModal('userProfileModal')" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="upc-body">
                 <div class="upc-avatar" id="upcAvatar">
                     <span id="upcAvatarText">?</span>
                 </div>
                 <div class="upc-name" id="upcName">-</div>
-                <div class="upc-login" id="upcLogin">鏈€杩戠櫥褰曪細鍔犺浇涓?/div>
-                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">馃挰 鍙戞秷鎭?/button>
+                <div class="upc-login" id="upcLogin">最近登录：加载中...</div>
+                <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">💬 发消息</button>
             </div>
         </div>
     </div>
@@ -657,11 +657,11 @@
                     <button class="announcement-tab active" data-tab="announcements">馃敂 鍏憡</button>
                     <button class="announcement-tab" data-tab="changelog">馃摑 鏇存柊鏃ュ織</button>
                 </div>
-                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">鉁?/button>
+                <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
             <div class="announcement-content">
                 <div id="announcementAdminArea" class="announcement-admin-area" style="display:none;">
-                    <div class="announcement-admin-title">馃摙 鍙戝竷鏂板叕鍛?/div>
+                    <div class="announcement-admin-title">📝 发布新公告</div>
                     <input type="text" id="announcementAdminTitle" class="announcement-admin-title-input" placeholder="杈撳叆鍏憡鏍囬锛堝彲閫夛級">
                     <textarea id="announcementAdminInput" class="announcement-admin-input" placeholder="杈撳叆鍏憡鍐呭锛堝彲閫夛級"></textarea>
                     <div class="announcement-admin-row">
@@ -690,9 +690,9 @@
     </div>
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-    <script defer src="js/performance.min.js"></script>
-    <script defer src="js/core.min.js"></script>
-    <script defer src="js/features.min.js"></script>
+    <script defer src="js/performance.js"></script>
+    <script defer src="js/core.js"></script>
+    <script defer src="js/features.js"></script>
 <script>
 (function() {
     var COLORS = {
@@ -1242,84 +1242,6 @@
             subtree: true,
             attributes: true,
             attributeFilter: ['class', 'style']
-        });
-    }
-})();
-
-/* ===== PHOTO WALL UPLOAD + POST MEDIA PREVIEW ===== */
-(function() {
-    /* -- Photo Wall Upload -- */
-    window.validFiles = [];
-    window.successCount = 0;
-    window.failCount = 0;
-
-    window.xtjUploadBtn = function() {
-        if (!window.currentUser) { window.showToast && window.showToast('璇峰厛鐧诲綍'); return; }
-        var fi = document.getElementById('photoFileInput');
-        if (!fi) return;
-        fi.value = '';
-        fi.click();
-    };
-
-    window.handlePhotoUpload = function(e) {
-        var files = (e && e.target && e.target.files) ? e.target.files : [];
-        if (!files || !files.length) return;
-        var selected = [];
-        for (var i = 0; i < files.length; i++) {
-            if (files[i] && /^image\//.test(files[i].type)) {
-                selected.push(files[i]);
-            }
-        }
-        if (!selected.length) {
-            window.showToast && window.showToast('鏈€夋嫨鏈夋晥鐨勫浘鐗囨枃浠?);
-            return;
-        }
-        window.validFiles = selected;
-        window.successCount = 0;
-        window.failCount = 0;
-        if (typeof window.triggerPhotoUpload === 'function') {
-            window.triggerPhotoUpload();
-        } else {
-            console.error('[photo-upload] triggerPhotoUpload not available');
-        }
-    };
-
-    /* -- Post Media Preview -- */
-    var fileInp = document.getElementById('fileInp');
-    var previewEl = document.getElementById('postMediaPreview');
-    var previewGrid = document.getElementById('postMediaPreviewGrid');
-    var previewCount = document.getElementById('postMediaPreviewCount');
-
-    if (fileInp && previewEl && previewGrid && previewCount) {
-        fileInp.addEventListener('change', function() {
-            var files = this.files || [];
-            previewGrid.innerHTML = '';
-            if (!files.length) {
-                previewEl.style.display = 'none';
-                return;
-            }
-            previewEl.style.display = 'block';
-            previewCount.textContent = '已选择 ' + files.length + ' 个文件';
-            var shown = Math.min(files.length, 12);
-            for (var i = 0; i < shown; i++) {
-                var f = files[i];
-                var url = URL.createObjectURL(f);
-                var isVideo = /^video\//.test(f.type);
-                var thumb = document.createElement('div');
-                thumb.className = 'post-media-preview-thumb';
-                if (isVideo) {
-                    thumb.innerHTML = '<video src="' + url + '" muted></video><span class="post-media-preview-tag">瑙嗛</span>';
-                } else {
-                    thumb.innerHTML = '<img src="' + url + '" alt="' + (f.name || '') + '">';
-                }
-                previewGrid.appendChild(thumb);
-            }
-            if (files.length > 12) {
-                var more = document.createElement('div');
-                more.className = 'post-media-preview-thumb post-media-preview-more';
-                more.textContent = '+' + (files.length - 12);
-                previewGrid.appendChild(more);
-            }
         });
     }
 })();
