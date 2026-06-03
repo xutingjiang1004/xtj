@@ -1868,7 +1868,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   <div class="actions">
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id).replace(/'/g, "\\'")}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id).replace(/'/g, "\\'")}" onclick="togglePostPin('${escapeHtml(p.id).replace(/'/g, "\\'")}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
@@ -2147,7 +2147,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   <div class="actions">
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id).replace(/'/g, "\\'")}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id).replace(/'/g, "\\'")}" onclick="togglePostPin('${escapeHtml(p.id).replace(/'/g, "\\'")}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
@@ -2321,7 +2321,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + id + '\')">编辑</button>');
                 }
                 if (canPinPost(post)) {
-                    actions.push('<button type="button" class="action-btn pin" onclick="togglePostPin(\'' + id + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + id + '" onclick="togglePostPin(\'' + id + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canDelete) {
                     actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + id + '\', \'' + actorKey + '\')">删除</button>');
@@ -2579,7 +2579,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             document.addEventListener('click', function(e) {
                 var btn = e.target.closest('.action-btn.pin');
                 if (btn) {
+                    if (btn.disabled) return;
                     var postId = btn.getAttribute('data-post-id');
+                    if (!postId) {
+                        var postEl = btn.closest('.post');
+                        if (postEl) {
+                            postId = postEl.getAttribute('data-post-id');
+                        }
+                    }
                     if (postId) {
                         togglePostPin(postId, btn);
                     }
@@ -3371,7 +3378,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
 
                 function buildCommentsCol() {
-                    let h = '<div class="stat-section-title">馃挰 评论记录</div>';
+                    let h = '<div class="stat-section-title">💬 评论记录</div>';
                     if (statAllComments.length) {
                         h += [...statAllComments].reverse().slice(0, 200).map(c => {
                             const post = postMap[c.post_id];
@@ -5886,7 +5893,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var canDel = canEdit && (post.actor_key === deviceId || post.actor_key === currentUser || isAdmin());
                 var detailActions = [];
                 if (canPinPost(post)) {
-                    detailActions.push('<button type="button" class="action-btn pin" data-post-id="' + String(post.id).replace(/'/g, "\\'") + '">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                    detailActions.push('<button type="button" class="action-btn pin" data-post-id="' + String(post.id).replace(/'/g, "\\'") + '" onclick="togglePostPin(\'' + String(post.id).replace(/'/g, "\\'") + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canEdit) {
                 }
@@ -6080,7 +6087,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
 
                 function buildCommentsCol() {
-                    var h = '<div class="stat-section-title">馃挰 评论记录</div>';
+                    var h = '<div class="stat-section-title">💬 评论记录</div>';
                     if (statAllComments.length) {
                         h += statAllComments.slice().reverse().slice(0, 200).map(function(c) {
                             var post = postMap[c.post_id];
