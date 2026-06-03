@@ -1731,6 +1731,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let feedAllComments = [];
             let feedAllLikes = [];
             let feedScrollObserver = null;
+            let feedLoadRequestId = 0;
 
             // DEPRECATED_DO_NOT_EDIT ====== [宸插簾寮�?涓嬫柟锟?412琛屾湁锟斤拷锟斤拷鐗堟湰 ======
             async function loadFeed(forceRefresh = false) {
@@ -2553,7 +2554,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     btn.textContent = "保存修改";
                 }
             };
-            window.togglePostPin = async function(postId, btn) {
+            window._legacyTogglePostPinBase = async function(postId, btn) {
                 console.log('[togglePostPin] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
                 if (!postId) { showToast("置顶失败: postId 为空"); return; }
                 var nextPinned;
@@ -2595,7 +2596,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
             };
-            window.togglePostPin = async function(postId, btn) {
+            window._legacyTogglePostPin = async function(postId, btn) {
                 console.log('[togglePostPin override] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
                 if (!postId) { showToast("置顶失败: postId 为空"); return; }
                 var nextPinned;
@@ -2638,6 +2639,146 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
             };
+            function writeFeedCacheSnapshot() {
+                try {
+                    var cachePosts = (feedAllPosts || []).filter(function(post) {
+                        return post && post.media_type !== '__avatar__' && post.media_type !== '__user_info__' && post.media_type !== '__photo_wall__';
+                    });
+                    localStorage.setItem(CACHE_KEY, JSON.stringify({
+                        data: {
+                            posts: cachePosts,
+                            comments: feedAllComments || [],
+                            likes: feedAllLikes || []
+                        },
+                        timestamp: Date.now()
+                    }));
+                } catch (e) {
+                    console.warn('[pin] failed to persist feed cache', e);
+                }
+            }
+
+            function syncPinnedPostIntoFeedState(serverPost) {
+                if (!serverPost || !serverPost.id) return false;
+                var found = false;
+                feedAllPosts = sortPosts((feedAllPosts || []).map(function(post) {
+                    if (String(post.id) !== String(serverPost.id)) return post;
+                    found = true;
+                    return Object.assign({}, post, serverPost);
+                }));
+                return found;
+            }
+
+            async function renderFeedFromMemoryState() {
+                await renderFeed({
+                    posts: feedAllPosts || [],
+                    comments: feedAllComments || [],
+                    likes: feedAllLikes || []
+                });
+            }
+
+            async function refreshPostDetailIfActive(postId) {
+                if (!postId || String(activePostId || '') !== String(postId)) return;
+                if (typeof window.openPostDetail !== 'function') return;
+                try {
+                    await window.openPostDetail(postId);
+                } catch (e) {
+                    console.warn('[pin] failed to refresh post detail', e);
+                }
+            }
+
+            async function verifyPinnedPostInBackground(postId, expectedPinned) {
+                try {
+                    var snapshot = await fetchPostSnapshot(postId);
+                    if (!snapshot) throw new Error('not found');
+                    var normalized = normalizePost(snapshot);
+                    var synced = syncPinnedPostIntoFeedState(snapshot);
+                    writeFeedCacheSnapshot();
+                    if (!!normalized.is_pinned !== !!expectedPinned) {
+                        if (synced) {
+                            await renderFeedFromMemoryState();
+                            await refreshPostDetailIfActive(postId);
+                        }
+                        showToast('置顶状态已按服务器结果校正');
+                    }
+                } catch (e) {
+                    console.error('[pin] background verify failed', e);
+                    showToast('置顶已更新，但后台校验失败: ' + (e && e.message ? e.message : '未知错误'));
+                }
+            }
+
+            window.togglePostPin = async function(postId, btn) {
+                console.log('[togglePostPin final override] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
+                if (!postId) {
+                    showToast('置顶失败: postId 为空');
+                    return;
+                }
+                var originalText = btn ? btn.textContent : '';
+                var nextPinned = false;
+                var didSucceed = false;
+                try {
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.textContent = '处理中...';
+                    }
+                    var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
+                    if (fetchRes.error) throw fetchRes.error;
+                    if (!fetchRes.data) throw new Error('未找到对应帖子');
+
+                    var dbPost = normalizePost(fetchRes.data);
+                    if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
+                        showToast('无权置顶');
+                        return;
+                    }
+
+                    nextPinned = !dbPost.is_pinned;
+                    var nextPinnedAt = nextPinned ? new Date().toISOString() : null;
+                    var nextUpdatedAt = new Date().toISOString();
+                    if (btn) btn.textContent = nextPinned ? '置顶中...' : '取消中...';
+
+                    var updateRes = await updatePostRecord(fetchRes.data, {
+                        is_pinned: nextPinned,
+                        pinned_at: nextPinnedAt,
+                        updated_at: nextUpdatedAt
+                    });
+                    if (!updateRes.ok) {
+                        showToast('置顶失败: ' + ((updateRes.error && updateRes.error.message) || '未知错误'));
+                        return;
+                    }
+
+                    var fallbackRow = Object.assign({}, fetchRes.data, {
+                        is_pinned: nextPinned,
+                        pinned_at: nextPinnedAt,
+                        updated_at: nextUpdatedAt,
+                        content: buildPostStorageContent(fetchRes.data, normalizePost(fetchRes.data).content, {
+                            is_pinned: nextPinned,
+                            pinned_at: nextPinnedAt,
+                            updated_at: nextUpdatedAt
+                        })
+                    });
+                    var synced = syncPinnedPostIntoFeedState(updateRes.data || fallbackRow);
+                    writeFeedCacheSnapshot();
+                    if (synced) {
+                        await renderFeedFromMemoryState();
+                        await refreshPostDetailIfActive(postId);
+                    } else {
+                        clearFeedCache();
+                        await loadFeed(true);
+                    }
+
+                    didSucceed = true;
+                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
+                    verifyPinnedPostInBackground(postId, nextPinned);
+                } catch (e) {
+                    console.error('[togglePostPin final override] error:', e);
+                    showToast('置顶失败: ' + (e && e.message ? e.message : '未知错误'));
+                } finally {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = didSucceed ? (nextPinned ? '取消置顶' : '置顶') : (originalText || '置顶');
+                    }
+                }
+            };
+
             window.togglePostVisibility = async function(postId, btn) {
                 var post;
                 var nextVisibility;
@@ -2751,6 +2892,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             loadFeed = async function(forceRefresh) {
                 var now = Date.now();
+                var requestId = ++feedLoadRequestId;
                 if (forceRefresh) {
                     feedPage = 0;
                     feedEndReached = false;
@@ -2766,6 +2908,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         try {
                             var parsed = JSON.parse(cached);
                             if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION) {
+                                if (requestId !== feedLoadRequestId) return;
                                 feedAllPosts = normalizePosts(parsed.data.posts || []);
                                 feedAllComments = parsed.data.comments || [];
                                 feedAllLikes = parsed.data.likes || [];
@@ -2790,10 +2933,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var commRes = results[1];
                     var likeRes = results[2];
                     if (postRes.error || commRes.error || likeRes.error) {
+                        if (requestId !== feedLoadRequestId) return;
                         var err = postRes.error || commRes.error || likeRes.error;
                         if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败: ' + escapeHtml(err.message || "未知错误") + '</div>';
                         return;
                     }
+                    if (requestId !== feedLoadRequestId) return;
                     feedAllPosts = normalizePosts(postRes.data || []);
                     feedAllComments = commRes.data || [];
                     feedAllLikes = likeRes.data || [];
