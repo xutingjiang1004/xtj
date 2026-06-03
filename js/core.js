@@ -3872,7 +3872,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         .limit(200);
                     if (error) throw error;
                     if (!allMsgs || !allMsgs.length) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>暂无消息</div><div style="font-size:12px;">鍦ㄥ笘瀛愰〉闈㈢偣鍑诲ご像开始聊�?</div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像开始聊天吧</div></div>';
                         updateUnreadBadge();
                         return;
                     }
@@ -4318,7 +4318,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (header) header.appendChild(delBtn);
                 }
 
-                renderAnnouncementList(); // 重新娓叉煋鍒楄〃，欢洿新增凡璇荤姸�?
+                renderAnnouncementList(); // 重新渲染列表，清理新增
             }
 
             async function loadAnnouncements() {
