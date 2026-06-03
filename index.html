@@ -492,8 +492,8 @@
             <div class="post-edit-controls">
                 <label class="post-compose-label">可见范围</label>
                 <div class="post-vis-toggle" id="editPostVisibility">
-                    <button type="button" class="vis-btn vis-public active" data-vis="public">公开</button>
-                    <button type="button" class="vis-btn vis-private" data-vis="private">私密</button>
+                    <button type="button" class="vis-btn vis-public active" data-vis="public" onclick="document.getElementById('editPostVisibilityVal').value='public';document.querySelectorAll('#editPostVisibility .vis-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-vis')==='public');})">公开</button>
+                    <button type="button" class="vis-btn vis-private" data-vis="private" onclick="document.getElementById('editPostVisibilityVal').value='private';document.querySelectorAll('#editPostVisibility .vis-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-vis')==='private');})">私密</button>
                 </div>
                 <input type="hidden" id="editPostVisibilityVal" value="public" />
             </div>

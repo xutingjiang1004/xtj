@@ -2528,11 +2528,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     btn.textContent = '处理中...';
                 }
                 try {
-                    // Fetch current post state directly from DB (most reliable)
-                    var fetchRes = await sb.from('posts').select('user_name,content,visibility,is_pinned,pinned_at').eq('id', postId).maybeSingle();
+                    // Fetch current post state directly from DB (only select columns that exist)
+                    var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
                     if (fetchRes.error) { alert('查询失败: ' + fetchRes.error.message); throw fetchRes.error; }
                     if (!fetchRes.data) { alert('未找到帖子 (id=' + postId + ')'); throw new Error('not found'); }
-                    var dbPost = fetchRes.data;
+                    var dbPost = normalizePost(fetchRes.data);
                     // Check permission
                     if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
                         alert('无权置顶这条帖子 (当前: ' + currentUser + ', 作者: ' + dbPost.user_name + ')');
