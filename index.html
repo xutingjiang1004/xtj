@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8" />
@@ -76,7 +76,7 @@
                 <div class="post-filter-bar glass" id="postFilterBar">
                     <div class="post-filter-toggle-row">
                         <button class="filter-toggle-btn" type="button" onclick="toggleFilterPanel()" id="filterToggleBtn">
-                            <span class="filter-toggle-icon">馃攳</span>
+                            <span class="filter-toggle-icon">🔍</span>
                             <span>筛选</span>
                             <span class="filter-active-badge" id="filterActiveBadge">0</span>
                         </button>
@@ -183,7 +183,7 @@
                             <option value="date_asc">按日期 ↑</option>
                             <option value="name">按名称</option>
                             <option value="size">按大小</option>
-                            <option value="views">按热度?/option>
+                            <option value="views">按热度</option>
                         </select>
                         <button class="photo-wall-btn" id="pwAlbumToggle" onclick="toggleAlbumView()" title="相册视图">
                             <span class="ui-icon" aria-hidden="true">
@@ -248,7 +248,7 @@
                 <div class="profile-settings">
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
-                            <span class="profile-setting-icon">馃寵</span>
+                            <span class="profile-setting-icon">🌙</span>
                             <span>深色模式</span>
                         </div>
                         <label class="profile-switch">
@@ -258,8 +258,8 @@
                     </div>
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
-                            <span class="profile-setting-icon">馃敂</span>
-                            <span>閫氱煡</span>
+                            <span class="profile-setting-icon">🔔</span>
+                            <span>通知</span>
                         </div>
                         <label class="profile-switch">
                             <input type="checkbox" id="profileNotifToggle" checked>
@@ -320,7 +320,7 @@
                 </svg>
             </span>
             <span id="navChatBadge" class="nav-chat-badge"></span>
-            <span class="dt-label">鑱婂ぉ</span>
+            <span class="dt-label">聊天</span>
             <svg class="anim-layer" viewBox="0 0 80 60" width="80" height="60" overflow="visible">
                 <!-- 3个气泡各自独立定位，明显分开 -->
                 <!-- Bubble 1 (Big)：主气泡 - 在中心偏�?-->
@@ -591,7 +591,7 @@
                     <div class="profile-detail-avatar" id="profileDetailAvatar" onclick="triggerAvatarUpload()">
                         <span id="profileDetailAvatarText">?</span>
                     </div>
-                    <div class="profile-detail-avatar-edit" onclick="triggerAvatarUpload()" title="更换头像">馃摲</div>
+                    <div class="profile-detail-avatar-edit" onclick="triggerAvatarUpload()" title="更换头像">📷</div>
                     <input type="file" id="avatarUploadInput" accept="image/*" style="display:none;" onchange="handleAvatarUpload(event)">
                 </div>
                 <div class="profile-detail-info">
@@ -636,7 +636,7 @@
         <div class="announcement-modal" onclick="event.stopPropagation()">
             <div class="announcement-header">
                 <div class="announcement-tab-bar">
-                    <button class="announcement-tab active" data-tab="announcements">馃敂 公告</button>
+                    <button class="announcement-tab active" data-tab="announcements">🔔 公告</button>
                     <button class="announcement-tab" data-tab="changelog">📝 更新日志</button>
                 </div>
                 <button class="btn btn-ghost" onclick="closeAnnouncementModal()" style="padding:4px 12px; font-size:16px;">✕</button>
