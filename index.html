@@ -486,15 +486,16 @@
     </div>
 
     <div class="modal-overlay" id="editPostModal" onclick="if(event.target===this)closeModal('editPostModal')">
-        <div class="modal-box glass post-edit-modal" onclick="event.stopPropagation()">
+        <div class="modal-box glass post-edit-modal">
             <h3 style="margin-top:0;">编辑帖子</h3>
             <textarea id="editPostInp" class="post-edit-textarea" placeholder="修改帖子内容..."></textarea>
             <div class="post-edit-controls">
-                <label class="post-compose-label" for="editPostVisibility">可见范围</label>
-                <select id="editPostVisibility" class="post-filter-select post-visibility-select">
-                    <option value="public">公开</option>
-                    <option value="private">私密</option>
-                </select>
+                <label class="post-compose-label">可见范围</label>
+                <div class="post-vis-toggle" id="editPostVisibility">
+                    <button type="button" class="vis-btn vis-public active" data-vis="public">公开</button>
+                    <button type="button" class="vis-btn vis-private" data-vis="private">私密</button>
+                </div>
+                <input type="hidden" id="editPostVisibilityVal" value="public" />
             </div>
             <div class="post-edit-note">媒体文件会保留，本次只编辑正文和可见范围。</div>
             <div class="post-edit-actions">
