@@ -297,15 +297,15 @@
                 </defs>
                 <path class="al-path" d="M 8,32 Q 22,12 38,28 T 70,18" fill="none" stroke="url(#g-stroke)" stroke-width="3" stroke-linecap="round"/>
                 <g class="al-pen">
-                    <!-- 淇暱铚＄瑪 - rotate(25)使笔尖更倾斜，跟着路径方向�?-->
+                    <!-- 修长蜡笔 - rotate(25)使笔尖更倾斜，跟着路径方向 -->
                     <g transform="rotate(25)">
-                        <!-- 铚＄瑪韬綋 - 缂╃煭1/4锛屼粠32减到24 -->
+                        <!-- 蜡笔身体 - 缩短1/4，从32减到24 -->
                         <rect x="-2" y="-4" width="5" height="24" rx="1.5" fill="#F59E0B" stroke="#D97706" stroke-width="0.8"/>
-                        <!-- 铚＄瑪鏍囩鏉＄汗 -->
+                        <!-- 蜡笔标签条纹 -->
                         <rect x="-2" y="6" width="5" height="4" rx="1" fill="#FBBF24" opacity="0.5"/>
-                        <!-- 铚＄瑪閲戝睘鍖呰竟 - 位置相应调整 -->
+                        <!-- 蜡笔金属包边 - 位置相应调整 -->
                         <rect x="-2" y="18" width="5" height="3" rx="0.5" fill="#9CA3AF" stroke="#6B7280" stroke-width="0.5"/>
-                        <!-- 铚＄瑪绗斿皷 - 三角形位置调�?-->
+                        <!-- 蜡笔笔尖 - 三角形位置调整 -->
                         <path d="M-2,21 L0.5,28 L3,21 Z" fill="#F59E0B" stroke="#D97706" stroke-width="0.6"/>
                         <!-- 笔尖尖端颜色 -->
                         <path d="M0,24 L0.5,28 L1,24 Z" fill="#FF6B6B"/>
@@ -338,7 +338,7 @@
                     <line x1="2" y1="-3" x2="16" y2="-3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.35"/>
                     <line x1="2" y1="2" x2="12" y2="2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.25"/>
                 </g>
-                <!-- Bubble 3 (Small)：小气泡 - 鍦ㄥぇ气泡�︿笂鏂?-->
+                <!-- Bubble 3 (Small)：小气泡 - 在大气泡上方 -->
                 <g class="al-bubble-3" opacity="0" transform="translate(0, 2)">
                     <path d="M0,0 Q0,-7 7,-7 L14,-7 Q17,-7 17,-4 L17,3 Q17,6 14,6 L8,6 L5,10 L2,6 L0,6 Q-4,6 -4,3 L-4,-4 Q-4,-7 0,0 Z" 
                           fill="rgba(74,108,247,0.1)" stroke="rgba(74,108,247,0.25)" stroke-width="1"/>
@@ -397,14 +397,14 @@
                 <g class="al-person" transform="translate(40, 30)">
                     <circle class="al-person-head" cx="0" cy="-8" r="5" fill="currentColor" opacity="0"/>
                     <path class="al-person-body" d="M-7,2 a7,6 0 0,1 14,0" fill="currentColor" opacity="0"/>
-                    <!-- 5条光波：从脑袋边缘散射，只向上和左右，下方不�?-->
-                    <!-- 上：从�ご椤跺彂鍑?-->
+                    <!-- 5条光波：从脑袋边缘散射，只向上和左右，下方不 -->
+                    <!-- 上：从头顶发出 -->
                     <g class="al-wave-0" opacity="0"><line x1="0" y1="-14" x2="0" y2="-26" stroke="#FF6B6B" stroke-width="2" stroke-linecap="round"/></g>
                     <!-- 右上：从右上方发�?-->
                     <g class="al-wave-1" opacity="0"><line x1="4" y1="-12" x2="15" y2="-22" stroke="#FBBF24" stroke-width="2" stroke-linecap="round"/></g>
                     <!-- 右：从右耳发�?-->
                     <g class="al-wave-2" opacity="0"><line x1="6" y1="-8" x2="20" y2="-8" stroke="#34D399" stroke-width="2" stroke-linecap="round"/></g>
-                    <!-- 宸︼細浠庡乏鑰冲彂鍑?-->
+                    <!-- 左：从左耳发出 -->
                     <g class="al-wave-3" opacity="0"><line x1="-6" y1="-8" x2="-20" y2="-8" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/></g>
                     <!-- 左上：从左上方发�?-->
                     <g class="al-wave-4" opacity="0"><line x1="-4" y1="-12" x2="-15" y2="-22" stroke="#A78BFA" stroke-width="2" stroke-linecap="round"/></g>
@@ -414,7 +414,7 @@
     </div>
     </div>
 
-    <!-- 照片墙全屏预�?- 蹇呴』鍦?body 直接子级，避免父�?transform 鐮村潖 position:fixed -->
+    <!-- 照片墙全屏预览 - 必须在 body 直接子级，避免父级 transform 破坏 position:fixed -->
     <div class="photo-preview-overlay" id="photoPreviewOverlay">
         <div class="pp-ambient-bg" id="ppAmbientBg"></div>
         <div class="pp-dots" id="ppDots"></div>
@@ -488,7 +488,7 @@
     <div class="modal-overlay" id="editPostModal" onclick="if(event.target===this)closeModal('editPostModal')">
         <div class="modal-box glass post-edit-modal" onclick="event.stopPropagation()">
             <h3 style="margin-top:0;">编辑帖子</h3>
-            <textarea id="editPostInp" class="post-edit-textarea" placeholder="淇��帖子内�..."></textarea>
+            <textarea id="editPostInp" class="post-edit-textarea" placeholder="修改帖子内容..."></textarea>
             <div class="post-edit-controls">
                 <label class="post-compose-label" for="editPostVisibility">可见范围</label>
                 <select id="editPostVisibility" class="post-filter-select post-visibility-select">
@@ -654,7 +654,7 @@
                     <div class="announcement-list" id="announcementList"></div>
                 </div>
                 <div id="announcementDetail" class="announcement-detail">
-                    <button class="announcement-back-btn" onclick="showAnnouncementList()">鈫?返回</button>
+                    <button class="announcement-back-btn" onclick="showAnnouncementList()">← 返回</button>
                     <div class="announcement-detail-header">
                         <div class="announcement-detail-left">
                             <div class="announcement-detail-user" id="announcementDetailUserInfo"></div>

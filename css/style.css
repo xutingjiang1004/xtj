@@ -996,6 +996,7 @@
             display: flex;
             flex-direction: column;
             gap: 14px;
+            contain: layout style !important; /* Remove paint containment to allow native select dropdown to render */
         }
         .post-edit-textarea {
             width: 100%;
@@ -1035,15 +1036,21 @@
             transform: translateZ(0);
             -webkit-transform: translateZ(0);
             isolation: isolate;
+            contain: none !important; /* Ensure native dropdown is not clipped */
         }
         /* Ensure the edit modal box doesn't block select interaction via backdrop-filter */
-        .post-edit-modal {
+        /* High specificity to override .perf-balanced .glass and .perf-lite .glass */
+        .modal-box.post-edit-modal,
+        .modal-box.glass.post-edit-modal {
             -webkit-backdrop-filter: none !important;
             backdrop-filter: none !important;
-            background: rgba(255,255,255,0.85);
+            background: rgba(255,255,255,0.85) !important;
         }
-        [data-theme="dark"] .post-edit-modal {
-            background: rgba(25,25,45,0.95);
+        [data-theme="dark"] .modal-box.post-edit-modal,
+        [data-theme="dark"] .modal-box.glass.post-edit-modal {
+            -webkit-backdrop-filter: none !important;
+            backdrop-filter: none !important;
+            background: rgba(25,25,45,0.95) !important;
         }
 
         .auth-form { display: flex; flex-direction: column; gap: 16px; }

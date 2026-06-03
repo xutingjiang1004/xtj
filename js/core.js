@@ -1863,13 +1863,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     </div>
                   </div>
                   <div class="content">${escapeHtml(p.content)}</div>
-                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(p.media_url).replace(/'/g, "\\'")}')">`}</div>`:''}
+                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}')">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
-                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id).replace(/'/g, "\\'")}" onclick="togglePostPin('${escapeHtml(p.id).replace(/'/g, "\\'")}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
-                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'❤️':'点赞'}</button>
+                    <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">评论</button>
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}" onclick="window.togglePostPin('${safeJsStr(p.id)}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
+                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -2142,13 +2142,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     </div>
                   </div>
                   <div class="content">${escapeHtml(p.content)}</div>
-                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(p.media_url).replace(/'/g, "\\'")}')">`}</div>`:''}
+                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}')">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${escapeHtml(p.id).replace(/'/g, "\\'")}')">${isLiked?'❤️':'点赞'}</button>
-                    <button class="action-btn" onclick="openComment('${escapeHtml(p.id).replace(/'/g, "\\'")}')">评论</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id).replace(/'/g, "\\'")}" onclick="togglePostPin('${escapeHtml(p.id).replace(/'/g, "\\'")}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
-                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${escapeHtml(p.id).replace(/'/g, "\\'")}', '${escapeHtml(p.actor_key).replace(/'/g, "\\'")}')">删除</button>`:''}
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'❤️':'点赞'}</button>
+                    <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">评论</button>
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}" onclick="window.togglePostPin('${safeJsStr(p.id)}', this)">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
+                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -2311,20 +2311,21 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             function buildPostActionHtml(post, isLiked, canDelete) {
-                var id = escapeHtml(String(post.id)).replace(/'/g, "\\'");
-                var actorKey = escapeHtml(String(post.actor_key || "")).replace(/'/g, "\\'");
+                var idJs = safeJsStr(String(post.id));
+                var idHtml = escapeHtml(String(post.id));
+                var actorKeyJs = safeJsStr(String(post.actor_key || ""));
                 var actions = [
-                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" onclick="toggleLike(this, \'' + id + '\')">' + (isLiked ? '❤️' : '点赞') + '</button>',
-                    '<button class="action-btn" onclick="openComment(\'' + id + '\')">评论</button>'
+                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '❤️' : '点赞') + '</button>',
+                    '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
                 ];
                 if (canEditPost(post)) {
-                    actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + id + '\')">编辑</button>');
+                    actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + idJs + '\')">编辑</button>');
                 }
                 if (canPinPost(post)) {
-                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + id + '" onclick="togglePostPin(\'' + id + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '" onclick="window.togglePostPin(\'' + idJs + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canDelete) {
-                    actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + id + '\', \'' + actorKey + '\')">删除</button>');
+                    actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + idJs + '\', \'' + actorKeyJs + '\')">删除</button>');
                 }
                 return actions.join("");
             }
@@ -2348,7 +2349,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     </div>
                   </div>
                   <div class="content">${escapeHtml(normalized.content || "")}</div>
-                  ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none"></video>` : `<img src="${escapeHtml(normalized.media_url)}" loading="lazy" onclick="openImageViewer('${escapeHtml(normalized.media_url).replace(/'/g, "\\'")}')">`}</div>` : ''}
+                  ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none"></video>` : `<img src="${escapeHtml(normalized.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(normalized.media_url)}')">`}</div>` : ''}
                   <div class="post-stats-text">浏览 ${normalized.views || 0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${pComms.length ? `<div class="comments">${pComms.map(function(c) {
@@ -2443,6 +2444,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             window.openEditPost = function(postId) {
+                console.log('[openEditPost] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
                 var target = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
                 if (!target || !canEditPost(target)) {
                     showToast("无权编辑这条帖子");
@@ -2525,6 +2527,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
             window.togglePostPin = async function(postId, btn) {
+                console.log('[togglePostPin] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
                 var post;
                 var nextPinned;
                 try {
@@ -2600,13 +2603,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast("操作异常: " + (e && e.message ? e.message : "未知错误，请查看控制台"));
                 }
             };
-            // Delegate pin clicks — only fires if inline onclick didn't already disable the button
+            // Delegate pin clicks with debugging
             document.addEventListener('click', function(e) {
                 var btn = e.target.closest('.action-btn.pin');
                 if (btn) {
+                    console.log('[pin] click detected, disabled:', btn.disabled, 'postId:', btn.getAttribute('data-post-id'));
                     if (btn.disabled) return;
                     var postId = btn.getAttribute('data-post-id') ||
                         (btn.closest('.post') || {}).getAttribute('data-post-id');
+                    console.log('[pin] resolved postId:', postId);
                     if (postId) window.togglePostPin(postId, btn);
                 }
             });
@@ -3229,7 +3234,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         </div>
                     </div>
                     ${post.content ? `<div class="post-detail-content">${escapeHtml(post.content)}</div>` : ''}
-                    ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${escapeHtml(post.media_url)}" controls preload="none"></video>`:`<img src="${escapeHtml(post.media_url)}" onclick="openImageViewer('${escapeHtml(post.media_url).replace(/'/g, "\\'")}')" loading="lazy" />`}</div>` : ''}
+                    ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${escapeHtml(post.media_url)}" controls preload="none"></video>`:`<img src="${escapeHtml(post.media_url)}" onclick="openImageViewer('${safeJsStr(post.media_url)}')" loading="lazy" />`}</div>` : ''}
                     <div class="post-detail-stats">浏览 ${vc} 次· 点赞 ${likes.length} 次· 评论 ${comments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
@@ -3275,7 +3280,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // 生成帖子�＄洰鐨凥TML锛堝彲鐐瑰嚮璺宠浆：
             function renderPostItemHTML(p) {
                 const fmt = formatPostSummary(p);
-                const onclick = `openPostDetail('${escapeHtml(p.id).replace(/'/g, "\\'")}')`;
+                const onclick = `openPostDetail('${safeJsStr(p.id)}')`;
                 return `
                     <div class="stat-post-item">
                         <span class="spi-content" onclick="${onclick}" title="点击查看帖子详情">
@@ -3317,7 +3322,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             ${posts.slice(0, 3).map(p => renderPostItemHTML(p)).join('')}
                             ${posts.length > 3 ? `
                                 <div style="text-align:center; padding:8px 0;">
-                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${escapeHtml(name).replace(/'/g, "\\'")}')">查看全部 ${posts.length} 条</button>
+                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${safeJsStr(name)}')">查看全部 ${posts.length} 条</button>
                                 </div>
                             ` : ''}
                         </div>
@@ -3531,6 +3536,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return _escapeDiv.innerHTML;
             }
             window.escapeHtml = escapeHtml;
+
+            // Safely escape a value for use inside a JavaScript single-quoted string
+            // that is itself inside an HTML attribute (e.g. onclick="...'...'...")
+            function safeJsStr(str) {
+                var s = String(str == null ? '' : str);
+                // Must escape & first, then \, then ', then "
+                return s.replace(/&/g, '&amp;').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            }
+            window.safeJsStr = safeJsStr;
 
 
 
@@ -5796,6 +5810,27 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
         })();
 
+        // === Self-diagnostic: verify key functions are available after page load ===
+        (function() {
+            function check() {
+                var funcs = ['togglePostPin', 'openEditPost', 'saveEditPost', 'safeJsStr', 'escapeHtml'];
+                var missing = [];
+                funcs.forEach(function(f) {
+                    if (typeof window[f] !== 'function') missing.push(f);
+                });
+                if (missing.length) {
+                    console.error('[XTJ] Missing functions:', missing.join(', '));
+                } else {
+                    console.log('[XTJ] All key functions loaded OK');
+                }
+            }
+            if (document.readyState === 'complete' || document.readyState === 'interactive') {
+                check();
+            } else {
+                document.addEventListener('DOMContentLoaded', check);
+            }
+        })();
+
         (function installMagicLoaderV4() {
             if (window.__xtjMagicLoaderV4Installed) return;
             window.__xtjMagicLoaderV4Installed = true;
@@ -5905,13 +5940,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var mediaHtml = post.media_url ? (
                     post.media_type === 'video'
                         ? '<video src="' + escapeHtml(post.media_url) + '" controls preload="none"></video>'
-                        : '<img src="' + escapeHtml(post.media_url) + '" onclick="openImageViewer(\'' + escapeHtml(post.media_url).replace(/'/g, "\\'") + '\')" loading="lazy" />'
+                        : '<img src="' + escapeHtml(post.media_url) + '" onclick="openImageViewer(\'' + safeJsStr(post.media_url) + '\')" loading="lazy" />'
                 ) : '';
                 var canEdit = canEditPost(post);
                 var canDel = canEdit && (post.actor_key === deviceId || post.actor_key === currentUser || isAdmin());
                 var detailActions = [];
                 if (canPinPost(post)) {
-                    detailActions.push('<button type="button" class="action-btn pin" data-post-id="' + String(post.id).replace(/'/g, "\\'") + '" onclick="togglePostPin(\'' + String(post.id).replace(/'/g, "\\'") + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
+                    detailActions.push('<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(String(post.id)) + '" onclick="window.togglePostPin(\'' + safeJsStr(String(post.id)) + '\', this)">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canEdit) {
                 }
