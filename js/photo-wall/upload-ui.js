@@ -118,7 +118,7 @@
       '.publish-box.is-submitting{transform:translateY(-1px);box-shadow:0 22px 46px rgba(76,149,104,.12);}',
       '.btn-primary.is-loading{position:relative;pointer-events:none;background:linear-gradient(135deg,#62b883,#8edaae)!important;color:#fff!important;box-shadow:0 12px 28px rgba(87,171,120,.24)!important;}',
       '.btn-primary.is-loading::after{content:"";display:inline-block;width:14px;height:14px;margin-left:8px;border-radius:50%;border:2px solid rgba(255,255,255,.34);border-top-color:#fff;vertical-align:-2px;animation:xtjUploadSpin .85s linear infinite;}',
-      '.pp-post-mode .pp-delete-btn{display:none!important;}',
+      '.pp-post-mode .pp-delete-btn,.pp-post-mode .pp-zoom-out,.pp-post-mode #ppDeleteBtn,.pp-post-mode #ppZoomOutBtn{display:none!important;}',
       '@keyframes xtjUploadSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}',
       '@keyframes xtjUploadPulse{0%,100%{transform:scale(.92);opacity:.62;}50%{transform:scale(1.06);opacity:1;}}',
       '@keyframes xtjUploadOrbit{0%,100%{transform:scale(.8);opacity:.4;}50%{transform:translateY(-5px) scale(1.2);opacity:1;}}',
@@ -679,33 +679,48 @@
     });
   }
 
-  function buildPostPreviewItem(img) {
+  function buildPostPreviewItems(img) {
     var postCard = img.closest('.post');
     if (postCard) {
-      return {
-        id: 'post-' + (postCard.getAttribute('data-post-id') || Date.now()),
-        imageUrl: img.currentSrc || img.src,
-        username: ((postCard.querySelector('.user-name') || {}).textContent || '帖子图片').trim(),
-        timestamp: new Date().toISOString(),
-        views: 0,
-        __xtjPostMode: true
-      };
+      var postId = postCard.getAttribute('data-post-id') || Date.now();
+      var username = ((postCard.querySelector('.user-name') || {}).textContent || '帖子图片').trim();
+      var timestamp = new Date().toISOString();
+      var postImages = Array.prototype.slice.call(postCard.querySelectorAll('.media img'));
+      return postImages.map(function(node, index) {
+        return {
+          id: 'post-' + postId + '-' + index,
+          imageUrl: node.currentSrc || node.src,
+          username: username,
+          timestamp: timestamp,
+          views: 0,
+          __xtjPostMode: true
+        };
+      }).filter(function(item) {
+        return !!item.imageUrl;
+      });
     }
 
     var detailMedia = img.closest('.post-detail-media');
     if (detailMedia) {
       var detailRoot = img.closest('#postDetailBody') || document;
-      return {
-        id: 'post-detail-' + Date.now(),
-        imageUrl: img.currentSrc || img.src,
-        username: ((detailRoot.querySelector('.pdh-name') || {}).textContent || '帖子图片').trim(),
-        timestamp: new Date().toISOString(),
-        views: 0,
-        __xtjPostMode: true
-      };
+      var detailName = ((detailRoot.querySelector('.pdh-name') || {}).textContent || '帖子图片').trim();
+      var detailTime = new Date().toISOString();
+      var detailImages = Array.prototype.slice.call(detailRoot.querySelectorAll('.post-detail-media img'));
+      return detailImages.map(function(node, index) {
+        return {
+          id: 'post-detail-' + index + '-' + Date.now(),
+          imageUrl: node.currentSrc || node.src,
+          username: detailName,
+          timestamp: detailTime,
+          views: 0,
+          __xtjPostMode: true
+        };
+      }).filter(function(item) {
+        return !!item.imageUrl;
+      });
     }
 
-    return null;
+    return [];
   }
 
   function restorePostPreviewMode() {
@@ -733,23 +748,26 @@
   }
 
   function openPostPreview(img) {
-    var item = buildPostPreviewItem(img);
-    if (!item || !item.imageUrl) return false;
+    var items = buildPostPreviewItems(img);
+    if (!items.length) return false;
+    var currentUrl = img.currentSrc || img.src;
+    var currentIndex = items.findIndex(function(item) {
+      return item.imageUrl === currentUrl;
+    });
+    if (currentIndex < 0) currentIndex = 0;
     if (typeof window.openPhotoPreview !== 'function') {
-      if (typeof window.openImageViewer === 'function') window.openImageViewer(item.imageUrl);
+      if (typeof window.openImageViewer === 'function') window.openImageViewer(items[currentIndex].imageUrl);
       return true;
     }
 
     state.savedPwCurrentSortedPhotos = window.pwCurrentSortedPhotos;
     state.postPreviewMode = true;
-    window.pwCurrentSortedPhotos = [item];
+    window.pwCurrentSortedPhotos = items;
     wrapPhotoPreviewClose();
-    window.openPhotoPreview(0, false);
+    window.openPhotoPreview(currentIndex, false);
     requestAnimationFrame(function() {
       var overlay = byId('photoPreviewOverlay');
-      var deleteBtn = byId('ppDeleteBtn');
       if (overlay) overlay.classList.add('pp-post-mode');
-      if (deleteBtn) deleteBtn.style.display = 'none';
     });
     return true;
   }
