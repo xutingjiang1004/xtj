@@ -2339,9 +2339,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function buildPostBadges(post) {
                 var normalized = normalizePost(post);
                 var bits = [];
-                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '🔒 私密' : '🔓 公开') + '</span>');
-                if (normalized.is_pinned) bits.push('<span class="post-pin-badge">📌 置顶</span>');
+                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
+                if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
                 return bits.join("");
+            }
+
+            function buildPostStatsLine(post, likeCount, commentCount) {
+                var normalized = normalizePost(post);
+                var visibilityClass = normalized.visibility === "private" ? 'private' : 'public';
+                var visibilityText = normalized.visibility === "private" ? '私密' : '公开';
+                return '浏览 ' + (normalized.views || 0) +
+                    ' | 点赞 ' + (likeCount || 0) +
+                    ' | 评论 ' + (commentCount || 0) +
+                    '<span class="post-stats-visibility post-stats-visibility-' + visibilityClass + '">' + visibilityText + '</span>';
             }
 
             function buildPostActionHtml(post, isLiked, canDelete) {
@@ -2384,7 +2394,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   </div>
                   <div class="content">${escapeHtml(normalized.content || "")}</div>
                   ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none"></video>` : `<img src="${escapeHtml(normalized.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(normalized.media_url)}')">`}</div>` : ''}
-                  <div class="post-stats-text">浏览 ${normalized.views || 0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
+                  <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${pComms.length ? `<div class="comments">${pComms.map(function(c) {
                     return `<div class="comment-item" data-comment-id="${escapeHtml(c.id)}"><div><b>${escapeHtml(c.user_name)}:</b> ${escapeHtml(c.content)}</div></div>`;
@@ -2541,10 +2551,21 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (String(verifiedMeta.visibility || "public") !== String(nextVisibility)) {
                         throw new Error("保存失败：content.meta.visibility 未同步");
                     }
-                    clearFeedCache();
+                    var savedPostId = editPostId;
+                    var syncedPost = syncPinnedPostIntoFeedState(fetchedPost);
+                    if (syncedPost) {
+                        writeFeedCacheSnapshot();
+                    } else {
+                        clearFeedCache();
+                    }
                     closeModal("editPostModal");
                     editPostId = null;
-                    await loadFeed(true);
+                    if (syncedPost) {
+                        await renderFeedFromMemoryState();
+                        await refreshPostDetailIfActive(savedPostId);
+                    } else {
+                        await loadFeed(true);
+                    }
                     showToast(nextVisibility === "private" ? "已改为私密" : "已改为公开");
                 } catch (e) {
                     console.error("[edit-post] save failed", e);
@@ -6210,6 +6231,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var body = document.getElementById('postDetailBody');
                 if (!body) return;
                 body.innerHTML = statPostDetailMarkup(post, likes, comments);
+                var statsEl = body.querySelector('.post-detail-stats');
+                if (statsEl) {
+                    statsEl.innerHTML = buildPostStatsLine(post, (likes || []).length, (comments || []).length);
+                }
             };
 
             function formatStatTime(value) {
