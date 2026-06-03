@@ -207,6 +207,26 @@
                 </div>
                 <div id="pwAlbumContainer" style="display:none;"></div>
                 <div class="photo-wall-grid" id="photoGrid"></div>
+                <div class="pw-upload-sheet" id="pwUploadSheet" aria-hidden="true">
+                    <div class="pw-upload-sheet-card">
+                        <div class="pw-upload-sheet-head">
+                            <div>
+                                <div class="pw-upload-sheet-kicker">照片墙上传</div>
+                                <h4 id="pwUploadSheetTitle">选择完成，准备上传</h4>
+                                <p id="pwUploadSheetMeta">请确认本次准备上传的照片内容。</p>
+                            </div>
+                            <button type="button" class="pw-upload-sheet-close" id="pwUploadSheetClose" aria-label="关闭">×</button>
+                        </div>
+                        <div class="pw-upload-sheet-grid" id="pwUploadSheetGrid"></div>
+                        <div class="pw-upload-sheet-footer">
+                            <div class="pw-upload-sheet-count" id="pwUploadSheetCount">0 张照片</div>
+                            <div class="pw-upload-sheet-actions">
+                                <button type="button" class="pw-upload-sheet-btn is-ghost" id="pwUploadReselectBtn">重新选择</button>
+                                <button type="button" class="pw-upload-sheet-btn is-primary" id="pwStartUploadBtn">开始上传</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <input type="file" id="photoFileInput" accept="image/*" multiple style="position:fixed;top:-100px;left:-100px;width:1px;height:1px;opacity:0;pointer-events:none;">
                 <div id="pwUploadProgressOverlay" style="display:none;" class="pw-upload-local-overlay">
                 <div class="pw-upload-progress-container">
@@ -1306,5 +1326,6 @@
 
 </script>
 <script src="js/photo-wall/upload.min.js"></script>
+<script src="js/photo-wall/upload-ui.js"></script>
 </body>
 </html>
