@@ -207,7 +207,7 @@
                 </div>
                 <div id="pwAlbumContainer" style="display:none;"></div>
                 <div class="photo-wall-grid" id="photoGrid"></div>
-                <input type="file" id="photoFileInput" accept="image/*" multiple style="position:fixed;top:-100px;left:-100px;width:1px;height:1px;opacity:0;pointer-events:none;">
+                <input type="file" id="photoFileInput" accept="image/*" multiple onchange="window.handlePhotoUpload(event)" style="position:fixed;top:-100px;left:-100px;width:1px;height:1px;opacity:0;pointer-events:none;">
                 <div id="pwUploadProgressOverlay" style="display:none;" class="pw-upload-local-overlay">
                 <div class="pw-upload-progress-container">
                     <div class="pw-upload-local-spinner">
@@ -1242,8 +1242,11 @@
     };
 
     window.handlePhotoUpload = function(e) {
+        if (window._uploading) return;
+        window._uploading = true;
+        setTimeout(function() { window._uploading = false; }, 120000);
         var files = (e && e.target && e.target.files) ? e.target.files : [];
-        if (!files || !files.length) return;
+        if (!files || !files.length) { window._uploading = false; return; }
         window.validFiles = [];
         for (var i = 0; i < files.length; i++) {
             if (files[i] && /^image\//.test(files[i].type)) {
@@ -1251,6 +1254,7 @@
             }
         }
         if (!window.validFiles.length) {
+            window._uploading = false;
             window.showToast && window.showToast('未选择有效的图片文件');
             return;
         }
@@ -1260,6 +1264,7 @@
             window.triggerPhotoUpload();
         } else {
             console.error('[photo-upload] triggerPhotoUpload not available');
+            window._uploading = false;
         }
     };
 
@@ -1302,6 +1307,8 @@
         });
     }
 })();
+
 </script>
+<script src="js/photo-wall/upload.min.js"></script>
 </body>
 </html>
