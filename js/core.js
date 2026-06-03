@@ -164,13 +164,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         function normalizePost(post) {
             var parsed = parsePostContent(post || {});
             var meta = Object.assign({}, POST_META_DEFAULTS, parsed.meta || {});
-            var hasMeta = parsed.meta && typeof parsed.meta === "object";
+            var realVisibility = post && typeof post.visibility === "string" && post.visibility ? post.visibility : "";
+            var hasRealPinned = !!(post && (post.is_pinned === true || post.is_pinned === false));
+            var hasRealPinnedAt = !!(post && post.pinned_at);
+            var hasRealUpdatedAt = !!(post && post.updated_at);
             return Object.assign({}, post, {
                 content: parsed.text || "",
-                visibility: hasMeta ? (meta.visibility || "public") : (post && post.visibility ? post.visibility : (meta.visibility || "public")),
-                is_pinned: hasMeta ? !!meta.is_pinned : (post && (post.is_pinned === true || post.is_pinned === false) ? !!post.is_pinned : !!meta.is_pinned),
-                pinned_at: hasMeta ? (meta.pinned_at || null) : (post && post.pinned_at ? post.pinned_at : (meta.pinned_at || null)),
-                updated_at: hasMeta ? (meta.updated_at || null) : (post && post.updated_at ? post.updated_at : (meta.updated_at || null)),
+                visibility: realVisibility || meta.visibility || "public",
+                is_pinned: hasRealPinned ? !!post.is_pinned : !!meta.is_pinned,
+                pinned_at: hasRealPinnedAt ? post.pinned_at : (meta.pinned_at || null),
+                updated_at: hasRealUpdatedAt ? post.updated_at : (meta.updated_at || null),
                 _contentMeta: meta
             });
         }
@@ -2283,10 +2286,39 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     pinned_at: nextPinnedAt,
                     updated_at: nextUpdatedAt
                 });
-
-                var result = await sb.from("posts").update({ content: newContent }).eq("id", post.id);
+                var updatePayload = {
+                    content: newContent,
+                    visibility: nextVisibility,
+                    is_pinned: nextPinned,
+                    pinned_at: nextPinnedAt,
+                    updated_at: nextUpdatedAt
+                };
+                var result = await sb.from("posts").update(updatePayload).eq("id", post.id).select("*").maybeSingle();
                 if (result.error) return { ok: false, error: result.error };
-                return { ok: true, fallback: true };
+                if (!result.data) {
+                    return { ok: false, error: new Error("更新失败：数据库没有实际修改任何行，可能是 RLS 权限阻止") };
+                }
+                var verified = normalizePost(result.data);
+                var verifiedMeta = parsePostContent(result.data).meta || {};
+                if (String(verified.visibility || "public") !== String(nextVisibility)) {
+                    return { ok: false, error: new Error("更新失败：visibility 字段未实际生效") };
+                }
+                if (String(verifiedMeta.visibility || "public") !== String(nextVisibility)) {
+                    return { ok: false, error: new Error("更新失败：content.meta.visibility 未同步") };
+                }
+                if (!!verified.is_pinned !== !!nextPinned) {
+                    return { ok: false, error: new Error("更新失败：置顶状态未实际生效") };
+                }
+                if (!!verifiedMeta.is_pinned !== !!nextPinned) {
+                    return { ok: false, error: new Error("更新失败：content.meta.is_pinned 未同步") };
+                }
+                if (Object.prototype.hasOwnProperty.call(updates, "pinned_at") && String(verified.pinned_at || "") !== String(nextPinnedAt || "")) {
+                    return { ok: false, error: new Error("更新失败：pinned_at 未实际生效") };
+                }
+                if (Object.prototype.hasOwnProperty.call(updates, "updated_at") && String(verified.updated_at || "") !== String(nextUpdatedAt || "")) {
+                    return { ok: false, error: new Error("更新失败：updated_at 未实际生效") };
+                }
+                return { ok: true, data: result.data };
             }
 
             function getRenderableComments(comments, visiblePosts) {
@@ -2501,8 +2533,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         throw new Error("保存失败：公开/秘密状态未实际保存");
                     }
                     var verified = normalizePost(fetchedPost);
+                    var verifiedMeta = parsePostContent(fetchedPost).meta || {};
                     if (String(verified.visibility) !== String(nextVisibility)) {
                         throw new Error("保存失败：公开/私密状态未实际保存");
+                    }
+                    if (String(verifiedMeta.visibility || "public") !== String(nextVisibility)) {
+                        throw new Error("保存失败：content.meta.visibility 未同步");
                     }
                     clearFeedCache();
                     closeModal("editPostModal");
@@ -2519,7 +2555,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
             window.togglePostPin = async function(postId, btn) {
                 console.log('[togglePostPin] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
-                if (!postId) { alert('[BUG] togglePostPin: postId is empty'); return; }
+                if (!postId) { showToast("置顶失败: postId 为空"); return; }
                 var nextPinned;
                 var originalText;
                 if (btn) {
@@ -2556,6 +2592,49 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (btn) { btn.disabled = false; btn.textContent = originalText || '置顶'; }
                     if (!/^[\u4e00-\u9fa5]/.test(e && e.message || '')) {
                         showToast('操作异常，请查看控制台');
+                    }
+                }
+            };
+            window.togglePostPin = async function(postId, btn) {
+                console.log('[togglePostPin override] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
+                if (!postId) { showToast("置顶失败: postId 为空"); return; }
+                var nextPinned;
+                var originalText;
+                if (btn) {
+                    originalText = btn.textContent;
+                    btn.disabled = true;
+                    btn.textContent = '处理中...';
+                }
+                try {
+                    var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
+                    if (fetchRes.error) throw fetchRes.error;
+                    if (!fetchRes.data) throw new Error('未找到对应帖子');
+                    var dbPost = normalizePost(fetchRes.data);
+                    if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
+                        showToast('无权置顶');
+                        return;
+                    }
+                    nextPinned = !dbPost.is_pinned;
+                    if (btn) btn.textContent = nextPinned ? '置顶中...' : '取消中...';
+                    var updateRes = await updatePostRecord(fetchRes.data, {
+                        is_pinned: nextPinned,
+                        pinned_at: nextPinned ? new Date().toISOString() : null,
+                        updated_at: new Date().toISOString()
+                    });
+                    if (!updateRes.ok) {
+                        showToast('置顶失败: ' + ((updateRes.error && updateRes.error.message) || '未知错误'));
+                        return;
+                    }
+                    clearFeedCache();
+                    await loadFeed(true);
+                    showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
+                } catch (e) {
+                    console.error('[togglePostPin override] error:', e);
+                    showToast('置顶失败: ' + (e && e.message ? e.message : '未知错误'));
+                } finally {
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.textContent = originalText || '置顶';
                     }
                 }
             };
