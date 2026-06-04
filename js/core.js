@@ -5234,7 +5234,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (isAdmin()) {
                     const delBtn = document.createElement('button');
                     delBtn.className = 'announcement-delete-btn';
-                    delBtn.textContent = '删除鍏憡';
+                    delBtn.textContent = '删除公告';
                     delBtn.onclick = function(e) { e.stopPropagation(); deleteAnnouncement(ann); };
                     const header = detail.querySelector('.announcement-detail-header');
                     if (header) header.appendChild(delBtn);
@@ -5340,7 +5340,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (error) throw error;
                     titleInput.value = '';
                     contentInput.value = '';
-                    showToast('鍏憡发布成功');
+                    showToast('公告发布成功');
                     await loadAnnouncements();
                     renderAnnouncementList();
                 } catch(e) {
@@ -6066,7 +6066,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     div.className = 'changelog-item';
                     div.innerHTML = `
                         <div class="changelog-header">
-                            <div class="changelog-version">猸?${item.version}</div>
+                            <div class="changelog-version">版本 ${item.version}</div>
                             <div class="changelog-date">${item.date}</div>
                         </div>
                         <div class="changelog-content">
