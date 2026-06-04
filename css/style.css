@@ -3749,6 +3749,7 @@
             display: grid;
             gap: 12px;
             margin-bottom: 16px;
+            order: 2;
         }
         .profile-activity-card {
             padding: 16px 16px 14px;
@@ -3806,12 +3807,23 @@
             align-items: start;
             padding: 12px 0;
             border-top: 1px solid rgba(126, 172, 143, 0.14);
+            cursor: pointer;
             animation: xtjFloatIn 0.28s cubic-bezier(0.16,1,.3,1) both;
             animation-delay: var(--xtj-enter-delay, 0ms);
+            transition: transform .2s ease, background .2s ease;
         }
         .profile-activity-list .profile-activity-item:first-child {
             border-top: none;
             padding-top: 0;
+        }
+        .profile-activity-item:hover {
+            transform: translateY(-1px);
+            background: rgba(255,255,255,0.10);
+        }
+        .profile-activity-item:focus-visible {
+            outline: 2px solid rgba(89, 161, 116, 0.42);
+            outline-offset: 4px;
+            border-radius: 12px;
         }
         .profile-activity-media,
         .profile-activity-video {
@@ -3970,6 +3982,7 @@
             backdrop-filter: var(--profile-glass-filter);
             -webkit-backdrop-filter: var(--profile-glass-filter);
             box-shadow: var(--profile-glass-shadow);
+            order: 1;
         }
         .profile-setting-item {
             display: flex;
@@ -4022,6 +4035,36 @@
             font-size: 13px;
             line-height: 1;
             flex-shrink: 0;
+            order: 3;
+        }
+        .profile-activity-modal {
+            max-width: 560px;
+            width: min(560px, calc(100vw - 28px));
+            max-height: min(78vh, 760px);
+            display: flex;
+            flex-direction: column;
+            padding: 18px 18px 16px;
+        }
+        .profile-activity-modal-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(126, 172, 143, 0.14);
+            margin-bottom: 12px;
+            flex-shrink: 0;
+        }
+        .profile-activity-modal-head h3 {
+            margin: 6px 0 0;
+            font-size: 20px;
+            font-weight: 800;
+            color: #214633;
+        }
+        .profile-activity-modal-list {
+            overflow: auto;
+            padding-right: 4px;
+            max-height: calc(min(78vh, 760px) - 110px);
         }
         .profile-total-item {
             display: inline-flex;
@@ -4082,9 +4125,13 @@
             background: var(--profile-glass-bg) !important;
             border-color: var(--profile-glass-border) !important;
         }
+        [data-theme="dark"] .profile-activity-item:hover {
+            background: rgba(255,255,255,0.04);
+        }
         [data-theme="dark"] .profile-activity-head h4,
         [data-theme="dark"] .profile-activity-title,
-        [data-theme="dark"] .profile-activity-note {
+        [data-theme="dark"] .profile-activity-note,
+        [data-theme="dark"] .profile-activity-modal-head h3 {
             color: #eef6ef;
         }
         [data-theme="dark"] .profile-activity-time,
