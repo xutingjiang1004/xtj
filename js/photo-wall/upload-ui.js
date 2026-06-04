@@ -914,6 +914,13 @@
         window.openPhotoPreview = function() {
           var result = originalOpenPhotoPreview.apply(this, arguments);
           requestAnimationFrame(function() {
+            ['ppZoomOutBtn', 'ppZoomInBtn', 'ppInfoBtn', 'ppShareBtn', 'ppRotateBtn'].forEach(function(id) {
+              var btn = byId(id);
+              if (btn) {
+                btn.style.opacity = '1';
+                btn.style.transform = id === 'ppInfoBtn' ? 'translateX(-50%)' : 'translateY(0)';
+              }
+            });
             var compact = byId('ppCompactBtn');
             if (compact && compact.parentNode) compact.parentNode.removeChild(compact);
             var rotate = byId('ppRotateBtn');

@@ -526,6 +526,8 @@
                 '<div class="pp-slide-slot pp-next-slot"><img id="ppNextImg" class="pp-slide-img" alt="next"/></div>' +
                 '</div>' +
                 '</div>' +
+                '<button class="pp-zoom-btn pp-zoom-out" id="ppZoomOutBtn" title="\u7f29\u5c0f" onclick="window.zoomOut()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span></button>' +
+                '<button class="pp-zoom-btn pp-zoom-in" id="ppZoomInBtn" title="\u653e\u5927" onclick="window.zoomIn()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span></button>' +
                 '<button class="pp-info-btn" id="ppInfoBtn" title="\u7167\u7247\u4fe1\u606f" onclick="showPhotoInfo()">' + ppIconSvg('info') + '</button>' +
                 '<button class="pp-share-btn" id="ppShareBtn" title="\u5206\u4eab" onclick="window.shareCurrentPhoto()">' + ppIconSvg('share') + '</button>' +
                 '<button class="pp-rotate-btn" id="ppRotateBtn" title="\u65cb\u8f6c 90 \u5ea6" onclick="window.ppRotatePhoto()">' + ppIconSvg('rotate') + '</button>' +
@@ -1638,7 +1640,7 @@
 
         overlay.addEventListener('pointerdown', function(e) {
             var target = e.target;
-            var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
+            var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
             var isModalContent = target.closest('.pp-info-modal-content, .pp-download-confirm-content');
             var isModal = target.closest('.pp-info-modal, .pp-download-confirm-overlay');
             var isDownloading = ppDownloadActive;
@@ -1816,7 +1818,7 @@
             }
 
             var target = e.target;
-            var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
+            var isButton = target.closest('.photo-preview-close, .pp-nav-arrow, .pp-zoom-btn, .pp-info-btn, .pp-share-btn, .pp-rotate-btn, .pp-delete-btn');
             var isModalContent = target.closest('.pp-info-modal-content, .pp-download-confirm-content');
             var isModal = target.closest('.pp-info-modal, .pp-download-confirm-overlay');
             var isDownloading = ppDownloadActive;
