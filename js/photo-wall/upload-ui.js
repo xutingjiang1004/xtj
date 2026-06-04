@@ -539,10 +539,14 @@
     try {
       var mediaUrl = '';
       var mediaType = '';
+      var uploadFile = file;
       if (file) {
+        if (/^image\//.test(file.type || '')) {
+          uploadFile = await withTimeout(compressPhoto(file), Math.min(TIMEOUTS.postUpload, 24000), 'post image preprocess');
+        }
         var path = buildSafeFileName(file, '');
-        var uploadRes = await withTimeout(window.sb.storage.from('uploads').upload(path, file, {
-          contentType: file.type || 'application/octet-stream',
+        var uploadRes = await withTimeout(window.sb.storage.from('uploads').upload(path, uploadFile, {
+          contentType: (uploadFile && uploadFile.type) || file.type || 'application/octet-stream',
           cacheControl: '31536000',
           upsert: false
         }), TIMEOUTS.postUpload, 'post media upload');
@@ -557,7 +561,7 @@
         is_pinned: false,
         pinned_at: null,
         updated_at: null,
-        fileSize: file ? (file.size || null) : null,
+        fileSize: uploadFile ? (uploadFile.size || file.size || null) : null,
         originalSize: file ? (file.size || null) : null,
         mimeType: file ? (file.type || '') : ''
       };
@@ -579,8 +583,8 @@
       };
       var fallbackContent = contentPayload;
       var insertResult = await withTimeout((async function() {
-        var primary = await window.sb.from('posts').insert([payload]);
-        if (!primary.error) return { ok: true, fallback: false };
+        var primary = await window.sb.from('posts').insert([payload]).select('*').maybeSingle();
+        if (!primary.error) return { ok: true, fallback: false, data: primary.data || null };
         var message = String(primary.error.message || '');
         if (!/visibility|is_pinned|pinned_at|updated_at|column/i.test(message)) {
           return { ok: false, error: primary.error };
@@ -592,9 +596,9 @@
           media_type: payload.media_type,
           actor_key: payload.actor_key
         };
-        var fallback = await window.sb.from('posts').insert([fallbackPayload]);
+        var fallback = await window.sb.from('posts').insert([fallbackPayload]).select('*').maybeSingle();
         if (fallback.error) return { ok: false, error: fallback.error };
-        return { ok: true, fallback: true };
+        return { ok: true, fallback: true, data: fallback.data || null };
       })(), TIMEOUTS.postInsert, 'post insert');
 
       if (!insertResult.ok) {
@@ -610,7 +614,8 @@
       }
       setPostPreview([]);
       toast(insertResult.fallback ? '发布成功，已兼容旧数据结构' : '发布成功');
-      if (typeof window.loadFeed === 'function') await window.loadFeed(true);
+      if (insertResult.data && typeof window.xtjPrependPostToFeed === 'function') await window.xtjPrependPostToFeed(insertResult.data);
+      else if (typeof window.loadFeed === 'function') await window.loadFeed(true);
     } catch (err) {
       console.error('[post-publish-ui] publish failed', err);
       toast('发布失败: ' + (err && err.message ? err.message : '请重试'));
@@ -822,9 +827,69 @@
     window.closePhotoPreview.__xtjPostPreviewWrapped = true;
   }
 
+  buildPostPreviewItems = function(img) {
+    function readNumberAttr(node, keys) {
+      if (!node) return null;
+      var raw = '';
+      for (var i = 0; i < keys.length; i++) {
+        raw = node.getAttribute(keys[i]) || raw;
+        if (!raw && node.dataset && keys[i].indexOf('data-') === 0) {
+          var dataKey = keys[i].slice(5).replace(/-([a-z])/g, function(_, letter) { return letter.toUpperCase(); });
+          raw = node.dataset[dataKey] || raw;
+        }
+        if (raw) break;
+      }
+      var value = Number(raw);
+      return Number.isFinite(value) && value >= 0 ? value : null;
+    }
+    function buildItemFromNode(node, index, fallbackId) {
+      if (!node) return null;
+      var imageUrl = node.currentSrc || node.src || node.getAttribute('data-media-url') || '';
+      if (!imageUrl) return null;
+      var postId = node.getAttribute('data-post-id') || fallbackId || Date.now();
+      var sourcePost = typeof window.xtjGetPostById === 'function' ? window.xtjGetPostById(postId) : null;
+      var sourceMeta = sourcePost && sourcePost._contentMeta ? sourcePost._contentMeta : {};
+      return {
+        id: 'post-' + postId + '-' + index,
+        postId: postId,
+        imageUrl: imageUrl,
+        username: (sourcePost && sourcePost.user_name) || (node.getAttribute('data-post-user') || '').trim() || '帖子图片',
+        timestamp: (sourcePost && sourcePost.created_at) || node.getAttribute('data-post-created-at') || new Date().toISOString(),
+        views: sourcePost ? Number(sourcePost.views || 0) : (readNumberAttr(node, ['data-post-views']) || 0),
+        fileSize: sourceMeta.fileSize != null ? (Number(sourceMeta.fileSize) || null) : readNumberAttr(node, ['data-file-size', 'data-size']),
+        originalSize: sourceMeta.originalSize != null ? (Number(sourceMeta.originalSize) || null) : readNumberAttr(node, ['data-original-size']),
+        __xtjPostMode: true
+      };
+    }
+    var postCard = img.closest('.post');
+    if (postCard) {
+      var postId = postCard.getAttribute('data-post-id') || Date.now();
+      return Array.prototype.slice.call(postCard.querySelectorAll('.media img')).map(function(node, index) {
+        return buildItemFromNode(node, index, postId);
+      }).filter(function(item) { return !!(item && item.imageUrl); });
+    }
+    var detailMedia = img.closest('.post-detail-media');
+    if (detailMedia) {
+      var detailRoot = img.closest('#postDetailBody') || document;
+      return Array.prototype.slice.call(detailRoot.querySelectorAll('.post-detail-media img')).map(function(node, index) {
+        return buildItemFromNode(node, index, node.getAttribute('data-post-id') || ('detail-' + Date.now()));
+      }).filter(function(item) { return !!(item && item.imageUrl); });
+    }
+    return [];
+  };
+
   function openPostPreview(img) {
     var items = buildPostPreviewItems(img);
     if (!items.length) return false;
+    var postId = items[0] && items[0].postId;
+    if (postId && typeof window.xtjTrackPostView === 'function') {
+      var tracked = !!window.xtjTrackPostView(postId);
+      if (tracked) {
+        items = items.map(function(item) {
+          return Object.assign({}, item, { views: Number(item.views || 0) + 1 });
+        });
+      }
+    }
     var currentUrl = img.currentSrc || img.src;
     var currentIndex = items.findIndex(function(item) {
       return item.imageUrl === currentUrl;

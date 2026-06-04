@@ -1671,6 +1671,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // 鍏ㄥ��帖子�℃伅锟斤拷锟斤拷锛岀敤浜庢祻瑙堣锟?
             const postInfoCache = {};
             const VIEW_HISTORY_KEY = 'xtj_view_history';
+            const VIEW_TRACK_TTL = 5 * 60 * 1000;
 
             function getViewHistory() {
                 try {
@@ -1727,6 +1728,77 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // ===================== 加载鍔ㄦ??=====================
             // 娴犺�?：分页加载相关变�?
+            saveViewHistory = function(entry) {
+                const history = getViewHistory();
+                history.unshift(entry);
+                if (history.length > 500) history.length = 500;
+                localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
+            };
+
+            function canTrackViewNow(postId) {
+                const key = `xtj_v_${postId}`;
+                const now = Date.now();
+                var last = 0;
+                try { last = Number(localStorage.getItem(key) || 0); } catch (e) { last = 0; }
+                if (viewTracked.has(postId) && now - last < VIEW_TRACK_TTL) return false;
+                if (last && now - last < VIEW_TRACK_TTL) return false;
+                return true;
+            }
+
+            trackView = function(postId) {
+                const key = `xtj_v_${postId}`;
+                if (!canTrackViewNow(postId)) return false;
+                const now = Date.now();
+                viewTracked.add(postId);
+                localStorage.setItem(key, String(now));
+                var postEl = document.querySelector('.post[data-post-id="' + postId + '"]');
+                if (postEl) {
+                    var statsEl = postEl.querySelector('.post-stats-text');
+                    if (statsEl) {
+                        var vm = statsEl.textContent.match(/(\d+)/);
+                        if (vm) {
+                            var newVal = parseInt(vm[1]) + 1;
+                            statsEl.innerHTML = statsEl.innerHTML.replace(/\d+/, String(newVal));
+                        }
+                    }
+                }
+                if (currentUser && postInfoCache[postId]) {
+                    var rawContent = postInfoCache[postId].content || '';
+                    saveViewHistory({
+                        user_name: currentUser,
+                        post_id: postId,
+                        post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || '(鍥剧墖/瑙嗛)'),
+                        post_author: postInfoCache[postId].user_name || '鏈煡',
+                        viewed_at: new Date().toISOString()
+                    });
+                }
+                if (Array.isArray(feedAllPosts)) {
+                    feedAllPosts = feedAllPosts.map(function(post) {
+                        if (!post || String(post.id) !== String(postId)) return post;
+                        return Object.assign({}, post, { views: Number(post.views || 0) + 1 });
+                    });
+                    if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
+                }
+                if (postInfoCache[postId]) {
+                    postInfoCache[postId].views = Number(postInfoCache[postId].views || 0) + 1;
+                }
+                setTimeout(async () => {
+                    try {
+                        await sb.rpc("increment_post_views", { p_post_id: postId });
+                    } catch (e) { console.error(e); }
+                }, 1000);
+                updateFeedStats();
+                return true;
+            };
+            window.xtjTrackPostView = trackView;
+            window.xtjCanTrackPostView = canTrackViewNow;
+            window.xtjGetPostById = function(postId) {
+                var found = Array.isArray(feedAllPosts) ? feedAllPosts.find(function(post) {
+                    return post && String(post.id) === String(postId);
+                }) : null;
+                return found || postInfoCache[postId] || null;
+            };
+
             let feedPage = 0;
             const FEED_PAGE_SIZE = 20;
             let feedEndReached = false;
@@ -2724,6 +2796,23 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     setupFeedInfiniteScroll();
                 }
             }
+
+            window.xtjPrependPostToFeed = async function(serverPost) {
+                if (!serverPost || !serverPost.id) return false;
+                var normalized = normalizePost(serverPost);
+                var exists = false;
+                feedAllPosts = sortPosts((feedAllPosts || []).map(function(post) {
+                    if (!post || String(post.id) !== String(normalized.id)) return post;
+                    exists = true;
+                    return Object.assign({}, post, normalized);
+                }));
+                if (!exists) {
+                    feedAllPosts = sortPosts([normalized].concat(feedAllPosts || []));
+                }
+                writeFeedCacheSnapshot();
+                await rebuildFeedFromCurrentState();
+                return true;
+            };
 
             async function refreshPostDetailIfActive(postId) {
                 if (!postId || String(activePostId || '') !== String(postId)) return;
