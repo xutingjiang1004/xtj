@@ -1234,8 +1234,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     likes: 0,
                     comments: 0
                 },
-                expandedLikes: false,
-                expandedComments: false,
+                modalKind: '',
                 loadedUser: '',
                 loading: false,
                 lastLoadedAt: 0
@@ -1260,6 +1259,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return getProfileActivityPostMap()[String(postId)] || null;
             }
 
+            function dedupeProfileLikes(items) {
+                var seen = Object.create(null);
+                return (items || []).filter(function(item) {
+                    var postKey = item && item.post_id != null ? String(item.post_id) : '';
+                    if (!postKey || seen[postKey]) return false;
+                    seen[postKey] = true;
+                    return true;
+                });
+            }
+
             function profileActivitySummary(post) {
                 var normalized = normalizePost(post || {});
                 var text = String(normalized.content || '').trim();
@@ -1272,7 +1281,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function profileActivityMedia(post, postId) {
                 var normalized = normalizePost(post || {});
                 if (!normalized.media_url) return '';
-                var onclick = "openProfileActivityMedia('" + safeJsStr(String(postId || normalized.id || '')) + "')";
+                var onclick = "event.stopPropagation();openProfileActivityMedia('" + safeJsStr(String(postId || normalized.id || '')) + "')";
                 if (normalized.media_type === 'image') {
                     return '<img class="profile-activity-media" src="' + escapeHtml(normalized.media_url) + '" alt="" loading="lazy" onclick="' + onclick + '" />';
                 }
@@ -1282,37 +1291,31 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return '';
             }
 
-            function renderProfileActivityList(kind) {
+            function buildProfileActivityListMarkup(kind, limit) {
                 var isLikes = kind === 'likes';
-                var listEl = document.getElementById(isLikes ? 'profileLikesList' : 'profileCommentsList');
-                var countEl = document.getElementById(isLikes ? 'profileLikesCount' : 'profileCommentsCount');
-                var moreBtn = document.getElementById(isLikes ? 'profileLikesMoreBtn' : 'profileCommentsMoreBtn');
-                if (!listEl || !countEl || !moreBtn) return;
-
                 var items = isLikes ? (profileActivityState.likes || []) : (profileActivityState.comments || []);
                 var totals = profileActivityState.totals || {};
                 var exactCount = isLikes ? (totals.likes || 0) : (totals.comments || 0);
-                var expanded = isLikes ? profileActivityState.expandedLikes : profileActivityState.expandedComments;
-                var visibleItems = expanded ? items : items.slice(0, 3);
-                countEl.textContent = String(exactCount || items.length || 0);
-
                 if (!currentUser) {
-                    listEl.innerHTML = '<div class="profile-activity-empty">登录后，这里会显示你的点赞和评论记录。</div>';
-                    moreBtn.style.display = 'none';
-                    return;
+                    return {
+                        html: '<div class="profile-activity-empty">登录后，这里会显示你的点赞和评论记录。</div>',
+                        totalCount: 0,
+                        hasMore: false
+                    };
                 }
-
                 if (!items.length) {
-                    listEl.innerHTML = '<div class="profile-activity-empty">' + (isLikes ? '你还没有点赞任何帖子。' : '你还没有留下评论记录。') + '</div>';
-                    moreBtn.style.display = 'none';
-                    return;
+                    return {
+                        html: '<div class="profile-activity-empty">' + (isLikes ? '你还没有点赞任何帖子。' : '你还没有留下评论记录。') + '</div>',
+                        totalCount: 0,
+                        hasMore: false
+                    };
                 }
-
-                listEl.innerHTML = visibleItems.map(function(item, index) {
+                var visibleItems = typeof limit === 'number' ? items.slice(0, limit) : items.slice();
+                var html = visibleItems.map(function(item, index) {
                     var post = getProfileActivityPost(item.post_id);
                     var normalized = normalizePost(post || {});
                     var mediaHtml = post ? profileActivityMedia(post, item.post_id) : '';
-                    var detailOnclick = "openProfileActivityPost('" + safeJsStr(String(item.post_id)) + "')";
+                    var openPostOnclick = "openProfileActivityPost('" + safeJsStr(String(item.post_id)) + "')";
                     var summary = post ? profileActivitySummary(post) : '原帖已不可用';
                     var actorName = String(currentUser || item.user_name || '你');
                     var hasMedia = !!(normalized && normalized.media_url);
@@ -1330,10 +1333,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         extraNote = '<div class="profile-activity-note">原帖没有文字内容</div>';
                     }
                     var actionHtml = isLikes
-                        ? '<button type="button" class="profile-activity-btn is-danger" onclick="unlikeFromProfile(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">取消点赞</button>'
-                        : '<button type="button" class="profile-activity-btn" onclick="' + detailOnclick + '">查看帖子</button>';
+                        ? '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();unlikeFromProfile(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">取消点赞</button>'
+                        : '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();deleteProfileComment(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">删除评论</button>';
                     return [
-                        '<article class="profile-activity-item" style="--xtj-enter-delay:' + Math.min(index * 28, 180) + 'ms;">',
+                        '<article class="profile-activity-item" role="button" tabindex="0" onclick="' + openPostOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + openPostOnclick + '}\" style="--xtj-enter-delay:' + Math.min(index * 28, 180) + 'ms;">',
                         '<div class="profile-activity-body">',
                         '<div class="profile-activity-title">' + titlePrefix + inlineSummary + '</div>',
                         extraNote,
@@ -1343,15 +1346,53 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         '</article>'
                     ].join('');
                 }).join('');
+                return {
+                    html: html,
+                    totalCount: exactCount || items.length || 0,
+                    hasMore: (exactCount || items.length || 0) > 3
+                };
+            }
 
-                moreBtn.style.display = (exactCount || items.length) > 3 ? 'block' : 'none';
-                moreBtn.textContent = expanded ? (isLikes ? '收起点赞记录' : '收起评论记录') : (isLikes ? '更多点赞内容' : '更多评论内容');
+            function renderProfileActivityList(kind) {
+                var isLikes = kind === 'likes';
+                var listEl = document.getElementById(isLikes ? 'profileLikesList' : 'profileCommentsList');
+                var countEl = document.getElementById(isLikes ? 'profileLikesCount' : 'profileCommentsCount');
+                var moreBtn = document.getElementById(isLikes ? 'profileLikesMoreBtn' : 'profileCommentsMoreBtn');
+                if (!listEl || !countEl || !moreBtn) return;
+                var payload = buildProfileActivityListMarkup(kind, 3);
+                countEl.textContent = String(payload.totalCount || 0);
+                listEl.innerHTML = payload.html;
+                moreBtn.style.display = payload.hasMore ? 'block' : 'none';
+                moreBtn.textContent = isLikes ? '更多点赞内容' : '更多评论内容';
+            }
+
+            function renderProfileActivityModal(kind) {
+                var listEl = document.getElementById('profileActivityModalList');
+                var titleEl = document.getElementById('profileActivityModalTitle');
+                var kickerEl = document.getElementById('profileActivityModalKicker');
+                var modal = document.getElementById('profileActivityModal');
+                if (!listEl || !titleEl || !kickerEl || !modal) return;
+                var isLikes = kind === 'likes';
+                var payload = buildProfileActivityListMarkup(kind);
+                titleEl.textContent = isLikes ? '点赞记录' : '评论记录';
+                kickerEl.textContent = isLikes ? '我的互动' : '我的留言';
+                listEl.innerHTML = payload.html;
+                profileActivityState.modalKind = kind;
+                modal.classList.add('active');
+            }
+
+            function refreshProfileActivityModalIfNeeded() {
+                if (!profileActivityState.modalKind) return;
+                var modal = document.getElementById('profileActivityModal');
+                if (!modal || !modal.classList.contains('active')) return;
+                renderProfileActivityModal(profileActivityState.modalKind);
             }
 
             function renderProfileActivity() {
                 renderProfileTotals();
                 renderProfileActivityList('likes');
                 renderProfileActivityList('comments');
+                refreshProfileActivityModalIfNeeded();
             }
 
             async function loadProfileActivity(forceRefresh) {
@@ -1401,11 +1442,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (commentsRes.error) throw commentsRes.error;
                     if (postsCountRes.error) throw postsCountRes.error;
 
-                    profileActivityState.likes = likesRes.data || [];
+                    profileActivityState.likes = dedupeProfileLikes(likesRes.data || []);
                     profileActivityState.comments = commentsRes.data || [];
                     profileActivityState.totals = {
                         posts: postsCountRes.count || 0,
-                        likes: likesRes.count || (likesRes.data || []).length,
+                        likes: profileActivityState.likes.length,
                         comments: commentsRes.count || (commentsRes.data || []).length
                     };
 
@@ -1448,26 +1489,38 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             window.toggleProfileActivity = function(kind) {
-                if (kind === 'likes') profileActivityState.expandedLikes = !profileActivityState.expandedLikes;
-                if (kind === 'comments') profileActivityState.expandedComments = !profileActivityState.expandedComments;
-                renderProfileActivityList(kind);
+                if (!currentUser) {
+                    showToast('请先登录');
+                    return;
+                }
+                renderProfileActivityModal(kind);
+            };
+
+            window.closeProfileActivityModal = function() {
+                profileActivityState.modalKind = '';
+                var modal = document.getElementById('profileActivityModal');
+                if (modal) modal.classList.remove('active');
             };
 
             window.openProfileActivityPost = function(postId) {
                 if (!postId) return;
+                window.closeProfileActivityModal();
                 openPostDetail(postId);
             };
 
             window.openProfileActivityMedia = function(postId) {
                 var post = getProfileActivityPost(postId);
                 if (!post) {
+                    window.closeProfileActivityModal();
                     openPostDetail(postId);
                     return;
                 }
                 if (post.media_type === 'image' && post.media_url && typeof window.openImageViewer === 'function') {
+                    window.closeProfileActivityModal();
                     window.openImageViewer(post.media_url);
                     return;
                 }
+                window.closeProfileActivityModal();
                 openPostDetail(post.id);
                 if (post.media_type === 'video') {
                     setTimeout(function() {
@@ -1488,18 +1541,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         btn.textContent = '取消中..';
                     }
                     var query = sb.from('likes').delete();
-                    if (likeId) query = query.eq('id', likeId);
-                    else query = query.eq('post_id', postId).eq('user_name', currentUser);
+                    if (postId) query = query.eq('post_id', postId).eq('user_name', currentUser);
+                    else if (likeId) query = query.eq('id', likeId);
                     var result = await query;
                     if (result.error) throw result.error;
 
                     profileActivityState.likes = (profileActivityState.likes || []).filter(function(item) {
+                        if (postId) return !(String(item.post_id) === String(postId) && String(item.user_name) === String(currentUser));
                         if (likeId) return String(item.id) !== String(likeId);
-                        return !(String(item.post_id) === String(postId) && String(item.user_name) === String(currentUser));
+                        return true;
                     });
                     feedAllLikes = (feedAllLikes || []).filter(function(item) {
+                        if (postId) return !(String(item.post_id) === String(postId) && String(item.user_name) === String(currentUser));
                         if (likeId && item && item.id != null) return String(item.id) !== String(likeId);
-                        return !(String(item.post_id) === String(postId) && String(item.user_name) === String(currentUser));
+                        return true;
                     });
                     if (profileActivityState.totals && profileActivityState.totals.likes > 0) {
                         profileActivityState.totals.likes -= 1;
@@ -1520,6 +1575,46 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (btn) {
                         btn.disabled = false;
                         if (btn.textContent === '取消中..') btn.textContent = originalText || '取消点赞';
+                    }
+                }
+            };
+
+            window.deleteProfileComment = async function(commentId, postId, btn) {
+                if (!currentUser || !commentId) return;
+                var originalText = btn ? btn.textContent : '';
+                try {
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.textContent = '删除中..';
+                    }
+                    var result = await sb.from('comments').delete().eq('id', commentId).eq('user_name', currentUser);
+                    if (result.error) throw result.error;
+
+                    profileActivityState.comments = (profileActivityState.comments || []).filter(function(item) {
+                        return String(item.id) !== String(commentId);
+                    });
+                    if (profileActivityState.totals && profileActivityState.totals.comments > 0) {
+                        profileActivityState.totals.comments -= 1;
+                    }
+                    feedAllComments = (feedAllComments || []).filter(function(item) {
+                        return !(item && item.id != null && String(item.id) === String(commentId));
+                    });
+                    if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
+                    if (typeof updateFeedStats === 'function') updateFeedStats();
+                    if (typeof refreshStatModal === 'function') refreshStatModal();
+                    if (typeof rebuildFeedFromCurrentState === 'function') {
+                        rebuildFeedFromCurrentState().catch(function() {});
+                    }
+                    renderProfileActivity();
+                    showToast('已删除评论');
+                } catch (e) {
+                    console.error('deleteProfileComment error:', e);
+                    showToast('删除评论失败');
+                    if (btn) btn.textContent = originalText || '删除评论';
+                } finally {
+                    if (btn) {
+                        btn.disabled = false;
+                        if (btn.textContent === '删除中..') btn.textContent = originalText || '删除评论';
                     }
                 }
             };
