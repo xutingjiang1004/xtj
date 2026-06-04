@@ -6425,39 +6425,13 @@
   background: rgba(238, 249, 242, 0.88);
 }
 
-/* ── Hero 配色主题 —— 每个 tab 独有 ── */
-#statModal .stat-hero--posts {
-  background: linear-gradient(135deg, rgba(220, 245, 230, 0.92), rgba(238, 249, 242, 0.88));
-  border-color: rgba(162, 210, 178, 0.62);
-}
-#statModal .stat-hero--posts .stat-hero-kicker { color: rgba(46, 102, 71, 0.66); }
-#statModal .stat-hero--posts .stat-hero-title { color: #1d5f36; }
-#statModal .stat-hero--posts .stat-hero-copy { color: rgba(47, 91, 65, 0.72); }
-#statModal .stat-hero--posts .stat-metric { background: rgba(255,255,255,0.58); border-color: rgba(162, 210, 178, 0.62); }
-#statModal .stat-hero--posts .stat-metric-value { color: #1d6b39; }
-#statModal .stat-hero--posts .stat-metric-label { color: rgba(49, 97, 69, 0.66); }
-
 #statModal .stat-hero--views {
-  background: linear-gradient(135deg, rgba(219, 237, 252, 0.92), rgba(232, 243, 252, 0.88));
-  border-color: rgba(158, 196, 232, 0.62);
+  background: rgba(236, 248, 241, 0.88);
 }
-#statModal .stat-hero--views .stat-hero-kicker { color: rgba(42, 88, 132, 0.66); }
-#statModal .stat-hero--views .stat-hero-title { color: #1a4973; }
-#statModal .stat-hero--views .stat-hero-copy { color: rgba(42, 82, 122, 0.72); }
-#statModal .stat-hero--views .stat-metric { background: rgba(255,255,255,0.58); border-color: rgba(158, 196, 232, 0.62); }
-#statModal .stat-hero--views .stat-metric-value { color: #1a4d7a; }
-#statModal .stat-hero--views .stat-metric-label { color: rgba(42, 84, 124, 0.66); }
 
 #statModal .stat-hero--likes {
-  background: linear-gradient(135deg, rgba(252, 226, 231, 0.92), rgba(253, 237, 240, 0.88));
-  border-color: rgba(233, 179, 188, 0.62);
+  background: rgba(237, 249, 241, 0.88);
 }
-#statModal .stat-hero--likes .stat-hero-kicker { color: rgba(158, 78, 88, 0.66); }
-#statModal .stat-hero--likes .stat-hero-title { color: #8a3a48; }
-#statModal .stat-hero--likes .stat-hero-copy { color: rgba(148, 72, 82, 0.72); }
-#statModal .stat-hero--likes .stat-metric { background: rgba(255,255,255,0.58); border-color: rgba(233, 179, 188, 0.62); }
-#statModal .stat-hero--likes .stat-metric-value { color: #8a3a48; }
-#statModal .stat-hero--likes .stat-metric-label { color: rgba(148, 72, 82, 0.66); }
 
 #statModal .stat-hero-kicker {
   font-size: 11px;
@@ -6732,92 +6706,54 @@
 #statModal .stat-like-item,
 #statModal .stat-view-item,
 #statModal .stat-comment-item {
-  padding: 14px 16px;
+  padding: 16px 16px 14px;
   border-radius: 22px;
-  border: 1px solid transparent;
   transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
 }
 
 #statModal .stat-like-item + .stat-like-item,
 #statModal .stat-view-item + .stat-view-item,
 #statModal .stat-comment-item + .stat-comment-item {
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
-/* ── 记录卡片图标行 ── */
-#statModal .sri-icon-row {
+#statModal .stat-record-head {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
 }
-#statModal .sri-icon {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 14px;
-  line-height: 1;
-}
-#statModal .sri-icon--like {
-  background: rgba(239, 68, 68, 0.10);
-}
-#statModal .sri-icon--comment {
-  background: rgba(59, 130, 246, 0.10);
-}
-#statModal .sri-icon--view {
-  background: rgba(245, 158, 11, 0.10);
+
+#statModal .stat-like-item:hover,
+#statModal .stat-view-item:hover,
+#statModal .stat-comment-item:hover,
+#statModal .stat-user-group:hover,
+#statModal .stat-two-col .stat-col:hover,
+#statModal .stat-hero:hover {
+  transform: translateY(-1px);
+  border-color: rgba(114, 178, 138, 0.56);
 }
 
-/* ── 用户名 + 时间 ── */
-#statModal .sri-user {
-  font-weight: 800;
+#statModal .stat-record-title {
+  margin-top: 10px;
+  font-size: 14px;
+  font-weight: 700;
   color: #28513b;
 }
-#statModal .sri-time {
-  margin-left: auto;
-  font-size: 11px;
-  color: rgba(64, 105, 80, 0.66);
-  white-space: nowrap;
-}
 
-/* ── 浏览专属：user → author ── */
-#statModal .sri-user-wrap {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-#statModal .sri-arrow {
-  color: rgba(64, 105, 80, 0.35);
+#statModal .stat-record-copy,
+#statModal .stat-record-note {
+  margin-top: 6px;
   font-size: 12px;
-}
-#statModal .sri-author {
-  font-size: 13px;
-  color: rgba(64, 105, 80, 0.78);
+  line-height: 1.65;
+  color: rgba(55, 92, 71, 0.78);
 }
 
-/* ── 内容预览 ── */
-#statModal .sri-content {
-  margin-top: 8px;
-  padding-left: 42px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: rgba(55, 92, 71, 0.78);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-#statModal .sri-reply-to {
-  margin-top: 4px;
-  padding-left: 42px;
-  font-size: 11px;
-  color: rgba(64, 105, 80, 0.50);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+#statModal .stat-view-layout {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
 }
 
 #statModal .stat-record-thumb {
@@ -6880,8 +6816,7 @@
 [data-theme="dark"] #statModal .sli-user,
 [data-theme="dark"] #statModal .svi-user,
 [data-theme="dark"] #statModal .sci-user,
-[data-theme="dark"] #statModal .spi-content,
-[data-theme="dark"] #statModal .sri-user {
+[data-theme="dark"] #statModal .spi-content {
   color: #eef3e8;
 }
 
@@ -6920,23 +6855,8 @@
 [data-theme="dark"] #statModal .sli-time,
 [data-theme="dark"] #statModal .svi-time,
 [data-theme="dark"] #statModal .sci-time,
-[data-theme="dark"] #statModal .spi-time,
-[data-theme="dark"] #statModal .sri-time,
-[data-theme="dark"] #statModal .sri-author,
-[data-theme="dark"] #statModal .sri-arrow,
-[data-theme="dark"] #statModal .sri-content,
-[data-theme="dark"] #statModal .sri-reply-to {
+[data-theme="dark"] #statModal .spi-time {
   color: rgba(225, 233, 218, 0.68);
-}
-
-[data-theme="dark"] #statModal .sri-icon--like {
-  background: rgba(239, 68, 68, 0.18);
-}
-[data-theme="dark"] #statModal .sri-icon--comment {
-  background: rgba(59, 130, 246, 0.18);
-}
-[data-theme="dark"] #statModal .sri-icon--view {
-  background: rgba(245, 158, 11, 0.18);
 }
 
 @media (max-width: 640px) {

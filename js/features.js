@@ -93,8 +93,7 @@
     ['姝ｅ湪鍘嬬缉骞朵笂浼犲ご鍍?..', '正在压缩并上传头像..'],
     ['姝ｅ湪鍘嬬缉骞朵笂浼犲ご鍍忋€?..', '正在压缩并上传头像..'],
     ['加载涓?..', '加载中..'],
-    ['加载涓?', '加载中'],
-    ['璇︽儏', '详情']
+    ['加载涓?', '加载中']
   ];
   var _mjBuilt=false,_mjRegex=null,_mjMap=null;
   function _buildMjRegex(){var map={};var patterns=[];MOJIBAKE_PAIRS.forEach(function(p){if(p[0]!==p[1]&&p[0].length>0&&!map[p[0]]){map[p[0]]=p[1];patterns.push(p[0]);}});patterns.sort(function(a,b){return b.length-a.length;});var escaped=patterns.map(function(p){return p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');});_mjMap=map;_mjRegex=new RegExp(escaped.join('|'),'g');_mjBuilt=true;}
