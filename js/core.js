@@ -47,6 +47,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         let activePostId = null;
         const viewTracked = new Set();
         let postVisibilityObserver = null;
+        function primePostReveal(nodes) {
+            Array.from(nodes || []).forEach(function(post, index) {
+                if (!post || post.classList.contains('visible')) return;
+                post.style.setProperty('--post-enter-delay', Math.min(index, 5) * 42 + 'ms');
+            });
+        }
         function getPostVisibilityObserver() {
             if (!postVisibilityObserver) {
                 postVisibilityObserver = new IntersectionObserver(e => {
@@ -2278,7 +2284,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             function initPostScrollAnimation() {
-                document.querySelectorAll('.post').forEach(p => getPostVisibilityObserver().observe(p));
+                var posts = document.querySelectorAll('.post');
+                primePostReveal(posts);
+                posts.forEach(p => getPostVisibilityObserver().observe(p));
             }
 
             let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
@@ -3203,6 +3211,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     feed.insertBefore(tempContainer.firstChild, sentinel);
                 }
                 var newPosts = feed.querySelectorAll(".post:not(.visible)");
+                primePostReveal(newPosts);
                 newPosts.forEach(function(p) { getPostVisibilityObserver().observe(p); });
                 updateFeedStats();
             };
@@ -6532,15 +6541,23 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var text = post.content || '';
                 var hasImg = post.media_url && post.media_type === 'image';
                 var hasVid = post.media_url && post.media_type === 'video';
-                var tag = hasImg ? '<span class="spi-img-tag">馃摲 鍥剧墖</span>' : (hasVid ? '<span class="spi-img-tag">馃幀 瑙嗛</span>' : '');
+                var tag = hasImg ? '<span class="spi-img-tag">图片</span>' : (hasVid ? '<span class="spi-img-tag">视频</span>' : '<span class="spi-img-tag spi-img-tag--text">文字</span>');
                 var summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
                 var display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
                 var onclick = "openPostDetail('" + String(post.id).replace(/'/g, "\\'") + "')";
+                var mediaHtml = hasImg
+                    ? '<img class="spi-thumb" src="' + escapeHtml(post.media_url) + '" onclick="' + onclick + '" title="点击查看帖子详情" />'
+                    : (hasVid ? '<div class="spi-thumb spi-thumb--video" onclick="' + onclick + '" title="点击查看帖子详情">视频</div>' : '');
                 return [
                     '<div class="stat-post-item">',
-                    '<span class="spi-content" onclick="' + onclick + '" title="鐐瑰嚮鏌ョ湅甯栧瓙璇︽儏">' + escapeHtml(display) + tag + '</span>',
-                    hasImg ? '<img class="spi-thumb" src="' + escapeHtml(post.media_url) + '" onclick="' + onclick + '" title="鐐瑰嚮鏌ョ湅甯栧瓙璇︽儏" />' : '',
-                    '<span class="spi-time">' + new Date(post.created_at).toLocaleString() + '</span>',
+                    mediaHtml,
+                    '<div class="spi-main">',
+                    '<div class="spi-content-row">',
+                    '<span class="spi-content" onclick="' + onclick + '" title="点击查看帖子详情">' + escapeHtml(display) + '</span>',
+                    tag,
+                    '</div>',
+                    '<div class="spi-meta"><span class="spi-time">' + new Date(post.created_at).toLocaleString() + '</span><span class="spi-open">查看详情</span></div>',
+                    '</div>',
                     '</div>'
                 ].join('');
             }
