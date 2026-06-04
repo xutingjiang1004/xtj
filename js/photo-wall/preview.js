@@ -37,6 +37,7 @@
     var ppDownloadProgress = 0;
     var ppConfirmDownloadModal = null;
     var ppDownloadAbortController = null;
+    var ppFileSizeCache = Object.create(null);
 
     function ppIconSvg(type) {
         if (type === 'close') {
@@ -390,6 +391,8 @@
         var photos = ppSortedPhotos;
         if (!photos[idx]) return;
         var photo = photos[idx];
+        photoPreviewCurrent = photo;
+        window.photoPreviewCurrent = photo;
         var userEl = document.getElementById('photoPreviewUser');
         var timeEl = document.getElementById('photoPreviewTime');
         var viewsEl = document.getElementById('photoPreviewViewsCount');
@@ -554,6 +557,7 @@
 
         photoPreviewActive = true;
         photoPreviewCurrent = ppSortedPhotos[index] || null;
+        window.photoPreviewCurrent = photoPreviewCurrent;
         ppPhotoIdx = index;
 
         var photo = ppSortedPhotos[index];
@@ -787,6 +791,87 @@
 
     window.closePhotoPreview = closePhotoPreview;
 
+    function ppFormatFileSize(size) {
+        if (!size && size !== 0) return '--';
+        if (size >= 1024 * 1024) return (size / (1024 * 1024)).toFixed(2) + ' MB';
+        if (size >= 1024) return (size / 1024).toFixed(1) + ' KB';
+        return size + ' B';
+    }
+
+    function ppInfoRow(label, value) {
+        return '<div class="pp-info-row"><span class="pp-info-label">' + label + '</span><span class="pp-info-value">' + value + '</span></div>';
+    }
+
+    function ppSafeInfoValue(value, fallback) {
+        var safe = value == null || value === '' ? (fallback || '--') : value;
+        return window.escapeHtml ? window.escapeHtml(String(safe)) : String(safe);
+    }
+
+    function ppRenderPhotoInfoBody(photo) {
+        if (!photo) return '';
+        var dateStr = photo.timestamp ? new Date(photo.timestamp).toLocaleString('zh-CN') : '--';
+        var metadataRows = '';
+        metadataRows += ppInfoRow('作者', ppSafeInfoValue(photo.username, '--'));
+        metadataRows += ppInfoRow('时间', ppSafeInfoValue(dateStr, '--'));
+        metadataRows += ppInfoRow('浏览', ppSafeInfoValue(photo.views != null ? photo.views : 0, '0'));
+
+        var fileRows = '';
+        fileRows += ppInfoRow('大小', ppSafeInfoValue(ppFormatFileSize(photo.fileSize), '--'));
+        if (photo.originalSize && Number(photo.originalSize) > 0 && Number(photo.originalSize) !== Number(photo.fileSize || 0)) {
+            fileRows += ppInfoRow('原始大小', ppSafeInfoValue(ppFormatFileSize(photo.originalSize), '--'));
+        }
+
+        var exifRows = '';
+        if (photo.exif) {
+            if (photo.exif.make || photo.exif.model) exifRows += ppInfoRow('设备', ppSafeInfoValue(photo.exif.model || photo.exif.make, '--'));
+            if (photo.exif.fNumber) exifRows += ppInfoRow('光圈', ppSafeInfoValue('f/' + photo.exif.fNumber, '--'));
+            if (photo.exif.exposureTime) exifRows += ppInfoRow('快门', ppSafeInfoValue(photo.exif.exposureTime, '--'));
+            if (photo.exif.iso) exifRows += ppInfoRow('ISO', ppSafeInfoValue(photo.exif.iso, '--'));
+            if (photo.exif.focalLength) exifRows += ppInfoRow('焦距', ppSafeInfoValue(photo.exif.focalLength + 'mm', '--'));
+        }
+
+        var bodyHtml =
+            '<div class="pp-info-section">' +
+            '<div class="pp-info-section-title">照片信息</div>' +
+            metadataRows +
+            '</div>' +
+            '<div class="pp-info-divider"></div>' +
+            '<div class="pp-info-section">' +
+            '<div class="pp-info-section-title">文件信息</div>' +
+            fileRows +
+            '</div>';
+
+        if (exifRows) {
+            bodyHtml +=
+                '<div class="pp-info-divider"></div>' +
+                '<div class="pp-info-section">' +
+                '<div class="pp-info-section-title">EXIF 数据</div>' +
+                exifRows +
+                '</div>';
+        }
+
+        return bodyHtml;
+    }
+
+    async function ppEnsurePhotoFileSize(photo) {
+        if (!photo || photo.fileSize || !photo.imageUrl) return photo ? photo.fileSize : null;
+        if (ppFileSizeCache[photo.imageUrl]) {
+            photo.fileSize = ppFileSizeCache[photo.imageUrl];
+            return photo.fileSize;
+        }
+        try {
+            var response = await fetch(photo.imageUrl, { cache: 'force-cache' });
+            if (!response || !response.ok) return null;
+            var blob = await response.blob();
+            if (!blob || !blob.size) return null;
+            ppFileSizeCache[photo.imageUrl] = blob.size;
+            photo.fileSize = blob.size;
+            return blob.size;
+        } catch (e) {
+            return null;
+        }
+    }
+
     function showPhotoInfo() {
         var photo = photoPreviewCurrent;
         if (!photo) return;
@@ -965,6 +1050,110 @@
             content.style.opacity = '1';
         }
     }
+    showPhotoInfo = function() {
+        var photo = photoPreviewCurrent;
+        if (!photo) return;
+
+        var modal = document.getElementById('ppInfoModal');
+        if (modal && (modal.style.display === 'flex' || modal.classList.contains('active') || modal.classList.contains('closing'))) {
+            window.closePhotoInfo();
+            return;
+        }
+
+        if (!modal) {
+            var modalEl = document.createElement('div');
+            modalEl.className = 'pp-info-modal';
+            modalEl.id = 'ppInfoModal';
+            modalEl.innerHTML =
+                '<div class="pp-info-modal-content">' +
+                '<div class="pp-info-modal-header">' +
+                '<span class="pp-info-modal-title">照片详情</span>' +
+                '<button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button>' +
+                '</div>' +
+                '<div class="pp-info-modal-body" id="ppInfoModalBody"></div>' +
+                '</div>';
+            document.body.appendChild(modalEl);
+            modal = modalEl;
+        }
+
+        if (!modal._bgListener) {
+            modal._bgListener = true;
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) window.closePhotoInfo();
+            });
+        }
+
+        var bodyEl = document.getElementById('ppInfoModalBody');
+        if (bodyEl) bodyEl.innerHTML = ppRenderPhotoInfoBody(photo);
+
+        if (modal._closeTimeout) {
+            clearTimeout(modal._closeTimeout);
+            modal._closeTimeout = null;
+        }
+
+        var content = modal.querySelector('.pp-info-modal-content');
+        var btn = document.getElementById('ppInfoBtn');
+        var btnRect = btn ? btn.getBoundingClientRect() : null;
+
+        modal.classList.remove('closing');
+        modal.classList.add('active');
+        modal.style.display = 'flex';
+        modal.style.opacity = '1';
+        content.style.transition = 'none';
+        content.style.transform = '';
+        content.style.opacity = '1';
+        void content.offsetHeight;
+
+        if (btnRect) {
+            var finalRect = content.getBoundingClientRect();
+            var dx = btnRect.left - finalRect.left;
+            var dy = btnRect.top - finalRect.top;
+            var scaleX = btnRect.width / finalRect.width;
+            var scaleY = btnRect.height / finalRect.height;
+            var scale = Math.min(scaleX, scaleY);
+            content.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + scale + ')';
+            content.style.transformOrigin = 'top left';
+            content.style.opacity = '0';
+            modal._ppInfoOrigin = {
+                dx: dx,
+                dy: dy,
+                scale: scale,
+                btnWidth: btnRect.width,
+                btnHeight: btnRect.height
+            };
+        }
+
+        void content.offsetHeight;
+        modal.style.transition = 'opacity 0.25s ease-out';
+        modal.style.opacity = '0';
+        void modal.offsetHeight;
+        modal.style.opacity = '1';
+
+        if (btnRect) {
+            content.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
+            content.style.transform = 'translate(0, 0) scale(1)';
+            content.style.opacity = '1';
+        } else {
+            content.style.transition = 'none';
+            content.style.transform = 'scale(0.9)';
+            content.style.opacity = '0';
+            void content.offsetHeight;
+            content.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
+            content.style.transform = 'scale(1)';
+            content.style.opacity = '1';
+        }
+
+        if (!photo.fileSize && photo.imageUrl) {
+            ppEnsurePhotoFileSize(photo).then(function(size) {
+                if (!size) return;
+                if (photoPreviewCurrent !== photo) return;
+                var activeModal = document.getElementById('ppInfoModal');
+                var activeBody = document.getElementById('ppInfoModalBody');
+                if (!activeModal || !activeBody || !activeModal.classList.contains('active')) return;
+                activeBody.innerHTML = ppRenderPhotoInfoBody(photo);
+            });
+        }
+    };
     window.showPhotoInfo = showPhotoInfo;
 
     window.closePhotoInfo = function() {

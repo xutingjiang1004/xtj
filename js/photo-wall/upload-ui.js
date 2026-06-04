@@ -552,10 +552,23 @@
       }
 
       var text = content.slice(0, 2000);
-      var metadata = { visibility: visibility || 'public', is_pinned: false, pinned_at: null, updated_at: null };
+      var metadata = {
+        visibility: visibility || 'public',
+        is_pinned: false,
+        pinned_at: null,
+        updated_at: null,
+        fileSize: file ? (file.size || null) : null,
+        originalSize: file ? (file.size || null) : null,
+        mimeType: file ? (file.type || '') : ''
+      };
+      var contentPayload = JSON.stringify({
+        __type: '__xtj_post_v2__',
+        text: text,
+        meta: metadata
+      });
       var payload = {
         user_name: window.currentUser,
-        content: text,
+        content: contentPayload,
         media_url: mediaUrl,
         media_type: mediaType,
         actor_key: window.deviceId,
@@ -564,11 +577,7 @@
         pinned_at: null,
         updated_at: null
       };
-      var fallbackContent = JSON.stringify({
-        __type: '__xtj_post_v2__',
-        text: text,
-        meta: metadata
-      });
+      var fallbackContent = contentPayload;
       var insertResult = await withTimeout((async function() {
         var primary = await window.sb.from('posts').insert([payload]);
         if (!primary.error) return { ok: true, fallback: false };
@@ -731,6 +740,63 @@
 
     return [];
   }
+
+  buildPostPreviewItems = function(img) {
+    function readNumberAttr(node, keys) {
+      if (!node) return null;
+      var raw = '';
+      for (var i = 0; i < keys.length; i++) {
+        raw = node.getAttribute(keys[i]) || raw;
+        if (!raw && node.dataset && keys[i].indexOf('data-') === 0) {
+          var dataKey = keys[i].slice(5).replace(/-([a-z])/g, function(_, letter) { return letter.toUpperCase(); });
+          raw = node.dataset[dataKey] || raw;
+        }
+        if (raw) break;
+      }
+      var value = Number(raw);
+      return Number.isFinite(value) && value >= 0 ? value : null;
+    }
+
+    function buildItemFromNode(node, index, fallbackId) {
+      if (!node) return null;
+      var imageUrl = node.currentSrc || node.src || node.getAttribute('data-media-url') || '';
+      if (!imageUrl) return null;
+      var postId = node.getAttribute('data-post-id') || fallbackId || Date.now();
+      return {
+        id: 'post-' + postId + '-' + index,
+        postId: postId,
+        imageUrl: imageUrl,
+        username: (node.getAttribute('data-post-user') || '').trim() || '帖子图片',
+        timestamp: node.getAttribute('data-post-created-at') || new Date().toISOString(),
+        views: readNumberAttr(node, ['data-post-views']) || 0,
+        fileSize: readNumberAttr(node, ['data-file-size', 'data-size']),
+        originalSize: readNumberAttr(node, ['data-original-size']),
+        __xtjPostMode: true
+      };
+    }
+
+    var postCard = img.closest('.post');
+    if (postCard) {
+      var postId = postCard.getAttribute('data-post-id') || Date.now();
+      return Array.prototype.slice.call(postCard.querySelectorAll('.media img')).map(function(node, index) {
+        return buildItemFromNode(node, index, postId);
+      }).filter(function(item) {
+        return !!(item && item.imageUrl);
+      });
+    }
+
+    var detailMedia = img.closest('.post-detail-media');
+    if (detailMedia) {
+      var detailRoot = img.closest('#postDetailBody') || document;
+      return Array.prototype.slice.call(detailRoot.querySelectorAll('.post-detail-media img')).map(function(node, index) {
+        return buildItemFromNode(node, index, node.getAttribute('data-post-id') || ('detail-' + Date.now()));
+      }).filter(function(item) {
+        return !!(item && item.imageUrl);
+      });
+    }
+
+    return [];
+  };
 
   function restorePostPreviewMode() {
     if (state.restoreTimer) {
