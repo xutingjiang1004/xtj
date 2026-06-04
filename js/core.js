@@ -3456,14 +3456,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function statPostItemMarkup(post) {
                 var hasImg = post.media_url && post.media_type === 'image';
                 var hasVid = post.media_url && post.media_type === 'video';
-                var tag = hasImg ? '<span class="spi-img-tag">图片</span>' : (hasVid ? '<span class="spi-img-tag">瑙嗛</span>' : '<span class="spi-img-tag spi-img-tag--text">鏂囧瓧</span>');
+                var tag = hasImg ? '<span class="spi-img-tag">图片</span>' : (hasVid ? '<span class="spi-img-tag">视频</span>' : '<span class="spi-img-tag spi-img-tag--text">文字</span>');
                 var display = summarizeStatPost(post, 38);
                 var onclick = "openPostDetail('" + String(post.id).replace(/'/g, "\\'") + "')";
                 return [
-                    '<div class="stat-post-item" onclick="' + onclick + '" title="点击查看帖子璇︽儏">',
+                    '<div class="stat-post-item" onclick="' + onclick + '" title="点击查看帖子详情">',
                     '<div class="spi-main">',
                     '<div class="spi-content-row"><span class="spi-content">' + escapeHtml(display) + '</span>' + tag + '</div>',
-                    '<div class="spi-meta"><span class="spi-time">' + escapeHtml(formatStatTime(post.created_at)) + '</span><span class="spi-open">查看璇︽儏</span></div>',
+                    '<div class="spi-meta"><span class="spi-time">' + escapeHtml(formatStatTime(post.created_at)) + '</span><span class="spi-open">查看详情</span></div>',
                     '</div>',
                     hasImg ? '<img class="spi-thumb" src="' + escapeHtml(post.media_url) + '" alt="" />' : (hasVid ? '<div class="spi-thumb spi-thumb--video">VIDEO</div>' : ''),
                     '</div>'
@@ -3522,7 +3522,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!body) return;
                 var userPosts = statAllPosts.filter(function(p) { return p.user_name === userName; });
                 body.innerHTML = [
-                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">返回总动态/button>',
+                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">← 返回总动态</button>',
                     statHeroMarkup({
                         tone: 'posts',
                         kicker: 'USER POSTS',
@@ -3563,9 +3563,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }) + '<div class="stat-stack">' + history.map(function(v) {
                     return [
                         '<article class="stat-view-item">',
-                        '<div class="stat-record-head"><div class="svi-user">' + escapeHtml(v.user_name) + '</div><span class="svi-time">' + escapeHtml(formatStatTime(v.viewed_at)) + '</span></div>',
-                        '<div class="stat-record-title">浏览了 ' + escapeHtml(v.post_author) + ' 的帖子</div>',
-                        '<div class="stat-record-copy">' + escapeHtml(v.post_content || '无文字内容') + '</div>',
+                        '<div class="sri-icon-row">',
+                        '<span class="sri-icon sri-icon--view">&#x1F441;</span>',
+                        '<span class="sri-user">' + escapeHtml(v.user_name) + '</span>',
+                        '<span class="sri-time">' + escapeHtml(formatStatTime(v.viewed_at)) + '</span>',
+                        '</div>',
+                        '<div class="sri-content">浏览了 ' + escapeHtml(v.post_author) + ' 的帖子' + (v.post_content ? '：' + escapeHtml(v.post_content) : '') + '</div>',
                         '</article>'
                     ].join('');
                 }).join('') + '</div>';
@@ -3585,9 +3588,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             var postContent = post ? summarizeStatPost(post, 32) : '原帖已删除';
                             return [
                                 '<article class="stat-like-item">',
-                                '<div class="stat-record-head"><div class="sli-user">' + escapeHtml(l.user_name) + '</div><span class="sli-time">' + escapeHtml(formatStatTime(l.created_at)) + '</span></div>',
-                                '<div class="stat-record-title">点赞了这条内容</div>',
-                                '<div class="stat-record-copy">' + escapeHtml(postContent) + '</div>',
+                                '<div class="sri-icon-row">',
+                                '<span class="sri-icon sri-icon--like">&#x2764;</span>',
+                                '<span class="sri-user">' + escapeHtml(l.user_name) + '</span>',
+                                '<span class="sri-time">' + escapeHtml(formatStatTime(l.created_at)) + '</span>',
+                                '</div>',
+                                '<div class="sri-content">' + escapeHtml(postContent) + '</div>',
                                 '</article>'
                             ].join('');
                         }).join('');
@@ -3605,10 +3611,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             var postContent = post ? summarizeStatPost(post, 28) : '原帖已删除';
                             return [
                                 '<article class="stat-comment-item">',
-                                '<div class="stat-record-head"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><span class="sci-time">' + escapeHtml(formatStatTime(c.created_at)) + '</span></div>',
-                                '<div class="stat-record-title">评论了这条内容</div>',
-                                '<div class="stat-record-copy">原帖：' + escapeHtml(postContent) + '</div>',
-                                '<div class="stat-record-note">' + escapeHtml(c.content || '无评论内容') + '</div>',
+                                '<div class="sri-icon-row">',
+                                '<span class="sri-icon sri-icon--comment">&#x1F4AC;</span>',
+                                '<span class="sri-user">' + escapeHtml(c.user_name) + '</span>',
+                                '<span class="sri-time">' + escapeHtml(formatStatTime(c.created_at)) + '</span>',
+                                '</div>',
+                                '<div class="sri-content">' + escapeHtml(c.content || '') + '</div>',
+                                '<div class="sri-reply-to">回复帖子：' + escapeHtml(postContent) + '</div>',
                                 '</article>'
                             ].join('');
                         }).join('');
@@ -3626,7 +3635,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     metrics: [
                         { label: '总互动', value: statAllLikes.length + statAllComments.length },
                         { label: '点赞', value: statAllLikes.length },
-                        { label: '璇勮', value: statAllComments.length }
+                        { label: '评论', value: statAllComments.length }
                     ]
                 }) + '<div class="stat-two-col"><section class="stat-col">' + buildLikesCol() + '</section><section class="stat-col">' + buildCommentsCol() + '</section></div>';
             };
@@ -3774,9 +3783,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const body = document.getElementById('statModalBody');
                 const userPosts = statAllPosts.filter(p => p.user_name === userName);
                 body.innerHTML = `
-                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">鈫?返回总动态/button>
+                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">← 返回总动态</button>
                     <div style="font-weight:700; font-size:15px; margin-bottom:12px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.1);">
-                        ${userName} 鐨勫叏閮ㄥ笘瀛愶紙${userPosts.length} 鏉★級
+                        ${userName} 的全部帖子（${userPosts.length} 条）
                     </div>
                     ${userPosts.map(p => renderPostItemHTML(p)).join('')}
                 `;
