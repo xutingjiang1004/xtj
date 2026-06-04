@@ -807,15 +807,21 @@
         .feed { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 20px; }
         .post {
             padding: 24px; border-radius: var(--radius-md);
+            --post-enter-delay: 0ms;
             opacity: 0;
-            transform: translateY(20px);
-            transition: opacity 0.5s cubic-bezier(0.16,1,0.3,1), transform 0.5s cubic-bezier(0.16,1,0.3,1);
+            transform: translateY(18px) scale(0.985);
+            filter: blur(7px);
+            transition:
+                opacity 0.56s cubic-bezier(0.16,1,0.3,1) var(--post-enter-delay),
+                transform 0.56s cubic-bezier(0.16,1,0.3,1) var(--post-enter-delay),
+                filter 0.46s ease-out var(--post-enter-delay);
             background: rgba(255,255,255,0.92);
             border: 1px solid rgba(255,255,255,0.7);
             box-shadow: 0 8px 32px rgba(0,0,0,0.06);
             content-visibility: auto;
             contain-intrinsic-size: 200px;
             contain: layout paint style;
+            will-change: opacity, transform, filter;
         }
         [data-theme="dark"] .post {
             background: rgba(30, 30, 40, 0.92);
@@ -823,7 +829,20 @@
         }
         .post.visible { 
             opacity: 1; 
-            transform: translateY(0);
+            transform: translateY(0) scale(1);
+            filter: blur(0);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .post {
+                transition: opacity 0.18s ease;
+                transform: none;
+                filter: none;
+            }
+            .post.visible {
+                transform: none;
+                filter: none;
+            }
         }
 
         .post-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -6333,19 +6352,19 @@
   max-width: 780px;
   border: 1px solid rgba(211, 236, 220, 0.72);
   background:
-    linear-gradient(180deg, rgba(244, 252, 246, 0.28) 0%, rgba(232, 246, 237, 0.22) 100%);
+    linear-gradient(180deg, rgba(244, 252, 246, 0.22) 0%, rgba(232, 246, 237, 0.16) 100%);
   box-shadow:
     0 28px 70px rgba(64, 112, 84, 0.18),
     0 3px 0 rgba(255, 255, 255, 0.62) inset;
-  backdrop-filter: blur(24px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(24px) saturate(140%) !important;
+  backdrop-filter: blur(30px) saturate(146%) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(146%) !important;
 }
 
 #statModal .stat-detail-header {
   padding: 22px 24px 18px;
   border-bottom: 1px solid rgba(163, 212, 183, 0.24);
   background:
-    linear-gradient(180deg, rgba(249, 255, 250, 0.18) 0%, rgba(231, 247, 237, 0.1) 100%);
+    linear-gradient(180deg, rgba(249, 255, 250, 0.14) 0%, rgba(231, 247, 237, 0.08) 100%);
 }
 
 #statModal .stat-detail-header h3 {
@@ -6399,6 +6418,7 @@
   border-radius: 28px;
   border: 1px solid rgba(206, 231, 216, 0.92);
   box-shadow: 0 10px 24px rgba(72, 120, 92, 0.08);
+  transition: transform 0.22s ease, border-color 0.22s ease, background-color 0.22s ease;
 }
 
 #statModal .stat-hero--posts {
@@ -6487,6 +6507,7 @@
 #statModal .stat-user-group {
   border-radius: 26px;
   overflow: hidden;
+  transition: transform 0.22s ease, border-color 0.22s ease, background-color 0.22s ease;
 }
 
 #statModal .stat-user-header {
@@ -6542,9 +6563,9 @@
   border: 1px solid rgba(116, 180, 141, 0.34);
   background: rgba(248, 254, 250, 0.62);
   color: #2f6e4d;
-  box-shadow: 0 10px 22px rgba(72, 120, 92, 0.1);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 8px 18px rgba(72, 120, 92, 0.08);
+  backdrop-filter: blur(16px) saturate(142%);
+  -webkit-backdrop-filter: blur(16px) saturate(142%);
 }
 
 #statModal .back-to-stats-btn {
@@ -6558,7 +6579,7 @@
 
 #statModal .stat-post-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 12px;
   align-items: center;
   padding: 14px 14px;
@@ -6566,7 +6587,7 @@
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.62);
   cursor: pointer;
-  transition: transform 0.18s ease, border-color 0.18s ease;
+  transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
 }
 
 #statModal .stat-post-item + .stat-post-item {
@@ -6576,6 +6597,7 @@
 #statModal .stat-post-item:hover {
   transform: translateY(-1px);
   border-color: rgba(100, 168, 126, 0.54);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 #statModal .spi-main {
@@ -6628,10 +6650,17 @@
 }
 
 #statModal .spi-thumb {
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   border-radius: 14px;
   object-fit: cover;
+  transform: scale(1);
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+#statModal .spi-thumb:hover {
+  transform: scale(1.08);
+  filter: saturate(1.03);
 }
 
 #statModal .spi-thumb--video {
@@ -6676,6 +6705,7 @@
 #statModal .stat-comment-item {
   padding: 16px 16px 14px;
   border-radius: 22px;
+  transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
 }
 
 #statModal .stat-like-item + .stat-like-item,
@@ -6689,6 +6719,16 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+
+#statModal .stat-like-item:hover,
+#statModal .stat-view-item:hover,
+#statModal .stat-comment-item:hover,
+#statModal .stat-user-group:hover,
+#statModal .stat-two-col .stat-col:hover,
+#statModal .stat-hero:hover {
+  transform: translateY(-1px);
+  border-color: rgba(114, 178, 138, 0.56);
 }
 
 #statModal .stat-record-title {
@@ -6721,6 +6761,13 @@
   border: 1px solid rgba(204, 230, 214, 0.82);
   cursor: pointer;
   flex-shrink: 0;
+  transform: scale(1);
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+#statModal .stat-record-thumb:hover {
+  transform: scale(1.08);
+  filter: saturate(1.03);
 }
 
 #statModal .stat-record-thumb--video {
