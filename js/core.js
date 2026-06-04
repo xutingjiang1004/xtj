@@ -4098,7 +4098,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (tabBtn) tabBtn.classList.add('active');
                 if (tab === 'posts') { if (window._rainResume) window._rainResume(); }
                 else { if (window._rainPause) window._rainPause(); }
-                if (tab === 'chat') { loadDockChatList(); startDMPolling(300000); }
+                if (tab === 'chat') {
+                    if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
+                        document.getElementById('dockChatListView').classList.add('hidden');
+                        document.getElementById('dockChatDetailView').classList.remove('hidden');
+                        document.getElementById('dockChatBackBtn').style.display = 'flex';
+                        document.getElementById('dockChatTitle').textContent = dockChatActiveUser;
+                    } else {
+                        loadDockChatList();
+                    }
+                    startDMPolling(300000);
+                }
                 if (tab === 'ai') { ensurePhotoWallLoaded().then(function() { if (typeof window.initPhotoWall === 'function') window.initPhotoWall(); }); }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); }
             };
@@ -4211,6 +4221,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             async function loadDockChatList() {
                 const el = document.getElementById('dockChatList');
                 if (!el) return;
+                if (!dockChatActiveUser) {
+                    document.getElementById('dockChatDetailView').classList.add('hidden');
+                    document.getElementById('dockChatListView').classList.remove('hidden');
+                    document.getElementById('dockChatBackBtn').style.display = 'none';
+                    document.getElementById('dockChatTitle').textContent = '消息';
+                }
                 if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
                 window.dockChatListCacheTime = Date.now();
                 el.innerHTML = window.xtjMagicLoadingHtml('加载中...', '正在召回最近消息', 'chat-list');
