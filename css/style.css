@@ -809,12 +809,12 @@
             padding: 24px; border-radius: var(--radius-md);
             --post-enter-delay: 0ms;
             opacity: 0;
-            transform: translateY(18px) scale(0.985);
-            filter: blur(7px);
+            transform: translateY(14px) scale(0.992);
+            filter: blur(5px);
             transition:
-                opacity 0.56s cubic-bezier(0.16,1,0.3,1) var(--post-enter-delay),
-                transform 0.56s cubic-bezier(0.16,1,0.3,1) var(--post-enter-delay),
-                filter 0.46s ease-out var(--post-enter-delay);
+                opacity 0.42s cubic-bezier(0.16,1,0.3,1) var(--post-enter-delay),
+                transform 0.42s cubic-bezier(0.16,1,0.3,1) var(--post-enter-delay),
+                filter 0.34s ease-out var(--post-enter-delay);
             background: rgba(255,255,255,0.92);
             border: 1px solid rgba(255,255,255,0.7);
             box-shadow: 0 8px 32px rgba(0,0,0,0.06);
@@ -1289,8 +1289,8 @@
             transition: background 0.25s cubic-bezier(0.25, 1, 0.3, 1), transform 0.25s cubic-bezier(0.25, 1, 0.3, 1); position: relative;
             border-bottom: 1px solid rgba(255,255,255,0.04);
         }
-        .chat-list-item:hover { background: rgba(255,255,255,0.12); transform: translateX(2px); }
-        .chat-list-item:active { background: rgba(255,255,255,0.18); transform: translateX(2px); }
+        .chat-list-item:hover { background: rgba(255,255,255,0.12); transform: translateY(-1px) scale(1.01); }
+        .chat-list-item:active { background: rgba(255,255,255,0.18); transform: translateY(-1px) scale(1.005); }
         .chat-list-item .cli-avatar {
             width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
@@ -4427,14 +4427,14 @@
         }
         .photo-wall-item.pw-stagger-enter {
             opacity: 0;
-            transform: translateY(18px) scale(0.96);
-            filter: blur(8px);
+            transform: translateY(12px) scale(0.988);
+            filter: blur(5px);
         }
         .photo-wall-item.pw-stagger-done {
             opacity: 1;
             transform: translateY(0) scale(1);
             filter: blur(0);
-            transition: opacity 420ms cubic-bezier(0.16,1,0.3,1), transform 420ms cubic-bezier(0.16,1,0.3,1), filter 420ms cubic-bezier(0.16,1,0.3,1);
+            transition: opacity 320ms cubic-bezier(0.16,1,0.3,1), transform 320ms cubic-bezier(0.16,1,0.3,1), filter 300ms cubic-bezier(0.16,1,0.3,1);
         }
         .photo-wall-item::before {
             content: "";
@@ -6352,12 +6352,12 @@
   max-width: 780px;
   border: 1px solid rgba(211, 236, 220, 0.72);
   background:
-    linear-gradient(180deg, rgba(244, 252, 246, 0.22) 0%, rgba(232, 246, 237, 0.16) 100%);
+    linear-gradient(180deg, rgba(244, 252, 246, 0.18) 0%, rgba(232, 246, 237, 0.12) 100%);
   box-shadow:
-    0 28px 70px rgba(64, 112, 84, 0.18),
-    0 3px 0 rgba(255, 255, 255, 0.62) inset;
-  backdrop-filter: blur(30px) saturate(146%) !important;
-  -webkit-backdrop-filter: blur(30px) saturate(146%) !important;
+    0 26px 62px rgba(64, 112, 84, 0.14),
+    0 2px 0 rgba(255, 255, 255, 0.54) inset;
+  backdrop-filter: blur(24px) saturate(138%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(138%) !important;
 }
 
 #statModal .stat-detail-header {
@@ -6400,11 +6400,11 @@
 #statModal .stat-view-item,
 #statModal .stat-comment-item,
 #statModal .stat-two-col .stat-col {
-  background: rgba(252, 255, 253, 0.84);
-  border: 1px solid rgba(208, 232, 216, 0.78);
-  box-shadow: 0 10px 24px rgba(72, 120, 92, 0.08);
-  backdrop-filter: blur(16px) saturate(128%) !important;
-  -webkit-backdrop-filter: blur(16px) saturate(128%) !important;
+  background: rgba(251, 255, 252, 0.78);
+  border: 1px solid rgba(208, 232, 216, 0.72);
+  box-shadow: 0 8px 20px rgba(72, 120, 92, 0.06);
+  backdrop-filter: blur(14px) saturate(122%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(122%) !important;
 }
 
 #statModal .stat-stack {
@@ -6510,12 +6510,25 @@
   transition: transform 0.22s ease, border-color 0.22s ease, background-color 0.22s ease;
 }
 
+#statModal .stat-user-summary {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 #statModal .stat-user-header {
   align-items: flex-start;
   gap: 14px;
   padding: 18px 18px 16px;
-  background: linear-gradient(180deg, rgba(237, 250, 241, 0.54) 0%, rgba(250, 255, 251, 0.28) 100%);
-  border-bottom: 1px solid rgba(190, 224, 201, 0.34);
+  background: linear-gradient(180deg, rgba(237, 250, 241, 0.32) 0%, rgba(250, 255, 251, 0.12) 100%);
+  border-bottom: 1px solid rgba(190, 224, 201, 0.22);
 }
 
 #statModal .stat-user-header .suh-copy {
@@ -6573,8 +6586,64 @@
   padding: 10px 16px;
 }
 
-#statModal .stat-user-posts {
-  padding: 14px;
+#statModal .stat-user-preview {
+  display: flex;
+  gap: 10px;
+  padding: 0 18px;
+}
+
+#statModal .stat-user-preview-thumb,
+#statModal .stat-user-preview-more {
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
+  flex: 0 0 auto;
+}
+
+#statModal .stat-user-preview-thumb {
+  object-fit: cover;
+  border: 1px solid rgba(204, 230, 214, 0.82);
+  cursor: pointer;
+  transition: transform 0.22s ease, filter 0.22s ease;
+}
+
+#statModal .stat-user-preview-thumb:hover {
+  transform: scale(1.16);
+  filter: saturate(1.04);
+}
+
+#statModal .stat-user-preview-more {
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.64);
+  border: 1px solid rgba(204, 230, 214, 0.72);
+  color: #2f7450;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+#statModal .stat-user-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 18px 18px;
+}
+
+#statModal .stat-user-note {
+  min-width: 0;
+  font-size: 13px;
+  color: rgba(51, 94, 70, 0.72);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#statModal .stat-user-link {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 800;
+  color: #2f7450;
 }
 
 #statModal .stat-post-item {
@@ -6640,6 +6709,14 @@
   font-size: 11px;
 }
 
+#statModal .spi-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
 #statModal .spi-time {
   color: rgba(64, 105, 80, 0.66);
 }
@@ -6647,6 +6724,26 @@
 #statModal .spi-open {
   color: #2f7450;
   font-weight: 700;
+}
+
+#statModal .spi-open-btn,
+#statModal .stat-record-action {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(116, 180, 141, 0.26);
+  background: rgba(248, 254, 250, 0.66);
+  color: #2f6e4d;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.18s ease, background-color 0.18s ease, border-color 0.18s ease;
+}
+
+#statModal .spi-open-btn:hover,
+#statModal .stat-record-action:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(96, 166, 124, 0.36);
 }
 
 #statModal .spi-thumb {
@@ -6662,7 +6759,7 @@
 }
 
 #statModal .spi-thumb:hover {
-  transform: scale(1.08);
+  transform: scale(1.16);
   filter: saturate(1.03);
 }
 
@@ -6769,8 +6866,50 @@
 }
 
 #statModal .stat-record-thumb:hover {
-  transform: scale(1.08);
+  transform: scale(1.16);
   filter: saturate(1.03);
+}
+
+#statModal .stat-inline-title {
+  margin-bottom: 14px;
+  font-size: 14px;
+  font-weight: 800;
+  color: #28513b;
+}
+
+@keyframes xtjFloatIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.992);
+    filter: blur(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+#statModal .stat-user-group,
+#statModal .stat-post-item,
+#statModal .stat-like-item,
+#statModal .stat-view-item,
+#statModal .stat-comment-item,
+.chat-list-item {
+  animation: xtjFloatIn 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--xtj-enter-delay, 0ms);
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #statModal .stat-user-group,
+  #statModal .stat-post-item,
+  #statModal .stat-like-item,
+  #statModal .stat-view-item,
+  #statModal .stat-comment-item,
+  .chat-list-item {
+    animation: none;
+  }
 }
 
 #statModal .stat-record-thumb--video {
