@@ -1229,12 +1229,28 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 likes: [],
                 comments: [],
                 posts: {},
+                totals: {
+                    posts: 0,
+                    likes: 0,
+                    comments: 0
+                },
                 expandedLikes: false,
                 expandedComments: false,
                 loadedUser: '',
                 loading: false,
                 lastLoadedAt: 0
             };
+
+            function renderProfileTotals() {
+                var postsEl = document.getElementById('profileTotalPosts');
+                var likesEl = document.getElementById('profileTotalLikes');
+                var commentsEl = document.getElementById('profileTotalComments');
+                if (!postsEl || !likesEl || !commentsEl) return;
+                var totals = profileActivityState.totals || {};
+                postsEl.textContent = String(totals.posts || 0);
+                likesEl.textContent = String(totals.likes || 0);
+                commentsEl.textContent = String(totals.comments || 0);
+            }
 
             function getProfileActivityPostMap() {
                 return profileActivityState.posts || {};
@@ -1274,9 +1290,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!listEl || !countEl || !moreBtn) return;
 
                 var items = isLikes ? (profileActivityState.likes || []) : (profileActivityState.comments || []);
+                var totals = profileActivityState.totals || {};
+                var exactCount = isLikes ? (totals.likes || 0) : (totals.comments || 0);
                 var expanded = isLikes ? profileActivityState.expandedLikes : profileActivityState.expandedComments;
                 var visibleItems = expanded ? items : items.slice(0, 3);
-                countEl.textContent = String(items.length || 0);
+                countEl.textContent = String(exactCount || items.length || 0);
 
                 if (!currentUser) {
                     listEl.innerHTML = '<div class="profile-activity-empty">登录后，这里会显示你的点赞和评论记录。</div>';
@@ -1292,30 +1310,46 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 listEl.innerHTML = visibleItems.map(function(item, index) {
                     var post = getProfileActivityPost(item.post_id);
+                    var normalized = normalizePost(post || {});
                     var mediaHtml = post ? profileActivityMedia(post, item.post_id) : '';
                     var detailOnclick = "openProfileActivityPost('" + safeJsStr(String(item.post_id)) + "')";
                     var summary = post ? profileActivitySummary(post) : '原帖已不可用';
+                    var actorName = String(currentUser || item.user_name || '你');
+                    var hasMedia = !!(normalized && normalized.media_url);
+                    var postText = normalized ? String(normalized.content || '').trim() : '';
+                    var titlePrefix = escapeHtml(actorName) + (isLikes ? '点赞了：' : '评论了：');
+                    var inlineSummary = !hasMedia && summary && summary !== '无文字内容'
+                        ? '<span class="profile-activity-inline-summary">' + escapeHtml(summary) + '</span>'
+                        : '';
+                    var extraNote = '';
+                    if (!isLikes && item.content) {
+                        extraNote = '<div class="profile-activity-note">我的评论：' + escapeHtml(item.content || '') + '</div>';
+                    } else if (hasMedia && postText) {
+                        extraNote = '<div class="profile-activity-note">' + escapeHtml(postText.length > 36 ? postText.slice(0, 36) + '...' : postText) + '</div>';
+                    } else if (!hasMedia && summary === '无文字内容') {
+                        extraNote = '<div class="profile-activity-note">原帖没有文字内容</div>';
+                    }
                     var actionHtml = isLikes
                         ? '<button type="button" class="profile-activity-btn is-danger" onclick="unlikeFromProfile(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">取消点赞</button>'
                         : '<button type="button" class="profile-activity-btn" onclick="' + detailOnclick + '">查看帖子</button>';
                     return [
                         '<article class="profile-activity-item" style="--xtj-enter-delay:' + Math.min(index * 28, 180) + 'ms;">',
-                        mediaHtml,
                         '<div class="profile-activity-body">',
-                        '<div class="profile-activity-meta"><span class="profile-activity-type">' + (isLikes ? '点赞' : '评论') + '</span><span class="profile-activity-time">' + new Date(item.created_at).toLocaleString() + '</span></div>',
-                        '<div class="profile-activity-title">' + escapeHtml(summary) + '</div>',
-                        !isLikes ? '<div class="profile-activity-note">我的评论：' + escapeHtml(item.content || '') + '</div>' : '',
+                        '<div class="profile-activity-title">' + titlePrefix + inlineSummary + '</div>',
+                        extraNote,
                         '</div>',
-                        '<div class="profile-activity-actions">' + actionHtml + '</div>',
+                        mediaHtml,
+                        '<div class="profile-activity-side"><span class="profile-activity-time">' + new Date(item.created_at).toLocaleString() + '</span><div class="profile-activity-actions">' + actionHtml + '</div></div>',
                         '</article>'
                     ].join('');
                 }).join('');
 
-                moreBtn.style.display = items.length > 3 ? 'block' : 'none';
+                moreBtn.style.display = (exactCount || items.length) > 3 ? 'block' : 'none';
                 moreBtn.textContent = expanded ? (isLikes ? '收起点赞记录' : '收起评论记录') : (isLikes ? '更多点赞内容' : '更多评论内容');
             }
 
             function renderProfileActivity() {
+                renderProfileTotals();
                 renderProfileActivityList('likes');
                 renderProfileActivityList('comments');
             }
@@ -1327,6 +1361,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     profileActivityState.likes = [];
                     profileActivityState.comments = [];
                     profileActivityState.posts = {};
+                    profileActivityState.totals = { posts: 0, likes: 0, comments: 0 };
                     profileActivityState.loadedUser = '';
                     renderProfileActivity();
                     return;
@@ -1338,22 +1373,41 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 profileActivityState.loading = true;
                 try {
-                    var likesRes = await sb.from('likes')
-                        .select('id, post_id, user_name, actor_key, created_at')
-                        .eq('user_name', currentUser)
-                        .order('created_at', { ascending: false })
-                        .limit(160);
+                    var results = await Promise.all([
+                        sb.from('likes')
+                            .select('id, post_id, user_name, actor_key, created_at', { count: 'exact' })
+                            .eq('user_name', currentUser)
+                            .order('created_at', { ascending: false })
+                            .limit(160),
+                        sb.from('comments')
+                            .select('id, post_id, user_name, content, actor_key, created_at', { count: 'exact' })
+                            .eq('user_name', currentUser)
+                            .order('created_at', { ascending: false })
+                            .limit(160),
+                        sb.from('posts')
+                            .select('id', { count: 'exact', head: true })
+                            .eq('user_name', currentUser)
+                            .neq('media_type', AUTH_MARKER)
+                            .neq('media_type', DM_MARKER)
+                            .neq('media_type', '__avatar__')
+                            .neq('media_type', '__user_info__')
+                            .neq('media_type', '__photo_wall__')
+                            .neq('media_type', '__ann__')
+                    ]);
+                    var likesRes = results[0];
+                    var commentsRes = results[1];
+                    var postsCountRes = results[2];
                     if (likesRes.error) throw likesRes.error;
-
-                    var commentsRes = await sb.from('comments')
-                        .select('id, post_id, user_name, content, actor_key, created_at')
-                        .eq('user_name', currentUser)
-                        .order('created_at', { ascending: false })
-                        .limit(160);
                     if (commentsRes.error) throw commentsRes.error;
+                    if (postsCountRes.error) throw postsCountRes.error;
 
                     profileActivityState.likes = likesRes.data || [];
                     profileActivityState.comments = commentsRes.data || [];
+                    profileActivityState.totals = {
+                        posts: postsCountRes.count || 0,
+                        likes: likesRes.count || (likesRes.data || []).length,
+                        comments: commentsRes.count || (commentsRes.data || []).length
+                    };
 
                     var ids = Array.from(new Set(profileActivityState.likes.concat(profileActivityState.comments).map(function(item) {
                         return item && item.post_id != null ? String(item.post_id) : '';
@@ -1447,13 +1501,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (likeId && item && item.id != null) return String(item.id) !== String(likeId);
                         return !(String(item.post_id) === String(postId) && String(item.user_name) === String(currentUser));
                     });
+                    if (profileActivityState.totals && profileActivityState.totals.likes > 0) {
+                        profileActivityState.totals.likes -= 1;
+                    }
                     if (typeof writeFeedCacheSnapshot === 'function') writeFeedCacheSnapshot();
                     if (typeof updateFeedStats === 'function') updateFeedStats();
                     if (typeof refreshStatModal === 'function') refreshStatModal();
                     if (typeof rebuildFeedFromCurrentState === 'function') {
                         rebuildFeedFromCurrentState().catch(function() {});
                     }
-                    renderProfileActivityList('likes');
+                    renderProfileActivity();
                     showToast('已取消点赞');
                 } catch (e) {
                     console.error('unlikeFromProfile error:', e);
@@ -3357,6 +3414,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     resetPostComposer();
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     await loadFeed(true);
+                    loadProfileActivity(true);
                 } catch (e) {
                     showToast("发布失败: " + (e.message || "网络閿欒"));
                 } finally {
@@ -3542,6 +3600,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast("帖子已删除");
                     delPostId = null;
                     await loadFeed(true);
+                    loadProfileActivity(true);
                 } catch (e) {
                     showToast("删除帖子失败");
                     console.error(e);
@@ -4447,6 +4506,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             window.showToast('正在刷新...');
                             syncProfileUser();
                             if (currentUser) loadUserAvatar();
+                            loadProfileActivity(true);
                             isRefreshing[tab] = false;
                             window.showToast('刷新完成');
                         }

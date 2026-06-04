@@ -298,7 +298,27 @@
                         <span class="profile-setting-value">xtj v0.68</span>
                     </div>
                 </div>
+                <div class="profile-totals-bar" id="profileTotalsBar" aria-label="累计互动数据">
+                    <span class="profile-total-item">帖子 <strong id="profileTotalPosts">0</strong></span>
+                    <span class="profile-total-sep">|</span>
+                    <span class="profile-total-item">点赞 <strong id="profileTotalLikes">0</strong></span>
+                    <span class="profile-total-sep">|</span>
+                    <span class="profile-total-item">评论 <strong id="profileTotalComments">0</strong></span>
+                </div>
             </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="profileActivityModal" onclick="if(event.target===this)closeProfileActivityModal()">
+        <div class="modal-box glass profile-activity-modal" onclick="event.stopPropagation()">
+            <div class="profile-activity-modal-head">
+                <div>
+                    <div class="profile-activity-kicker" id="profileActivityModalKicker">我的互动</div>
+                    <h3 id="profileActivityModalTitle">点赞记录</h3>
+                </div>
+                <button class="btn btn-ghost stat-close-btn" type="button" onclick="closeProfileActivityModal()" aria-label="关闭互动记录">✕</button>
+            </div>
+            <div class="profile-activity-list profile-activity-modal-list" id="profileActivityModalList"></div>
         </div>
     </div>
 
