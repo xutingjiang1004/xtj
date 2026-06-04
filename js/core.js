@@ -3451,7 +3451,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             ].join('');
                         }).join('');
                     } else {
-                        h += statEmptyMarkup({ title: '暂无点赞记录', copy: '当有人给帖子点赞后，这里会显示最近的互动。' });
+                        h += statEmptyMarkup({ title: '点赞记录', copy: '当有人给帖子点赞后，这里会显示最近的互动。' });
                     }
                     return h;
                 }
@@ -3677,7 +3677,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statAllPosts.forEach(p => { postMap[p.id] = p; });
 
                 function buildLikesCol() {
-                    let h = '<div class="stat-section-title">鉂わ笍 点赞记录</div>';
+                    let h = '<div class="stat-section-title">点赞记录</div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(l => {
                             const post = postMap[l.post_id];
@@ -3693,7 +3693,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     `;
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">暂无点赞记录</div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">点赞记录</div>';
                     }
                     return h;
                 }
@@ -5963,6 +5963,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
         (function installUiTextRepair() {
+            // This repair system is superseded by features.js which handles mojibake more accurately.
+            // Only expose stop/repair hooks for backward compatibility.
+            window.__xtjUiTextRepair = function(node) {};
+            window.__xtjUiTextRepairStop = function() {};
+            return;
+            /* ORIGINAL CODE DISABLED - superseded by features.js
             const pairs = [
                 ['瀹歌尪顕?', '已读'],
                 ['閺堫亣顕?', '未读'],
@@ -6130,6 +6136,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 repairQueued = false;
                 queuedRoots = [];
             };
+            */
         })();
 
         // === Self-diagnostic: verify key functions are available after page load ===
@@ -6452,7 +6459,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statAllPosts.forEach(function(p) { postMap[p.id] = p; });
 
                 function buildLikesCol() {
-                    var h = '<div class="stat-section-title">✦ 点赞记录</div>';
+                    var h = '<div class="stat-section-title">点赞记录</div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(function(l) {
                             var post = postMap[l.post_id];
@@ -6460,7 +6467,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             return '<div class="stat-like-item"><div class="sli-info"><div class="sli-user">' + escapeHtml(l.user_name) + '</div><div class="sli-target">点赞了：' + postContent + '</div></div><span class="sli-time">' + new Date(l.created_at).toLocaleString() + '</span></div>';
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">暂无点赞记录</div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">点赞记录</div>';
                     }
                     return h;
                 }
