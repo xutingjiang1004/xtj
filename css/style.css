@@ -6333,7 +6333,7 @@
   max-width: 780px;
   border: 1px solid rgba(211, 236, 220, 0.72);
   background:
-    linear-gradient(180deg, rgba(244, 252, 246, 0.78) 0%, rgba(232, 246, 237, 0.74) 100%),
+    linear-gradient(180deg, rgba(244, 252, 246, 0.42) 0%, rgba(232, 246, 237, 0.38) 100%),
     #edf7f0;
   box-shadow:
     0 28px 70px rgba(64, 112, 84, 0.18),
@@ -6346,7 +6346,7 @@
   padding: 22px 24px 18px;
   border-bottom: 1px solid rgba(163, 212, 183, 0.24);
   background:
-    linear-gradient(180deg, rgba(249, 255, 250, 0.66) 0%, rgba(231, 247, 237, 0.44) 100%);
+    linear-gradient(180deg, rgba(249, 255, 250, 0.34) 0%, rgba(231, 247, 237, 0.22) 100%);
 }
 
 #statModal .stat-detail-header h3 {
@@ -6360,8 +6360,8 @@
   padding: 20px 22px 24px;
   max-height: min(72vh, 780px);
   background:
-    radial-gradient(circle at top right, rgba(173, 229, 194, 0.18), transparent 26%),
-    linear-gradient(180deg, rgba(247, 255, 249, 0.58) 0%, rgba(232, 247, 237, 0.5) 100%);
+    radial-gradient(circle at top right, rgba(173, 229, 194, 0.1), transparent 26%),
+    linear-gradient(180deg, rgba(247, 255, 249, 0.3) 0%, rgba(232, 247, 237, 0.24) 100%);
 }
 
 #statModal .stat-detail-body::-webkit-scrollbar-track {
