@@ -1672,10 +1672,41 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             const postInfoCache = {};
             const VIEW_HISTORY_KEY = 'xtj_view_history';
             const VIEW_TRACK_TTL = 5 * 60 * 1000;
+            const VIEW_HISTORY_MEDIA_LABEL = '(\u56fe\u7247/\u89c6\u9891)';
+            const VIEW_HISTORY_DELETED_AUTHOR = '\u5df2\u5220\u9664\u7528\u6237';
+
+            function normalizeViewHistoryText(value, fallback) {
+                var text = String(value == null ? '' : value).trim();
+                if (!text) return fallback;
+                if (/鍥剧墖|瑙嗛|閸ュ墽澧|鐟欏棝顣/.test(text)) return VIEW_HISTORY_MEDIA_LABEL;
+                if (/閺堫亞鐓|宸插垹闄ゅ/.test(text)) return VIEW_HISTORY_DELETED_AUTHOR;
+                return text;
+            }
+
+            function normalizeViewHistoryEntry(entry) {
+                entry = entry || {};
+                return Object.assign({}, entry, {
+                    user_name: String(entry.user_name || '').trim(),
+                    post_id: entry.post_id,
+                    post_content: normalizeViewHistoryText(entry.post_content, VIEW_HISTORY_MEDIA_LABEL),
+                    post_author: normalizeViewHistoryText(entry.post_author, VIEW_HISTORY_DELETED_AUTHOR),
+                    viewed_at: entry.viewed_at || new Date().toISOString()
+                });
+            }
 
             function getViewHistory() {
                 try {
-                    return window.safeLocalStorageGetJSON(VIEW_HISTORY_KEY, []);
+                    var history = window.safeLocalStorageGetJSON(VIEW_HISTORY_KEY, []);
+                    var changed = false;
+                    var normalized = Array.isArray(history) ? history.map(function(entry) {
+                        var next = normalizeViewHistoryEntry(entry);
+                        if (!changed && JSON.stringify(next) !== JSON.stringify(entry || {})) changed = true;
+                        return next;
+                    }) : [];
+                    if (changed) {
+                        try { localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(normalized)); } catch (e) {}
+                    }
+                    return normalized;
                 } catch(e) { return []; }
             }
 
@@ -1684,7 +1715,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 // 避免重复锟斤拷录锛堝悓涓拷锟矫伙拷鍚屼竴帖子鍙录一�★�?
                 const exists = history.some(h => h.post_id === entry.post_id && h.user_name === entry.user_name);
                 if (!exists) {
-                    history.unshift(entry);
+                    history.unshift(normalizeViewHistoryEntry(entry));
                     // 只保留最??00�?
                     if (history.length > 500) history.length = 500;
                     localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
@@ -1730,7 +1761,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // 娴犺�?：分页加载相关变�?
             saveViewHistory = function(entry) {
                 const history = getViewHistory();
-                history.unshift(entry);
+                history.unshift(normalizeViewHistoryEntry(entry));
                 if (history.length > 500) history.length = 500;
                 localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
             };
@@ -1767,8 +1798,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     saveViewHistory({
                         user_name: currentUser,
                         post_id: postId,
-                        post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || '(鍥剧墖/瑙嗛)'),
-                        post_author: postInfoCache[postId].user_name || '鏈煡',
+                        post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || VIEW_HISTORY_MEDIA_LABEL),
+                        post_author: postInfoCache[postId].user_name || VIEW_HISTORY_DELETED_AUTHOR,
                         viewed_at: new Date().toISOString()
                     });
                 }
