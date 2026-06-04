@@ -245,6 +245,30 @@
                     </div>
                     <span class="profile-chevron">→</span>
                 </div>
+                <div class="profile-activity-board">
+                    <section class="profile-activity-card" id="profileLikesCard">
+                        <div class="profile-activity-head">
+                            <div>
+                                <div class="profile-activity-kicker">我的互动</div>
+                                <h4>点赞记录</h4>
+                            </div>
+                            <span class="profile-activity-count" id="profileLikesCount">0</span>
+                        </div>
+                        <div class="profile-activity-list" id="profileLikesList"></div>
+                        <button type="button" class="profile-activity-more" id="profileLikesMoreBtn" onclick="toggleProfileActivity('likes')" style="display:none;">更多点赞内容</button>
+                    </section>
+                    <section class="profile-activity-card" id="profileCommentsCard">
+                        <div class="profile-activity-head">
+                            <div>
+                                <div class="profile-activity-kicker">我的留言</div>
+                                <h4>评论记录</h4>
+                            </div>
+                            <span class="profile-activity-count" id="profileCommentsCount">0</span>
+                        </div>
+                        <div class="profile-activity-list" id="profileCommentsList"></div>
+                        <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" onclick="toggleProfileActivity('comments')" style="display:none;">更多评论内容</button>
+                    </section>
+                </div>
                 <div class="profile-settings">
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
