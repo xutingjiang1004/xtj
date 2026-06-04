@@ -4934,7 +4934,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var otherAvatarHtml = avatarCache[otherUser] ? '<img src="' + avatarCache[otherUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">' : (otherUser ? otherUser[0].toUpperCase() : '?');
                 el.innerHTML = msgs.map(m => {
                     const sent = m.user_name === currentUser;
-                    const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">宸茶</span>' : '<span class="msg-read-status">鏈</span>') : '';
+                    const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
                     let body = '';
                     if (m.actor_key && m.actor_key.startsWith('__dm_img__')) {
                         body = '<img class="msg-img" src="' + getMediaUrl('__dm_img__', m.actor_key.replace('__dm_img__', '')) + '" onclick="openImageViewer(this.src)" loading="lazy" />';
@@ -5264,11 +5264,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             function parseAnnData(ann) {
-                var title = '鍏憡', content = ann.content || '';
+                var title = '公告', content = ann.content || '';
                 if (ann.content) {
                     try {
                         var parsed = JSON.parse(ann.content);
-                        if (parsed.title !== undefined) { title = parsed.title || '鍏憡'; content = parsed.content || ''; }
+                        if (parsed.title !== undefined) { title = parsed.title || '公告'; content = parsed.content || ''; }
                     } catch(e) {}
                 }
                 return { title: title, content: content };
@@ -5279,7 +5279,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!listEl) return;
 
                 if (!announcements.length) {
-                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">馃摙</div><div>暂无鍏憡</div></div>';
+                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">📢</div><div>暂无公告</div></div>';
                     return;
                 }
 
