@@ -2446,31 +2446,31 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function formatPostTime(post) {
                 var normalized = normalizePost(post);
                 var time = normalized.created_at ? new Date(normalized.created_at).toLocaleString() : "";
-                if (normalized.updated_at) return time + " (宸茬紪杈?";
+                if (normalized.updated_at) return time + " (已编辑)";
                 return time;
             }
 
             function buildPostBadges(post) {
                 var normalized = normalizePost(post);
                 var bits = [];
-                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '绉佸瘑' : '鍏紑') + '</span>');
-                if (normalized.is_pinned) bits.push('<span class="post-pin-badge">缃《</span>');
+                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
+                if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
                 return bits.join("");
             }
 
             function buildPostStatsLine(post, likeCount, commentCount) {
                 var normalized = normalizePost(post);
                 var visibilityClass = normalized.visibility === "private" ? 'private' : 'public';
-                var visibilityText = normalized.visibility === "private" ? '绉佸瘑' : '鍏紑';
-                return '娴忚 ' + (normalized.views || 0) +
-                    ' | 鐐硅禐 ' + (likeCount || 0) +
-                    ' | 璇勮 ' + (commentCount || 0) +
+                var visibilityText = normalized.visibility === "private" ? '私密' : '公开';
+                return '浏览 ' + (normalized.views || 0) +
+                    ' | 点赞 ' + (likeCount || 0) +
+                    ' | 评论 ' + (commentCount || 0) +
                     '<span class="post-stats-visibility post-stats-visibility-' + visibilityClass + '">' + visibilityText + '</span>';
             }
 
             buildPostBadges = function(post) {
                 var normalized = normalizePost(post);
-                return normalized.is_pinned ? '<span class="post-pin-badge">缂冾噣銆?/span>' : '';
+                return normalized.is_pinned ? '<span class="post-pin-badge">置顶</span>' : '';
             };
 
             function buildPostActionHtml(post, isLiked, canDelete) {
@@ -2478,17 +2478,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var idHtml = escapeHtml(String(post.id));
                 var actorKeyJs = safeJsStr(String(post.actor_key || ""));
                 var actions = [
-                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '鉂わ笍' : '鐐硅禐') + '</button>',
-                    '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">璇勮</button>'
+                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>',
+                    '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
                 ];
                 if (canEditPost(post)) {
-                    actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + idJs + '\')">缂栬緫</button>');
+                    actions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + idJs + '\')">编辑</button>');
                 }
                 if (canPinPost(post)) {
-                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '">' + (normalizePost(post).is_pinned ? '鍙栨秷缃《' : '缃《') + '</button>');
+                    actions.push('<button type="button" class="action-btn pin" data-post-id="' + idHtml + '">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
                 }
                 if (canDelete) {
-                    actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + idJs + '\', \'' + actorKeyJs + '\')">鍒犻櫎</button>');
+                    actions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + idJs + '\', \'' + actorKeyJs + '\')">删除</button>');
                 }
                 return actions.join("");
             }
@@ -6530,7 +6530,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return [
                     '<div class="stat-empty-rich stat-surface-card">',
                     opts.kicker ? '<div class="stat-hero-kicker">' + escapeHtml(opts.kicker) + '</div>' : '',
-                    '<div class="stat-empty-title">' + escapeHtml(opts.title || '鏆傛棤鏁版嵁') + '</div>',
+                    '<div class="stat-empty-title">' + escapeHtml(opts.title || '暂无数据') + '</div>',
                     opts.copy ? '<div class="stat-empty-copy">' + escapeHtml(opts.copy) + '</div>' : '',
                     opts.note ? '<div class="stat-empty-note">' + escapeHtml(opts.note) + '</div>' : '',
                     '</div>'
@@ -6543,7 +6543,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var hasVid = post.media_url && post.media_type === 'video';
                 var tag = hasImg ? '<span class="spi-img-tag">图片</span>' : (hasVid ? '<span class="spi-img-tag">视频</span>' : '<span class="spi-img-tag spi-img-tag--text">文字</span>');
                 var summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
-                var display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
+                var display = summary || '';
                 var onclick = "openPostDetail('" + String(post.id).replace(/'/g, "\\'") + "')";
                 var mediaHtml = hasImg
                     ? '<img class="spi-thumb" src="' + escapeHtml(post.media_url) + '" onclick="' + onclick + '" title="点击查看帖子详情" />'
@@ -6553,7 +6553,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     mediaHtml,
                     '<div class="spi-main">',
                     '<div class="spi-content-row">',
-                    '<span class="spi-content" onclick="' + onclick + '" title="点击查看帖子详情">' + escapeHtml(display) + '</span>',
+                    display ? '<span class="spi-content" onclick="' + onclick + '" title="点击查看帖子详情">' + escapeHtml(display) + '</span>' : '',
                     tag,
                     '</div>',
                     '<div class="spi-meta"><span class="spi-time">' + new Date(post.created_at).toLocaleString() + '</span><span class="spi-open">查看详情</span></div>',
@@ -6574,18 +6574,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return b[1].length - a[1].length;
                 });
                 if (!entries.length) {
-                    body.innerHTML = '<div class="stat-empty">鏆傛棤鍔ㄦ€佹暟鎹?/div>';
+                    body.innerHTML = '<div class="stat-empty">暂无动态数据</div>';
                     return;
                 }
                 body.innerHTML = entries.map(function(entry) {
                     var name = entry[0];
                     var posts = entry[1];
+                    var latest = posts[0] ? new Date(posts[0].created_at).toLocaleString() : '--';
                     var moreButton = posts.length > 3
-                        ? '<div style="text-align:center; padding:8px 0;"><button class="stat-view-btn" onclick="loadUserAllPosts(\'' + String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">鏌ョ湅鍏ㄩ儴 ' + posts.length + ' 鏉?/button></div>'
+                        ? '<div style="text-align:center; padding:8px 0;"><button class="stat-view-btn" onclick="loadUserAllPosts(\'' + String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">查看全部 ' + posts.length + ' 条</button></div>'
                         : '';
                     return [
                         '<div class="stat-user-group">',
-                        '<div class="stat-user-header"><div class="suh-left"><div class="suh-avatar">' + escapeHtml(name).slice(0, 1).toUpperCase() + '</div><span class="suh-name">' + escapeHtml(name) + '</span></div><span class="suh-count">' + posts.length + ' 鏉?/span></div>',
+                        '<div class="stat-user-header"><div class="suh-left"><div class="suh-avatar">' + escapeHtml(name).slice(0, 1).toUpperCase() + '</div><div class="suh-copy"><span class="suh-name">' + escapeHtml(name) + '</span><span class="suh-sub">最近更新 ' + escapeHtml(latest) + '</span></div></div><span class="suh-count">' + posts.length + ' 条</span></div>',
                         '<div class="stat-user-posts">',
                         posts.slice(0, 3).map(function(p) { return statPostItemMarkup(p); }).join(''),
                         moreButton,
@@ -6600,9 +6601,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!body) return;
                 var userPosts = statAllPosts.filter(function(p) { return p.user_name === userName; });
                 body.innerHTML = [
-                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">鈫?杩斿洖鎬诲姩鎬?/button>',
+                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">返回总动态</button>',
                     '<div style="font-weight:700; font-size:15px; margin-bottom:12px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.1);">',
-                    escapeHtml(userName) + ' 鐨勫叏閮ㄥ笘瀛愶紙' + userPosts.length + ' 鏉★級',
+                    escapeHtml(userName) + ' 的全部动态（' + userPosts.length + ' 条）',
                     '</div>',
                     userPosts.map(function(p) { return statPostItemMarkup(p); }).join('')
                 ].join('');

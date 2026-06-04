@@ -6654,6 +6654,9 @@
   height: 56px;
   border-radius: 14px;
   object-fit: cover;
+  border: 1px solid rgba(204, 230, 214, 0.82);
+  cursor: pointer;
+  flex-shrink: 0;
   transform: scale(1);
   transition: transform 0.2s ease, filter 0.2s ease;
 }
