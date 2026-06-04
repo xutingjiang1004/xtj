@@ -6381,13 +6381,11 @@
 #statModal .stat-view-item,
 #statModal .stat-comment-item,
 #statModal .stat-two-col .stat-col {
-  background: rgba(255, 255, 255, 0.74);
+  background: rgba(252, 255, 253, 0.84);
   border: 1px solid rgba(208, 232, 216, 0.78);
-  box-shadow:
-    0 14px 30px rgba(72, 120, 92, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px) saturate(142%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(142%) !important;
+  box-shadow: 0 10px 24px rgba(72, 120, 92, 0.08);
+  backdrop-filter: blur(16px) saturate(128%) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(128%) !important;
 }
 
 #statModal .stat-stack {
@@ -6400,19 +6398,19 @@
   padding: 18px 18px 16px;
   border-radius: 28px;
   border: 1px solid rgba(206, 231, 216, 0.92);
-  box-shadow: 0 14px 34px rgba(72, 120, 92, 0.1);
+  box-shadow: 0 10px 24px rgba(72, 120, 92, 0.08);
 }
 
 #statModal .stat-hero--posts {
-  background: linear-gradient(135deg, rgba(229, 247, 236, 0.98), rgba(244, 252, 246, 0.98));
+  background: rgba(238, 249, 242, 0.88);
 }
 
 #statModal .stat-hero--views {
-  background: linear-gradient(135deg, rgba(225, 245, 238, 0.98), rgba(240, 252, 246, 0.98));
+  background: rgba(236, 248, 241, 0.88);
 }
 
 #statModal .stat-hero--likes {
-  background: linear-gradient(135deg, rgba(227, 246, 232, 0.98), rgba(238, 251, 242, 0.98));
+  background: rgba(237, 249, 241, 0.88);
 }
 
 #statModal .stat-hero-kicker {
@@ -6566,9 +6564,9 @@
   padding: 14px 14px;
   border: 1px solid rgba(205, 228, 212, 0.8);
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.32);
+  background: rgba(255, 255, 255, 0.62);
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  transition: transform 0.18s ease, border-color 0.18s ease;
 }
 
 #statModal .stat-post-item + .stat-post-item {
@@ -6578,7 +6576,6 @@
 #statModal .stat-post-item:hover {
   transform: translateY(-1px);
   border-color: rgba(100, 168, 126, 0.54);
-  box-shadow: 0 12px 24px rgba(72, 120, 92, 0.1);
 }
 
 #statModal .spi-main {
@@ -6631,9 +6628,9 @@
 }
 
 #statModal .spi-thumb {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
   object-fit: cover;
 }
 
@@ -6712,17 +6709,16 @@
 #statModal .stat-view-layout {
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 14px;
-  align-items: center;
+  gap: 12px;
+  align-items: start;
 }
 
 #statModal .stat-record-thumb {
-  width: 78px;
-  height: 78px;
-  border-radius: 18px;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
   object-fit: cover;
   border: 1px solid rgba(204, 230, 214, 0.82);
-  box-shadow: 0 10px 24px rgba(76, 122, 95, 0.14);
   cursor: pointer;
   flex-shrink: 0;
 }
@@ -6730,9 +6726,9 @@
 #statModal .stat-record-thumb--video {
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, rgba(215, 239, 224, 0.92), rgba(242, 250, 245, 0.94));
+  background: rgba(223, 241, 229, 0.92);
   color: #2d5640;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
 }
