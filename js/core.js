@@ -1335,13 +1335,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var actionHtml = isLikes
                         ? '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();unlikeFromProfile(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">取消点赞</button>'
                         : '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();deleteProfileComment(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">删除评论</button>';
+                    var titleRow = '<div class="profile-activity-topline"><div class="profile-activity-title">' + titlePrefix + inlineSummary + '</div>' + (hasMedia ? mediaHtml : '') + '</div>';
                     return [
                         '<article class="profile-activity-item" role="button" tabindex="0" onclick="' + openPostOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + openPostOnclick + '}\" style="--xtj-enter-delay:' + Math.min(index * 28, 180) + 'ms;">',
+                        '<div class="profile-activity-main">',
                         '<div class="profile-activity-body">',
-                        '<div class="profile-activity-title">' + titlePrefix + inlineSummary + '</div>',
+                        titleRow,
                         extraNote,
                         '</div>',
-                        mediaHtml,
+                        '</div>',
                         '<div class="profile-activity-side"><span class="profile-activity-time">' + new Date(item.created_at).toLocaleString() + '</span><div class="profile-activity-actions">' + actionHtml + '</div></div>',
                         '</article>'
                     ].join('');
@@ -1349,7 +1351,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return {
                     html: html,
                     totalCount: exactCount || items.length || 0,
-                    hasMore: (exactCount || items.length || 0) > 3
+                    hasMore: (exactCount || items.length || 0) > 1
                 };
             }
 
@@ -1359,7 +1361,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var countEl = document.getElementById(isLikes ? 'profileLikesCount' : 'profileCommentsCount');
                 var moreBtn = document.getElementById(isLikes ? 'profileLikesMoreBtn' : 'profileCommentsMoreBtn');
                 if (!listEl || !countEl || !moreBtn) return;
-                var payload = buildProfileActivityListMarkup(kind, 3);
+                var payload = buildProfileActivityListMarkup(kind, 1);
                 countEl.textContent = String(payload.totalCount || 0);
                 listEl.innerHTML = payload.html;
                 moreBtn.style.display = payload.hasMore ? 'block' : 'none';
@@ -5390,26 +5392,24 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // 版本更新日志
             const changelogData = [
                 {
-                    version: 'v0.68',
+                    version: 'v0.69',
                     date: '2026-06-04',
                     content: `
-                        <h4>帖子交互修复</h4>
+                        <h4>我的页互动收口</h4>
                         <ul>
-                            <li>置顶和取消置顶改为即时重排，点击后列表会立刻更新</li>
-                            <li>帖子卡片右上角移除重复的公开/私密标记，仅保留统计行右侧显示</li>
-                            <li>双击帖子 Dock 刷新改为先本地显示、再后台静默同步，减少空白等待</li>
-                            <li>预览和上传链接继续收口，交互反馈更顺滑</li>
+                            <li>我的页点赞记录和评论记录改为首页只预览 1 条，减少首屏占位</li>
+                            <li>更多点赞内容和更多评论内容统一改成二级弹层，不再把当前页面拉得很长</li>
+                            <li>评论记录整条可直接查看帖子，主按钮改成删除评论</li>
+                            <li>点赞记录缩略图位置收紧到文案右侧，信息关系更清晰</li>
+                        </ul>
+                        <h4>详情入口整理</h4>
+                        <ul>
+                            <li>所有非首页查看详情入口移除置顶和取消置顶操作，避免和首页帖子操作重复</li>
+                            <li>我的页互动卡、互动二级弹层、帖子详情弹层统一向首页帖子卡样式靠拢</li>
                         </ul>
                         <h4>Remade</h4>
                         <ul>
-                            <li>重做了帖子状态切换、刷新反馈和部分预览细节，整体更直接、更干净</li>
-                        </ul>
-                        <h4>乱码修复</h4>
-                        <ul>
-                            <li>全面修复了网站所有中文乱码问题（core.js 源头修复 400+ 处）</li>
-                            <li>修复照片预览照片信息乱码、编辑器公开/私密显示乱码</li>
-                            <li>修复 features.js 重复定义导致的照片信息动画失效</li>
-                            <li>所有 UI 文本、按钮、提示信息恢复正确中文显示</li>
+                            <li>重做了我的页互动入口、记录弹层和详情入口关系，整个链路更短、更干净，也更顺手</li>
                         </ul>
                     `
                 },
@@ -6434,9 +6434,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var canEdit = canEditPost(post);
                 var canDel = canDeletePost(post);
                 var detailActions = [];
-                if (canPinPost(post)) {
-                    detailActions.push('<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(String(post.id)) + '">' + (normalizePost(post).is_pinned ? '取消置顶' : '置顶') + '</button>');
-                }
                 if (canEdit) {
                 }
                 if (canDel) {
@@ -6446,8 +6443,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     '<div class="post-detail-header"><div class="pdh-left">',
                     '<div class="pdh-name">' + escapeHtml(post.user_name) + '</div>',
                     '<div class="pdh-time">' + new Date(post.created_at).toLocaleString() + '</div>',
-                    '</div>',
-                    '<div class="pdh-badges">' + buildPostBadges(post) + '</div>',
                     '</div>',
                     post.content ? '<div class="post-detail-content">' + escapeHtml(post.content) + '</div>' : '',
                     mediaHtml ? '<div class="post-detail-media">' + mediaHtml + '</div>' : '',
