@@ -67,7 +67,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             visibility: "public",
             is_pinned: false,
             pinned_at: null,
-            updated_at: null
+            updated_at: null,
+            fileSize: null,
+            originalSize: null,
+            mimeType: ""
         };
         let postSearchState = {
             keyword: "",
@@ -2385,6 +2388,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var pComms = commentMap[normalized.id] || [];
                 var isLiked = likeUserMap[normalized.id + '|' + deviceId];
                 var canDelete = normalized.actor_key === deviceId || normalized.actor_key === currentUser || isAdmin();
+                var mediaDataAttrs = [
+                    'data-post-id="' + escapeHtml(String(normalized.id)) + '"',
+                    'data-media-url="' + escapeHtml(String(normalized.media_url || "")) + '"',
+                    'data-post-user="' + escapeHtml(String(normalized.user_name || "")) + '"',
+                    'data-post-created-at="' + escapeHtml(String(normalized.created_at || "")) + '"',
+                    'data-post-views="' + escapeHtml(String(normalized.views || 0)) + '"',
+                    'data-file-size="' + escapeHtml(String((normalized._contentMeta && normalized._contentMeta.fileSize) || "")) + '"',
+                    'data-original-size="' + escapeHtml(String((normalized._contentMeta && normalized._contentMeta.originalSize) || "")) + '"'
+                ].join(" ");
                 return `
                 <div class="post glass" data-post-id="${escapeHtml(normalized.id)}">
                   <div class="post-header">
@@ -2398,7 +2410,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     </div>
                   </div>
                   <div class="content">${escapeHtml(normalized.content || "")}</div>
-                  ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none"></video>` : `<img src="${escapeHtml(normalized.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(normalized.media_url)}')">`}</div>` : ''}
+                  ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none"></video>` : `<img ${mediaDataAttrs} src="${escapeHtml(normalized.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(normalized.media_url)}')">`}</div>` : ''}
                   <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${pComms.length ? `<div class="comments">${pComms.map(function(c) {
@@ -6266,10 +6278,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             function statPostDetailMarkup(post, likes, comments) {
                 var vc = (post.views || 0) + 1;
+                var normalizedPost = normalizePost(post);
+                var detailMediaAttrs = [
+                    'data-post-id="' + escapeHtml(String(post.id || "")) + '"',
+                    'data-media-url="' + escapeHtml(String(post.media_url || "")) + '"',
+                    'data-post-user="' + escapeHtml(String(post.user_name || "")) + '"',
+                    'data-post-created-at="' + escapeHtml(String(post.created_at || "")) + '"',
+                    'data-post-views="' + escapeHtml(String(post.views || 0)) + '"',
+                    'data-file-size="' + escapeHtml(String((normalizedPost._contentMeta && normalizedPost._contentMeta.fileSize) || "")) + '"',
+                    'data-original-size="' + escapeHtml(String((normalizedPost._contentMeta && normalizedPost._contentMeta.originalSize) || "")) + '"'
+                ].join(" ");
                 var mediaHtml = post.media_url ? (
                     post.media_type === 'video'
                         ? '<video src="' + escapeHtml(post.media_url) + '" controls preload="none"></video>'
-                        : '<img src="' + escapeHtml(post.media_url) + '" onclick="openImageViewer(\'' + safeJsStr(post.media_url) + '\')" loading="lazy" />'
+                        : '<img ' + detailMediaAttrs + ' src="' + escapeHtml(post.media_url) + '" onclick="openImageViewer(\'' + safeJsStr(post.media_url) + '\')" loading="lazy" />'
                 ) : '';
                 var canEdit = canEditPost(post);
                 var canDel = canEdit && (post.actor_key === deviceId || post.actor_key === currentUser || isAdmin());
