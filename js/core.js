@@ -4133,7 +4133,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         lastTabTapCount[tab] = (lastTabTapCount[tab] || 0) + 1;
                         
                         if (tab === 'ai') {
-                            window.showToast('刷新失败'));
+                            window.showToast('刷新失败');
                             ensurePhotoWallLoaded().then(function() {
                                 if (typeof window.loadPhotoWallData === 'function') {
                                     return window.loadPhotoWallData(true).then(function() {
@@ -5719,7 +5719,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ['闁告瑦鍨电粩鐑藉箣閹邦剙顫?, '发布成功'],
                 ['删除锟筋剙锟?', '删除鍏憡'],
                 ['闁稿浚鍓欓幉锟犲矗閹存繄顏撮柟瀛樺姇婵?', '鍏憡发布成功'],
-                ['闁告瑦鍨块埀顑跨閵囨垹鎷?', '发送失败],
+                ['闁告瑦鍨块埀顑跨閵囨垹鎷?', '发送失败'],
                 ['功能优化', '功能优化'],
                 ['Bug濞ｅ浂鍠栭ˇ?', 'Bug修复'],
                 ['閺傛澘锟?', '新增'],
@@ -5730,9 +5730,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ['控件', '控件'],
                 ['闁硅埖锚瑜?', '折叠'],
                 ['闂堛垺锟?', '面板'],
-                ['徽章, '徽章'],
+                ['徽章', '徽章'],
                 ['婵炲弶妲掔粚?', '活跃'],
-                ['闁衡偓椤栨稑鐦?, '支持'],
+                ['闁衡偓椤栨稑鐦?', '支持'],
                 ['濡炪倗鏁诲?', '椤甸潰'],
                 ['閺夆晜鏌ㄥú?', '返回'],
                 ['闁轰胶澧楀畵?', '数据'],
@@ -5746,7 +5746,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ['缂傛牞锟?', '编辑'],
                 ['闁哄洤鐡ㄩ弻?', '更新'],
                 ['闁绘挆鍛暬', '照片'],
-                ['闁告瑦鍨块埀?', '发送?],
+                ['闁告瑦鍨块埀?', '发送'],
                 ['濠㈡儼绮剧憴?', '失败'],
                 ['闁瑰瓨鍔曟慨?', '成功'],
                 ['闂佹寧鐟ㄩ?', '閿欒'],
@@ -5773,8 +5773,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ['涓伙拷锟?', '主题'],
                 ['濡炪倗顢婃竟?', '颜色'],
                 ['濡増绮忔竟?', '颜色'],
-                ['濞ｅ洠鈧啿濞?, '信号'],
-                ['鐎殿喖鍊?, '异常'],
+                ['濞ｅ洠鈧啿濞?', '信号'],
+                ['鐎殿喖鍊?', '异常'],
                 ['濠㈣泛瀚幃?', '处理'],
                 ['閳?', '鉂わ笍'],
             ];
