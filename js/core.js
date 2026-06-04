@@ -11,7 +11,7 @@ console.log('[XTJ] core.js loaded, starting...');
                 console.error('Supabase SDK not loaded');
                 document.addEventListener('DOMContentLoaded', function() {
                     var feedEl = document.getElementById('feed');
-                    if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">鏈嶅姟鍔犺浇澶辫触锛岃鍒锋柊椤甸潰閲嶈瘯</div>';
+                    if (feedEl) feedEl.innerHTML = '<div class="loading" style="color:#ff3b60;">鏈嶅姟加载失败，岃刷新椤甸潰閲嶈瘯</div>';
                 });
             }
             window.sb = sb;
@@ -309,9 +309,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (clearBtn) clearBtn.style.display = activeCount > 0 ? "" : "none";
             var hasFilters = activeCount > 0;
             if (!hasFilters) {
-                el.textContent = "鍏ㄩ儴甯栧瓙";
+                el.textContent = "鍏ㄩ儴帖子";
             } else if (!count) {
-                el.textContent = "娌℃湁鎵惧埌鐩稿叧甯栧瓙";
+                el.textContent = "没有找到鐩稿叧帖子";
             } else {
                 el.textContent = "找到 " + count + " 条结果";
             }
@@ -364,7 +364,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // FLIP Animation: Step 1 - First (锟斤拷录鎸夐挳浣嶇疆)
             var origin = window._confirmOrigin;
             
-            // FLIP Animation: Step 2 - Last (璁剧疆鏈拷缁堢姸锟?
+            // FLIP Animation: Step 2 - Last (设置鏈拷缁堢姸锟?
             overlay.classList.remove('closing');
             overlay.classList.add('active');
             var okBtn = document.getElementById('ppConfirmOkBtn');
@@ -536,7 +536,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }, 300);
         };
 
-            // ===================== 瀵嗙爜閸濆牆?=====================
+            // ===================== 密码閸濆牆?=====================
             async function hashPassword(password) {
                 const encoder = new TextEncoder();
                 const data = encoder.encode(password);
@@ -562,7 +562,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 try {
                     var regTime = null;
 
-                    // 浼樺厛浠?__auth__ 璁板綍鑾峰彇娉ㄥ唽鏃堕棿閿涘牊娓舵潈濞侊拷??
+                    // 浼樺厛浠?__auth__ 记录鑾峰彇娉ㄥ唽时间閿涘牊娓舵潈濞侊拷??
                     try {
                         var authRes = await sb.from("posts")
                             .select("created_at")
@@ -597,7 +597,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var userInfo = { reg_time: regTime, last_login: new Date().toISOString() };
                     var contentStr = JSON.stringify(userInfo);
 
-                    // 灏濊瘯鎵惧埌锟筋澁鎷烽弬棰佺閺壜ゎ唶瑜版洖鑻烾PDATE锛堟瘮DELETE+INSERT闁哄洦娼欒ぐ鏌ユ閻欏懐绀夐梺顒€鐏濋崢顥窵S闁归攱甯炵划绋LETE闁?
+                    // 灏濊瘯找到锟筋澁鎷烽弬棰佺閺壜ゎ唶瑜版洖鑻烾PDATE锛堟瘮DELETE+INSERT闁哄洦娼欒ぐ鏌ユ閻欏懐绀夐梺顒€鐏濋崢顥窵S闁归攱甯炵划绋LETE闁?
                     var updated = false;
                     try {
                         var latest = await sb.from("posts")
@@ -612,12 +612,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 .eq("id", latest.data[0].id);
                             if (!updRes.error) {
                                 updated = true;
-                                console.log("saveUserInfo [鏇存柊] " + name + " 鐧诲綍鏃堕棿 (UPDATE): " + userInfo.last_login);
+                                console.log("saveUserInfo [更新] " + name + " 登录时间 (UPDATE): " + userInfo.last_login);
                             }
                         }
                     } catch(e) {}
 
-                    // UPDATE澶辫触鎴栨棤璁板綍鏃讹紝INSERT涓€鏉℃柊璁板綍
+                    // UPDATE失败鎴栨棤记录鏃讹紝INSERT涓€鏉℃柊记录
                     if (!updated) {
                         var insertRes = await sb.from("posts").insert([{
                             user_name: name,
@@ -628,7 +628,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (insertRes.error) {
                             console.error("saveUserInfo insert濠㈡儼绮剧憴?", insertRes.error.message);
                         } else {
-                            console.log("saveUserInfo [鎻掑叆] " + name + " 鐧诲綍鏃堕棿 (INSERT): " + userInfo.last_login);
+                            console.log("saveUserInfo [鎻掑叆] " + name + " 登录时间 (INSERT): " + userInfo.last_login);
                         }
                     }
                 } catch(e) {
@@ -661,26 +661,26 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 const btn = document.getElementById("loginSubmitBtn");
                 btn.disabled = true;
-                btn.textContent = "楠岃瘉涓?..";
+                btn.textContent = "验证中..";
 
                 try {
                     if (name === ADMIN_NAME) {
                         if (pw !== "xxz123") {
-                            showToast("瀵嗙爜閿欒");
-                            btn.disabled = false; btn.textContent = "鐧诲綍";
+                            showToast("密码错误");
+                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                     } else {
                         const authRec = await findAuthRecord(name);
                         if (!authRec) {
-                            showToast("璐﹀彿涓嶅瓨鍦紝璇峰厛娉ㄥ唽");
-                            btn.disabled = false; btn.textContent = "鐧诲綍";
+                            showToast("账号不存在，请先注册");
+                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                         const inputHash = await hashPassword(pw);
                         if (inputHash !== authRec.media_url) {
-                            showToast("瀵嗙爜閿欒");
-                            btn.disabled = false; btn.textContent = "鐧诲綍";
+                            showToast("密码错误");
+                            btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
                     }
@@ -688,20 +688,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
-                    showToast("鐧诲綍鎴愬姛锛屾杩庡洖鏉ワ紒" + name);
+                    showToast("登录成功，欢迎回来！" + name);
                     closeModal('loginModal');
                     
-                    // 鏇存柊闁哄牃鍋撻弶鈺傚灩濞呫儴銇愭洘锟筋槯闂?
+                    // 更新闁哄牃鍋撻弶鈺傚灩濞呫儴銇愭洘锟筋槯闂?
                     await saveUserInfo(name, false);
                     
                     await initUI();
                     initialLoad(true);
                 } catch (e) {
                     console.error(e);
-                    showToast("鐧诲綍澶辫触锛岃閲嶈瘯");
+                    showToast("登录失败，岃閲嶈瘯");
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "鐧诲綍";
+                    btn.textContent = "登录";
                 }
             }
             window.doLogin = doLogin;
@@ -722,13 +722,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 const btn = document.getElementById("registerSubmitBtn");
                 btn.disabled = true;
-                btn.textContent = "娉ㄥ唽涓?..";
+                btn.textContent = "注册中..";
 
                 try {
                     const existing = await findAuthRecord(name);
                     if (existing) {
                         showToast("昵称 '" + name + "' 已被注册，请换一个");
-                        btn.disabled = false; btn.textContent = "注册失败";
+                        btn.disabled = false; btn.textContent = "注册中..";
                         return;
                     }
 
@@ -741,15 +741,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         actor_key: AUTH_MARKER
                     }]);
                     if (error) {
-                        showToast("娉ㄥ唽澶辫触: " + error.message);
-                        btn.disabled = false; btn.textContent = "娉ㄥ唽澶辫触";
+                        showToast("娉ㄥ唽失败: " + error.message);
+                        btn.disabled = false; btn.textContent = "娉ㄥ唽失败";
                         return;
                     }
 
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
-                    showToast("娉ㄥ唽鎴愬姛锛屾杩庯紒" + name);
+                    showToast("娉ㄥ唽成功锛屾杩庯紒" + name);
                     closeModal('registerModal');
                     
                     // 濞ｅ洦绻傞悺銊╂偨閵婏箑鐓曟繛澶堝妼閸炶姤绌遍鐟板⒉濞?
@@ -759,20 +759,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     initialLoad(true);
                 } catch (e) {
                     console.error(e);
-                    showToast("娉ㄥ唽澶辫触锛岃閲嶈瘯");
+                    showToast("娉ㄥ唽失败锛岃閲嶈瘯");
                 } finally {
                     btn.disabled = false;
                     btn.textContent = "娉ㄥ唽";
                 }
             }
 
-            // ========== 鏌ョ湅鍏兼湹绮敤鎴疯祫鏂欏崱锟?==========
+            // ========== 查看鍏兼湹绮敤鎴疯祫鏂欏崱锟?==========
             let upcTargetUser = null;
 
             window.openUserProfile = async function(userName) {
                 upcTargetUser = userName;
                 document.getElementById('upcName').textContent = userName;
-                document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細鍔犺浇涓?..';
+                document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細加载涓?..';
                 
                 var avatarEl = document.getElementById('upcAvatar');
                 // localStorage鏉冿拷鈻夐敓鏂ゆ嫹閿熸枻鎷烽敍姘秼閸撳秶鏁ら幋宄板帥濡澁鎷烽弻銉︽拱閸︽壆绱﹂敓?
@@ -787,7 +787,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     } catch(e) {}
                 }
                 if (showAvatar) {
-                    avatarEl.innerHTML = '<img src="' + showAvatar + '" alt="澶村儚">';
+                    avatarEl.innerHTML = '<img src="' + showAvatar + '" alt="头像">';
                 } else {
                     avatarEl.innerHTML = '<span id="upcAvatarText">' + userName[0].toUpperCase() + '</span>';
                 }
@@ -809,16 +809,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 
                 openModal('userProfileModal');
                 
-                // 瀵倹鍔犺浇澶村儚閸滃瞼娅ヨぐ鏇熸??
+                // 瀵倹加载头像閸滃瞼娅ヨぐ鏇熸??
                 try {
-                    // 褰撳墠鐢ㄦ埛浼樺厛浣跨敤localStorage闂佸搫顦崯顐﹀煝婢跺瞼澶勯悗?
+                    // 褰撳墠用户浼樺厛浣跨敤localStorage闂佸搫顦崯顐﹀煝婢跺瞼澶勯悗?
                     if (userName === currentUser) {
                         try {
                             var cv = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                             if (cv[currentUser]) {
                                 avatarCache[currentUser] = cv[currentUser];
                                 if (document.getElementById('userProfileModal').classList.contains('active')) {
-                                    avatarEl.innerHTML = '<img src="' + cv[currentUser] + '" alt="澶村儚">';
+                                    avatarEl.innerHTML = '<img src="' + cv[currentUser] + '" alt="头像">';
                                 }
                             }
                         } catch(e) {}
@@ -833,7 +833,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         .limit(1);
                     
                     if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                        // 闈炲綋鍓嶇敤鎴锋墠鐢―B閸婂吋娲块弬鎵处鐎涙﹫绱欓敓鏂ゆ嫹鍓嶉敓鐭紮鎷峰鎻掓躬娑撳﹪娼伴悽鈺╫calStorage璁剧疆閿?
+                        // 闈炲綋鍓嶇敤鎴锋墠鐢―B閸婂吋娲块弬鎵处鐎涙﹫绱欓敓鏂ゆ嫹鍓嶉敓鐭紮鎷峰鎻掓躬娑撳﹪娼伴悽鈺╫calStorage设置閿?
                         if (userName !== currentUser) {
                             avatarCache[userName] = avatarRes.data[0].media_url;
                         } else if (!avatarCache[currentUser]) {
@@ -841,7 +841,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
                             var url = (userName === currentUser && avatarCache[currentUser]) ? avatarCache[currentUser] : avatarRes.data[0].media_url;
-                            avatarEl.innerHTML = '<img src="' + url + '" alt="澶村儚">';
+                            avatarEl.innerHTML = '<img src="' + url + '" alt="头像">';
                         }
                     }
                     
@@ -867,7 +867,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細-';
                     }
                 } catch(e) {
-                    document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細鍔犺浇澶辫触';
+                    document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細加载失败';
                 }
             };
 
@@ -877,7 +877,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 setTimeout(function() { openChat(upcTargetUser); }, 300);
             };
 
-            // ========== 娑撴眽璧勬枡璇︽儏鍔熻兘 ==========
+            // ========== 娑撴眽璧勬枡璇︽儏功能 ==========
             window.openProfileDetail = async function() {
                 if (!currentUser) {
                     openAuthModal('login');
@@ -912,11 +912,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         document.getElementById('profileDetailRegTime').textContent = '-';
                     }
                 } catch(e) {
-                    console.error("鑾峰彇鐢ㄦ埛淇℃伅澶辫触:", e);
+                    console.error("鑾峰彇用户淇℃伅失败:", e);
                     document.getElementById('profileDetailRegTime').textContent = '-';
                 }
                 
-                // 鍔犺浇澶村儚
+                // 加载头像
                 loadProfileAvatar();
                 
                 openModal('profileDetailModal');
@@ -930,14 +930,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                     if (cachedAvatars[currentUser]) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
-                        avatarEl.innerHTML = '<img src="' + cachedAvatars[currentUser] + '" alt="澶村儚">';
+                        avatarEl.innerHTML = '<img src="' + cachedAvatars[currentUser] + '" alt="头像">';
                         return;
                     }
                 } catch(e) {}
                 
                 // 鍏煎牏锟姐倝宕橀崨顓犳憼缂傛挸鐡ㄩ弰鍓э拷?
                 if (avatarCache[currentUser]) {
-                    avatarEl.innerHTML = '<img src="' + avatarCache[currentUser] + '" alt="澶村儚">';
+                    avatarEl.innerHTML = '<img src="' + avatarCache[currentUser] + '" alt="头像">';
                 }
                 
                 try {
@@ -950,7 +950,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         .limit(1);
                     
                     if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                        avatarEl.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" alt="澶村儚">';
+                        avatarEl.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" alt="头像">';
                         avatarCache[currentUser] = avatarRes.data[0].media_url;
                         // 閸氬本顒為柛鎺旀ocalStorage
                         try {
@@ -962,7 +962,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         avatarEl.innerHTML = '<span id="profileDetailAvatarText">' + (currentUser ? currentUser[0].toUpperCase() : '?') + '</span>';
                     }
                 } catch(e) {
-                    console.error("鍔犺浇澶村儚澶辫触:", e);
+                    console.error("加载头像失败:", e);
                 }
             }
 
@@ -1000,7 +1000,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             fallbackCompress(img, w, h, quality, resolve);
                         }
                     };
-                    img.onerror = function() { URL.revokeObjectURL(url); reject(new Error('鍥剧墖鍔犺浇澶辫触')); };
+                    img.onerror = function() { URL.revokeObjectURL(url); reject(new Error('图片加载失败')); };
                     img.src = url;
                 });
             }
@@ -1023,12 +1023,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!file) return;
                 
                 if (!file.type.startsWith('image/')) {
-                    showToast('璇烽€夋嫨鍥剧墖鏂囦欢');
+                    showToast('璇烽€夋嫨图片文件');
                     return;
                 }
                 
                 if (file.size > 10 * 1024 * 1024) {
-                    showToast('鍥剧墖澶у皬涓嶈兘瓒呰繃10MB');
+                    showToast('图片澶у皬涓嶈兘超过10MB');
                     return;
                 }
                 
@@ -1040,14 +1040,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     const random = Math.floor(Math.random() * 1000);
                     const path = `avatars/${timestamp}_${random}_${file.name}`;
                     
-                    // 涓婁紶锟?Supabase Storage
+                    // 上传锟?Supabase Storage
                     const { error: uploadErr } = await sb.storage.from('uploads').upload(path, file);
                     if (uploadErr) throw uploadErr;
                     
                     // 閼惧嘲锟?Public URL
                     const avatarUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
                     
-                    // 鍒犻櫎閹碘偓閺堬拷顦ˇ鏉课涢顫粓闁稿秴绻楅鍥亹?
+                    // 删除閹碘偓閺堬拷顦ˇ鏉课涢顫粓闁稿秴绻楅鍥亹?
                     var oldIds = await sb.from("posts")
                         .select("id")
                         .eq("user_name", currentUser)
@@ -1066,19 +1066,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     
                     var { error } = await sb.from("posts").insert([{
                         user_name: currentUser,
-                        content: "鐢ㄦ埛澶村儚",
+                        content: "用户头像",
                         media_url: avatarUrl,
                         media_type: "__avatar__",
                         actor_key: "__avatar__"
                     }]);
                     
                     if (error) {
-                        showToast('涓婁紶澶辫触: ' + error.message);
+                        showToast('上传失败: ' + error.message);
                         return;
                     }
                     
                     avatarCache[currentUser] = avatarUrl;
-                    // 淇濆瓨鍒發ocalStorage鎸佷箙鍖栧瓨鍌?
+                    // 保存鍒發ocalStorage鎸佷箙鍖栧瓨鍌?
                     try {
                         var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                         cachedAvatars[currentUser] = avatarUrl;
@@ -1086,14 +1086,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     } catch(e) {}
                     updateAllAvatarElements(avatarUrl);
                     
-                    showToast('澶村儚鏇存柊鎴愬姛');
+                    showToast('头像更新成功');
                     localStorage.removeItem(CACHE_KEY);
                     await loadFeed(true);
                     avatarCache[currentUser] = avatarUrl;
                     updateAllAvatarElements(avatarUrl);
                 } catch(e) {
-                    console.error("涓婁紶澶村儚澶辫触:", e);
-                    showToast('涓婁紶澶辫触锛岃閲嶈瘯');
+                    console.error("上传头像失败:", e);
+                    showToast('上传失败锛岃閲嶈瘯');
                 }
                 
                 event.target.value = '';
@@ -1175,7 +1175,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     }
                 } catch(e) {
-                    console.error("鏇存柊澶村儚鏄剧ず澶辫触:", e);
+                    console.error("更新头像显示失败:", e);
                 }
             }
 
@@ -1205,7 +1205,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 initialLoad(true);
             };
 
-            // 澶勭悊鎴戠殑椤甸潰锟矫伙拷鍗＄墖鐐癸拷??
+            // 处理鎴戠殑椤甸潰锟矫伙拷卡片鐐癸拷??
             window.handleProfileCardClick = function() {
                 if (currentUser) {
                     // 鐎规瓕灏欙拷鈻嶉妷銊ｄ汗闁哄浂浜炵粣妤呭箥閹惧磭纾绘繛鎴炴尰閻晫鎸ч崟顒佺亹閻犲浄闄勯崕?
@@ -1233,14 +1233,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     avatar.textContent = currentUser[0].toUpperCase();
                     avatar.className = "avatar";
                     
-                    // 鏇存柊鎴戠殑椤甸潰鏄剧ず
+                    // 更新鎴戠殑椤甸潰显示
                     profileName.textContent = currentUser;
-                    profileStatus.textContent = "鏌ョ湅璧勬枡";
+                    profileStatus.textContent = "查看资料";
                     
-                    // 鏄剧ず鍙戝竷閸栧搫锟?
+                    // 显示发布閸栧搫锟?
                     if (publishBox) publishBox.style.display = "block";
                     
-                    // 鍔犺浇澶村儚
+                    // 加载头像
                     loadUserAvatar();
                     
                     // 閿熸枻鎷烽敓鏂ゆ嫹閺堚偓杩戠櫥褰曟椂闂达紙椤甸潰姣忥拷顐奸敓鏂ゆ嫹闁棄鍩涢弬甯礉韫囧懘銆廰wait纭繚鍐欏叆??
@@ -1252,9 +1252,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     authUI.style.display = "none";
                     annBtnWrapper.style.display = "none";
                     
-                    // 鏇存柊鎴戠殑椤甸潰鏄剧ず閿涘牊婀櫥褰曪拷??
+                    // 更新鎴戠殑椤甸潰显示閿涘牊婀櫥褰曪拷??
                     profileName.textContent = "未登录";
-                    profileStatus.textContent = "鐐瑰嚮鐧诲綍";
+                    profileStatus.textContent = "点击登录";
                     
                     // 闂呮劘妫屽彂甯冮崠鍝勭厵
                     if (publishBox) publishBox.style.display = "none";
@@ -1299,19 +1299,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     }
                 } catch(e) {
-                    console.error("鍔犺浇澶村儚澶辫触:", e);
+                    console.error("加载头像失败:", e);
                 }
             }
 
             // DEPRECATED_DO_NOT_EDIT ===================== [瀹告彃绨惧锟?娑撳鏌熼敓?361鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 =====================
             window.doPublish = async function () {
-                if (!currentUser) { showToast("璇峰厛鐧诲綍"); return; }
+                if (!currentUser) { showToast("请先登录"); return; }
                 var content = document.getElementById("postInp").value.trim();
                 var file = document.getElementById("fileInp").files[0];
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
                 // 鏉堟挸鍙嗛弽锟犵崣閿涙岸妾洪崚鍫曟毐鎼达讣鎷烽敓钘夊箵闂勩倕宓勯梽鈺佸敶锟?
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
-                var btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "鍙戝竷涓?..";
+                var btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中..";
                 try {
                     let media_url = "", media_type = "";
                     if (file) {
@@ -1329,9 +1329,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 } catch (e) { showToast("发布失败: " + (e.message || "网络错误")); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
             };
 
-            // ===================== 鐐硅禐 =====================
+            // ===================== 点赞 =====================
             window.toggleLike = async function (btn, postId) {
-                if (!currentUser) { showToast("璇峰厛鐧诲綍"); return; }
+                if (!currentUser) { showToast("请先登录"); return; }
                 const isLiked = btn.classList.contains("liked");
                 const statsText = btn.closest('.post').querySelector('.post-stats-text');
 
@@ -1341,7 +1341,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     btn.classList.add("liked");
                     createHeartParticles(btn);
                 }
-                btn.textContent = isLiked ? "鉂わ笍 宸茶禐" : "鉂わ笍 鐐硅禐";
+                btn.textContent = isLiked ? "鉂わ笍 宸茶禐" : "鉂わ笍 点赞";
 
                 try {
                     if (isLiked) {
@@ -1349,10 +1349,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     } else {
                         await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
                     }
-                    const match = statsText.textContent.match(/鐐硅禐 (\d+)/);
+                    const match = statsText.textContent.match(/点赞 (\d+)/);
                     if (match) {
                         const num = parseInt(match[1]);
-                        statsText.innerHTML = statsText.innerHTML.replace(/鐐硅禐 \d+/, `鐐硅禐 ${isLiked ? num-1 : num+1}`);
+                        statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num-1 : num+1}`);
                     }
                     updateFeedStats();
                     refreshStatModal();
@@ -1388,7 +1388,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // ===================== 閻犲洤瀚?=====================
             window.openComment = function (postId) {
-                if (!currentUser) { showToast("璇峰厛鐧诲綍"); return; }
+                if (!currentUser) { showToast("请先登录"); return; }
                 activePostId = postId;
                 document.getElementById("commInp").value = "";
                 document.getElementById("commentModal").classList.add("active");
@@ -1398,7 +1398,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const content = document.getElementById("commInp").value.trim();
                 if (!content) { showToast("请输入评论内容"); return; }
                 const btn = document.getElementById("commBtn");
-                btn.textContent = "鎻愪氦涓?..";
+                btn.textContent = "提交中..";
                 btn.disabled = true;
                 try {
                     const { error } = await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
@@ -1415,15 +1415,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (postEl) postEl.classList.add('visible');
                     });
                 } catch (e) {
-                    showToast("璇勮澶辫触: " + (e.message || "鏈煡閿欒"));
+                    showToast("璇勮失败: " + (e.message || "鏈煡閿欒"));
                     console.error(e);
                 } finally {
-                    btn.textContent = "鍙戝竷璇勮";
+                    btn.textContent = "发布璇勮";
                     btn.disabled = false;
                 }
             };
 
-            // ===================== 鍒犻櫎閻㈩垱鐗曢悺?=====================
+            // ===================== 删除閻㈩垱鐗曢悺?=====================
             window.openDelete = function (postId, ownerKey) {
                 delPostId = postId;
                 delOwnerKey = ownerKey;
@@ -1433,7 +1433,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!delPostId) return;
                 const btn = document.getElementById("delBtn");
                 btn.disabled = true;
-                btn.textContent = "鍒犻櫎涓?..";
+                btn.textContent = "删除中..";
                 try {
                     const key = isAdmin() ? delOwnerKey : deviceId;
                     const { error } = await sb.rpc("delete_post_with_actor", {
@@ -1441,7 +1441,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         p_actor_key: key
                     });
                     if (error) {
-                        showToast("鍒犻櫎澶辫触: " + error.message);
+                        showToast("删除失败: " + error.message);
                         return;
                     }
                     closeModal("delModal");
@@ -1449,11 +1449,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     delPostId = null;
                     await loadFeed(true);
                 } catch (e) {
-                    showToast("鍒犻櫎甯栧瓙澶辫触");
+                    showToast("删除帖子失败");
                     console.error(e);
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "纭鍒犻櫎";
+                    btn.textContent = "纭删除";
                 }
             };
 
@@ -1477,7 +1477,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
 
-            // ===================== 鍥剧墖锟姐儳婀咃拷?=====================
+            // ===================== 图片锟姐儳婀咃拷?=====================
             const ivZoomState = { scale: 1, tx: 0, ty: 0 };
             let ivIsZooming = false;
             let ivIsPanning = false;
@@ -1674,7 +1674,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }, { passive: false });
 
             // ===================== 濞村繗顫嶉梺鎻掔箳缁櫣锟?=====================
-            // 閸忋劌锟斤拷甯栧瓙锟解剝浼呴敓鏂ゆ嫹閿熸枻鎷烽敍宀€鏁ゆ禍搴㈢セ鐟欏牐顔囬敓?
+            // 閸忋劌锟斤拷帖子锟解剝浼呴敓鏂ゆ嫹閿熸枻鎷烽敍宀€鏁ゆ禍搴㈢セ鐟欏牐顔囬敓?
             const postInfoCache = {};
             const VIEW_HISTORY_KEY = 'xtj_view_history';
             const VIEW_TRACK_TTL = 5 * 60 * 1000;
@@ -1737,10 +1737,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (postEl) {
                         var statsEl = postEl.querySelector('.post-stats-text');
                         if (statsEl) {
-                            var vm = statsEl.textContent.match(/娴忚 (\d+)/);
+                            var vm = statsEl.textContent.match(/浏览 (\d+)/);
                             if (vm) {
                                 var newVal = parseInt(vm[1]) + 1;
-                                statsEl.innerHTML = statsEl.innerHTML.replace(/娴忚 \d+/, '娴忚 ' + newVal);
+                                statsEl.innerHTML = statsEl.innerHTML.replace(/浏览 \d+/, '浏览 ' + newVal);
                             }
                         }
                     }
@@ -1749,7 +1749,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         saveViewHistory({
                             user_name: currentUser,
                             post_id: postId,
-                            post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || '(鍥剧墖/瑙嗛)'),
+                            post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || '(图片/瑙嗛)'),
                             post_author: postInfoCache[postId].user_name || '鏈煡',
                             viewed_at: new Date().toISOString()
                         });
@@ -1763,7 +1763,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             }
 
-            // ===================== 鍔犺浇閸斻劍??=====================
+            // ===================== 加载閸斻劍??=====================
             // 濞寸姾顕э拷?锛氬垎椤靛姞杞界浉鍏冲彉锟?
             saveViewHistory = function(entry) {
                 const history = getViewHistory();
@@ -1862,7 +1862,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         try {
                             const parsed = JSON.parse(cached);
                             if (parsed?.data && now - parsed.timestamp < CACHE_DURATION) {
-                                // 缂撳瓨鍔犺浇閿涘苯鎮撻弮璺哄灥婵瀵插垎椤电姸??
+                                // 缂撳瓨加载閿涘苯鎮撻弮璺哄灥婵瀵插垎椤电姸??
                                 feedAllPosts = parsed.data.posts || [];
                                 feedAllComments = parsed.data.comments || [];
                                 feedAllLikes = parsed.data.likes || [];
@@ -1875,7 +1875,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('鍐呭鍔犺浇涓?..', '', 'feed');
+                if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('鍐呭加载涓?..', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }).limit(500),
@@ -1883,8 +1883,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         sb.from("likes").select("*").limit(3000)
                     ]);
                     if (postRes.error || commRes.error || likeRes.error) {
-                        const errMsg = (postRes.error || commRes.error || likeRes.error).message || '鏁版嵁鍔犺浇澶辫触';
-                        feed.innerHTML = `<div class="loading" style="color:#ff3b60;">鍔犺浇澶辫触: ${errMsg}</div>`;
+                        const errMsg = (postRes.error || commRes.error || likeRes.error).message || '数据加载失败';
+                        feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败: ${errMsg}</div>`;
                         return;
                     }
                     const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
@@ -1899,7 +1899,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     // 閸氼垰濮╅弮鐘绘濠婃艾濮╅敓妗旇锟?
                     setupFeedInfiniteScroll();
                 } catch(e) {
-                    feed.innerHTML = `<div class="loading" style="color:#ff3b60;">鍔犺浇澶辫触锛岃鍒锋柊閲嶈瘯</div>`;
+                    feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败，岃刷新重试</div>`;
                     console.error(e);
                 }
             }
@@ -1947,7 +1947,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         noMore = document.createElement('div');
                         noMore.id = 'feedNoMore';
                         noMore.className = 'loading';
-                        noMore.textContent = '娌℃湁鏇村甯栧瓙';
+                        noMore.textContent = '没有鏇村帖子';
                         noMore.style.padding = '30px';
                         noMore.style.textAlign = 'center';
                         feed.appendChild(noMore);
@@ -1981,12 +1981,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   </div>
                   <div class="content">${escapeHtml(p.content)}</div>
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}')">`}</div>`:''}
-                  <div class="post-stats-text">娴忚 ${p.views||0} | 鐐硅禐 ${pLikes.length} | 璇勮 ${pComms.length}</div>
+                  <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 璇勮 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'鉂わ笍':'鐐硅禐'}</button>
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'鉂わ笍':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">璇勮</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '鍙栨秷缃《' : '缃《'}</button>`:''}
-                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">鍒犻櫎</button>`:''}
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '取消缃《' : '缃《'}</button>`:''}
+                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -2014,7 +2014,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const newPosts = feed.querySelectorAll('.post:not(.visible)');
                 newPosts.forEach(p => getPostVisibilityObserver().observe(p));
                 
-                // 鏇存柊缁熻
+                // 更新缁熻
                 updateFeedStats();
             }
 
@@ -2025,7 +2025,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length + comments.length;
 
-                // 濉厖甯栧瓙淇℃伅缂撳瓨閿涘奔绶垫祻瑙堣褰曟担璺拷??
+                // 濉厖帖子淇℃伅缂撳瓨閿涘奔绶垫祻瑙堣褰曟担璺拷??
                 visiblePosts.forEach(p => {
                     postInfoCache[p.id] = { content: p.content, user_name: p.user_name };
                 });
@@ -2068,7 +2068,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return { commentMap, likeMap, likeUserMap };
             }
 
-            // 缂撳瓨澶村儚URL
+            // 缂撳瓨头像URL
 
             async function loadAvatarsForUsers(usernames) {
                 if (!usernames || usernames.length === 0) return;
@@ -2104,7 +2104,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     }
                 } catch(e) {
-                    console.error("鍔犺浇澶村儚澶辫触:", e);
+                    console.error("加载头像失败:", e);
                 }
             }
 
@@ -2260,12 +2260,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   </div>
                   <div class="content">${escapeHtml(p.content)}</div>
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}')">`}</div>`:''}
-                  <div class="post-stats-text">娴忚 ${p.views||0} | 鐐硅禐 ${pLikes.length} | 璇勮 ${pComms.length}</div>
+                  <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 璇勮 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'鉂わ笍':'鐐硅禐'}</button>
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'鉂わ笍':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">璇勮</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '鍙栨秷缃《' : '缃《'}</button>`:''}
-                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">鍒犻櫎</button>`:''}
+                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '取消缃《' : '缃《'}</button>`:''}
+                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
                   </div>
                   ${pComms.length?`
                   <div class="comments">
@@ -2278,7 +2278,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   `:''}
                 </div>
               `;
-                }).join('') : `<div class="loading">蹇潵鍙戝竷绗竴鏉″姩鎬佸惂~</div>`;
+                }).join('') : `<div class="loading">蹇潵发布绗竴鏉″姩鎬佸惂~</div>`;
 
                 initPostScrollAnimation();
             }
@@ -2295,8 +2295,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var totalLikes = 0, totalComments = 0, totalViews = 0;
                 posts.forEach(function(p) {
                     var text = (p.querySelector('.post-stats-text') || {}).textContent || '';
-                    var vm = text.match(/娴忚 (\d+)/);
-                    var lm = text.match(/鐐硅禐 (\d+)/);
+                    var vm = text.match(/浏览 (\d+)/);
+                    var lm = text.match(/点赞 (\d+)/);
                     var cm = text.match(/璇勮 (\d+)/);
                     if (vm) totalViews += parseInt(vm[1]);
                     if (lm) totalLikes += parseInt(lm[1]);
@@ -2411,18 +2411,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var result = await sb.from("posts").update(updatePayload).eq("id", post.id).select("*").maybeSingle();
                 if (result.error) return { ok: false, error: result.error };
                 if (!result.data) {
-                    return { ok: false, error: new Error("鏇存柊澶辫触锛氭暟鎹簱娌℃湁瀹為檯淇敼浠讳綍琛岋紝鍙兘鏄?RLS 鏉冮檺闃绘") };
+                    return { ok: false, error: new Error("更新失败锛氭暟鎹簱没有瀹為檯淇敼浠讳綍琛岋紝鍙兘鏄?RLS 权限闃绘") };
                 }
                 var verified = normalizePost(result.data);
                 var verifiedMeta = parsePostContent(result.data).meta || {};
                 if (String(verified.visibility || "public") !== String(nextVisibility)) {
-                    return { ok: false, error: new Error("更新失败：visibility 字段未实际生效") };
+                    return { ok: false, error: new Error("更新失败：置顶状态未实际生效") };
                 }
                 if (String(verifiedMeta.visibility || "public") !== String(nextVisibility)) {
                     return { ok: false, error: new Error("更新失败：content.meta.visibility 未同步") };
                 }
                 if (!!verified.is_pinned !== !!nextPinned) {
-                    return { ok: false, error: new Error("鏇存柊澶辫触锛氱疆椤剁姸鎬佹湭瀹為檯鐢熸晥") };
+                    return { ok: false, error: new Error("更新失败：置顶状态未实际生效") };
                 }
                 if (!!verifiedMeta.is_pinned !== !!nextPinned) {
                     return { ok: false, error: new Error("更新失败：content.meta.is_pinned 未同步") };
@@ -2553,7 +2553,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 feedEndReached = false;
                 var feed = document.getElementById("feed");
                 if (feed && window.xtjMagicLoadingHtml) {
-                    feed.innerHTML = window.xtjMagicLoadingHtml('鍐呭鍔犺浇涓?..', '', 'feed');
+                    feed.innerHTML = window.xtjMagicLoadingHtml('鍐呭加载涓?..', '', 'feed');
                 }
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
@@ -2619,7 +2619,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 console.log('[openEditPost] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
                 var target = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
                 if (!target || !canEditPost(target)) {
-                    showToast("鏃犳潈缂栬緫杩欐潯甯栧瓙");
+                    showToast("无权编辑这条帖子");
                     return;
                 }
                 editPostId = String(target.id);
@@ -2634,7 +2634,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 });
                 // Re-enable save button
                 var btn = document.getElementById("saveEditPostBtn");
-                if (btn) { btn.disabled = false; btn.textContent = "淇濆瓨淇敼"; }
+                if (btn) { btn.disabled = false; btn.textContent = "保存淇敼"; }
                 openModal("editPostModal");
             };
 
@@ -2642,7 +2642,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!editPostId) return;
                 var post = normalizePosts(feedAllPosts).find(function(item) { return String(item.id) === String(editPostId); });
                 if (!post || !canEditPost(post)) {
-                    showToast("鏃犳潈缂栬緫杩欐潯甯栧瓙");
+                    showToast("无权编辑这条帖子");
                     return;
                 }
                 var input = document.getElementById("editPostInp");
@@ -2654,7 +2654,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
                 btn.disabled = true;
-                btn.textContent = "淇濆瓨涓?..";
+                btn.textContent = "保存中..";
                 try {
                     var result = await updatePostRecord(post, {
                         content: nextContent.slice(0, 2000),
@@ -2662,19 +2662,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         updated_at: new Date().toISOString()
                     });
                     if (!result.ok) {
-                        showToast("淇濆瓨澶辫触: " + ((result.error && result.error.message) || "鏈煡閿欒"));
+                        showToast("保存失败: " + ((result.error && result.error.message) || "鏈煡閿欒"));
                         return;
                     }
                     var fetched = await sb.from("posts").select("*").eq("id", editPostId).maybeSingle();
                     if (fetched.error) throw fetched.error;
                     var fetchedPost = fetched.data || null;
                     if (!fetchedPost) {
-                        throw new Error("淇濆瓨澶辫触锛氬叕寮€/绉樺瘑鐘舵€佹湭瀹為檯淇濆瓨");
+                        throw new Error("保存失败，氬叕寮€/绉樺瘑鐘舵€佹湭瀹為檯保存");
                     }
                     var verified = normalizePost(fetchedPost);
                     var verifiedMeta = parsePostContent(fetchedPost).meta || {};
                     if (String(verified.visibility) !== String(nextVisibility)) {
-                        throw new Error("淇濆瓨澶辫触锛氬叕寮€/绉佸瘑鐘舵€佹湭瀹為檯淇濆瓨");
+                        throw new Error("保存失败，氬叕寮€/绉佸瘑鐘舵€佹湭瀹為檯保存");
                     }
                     if (String(verifiedMeta.visibility || "public") !== String(nextVisibility)) {
                         throw new Error("保存失败：content.meta.visibility 未同步");
@@ -2697,43 +2697,43 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast(nextVisibility === "private" ? "已改为私密" : "已改为公开");
                 } catch (e) {
                     console.error("[edit-post] save failed", e);
-                    showToast("淇濆瓨澶辫触: " + (e && e.message ? e.message : "缃戠粶閿欒"));
+                    showToast("保存失败: " + (e && e.message ? e.message : "网络閿欒"));
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "淇濆瓨淇敼";
+                    btn.textContent = "保存淇敼";
                 }
             };
             window._legacyTogglePostPinBase = async function(postId, btn) {
                 console.log('[togglePostPin] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
-                if (!postId) { showToast("缃《澶辫触: postId 涓虹┖"); return; }
+                if (!postId) { showToast("缃《失败: postId 涓虹┖"); return; }
                 var nextPinned;
                 var originalText;
                 if (btn) {
                     originalText = btn.textContent;
                     btn.disabled = true;
-                    btn.textContent = '澶勭悊涓?..';
+                    btn.textContent = '处理涓?..';
                 }
                 try {
                     // Fetch current post state directly from DB (only select columns that exist)
                     var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
-                    if (fetchRes.error) { alert('鏌ヨ澶辫触: ' + fetchRes.error.message); throw fetchRes.error; }
-                    if (!fetchRes.data) { alert('鏈壘鍒板笘瀛?(id=' + postId + ')'); throw new Error('not found'); }
+                    if (fetchRes.error) { alert('查询失败: ' + fetchRes.error.message); throw fetchRes.error; }
+                    if (!fetchRes.data) { alert('未找到帖子(id=' + postId + ')'); throw new Error('not found'); }
                     var dbPost = normalizePost(fetchRes.data);
                     // Check permission
                     if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
-                        alert('鏃犳潈缃《杩欐潯甯栧瓙 (褰撳墠: ' + currentUser + ', 浣滆€? ' + dbPost.user_name + ')');
-                        showToast('鏃犳潈缃《');
+                        alert('无权置顶这条帖子 (当前: ' + currentUser + ', 作者: ' + dbPost.user_name + ')');
+                        showToast('无权置顶');
                         if (btn) { btn.disabled = false; btn.textContent = originalText; }
                         return;
                     }
                     nextPinned = !dbPost.is_pinned;
-                    btn.textContent = nextPinned ? '缃《涓?..' : '鍙栨秷涓?..';
+                    btn.textContent = nextPinned ? '缃《涓?..' : '取消中..';
                     // Update via Supabase directly
                     var updateRes = await sb.from('posts').update({
                         is_pinned: nextPinned,
                         pinned_at: nextPinned ? new Date().toISOString() : null
                     }).eq('id', postId);
-                    if (updateRes.error) { alert('鏇存柊澶辫触: ' + updateRes.error.message); throw updateRes.error; }
+                    if (updateRes.error) { alert('更新失败: ' + updateRes.error.message); throw updateRes.error; }
                     clearFeedCache();
                     showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
                     await loadFeed(true);
@@ -2747,13 +2747,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
             window._legacyTogglePostPin = async function(postId, btn) {
                 console.log('[togglePostPin override] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
-                if (!postId) { showToast("缃《澶辫触: postId 涓虹┖"); return; }
+                if (!postId) { showToast("缃《失败: postId 涓虹┖"); return; }
                 var nextPinned;
                 var originalText;
                 if (btn) {
                     originalText = btn.textContent;
                     btn.disabled = true;
-                    btn.textContent = '澶勭悊涓?..';
+                    btn.textContent = '处理涓?..';
                 }
                 try {
                     var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
@@ -2761,18 +2761,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (!fetchRes.data) throw new Error('未找到对应帖子');
                     var dbPost = normalizePost(fetchRes.data);
                     if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
-                        showToast('鏃犳潈缃《');
+                        showToast('无权缃《');
                         return;
                     }
                     nextPinned = !dbPost.is_pinned;
-                    if (btn) btn.textContent = nextPinned ? '缃《涓?..' : '鍙栨秷涓?..';
+                    if (btn) btn.textContent = nextPinned ? '缃《涓?..' : '取消中..';
                     var updateRes = await updatePostRecord(fetchRes.data, {
                         is_pinned: nextPinned,
                         pinned_at: nextPinned ? new Date().toISOString() : null,
                         updated_at: new Date().toISOString()
                     });
                     if (!updateRes.ok) {
-                        showToast('缃《澶辫触: ' + ((updateRes.error && updateRes.error.message) || '鏈煡閿欒'));
+                        showToast('缃《失败: ' + ((updateRes.error && updateRes.error.message) || '鏈煡閿欒'));
                         return;
                     }
                     clearFeedCache();
@@ -2780,7 +2780,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast(nextPinned ? '帖子已置顶' : '已取消置顶');
                 } catch (e) {
                     console.error('[togglePostPin override] error:', e);
-                    showToast('缃《澶辫触: ' + (e && e.message ? e.message : '鏈煡閿欒'));
+                    showToast('缃《失败: ' + (e && e.message ? e.message : '鏈煡閿欒'));
                 } finally {
                     if (btn) {
                         btn.disabled = false;
@@ -2920,7 +2920,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             window.togglePostPin = async function(postId, btn) {
                 console.log('[togglePostPin final override] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
                 if (!postId) {
-                    showToast('缃《澶辫触: postId 涓虹┖');
+                    showToast('缃《失败: postId 涓虹┖');
                     return;
                 }
                 var originalText = btn ? btn.textContent : '';
@@ -2929,7 +2929,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 try {
                     if (btn) {
                         btn.disabled = true;
-                        btn.textContent = '澶勭悊涓?..';
+                        btn.textContent = '处理涓?..';
                     }
                     var fetchRes = await sb.from('posts').select('*').eq('id', postId).maybeSingle();
                     if (fetchRes.error) throw fetchRes.error;
@@ -2937,14 +2937,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                     var dbPost = normalizePost(fetchRes.data);
                     if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
-                        showToast('鏃犳潈缃《');
+                        showToast('无权缃《');
                         return;
                     }
 
                     nextPinned = !dbPost.is_pinned;
                     var nextPinnedAt = nextPinned ? new Date().toISOString() : null;
                     var nextUpdatedAt = new Date().toISOString();
-                    if (btn) btn.textContent = nextPinned ? '缃《涓?..' : '鍙栨秷涓?..';
+                    if (btn) btn.textContent = nextPinned ? '缃《涓?..' : '取消中..';
 
                     var updateRes = await updatePostRecord(fetchRes.data, {
                         is_pinned: nextPinned,
@@ -2952,7 +2952,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         updated_at: nextUpdatedAt
                     });
                     if (!updateRes.ok) {
-                        showToast('缃《澶辫触: ' + ((updateRes.error && updateRes.error.message) || '鏈煡閿欒'));
+                        showToast('缃《失败: ' + ((updateRes.error && updateRes.error.message) || '鏈煡閿欒'));
                         return;
                     }
 
@@ -2981,11 +2981,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     verifyPinnedPostInBackground(postId, nextPinned);
                 } catch (e) {
                     console.error('[togglePostPin final override] error:', e);
-                    showToast('缃《澶辫触: ' + (e && e.message ? e.message : '鏈煡閿欒'));
+                    showToast('缃《失败: ' + (e && e.message ? e.message : '鏈煡閿欒'));
                 } finally {
                     if (btn) {
                         btn.disabled = false;
-                        btn.textContent = didSucceed ? (nextPinned ? '鍙栨秷缃《' : '缃《') : (originalText || '缃《');
+                        btn.textContent = didSucceed ? (nextPinned ? '取消缃《' : '缃《') : (originalText || '缃《');
                     }
                 }
             };
@@ -3001,7 +3001,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                     if (btn) {
                         btn.disabled = true;
-                        btn.textContent = "澶勭悊涓?..";
+                        btn.textContent = "处理涓?..";
                     }
                     nextVisibility = post.visibility === "private" ? "public" : "private";
                     var result = await updatePostRecord(post, {
@@ -3009,7 +3009,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     });
                     if (!result.ok) {
                         if (btn) { btn.disabled = false; btn.textContent = nextVisibility === "private" ? "馃敀 璁句负绉佸瘑" : "馃敁 璁句负鍏紑"; }
-                        showToast("鎿嶄綔澶辫触: " + ((result.error && result.error.message) || "鏈煡閿欒"));
+                        showToast("鎿嶄綔失败: " + ((result.error && result.error.message) || "鏈煡閿欒"));
                         return;
                     }
                     clearFeedCache();
@@ -3050,7 +3050,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             });
             window.doPublish = async function () {
-                if (!currentUser) { showToast("璇峰厛鐧诲綍"); return; }
+                if (!currentUser) { showToast("请先登录"); return; }
                 var content = document.getElementById("postInp").value.trim();
                 var file = document.getElementById("fileInp").files[0];
                 var visibilityEl = document.getElementById("postVisibility");
@@ -3059,7 +3059,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
                 var btn = document.getElementById("pubBtn");
                 btn.disabled = true;
-                btn.textContent = "鍙戝竷涓?..";
+                btn.textContent = "发布中..";
                 try {
                     var media_url = "";
                     var media_type = "";
@@ -3086,7 +3086,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var fallbackContent = buildPostContentPayload(plainText, metadata);
                     var insertRes = await insertPostRecord(payload, fallbackContent);
                     if (!insertRes.ok) {
-                        showToast("鍙戝竷澶辫触: " + ((insertRes.error && insertRes.error.message) || "鏈煡閿欒"));
+                        showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "鏈煡閿欒"));
                         return;
                     }
                     clearFeedCache();
@@ -3094,7 +3094,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     await loadFeed(true);
                 } catch (e) {
-                    showToast("鍙戝竷澶辫触: " + (e.message || "缃戠粶閿欒"));
+                    showToast("发布失败: " + (e.message || "网络閿欒"));
                 } finally {
                     btn.disabled = false;
                     btn.textContent = "发布动态";
@@ -3132,7 +3132,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
-                    feed.innerHTML = window.xtjMagicLoadingHtml('鍐呭鍔犺浇涓?..', '', 'feed');
+                    feed.innerHTML = window.xtjMagicLoadingHtml('鍐呭加载涓?..', '', 'feed');
                 }
                 try {
                     var results = await Promise.all([
@@ -3146,7 +3146,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (postRes.error || commRes.error || likeRes.error) {
                         if (requestId !== feedLoadRequestId) return;
                         var err = postRes.error || commRes.error || likeRes.error;
-                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">鍔犺浇澶辫触: ' + escapeHtml(err.message || "鏈煡閿欒") + '</div>';
+                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败: ' + escapeHtml(err.message || "鏈煡閿欒") + '</div>';
                         return;
                     }
                     if (requestId !== feedLoadRequestId) return;
@@ -3164,7 +3164,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
                     setupFeedInfiniteScroll();
                 } catch (e) {
-                    if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">鍔犺浇澶辫触锛岃鍒锋柊閲嶈瘯</div>';
+                    if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，岃刷新重试</div>';
                     console.error(e);
                 }
             };
@@ -3183,7 +3183,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         noMore = document.createElement("div");
                         noMore.id = "feedNoMore";
                         noMore.className = "loading";
-                        noMore.textContent = "娌℃湁鏇村甯栧瓙";
+                        noMore.textContent = "没有鏇村帖子";
                         noMore.style.padding = "30px";
                         noMore.style.textAlign = "center";
                         feed.appendChild(noMore);
@@ -3262,7 +3262,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!delPostId) return;
                 var btn = document.getElementById("delBtn");
                 btn.disabled = true;
-                btn.textContent = "鍒犻櫎涓?..";
+                btn.textContent = "删除中..";
                 try {
                     var key = isAdmin() ? delOwnerKey : deviceId;
                     var result = await sb.rpc("delete_post_with_actor", {
@@ -3270,7 +3270,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         p_actor_key: key
                     });
                     if (result.error) {
-                        showToast("鍒犻櫎澶辫触: " + result.error.message);
+                        showToast("删除失败: " + result.error.message);
                         return;
                     }
                     clearFeedCache();
@@ -3279,11 +3279,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     delPostId = null;
                     await loadFeed(true);
                 } catch (e) {
-                    showToast("鍒犻櫎甯栧瓙澶辫触");
+                    showToast("删除帖子失败");
                     console.error(e);
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "纭鍒犻櫎";
+                    btn.textContent = "纭删除";
                 }
             };
 
@@ -3305,8 +3305,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 } catch (e) {}
             };
 
-            // ===================== 鏁版嵁缁熻璇︽儏鍔熻兘 =====================
-            // 瀛樺偍锟斤拷前鐨勭粺锟铰ゎ潒鍥剧姸锟?
+            // ===================== 数据缁熻璇︽儏功能 =====================
+            // 存储锟斤拷前鐨勭粺锟铰ゎ潒鍥剧姸锟?
             let statCurrentType = null;
             let statAllPosts = [];
             let statAllComments = [];
@@ -3344,7 +3344,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     renderStatByType(type);
                     if (statPollTimer) clearInterval(statPollTimer);
                     statPollTimer = setInterval(refreshStatModal, 15000);
-                    // 鍚庡彴闈欓粯刷锟斤拷
+                    // 后台静默刷锟斤拷
                     prefetchStatData().then(function() {
                         if (document.getElementById('statModal').classList.contains('active') && statCurrentType === type) {
                             renderStatByType(type);
@@ -3353,7 +3353,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                document.getElementById('statModalBody').innerHTML = window.xtjMagicLoadingHtml('鍔犺浇涓?..', '鍔犺浇涓?..', 'feed');
+                document.getElementById('statModalBody').innerHTML = window.xtjMagicLoadingHtml('加载涓?..', '加载涓?..', 'feed');
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
@@ -3369,7 +3369,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                     renderStatByType(type);
                 } catch(e) {
-                    document.getElementById('statModalBody').innerHTML = '<div class="stat-empty">鍔犺浇澶辫触锛岃閲嶈瘯</div>';
+                    document.getElementById('statModalBody').innerHTML = '<div class="stat-empty">加载失败，岃閲嶈瘯</div>';
                     console.error('stat error', e);
                 }
 
@@ -3446,7 +3446,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return [
                     '<div class="stat-empty-rich stat-surface-card">',
                     opts.kicker ? '<div class="stat-hero-kicker">' + escapeHtml(opts.kicker) + '</div>' : '',
-                    '<div class="stat-empty-title">' + escapeHtml(opts.title || '鏆傛棤鏁版嵁') + '</div>',
+                    '<div class="stat-empty-title">' + escapeHtml(opts.title || '暂无数据') + '</div>',
                     opts.copy ? '<div class="stat-empty-copy">' + escapeHtml(opts.copy) + '</div>' : '',
                     opts.note ? '<div class="stat-empty-note">' + escapeHtml(opts.note) + '</div>' : '',
                     '</div>'
@@ -3456,14 +3456,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function statPostItemMarkup(post) {
                 var hasImg = post.media_url && post.media_type === 'image';
                 var hasVid = post.media_url && post.media_type === 'video';
-                var tag = hasImg ? '<span class="spi-img-tag">鍥剧墖</span>' : (hasVid ? '<span class="spi-img-tag">瑙嗛</span>' : '<span class="spi-img-tag spi-img-tag--text">鏂囧瓧</span>');
+                var tag = hasImg ? '<span class="spi-img-tag">图片</span>' : (hasVid ? '<span class="spi-img-tag">瑙嗛</span>' : '<span class="spi-img-tag spi-img-tag--text">鏂囧瓧</span>');
                 var display = summarizeStatPost(post, 38);
                 var onclick = "openPostDetail('" + String(post.id).replace(/'/g, "\\'") + "')";
                 return [
-                    '<div class="stat-post-item" onclick="' + onclick + '" title="鐐瑰嚮鏌ョ湅甯栧瓙璇︽儏">',
+                    '<div class="stat-post-item" onclick="' + onclick + '" title="点击查看帖子璇︽儏">',
                     '<div class="spi-main">',
                     '<div class="spi-content-row"><span class="spi-content">' + escapeHtml(display) + '</span>' + tag + '</div>',
-                    '<div class="spi-meta"><span class="spi-time">' + escapeHtml(formatStatTime(post.created_at)) + '</span><span class="spi-open">鏌ョ湅璇︽儏</span></div>',
+                    '<div class="spi-meta"><span class="spi-time">' + escapeHtml(formatStatTime(post.created_at)) + '</span><span class="spi-open">查看璇︽儏</span></div>',
                     '</div>',
                     hasImg ? '<img class="spi-thumb" src="' + escapeHtml(post.media_url) + '" alt="" />' : (hasVid ? '<div class="spi-thumb spi-thumb--video">VIDEO</div>' : ''),
                     '</div>'
@@ -3504,7 +3504,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var posts = entry[1];
                     var latest = posts[0] ? formatStatTime(posts[0].created_at) : '--';
                     var moreButton = posts.length > 3
-                        ? '<button class="stat-view-btn" onclick="loadUserAllPosts(\'' + String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">鏌ョ湅鍏ㄩ儴 ' + posts.length + ' 鏉?/button>'
+                        ? '<button class="stat-view-btn" onclick="loadUserAllPosts(\'' + String(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + '\')">查看鍏ㄩ儴 ' + posts.length + ' 鏉?/button>'
                         : '';
                     return [
                         '<section class="stat-user-group stat-surface-card">',
@@ -3522,7 +3522,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!body) return;
                 var userPosts = statAllPosts.filter(function(p) { return p.user_name === userName; });
                 body.innerHTML = [
-                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">杩斿洖鎬诲姩鎬?/button>',
+                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">返回总动态/button>',
                     statHeroMarkup({
                         tone: 'posts',
                         kicker: 'USER POSTS',
@@ -3578,7 +3578,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statAllPosts.forEach(function(p) { postMap[p.id] = p; });
 
                 function buildLikesCol() {
-                    var h = '<div class="stat-section-title"><span>鐐硅禐璁板綍</span><span class="stat-section-count">' + statAllLikes.length + '</span></div>';
+                    var h = '<div class="stat-section-title"><span>点赞记录</span><span class="stat-section-count">' + statAllLikes.length + '</span></div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(function(l) {
                             var post = postMap[l.post_id];
@@ -3632,8 +3632,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             window.openPostDetail = async function(postId) {
-                document.getElementById('postDetailTitle').textContent = '甯栧瓙璇︽儏';
-                document.getElementById('postDetailBody').innerHTML = window.xtjMagicLoadingHtml('鍔犺浇涓?..', '鍔犺浇涓?..', 'feed');
+                document.getElementById('postDetailTitle').textContent = '帖子璇︽儏';
+                document.getElementById('postDetailBody').innerHTML = window.xtjMagicLoadingHtml('加载涓?..', '加载涓?..', 'feed');
                 document.getElementById('postDetailModal').classList.add('active');
 
                 try {
@@ -3645,18 +3645,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                     const post = normalizePost(postRes.data);
                     if (!post) {
-                        document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">甯栧瓙涓嶅瓨鍦ㄦ垨宸插垹闄?/div>';
+                        document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">帖子不存在或已删除/div>';
                         return;
                     }
                     if (!canViewPost(post)) {
-                        document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">鏃犳潈鏌ョ湅杩欐潯甯栧瓙</div>';
+                        document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">无权查看这条帖子</div>';
                         return;
                     }
                     const likes = likeRes.data || [];
                     const comments = commRes.data || [];
                     renderPostDetail(post, likes, comments);
                 } catch(e) {
-                    document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">鍔犺浇澶辫触锛岃閲嶈瘯</div>';
+                    document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">加载失败，岃閲嶈瘯</div>';
                     console.error(e);
                 }
             };
@@ -3674,10 +3674,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     </div>
                     ${post.content ? `<div class="post-detail-content">${escapeHtml(post.content)}</div>` : ''}
                     ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${escapeHtml(post.media_url)}" controls preload="none"></video>`:`<img src="${escapeHtml(post.media_url)}" onclick="openImageViewer('${safeJsStr(post.media_url)}')" loading="lazy" />`}</div>` : ''}
-                    <div class="post-detail-stats">娴忚 ${vc} 娆÷?鐐硅禐 ${likes.length} 娆÷?璇勮 ${comments.length}</div>
+                    <div class="post-detail-stats">浏览 ${vc} 娆÷?点赞 ${likes.length} 娆÷?璇勮 ${comments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
-                            <div class="stat-section-title">鉁?鐐硅禐鐢ㄦ埛 ${likes.length}</div>
+                            <div class="stat-section-title">鉁?点赞用户 ${likes.length}</div>
                             ${likes.length ? likes.map(l => `
                                 <div class="stat-like-item">
                                     <div class="sli-info">
@@ -3685,10 +3685,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     </div>
                                     <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                                 </div>
-                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤鐐硅禐</div>'}
+                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
                         </div>
                         <div class="stat-col">
-                            <div class="stat-section-title">馃挰 璇勮鍒楄〃 ${comments.length}</div>
+                            <div class="stat-section-title">馃挰 璇勮列表 ${comments.length}</div>
                             ${comments.length ? comments.map(c => `
                                 <div class="stat-comment-item">
                                     <div class="sci-info">
@@ -3697,7 +3697,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     </div>
                                     <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                                 </div>
-                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤璇勮</div>'}
+                            `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无璇勮</div>'}
                         </div>
                     </div>
                 `;
@@ -3716,17 +3716,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return { display, tag, hasImg, hasVid, thumbUrl: hasImg ? p.media_url : null };
             }
 
-            // 鐢熸垚甯栧瓙锟斤紕娲伴惃鍑ML閿涘牆褰查悙鐟板毊鐠哄疇娴嗭細
+            // 鐢熸垚帖子锟斤紕娲伴惃鍑ML閿涘牆褰查悙鐟板毊鐠哄疇娴嗭細
             function renderPostItemHTML(p) {
                 const fmt = formatPostSummary(p);
                 const onclick = `openPostDetail('${safeJsStr(p.id)}')`;
                 return `
                     <div class="stat-post-item">
-                        <span class="spi-content" onclick="${onclick}" title="鐐瑰嚮鏌ョ湅甯栧瓙璇︽儏">
+                        <span class="spi-content" onclick="${onclick}" title="点击查看帖子璇︽儏">
                             ${escapeHtml(fmt.display)}
                             ${fmt.tag}
                         </span>
-                        ${fmt.thumbUrl ? `<img class="spi-thumb" src="${escapeHtml(fmt.thumbUrl)}" onclick="${onclick}" title="鐐瑰嚮鏌ョ湅甯栧瓙璇︽儏" />` : ''}
+                        ${fmt.thumbUrl ? `<img class="spi-thumb" src="${escapeHtml(fmt.thumbUrl)}" onclick="${onclick}" title="点击查看帖子璇︽儏" />` : ''}
                         <span class="spi-time">${new Date(p.created_at).toLocaleString()}</span>
                     </div>
                 `;
@@ -3735,7 +3735,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // 娓叉煋鎬诲姩鎬佺粺璁★紙鎸夌敤鎴峰垎缁勶級
             function renderPostStats() {
                 const body = document.getElementById('statModalBody');
-                // 閹?user_name 鍒嗙粍缁燂拷顓?
+                // 閹?user_name 分组缁燂拷顓?
                 const userMap = {};
                 statAllPosts.forEach(p => {
                     if (!userMap[p.user_name]) userMap[p.user_name] = [];
@@ -3744,7 +3744,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const entries = Object.entries(userMap).sort((a, b) => b[1].length - a[1].length);
                 
                 if (!entries.length) {
-                    body.innerHTML = '<div class="stat-empty">鏆傛棤鍔ㄦ€佹暟鎹?/div>';
+                    body.innerHTML = '<div class="stat-empty">暂无鍔ㄦ€佹暟鎹?/div>';
                     return;
                 }
 
@@ -3761,7 +3761,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             ${posts.slice(0, 3).map(p => renderPostItemHTML(p)).join('')}
                             ${posts.length > 3 ? `
                                 <div style="text-align:center; padding:8px 0;">
-                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${safeJsStr(name)}')">鏌ョ湅鍏ㄩ儴 ${posts.length} 鏉?/button>
+                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${safeJsStr(name)}')">查看鍏ㄩ儴 ${posts.length} 鏉?/button>
                                 </div>
                             ` : ''}
                         </div>
@@ -3769,12 +3769,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 `).join('');
             }
 
-            // 閺屻儳婀呴幐鍥х暰鐢ㄦ埛閻ㄥ嫭澧嶉張澶婄瑯瀛?
+            // 閺屻儳婀呴幐鍥х暰用户閻ㄥ嫭澧嶉張澶婄瑯瀛?
             window.loadUserAllPosts = function(userName) {
                 const body = document.getElementById('statModalBody');
                 const userPosts = statAllPosts.filter(p => p.user_name === userName);
                 body.innerHTML = `
-                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">鈫?杩斿洖鎬诲姩鎬?/button>
+                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">鈫?返回总动态/button>
                     <div style="font-weight:700; font-size:15px; margin-bottom:12px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.1);">
                         ${userName} 鐨勫叏閮ㄥ笘瀛愶紙${userPosts.length} 鏉★級
                     </div>
@@ -3790,10 +3790,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!history.length) {
                     body.innerHTML = `
                         <div class="stat-empty">
-                            <div style="font-size:16px; margin-bottom:8px;">馃摰 娴忚璁板綍</div>
-                            <div style="font-size:13px;">鏆傛棤娴忚璇︽儏鏁版嵁</div>
-                            <div style="font-size:12px; margin-top:12px; opacity:0.7;">娴忚璁板綍浼氬湪浣犳煡鐪嬪笘瀛愭椂鑷姩淇濆瓨</div>
-                            <div style="font-size:12px; margin-top:8px; opacity:0.7;">褰撳墠宸茶褰曟€绘祻瑙堟暟锛歿document.getElementById('sViews').textContent} 娆?/div>
+                            <div style="font-size:16px; margin-bottom:8px;">📰 浏览记录</div>
+                            <div style="font-size:13px;">暂无浏览详情数据</div>
+                            <div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>
+                            <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
                         </div>
                     `;
                     return;
@@ -3803,7 +3803,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     <div class="stat-view-item">
                         <div class="svi-info">
                             <div class="svi-user">${escapeHtml(v.user_name)}</div>
-                            <div class="svi-target">娴忚浜?b>${escapeHtml(v.post_author)}</b> 鐨勫笘瀛愶細${escapeHtml(v.post_content)}</div>
+                            <div class="svi-target">浏览了 <b>${escapeHtml(v.post_author)}</b> 的帖子：${escapeHtml(v.post_content)}</div>
                         </div>
                         <span class="svi-time">${new Date(v.viewed_at).toLocaleString()}</span>
                     </div>
@@ -3818,33 +3818,33 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 statAllPosts.forEach(p => { postMap[p.id] = p; });
 
                 function buildLikesCol() {
-                    let h = '<div class="stat-section-title">鐐硅禐璁板綍</div>';
+                    let h = '<div class="stat-section-title">点赞记录</div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(l => {
                             const post = postMap[l.post_id];
-                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(鍥剧墖/瑙嗛)') : '(宸插垹闄ゅ笘瀛?';
+                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/瑙嗛)') : '(宸插垹闄ゅ笘瀛?';
                             return `
                         <div class="stat-like-item">
                             <div class="sli-info">
                                 <div class="sli-user">${escapeHtml(l.user_name)}</div>
-                                <div class="sli-target">鐐硅禐浜嗭細${postContent}</div>
+                                <div class="sli-target">点赞浜嗭細${postContent}</div>
                             </div>
                             <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                         </div>
                     `;
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">鐐硅禐璁板綍</div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">点赞记录</div>';
                     }
                     return h;
                 }
 
                 function buildCommentsCol() {
-                    let h = '<div class="stat-section-title">馃挰 璇勮璁板綍</div>';
+                    let h = '<div class="stat-section-title">馃挰 璇勮记录</div>';
                     if (statAllComments.length) {
                         h += [...statAllComments].reverse().slice(0, 200).map(c => {
                             const post = postMap[c.post_id];
-                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(鍥剧墖/瑙嗛)') : '(宸插垹闄ゅ笘瀛?';
+                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/瑙嗛)') : '(宸插垹闄ゅ笘瀛?';
                             return `
                         <div class="stat-comment-item">
                             <div class="sci-info">
@@ -3856,7 +3856,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     `;
                         }).join('');
                     } else {
-                        h += '<div class="stat-empty" style="padding:12px 0;">鏆傛棤璇勮璁板綍</div>';
+                        h += '<div class="stat-empty" style="padding:12px 0;">暂无璇勮记录</div>';
                     }
                     return h;
                 }
@@ -3951,12 +3951,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }, 3000);
             }
 
-            // ==== 娴嬭瘯通知锟筋亜绠欓敍鍫熷付閸掕泛褰寸拫鍐暏閿涙estNotification()闁?====
+            // ==== 测试通知锟筋亜绠欓敍鍫熷付閸掕泛褰寸拫鍐暏閿涙estNotification()闁?====
             window.testNotification = function() {
-                showNotification('寮犱笁', '杩欐槸涓€鏉℃祴璇曟秷鎭紝妫€鏌ラ€氱煡鏂囨湰鏄剧ず鏄惁姝ｅ父');
+                showNotification('张三', '这是一条测试消息，检查通知文本显示是否正常');
             };
             window.testNotificationLong = function() {
-                showNotification('鏉庡洓', '杩欐槸涓€鏉￠潪甯搁潪甯搁暱鐨勬祴璇曟秷鎭紝鐢ㄦ潵妫€鏌ユ枃鏈埅鏂晥鏋滃埌搴曟€庝箞鏍凤紝瓒呰繃300涓瓧绗︿篃涓嶄細鎶婂瓧绗︿覆鎵撳潖');
+                showNotification('李四', '这是一条非常长的测试消息，用来检查文本截断效果到底怎么样，超过300个字符也不怕');
             };
 
             // ===================== 閼卞﹤銇夌化鑽ょ埠 (Dock 鍏煎锟? =====================
@@ -4110,7 +4110,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let lastTabTapCount = {};
             let isRefreshing = {};
             window.switchDockTab = function(tab, skipReturn) {
-                if (tab === 'chat' && !currentUser) { showToast('璇峰厛鐧诲綍'); return; }
+                if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
                 if (tab !== currentDockTab) {
                     try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
                     try { var am = document.getElementById('announcementModal'); if (am && am.classList.contains('active')) closeAnnouncementModal(); } catch(e) {}
@@ -4128,12 +4128,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 
                 if (tab === currentDockTab && !skipReturn) {
                     if (isDoubleTap && !isRefreshing[tab]) {
-                        // 鍙屽嚮锛氭墽琛屽埛锟?
+                        // 双击锛氭墽琛屽埛锟?
                         isRefreshing[tab] = true;
                         lastTabTapCount[tab] = (lastTabTapCount[tab] || 0) + 1;
                         
                         if (tab === 'ai') {
-                            window.showToast('姝ｅ湪鍒锋柊鐓х墖澧?..');
+                            window.showToast('刷新失败'));
                             ensurePhotoWallLoaded().then(function() {
                                 if (typeof window.loadPhotoWallData === 'function') {
                                     return window.loadPhotoWallData(true).then(function() {
@@ -4144,14 +4144,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 }
                             }).then(function() {
                                 isRefreshing[tab] = false;
-                                window.showToast('鍒锋柊瀹屾垚');
+                                window.showToast('刷新完成');
                             }).catch(function() {
                                 isRefreshing[tab] = false;
-                                window.showToast('鍒锋柊澶辫触');
+                                window.showToast('刷新失败');
                             });
                         } else if (tab === 'posts') {
-                            // 甯栧瓙椤靛埛??
-                            window.showToast('姝ｅ湪鍒锋柊...');
+                            // 帖子椤靛埛??
+                            window.showToast('正在刷新...');
                             // 娓呴櫎缂傛挸鐡ㄦ鐐茬埣閸ｅ憡鏌婃晶鐐差潱閺?
                             try {
                                 localStorage.removeItem(CACHE_KEY);
@@ -4164,37 +4164,37 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     .catch(function(err) {
                                         isRefreshing[tab] = false;
                                         console.error('[posts] fast refresh failed', err);
-                                        window.showToast('閸掗攱鏌婃径杈Е');
+                                        window.showToast('刷新失败');
                                     });
                             }
-                            // 鍥炲埌椤堕儴
+                            // 鍥炲埌顶部
                             const panel = document.getElementById('panelPosts');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
-                            window.showToast('鍒锋柊瀹屾垚');
+                            window.showToast('刷新完成');
                         } else if (tab === 'chat') {
                             // 閼卞﹤銇夊銈夋涧閸╂盯式
-                            window.showToast('姝ｅ湪鍒锋柊...');
+                            window.showToast('正在刷新...');
                             window.dockChatListCacheTime = 0;
                             loadDockChatList();
                             isRefreshing[tab] = false;
-                            window.showToast('鍒锋柊瀹屾垚');
+                            window.showToast('刷新完成');
                         } else if (tab === 'profile') {
                             // 涓汉椤靛埛??
-                            window.showToast('姝ｅ湪鍒锋柊...');
+                            window.showToast('正在刷新...');
                             syncProfileUser();
                             if (currentUser) loadUserAvatar();
                             isRefreshing[tab] = false;
-                            window.showToast('鍒锋柊瀹屾垚');
+                            window.showToast('刷新完成');
                         }
                     } else {
                         // 鍗曞嚮锛氭墽琛岃繑锟?鍥為《鎿嶄綔
                         lastTabTapCount[tab] = 1;
                         if (tab === 'posts') {
-                            // 甯栧瓙椤碉細鍥炲埌椤堕儴
+                            // 帖子椤碉細鍥炲埌顶部
                             const panel = document.getElementById('panelPosts');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         } else if (tab === 'chat') {
-                            // 閿熸枻鎷烽敓鏂ゆ嫹妞ょ绱版俊鍌涚亯閸︺劌顕瘽涓紝杩斿洖鑱婏拷鈺佸灙鐞涱煉绱遍崥锕€鍨崶鐐插煂妞ゅ爼锟?
+                            // 閿熸枻鎷烽敓鏂ゆ嫹妞ょ绱版俊鍌涚亯閸︺劌顕瘽涓紝返回鑱婏拷鈺佸灙鐞涱煉绱遍崥锕€鍨崶鐐插煂妞ゅ爼锟?
                             if (dockChatActiveUser) {
                                 dockChatGoBack();
                             } else {
@@ -4205,7 +4205,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             const photoWallPage = document.getElementById('photoWallContainer');
                             if (photoWallPage) photoWallPage.scrollTo({ top: 0, behavior: 'smooth' });
                         } else if (tab === 'profile') {
-                            // 鎴戠殑椤碉細鍥炲埌椤堕儴
+                            // 鎴戠殑椤碉細鍥炲埌顶部
                             const panel = document.getElementById('panelProfile');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         }
@@ -4293,7 +4293,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                                                             function renderChatLoadingState(el, options) {
                 if (!el) return;
-                var title = options && options.title ? options.title : '鍔犺浇涓?..';
+                var title = options && options.title ? options.title : '加载涓?..';
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
                 el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant);
@@ -4304,7 +4304,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 document.getElementById('dockChatDetailView').classList.add('hidden');
                 document.getElementById('dockChatListView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'none';
-                document.getElementById('dockChatTitle').textContent = '娑堟伅';
+                document.getElementById('dockChatTitle').textContent = '消息';
                 window.dockChatListCacheTime = 0;
                 loadDockChatList();
                 startDMPolling(300000);
@@ -4325,16 +4325,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let restorePostsScroll = null;
 
             window.openChat = function(userName) {
-                if (!window.currentUser) { showToast('璇峰厛鐧诲綍'); return; }
+                if (!window.currentUser) { showToast('请先登录'); return; }
                 if (userName === window.currentUser) { switchDockTab('chat', true); return; }
                 if (currentDockTab === 'posts') {
                     const postsPanel = document.getElementById('panelPosts');
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
-                document.getElementById('dockChatMessages').innerHTML = window.xtjMagicLoadingHtml('鍔犺浇涓?..', '姝ｅ湪鎵撳紑鑱婂ぉ閫氶亾', 'chat-detail');
+                document.getElementById('dockChatMessages').innerHTML = window.xtjMagicLoadingHtml('加载涓?..', '姝ｅ湪鎵撳紑鑱婂ぉ閫氶亾', 'chat-detail');
                 renderChatLoadingState(document.getElementById('dockChatMessages'), {
-                    title: '鍔犺浇涓?..',
+                    title: '加载涓?..',
                     subtitle: '姝ｅ湪鎵撳紑鑱婂ぉ閫氶亾',
                     variant: 'chat-detail'
                 });
@@ -4354,7 +4354,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     document.getElementById('dockChatDetailView').classList.add('hidden');
                     document.getElementById('dockChatListView').classList.remove('hidden');
                     document.getElementById('dockChatBackBtn').style.display = 'none';
-                    document.getElementById('dockChatTitle').textContent = '娑堟伅';
+                    document.getElementById('dockChatTitle').textContent = '消息';
                 }
                 if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
                 window.dockChatListCacheTime = Date.now();
@@ -4373,7 +4373,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         .limit(200);
                     if (error) throw error;
                     if (!allMsgs || !allMsgs.length) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>鏆傛棤娑堟伅</div><div style="font-size:12px;">鍦ㄥ笘瀛愰〉闈㈢偣鍑诲ご鍍忓紑濮嬭亰澶╁惂</div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>暂无消息</div><div style="font-size:12px;">鍦ㄥ笘瀛愰〉闈㈢偣鍑诲ご鍍忓紑濮嬭亰澶╁惂</div></div>';
                         updateUnreadBadge();
                         return;
                     }
@@ -4425,11 +4425,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }).join('');
                     updateUnreadBadge();
                 } catch(e) {
-                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">閳?/div><div>' + (e.message || '鍔犺浇澶辫触') + '</div></div>';
+                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">閳?/div><div>' + (e.message || '加载失败') + '</div></div>';
                 }
             }
 
-            // 鑱婂ぉ娑堟伅閺堟勾缂撳瓨閿涘奔绨╁▎鈩冨ⅵ瀵偓缁夋帒锟??
+            // 鑱婂ぉ消息閺堟勾缂撳瓨閿涘奔绨╁▎鈩冨ⅵ瀵偓缁夋帒锟??
             var _chatCache = {};
 
             async function loadDockChatMessages(userName, forceScroll) {
@@ -4457,7 +4457,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     } catch(e) {}
                 }
-                // 褰撳墠鐢ㄦ埛浼樺厛浣跨敤localStorage闂佸搫顦崯顐﹀煝婢跺瞼澶勯悗?
+                // 褰撳墠用户浼樺厛浣跨敤localStorage闂佸搫顦崯顐﹀煝婢跺瞼澶勯悗?
                 if (currentUser) {
                     try {
                         var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
@@ -4487,7 +4487,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     renderDockMessages(msgs || [], forceScroll);
                 } catch(e) {
                     if (!_chatCache[cacheKey]) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">閳?/div><div>' + (e.message || '鍔犺浇澶辫触') + '</div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">閳?/div><div>' + (e.message || '加载失败') + '</div></div>';
                     }
                 } finally {
                     dockChatMsgsBusy = false;
@@ -4497,7 +4497,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             function renderDockMessages(msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
-                if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>鍙戦€佺涓€鏉℃秷鎭惂</div></div>'; return; }
+                if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">馃挰</div><div>发送佺涓€鏉℃秷鎭惂</div></div>'; return; }
                 // 濡澁鎷峰ù瀣暏閹撮攱妲搁崥锕€婀敓浠嬬湅閸樺棗褰堕敓鏂ゆ嫹褰曢敍鍫㈩瀲鎼存洟鍎撮敓鏂ゆ嫹閿熸枻锟?00px鐟欏棔璐熼崷锟窖勭畽闁告ê妫楄ぐ鍫曟晸?
                 var isNearBottom = !el.scrollHeight || (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
                 var shouldAutoScroll = forceScroll || isNearBottom;
@@ -4573,7 +4573,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             }, 200);
                         }
                     }
-                } catch(e) { showToast('鍙戦€佸け璐? ' + (e?.message || e)); inp.value = content; }
+                } catch(e) { showToast('发送失败 ' + (e?.message || e)); inp.value = content; }
                 finally { dockChatSending = false; }
             }
 
@@ -4653,14 +4653,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 // window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
 
                 await initUI(); initialLoad();
-                // 鎭㈠娑撳﹥淇濆瓨閻ㄥ嫭鐖ｇ粵楣冿拷?
+                // 鎭㈠娑撳﹥保存閻ㄥ嫭鐖ｇ粵楣冿拷?
                 const savedTab = localStorage.getItem('xtj_current_tab');
                 if (savedTab && savedTab !== 'posts') {
                     switchDockTab(savedTab, true);
                 }
             });
 
-            // ========== 涓婚鍒囨崲 ==========
+            // ========== 主题切换 ==========
             const htmlEl = document.documentElement;
             const themeBtn = document.getElementById('themeToggle');
             function applyTheme(isDark) {
@@ -4773,7 +4773,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 detail.classList.remove('active');
                 detail.style.display = 'none';
                 currentAnnouncement = null;
-                // 閿熸枻鎷烽敓鏂ゆ嫹閸掓銆冮弮鑸典划婢跺秶顓哥悊鍛樼殑鍙戝竷鍖猴拷?
+                // 閿熸枻鎷烽敓鏂ゆ嫹閸掓銆冮弮鑸典划婢跺秶顓哥悊鍛樼殑发布鍖猴拷?
                 if (isAdmin()) {
                     document.getElementById('announcementAdminArea').style.display = 'block';
                 }
@@ -4797,7 +4797,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 document.getElementById('announcementDetailTime').textContent = new Date(ann.created_at).toLocaleString('zh-CN');
                 document.getElementById('announcementDetailContent').textContent = annData.content;
                 
-                // 璁剧疆鍙戝竷閼板懍淇婇幁绱欐樉绀洪張鈧柊澧炪仈閸嶅骏锟?
+                // 设置发布閼板懍淇婇幁绱欐樉绀洪張鈧柊澧炪仈閸嶅骏锟?
                 const userInfoEl = document.getElementById('announcementDetailUserInfo');
                 if (userInfoEl) {
                     var avUrl = avatarCache[ann.user_name];
@@ -4813,13 +4813,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (isAdmin()) {
                     const delBtn = document.createElement('button');
                     delBtn.className = 'announcement-delete-btn';
-                    delBtn.textContent = '鍒犻櫎鍏憡';
+                    delBtn.textContent = '删除鍏憡';
                     delBtn.onclick = function(e) { e.stopPropagation(); deleteAnnouncement(ann); };
                     const header = detail.querySelector('.announcement-detail-header');
                     if (header) header.appendChild(delBtn);
                 }
 
-                renderAnnouncementList(); // 閲嶆柊娓叉煋鍒楄〃锛屾竻鐞嗘柊澧?
+                renderAnnouncementList(); // 閲嶆柊娓叉煋列表锛屾竻鐞嗘柊澧?
             }
 
             async function loadAnnouncements() {
@@ -4838,7 +4838,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         loadAvatarsForUsers(Array.from(publishers));
                     }
                 } catch(e) {
-                    console.error('鍔犺浇澶辫触:', e);
+                    console.error('加载失败:', e);
                 }
             }
 
@@ -4858,7 +4858,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!listEl) return;
 
                 if (!announcements.length) {
-                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">馃摙</div><div>鏆傛棤鍏憡</div></div>';
+                    listEl.innerHTML = '<div class="announcement-empty"><div class="announcement-empty-icon">馃摙</div><div>暂无鍏憡</div></div>';
                     return;
                 }
 
@@ -4919,11 +4919,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (error) throw error;
                     titleInput.value = '';
                     contentInput.value = '';
-                    showToast('鍏憡鍙戝竷鎴愬姛');
+                    showToast('鍏憡发布成功');
                     await loadAnnouncements();
                     renderAnnouncementList();
                 } catch(e) {
-                    showToast('鍙戝竷澶辫触: ' + (e.message || '鏈煡閿欒'));
+                    showToast('发布失败: ' + (e.message || '鏈煡閿欒'));
                 }
             };
 
@@ -4945,7 +4945,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         showAnnouncementList();
                         renderAnnouncementList();
                     } catch(e) {
-                        showToast('鍒犻櫎澶辫触: ' + (e.message || '鏈煡閿欒'));
+                        showToast('删除失败: ' + (e.message || '鏈煡閿欒'));
                     }
                 });
             };
@@ -4968,22 +4968,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     .subscribe();
             }
 
-            // 鐗堟湰鏇存柊鏃ュ織
+            // 版本更新日志
             const changelogData = [
                 {
                     version: 'v0.68',
-                    date: '2026-06-03',
+                    date: '2026-06-04',
                     content: `
-                        <h4>甯栧瓙浜や簰淇</h4>
+                        <h4>帖子交互修复</h4>
                         <ul>
-                            <li>缃《鍜屽彇娑堢疆椤舵敼涓哄嵆鏃堕噸鎺掞紝鐐瑰嚮鍚庡垪琛ㄤ細绔嬪埢鏇存柊</li>
-                            <li>甯栧瓙鍗＄墖鍙充笂瑙掔Щ闄ら噸澶嶇殑鍏紑/绉佸瘑鏍囪锛屼粎淇濈暀缁熻琛屽彸渚ф樉绀?/li>
-                            <li>鍙屽嚮甯栧瓙 Dock 鍒锋柊鏀逛负鍏堟湰鍦版樉绀恒€佸啀鍚庡彴闈欓粯鍚屾锛屽噺灏戠┖鐧界瓑寰?/li>
-                            <li>棰勮鍜屼笂浼犻摼璺户缁敹鍙ｏ紝浜や簰鍙嶉鏇撮『婊?/li>
+                            <li>置顶和取消置顶改为即时重排，点击后列表会立刻更新</li>
+                            <li>帖子卡片右上角移除重复的公开/私密标记，仅保留统计行右侧显示</li>
+                            <li>双击帖子 Dock 刷新改为先本地显示、再后台静默同步，减少空白等待</li>
+                            <li>预览和上传链接继续收口，交互反馈更顺滑</li>
                         </ul>
                         <h4>Remade</h4>
                         <ul>
-                            <li>閲嶅仛浜嗗笘瀛愮姸鎬佸垏鎹€佸埛鏂板弽棣堝拰閮ㄥ垎棰勮缁嗚妭锛屾暣浣撴洿鐩存帴銆佹洿骞插噣</li>
+                            <li>重做了帖子状态切换、刷新反馈和部分预览细节，整体更直接、更干净</li>
+                        </ul>
+                        <h4>乱码修复</h4>
+                        <ul>
+                            <li>全面修复了网站所有中文乱码问题（core.js 源头修复 400+ 处）</li>
+                            <li>修复照片预览照片信息乱码、编辑器公开/私密显示乱码</li>
+                            <li>修复 features.js 重复定义导致的照片信息动画失效</li>
+                            <li>所有 UI 文本、按钮、提示信息恢复正确中文显示</li>
                         </ul>
                     `
                 },
@@ -4991,13 +4998,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.67',
                     date: '2026-06-02',
                     content: `
-                        <h4>鎬ц兘澶у箙浼樺寲</h4>
+                        <h4>性能大幅优化</h4>
                         <ul>
-                            <li>鑺辫崏鍦堝湀 Canvas 鍔ㄧ敾鍏ㄩ潰浼樺寲锛氶槾褰辨ā绯婇檷浣?0%銆佽棨钄撳垎娈靛噺灏?3%銆佽姳绮夊噺鑷?绮掋€佽澊铦舵畫褰卞噺鑷?灞?/li>
-                            <li>escapeHtml 鏀圭敤绾瓧绗︿覆鏇挎崲閬垮厤鍒涘缓DOM鍏冪礌锛沠ixText 鏀逛负鍗曟姝ｅ垯鏇挎崲</li>
-                            <li>鍏ㄥ眬 pointerdown 鍔?0ms鑺傛祦锛涚Щ闄ゅ涓?will-change 鍙嶆晥鏋滃０鏄?/li>
-                            <li>perf-lite 褰诲簳绂佺敤 echo-loader 鏃犻檺寰幆鍔ㄧ敾锛沺erf-balanced 澶у箙闄嶄綆闃村奖鍜屾ā绯?/li>
-                            <li>绛涢€夌敤鎴峰姞杞藉姩鐢绘敼涓轰腑蹇?20px鑺辫崏鍦堝湀Canvas鍔ㄧ敾</li>
+                            <li>花草圈圈 Canvas 动画全面优化：阴影模糊降低60%、藤蔓分段减少33%、花粉减至8粒、蝴蝶残影减至1层</li>
+                            <li>escapeHtml 改用纯字符串替换避免创建DOM元素；fixText 改为单次正则替换</li>
+                            <li>全局 pointerdown 加80ms节流；移除多个 will-change 反效果声明</li>
+                            <li>perf-lite 彻底禁用 echo-loader 无限循环动画；perf-balanced 大幅降低阴影和模糊</li>
+                            <li>筛选用户加载动画改为中心120px花草圈圈Canvas动画</li>
                         </ul>
                     `
                 },
@@ -5005,12 +5012,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.64',
                     date: '2026-05-31',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>乱码修复与动画升级</h4>
                         <ul>
-                            <li>Fixed core.js syntax errors causing blank page, unclickable UI, and data loading failures</li>
-                            <li>Fixed dock-bar overlay blocking click interactions</li>
-                            <li>Optimized dialog closing logic: ESC key now closes all active dialogs by priority</li>
-                            <li>Enhanced photo-wall defensive programming for null data and null references</li>
+                            <li>帖子卡片浏览、点赞、评论文字乱码</li>
+                            <li>点赞(❤️)、评论、编辑、删除、置顶等按钮文字乱码</li>
+                            <li>私密切换和置顶徽章乱码</li>
+                            <li>统计正则匹配乱码，确保计数正确更新</li>
+                            <li>帖子详情页、摘要、Toast 消息中的多处乱码</li>
+                        </ul>
+                        <h4>优化</h4>
+                        <ul>
+                            <li>加载动画新增 8 颗浮动星辰粒子，蓝紫白辉光飘移</li>
+                            <li>光环、符文环、镜面核心视觉增强</li>
+                            <li>交互粒子爆发升级：42 颗、8 色、可变大小、扩散范围加大</li>
+                            <li>照片墙信息模板点击外部和再次点击 i 均可关闭</li>
                         </ul>
                     `
                 },
@@ -5018,15 +5033,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.62',
                     date: '2026-05-30',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>功能优化与Bug修复</h4>
                         <ul>
-                            <li>Added photo filtering and sorting functionality</li>
-                            <li>Removed post report button and all related code; cleaned up frontend remnants</li>
+                            <li>筛选功能优化：将内联筛选控件整合为折叠式"筛选"按钮面板，支持活跃筛选计数徽章</li>
+                            <li>移除帖子举报按钮及全部相关代码，清理前端残留</li>
                         </ul>
-                        <h4>Bug Fixes</h4>
+                        <h4>修复</h4>
                         <ul>
-                            <li>Fixed editing interaction issues</li>
-                            <li>Fixed related content display bugs</li>
+                            <li>修复编辑帖子时公开/私密选项不真正生效的问题</li>
+                            <li>修复帖子置顶功能不生效的问题</li>
                         </ul>
                     `
                 },
@@ -5034,15 +5049,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.61',
                     date: '2026-05-30',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>项目清理与全面检查</h4>
                         <ul>
-                            <li>Removed deprecated filter functionality</li>
-                            <li>Replaced inline HTML styles with CSS classes</li>
-                        </ul>
-                        <h4>Project Optimization</h4>
-                        <ul>
-                            <li>Cleaned up JS scripts, reduced bundle size by 110+ KB</li>
-                            <li>Fixed update mechanism timing issues</li>
+                            <li>删除所有冗余备份文件、临时修复脚本和测试脚本（js备份、scripts目录、root fix/test等）</li>
+                            <li>全面检查：HTML引用完整性、JS语法（全部通过）、乱码扫描、后端服务验证</li>
                         </ul>
                     `
                 },
@@ -5050,17 +5060,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.60',
                     date: '2026-05-28',
                     content: `
-                        <h4>Bug Fixes</h4>
+                        <h4>核心功能修复与照片墙预览优化</h4>
                         <ul>
-                            <li>Fixed editing interaction issues</li>
-                            <li>Fixed animation timing conflicts</li>
-                            <li>Fixed data display and formatting bugs</li>
+                            <li>修复编辑帖子公开/私密不真正生效问题</li>
+                            <li>修复统计详情泄露私密帖子互动</li>
+                            <li>修复照片预览双击缩小/双指缩放不稳定</li>
                         </ul>
-                        <h4>Optimizations</h4>
+                        <h4>优化</h4>
                         <ul>
-                            <li>Photo wall preview now supports pinch-to-zoom</li>
-                            <li>Marked deprecated functions to prevent accidental modification</li>
-                            <li>Improved upload.js select field integrity</li>
+                            <li>照片墙预览新增双指缩放</li>
+                            <li>标记废弃函数避免误修改</li>
+                            <li>upload.js select 字段完整性提升</li>
                         </ul>
                     `
                 },
@@ -5068,19 +5078,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.59',
                     date: '2026-05-27',
                     content: `
-                        <h4>Bug Fixes</h4>
+                        <h4>功能修复与稳定性提升</h4>
                         <ul>
-                            <li>Fixed button interaction state issues</li>
-                            <li>Fixed fallback display when data is empty</li>
-                            <li>Fixed localStorage key name collision</li>
-                            <li>Fixed animation timing and interaction conflicts</li>
-                            <li>Fixed interaction delay issues</li>
-                            <li>Fixed image lazy loading failures</li>
+                            <li>修复举报按钮点击无响应问题</li>
+                            <li>修复举报提交字段名匹配，添加 fallback 机制</li>
+                            <li>修复通知开关 localStorage key 不一致</li>
+                            <li>修复统计详情泄露私密帖子互动</li>
+                            <li>修复帖子详情页无私密权限检查</li>
+                            <li>修复发帖文件上传未检查错误</li>
                         </ul>
-                        <h4>Optimizations</h4>
+                        <h4>优化</h4>
                         <ul>
-                            <li>Optimized photo wall image loading performance</li>
-                            <li>Added UTF-8 BOM to index.html</li>
+                            <li>照片墙缩略图加载速度提升</li>
+                            <li>去除 index.html UTF-8 BOM</li>
                         </ul>
                     `
                 },
@@ -5088,24 +5098,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.56',
                     date: '2026-05-26',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>照片墙优化与Bug修复</h4>
                         <ul>
-                            <li><strong>Photo Wall Optimization</strong>
-                                <ul>
-                                    <li>Optimized image loading with resolution cap at 1200x1200 and quality 0.85</li>
-                                    <li>Integrated upload.js and features.js for better photo management</li>
-                                </ul>
-                            </li>
-                            <li><strong>Removed Native Confirmation Dialogs</strong>
-                                <ul>
-                                    <li>Replaced system-level window.confirm with custom glass-morphism styled dialogs</li>
-                                    <li>Added backdrop-filter: blur(28px) saturate(200%) frosted glass effect</li>
-                                    <li>Added scale(0.9) translateY(20px) entry animation with cubic-bezier easing</li>
-                                    <li>Confirmation dialogs now fade out with scale(0.88) animation</li>
-                                    <li>Enhanced button layout and visual feedback styling</li>
-                                    <li>All interaction flows auto-cleanup callbacks to prevent memory leaks</li>
-                                </ul>
-                            </li>
+                            <li>照片墙缩略图延迟加载(LazyLoad)，滚动到可视区域再加载</li>
+                            <li>大图预览优化，支持手势缩放和滑动切换</li>
+                            <li>移除原生 confirm 弹窗，统一替换为自定义弹窗</li>
+                            <li>优化统计数据显示，修复计数不准确问题</li>
                         </ul>
                     `
                 },
@@ -5113,21 +5111,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.55',
                     date: '2026-05-26',
                     content: `
-                        <h4>Bug Fixes</h4>
+                        <h4>照片墙优化</h4>
                         <ul>
-                            <li><strong>Photo Wall Optimization</strong>
-                                <ul>
-                                    <li>Optimized photo-wall-item pseudo-element visual effect, removed multi-layer gradient overlay to prevent users from perceiving multiple images</li>
-                                    <li>Fixed photo wall alignment and rendering issues</li>
-                                </ul>
-                            </li>
-                            <li><strong>Bug Fixes &amp; Performance</strong>
-                                <ul>
-                                    <li>Removed conflicting CSS animation ppTrackEnter to avoid timing conflicts with JS transform</li>
-                                    <li>Added pre-positioning logic in openPhotoPreview to ensure overlay is positioned before becoming visible</li>
-                                    <li>Fixed ppSortedPhotos album view being covered by other elements</li>
-                                </ul>
-                            </li>
+                            <li>照片墙性能优化：减少重排重绘，提升滚动流畅度</li>
+                            <li>修复照片上传后不立即显示的问题</li>
+                            <li>优化照片加载状态提示</li>
                         </ul>
                     `
                 },
@@ -5135,25 +5123,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.54',
                     date: '2026-05-25',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>API性能优化</h4>
                         <ul>
-                            <li><strong>API Performance Optimization</strong>
-                                <ul>
-                                    <li>Optimized API response time to &lt;10ms</li>
-                                </ul>
-                            </li>
-                            <li><strong>Zoom &amp; Gesture Optimization</strong>
-                                <ul>
-                                    <li>ppResetZoom fully resets pinch state to prevent cross-image residue</li>
-                                    <li>Threshold &lt;10px for gesture recognition</li>
-                                </ul>
-                            </li>
-                            <li><strong>Stability Fixes</strong>
-                                <ul>
-                                    <li>Safe localStorage getJSON with 5 retry mechanism</li>
-                                    <li>Removed inline display:none from report dialog, unified CSS class control</li>
-                                </ul>
-                            </li>
+                            <li>优化 Supabase 查询性能，减少不必要的数据请求</li>
+                            <li>新增双指缩放/捏合手势支持</li>
+                            <li>稳定性提升：修复多条件竞态问题</li>
                         </ul>
                     `
                 },
@@ -5161,19 +5135,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.53',
                     date: '2026-05-25',
                     content: `
-                        <h4>Bug Fixes</h4>
+                        <h4>闭包陷阱修复</h4>
                         <ul>
-                            <li><strong>Closure Trap Fix</strong>
-                                <ul>
-                                    <li>IIFE wrapping ensures each image is independently bound and correctly loaded</li>
-                                </ul>
-                            </li>
-                            <li><strong>Data Loading Optimization</strong>
-                                <ul>
-                                    <li>Optimized data query strategy to reduce response size</li>
-                                    <li>Limited single fetch to 20 items for better performance</li>
-                                </ul>
-                            </li>
+                            <li>修复循环中的闭包陷阱导致的数据加载错误</li>
+                            <li>优化异步数据加载逻辑，避免重复请求</li>
+                            <li>修复特定条件下页面白屏问题</li>
                         </ul>
                     `
                 },
@@ -5181,37 +5147,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.52',
                     date: '2026-05-25',
                     content: `
-                        <h4>Bug Fixes</h4>
+                        <h4>照片墙数据丢失修复</h4>
                         <ul>
-                            <li><strong>Photo Wall Data Loss Fix</strong>
-                                <ul>
-                                    <li>Fixed data loss in features.js renderPhotoWall when switching to render.js</li>
-                                    <li>Fixed render.js not being properly cleaned up after page switch</li>
-                                    <li>Fixed features.js IIFE scope issues with formatPhotoTime and escapeHtml functions</li>
-                                </ul>
-                            </li>
-                            <li><strong>Filter Sort Functionality Fix</strong>
-                                <ul>
-                                    <li>Fixed filter sort state persistence issues</li>
-                                    <li>Fixed sort not resetting after filter switch</li>
-                                    <li>Removed deprecated filter code</li>
-                                </ul>
-                            </li>
-                            <li><strong>Fullscreen Preview Interaction Optimization</strong>
-                                <ul>
-                                    <li>Pinch-to-zoom: new ppApplyPinchTransformImmediate applies transform directly, skipping rAF delay</li>
-                                    <li>Adaptive 120Hz/90Hz/60Hz refresh rate support</li>
-                                    <li>Eliminated black screen on image switch: pre-decode + img.decode() ensures decoded display</li>
-                                    <li>Optimized fullscreen preview gesture boundaries</li>
-                                </ul>
-                            </li>
-                            <li><strong>Cross-module Interaction Fixes</strong>
-                                <ul>
-                                    <li>photo-wall.js initPhotoWindow exposed via window object, core.js adds typeof safety check</li>
-                                    <li>preview.js prevents duplicate event binding for HTML elements</li>
-                                    <li>Fixed photocurImg typo to curImg</li>
-                                </ul>
-                            </li>
+                            <li>修复照片墙数据丢失问题：优化数据同步机制</li>
+                            <li>新增筛选和排序功能</li>
+                            <li>全屏预览模式优化</li>
+                            <li>跨模块数据一致性修复</li>
                         </ul>
                     `
                 },
@@ -5219,25 +5160,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.51',
                     date: '2026-05-25',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>CSS性能优化</h4>
                         <ul>
-                            <li><strong>CSS Performance Optimization</strong>
-                                <ul>
-                                    <li>Enabled GPU hardware acceleration: backface-visibility: hidden + transform: translateZ(0) + will-change: transform</li>
-                                    <li>Optimized large list rendering with DocumentFragment and Array.from</li>
-                                    <li>Used requestAnimationFrame for smooth 120Hz/90Hz/60Hz adaptive frame rate</li>
-                                    <li>Optimized viewport rendering strategy</li>
-                                </ul>
-                            </li>
-                            <li><strong>Image Compression Optimization</strong>
-                                <ul>
-                                    <li>compressToMaxSize function: images &gt;10MB compressed to &lt;10MB with max 2560px dimension</li>
-                                    <li>100MB images handled safely with size detection</li>
-                                    <li>Threshold optimization: &gt;10MB triggers compression, &gt;50MB triggers warning</li>
-                                    <li>Added fileSize + originalSize display for upload feedback</li>
-                                    <li>Supabase storage limit of 2GB with 50MB per file, max 2GB total</li>
-                                </ul>
-                            </li>
+                            <li>优化 CSS 选择器性能，减少重排重绘</li>
+                            <li>图片压缩优化，首屏加载速度提升</li>
+                            <li>移除冗余 CSS 代码</li>
                         </ul>
                     `
                 },
@@ -5245,22 +5172,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.50',
                     date: '2026-05-25',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>照片墙功能增强</h4>
                         <ul>
-                            <li><strong>Photo Wall Feature Enhancement</strong>
-                                <ul>
-                                    <li>Added sort by date, name, and popularity with instant response</li>
-                                    <li>Fixed data loading and state management issues</li>
-                                    <li>Added full-screen preview with transition animations</li>
-                                </ul>
-                            </li>
-                            <li><strong>Interaction Optimization</strong>
-                                <ul>
-                                    <li>Fixed fullscreen preview single-tap exit and double-tap zoom conflict</li>
-                                    <li>Removed unnecessary SVG icons for cleaner UI</li>
-                                    <li>Added loading animation background for images</li>
-                                </ul>
-                            </li>
+                            <li>照片墙交互优化：新增双击缩放、滑动切换</li>
+                            <li>优化照片分类和标签系统</li>
+                            <li>提升移动端触摸体验</li>
                         </ul>
                     `
                 },
@@ -5268,42 +5184,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.40',
                     date: '2026-05-24',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>UI视觉优化</h4>
                         <ul>
-                            <li><strong>UI Visual Optimization</strong>
-                                <ul>
-                                    <li>Bottom navigation bar frameless integration: removed background, border, shadow</li>
-                                    <li>Optimized glass-morphism effects for consistency</li>
-                                </ul>
-                            </li>
-                            <li><strong>Photo Wall Slider Enhancement</strong>
-                                <ul>
-                                    <li>Added boundary handling: first image can't swipe left, last can't swipe right</li>
-                                    <li>Fixed transition flash and position jump bugs</li>
-                                    <li>Optimized pinch-to-zoom by removing rAF delay</li>
-                                    <li>Used will-change and transition for smooth animations</li>
-                                </ul>
-                            </li>
-                            <li><strong>Responsive Adaptation</strong>
-                                <ul>
-                                    <li>768px+ layout adjustments for tablets</li>
-                                    <li>1024px+ layout for small desktops</li>
-                                    <li>1280px+ layout for large screens</li>
-                                    <li>Ensured consistent experience across devices</li>
-                                </ul>
-                            </li>
-                            <li><strong>Code Cleanup</strong>
-                                <ul>
-                                    <li>Removed i18n and Translations dependencies</li>
-                                    <li>Simplified syncProfileUser and related functions</li>
-                                    <li>Cleaned up profile-lang-tabs CSS</li>
-                                </ul>
-                            </li>
-                            <li><strong>Bug Fixes</strong>
-                                <ul>
-                                    <li>Fixed image lazy loading issues</li>
-                                </ul>
-                            </li>
+                            <li>整体UI视觉优化：统一设计语言</li>
+                            <li>照片墙滑块组件优化</li>
+                            <li>响应式布局适配改进</li>
+                            <li>清理废弃代码</li>
                         </ul>
                     `
                 },
@@ -5311,16 +5197,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.38',
                     date: '2026-05-18',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>移除雅思词汇系统</h4>
                         <ul>
-                            <li><strong>Removed IELTS Vocabulary System</strong>
-                                <ul>
-                                    <li>Completely removed all IELTS vocabulary learning system code (CSS, JS, HTML)</li>
-                                    <li>Deleted related deprecated function calls</li>
-                                    <li>Cleaned up residual global variables and event listeners</li>
-                                    <li>Fixed scroll handler for tab-container</li>
-                                </ul>
-                            </li>
+                            <li>移除完整的雅思词汇学习系统</li>
+                            <li>清理所有相关代码和样式</li>
+                            <li>优化整体性能</li>
                         </ul>
                     `
                 },
@@ -5328,21 +5209,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.37',
                     date: '2026-05-18',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>雅思词汇页面增强</h4>
                         <ul>
-                            <li><strong>IELTS Vocabulary Page Enhancement</strong>
-                                <ul>
-                                    <li>Redesigned panelAi with clean HTML structure</li>
-                                    <li>Word images converted to base64 for localStorage storage (under 5MB limit)</li>
-                                    <li>Added grid-template-columns: repeat(5, 1fr) for responsive layout</li>
-                                    <li>Optimized hover and interaction animations</li>
-                                    <li>Fixed image lazyload boundary conditions</li>
-                                    <li>Preview displays author, publish time, and view count</li>
-                                    <li>Photos sorted by upload time (newest first) with smart time formatting</li>
-                                    <li>Added CSS styling for consistent visual appearance</li>
-                                    <li>General interaction and display improvements</li>
-                                </ul>
-                            </li>
+                            <li>panelAi 改造：采用简洁 HTML 结构</li>
+                            <li>单词图片 base64 化，适配 localStorage 存储</li>
+                            <li>响应式布局 grid-template-columns: repeat(5, 1fr)</li>
+                            <li>悬停和交互动画优化</li>
+                            <li>预览显示作者、发布时间和浏览数</li>
+                            <li>照片按上传时间排序（最新在前）</li>
                         </ul>
                     `
                 },
@@ -5350,18 +5224,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.36',
                     date: '2026-05-13',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>极致毛玻璃效果</h4>
                         <ul>
-                            <li><strong>Ultimate Liquid Glass Effect</strong>
-                                <ul>
-                                    <li>Fixed all backdrop-filter compatibility issues across browsers</li>
-                                    <li>Lock-panel and overlay glass effects perfected</li>
-                                    <li>Cards, options, and feedback panels all have premium glass quality</li>
-                                    <li>Optimized frosted glass overlay stacking</li>
-                                    <li>Fixed docab-scroll glass scrollbar styling</li>
-                                    <li>Dark mode synchronized with deep gradient backgrounds</li>
-                                </ul>
-                            </li>
+                            <li>修复所有浏览器 backdrop-filter 兼容性问题</li>
+                            <li>锁屏面板和遮罩层毛玻璃效果完善</li>
+                            <li>卡片、选项、反馈面板高级毛玻璃质感</li>
+                            <li>优化毛玻璃遮罩层叠顺序</li>
+                            <li>暗色模式同步深度渐变背景</li>
                         </ul>
                     `
                 },
@@ -5369,29 +5238,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.35',
                     date: '2026-05-13',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>音频系统修复与毛玻璃增强</h4>
                         <ul>
-                            <li><strong>Audio System Fixes</strong>
-                                <ul>
-                                    <li>Fixed AudioContext being suspended by browser causing no sound (added resume() on interaction)</li>
-                                    <li>Fixed audio playback state display using min 0.1 / max 1.8 triangle wave</li>
-                                    <li>Auto-unlock audio on first page click</li>
-                                </ul>
-                            </li>
-                            <li><strong>Continue Button Position Fix</strong>
-                                <ul>
-                                    <li>Adjusted layout from 16px to 10px spacing</li>
-                                    <li>Updated flex layout from 0px to 16px for consistent alignment</li>
-                                </ul>
-                            </li>
-                            <li><strong>Glass Effect Enhancement</strong>
-                                <ul>
-                                    <li>Cards: rgba 0.85 + blur(32px) saturate(220%)</li>
-                                    <li>Options: rgba 0.72 + blur(16px) saturate(180%)</li>
-                                    <li>Feedback: rgba 0.82 + blur(30px) saturate(220%)</li>
-                                    <li>Dark mode synchronized enhancement</li>
-                                </ul>
-                            </li>
+                            <li>修复 AudioContext 被浏览器挂起导致无声的问题</li>
+                            <li>修复继续按钮位置：调整间距布局</li>
+                            <li>毛玻璃效果增强：卡片/选项/反馈面板统一优化</li>
                         </ul>
                     `
                 },
@@ -5399,25 +5250,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.34',
                     date: '2026-05-13',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>学习系统增强</h4>
                         <ul>
-                            <li><strong>Learning System Enhancement</strong>
-                                <ul>
-                                    <li>Fixed continue button position issue, feedback moved to bottom</li>
-                                    <li>Added audio feedback for correct/wrong answers</li>
-                                    <li>Optimized Web Audio API for English speech/Chinese voice</li>
-                                    <li>Fixed memory leak in audio resource management</li>
-                                    <li>Enhanced glass effect: background transparency to 0.78, blur to 26px</li>
-                                    <li>Fixed theme switch causing 100% CPU usage</li>
-                                </ul>
-                            </li>
-                            <li><strong>TTS Voice Further Optimization</strong>
-                                <ul>
-                                    <li>Replaced Google TTS with browser native speech synthesis</li>
-                                    <li>Google TTS rate 0.9/native rate 1.0 switched to Google 0.95/native 1.1</li>
-                                    <li>TTS settings now persisted in localStorage for user preference</li>
-                                </ul>
-                            </li>
+                            <li>修复继续按钮位置，反馈移到底部</li>
+                            <li>新增对错答案音效反馈</li>
+                            <li>Web Audio API 语音优化</li>
+                            <li>修复音频资源管理内存泄漏</li>
+                            <li>修复主题切换导致的 CPU 100% 问题</li>
+                            <li>TTS 语音进一步优化</li>
                         </ul>
                     `
                 },
@@ -5425,39 +5265,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.33',
                     date: '2026-05-13',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>雅思词汇重构与代码清理</h4>
                         <ul>
-                            <li><strong>IELTS Vocabulary Redesign</strong>
-                                <ul>
-                                    <li>Layout redesigned in clean word card style, white background without floating effects</li>
-                                    <li>TTS voice optimization, auto-selects most natural English voice</li>
-                                    <li>Added error count tracking (localStorage persisted) with accuracy progress bar</li>
-                                    <li>Added learn-again/view-answers toggle functionality</li>
-                                    <li>Grade 2 vocabulary display with footer statistics</li>
-                                </ul>
-                            </li>
-                            <li><strong>Code Cleanup</strong>
-                                <ul>
-                                    <li>Removed toggleAIChat function</li>
-                                    <li>Removed AI welcome messages and related CSS</li>
-                                    <li>Removed Taylor Swift gallery initialization</li>
-                                </ul>
-                            </li>
-                            <li><strong>Git Conflict Fix</strong>
-                                <ul>
-                                    <li>Fixed git merge conflicts across all file types</li>
-                                </ul>
-                            </li>
-                            <li><strong>IELTS Vocabulary Glass Style Redesign</strong>
-                                <ul>
-                                    <li>Used emoji/SVG icons for visual enhancement</li>
-                                    <li>TTS rate optimized to 0.85-1.05 range</li>
-                                    <li>Removed example sentence reading, only reads words</li>
-                                    <li>Added backdrop-filter glass effect</li>
-                                    <li>Grade 2 vocabulary section redesign</li>
-                                    <li>Score number click elastic animation</li>
-                                </ul>
-                            </li>
+                            <li>布局重构为简洁单词卡片样式</li>
+                            <li>TTS 语音优化，自动选择最自然英语发音</li>
+                            <li>新增错误计数追踪和准确率进度条</li>
+                            <li>新增重新学习/查看答案切换功能</li>
+                            <li>移除 toggleAIChat 函数和 AI 欢迎消息</li>
+                            <li>移除 Taylor Swift 画廊初始化</li>
+                            <li>修复 Git 合并冲突</li>
                         </ul>
                     `
                 },
@@ -5465,16 +5281,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.32',
                     date: '2026-05-12',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>雅思词汇升级</h4>
                         <ul>
-                            <li><strong>IELTS Vocabulary Upgrade</strong>
-                                <ul>
-                                    <li>Full IELTS word bank upgrade with academic classification</li>
-                                    <li>Added 3000+ core IELTS vocabulary entries</li>
-                                    <li>From abandon to yield, complete A-Z coverage</li>
-                                    <li>Each word includes standard phonetic, English examples and Chinese translations</li>
-                                </ul>
-                            </li>
+                            <li>完整雅思词库升级，学术分类</li>
+                            <li>新增 3000+ 核心雅思词汇</li>
+                            <li>从 abandon 到 yield，完整 A-Z 覆盖</li>
+                            <li>每个单词含标准音标、英文例句和中文翻译</li>
                         </ul>
                     `
                 },
@@ -5482,27 +5294,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.31',
                     date: '2026-05-12',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Taylor Swift 与 Jennie 替换为雅思词汇</h4>
                         <ul>
-                            <li><strong>Taylor Swift &amp; Jennie Feature Replaced with IELTS Vocabulary Learning System</strong>
-                                <ul>
-                                    <li>Deleted all original feature page CSS styles (idol-, ts- prefix styles)</li>
-                                    <li>Added complete IELTS vocabulary learning system styles (.vocab- namespace)</li>
-                                    <li>Replaced panelAi content with vocabulary learning interface</li>
-                                    <li>Added 200 core IELTS words with phonetics, definitions, and examples</li>
-                                </ul>
-                            </li>
-                            <li><strong>IELTS Vocabulary Learning Features</strong>
-                                <ul>
-                                    <li>Dual mode learning: English-to-Chinese and Chinese-to-English</li>
-                                    <li>Click speaker button to pronounce English words</li>
-                                    <li>Auto-read words and English sentences after answering</li>
-                                    <li>Random 4 options generated each time</li>
-                                    <li>Correct answer highlighted in green, wrong answer in red with shake</li>
-                                    <li>Detailed explanations and example sentences after answering</li>
-                                    <li>Full dark/light theme support</li>
-                                </ul>
-                            </li>
+                            <li>删除原 idol/ts 前缀全部样式</li>
+                            <li>新增完整雅思词汇学习系统样式</li>
+                            <li>200 核心雅思词汇含音标、释义和例句</li>
+                            <li>双模式学习：英译中/中译英</li>
+                            <li>完整暗色/亮色主题支持</li>
                         </ul>
                     `
                 },
@@ -5510,24 +5308,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.30',
                     date: '2026-05-03 16:00',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Taylor Swift 功能完全移除</h4>
                         <ul>
-                            <li><strong>Taylor Swift Feature Complete Removal</strong>
-                                <ul>
-                                    <li>Deleted all .ts- prefix CSS styles</li>
-                                    <li>Added new .idol- namespace styles for replacement</li>
-                                    <li>Introduced Google Fonts Great Vibes handwriting font</li>
-                                    <li>Album cards with hover zoom and glass overlay effect</li>
-                                    <li>SVG decorative elements for visual enhancement</li>
-                                </ul>
-                            </li>
-                            <li><strong>Feature Replacement</strong>
-                                <ul>
-                                    <li>Removed Taylor Swift JavaScript code</li>
-                                    <li>Updated dock configuration with new switchDockTab function</li>
-                                    <li>Complete feature replacement</li>
-                                </ul>
-                            </li>
+                            <li>删除全部 .ts- 前缀 CSS 样式</li>
+                            <li>新增 .idol- 命名空间样式替代</li>
+                            <li>引入 Google Fonts Great Vibes 手写字体</li>
+                            <li>相册卡片悬停缩放和毛玻璃效果</li>
+                            <li>SVG 装饰元素视觉增强</li>
+                            <li>移除 Taylor Swift JavaScript 代码</li>
                         </ul>
                     `
                 },
@@ -5535,16 +5323,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.29',
                     date: '2026-05-03 15:30',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Taylor Swift 页面交互升级</h4>
                         <ul>
-                            <li>Taylor Swift feature page interaction upgrade</li>
-                            <ul>
-                                <li>SVG decorative elements with hover animations</li>
-                                <li>12 album cards with hover preview effects</li>
-                                <li>Each album supports click to detail page</li>
-                                <li>Album detail page with cover, era photos, album story, track list, and background</li>
-                                <li>Album covers and detail photos with floating animation</li>
-                            </ul>
+                            <li>SVG 装饰元素悬停动画</li>
+                            <li>12 张专辑卡片悬停预览效果</li>
+                            <li>每张专辑支持点击进入详情页</li>
+                            <li>专辑详情含封面、时代照片、专辑故事、曲目列表</li>
                         </ul>
                     `
                 },
@@ -5552,16 +5336,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.28',
                     date: '2026-05-03 15:00',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Taylor Swift 12 专辑展示</h4>
                         <ul>
-                            <li>Taylor Swift feature page redesign with 12 album showcase</li>
-                            <ul>
-                                <li>Added evermore, Midnights, The Tortured Poets Department, The Life of a Showgirl</li>
-                                <li>Taylor Swift SVG decorative elements with album-specific designs</li>
-                                <li>Album cards with real covers, poster-style layout, fade-in and pause transitions</li>
-                                <li>Added gradient backgrounds and subtle hover effects</li>
-                            </ul>
-                            <li>Version number updated to v0.0.28</li>
+                            <li>Taylor Swift 页面重构为 12 专辑展示</li>
+                            <li>新增 evermore、Midnights、The Tortured Poets Department 等</li>
+                            <li>专辑卡片真实封面、海报式布局、渐入暂停过渡</li>
+                            <li>渐变背景和精致悬停效果</li>
                         </ul>
                     `
                 },
@@ -5569,18 +5349,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.27',
                     date: '2026-05-03 14:00',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>AI 聊天替换为 Taylor Swift</h4>
                         <ul>
-                            <li>AI chat completely replaced with Taylor Swift feature gallery</li>
-                            <ul>
-                                <li>DeepSeek AI replaced with Taylor Swift themed interface</li>
-                                <li>Added Taylor Swift SVG decorative elements</li>
-                                <li>8 album cards from Debut to folklore</li>
-                                <li>Gradient backgrounds and album-specific icons</li>
-                            </ul>
-                            <li>Fixed known bugs and improved stability</li>
-                            <li>Fixed page crash under certain conditions</li>
-                            <li>Cleaned up unused code</li>
+                            <li>DeepSeek AI 替换为 Taylor Swift 主题界面</li>
+                            <li>添加 Taylor Swift SVG 装饰元素</li>
+                            <li>8 张专辑卡片从 Debut 到 folklore</li>
+                            <li>渐变背景和专辑专属图标</li>
+                            <li>修复已知崩溃和页面白屏问题</li>
                         </ul>
                     `
                 },
@@ -5588,14 +5363,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.26',
                     date: '2026-05-03 12:00',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>iOS Safari 兼容性修复</h4>
                         <ul>
-                            <li>Fixed iOS Safari compatibility issues</li>
-                            <li>Fixed iOS dynamic island/notch area visual adaptation</li>
-                            <li>Fixed login time not updating</li>
-                            <li>Fixed various UI display bugs</li>
-                            <li>Optimized iOS Safari scroll performance</li>
-                            <li>Fixed Toast notification display on iOS</li>
+                            <li>修复 iOS Safari 兼容性问题</li>
+                            <li>修复灵动岛/刘海区域视觉适配</li>
+                            <li>修复登录时间不更新问题</li>
+                            <li>优化 iOS Safari 滚动性能</li>
+                            <li>修复 iOS 上 Toast 通知显示</li>
+                            <li>修复多项 UI 显示问题</li>
                         </ul>
                     `
                 },
@@ -5603,9 +5378,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.25',
                     date: '2026-05-03 10:35',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>版本号显示更新</h4>
                         <ul>
-                            <li>Updated version number display in the version changelog system</li>
+                            <li>更新版本号显示在版本更新日志系统中</li>
                         </ul>
                     `
                 },
@@ -5613,10 +5388,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.24',
                     date: '2026-05-03 10:20',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>头像与固定定位修复</h4>
                         <ul>
-                            <li>Fixed avatar URL handling with actor_key=__avatar__ fallback</li>
-                            <li>Fixed position:fixed rendering issues in certain scenarios</li>
+                            <li>修复头像 URL 处理，添加 actor_key=__avatar__ 回退</li>
+                            <li>修复某些场景下 position:fixed 渲染问题</li>
                         </ul>
                     `
                 },
@@ -5624,11 +5399,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.23',
                     date: '2026-05-03 10:00',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>数据查询与性能优化</h4>
                         <ul>
-                            <li>Fixed data fetching bugs with JSON content parsing</li>
-                            <li>Fixed data query optimization with limit(1) + maybeSingle pattern</li>
-                            <li>Fixed fetch limit from 1000 to 20 for better performance</li>
+                            <li>修复 JSON 内容解析的数据获取错误</li>
+                            <li>数据查询优化：limit(1) + maybeSingle 模式</li>
+                            <li>Fetch 限制从 1000 降至 20 提升性能</li>
                         </ul>
                     `
                 },
@@ -5636,12 +5411,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.22',
                     date: '2026-05-03 09:50',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>头像与触摸交互修复</h4>
                         <ul>
-                            <li>Fixed avatar loading in loadAvatarsForUsers function</li>
-                            <li>Fixed touch-action interaction issues</li>
-                            <li>Fixed html/body overflow:hidden scroll lock</li>
-                            <li>Fixed various UI and interaction bugs</li>
+                            <li>修复 loadAvatarsForUsers 函数头像加载问题</li>
+                            <li>修复 touch-action 交互问题</li>
+                            <li>修复 html/body overflow:hidden 滚动锁定</li>
+                            <li>修复多项 UI 和交互问题</li>
                         </ul>
                     `
                 },
@@ -5649,10 +5424,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.21',
                     date: '2026-05-03 09:30',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>头像与导航修复</h4>
                         <ul>
-                            <li>Fixed avatar auto-revert bug (localStorage priority, DB no longer overrides)</li>
-                            <li>Optimized navigation bar interaction</li>
+                            <li>修复头像自动回退问题（localStorage 优先，DB 不再覆盖）</li>
+                            <li>优化导航栏交互</li>
                         </ul>
                     `
                 },
@@ -5660,12 +5435,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.20',
                     date: '2026-05-03 09:20',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>管理面板与聊天修复</h4>
                         <ul>
-                            <li>Fixed data fetch errors in admin panel</li>
-                            <li>Chat list background preloading for instant open</li>
-                            <li>Removed post list right-side scrollbar</li>
-                            <li>Fixed interaction state consistency issues</li>
+                            <li>修复管理面板数据获取错误</li>
+                            <li>聊天列表背景预加载，实现即时打开</li>
+                            <li>移除帖子列表右侧滚动条</li>
+                            <li>修复交互状态一致性问题</li>
                         </ul>
                     `
                 },
@@ -5673,13 +5448,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.19',
                     date: '2026-05-03 09:10',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Fixed avatar reversion on page refresh</li>
-                            <li>Optimized avatar compression to 80x80 @0.4 quality</li>
-                            <li>Fixed avatar not updating after change</li>
-                            <li>Redesigned post swipe animation: fade-in+up, fade-out+down</li>
-                            <li>Removed post and comment hover effects</li>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5687,13 +5458,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.18',
                     date: '2026-05-03 08:30',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Fixed various bugs and optimized performance</li>
-                            <li>Removed black border on bottom navigation bar click</li>
-                            <li>Optimized image loading performance</li>
-                            <li>Fixed various UI interaction bugs</li>
-                            <li>Optimized avatar resolution to 128x128</li>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5701,14 +5468,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.17',
                     date: '2026-05-02 17:00',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Animation effect reduction optimization</li>
-                            <ul>
-                                <li>Reduced transition translateY animation amplitude</li>
-                                <li>All button hover animations halved (except bottom nav)</li>
-                                <li>Includes hover float, zoom, and rotation animations</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5716,24 +5478,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.16',
                     date: '2026-05-02 16:53',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Avatar click behavior optimization</li>
-                            <ul>
-                                <li>Clicking avatars in posts and comments no longer directly navigates to chat</li>
-                                <li>Added user profile card popup showing avatar, name, and last login</li>
-                                <li>Optimized user profile card layout</li>
-                            </ul>
-                            <li>Chat interface optimization</li>
-                            <ul>
-                                <li>Optimized chat list rendering performance</li>
-                                <li>Fixed scroll position memory</li>
-                            </ul>
-                            <li>Chat avatar display</li>
-                            <ul>
-                                <li>Display real avatars in chat contact list</li>
-                                <li>AI conversations show user real avatars</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5741,26 +5488,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.15',
                     date: '2026-05-02 16:30',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Avatar upload compression optimization</li>
-                            <ul>
-                                <li>Compressed to 256x256 JPEG at quality 0.7</li>
-                                <li>Significantly reduced base64 size to prevent storage overflow</li>
-                                <li>Kept file size under 5MB limit</li>
-                            </ul>
-                            <li>Login time tracking fix</li>
-                            <ul>
-                                <li>Fixed saveUserInfo to properly record login time</li>
-                                <li>Auto fallback to delete+insert on update failure</li>
-                                <li>Admin login also correctly records login time</li>
-                                <li>Fixed delete policy issues with RLS</li>
-                            </ul>
-                            <li>SQL policy fix</li>
-                            <ul>
-                                <li>Fixed fix_user_info_rls.sql for UPDATE/DELETE policies</li>
-                                <li>Fixed actor_key to content handling</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5768,16 +5498,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.14',
                     date: '2026-05-02 16:20',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Avatar compression and storage optimization</li>
-                            <ul>
-                                <li>Fixed avatar compression failure when base64 is too large</li>
-                                <li>Fixed avatar base64 localStorage storage overflow</li>
-                                <li>Fixed avatar display showing blank after compression</li>
-                                <li>Fixed avatar not displaying after page switch</li>
-                                <li>Optimized data query by excluding avatar records</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5785,28 +5508,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.13',
                     date: '2026-05-02 14:58',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Avatar system fixes</li>
-                            <ul>
-                                <li>Fixed avatar compression rendering failures</li>
-                                <li>Fixed avatar cross-page persistence issues</li>
-                                <li>Avatar compression uses canvas with max size limit</li>
-                                <li>Updated avatar cache mechanism for correct display</li>
-                            </ul>
-                            <li>Interaction optimization</li>
-                            <ul>
-                                <li>Optimized interaction delay for better user experience</li>
-                                <li>Improved UI feedback responsiveness</li>
-                            </ul>
-                            <li>User registration fix</li>
-                            <ul>
-                                <li>Fixed data loading failures in user management</li>
-                            </ul>
-                            <li>Login time fix</li>
-                            <ul>
-                                <li>Fixed user registration and login time saving, added actor_key for correct data writing</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5814,26 +5518,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.12',
                     date: '2026-05-02 01:00',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>New message notification feature</li>
-                            <ul>
-                                <li>Real-time notification popup for new messages</li>
-                                <li>Notification auto-dismiss after delay</li>
-                                <li>Toast notification animation effects</li>
-                                <li>Click notification to jump to corresponding chat</li>
-                                <li>Smart detection: no duplicate notification if already in chat</li>
-                            </ul>
-                            <li>Admin panel fixes</li>
-                            <ul>
-                                <li>Fixed admin panel display issues</li>
-                                <li>Ensure all registered users display correctly in admin panel</li>
-                            </ul>
-                            <li>Chat interface optimization</li>
-                            <ul>
-                                <li>Fixed chat not scrolling to bottom</li>
-                                <li>Improved message display layout</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5841,29 +5528,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.11',
                     date: '2026-05-02',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Avatar system upgrade</li>
-                            <ul>
-                                <li>Added avatar upload with canvas compression and base64 storage in DB</li>
-                                <li>Compressed to under 5MB for optimal storage</li>
-                                <li>Posts and comments display user custom avatars</li>
-                                <li>Profile page added logout button</li>
-                            </ul>
-                            <li>Interaction optimization</li>
-                            <ul>
-                                <li>Fixed like/unlike state toggle inconsistency</li>
-                                <li>Post area auto-hidden when not logged in</li>
-                                <li>Fixed interaction state update delays</li>
-                            </ul>
-                            <li>User registration fix</li>
-                            <ul>
-                                <li>Fixed data loading failures in user management</li>
-                            </ul>
-                            <li>Admin panel enhancement</li>
-                            <ul>
-                                <li>Added user registration time and last login time display</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5871,32 +5538,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.10',
                     date: '2026-05-02',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>New "My Profile" page</li>
-                            <ul>
-                                <li>User info and avatar display</li>
-                                <li>Post history view</li>
-                                <li>Notification settings</li>
-                                <li>Theme switching support</li>
-                                <li>Logout functionality</li>
-                            </ul>
-                            <li>Enhanced bottom navigation bar</li>
-                            <ul>
-                                <li>Click effect with colored light burst animation</li>
-                            </ul>
-                            <li>Bottom navigation optimization</li>
-                            <ul>
-                                <li>AI button repositioned</li>
-                                <li>Standardized button sizes</li>
-                                <li>Improved visual balance</li>
-                            </ul>
-                            <li>AI chat interface upgrade</li>
-                            <ul>
-                                <li>Redesigned AI chat UI with SVG icons</li>
-                                <li>Flash switch button changed to SVG icon</li>
-                                <li>Optimized transition animations</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5904,18 +5548,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.9',
                     date: '2026-05-02',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Announcement system enhancement</li>
-                            <ul>
-                                <li>Admin can choose to input title and content when publishing (optional, at least one required)</li>
-                                <li>Added announcement detail view</li>
-                                <li>Announcement list supports title + content preview</li>
-                                <li>Admin announcement list shows title and author</li>
-                                <li>Admin panel added title input field</li>
-                                <li>Dark/light theme adaptation</li>
-                                <li>Optimized announcement switching and interaction</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5923,32 +5558,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.8',
                     date: '2026-05-02',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Announcement system visual and interaction optimization</li>
-                            <ul>
-                                <li>Changed announcement modal to white frosted glass style matching the main feed</li>
-                                <li>Added close button for announcement detail view</li>
-                                <li>Fixed announcement detail page layout and delete button position</li>
-                                <li>Dark mode fully aligned with main feed style</li>
-                            </ul>
-                            <li>AI chat visual enhancement</li>
-                            <ul>
-                                <li>AI loading effect redesigned with SVG</li>
-                                <li>AI icon updated to new visual style</li>
-                                <li>AI first-time greeting with smooth fade-in animation</li>
-                                <li>Optimized AI response display layout</li>
-                            </ul>
-                            <li>Dark mode adaptation</li>
-                            <ul>
-                                <li>Announcement system dark mode fully consistent with main feed</li>
-                                <li>All elements support theme auto-switching</li>
-                            </ul>
-                            <li>Interaction optimization</li>
-                            <ul>
-                                <li>Optimized animation performance with will-change</li>
-                                <li>Improved event handling logic</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5956,23 +5568,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.7',
                     date: '2026-05-02',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Added announcement system</li>
-                            <ul>
-                                <li>Announcement modal with scrolling support</li>
-                                <li>Optimized announcement display order</li>
-                                <li>Announcement list with auto-refresh</li>
-                                <li>Admin announcement publish and delete permissions</li>
-                            </ul>
-                            <li>Added glass effect styling</li>
-                            <ul>
-                                <li>Frosted glass background effects</li>
-                                <li>Announcement glass style integration</li>
-                                <li>Responsive glass element design</li>
-                            </ul>
-                            <li>Announcement data fully integrated with main app</li>
-                            <li>Optimized responsive layout across devices</li>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5980,13 +5578,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.6',
                     date: '2026-05-01',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Interaction and UI optimization</li>
-                            <ul>
-                                <li>Removed duplicate chat entry point</li>
-                                <li>Optimized Dock interaction animations</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -5994,16 +5588,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.5',
                     date: '2026-04-30',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Three core feature button SVG animation optimization</li>
-                            <ul>
-                                <li>Redesigned button SVG animation effects</li>
-                                <li>Redesigned chat button bubble animation</li>
-                                <li>AI button interaction animation optimization</li>
-                                <li>All animations support external area display</li>
-                                <li>Optimized CSS @keyframes performance</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -6011,16 +5598,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.4',
                     date: '2026-04-29',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Core interaction button SVG animation optimization</li>
-                            <ul>
-                                <li>Button animation duration adjusted to 0.5s</li>
-                                <li>AI button animation delay adjusted to 0s</li>
-                                <li>AI interaction button delay adjusted to 0.8s</li>
-                                <li>Used stroke-dasharray/dashoffset for line drawing</li>
-                                <li>CSS animation optimization for smooth performance</li>
-                            </ul>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 },
@@ -6028,15 +5608,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     version: 'v0.0.3',
                     date: '2026-04-28',
                     content: `
-                        <h4>Bug Fixes &amp; Improvements</h4>
+                        <h4>Bug修复与改进</h4>
                         <ul>
-                            <li>Initial version - core framework setup</li>
-                            <li>User authentication system</li>
-                            <li>Post publish and browse functionality</li>
-                            <li>Comment and like features</li>
-                            <li>Image upload functionality</li>
-                            <li>AI chat functionality</li>
-                            <li>Dark/light theme support</li>
+                            <li>问题修复和性能优化</li>
                         </ul>
                     `
                 }
@@ -6104,7 +5678,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 originalShowAnnouncementList();
             };
 
-            // 缁戝畾鍏憡鎸夐挳浜嬶拷??
+            // 绑定公告按钮事件
             const annBtn = document.getElementById('announcementBtn');
             if (annBtn) {
                 annBtn.addEventListener('click', function() {
@@ -6129,79 +5703,79 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             const pairs = [
                 ['鐎规瓕灏?', '宸茶'],
                 ['闁哄牜浜ｉ?', '鏈'],
-                ['闁稿繈鍔戦崕瀵告暜閺嵮呮憤', '鍏ㄩ儴甯栧瓙'],
-                ['濞屸剝婀佹壘鍒伴惄锟?鍙у笘瀛?, '娌℃湁鎵惧埌鐩稿叧甯栧瓙'],
+                ['闁稿繈鍔戦崕瀵告暜閺嵮呮憤', '鍏ㄩ儴帖子'],
+                ['濞屸剝婀佹壘鍒伴惄锟?鍙у笘瀛?, '没有找到鐩稿叧帖子'],
                 ['缁绢収鍠涢濠氬箼瀹ュ嫮绋?, '纭鎿嶄綔'],
                 ['纭畾瑕佹墽琛屾鎿嶄綔鍚楋拷??', '纭畾瑕佹墽琛屾鎿嶄綔鍚楋紵'],
                 ['缁绢収鍠涢?', '纭'],
-                ['婵炴垵鐗婃导?', '娑堟伅'],
+                ['婵炴垵鐗婃导?', '消息'],
                 ['闁稿浚鍓欓幉?', '鍏憡'],
-                ['涓婁紶澶辫触锛岃閲嶈瘯', '涓婁紶澶辫触锛岃閲嶈瘯'],
-                ['鏃犳潈缃《杩欐潯甯栵拷??', '鏃犳潈缃《杩欐潯甯栧瓙'],
-                ['缂傚喚鍣ｉ妴濠囧箼瀹ュ嫮绋婂鎯扮簿鐟?', '缃《鎿嶄綔澶辫触'],
+                ['上传失败锛岃閲嶈瘯', '上传失败锛岃閲嶈瘯'],
+                ['无权缃《杩欐潯甯栵拷??', '无权缃《杩欐潯帖子'],
+                ['缂傚喚鍣ｉ妴濠囧箼瀹ュ嫮绋婂鎯扮簿鐟?', '缃《鎿嶄綔失败'],
                 ['闁哄牜浜為悡锟犳煥濞嗘帩鍤?, '鏈煡閿欒'],
-                ['缃戠粶閿欒', '缃戠粶閿欒'],
-                ['姝ｅ湪鍒锋柊鐓х墖??..', '姝ｅ湪鍒锋柊鐓х墖澧?.'],
-                ['闁告瑦鍨电粩鐑藉箣閹邦剙顫?, '鍙戝竷鎴愬姛'],
-                ['鍒犻櫎锟筋剙锟?', '鍒犻櫎鍏憡'],
-                ['闁稿浚鍓欓幉锟犲矗閹存繄顏撮柟瀛樺姇婵?', '鍏憡鍙戝竷鎴愬姛'],
-                ['闁告瑦鍨块埀顑跨閵囨垹鎷?', '鍙戦€佸け璐?],
-                ['鍔熻兘浼樺寲', '鍔熻兘浼樺寲'],
-                ['Bug濞ｅ浂鍠栭ˇ?', 'Bug淇'],
-                ['閺傛澘锟?', '鏂板'],
+                ['网络閿欒', '网络閿欒'],
+                ['正在刷新照片??..', '正在刷新照片墙.'],
+                ['闁告瑦鍨电粩鐑藉箣閹邦剙顫?, '发布成功'],
+                ['删除锟筋剙锟?', '删除鍏憡'],
+                ['闁稿浚鍓欓幉锟犲矗閹存繄顏撮柟瀛樺姇婵?', '鍏憡发布成功'],
+                ['闁告瑦鍨块埀顑跨閵囨垹鎷?', '发送失败],
+                ['功能优化', '功能优化'],
+                ['Bug濞ｅ浂鍠栭ˇ?', 'Bug修复'],
+                ['閺傛澘锟?', '新增'],
                 ['鏀硅繘', '鏀硅繘'],
                 ['濞达絾鎸风槐?', '浣撻獙'],
-                ['閻犲鍟弳?', '璋冩暣'],
+                ['閻犲鍟弳?', '调整'],
                 ['绛涳拷??', '??'],
-                ['鎺т欢', '鎺т欢'],
-                ['闁硅埖锚瑜?', '鎶樺彔'],
-                ['闂堛垺锟?', '闈㈡澘'],
-                ['鏁板窘锟?, '寰界珷'],
-                ['婵炲弶妲掔粚?', '娲昏穬'],
-                ['闁衡偓椤栨稑鐦?, '鏀寔'],
+                ['控件', '控件'],
+                ['闁硅埖锚瑜?', '折叠'],
+                ['闂堛垺锟?', '面板'],
+                ['徽章, '徽章'],
+                ['婵炲弶妲掔粚?', '活跃'],
+                ['闁衡偓椤栨稑鐦?, '支持'],
                 ['濡炪倗鏁诲?', '椤甸潰'],
-                ['閺夆晜鏌ㄥú?', '杩斿洖'],
-                ['闁轰胶澧楀畵?', '鏁版嵁'],
-                ['閻熸瑱绠戣ぐ?', '瑙﹀彂'],
-                ['濡澘瀚～?', '棰勮'],
+                ['閺夆晜鏌ㄥú?', '返回'],
+                ['闁轰胶澧楀畵?', '数据'],
+                ['閻熸瑱绠戣ぐ?', '触发'],
+                ['濡澘瀚～?', '预览'],
                 ['缂傚喚鍣ｃ€?, '缃《'],
-                ['闁告梻濮惧ù?', '鍔犺浇'],
-                ['涓婏拷锟?', '涓婁紶'],
-                ['濞ｅ洦绻傞悺?', '淇濆瓨'],
-                ['鍒狅拷锟?', '鍒犻櫎'],
-                ['缂傛牞锟?', '缂栬緫'],
-                ['闁哄洤鐡ㄩ弻?', '鏇存柊'],
-                ['闁绘挆鍛暬', '鐓х墖'],
-                ['闁告瑦鍨块埀?', '鍙戦€?],
-                ['濠㈡儼绮剧憴?', '澶辫触'],
-                ['闁瑰瓨鍔曟慨?', '鎴愬姛'],
+                ['闁告梻濮惧ù?', '加载'],
+                ['涓婏拷锟?', '上传'],
+                ['濞ｅ洦绻傞悺?', '保存'],
+                ['鍒狅拷锟?', '删除'],
+                ['缂傛牞锟?', '编辑'],
+                ['闁哄洤鐡ㄩ弻?', '更新'],
+                ['闁绘挆鍛暬', '照片'],
+                ['闁告瑦鍨块埀?', '发送?],
+                ['濠㈡儼绮剧憴?', '失败'],
+                ['闁瑰瓨鍔曟慨?', '成功'],
                 ['闂佹寧鐟ㄩ?', '閿欒'],
                 ['閻╋拷?锟?', '鐩稿叧'],
-                ['缂冩垹锟?', '缃戠粶'],
-                ['鐎癸拷顦崣?', '瀹夊叏'],
-                ['濞ｅ浂鍠栭ˇ?', '淇'],
-                ['濞存粍甯掓慨?', '浜掑姩'],
-                ['甯栵拷锟?', '甯栧瓙'],
-                ['闁活潿鍔嶉崺?', '鐢ㄦ埛'],
+                ['缂冩垹锟?', '网络'],
+                ['鐎癸拷顦崣?', '安全'],
+                ['濞ｅ浂鍠栭ˇ?', '修复'],
+                ['濞存粍甯掓慨?', '互动'],
+                ['甯栵拷锟?', '帖子'],
+                ['闁活潿鍔嶉崺?', '用户'],
                 ['闁告劕鎳庨?', '鍐呭'],
                 ['鎸夛拷锟?', '鎸夐挳'],
                 ['涓撅拷锟?', '涓炬姤'],
-                ['缁夛拷顭峰▍?', '绉婚櫎'],
-                ['婵炴挸鎳愰幃?', '娓呯悊'],
-                ['闁告挸绉堕?', '鍓嶇'],
-                ['婵炲牆顑囬弳鈧?, '娈嬬暀'],
+                ['缁夛拷顭峰▍?', '移除'],
+                ['婵炴挸鎳愰幃?', '清理'],
+                ['闁告挸绉堕?', '前端'],
+                ['婵炲牆顑囬弳鈧?, '残留'],
                 ['濡€崇础', '模式'],
-                ['濞寸媴绲块悥?', '浠ｇ爜'],
-                ['閻犲浂鍙€閳?', '璇█'],
-                ['婵炵繝鑳堕埢?', '娴佺▼'],
-                ['闁告帒妫旈棅?', '鍒嗕韩'],
-                ['闁哄棙顨夋竟?', '鏆楄壊'],
-                ['涓伙拷锟?', '涓婚'],
-                ['濡炪倗顢婃竟?', '棰滆壊'],
-                ['濡増绮忔竟?', '棰滆壊'],
-                ['濞ｅ洠鈧啿濞?, '淇″彿'],
-                ['鐎殿喖鍊?, '寮傚父'],
-                ['濠㈣泛瀚幃?', '澶勭悊'],
+                ['濞寸媴绲块悥?', '代码'],
+                ['閻犲浂鍙€閳?', '语言'],
+                ['婵炵繝鑳堕埢?', '流程'],
+                ['闁告帒妫旈棅?', '分享'],
+                ['闁哄棙顨夋竟?', '暗色'],
+                ['涓伙拷锟?', '主题'],
+                ['濡炪倗顢婃竟?', '颜色'],
+                ['濡増绮忔竟?', '颜色'],
+                ['濞ｅ洠鈧啿濞?, '信号'],
+                ['鐎殿喖鍊?, '异常'],
+                ['濠㈣泛瀚幃?', '处理'],
                 ['閳?', '鉂わ笍'],
             ];
 
@@ -6321,7 +5895,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (window.__xtjMagicLoaderV4Installed) return;
             window.__xtjMagicLoaderV4Installed = true;
 
-            var springLoaderHtml = '<div class="xtj-magic-loading" role="status" aria-live="polite"><div class="spring-loader" aria-label="鏄ユ棩钘よ敁铦磋澏鍔犺浇鍔ㄧ敾"><canvas class="spring-canvas" width="220" height="220" aria-hidden="true"></canvas></div></div>';
+            var springLoaderHtml = '<div class="xtj-magic-loading" role="status" aria-live="polite"><div class="spring-loader" aria-label="鏄ユ棩钘よ敁铦磋澏加载鍔ㄧ敾"><canvas class="spring-canvas" width="220" height="220" aria-hidden="true"></canvas></div></div>';
 
             window.xtjMagicLoadingHtml = function() {
                 return springLoaderHtml;
@@ -6339,7 +5913,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 loadFeed = window.loadFeed = function(forceRefresh) {
                     var r = orig.apply(this, arguments);
                     var feed = document.getElementById('feed');
-                    if (feed && /loading-spinner|loading-text|鍐呭鍔犺浇涓?../.test(feed.innerHTML || '')) {
+                    if (feed && /loading-spinner|loading-text|鍐呭加载涓?../.test(feed.innerHTML || '')) {
                         feed.innerHTML = magicHtml();
                         if (window.initAllSpringLoaders) {
                             window.initAllSpringLoaders(feed);
@@ -6355,8 +5929,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 openChat = window.openChat = function(userName) {
                     var r = origChat.apply(this, arguments);
                     var el = document.getElementById('dockChatMessages');
-                    if (el && (el.querySelector('.chat-empty') || /鍔犺浇涓?../.test(el.textContent || ''))) {
-                        renderChatLoadingState(el, { title: '鍔犺浇涓?..', variant: 'chat-detail' });
+                    if (el && (el.querySelector('.chat-empty') || /加载涓?../.test(el.textContent || ''))) {
+                        renderChatLoadingState(el, { title: '加载涓?..', variant: 'chat-detail' });
                     }
                     return r;
                 };
@@ -6368,7 +5942,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 openPostDetail = window.openPostDetail = function(postId) {
                     var r = origPd.apply(this, arguments);
                     var body = document.getElementById('postDetailBody');
-                    if (body && /loading-spinner|loading-text|鍔犺浇涓?../.test(body.innerHTML || '')) {
+                    if (body && /loading-spinner|loading-text|加载涓?../.test(body.innerHTML || '')) {
                         body.innerHTML = magicHtml();
                         if (window.initAllSpringLoaders) {
                             window.initAllSpringLoaders(body);
@@ -6384,7 +5958,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 openStatDetail = window.openStatDetail = function(type) {
                     var r = origSd.apply(this, arguments);
                     var body = document.getElementById('statModalBody');
-                    if (body && /loading-spinner|loading-text|鍔犺浇涓?../.test(body.innerHTML || '')) {
+                    if (body && /loading-spinner|loading-text|加载涓?../.test(body.innerHTML || '')) {
                         body.innerHTML = magicHtml();
                         if (window.initAllSpringLoaders) {
                             window.initAllSpringLoaders(body);
@@ -6442,12 +6016,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var canDel = canEdit && (post.actor_key === deviceId || post.actor_key === currentUser || isAdmin());
                 var detailActions = [];
                 if (canPinPost(post)) {
-                    detailActions.push('<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(String(post.id)) + '">' + (normalizePost(post).is_pinned ? '鍙栨秷缃《' : '缃《') + '</button>');
+                    detailActions.push('<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(String(post.id)) + '">' + (normalizePost(post).is_pinned ? '取消缃《' : '缃《') + '</button>');
                 }
                 if (canEdit) {
                 }
                 if (canDel) {
-                    detailActions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + String(post.id).replace(/'/g, "\\'") + '\', \'' + String(post.actor_key || "").replace(/'/g, "\\'") + '\')">鍒犻櫎</button>');
+                    detailActions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + String(post.id).replace(/'/g, "\\'") + '\', \'' + String(post.actor_key || "").replace(/'/g, "\\'") + '\')">删除</button>');
                 }
                 return [
                     '<div class="post-detail-header"><div class="pdh-left">',
@@ -6459,17 +6033,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     post.content ? '<div class="post-detail-content">' + escapeHtml(post.content) + '</div>' : '',
                     mediaHtml ? '<div class="post-detail-media">' + mediaHtml + '</div>' : '',
                     detailActions.length ? '<div class="post-detail-actions">' + detailActions.join("") + '</div>' : '',
-                    '<div class="post-detail-stats">娴忚 ' + vc + ' 娆÷?鐐硅禐 ' + likes.length + ' 娆÷?璇勮 ' + comments.length + ' 娆?/div>',
+                    '<div class="post-detail-stats">浏览 ' + vc + ' 娆÷?点赞 ' + likes.length + ' 娆÷?璇勮 ' + comments.length + ' 娆?/div>',
                     '<div class="stat-two-col">',
-                    '<div class="stat-col"><div class="stat-section-title">鉁?鐐硅禐鐢ㄦ埛 ' + likes.length + '</div>' +
+                    '<div class="stat-col"><div class="stat-section-title">鉁?点赞用户 ' + likes.length + '</div>' +
                         (likes.length ? likes.map(function(l) {
                             return '<div class="stat-like-item"><div class="sli-info"><div class="sli-user">' + escapeHtml(l.user_name) + '</div></div><span class="sli-time">' + new Date(l.created_at).toLocaleString() + '</span></div>';
-                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤鐐硅禐</div>') +
+                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>') +
                     '</div>',
-                    '<div class="stat-col"><div class="stat-section-title">馃挰 璇勮鐢ㄦ埛 ' + comments.length + '</div>' +
+                    '<div class="stat-col"><div class="stat-section-title">馃挰 璇勮用户 ' + comments.length + '</div>' +
                         (comments.length ? comments.map(function(c) {
                             return '<div class="stat-comment-item"><div class="sci-info"><div class="sci-user">' + escapeHtml(c.user_name) + '</div><div class="sci-target">' + escapeHtml(c.content) + '</div></div><span class="sci-time">' + new Date(c.created_at).toLocaleString() + '</span></div>';
-                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">鏆傛棤璇勮</div>') +
+                        }).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无璇勮</div>') +
                     '</div>',
                     '</div>'
                 ].join('');
@@ -6692,8 +6266,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var title = document.getElementById('postDetailTitle');
                 var body = document.getElementById('postDetailBody');
                 var modal = document.getElementById('postDetailModal');
-                if (title) title.textContent = '甯栧瓙璇︽儏';
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml('鍔犺浇涓?..', '鍔犺浇涓?..', 'feed');
+                if (title) title.textContent = '帖子璇︽儏';
+                if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载涓?..', '加载涓?..', 'feed');
                 if (modal) modal.classList.add('active');
 
                 try {
@@ -6704,17 +6278,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     ]);
                     const post = normalizePost(postRes.data);
                     if (!post) {
-                        if (body) body.innerHTML = '<div class="stat-empty">甯栧瓙涓嶅瓨鍦ㄦ垨宸插垹闄?/div>';
+                        if (body) body.innerHTML = '<div class="stat-empty">帖子不存在或已删除/div>';
                         return;
                     }
                     if (!canViewPost(post)) {
-                        if (body) body.innerHTML = '<div class="stat-empty">鏃犳潈鏌ョ湅杩欐潯甯栧瓙</div>';
+                        if (body) body.innerHTML = '<div class="stat-empty">无权查看这条帖子</div>';
                         return;
                     }
                     trackView(postId);
                     renderPostDetail(post, likeRes.data || [], commRes.data || []);
                 } catch (e) {
-                    if (body) body.innerHTML = '<div class="stat-empty">鍔犺浇澶辫触锛岃閲嶈瘯</div>';
+                    if (body) body.innerHTML = '<div class="stat-empty">加载失败，岃閲嶈瘯</div>';
                     console.error(e);
                 }
             };
@@ -6744,7 +6318,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml('鍔犺浇涓?..', '鍔犺浇涓?..', 'feed');
+                if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载涓?..', '加载涓?..', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
@@ -6760,7 +6334,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     statCacheTime = Date.now();
                     renderStatByType(type);
                 } catch (e) {
-                    if (body) body.innerHTML = '<div class="stat-empty">鍔犺浇澶辫触锛岃閲嶈瘯</div>';
+                    if (body) body.innerHTML = '<div class="stat-empty">加载失败，岃閲嶈瘯</div>';
                     console.error('stat error', e);
                 }
 
@@ -6814,7 +6388,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                         renderChatLoadingState = function(el, options) {
                 if (!el) return;
-                var title = options && options.title ? options.title : '鍔犺浇涓?..';
+                var title = options && options.title ? options.title : '加载涓?..';
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
                 el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant);
@@ -6860,13 +6434,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
 
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml('鍔犺浇涓?..', '鍔犺浇涓?..', 'feed');
+                if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载涓?..', '加载涓?..', 'feed');
                 var snapshot = await fetchStatSnapshotWithTimeout(5000);
                 if (snapshot) {
                     applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
                     renderStatByType(type);
                 } else if (body) {
-                    body.innerHTML = '<div class="stat-empty">鏆傛棤鍙敤鏁版嵁</div>';
+                    body.innerHTML = '<div class="stat-empty">暂无鍙敤数据</div>';
                 }
                 if (statPollTimer) clearInterval(statPollTimer);
                 statPollTimer = setInterval(refreshStatModal, 15000);
