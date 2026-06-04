@@ -6381,13 +6381,13 @@
 #statModal .stat-view-item,
 #statModal .stat-comment-item,
 #statModal .stat-two-col .stat-col {
-  background: rgba(255, 255, 255, 0.38);
-  border: 1px solid rgba(208, 232, 216, 0.54);
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(208, 232, 216, 0.78);
   box-shadow:
-    0 12px 30px rgba(72, 120, 92, 0.09),
-    inset 0 1px 0 rgba(255, 255, 255, 0.58);
-  backdrop-filter: blur(18px) saturate(140%) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(140%) !important;
+    0 14px 30px rgba(72, 120, 92, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px) saturate(142%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(142%) !important;
 }
 
 #statModal .stat-stack {
@@ -6707,6 +6707,34 @@
   font-size: 12px;
   line-height: 1.65;
   color: rgba(55, 92, 71, 0.78);
+}
+
+#statModal .stat-view-layout {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  align-items: center;
+}
+
+#statModal .stat-record-thumb {
+  width: 78px;
+  height: 78px;
+  border-radius: 18px;
+  object-fit: cover;
+  border: 1px solid rgba(204, 230, 214, 0.82);
+  box-shadow: 0 10px 24px rgba(76, 122, 95, 0.14);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+#statModal .stat-record-thumb--video {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, rgba(215, 239, 224, 0.92), rgba(242, 250, 245, 0.94));
+  color: #2d5640;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 #statModal .sli-user,
