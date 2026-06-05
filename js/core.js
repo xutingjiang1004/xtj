@@ -6740,7 +6740,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var postMap = statGetPostMap();
 
                 function buildLikesCol() {
-                    var h = '<div class="stat-section-title">点赞记录<span class="stat-section-count">' + statAllLikes.length + '</span></div>';
+                    var h = '<div class="stat-col-kicker">点赞记录<span class="stat-col-kicker-count">' + statAllLikes.length + '</span></div>';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 5).map(function(l, index) {
                             return buildStatRecordEntry('likes', l, postMap[String(l.post_id)] || null, index);
@@ -6755,7 +6755,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
 
                 function buildCommentsCol() {
-                    var h = '<div class="stat-section-title">评论记录<span class="stat-section-count">' + statAllComments.length + '</span></div>';
+                    var h = '<div class="stat-col-kicker">评论记录<span class="stat-col-kicker-count">' + statAllComments.length + '</span></div>';
                     if (statAllComments.length) {
                         h += statAllComments.slice().reverse().slice(0, 5).map(function(c, index) {
                             return buildStatRecordEntry('comments', c, postMap[String(c.post_id)] || null, index);
@@ -6769,7 +6769,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return h;
                 }
 
-                body.innerHTML = '<div class="stat-two-col"><div class="stat-col">' + buildLikesCol() + '</div><div class="stat-col">' + buildCommentsCol() + '</div></div>';
+                body.innerHTML = '<div class="stat-two-col stat-two-col--flat"><div class="stat-col stat-col--flat">' + buildLikesCol() + '</div><div class="stat-col stat-col--flat">' + buildCommentsCol() + '</div></div>';
             };
 
             window.openPostDetail = async function(postId) {
