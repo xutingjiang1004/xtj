@@ -27,7 +27,11 @@
             <nav>
                 <div style="display:flex; align-items:center; gap:8px;">
                     <h1>xtj</h1>
-                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题">☀️</button>
+                    <button id="themeToggle" class="theme-toggle-btn" title="切换主题" aria-label="切换主题">
+                        <span class="theme-toggle-orb" aria-hidden="true">
+                            <span class="theme-toggle-core"></span>
+                        </span>
+                    </button>
                 </div>
                 <div id="announcement-btn-wrapper" style="display:none; margin-right: 8px;">
                     <button class="announcement-btn" id="announcementBtn" title="公告">
@@ -272,8 +276,12 @@
                 <div class="profile-settings">
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
-                            <span class="profile-setting-icon">🌙</span>
-                            <span>深色模式</span>
+                            <span class="profile-setting-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path>
+                                </svg>
+                            </span>
+                            <span class="profile-setting-text">深色模式</span>
                         </div>
                         <label class="profile-switch">
                             <input type="checkbox" id="profileThemeToggle">
@@ -282,8 +290,13 @@
                     </div>
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
-                            <span class="profile-setting-icon">🔔</span>
-                            <span>通知</span>
+                            <span class="profile-setting-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                                </svg>
+                            </span>
+                            <span class="profile-setting-text">通知</span>
                         </div>
                         <label class="profile-switch">
                             <input type="checkbox" id="profileNotifToggle" checked>
@@ -292,8 +305,14 @@
                     </div>
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
-                            <span class="profile-setting-icon">ℹ️</span>
-                            <span>关于</span>
+                            <span class="profile-setting-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="9"></circle>
+                                    <path d="M12 10v6"></path>
+                                    <path d="M12 7h.01"></path>
+                                </svg>
+                            </span>
+                            <span class="profile-setting-text">关于</span>
                         </div>
                         <span class="profile-setting-value">xtj v0.69</span>
                     </div>

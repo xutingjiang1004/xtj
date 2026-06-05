@@ -5087,11 +5087,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function applyTheme(isDark) {
                 if (isDark) {
                     htmlEl.setAttribute('data-theme', 'dark');
-                    if (themeBtn) themeBtn.textContent = '馃寵';
+                    if (themeBtn) {
+                        themeBtn.setAttribute('aria-label', '切换到浅色模式');
+                        themeBtn.setAttribute('title', '切换到浅色模式');
+                    }
                     localStorage.setItem('xtj-theme', 'dark');
                 } else {
                     htmlEl.removeAttribute('data-theme');
-                    if (themeBtn) themeBtn.textContent = '☀️';
+                    if (themeBtn) {
+                        themeBtn.setAttribute('aria-label', '切换到深色模式');
+                        themeBtn.setAttribute('title', '切换到深色模式');
+                    }
                     localStorage.setItem('xtj-theme', 'light');
                 }
             }
