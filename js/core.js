@@ -1,4 +1,4 @@
-﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -2402,7 +2402,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}')">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'鉂わ笍':'点赞'}</button>
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">评论</button>
                     ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
@@ -2681,7 +2681,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none">`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}')">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'鉂わ笍':'点赞'}</button>
+                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'❤️':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">评论</button>
                     ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
@@ -3513,7 +3513,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     await loadFeed(true);
                     loadProfileActivity(true);
                 } catch (e) {
-                    showToast("发布失败: " + (e.message || "网络閿欒"));
+                    showToast("发布失败: " + (e.message || "网络错误"));
                 } finally {
                     btn.disabled = false;
                     btn.textContent = "发布动态";
@@ -3703,7 +3703,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     console.error(e);
                 } finally {
                     btn.disabled = false;
-                    btn.textContent = "纭删除";
+                    btn.textContent = "确认删除";
                 }
             };
 
@@ -4242,7 +4242,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 200).map(l => {
                             const post = postMap[l.post_id];
-                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(宸插垹闄ゅ笘瀛?';
+                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(已删除)';
                             return `
                         <div class="stat-like-item">
                             <div class="sli-info">
@@ -4264,7 +4264,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (statAllComments.length) {
                         h += [...statAllComments].reverse().slice(0, 200).map(c => {
                             const post = postMap[c.post_id];
-                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(宸插垹闄ゅ笘瀛?';
+                            const postContent = post ? (post.content ? escapeHtml(post.content.slice(0, 20)) + '...' : '(图片/视频)') : '(已删除)';
                             return `
                         <div class="stat-comment-item">
                             <div class="sci-info">
@@ -4753,10 +4753,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
-                document.getElementById('dockChatMessages').innerHTML = window.xtjMagicLoadingHtml('加载中..', '姝ｅ湪鎵撳紑鑱婂ぉ閫氶亾', 'chat-detail');
+                document.getElementById('dockChatMessages').innerHTML = window.xtjMagicLoadingHtml('加载中..', '正在打开聊天通道', 'chat-detail');
                 renderChatLoadingState(document.getElementById('dockChatMessages'), {
                     title: '加载中..',
-                    subtitle: '姝ｅ湪鎵撳紑鑱婂ぉ閫氶亾',
+                    subtitle: '正在打开聊天通道',
                     variant: 'chat-detail'
                 });
                 document.getElementById('dockChatListView').classList.add('hidden');
@@ -4908,7 +4908,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     renderDockMessages(msgs || [], forceScroll);
                 } catch(e) {
                     if (!_chatCache[cacheKey]) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">閳?/div><div>' + (e.message || '加载失败') + '</div></div>';
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>' + (e.message || '加载失败') + '</div></div>';
                     }
                 } finally {
                     dockChatMsgsBusy = false;
@@ -6118,175 +6118,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             window.__xtjUiTextRepair = function(node) {};
             window.__xtjUiTextRepairStop = function() {};
             return;
-            /* ORIGINAL CODE DISABLED - superseded by features.js
-            const pairs = [
-                ['鐎规瓕灏?', '宸茶'],
-                ['闁哄牜浜ｉ?', '鏈'],
-                ['闁稿繈鍔戦崕瀵告暜閺嵮呮憤', '鍏ㄩ儴帖子'],
-                ['濞屸剝婀佹壘鍒伴惄锟?鍙у笘瀛?, '没有找到鐩稿叧帖子'],
-                ['缁绢収鍠涢濠氬箼瀹ュ嫮绋?, '纭鎿嶄綔'],
-                ['纭畾瑕佹墽琛屾鎿嶄綔鍚楋拷??', '纭畾瑕佹墽琛屾鎿嶄綔鍚楋紵'],
-                ['缁绢収鍠涢?', '纭'],
-                ['婵炴垵鐗婃导?', '消息'],
-                ['闁稿浚鍓欓幉?', '鍏憡'],
-                ['上传失败锛岃閲嶈瘯', '上传失败锛岃閲嶈瘯'],
-                ['无权缃《杩欐潯甯栵拷??', '无权缃《杩欐潯帖子'],
-                ['缂傚喚鍣ｉ妴濠囧箼瀹ュ嫮绋婂鎯扮簿鐟?', '缃《鎿嶄綔失败'],
-                ['闁哄牜浜為悡锟犳煥濞嗘帩鍤?, '未知错误'],
-                ['网络閿欒', '网络閿欒'],
-                ['正在刷新照片??..', '正在刷新照片墙.'],
-                ['闁告瑦鍨电粩鐑藉箣閹邦剙顫?, '发布成功'],
-                ['删除锟筋剙锟?', '删除鍏憡'],
-                ['闁稿浚鍓欓幉锟犲矗閹存繄顏撮柟瀛樺姇婵?', '鍏憡发布成功'],
-                ['闁告瑦鍨块埀顑跨閵囨垹鎷?', '发送失败'],
-                ['功能优化', '功能优化'],
-                ['Bug濞ｅ浂鍠栭ˇ?', 'Bug修复'],
-                ['閺傛澘锟?', '新增'],
-                ['鏀硅繘', '鏀硅繘'],
-                ['濞达絾鎸风槐?', '浣撻獙'],
-                ['閻犲鍟弳?', '调整'],
-                ['绛涳拷??', '??'],
-                ['控件', '控件'],
-                ['闁硅埖锚瑜?', '折叠'],
-                ['闂堛垺锟?', '面板'],
-                ['徽章', '徽章'],
-                ['婵炲弶妲掔粚?', '活跃'],
-                ['闁衡偓椤栨稑鐦?', '支持'],
-                ['濡炪倗鏁诲?', '椤甸潰'],
-                ['閺夆晜鏌ㄥú?', '返回'],
-                ['闁轰胶澧楀畵?', '数据'],
-                ['閻熸瑱绠戣ぐ?', '触发'],
-                ['濡澘瀚～?', '预览'],
-                ['缂傚喚鍣ｃ€?, '置顶'],
-                ['闁告梻濮惧ù?', '加载'],
-                ['涓婏拷锟?', '上传'],
-                ['濞ｅ洦绻傞悺?', '保存'],
-                ['鍒狅拷锟?', '删除'],
-                ['缂傛牞锟?', '编辑'],
-                ['闁哄洤鐡ㄩ弻?', '更新'],
-                ['闁绘挆鍛暬', '照片'],
-                ['闁告瑦鍨块埀?', '发送'],
-                ['濠㈡儼绮剧憴?', '失败'],
-                ['闁瑰瓨鍔曟慨?', '成功'],
-                ['闂佹寧鐟ㄩ?', '閿欒'],
-                ['閻╋拷?锟?', '鐩稿叧'],
-                ['缂冩垹锟?', '网络'],
-                ['鐎癸拷顦崣?', '安全'],
-                ['濞ｅ浂鍠栭ˇ?', '修复'],
-                ['濞存粍甯掓慨?', '互动'],
-                ['甯栵拷锟?', '帖子'],
-                ['闁活潿鍔嶉崺?', '用户'],
-                ['闁告劕鎳庨?', '鍐呭'],
-                ['鎸夛拷锟?', '鎸夐挳'],
-                ['涓撅拷锟?', '涓炬姤'],
-                ['缁夛拷顭峰▍?', '移除'],
-                ['婵炴挸鎳愰幃?', '清理'],
-                ['闁告挸绉堕?', '前端'],
-                ['婵炲牆顑囬弳鈧?, '残留'],
-                ['濡€崇础', '模式'],
-                ['濞寸媴绲块悥?', '代码'],
-                ['閻犲浂鍙€閳?', '语言'],
-                ['婵炵繝鑳堕埢?', '流程'],
-                ['闁告帒妫旈棅?', '分享'],
-                ['闁哄棙顨夋竟?', '暗色'],
-                ['涓伙拷锟?', '主题'],
-                ['濡炪倗顢婃竟?', '颜色'],
-                ['濡増绮忔竟?', '颜色'],
-                ['濞ｅ洠鈧啿濞?', '信号'],
-                ['鐎殿喖鍊?', '异常'],
-                ['濠㈣泛瀚幃?', '处理'],
-                ['閳?', '鉂わ笍'],
-            ];
-
-            function repairString(value) {
-                if (typeof value !== 'string' || !value) return value;
-                let next = value;
-                for (const [from, to] of pairs) {
-                    if (next.includes(from)) next = next.split(from).join(to);
-                }
-                return next;
-            }
-
-            function repairNode(node) {
-                if (!node) return;
-                if (node.nodeType === Node.TEXT_NODE) {
-                    const fixed = repairString(node.nodeValue);
-                    if (fixed !== node.nodeValue) node.nodeValue = fixed;
-                    return;
-                }
-                if (node.nodeType !== Node.ELEMENT_NODE) return;
-                if (node.tagName === 'SCRIPT' || node.tagName === 'STYLE') return;
-
-                ['title', 'aria-label', 'placeholder', 'alt', 'value', 'data-button-label', 'data-busy-label', 'data-default-label'].forEach(function(attr) {
-                    if (node.hasAttribute && node.hasAttribute(attr)) {
-                        const current = node.getAttribute(attr);
-                        const fixed = repairString(current);
-                        if (fixed !== current) node.setAttribute(attr, fixed);
-                    }
-                });
-
-                for (const child of Array.from(node.childNodes || [])) {
-                    repairNode(child);
-                }
-            }
-
-            let repairQueued = false;
-            let queuedRoots = [];
-            function scheduleRepair(root) {
-                queuedRoots.push(root || document.body);
-                if (repairQueued) return;
-                repairQueued = true;
-                requestAnimationFrame(function() {
-                    repairQueued = false;
-                    const roots = queuedRoots.length ? queuedRoots.splice(0) : [document.body];
-                    roots.forEach(function(target) {
-                        repairNode(target || document.body);
-                    });
-                });
-            }
-
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', function() {
-                    repairNode(document.body);
-                    scheduleRepair(document.body);
-                }, { once: true });
-            } else {
-                repairNode(document.body);
-            }
-
-            const observer = new MutationObserver(function(records) {
-                for (const record of records) {
-                    if (record.type === 'characterData') {
-                        scheduleRepair(record.target);
-                        continue;
-                    }
-                    if (record.type === 'attributes') {
-                        scheduleRepair(record.target);
-                        continue;
-                    }
-                    for (const node of Array.from(record.addedNodes || [])) {
-                        if (node && (node.nodeType === Node.ELEMENT_NODE || node.nodeType === Node.TEXT_NODE)) {
-                            scheduleRepair(node);
-                        }
-                    }
-                }
-            });
-
-            observer.observe(document.documentElement, {
-                subtree: true,
-                childList: true,
-                characterData: true,
-                attributes: true,
-                attributeFilter: ['title', 'aria-label', 'placeholder', 'alt', 'value', 'data-button-label', 'data-busy-label', 'data-default-label']
-            });
-
-            window.__xtjUiTextRepair = repairNode;
-            window.__xtjUiTextRepairStop = function() {
-                observer.disconnect();
-                repairQueued = false;
-                queuedRoots = [];
-            };
-            */
         })();
 
         // === Self-diagnostic: verify key functions are available after page load ===
@@ -6314,7 +6145,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (window.__xtjMagicLoaderV4Installed) return;
             window.__xtjMagicLoaderV4Installed = true;
 
-            var springLoaderHtml = '<div class="xtj-magic-loading" role="status" aria-live="polite"><div class="spring-loader" aria-label="鏄ユ棩钘よ敁铦磋澏加载鍔ㄧ敾"><canvas class="spring-canvas" width="220" height="220" aria-hidden="true"></canvas></div></div>';
+            var springLoaderHtml = '<div class="xtj-magic-loading" role="status" aria-live="polite"><div class="spring-loader" aria-label="春日藤蔓蝴蝶加载动画"><canvas class="spring-canvas" width="220" height="220" aria-hidden="true"></canvas></div></div>';
 
             window.xtjMagicLoadingHtml = function() {
                 return springLoaderHtml;
