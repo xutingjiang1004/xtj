@@ -12,6 +12,8 @@
     var sb = null;
     var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [];
     var searchUser = '', searchPost = '';
+    var userFilterStatus = 'all'; // all | admin | banned | muted
+    var userSortBy = 'reg'; // reg | login | posts
     var confirmCallback = null;
     var currentTab = 'ann';
 
@@ -76,10 +78,10 @@
         saveSession();
         
         var savedTab = localStorage.getItem(TAB_KEY);
-        if (savedTab && ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos'].indexOf(savedTab) !== -1) {
+        if (savedTab && ['ann','users','posts','likes','comments','reports','bans','mutes','photos'].indexOf(savedTab) !== -1) {
             currentTab = savedTab;
             await loadAllData(true);
-            ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos'].forEach(function(t) {
+            ['ann','users','posts','likes','comments','reports','bans','mutes','photos'].forEach(function(t) {
                 document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.remove('active');
                 document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn').classList.remove('active');
             });
@@ -128,12 +130,16 @@
             allComments.forEach(function(c) { userMap[c.user_name] = true; });
             
             var userInfoList = (postRes.data || []).filter(function(p) { return p.media_type === '__user_info__'; });
+            // 注意：postRes 按 created_at DESC 排序（最新在前）
+            // 所以对于每个用户，只取第一条（最新）记录，避免被旧记录覆盖
             var userInfoMap = {};
             userInfoList.forEach(function(ui) {
                 try {
-                    var info = JSON.parse(ui.content);
-                    userInfoMap[ui.user_name] = info;
-                    userMap[ui.user_name] = true;
+                    if (!userInfoMap[ui.user_name]) {
+                        var info = JSON.parse(ui.content);
+                        userInfoMap[ui.user_name] = info;
+                        userMap[ui.user_name] = true;
+                    }
                 } catch(e) {}
             });
             
@@ -143,6 +149,9 @@
                     info: userInfoMap[u] || null
                 };
             });
+
+            await loadBansData();
+            await loadMutesData();
 
             if (!keepTab) {
                 switchTab('ann');
@@ -376,13 +385,62 @@
         h += '<div class="stat-box"><div class="val">' + allLikes.length + '</div><div class="lbl">总点赞数</div></div>';
         h += '<div class="stat-box"><div class="val">' + allComments.length + '</div><div class="lbl">总评论数</div></div>';
         h += '</div>';
-        h += '<div class="card"><h3>👥 用户列表</h3>';
-        h += '<div class="search-bar"><input id="userSearchInp" placeholder="搜索用户..." oninput="searchUserInp()" /></div>';
-        var filtered = allUsers;
-        if (searchUser) filtered = allUsers.filter(function(u) { return u.name.toLowerCase().includes(searchUser.toLowerCase()); });
-        if (!filtered.length) { h += '<div class="empty">无匹配用户</div>'; }
-        else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>帖子数</th><th>点赞数</th><th>评论数</th><th>注册时间</th><th>最近登录</th><th>操作</th></tr></thead><tbody>';
+
+        // 筛选排序栏
+        h += '<div class="filter-bar">';
+        h += '<div class="search-wrap"><span class="search-icon">🔍</span><input id="userSearchInp" placeholder="搜索用户名..." oninput="searchUserInp()" value="' + escapeHtml(searchUser) + '"></div>';
+        h += '<div class="filter-chips">';
+        h += '<span class="filter-chip' + (userFilterStatus === 'all' ? ' active' : '') + '" onclick="userFilterStatus=\'all\';renderTab(\'users\')">全部</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'admin' ? ' active' : '') + '" onclick="userFilterStatus=\'admin\';renderTab(\'users\')">管理员</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'banned' ? ' active active-del' : '') + '" onclick="userFilterStatus=\'banned\';renderTab(\'users\')">拉黑封禁中</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'muted' ? ' active active-warn' : '') + '" onclick="userFilterStatus=\'muted\';renderTab(\'users\')">禁言中</span>';
+        h += '</div>';
+        h += '<select onchange="userSortBy=this.value;renderTab(\'users\')">';
+        h += '<option value="reg"' + (userSortBy === 'reg' ? ' selected' : '') + '>按注册时间</option>';
+        h += '<option value="login"' + (userSortBy === 'login' ? ' selected' : '') + '>按最近登录</option>';
+        h += '<option value="posts"' + (userSortBy === 'posts' ? ' selected' : '') + '>按帖子数</option>';
+        h += '</select>';
+        h += '</div>';
+
+        // 筛选
+        var filtered = allUsers.slice();
+        if (searchUser) {
+            var sq = searchUser.toLowerCase();
+            filtered = filtered.filter(function(u) { return u.name.toLowerCase().includes(sq); });
+        }
+        if (userFilterStatus === 'admin') {
+            filtered = filtered.filter(function(u) { return u.name === ADMIN; });
+        } else if (userFilterStatus === 'banned') {
+            filtered = filtered.filter(function(u) { return bansData.some(function(b) { return b.user_name === u.name && b.is_active; }); });
+        } else if (userFilterStatus === 'muted') {
+            filtered = filtered.filter(function(u) { return mutesData.some(function(m) { return m.user_name === u.name && m.is_active; }); });
+        }
+
+        // 排序
+        filtered.sort(function(a, b) {
+            if (userSortBy === 'posts') {
+                var pa = allPosts.filter(function(p) { return p.user_name === a.name; }).length;
+                var pb = allPosts.filter(function(p) { return p.user_name === b.name; }).length;
+                return pb - pa;
+            }
+            if (userSortBy === 'login') {
+                var la = a.info && a.info.last_login ? new Date(a.info.last_login).getTime() : 0;
+                var lb = b.info && b.info.last_login ? new Date(b.info.last_login).getTime() : 0;
+                return lb - la;
+            }
+            var ra = a.info && a.info.reg_time ? new Date(a.info.reg_time).getTime() : 0;
+            var rb = b.info && b.info.reg_time ? new Date(b.info.reg_time).getTime() : 0;
+            return rb - ra;
+        });
+
+        h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+        h += '<span class="count-badge">共 ' + filtered.length + ' 位用户</span>';
+        h += '</div>';
+
+        if (!filtered.length) {
+            h += '<div class="empty-state"><div class="icon">📭</div><div class="text">无匹配用户</div></div>';
+        } else {
+            h += '<div class="user-grid">';
             filtered.forEach(function(u) {
                 var pc = allPosts.filter(function(p) { return p.user_name === u.name; }).length;
                 var lc = allLikes.filter(function(l) { return l.user_name === u.name; }).length;
@@ -390,27 +448,59 @@
                 var regTime = u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-';
                 var lastLogin = u.info && u.info.last_login ? formatTime(u.info.last_login) : '-';
                 var isAdmin = u.name === ADMIN;
+                var isBanned = bansData.some(function(b) { return b.user_name === u.name && b.is_active; });
+                var isMuted = mutesData.some(function(m) { return m.user_name === u.name && m.is_active; });
+
+                var cardCls = 'user-card';
+                if (isBanned) cardCls += ' is-banned';
+                if (isMuted) cardCls += ' is-muted';
+                if (isAdmin) cardCls += ' is-admin';
+
+                var avatarCls = 'user-avatar';
+                if (isAdmin) avatarCls += ' admin-avatar';
+                else if (isBanned) avatarCls += ' banned-avatar';
+                else if (isMuted) avatarCls += ' muted-avatar';
+
+                var firstChar = u.name.charAt(0).toUpperCase();
                 var safeName = u.name.replace(/'/g, "\\'");
-                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong>' + (isAdmin ? ' <span class="badge badge-red">管理员</span>' : '') + '</td>';
-                h += '<td>' + pc + '</td><td>' + lc + '</td><td>' + cc + '</td><td>' + regTime + '</td><td>' + lastLogin + '</td>';
-                if (isAdmin) {
-                    h += '<td>-</td>';
-                } else {
-                    h += '<td><div style="display:flex;gap:4px;flex-wrap:wrap;">';
+
+                h += '<div class="' + cardCls + '">';
+                h += '<div class="user-card-head">';
+                h += '<div class="' + avatarCls + '">' + escapeHtml(firstChar) + '</div>';
+                h += '<div class="user-card-name"><strong>' + escapeHtml(u.name) + '</strong>';
+                h += '<div class="user-tags">';
+                if (isAdmin) h += '<span class="tag tag-admin">管理员</span>';
+                if (isBanned) h += '<span class="tag tag-banned">拉黑封禁中</span>';
+                if (isMuted) h += '<span class="tag tag-muted">禁言中</span>';
+                h += '</div></div></div>';
+
+                h += '<div class="user-card-stats">';
+                h += '<div class="user-stat-item"><div class="num">' + pc + '</div><div class="lbl">帖子</div></div>';
+                h += '<div class="user-stat-item"><div class="num">' + lc + '</div><div class="lbl">点赞</div></div>';
+                h += '<div class="user-stat-item"><div class="num">' + cc + '</div><div class="lbl">评论</div></div>';
+                h += '</div>';
+
+                h += '<div class="user-card-meta">';
+                h += '<div class="meta-row"><span class="label">注册时间</span><span class="value">' + regTime + '</span></div>';
+                h += '<div class="meta-row"><span class="label">最近登录</span><span class="value">' + lastLogin + '</span></div>';
+                h += '</div>';
+
+                if (!isAdmin) {
+                    h += '<div class="user-card-actions">';
                     h += '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')" title="禁言用户">🤐禁言</button>';
-                    h += '<button class="btn-sm" onclick="quickBanUser(\'' + safeName + '\')" title="封禁用户">🔒封禁</button>';
-                    h += '<button class="btn-sm del" onclick="quickBlacklistUser(\'' + safeName + '\')" title="拉黑用户">⛔拉黑</button>';
-                    h += '</div></td>';
+                    h += '<button class="btn-sm" onclick="quickBanUser(\'' + safeName + '\')" title="拉黑封禁用户">🔒拉黑封禁</button>';
+                    h += '</div>';
                 }
-                h += '</tr>';
+
+                h += '</div>';
             });
-            h += '</tbody></table></div>';
+            h += '</div>';
         }
-        h += '</div>';
+
         el.innerHTML = h;
     }
 
-    // ===================== 用户列表一键操作（封禁/禁言/拉黑） =====================
+    // ===================== 用户列表一键操作（拉黑封禁/禁言） =====================
     window.quickMuteUser = function(userName) {
         var hours = prompt('请输入禁言时长（小时），0=永久禁言：', '24');
         if (hours === null) return;
@@ -440,11 +530,11 @@
     };
 
     window.quickBanUser = function(userName) {
-        var hours = prompt('请输入封禁时长（小时），0=永久封禁：', '24');
+        var hours = prompt('请输入拉黑封禁时长（小时），0=永久拉黑封禁：', '24');
         if (hours === null) return;
         hours = parseInt(hours);
         if (isNaN(hours) || hours < 0) { showToast('请输入有效的小时数', 'error'); return; }
-        showConfirm('封禁用户', '确认封禁 ' + userName + (hours > 0 ? ' ' + hours + '小时' : ' 永久') + '？', '确认封禁', async function() {
+        showConfirm('拉黑封禁', '确认拉黑封禁 ' + userName + (hours > 0 ? ' ' + hours + '小时' : ' 永久') + '？', '确认拉黑封禁', async function() {
             try {
                 var expiresAt = null;
                 if (hours > 0) {
@@ -462,43 +552,14 @@
                     is_active: true,
                     banned_at: new Date().toISOString()
                 }]);
-                if (error) { showToast('封禁失败: ' + error.message, 'error'); return; }
+                if (error) { showToast('拉黑封禁失败: ' + error.message, 'error'); return; }
                 await loadBansData();
-                showToast('✅ 已封禁 ' + userName, 'success');
-            } catch(e) { showToast('封禁失败: ' + e.message, 'error'); }
+                showToast('✅ 已拉黑封禁 ' + userName, 'success');
+            } catch(e) { showToast('拉黑封禁失败: ' + e.message, 'error'); }
         });
     };
 
-    window.quickBlacklistUser = function(userName) {
-        var hours = prompt('请输入拉黑时长（小时），0=永久拉黑：', '0');
-        if (hours === null) return;
-        hours = parseInt(hours);
-        if (isNaN(hours) || hours < 0) { showToast('请输入有效的小时数', 'error'); return; }
-        showConfirm('拉黑用户', '确认拉黑 ' + userName + (hours > 0 ? ' ' + hours + '小时' : ' 永久') + '？', '确认拉黑', async function() {
-            try {
-                var expiresAt = null;
-                if (hours > 0) {
-                    var d = new Date();
-                    d.setHours(d.getHours() + hours);
-                    expiresAt = d.toISOString();
-                }
-                var { error } = await sb.from('blacklist').insert([{
-                    user_name: userName,
-                    reason: '管理员操作',
-                    duration_hours: hours,
-                    added_by: ADMIN,
-                    expires_at: expiresAt,
-                    is_active: true
-                }]);
-                if (error) {
-                    if (error.code === '23505') { showToast('该用户已在黑名单中', 'error'); return; }
-                    showToast('操作失败: ' + error.message, 'error'); return;
-                }
-                await loadBlacklistData();
-                showToast('✅ 已拉黑 ' + userName, 'success');
-            } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
-        });
-    };
+
 
     function renderPostsTab(el) {
         var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__'; });
@@ -823,14 +884,14 @@
         }
         var active = bansData.filter(function(b) { return b.is_active; }).length;
         var h = '<div class="stats-row">';
-        h += '<div class="stat-box"><div class="val">' + bansData.length + '</div><div class="lbl">总封禁记录</div></div>';
-        h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前封禁</div></div>';
+        h += '<div class="stat-box"><div class="val">' + bansData.length + '</div><div class="lbl">总拉黑封禁记录</div></div>';
+        h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前拉黑封禁</div></div>';
         h += '</div>';
 
-        h += '<div class="card"><h3>🔒 添加封禁</h3>';
+        h += '<div class="card"><h3>🔒 添加拉黑封禁</h3>';
         h += '<div class="admin-user-form-row">';
-        h += '<div class="admin-field"><label>用户名</label>' + buildAdminUserPicker('banUserName', '选择封禁用户') + '</div>';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">封禁时长</label><select id="banDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
+        h += '<div class="admin-field"><label>用户名</label>' + buildAdminUserPicker('banUserName', '选择拉黑封禁用户') + '</div>';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">拉黑封禁时长</label><select id="banDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
         h += '<option value="1">1小时</option>';
         h += '<option value="6">6小时</option>';
         h += '<option value="12">12小时</option>';
@@ -838,19 +899,20 @@
         h += '<option value="72">3天</option>';
         h += '<option value="168">7天</option>';
         h += '<option value="720">30天</option>';
-        h += '<option value="0">永久封禁</option>';
+        h += '<option value="0">永久拉黑封禁</option>';
         h += '</select></div>';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">封禁原因</label><input id="banReason" placeholder="输入原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:180px;"></div>';
-        h += '<button class="btn-sm primary" onclick="addBan()" style="height:36px;">执行封禁</button>';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">拉黑封禁原因</label><input id="banReason" placeholder="输入原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:180px;"></div>';
+        h += '<button class="btn-sm primary" onclick="addBan()" style="height:36px;">执行拉黑封禁</button>';
         h += '</div></div>';
 
-        h += '<div class="card"><h3>🔒 封禁列表</h3>';
+        h += '<div class="card"><h3>🔒 拉黑封禁列表</h3>';
         if (!bansData.length) {
-            h += '<div class="empty">暂无封禁记录</div>';
+            h += '<div class="empty">暂无拉黑封禁记录</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>类型</th><th>原因</th><th>封禁人</th><th>封禁时间</th><th>过期时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>类型</th><th>原因</th><th>操作人</th><th>拉黑封禁时间</th><th>过期时间</th><th>状态</th><th>解除时间</th></tr></thead><tbody>';
             bansData.forEach(function(b) {
-                var statusBadge = b.is_active ? '<span class="badge badge-red">封禁中</span>' : '<span class="badge badge-green">已解封</span>';
+                var statusBadge = b.is_active ? '<span class="badge badge-red">拉黑封禁中</span>' : '<span class="badge badge-green">已解除</span>';
+                var liftTime = !b.is_active && b.lifted_at ? formatTime(b.lifted_at) : '-';
                 h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td>';
                 h += '<td>' + (b.ban_type === 'permanent' ? '永久' : formatDuration(b.ban_duration_hours || 0)) + '</td>';
                 h += '<td style="max-width:150px;">' + escapeHtml(b.ban_reason || '-') + '</td>';
@@ -858,7 +920,7 @@
                 h += '<td>' + formatTime(b.banned_at) + '</td>';
                 h += '<td>' + (b.expires_at ? formatTime(b.expires_at) : '-') + '</td>';
                 h += '<td>' + statusBadge + '</td>';
-                h += '<td>' + (b.is_active ? '<button class="btn-sm" onclick="liftBan(\'' + b.id + '\')">解封</button>' : '-') + '</td></tr>';
+                h += '<td>' + (b.is_active ? (b.expires_at ? formatTime(b.expires_at) : '永久') + ' <button class="btn-sm" onclick="liftBan(\'' + b.id + '\')">提前解除</button>' : liftTime) + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -885,24 +947,24 @@
                 banned_by: ADMIN, expires_at: expiresAt, is_active: true
             }]);
             if (error) {
-                if (error.code === '23505') { showToast('该用户已被封禁', 'error'); return; }
-                showToast('封禁失败: ' + error.message, 'error'); return;
+                if (error.code === '23505') { showToast('该用户已被拉黑封禁', 'error'); return; }
+                showToast('拉黑封禁失败: ' + error.message, 'error'); return;
             }
             document.getElementById('banUserName').value = '';
             document.getElementById('banReason').value = '';
             await loadBansData();
             renderTab('bans');
-            showToast('✅ 已封禁 ' + userName, 'success');
-        } catch(e) { showToast('封禁失败: ' + e.message, 'error'); }
+            showToast('✅ 已拉黑封禁 ' + userName, 'success');
+        } catch(e) { showToast('拉黑封禁失败: ' + e.message, 'error'); }
     };
 
     window.liftBan = function(id) {
-        showConfirm('解封用户', '确认解封该用户？', '确认解封', async function() {
+        showConfirm('解除拉黑封禁', '确认解除该用户的拉黑封禁？', '确认解除', async function() {
             try {
                 await sb.from('bans').update({ is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN }).eq('id', id);
                 await loadBansData();
                 renderTab('bans');
-                showToast('✅ 已解封', 'success');
+                showToast('✅ 已解除拉黑封禁', 'success');
             } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
         });
     };
@@ -949,10 +1011,11 @@
         if (!mutesData.length) {
             h += '<div class="empty">暂无禁言记录</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>操作人</th><th>开始时间</th><th>过期时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>操作人</th><th>开始时间</th><th>过期时间</th><th>状态</th><th>解除时间</th></tr></thead><tbody>';
             mutesData.forEach(function(m) {
                 var durationLabel = m.duration_hours > 0 ? formatDuration(m.duration_hours) : '永久';
                 var statusBadge = m.is_active ? '<span class="badge badge-red">禁言中</span>' : '<span class="badge badge-green">已解除</span>';
+                var liftTime = !m.is_active && m.lifted_at ? formatTime(m.lifted_at) : '-';
                 h += '<tr><td><strong>' + escapeHtml(m.user_name) + '</strong></td>';
                 h += '<td>' + durationLabel + '</td>';
                 h += '<td style="max-width:150px;">' + escapeHtml(m.reason || '-') + '</td>';
@@ -960,7 +1023,7 @@
                 h += '<td>' + formatTime(m.created_at) + '</td>';
                 h += '<td>' + (m.expires_at ? formatTime(m.expires_at) : '永久') + '</td>';
                 h += '<td>' + statusBadge + '</td>';
-                h += '<td>' + (m.is_active ? '<button class="btn-sm" onclick="liftMute(\'' + m.id + '\')">解除禁言</button>' : '-') + '</td></tr>';
+                h += '<td>' + (m.is_active ? (m.expires_at ? formatTime(m.expires_at) : '永久') + ' <button class="btn-sm" onclick="liftMute(\'' + m.id + '\')">提前解除</button>' : liftTime) + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -1018,110 +1081,7 @@
         });
     };
 
-    var blacklistData = [];
-
-    async function loadBlacklistData() {
-        try {
-            var res = await sb.from('blacklist').select('*').order('created_at', { ascending: false }).limit(500);
-            blacklistData = res.data || [];
-        } catch(e) {
-            blacklistData = [];
-        }
-    }
-
-    async function renderBlacklistTab(el) {
-        if (!blacklistData.length) {
-            await loadBlacklistData();
-        }
-        var active = blacklistData.filter(function(b) { return b.is_active !== false; }).length;
-        var h = '<div class="stats-row">';
-        h += '<div class="stat-box"><div class="val">' + blacklistData.length + '</div><div class="lbl">总拉黑记录</div></div>';
-        h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前拉黑</div></div>';
-        h += '</div>';
-
-        h += '<div class="card"><h3>⛔ 添加黑名单</h3>';
-        h += '<div class="admin-user-form-row">';
-        h += '<div class="admin-field"><label>用户名</label>' + buildAdminUserPicker('blUserName', '选择拉黑用户') + '</div>';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">拉黑时长</label><select id="blDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
-        h += '<option value="1">1小时</option>';
-        h += '<option value="6">6小时</option>';
-        h += '<option value="12">12小时</option>';
-        h += '<option value="24">1天</option>';
-        h += '<option value="72">3天</option>';
-        h += '<option value="168">7天</option>';
-        h += '<option value="720">30天</option>';
-        h += '<option value="0" selected>永久拉黑</option>';
-        h += '</select></div>';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">拉黑原因</label><input id="blReason" placeholder="输入原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:180px;"></div>';
-        h += '<button class="btn-sm primary" onclick="addBlacklist()" style="height:36px;">加入黑名单</button>';
-        h += '</div></div>';
-
-        h += '<div class="card"><h3>⛔ 黑名单列表（' + blacklistData.length + '人）</h3>';
-        if (!blacklistData.length) {
-            h += '<div class="empty">黑名单为空</div>';
-        } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>添加人</th><th>时间</th><th>过期</th><th>状态</th><th>操作</th></tr></thead><tbody>';
-            blacklistData.forEach(function(b) {
-                var durationLabel = (b.duration_hours || 0) > 0 ? formatDuration(b.duration_hours) : '永久';
-                var isActive = b.is_active !== false;
-                var statusBadge = isActive ? '<span class="badge badge-red">拉黑中</span>' : '<span class="badge badge-green">已移除</span>';
-                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td>';
-                h += '<td>' + durationLabel + '</td>';
-                h += '<td>' + escapeHtml(b.reason || '-') + '</td>';
-                h += '<td>' + escapeHtml(b.added_by || '-') + '</td>';
-                h += '<td>' + formatTime(b.created_at) + '</td>';
-                h += '<td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td>';
-                h += '<td>' + statusBadge + '</td>';
-                h += '<td>' + (isActive ? '<button class="btn-sm del" onclick="removeBlacklist(\'' + b.id + '\', \'' + escapeHtml(b.user_name) + '\')">移除</button>' : '-') + '</td></tr>';
-            });
-            h += '</tbody></table></div>';
-        }
-        h += '</div>';
-        el.innerHTML = h;
-    }
-
-    window.addBlacklist = async function() {
-        var userName = document.getElementById('blUserName').value.trim();
-        var duration = parseInt(document.getElementById('blDuration').value);
-        var reason = document.getElementById('blReason').value.trim();
-        if (!validateAdminTargetUser(userName, 'blUserName')) return;
-        var expiresAt = null;
-        if (duration > 0) {
-            var d = new Date();
-            d.setHours(d.getHours() + duration);
-            expiresAt = d.toISOString();
-        }
-        try {
-            var { error } = await sb.from('blacklist').insert([{
-                user_name: userName,
-                reason: reason || '管理员操作',
-                duration_hours: duration,
-                added_by: ADMIN,
-                expires_at: expiresAt,
-                is_active: true
-            }]);
-            if (error) {
-                if (error.code === '23505') { showToast('该用户已在黑名单中', 'error'); return; }
-                showToast('操作失败: ' + error.message, 'error'); return;
-            }
-            document.getElementById('blUserName').value = '';
-            document.getElementById('blReason').value = '';
-            await loadBlacklistData();
-            renderTab('blacklist');
-            showToast('✅ 已加入黑名单', 'success');
-        } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
-    };
-
-    window.removeBlacklist = function(id, userName) {
-        showConfirm('移出黑名单', '确认将 ' + userName + ' 移出黑名单？', '确认移除', async function() {
-            try {
-                await sb.from('blacklist').update({ is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN }).eq('id', id);
-                await loadBlacklistData();
-                renderTab('blacklist');
-                showToast('✅ 已移出黑名单', 'success');
-            } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
-        });
-    };
+    // 黑名单功能已合并到「拉黑封禁」，相关函数已移除
 
     var photosAdminData = [];
 
@@ -1180,7 +1140,7 @@
     window.switchTab = function(tab) {
         currentTab = tab;
         saveCurrentTab();
-        ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos'].forEach(function(t) {
+        ['ann','users','posts','likes','comments','reports','bans','mutes','photos'].forEach(function(t) {
             var panel = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
             var btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn');
             if (panel) panel.classList.remove('active');
@@ -1206,7 +1166,6 @@
             case 'reports': renderReportsTab(el); break;
             case 'bans': renderBansTab(el); break;
             case 'mutes': renderMutesTab(el); break;
-            case 'blacklist': renderBlacklistTab(el); break;
             case 'photos': renderPhotosTab(el); break;
         }
     };
@@ -1229,9 +1188,10 @@
             allComments.forEach(function(c) { userMap[c.user_name] = true; });
 
             var userInfoList = (postRes.data || []).filter(function(p) { return p.media_type === '__user_info__'; });
+            // postRes 按 created_at DESC 排序（最新在前），只保留每个用户第一条（最新）记录
             var userInfoMap = {};
             userInfoList.forEach(function(ui) {
-                try { var info = JSON.parse(ui.content); userInfoMap[ui.user_name] = info; userMap[ui.user_name] = true; } catch(e) {}
+                try { if (!userInfoMap[ui.user_name]) { var info = JSON.parse(ui.content); userInfoMap[ui.user_name] = info; userMap[ui.user_name] = true; } } catch(e) {}
             });
 
             allUsers = Object.keys(userMap).sort().map(function(u) {
@@ -1241,7 +1201,6 @@
             await loadReportsData();
             await loadBansData();
             await loadMutesData();
-            await loadBlacklistData();
             await loadPhotosAdminData();
 
             if (!keepTab) { switchTab('ann'); }
