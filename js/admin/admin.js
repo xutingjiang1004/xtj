@@ -164,7 +164,7 @@
         });
         document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
         document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1) + 'Btn').classList.add('active');
-        renderTab(tab);
+        window.renderTab(tab);
     };
 
     function escapeHtml(s) {
@@ -1054,7 +1054,7 @@
         var btn = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1) + 'Btn');
         if (panel) panel.classList.add('active');
         if (btn) btn.classList.add('active');
-        renderTab(tab);
+        window.renderTab(tab);
     };
 
     var _origRenderTab = window.renderTab;
@@ -1109,7 +1109,7 @@
             await loadPhotosAdminData();
 
             if (!keepTab) { switchTab('ann'); }
-            else { renderTab(currentTab); }
+            else { window.renderTab(currentTab); }
         } catch(e) {
             console.error(e);
             showToast('数据加载失败，请刷新重试', 'error');
