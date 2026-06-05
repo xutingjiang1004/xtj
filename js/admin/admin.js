@@ -519,17 +519,57 @@
                     d.setHours(d.getHours() + hours);
                     expiresAt = d.toISOString();
                 }
-                var { error } = await sb.from('bans').insert([{
-                    user_name: userName,
-                    ban_reason: '管理员操作',
-                    ban_duration_hours: hours,
-                    ban_type: hours > 0 ? 'temporary' : 'permanent',
-                    banned_by: ADMIN,
-                    expires_at: expiresAt,
-                    is_active: true,
-                    banned_at: new Date().toISOString()
-                }]);
-                if (error) { showToast('拉黑封禁失败: ' + error.message, 'error'); return; }
+                // 检查是否已有拉黑记录
+                var { data: existingBans, error: findErr } = await sb.from('bans').select('id, is_active').eq('user_name', userName);
+                if (findErr) { showToast('查询失败: ' + findErr.message, 'error'); return; }
+                if (existingBans && existingBans.length) {
+                    var activeBan = existingBans.find(function(b) { return b.is_active; });
+                    if (activeBan) {
+                        showToast('该用户已被拉黑封禁', 'error');
+                        return;
+                    }
+                    // 有旧记录但已解除，更新它
+                    var { error: updErr } = await sb.from('bans').update({
+                        ban_reason: '管理员操作',
+                        ban_duration_hours: hours,
+                        ban_type: hours > 0 ? 'temporary' : 'permanent',
+                        banned_by: ADMIN,
+                        expires_at: expiresAt,
+                        is_active: true,
+                        banned_at: new Date().toISOString()
+                    }).eq('id', existingBans[0].id);
+                    if (updErr) { showToast('拉黑封禁失败: ' + updErr.message, 'error'); return; }
+                } else {
+                    // 无旧记录，直接插入
+                    var { error } = await sb.from('bans').insert([{
+                        user_name: userName,
+                        ban_reason: '管理员操作',
+                        ban_duration_hours: hours,
+                        ban_type: hours > 0 ? 'temporary' : 'permanent',
+                        banned_by: ADMIN,
+                        expires_at: expiresAt,
+                        is_active: true,
+                        banned_at: new Date().toISOString()
+                    }]);
+                    if (error) {
+                        if (error.code === '23505') {
+                            // 唯一约束冲突，并发导致查询后又被插入，改为更新
+                            var { error: updErr2 } = await sb.from('bans').update({
+                                ban_reason: '管理员操作',
+                                ban_duration_hours: hours,
+                                ban_type: hours > 0 ? 'temporary' : 'permanent',
+                                banned_by: ADMIN,
+                                expires_at: expiresAt,
+                                is_active: true,
+                                banned_at: new Date().toISOString()
+                            }).eq('user_name', userName);
+                            if (updErr2) { showToast('拉黑封禁失败: ' + updErr2.message, 'error'); return; }
+                        } else {
+                            showToast('拉黑封禁失败: ' + error.message, 'error');
+                            return;
+                        }
+                    }
+                }
                 await loadBansData();
                 showToast('✅ 已拉黑封禁 ' + userName, 'success');
             } catch(e) { showToast('拉黑封禁失败: ' + e.message, 'error'); }
@@ -918,14 +958,46 @@
             expiresAt = d.toISOString();
         }
         try {
-            var { error } = await sb.from('bans').insert([{
-                user_name: userName, ban_type: banType, ban_reason: reason || '违反社区规定',
-                ban_duration_hours: duration,
-                banned_by: ADMIN, expires_at: expiresAt, is_active: true
-            }]);
-            if (error) {
-                if (error.code === '23505') { showToast('该用户已被拉黑封禁', 'error'); return; }
-                showToast('拉黑封禁失败: ' + error.message, 'error'); return;
+            // 先检查是否已有拉黑记录
+            var { data: existingBans, error: findErr } = await sb.from('bans').select('id, is_active').eq('user_name', userName);
+            if (findErr) { showToast('查询失败: ' + findErr.message, 'error'); return; }
+            if (existingBans && existingBans.length) {
+                var activeBan = existingBans.find(function(b) { return b.is_active; });
+                if (activeBan) { showToast('该用户已被拉黑封禁', 'error'); return; }
+                // 有旧记录但已解除，更新
+                var { error: updErr } = await sb.from('bans').update({
+                    ban_reason: reason || '违反社区规定',
+                    ban_duration_hours: duration,
+                    ban_type: banType,
+                    banned_by: ADMIN,
+                    expires_at: expiresAt,
+                    is_active: true,
+                    banned_at: new Date().toISOString()
+                }).eq('id', existingBans[0].id);
+                if (updErr) { showToast('拉黑封禁失败: ' + updErr.message, 'error'); return; }
+            } else {
+                var { error } = await sb.from('bans').insert([{
+                    user_name: userName, ban_type: banType, ban_reason: reason || '违反社区规定',
+                    ban_duration_hours: duration,
+                    banned_by: ADMIN, expires_at: expiresAt, is_active: true
+                }]);
+                if (error) {
+                    if (error.code === '23505') {
+                        // 并发冲突，改为更新
+                        var { error: updErr2 } = await sb.from('bans').update({
+                            ban_reason: reason || '违反社区规定',
+                            ban_duration_hours: duration,
+                            ban_type: banType,
+                            banned_by: ADMIN,
+                            expires_at: expiresAt,
+                            is_active: true,
+                            banned_at: new Date().toISOString()
+                        }).eq('user_name', userName);
+                        if (updErr2) { showToast('拉黑封禁失败: ' + updErr2.message, 'error'); return; }
+                    } else {
+                        showToast('拉黑封禁失败: ' + error.message, 'error'); return;
+                    }
+                }
             }
             document.getElementById('banUserName').value = '';
             document.getElementById('banReason').value = '';
