@@ -8583,3 +8583,131 @@ body.ios-chat-keyboard-open .chat-input-area {
   border-color: rgba(104, 123, 111, 0.34) !important;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3) !important;
 }
+
+#statModal.modal-overlay {
+  background: rgba(8, 12, 10, 0.18) !important;
+  backdrop-filter: blur(2px) saturate(108%) !important;
+  -webkit-backdrop-filter: blur(2px) saturate(108%) !important;
+}
+
+#statModal .stat-detail-modal {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border: 1px solid rgba(255, 255, 255, 0.72) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.16) !important;
+  overflow: hidden !important;
+}
+
+#statModal .stat-detail-header {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(255,255,255,0.24) !important;
+  padding: 16px 20px !important;
+}
+
+#statModal .stat-detail-body {
+  background: transparent !important;
+  padding: 18px !important;
+}
+
+#statModal .stat-two-col.stat-two-col--flat {
+  gap: 12px;
+}
+
+#statModal .stat-two-col.stat-two-col--flat .stat-col.stat-col--flat {
+  padding: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#statModal .stat-two-col.stat-two-col--flat .stat-record-more-btn {
+  margin-top: 10px;
+}
+
+:where(
+  .btn-primary,
+  .btn-ghost,
+  .file-label,
+  .photo-wall-btn,
+  .photo-wall-upload-btn,
+  .send-btn,
+  .chat-img-btn,
+  .announcement-btn,
+  .announcement-back-btn,
+  .announcement-tab,
+  .announcement-close-btn,
+  .post-filter-clear,
+  .filter-toggle-btn,
+  .profile-activity-btn,
+  .profile-activity-more,
+  .action-btn,
+  .stat-close-btn,
+  .stat-record-more-btn,
+  .stat-record-action,
+  .spi-open-btn,
+  .back-to-stats-btn,
+  .stat-user-summary
+) {
+  transition:
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
+:where(
+  .btn-primary,
+  .btn-ghost,
+  .file-label,
+  .photo-wall-btn,
+  .photo-wall-upload-btn,
+  .send-btn,
+  .chat-img-btn,
+  .announcement-btn,
+  .announcement-back-btn,
+  .announcement-tab,
+  .announcement-close-btn,
+  .post-filter-clear,
+  .filter-toggle-btn,
+  .profile-activity-btn,
+  .profile-activity-more,
+  .action-btn,
+  .stat-close-btn,
+  .stat-record-more-btn,
+  .stat-record-action,
+  .spi-open-btn,
+  .back-to-stats-btn
+):hover {
+  transform: translateY(-1px);
+}
+
+:where(
+  .btn-primary,
+  .btn-ghost,
+  .file-label,
+  .photo-wall-btn,
+  .photo-wall-upload-btn,
+  .send-btn,
+  .chat-img-btn,
+  .announcement-btn,
+  .announcement-back-btn,
+  .announcement-tab,
+  .announcement-close-btn,
+  .post-filter-clear,
+  .filter-toggle-btn,
+  .profile-activity-btn,
+  .profile-activity-more,
+  .action-btn,
+  .stat-close-btn,
+  .stat-record-more-btn,
+  .stat-record-action,
+  .spi-open-btn,
+  .back-to-stats-btn
+):active {
+  transform: scale(0.97);
+}
