@@ -1,9 +1,70 @@
 -- ============================================================
--- 禁言功能 + 黑名单增强
+-- 禁言功能 + 黑名单增强（完整版）
 -- 在 Supabase SQL Editor 中执行
 -- ============================================================
 
--- 1. 禁言表
+-- 1. 黑名单表（如果不存在则创建，包含所有字段）
+create table if not exists public.blacklist (
+  id uuid primary key default gen_random_uuid(),
+  user_name text not null unique,
+  reason text not null default '',
+  added_by text not null default '',
+  duration_hours integer not null default 0,
+  expires_at timestamptz,
+  is_active boolean not null default true,
+  lifted_at timestamptz,
+  lifted_by text default '',
+  created_at timestamptz not null default now()
+);
+
+-- 黑名单表增强：补充缺失的字段
+do $$
+begin
+  if not exists (select 1 from information_schema.columns 
+    where table_name = 'blacklist' and column_name = 'expires_at') then
+    alter table public.blacklist add column expires_at timestamptz;
+  end if;
+  if not exists (select 1 from information_schema.columns 
+    where table_name = 'blacklist' and column_name = 'duration_hours') then
+    alter table public.blacklist add column duration_hours integer default 0;
+  end if;
+  if not exists (select 1 from information_schema.columns 
+    where table_name = 'blacklist' and column_name = 'is_active') then
+    alter table public.blacklist add column is_active boolean not null default true;
+  end if;
+  if not exists (select 1 from information_schema.columns 
+    where table_name = 'blacklist' and column_name = 'lifted_at') then
+    alter table public.blacklist add column lifted_at timestamptz;
+  end if;
+  if not exists (select 1 from information_schema.columns 
+    where table_name = 'blacklist' and column_name = 'lifted_by') then
+    alter table public.blacklist add column lifted_by text default '';
+  end if;
+end;
+$$;
+
+create index if not exists idx_blacklist_active on public.blacklist(is_active, expires_at);
+create index if not exists idx_blacklist_user on public.blacklist(user_name);
+alter table public.blacklist enable row level security;
+
+do $$
+begin
+  if not exists (select 1 from pg_policies where tablename = 'blacklist' and policyname = 'blacklist_select_all') then
+    create policy blacklist_select_all on public.blacklist for select using (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'blacklist' and policyname = 'blacklist_insert_all') then
+    create policy blacklist_insert_all on public.blacklist for insert with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'blacklist' and policyname = 'blacklist_update_all') then
+    create policy blacklist_update_all on public.blacklist for update using (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'blacklist' and policyname = 'blacklist_delete_all') then
+    create policy blacklist_delete_all on public.blacklist for delete using (true);
+  end if;
+end;
+$$;
+
+-- 2. 禁言表
 create table if not exists public.mutes (
   id uuid primary key default gen_random_uuid(),
   user_name text not null,
@@ -20,12 +81,25 @@ create table if not exists public.mutes (
 create index if not exists idx_mutes_active on public.mutes(is_active, expires_at);
 create index if not exists idx_mutes_user on public.mutes(user_name);
 alter table public.mutes enable row level security;
-create policy if not exists mutes_select_all on public.mutes for select using (true);
-create policy if not exists mutes_insert_all on public.mutes for insert with check (true);
-create policy if not exists mutes_update_all on public.mutes for update using (true);
-create policy if not exists mutes_delete_all on public.mutes for delete using (true);
 
--- 2. 检查用户是否被禁言
+do $$
+begin
+  if not exists (select 1 from pg_policies where tablename = 'mutes' and policyname = 'mutes_select_all') then
+    create policy mutes_select_all on public.mutes for select using (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'mutes' and policyname = 'mutes_insert_all') then
+    create policy mutes_insert_all on public.mutes for insert with check (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'mutes' and policyname = 'mutes_update_all') then
+    create policy mutes_update_all on public.mutes for update using (true);
+  end if;
+  if not exists (select 1 from pg_policies where tablename = 'mutes' and policyname = 'mutes_delete_all') then
+    create policy mutes_delete_all on public.mutes for delete using (true);
+  end if;
+end;
+$$;
+
+-- 3. 禁言相关函数
 create or replace function public.is_user_muted(p_user_name text)
 returns boolean
 language plpgsql
@@ -43,7 +117,6 @@ begin
 end;
 $$;
 
--- 3. 自动清理过期禁言
 create or replace function public.auto_expire_mutes()
 returns void
 language plpgsql
@@ -60,7 +133,6 @@ begin
 end;
 $$;
 
--- 4. 获取用户当前禁言信息
 create or replace function public.get_user_mute_info(p_user_name text)
 returns table(
   is_muted boolean,
@@ -93,33 +165,7 @@ begin
 end;
 $$;
 
--- 5. 增强黑名单：添加时限支持
-do $$
-begin
-  if not exists (select 1 from information_schema.columns 
-    where table_name = 'blacklist' and column_name = 'expires_at') then
-    alter table public.blacklist add column expires_at timestamptz;
-  end if;
-  if not exists (select 1 from information_schema.columns 
-    where table_name = 'blacklist' and column_name = 'duration_hours') then
-    alter table public.blacklist add column duration_hours integer default 0;
-  end if;
-  if not exists (select 1 from information_schema.columns 
-    where table_name = 'blacklist' and column_name = 'is_active') then
-    alter table public.blacklist add column is_active boolean not null default true;
-  end if;
-  if not exists (select 1 from information_schema.columns 
-    where table_name = 'blacklist' and column_name = 'lifted_at') then
-    alter table public.blacklist add column lifted_at timestamptz;
-  end if;
-  if not exists (select 1 from information_schema.columns 
-    where table_name = 'blacklist' and column_name = 'lifted_by') then
-    alter table public.blacklist add column lifted_by text default '';
-  end if;
-end;
-$$;
-
--- 更新 is_user_blacklisted 函数支持时限
+-- 4. 黑名单相关函数（支持时限）
 create or replace function public.is_user_blacklisted(p_user_name text)
 returns boolean
 language plpgsql
@@ -137,7 +183,6 @@ begin
 end;
 $$;
 
--- 6. 获取用户当前拉黑信息
 create or replace function public.get_user_blacklist_info(p_user_name text)
 returns table(
   is_blacklisted boolean,
@@ -170,7 +215,23 @@ begin
 end;
 $$;
 
--- 7. 获取用户当前封禁信息
+create or replace function public.auto_expire_blacklist()
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  update public.blacklist
+  set is_active = false,
+      lifted_at = now(),
+      lifted_by = 'system'
+  where is_active = true
+    and expires_at is not null
+    and expires_at <= now();
+end;
+$$;
+
+-- 5. 封禁相关函数（获取封禁信息）
 create or replace function public.get_user_ban_info(p_user_name text)
 returns table(
   is_banned boolean,
@@ -205,7 +266,7 @@ begin
 end;
 $$;
 
--- 8. 统一获取用户所有限制状态
+-- 6. 统一获取用户所有限制状态（前端轮询使用）
 create or replace function public.get_user_restrictions(p_user_name text)
 returns jsonb
 language plpgsql
@@ -231,26 +292,11 @@ begin
 end;
 $$;
 
--- 9. 自动清理过期黑名单
-create or replace function public.auto_expire_blacklist()
-returns void
-language plpgsql
-security definer
-as $$
-begin
-  update public.blacklist
-  set is_active = false,
-      lifted_at = now(),
-      lifted_by = 'system'
-  where is_active = true
-    and expires_at is not null
-    and expires_at <= now();
-end;
-$$;
-
+-- 7. 授权
 grant execute on function public.is_user_muted(text) to anon;
 grant execute on function public.auto_expire_mutes() to anon;
 grant execute on function public.get_user_mute_info(text) to anon;
+grant execute on function public.is_user_blacklisted(text) to anon;
 grant execute on function public.get_user_blacklist_info(text) to anon;
 grant execute on function public.get_user_ban_info(text) to anon;
 grant execute on function public.get_user_restrictions(text) to anon;
