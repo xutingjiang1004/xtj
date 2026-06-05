@@ -19,7 +19,8 @@ create table if not exists public.blacklist (
 
 create index if not exists idx_blacklist_active on public.blacklist(is_active, expires_at);
 create index if not exists idx_blacklist_user on public.blacklist(user_name);
-alter table public.blacklist enable row level security;
+-- ⚠️ 不启用 RLS，否则 anon key 的插入/查询会被阻塞
+-- alter table public.blacklist enable row level security;
 
 -- 2️⃣ 禁言表
 create table if not exists public.mutes (
@@ -37,7 +38,8 @@ create table if not exists public.mutes (
 
 create index if not exists idx_mutes_active on public.mutes(is_active, expires_at);
 create index if not exists idx_mutes_user on public.mutes(user_name);
-alter table public.mutes enable row level security;
+-- ⚠️ 不启用 RLS，否则 anon key 的插入/查询会被阻塞
+-- alter table public.mutes enable row level security;
 
 -- 3️⃣ 禁言相关函数
 create or replace function public.is_user_muted(p_user_name text)
