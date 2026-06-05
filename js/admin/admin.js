@@ -433,14 +433,11 @@
             return rb - ra;
         });
 
-        h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
-        h += '<span class="count-badge">共 ' + filtered.length + ' 位用户</span>';
-        h += '</div>';
-
+        h += '<div class="card"><h3>👥 用户列表 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + filtered.length + ' 位用户</span></h3>';
         if (!filtered.length) {
-            h += '<div class="empty-state"><div class="icon">📭</div><div class="text">无匹配用户</div></div>';
+            h += '<div class="empty">无匹配用户</div>';
         } else {
-            h += '<div class="user-grid">';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(u) {
                 var pc = allPosts.filter(function(p) { return p.user_name === u.name; }).length;
                 var lc = allLikes.filter(function(l) { return l.user_name === u.name; }).length;
@@ -450,52 +447,32 @@
                 var isAdmin = u.name === ADMIN;
                 var isBanned = bansData.some(function(b) { return b.user_name === u.name && b.is_active; });
                 var isMuted = mutesData.some(function(m) { return m.user_name === u.name && m.is_active; });
-
-                var cardCls = 'user-card';
-                if (isBanned) cardCls += ' is-banned';
-                if (isMuted) cardCls += ' is-muted';
-                if (isAdmin) cardCls += ' is-admin';
-
-                var avatarCls = 'user-avatar';
-                if (isAdmin) avatarCls += ' admin-avatar';
-                else if (isBanned) avatarCls += ' banned-avatar';
-                else if (isMuted) avatarCls += ' muted-avatar';
-
-                var firstChar = u.name.charAt(0).toUpperCase();
                 var safeName = u.name.replace(/'/g, "\\'");
 
-                h += '<div class="' + cardCls + '">';
-                h += '<div class="user-card-head">';
-                h += '<div class="' + avatarCls + '">' + escapeHtml(firstChar) + '</div>';
-                h += '<div class="user-card-name"><strong>' + escapeHtml(u.name) + '</strong>';
-                h += '<div class="user-tags">';
-                if (isAdmin) h += '<span class="tag tag-admin">管理员</span>';
-                if (isBanned) h += '<span class="tag tag-banned">拉黑封禁中</span>';
-                if (isMuted) h += '<span class="tag tag-muted">禁言中</span>';
-                h += '</div></div></div>';
+                var statusBadge = isAdmin ? '<span class="badge" style="background:rgba(99,102,241,0.15);color:#818cf8">管理员</span>' :
+                                  isBanned ? '<span class="badge badge-red">拉黑封禁中</span>' :
+                                  isMuted ? '<span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24">禁言中</span>' :
+                                  '<span class="badge badge-green">正常</span>';
 
-                h += '<div class="user-card-stats">';
-                h += '<div class="user-stat-item"><div class="num">' + pc + '</div><div class="lbl">帖子</div></div>';
-                h += '<div class="user-stat-item"><div class="num">' + lc + '</div><div class="lbl">点赞</div></div>';
-                h += '<div class="user-stat-item"><div class="num">' + cc + '</div><div class="lbl">评论</div></div>';
-                h += '</div>';
-
-                h += '<div class="user-card-meta">';
-                h += '<div class="meta-row"><span class="label">注册时间</span><span class="value">' + regTime + '</span></div>';
-                h += '<div class="meta-row"><span class="label">最近登录</span><span class="value">' + lastLogin + '</span></div>';
-                h += '</div>';
-
+                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td>';
+                h += '<td>' + statusBadge + '</td>';
+                h += '<td>' + regTime + '</td>';
+                h += '<td>' + lastLogin + '</td>';
+                h += '<td>' + pc + '</td>';
+                h += '<td>' + lc + '</td>';
+                h += '<td>' + cc + '</td>';
+                h += '<td style="white-space:nowrap;">';
                 if (!isAdmin) {
-                    h += '<div class="user-card-actions">';
-                    h += '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')" title="禁言用户">🤐禁言</button>';
-                    h += '<button class="btn-sm" onclick="quickBanUser(\'' + safeName + '\')" title="拉黑封禁用户">🔒拉黑封禁</button>';
-                    h += '</div>';
+                    h += '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')" style="margin-right:4px;">🤐禁言</button>';
+                    h += '<button class="btn-sm" onclick="quickBanUser(\'' + safeName + '\')">🔒拉黑</button>';
+                } else {
+                    h += '<span style="color:var(--text-muted);font-size:12px;">-</span>';
                 }
-
-                h += '</div>';
+                h += '</td></tr>';
             });
-            h += '</div>';
+            h += '</tbody></table></div>';
         }
+        h += '</div>';
 
         el.innerHTML = h;
     }
