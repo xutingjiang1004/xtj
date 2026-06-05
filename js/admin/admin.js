@@ -76,10 +76,10 @@
         saveSession();
         
         var savedTab = localStorage.getItem(TAB_KEY);
-        if (savedTab && ['ann','users','posts','likes','comments'].indexOf(savedTab) !== -1) {
+        if (savedTab && ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos'].indexOf(savedTab) !== -1) {
             currentTab = savedTab;
             await loadAllData(true);
-            ['ann','users','posts','likes','comments'].forEach(function(t) {
+            ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos'].forEach(function(t) {
                 document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.remove('active');
                 document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn').classList.remove('active');
             });
@@ -590,13 +590,21 @@
         h += '</div>';
 
         h += '<div class="card"><h3>🔒 添加封禁</h3>';
-        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
-        h += '<input id="banUserName" placeholder="用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
-        h += '<select id="banType" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);"><option value="temporary">临时封禁</option><option value="permanent">永久封禁</option></select>';
-        h += '<input id="banDuration" type="number" placeholder="时长(小时)" value="24" style="width:100px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
-        h += '<input id="banReason" placeholder="封禁原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);"></div>';
-        h += '<button class="btn-sm primary" onclick="addBan()" style="margin-top:8px;">执行封禁</button>';
-        h += '</div>';
+        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">用户名</label><input id="banUserName" placeholder="输入用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:140px;"></div>';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">封禁时长</label><select id="banDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
+        h += '<option value="1">1小时</option>';
+        h += '<option value="6">6小时</option>';
+        h += '<option value="12">12小时</option>';
+        h += '<option value="24" selected>1天</option>';
+        h += '<option value="72">3天</option>';
+        h += '<option value="168">7天</option>';
+        h += '<option value="720">30天</option>';
+        h += '<option value="0">永久封禁</option>';
+        h += '</select></div>';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">封禁原因</label><input id="banReason" placeholder="输入原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:180px;"></div>';
+        h += '<button class="btn-sm primary" onclick="addBan()" style="height:36px;">执行封禁</button>';
+        h += '</div></div>';
 
         h += '<div class="card"><h3>🔒 封禁列表</h3>';
         if (!bansData.length) {
@@ -606,7 +614,7 @@
             bansData.forEach(function(b) {
                 var statusBadge = b.is_active ? '<span class="badge badge-red">封禁中</span>' : '<span class="badge badge-green">已解封</span>';
                 h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td>';
-                h += '<td>' + (b.ban_type === 'permanent' ? '永久' : '临时') + '</td>';
+                h += '<td>' + (b.ban_type === 'permanent' ? '永久' : formatDuration(b.ban_duration_hours || 0)) + '</td>';
                 h += '<td style="max-width:150px;">' + escapeHtml(b.ban_reason || '-') + '</td>';
                 h += '<td>' + escapeHtml(b.banned_by || '-') + '</td>';
                 h += '<td>' + formatTime(b.banned_at) + '</td>';
@@ -622,12 +630,12 @@
 
     window.addBan = async function() {
         var userName = document.getElementById('banUserName').value.trim();
-        var banType = document.getElementById('banType').value;
-        var duration = parseInt(document.getElementById('banDuration').value) || 24;
+        var duration = parseInt(document.getElementById('banDuration').value);
         var reason = document.getElementById('banReason').value.trim();
         if (!userName) { showToast('请输入用户名', 'error'); return; }
+        var banType = duration === 0 ? 'permanent' : 'temporary';
         var expiresAt = null;
-        if (banType === 'temporary') {
+        if (duration > 0) {
             var d = new Date();
             d.setHours(d.getHours() + duration);
             expiresAt = d.toISOString();
@@ -635,7 +643,7 @@
         try {
             var { error } = await sb.from('bans').insert([{
                 user_name: userName, ban_type: banType, ban_reason: reason || '违反社区规定',
-                ban_duration_hours: banType === 'temporary' ? duration : 0,
+                ban_duration_hours: duration,
                 banned_by: ADMIN, expires_at: expiresAt, is_active: true
             }]);
             if (error) {
@@ -661,6 +669,117 @@
         });
     };
 
+    var mutesData = [];
+
+    async function loadMutesData() {
+        try {
+            var res = await sb.from('mutes').select('*').order('created_at', { ascending: false }).limit(500);
+            mutesData = res.data || [];
+        } catch(e) {
+            mutesData = [];
+        }
+    }
+
+    async function renderMutesTab(el) {
+        if (!mutesData.length) {
+            await loadMutesData();
+        }
+        var active = mutesData.filter(function(m) { return m.is_active; }).length;
+        var h = '<div class="stats-row">';
+        h += '<div class="stat-box"><div class="val">' + mutesData.length + '</div><div class="lbl">总禁言记录</div></div>';
+        h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前禁言</div></div>';
+        h += '</div>';
+
+        h += '<div class="card"><h3>🤐 添加禁言</h3>';
+        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">用户名</label><input id="muteUserName" placeholder="输入用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:140px;"></div>';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">禁言时长</label><select id="muteDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
+        h += '<option value="1">1小时</option>';
+        h += '<option value="6">6小时</option>';
+        h += '<option value="12">12小时</option>';
+        h += '<option value="24" selected>1天</option>';
+        h += '<option value="72">3天</option>';
+        h += '<option value="168">7天</option>';
+        h += '<option value="720">30天</option>';
+        h += '<option value="0">永久禁言</option>';
+        h += '</select></div>';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">禁言原因</label><input id="muteReason" placeholder="输入原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:180px;"></div>';
+        h += '<button class="btn-sm primary" onclick="addMute()" style="height:36px;">执行禁言</button>';
+        h += '</div></div>';
+
+        h += '<div class="card"><h3>🤐 禁言列表</h3>';
+        if (!mutesData.length) {
+            h += '<div class="empty">暂无禁言记录</div>';
+        } else {
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>操作人</th><th>开始时间</th><th>过期时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            mutesData.forEach(function(m) {
+                var durationLabel = m.duration_hours > 0 ? formatDuration(m.duration_hours) : '永久';
+                var statusBadge = m.is_active ? '<span class="badge badge-red">禁言中</span>' : '<span class="badge badge-green">已解除</span>';
+                h += '<tr><td><strong>' + escapeHtml(m.user_name) + '</strong></td>';
+                h += '<td>' + durationLabel + '</td>';
+                h += '<td style="max-width:150px;">' + escapeHtml(m.reason || '-') + '</td>';
+                h += '<td>' + escapeHtml(m.muted_by || '-') + '</td>';
+                h += '<td>' + formatTime(m.created_at) + '</td>';
+                h += '<td>' + (m.expires_at ? formatTime(m.expires_at) : '永久') + '</td>';
+                h += '<td>' + statusBadge + '</td>';
+                h += '<td>' + (m.is_active ? '<button class="btn-sm" onclick="liftMute(\'' + m.id + '\')">解除禁言</button>' : '-') + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    }
+
+    function formatDuration(hours) {
+        if (hours >= 720) return Math.floor(hours / 720) + '个月';
+        if (hours >= 168) return Math.floor(hours / 168) + '周';
+        if (hours >= 24) return Math.floor(hours / 24) + '天';
+        return hours + '小时';
+    }
+
+    window.addMute = async function() {
+        var userName = document.getElementById('muteUserName').value.trim();
+        var duration = parseInt(document.getElementById('muteDuration').value);
+        var reason = document.getElementById('muteReason').value.trim();
+        if (!userName) { showToast('请输入用户名', 'error'); return; }
+        var expiresAt = null;
+        if (duration > 0) {
+            var d = new Date();
+            d.setHours(d.getHours() + duration);
+            expiresAt = d.toISOString();
+        }
+        try {
+            var { error } = await sb.from('mutes').insert([{
+                user_name: userName,
+                reason: reason || '违反社区规定',
+                duration_hours: duration,
+                muted_by: ADMIN,
+                expires_at: expiresAt,
+                is_active: true
+            }]);
+            if (error) {
+                showToast('禁言失败: ' + error.message, 'error');
+                return;
+            }
+            document.getElementById('muteUserName').value = '';
+            document.getElementById('muteReason').value = '';
+            await loadMutesData();
+            renderTab('mutes');
+            showToast('✅ 已禁言 ' + userName, 'success');
+        } catch(e) { showToast('禁言失败: ' + e.message, 'error'); }
+    };
+
+    window.liftMute = function(id) {
+        showConfirm('解除禁言', '确认解除该用户的禁言？', '确认解除', async function() {
+            try {
+                await sb.from('mutes').update({ is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN }).eq('id', id);
+                await loadMutesData();
+                renderTab('mutes');
+                showToast('✅ 已解除禁言', 'success');
+            } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+        });
+    };
+
     var blacklistData = [];
 
     async function loadBlacklistData() {
@@ -676,24 +795,46 @@
         if (!blacklistData.length) {
             await loadBlacklistData();
         }
-        var h = '<div class="card"><h3>⛔ 添加黑名单</h3>';
-        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">';
-        h += '<input id="blUserName" placeholder="用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
-        h += '<input id="blReason" placeholder="拉黑原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);"></div>';
-        h += '<button class="btn-sm primary" onclick="addBlacklist()" style="margin-top:8px;">加入黑名单</button>';
+        var active = blacklistData.filter(function(b) { return b.is_active !== false; }).length;
+        var h = '<div class="stats-row">';
+        h += '<div class="stat-box"><div class="val">' + blacklistData.length + '</div><div class="lbl">总拉黑记录</div></div>';
+        h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前拉黑</div></div>';
         h += '</div>';
+
+        h += '<div class="card"><h3>⛔ 添加黑名单</h3>';
+        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">用户名</label><input id="blUserName" placeholder="输入用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:140px;"></div>';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">拉黑时长</label><select id="blDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
+        h += '<option value="1">1小时</option>';
+        h += '<option value="6">6小时</option>';
+        h += '<option value="12">12小时</option>';
+        h += '<option value="24">1天</option>';
+        h += '<option value="72">3天</option>';
+        h += '<option value="168">7天</option>';
+        h += '<option value="720">30天</option>';
+        h += '<option value="0" selected>永久拉黑</option>';
+        h += '</select></div>';
+        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">拉黑原因</label><input id="blReason" placeholder="输入原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:180px;"></div>';
+        h += '<button class="btn-sm primary" onclick="addBlacklist()" style="height:36px;">加入黑名单</button>';
+        h += '</div></div>';
 
         h += '<div class="card"><h3>⛔ 黑名单列表（' + blacklistData.length + '人）</h3>';
         if (!blacklistData.length) {
             h += '<div class="empty">黑名单为空</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>原因</th><th>添加人</th><th>时间</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>添加人</th><th>时间</th><th>过期</th><th>状态</th><th>操作</th></tr></thead><tbody>';
             blacklistData.forEach(function(b) {
+                var durationLabel = (b.duration_hours || 0) > 0 ? formatDuration(b.duration_hours) : '永久';
+                var isActive = b.is_active !== false;
+                var statusBadge = isActive ? '<span class="badge badge-red">拉黑中</span>' : '<span class="badge badge-green">已移除</span>';
                 h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td>';
+                h += '<td>' + durationLabel + '</td>';
                 h += '<td>' + escapeHtml(b.reason || '-') + '</td>';
                 h += '<td>' + escapeHtml(b.added_by || '-') + '</td>';
                 h += '<td>' + formatTime(b.created_at) + '</td>';
-                h += '<td><button class="btn-sm del" onclick="removeBlacklist(\'' + b.id + '\', \'' + escapeHtml(b.user_name) + '\')">移除</button></td></tr>';
+                h += '<td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td>';
+                h += '<td>' + statusBadge + '</td>';
+                h += '<td>' + (isActive ? '<button class="btn-sm del" onclick="removeBlacklist(\'' + b.id + '\', \'' + escapeHtml(b.user_name) + '\')">移除</button>' : '-') + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -703,10 +844,24 @@
 
     window.addBlacklist = async function() {
         var userName = document.getElementById('blUserName').value.trim();
+        var duration = parseInt(document.getElementById('blDuration').value);
         var reason = document.getElementById('blReason').value.trim();
         if (!userName) { showToast('请输入用户名', 'error'); return; }
+        var expiresAt = null;
+        if (duration > 0) {
+            var d = new Date();
+            d.setHours(d.getHours() + duration);
+            expiresAt = d.toISOString();
+        }
         try {
-            var { error } = await sb.from('blacklist').insert([{ user_name: userName, reason: reason || '管理员操作', added_by: ADMIN }]);
+            var { error } = await sb.from('blacklist').insert([{
+                user_name: userName,
+                reason: reason || '管理员操作',
+                duration_hours: duration,
+                added_by: ADMIN,
+                expires_at: expiresAt,
+                is_active: true
+            }]);
             if (error) {
                 if (error.code === '23505') { showToast('该用户已在黑名单中', 'error'); return; }
                 showToast('操作失败: ' + error.message, 'error'); return;
@@ -722,7 +877,7 @@
     window.removeBlacklist = function(id, userName) {
         showConfirm('移出黑名单', '确认将 ' + userName + ' 移出黑名单？', '确认移除', async function() {
             try {
-                await sb.from('blacklist').delete().eq('id', id);
+                await sb.from('blacklist').update({ is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN }).eq('id', id);
                 await loadBlacklistData();
                 renderTab('blacklist');
                 showToast('✅ 已移出黑名单', 'success');
@@ -787,7 +942,7 @@
     window.switchTab = function(tab) {
         currentTab = tab;
         saveCurrentTab();
-        ['ann','users','posts','likes','comments','reports','bans','blacklist','photos'].forEach(function(t) {
+        ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos'].forEach(function(t) {
             var panel = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
             var btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn');
             if (panel) panel.classList.remove('active');
@@ -812,6 +967,7 @@
             case 'comments': renderCommentsTab(el); break;
             case 'reports': renderReportsTab(el); break;
             case 'bans': renderBansTab(el); break;
+            case 'mutes': renderMutesTab(el); break;
             case 'blacklist': renderBlacklistTab(el); break;
             case 'photos': renderPhotosTab(el); break;
         }
@@ -846,6 +1002,7 @@
 
             await loadReportsData();
             await loadBansData();
+            await loadMutesData();
             await loadBlacklistData();
             await loadPhotosAdminData();
 
