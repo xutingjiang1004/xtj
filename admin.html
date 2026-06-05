@@ -214,6 +214,89 @@
         font-size: 13px; outline: none; color: var(--text);
     }
     .search-bar input:focus { border-color: var(--primary); }
+    .admin-user-form-row {
+        display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end;
+    }
+    .admin-field {
+        display: flex; flex-direction: column; gap: 4px;
+    }
+    .admin-field label {
+        font-size: 11px; color: var(--text-muted);
+    }
+    .admin-user-picker {
+        min-width: 220px;
+    }
+    .admin-user-picker-shell {
+        display: flex; flex-direction: column; gap: 8px;
+        width: 220px; padding: 10px; border-radius: 14px;
+        border: 1px solid rgba(5,150,105,0.12);
+        background: rgba(255,255,255,0.14);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
+    }
+    .admin-user-picker.has-selection .admin-user-picker-shell {
+        border-color: rgba(5,150,105,0.26);
+        box-shadow: 0 10px 22px rgba(26, 71, 48, 0.08), inset 0 1px 0 rgba(255,255,255,0.2);
+    }
+    .admin-user-picker.is-disabled .admin-user-picker-shell {
+        opacity: 0.55;
+    }
+    .admin-user-input {
+        width: 100%; padding: 9px 12px; border-radius: 10px;
+        border: 1px solid var(--border); background: rgba(255,255,255,0.15);
+        font-size: 13px; outline: none; color: var(--text);
+    }
+    .admin-user-input:focus {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(5,150,105,0.10);
+    }
+    .admin-user-input:disabled {
+        opacity: 0.55; cursor: not-allowed;
+    }
+    .admin-user-list {
+        display: flex; flex-direction: column; gap: 6px;
+        max-height: 176px; overflow-y: auto; padding-right: 2px;
+    }
+    .admin-user-option {
+        width: 100%; text-align: left; padding: 9px 12px; border-radius: 10px;
+        border: 1px solid transparent; background: rgba(255,255,255,0.12);
+        color: var(--text); cursor: pointer; font-size: 13px;
+        transition:
+            transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        transform: translateY(0) scale(1);
+        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.05);
+    }
+    .admin-user-option:hover {
+        background: rgba(255,255,255,0.2);
+        border-color: rgba(5,150,105,0.18);
+        transform: translateY(-1px);
+        box-shadow: 0 12px 22px rgba(26, 71, 48, 0.10);
+    }
+    .admin-user-option:active {
+        transform: translateY(0) scale(0.965);
+        box-shadow: 0 6px 14px rgba(26, 71, 48, 0.07);
+        transition-duration: 0.12s;
+    }
+    .admin-user-option.is-selected {
+        background: rgba(5,150,105,0.14);
+        border-color: rgba(5,150,105,0.22);
+        color: var(--primary);
+        font-weight: 600;
+    }
+    .admin-user-option-empty {
+        cursor: default;
+        color: var(--text-muted);
+    }
+    .admin-user-option-empty:hover,
+    .admin-user-option-empty:active {
+        transform: none;
+        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.05);
+        background: rgba(255,255,255,0.12);
+        border-color: transparent;
+    }
 
     .toast-wrap {
         position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
