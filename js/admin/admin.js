@@ -246,21 +246,123 @@
         if (searchUser) filtered = allUsers.filter(function(u) { return u.name.toLowerCase().includes(searchUser.toLowerCase()); });
         if (!filtered.length) { h += '<div class="empty">无匹配用户</div>'; }
         else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>帖子数</th><th>点赞数</th><th>评论数</th><th>注册时间</th><th>最近登录</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>帖子数</th><th>点赞数</th><th>评论数</th><th>注册时间</th><th>最近登录</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(u) {
                 var pc = allPosts.filter(function(p) { return p.user_name === u.name; }).length;
                 var lc = allLikes.filter(function(l) { return l.user_name === u.name; }).length;
                 var cc = allComments.filter(function(c) { return c.user_name === u.name; }).length;
                 var regTime = u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-';
                 var lastLogin = u.info && u.info.last_login ? formatTime(u.info.last_login) : '-';
-                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong>' + (u.name === ADMIN ? ' <span class="badge badge-red">管理员</span>' : '') + '</td>';
-                h += '<td>' + pc + '</td><td>' + lc + '</td><td>' + cc + '</td><td>' + regTime + '</td><td>' + lastLogin + '</td></tr>';
+                var isAdmin = u.name === ADMIN;
+                var safeName = u.name.replace(/'/g, "\\'");
+                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong>' + (isAdmin ? ' <span class="badge badge-red">管理员</span>' : '') + '</td>';
+                h += '<td>' + pc + '</td><td>' + lc + '</td><td>' + cc + '</td><td>' + regTime + '</td><td>' + lastLogin + '</td>';
+                if (isAdmin) {
+                    h += '<td>-</td>';
+                } else {
+                    h += '<td><div style="display:flex;gap:4px;flex-wrap:wrap;">';
+                    h += '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')" title="禁言用户">🤐禁言</button>';
+                    h += '<button class="btn-sm" onclick="quickBanUser(\'' + safeName + '\')" title="封禁用户">🔒封禁</button>';
+                    h += '<button class="btn-sm del" onclick="quickBlacklistUser(\'' + safeName + '\')" title="拉黑用户">⛔拉黑</button>';
+                    h += '</div></td>';
+                }
+                h += '</tr>';
             });
             h += '</tbody></table></div>';
         }
         h += '</div>';
         el.innerHTML = h;
     }
+
+    // ===================== 用户列表一键操作（封禁/禁言/拉黑） =====================
+    window.quickMuteUser = function(userName) {
+        var hours = prompt('请输入禁言时长（小时），0=永久禁言：', '24');
+        if (hours === null) return;
+        hours = parseInt(hours);
+        if (isNaN(hours) || hours < 0) { showToast('请输入有效的小时数', 'error'); return; }
+        showConfirm('禁言用户', '确认禁言 ' + userName + (hours > 0 ? ' ' + hours + '小时' : ' 永久') + '？', '确认禁言', async function() {
+            try {
+                var expiresAt = null;
+                if (hours > 0) {
+                    var d = new Date();
+                    d.setHours(d.getHours() + hours);
+                    expiresAt = d.toISOString();
+                }
+                var { error } = await sb.from('mutes').insert([{
+                    user_name: userName,
+                    reason: '管理员操作',
+                    duration_hours: hours,
+                    muted_by: ADMIN,
+                    expires_at: expiresAt,
+                    is_active: true
+                }]);
+                if (error) { showToast('禁言失败: ' + error.message, 'error'); return; }
+                await loadMutesData();
+                showToast('✅ 已禁言 ' + userName, 'success');
+            } catch(e) { showToast('禁言失败: ' + e.message, 'error'); }
+        });
+    };
+
+    window.quickBanUser = function(userName) {
+        var hours = prompt('请输入封禁时长（小时），0=永久封禁：', '24');
+        if (hours === null) return;
+        hours = parseInt(hours);
+        if (isNaN(hours) || hours < 0) { showToast('请输入有效的小时数', 'error'); return; }
+        showConfirm('封禁用户', '确认封禁 ' + userName + (hours > 0 ? ' ' + hours + '小时' : ' 永久') + '？', '确认封禁', async function() {
+            try {
+                var expiresAt = null;
+                if (hours > 0) {
+                    var d = new Date();
+                    d.setHours(d.getHours() + hours);
+                    expiresAt = d.toISOString();
+                }
+                var { error } = await sb.from('bans').insert([{
+                    user_name: userName,
+                    ban_reason: '管理员操作',
+                    ban_duration_hours: hours,
+                    ban_type: hours > 0 ? 'temporary' : 'permanent',
+                    banned_by: ADMIN,
+                    expires_at: expiresAt,
+                    is_active: true,
+                    banned_at: new Date().toISOString()
+                }]);
+                if (error) { showToast('封禁失败: ' + error.message, 'error'); return; }
+                await loadBansData();
+                showToast('✅ 已封禁 ' + userName, 'success');
+            } catch(e) { showToast('封禁失败: ' + e.message, 'error'); }
+        });
+    };
+
+    window.quickBlacklistUser = function(userName) {
+        var hours = prompt('请输入拉黑时长（小时），0=永久拉黑：', '0');
+        if (hours === null) return;
+        hours = parseInt(hours);
+        if (isNaN(hours) || hours < 0) { showToast('请输入有效的小时数', 'error'); return; }
+        showConfirm('拉黑用户', '确认拉黑 ' + userName + (hours > 0 ? ' ' + hours + '小时' : ' 永久') + '？', '确认拉黑', async function() {
+            try {
+                var expiresAt = null;
+                if (hours > 0) {
+                    var d = new Date();
+                    d.setHours(d.getHours() + hours);
+                    expiresAt = d.toISOString();
+                }
+                var { error } = await sb.from('blacklist').insert([{
+                    user_name: userName,
+                    reason: '管理员操作',
+                    duration_hours: hours,
+                    added_by: ADMIN,
+                    expires_at: expiresAt,
+                    is_active: true
+                }]);
+                if (error) {
+                    if (error.code === '23505') { showToast('该用户已在黑名单中', 'error'); return; }
+                    showToast('操作失败: ' + error.message, 'error'); return;
+                }
+                await loadBlacklistData();
+                showToast('✅ 已拉黑 ' + userName, 'success');
+            } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+        });
+    };
 
     function renderPostsTab(el) {
         var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__'; });
