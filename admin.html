@@ -388,6 +388,391 @@
         th, td { padding: 8px 6px; }
         .toast-item { max-width: 280px; font-size: 13px; padding: 10px 18px; }
     }
+
+    /* ===== 新用户列表美化样式 ===== */
+    .user-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 12px;
+        margin-top: 4px;
+    }
+    .user-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 16px;
+        backdrop-filter: blur(12px);
+        transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        transform: translateY(0) scale(1);
+        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.05);
+        position: relative;
+        overflow: hidden;
+    }
+    .user-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 14px 28px rgba(26, 71, 48, 0.10);
+    }
+    .user-card:active {
+        transform: translateY(0) scale(0.98);
+        transition-duration: 0.12s;
+    }
+    .user-card.is-banned { border-left: 3px solid #ff3b60; }
+    .user-card.is-muted { border-left: 3px solid #f59e0b; }
+    .user-card.is-admin { border-left: 3px solid #3b82f6; }
+    .user-card-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+    .user-avatar {
+        width: 44px; height: 44px;
+        border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 18px; font-weight: 700;
+        color: white;
+        flex-shrink: 0;
+        background: linear-gradient(135deg, #059669, #34d399);
+        box-shadow: 0 4px 10px rgba(5,150,105,0.2);
+    }
+    .user-avatar.admin-avatar { background: linear-gradient(135deg, #3b82f6, #60a5fa); box-shadow: 0 4px 10px rgba(59,130,246,0.2); }
+    .user-avatar.banned-avatar { background: linear-gradient(135deg, #ff3b60, #fb7185); box-shadow: 0 4px 10px rgba(255,59,96,0.2); }
+    .user-avatar.muted-avatar { background: linear-gradient(135deg, #f59e0b, #fbbf24); box-shadow: 0 4px 10px rgba(245,158,11,0.2); }
+    .user-card-name {
+        flex: 1;
+        min-width: 0;
+    }
+    .user-card-name strong {
+        font-size: 15px;
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .user-card-name .user-tags {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+        margin-top: 3px;
+    }
+    .tag {
+        display: inline-block;
+        padding: 1px 7px;
+        border-radius: 99px;
+        font-size: 10px;
+        font-weight: 600;
+        line-height: 1.6;
+    }
+    .tag-admin { background: rgba(59,130,246,0.15); color: #3b82f6; }
+    .tag-banned { background: rgba(255,59,96,0.15); color: #ff3b60; }
+    .tag-muted { background: rgba(245,158,11,0.15); color: #f59e0b; }
+    .user-card-stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+        margin-bottom: 12px;
+        padding: 10px;
+        background: rgba(255,255,255,0.08);
+        border-radius: 10px;
+    }
+    .user-stat-item {
+        text-align: center;
+    }
+    .user-stat-item .num {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--text);
+    }
+    .user-stat-item .lbl {
+        font-size: 10px;
+        color: var(--text-muted);
+        margin-top: 1px;
+    }
+    .user-card-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        margin-bottom: 12px;
+        font-size: 11px;
+        color: var(--text-muted);
+    }
+    .user-card-meta .meta-row {
+        display: flex;
+        justify-content: space-between;
+    }
+    .user-card-meta .meta-row .label { opacity: 0.7; }
+    .user-card-meta .meta-row .value { font-weight: 500; color: var(--text); }
+    .user-card-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+    }
+    .user-card-actions .btn-sm {
+        flex: 1;
+        min-width: 70px;
+        text-align: center;
+        font-size: 11px;
+        padding: 6px 8px;
+    }
+
+    /* 筛选排序栏 */
+    .filter-bar {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 14px;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    .filter-bar .search-wrap {
+        flex: 1;
+        min-width: 160px;
+        position: relative;
+    }
+    .filter-bar .search-wrap input {
+        width: 100%;
+        padding: 9px 14px 9px 34px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.1);
+        font-size: 13px;
+        outline: none;
+        color: var(--text);
+        box-sizing: border-box;
+    }
+    .filter-bar .search-wrap input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(5,150,105,0.08); }
+    .filter-bar .search-wrap .search-icon {
+        position: absolute;
+        left: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 13px;
+        opacity: 0.5;
+        pointer-events: none;
+    }
+    .filter-bar select {
+        padding: 9px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.1);
+        font-size: 12px;
+        outline: none;
+        color: var(--text);
+        cursor: pointer;
+        min-width: 100px;
+    }
+    .filter-bar select:focus { border-color: var(--primary); }
+    .filter-bar .filter-chips {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+    }
+    .filter-bar .filter-chip {
+        padding: 6px 12px;
+        border-radius: 99px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.06);
+        font-size: 11px;
+        cursor: pointer;
+        color: var(--text-muted);
+        transition: all 0.2s;
+    }
+    .filter-bar .filter-chip:hover {
+        background: rgba(255,255,255,0.12);
+        color: var(--text);
+    }
+    .filter-bar .filter-chip.active {
+        background: var(--primary);
+        border-color: var(--primary);
+        color: white;
+    }
+    .filter-bar .filter-chip.active-del { background: #ff3b60; border-color: #ff3b60; color: white; }
+    .filter-bar .filter-chip.active-warn { background: #f59e0b; border-color: #f59e0b; color: white; }
+    .filter-bar .count-badge {
+        font-size: 11px;
+        color: var(--text-muted);
+        padding: 6px 0;
+        white-space: nowrap;
+    }
+
+    /* 美化表格 */
+    .table-modern {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: 12px;
+    }
+    .table-modern thead th {
+        padding: 10px 12px;
+        text-align: left;
+        font-weight: 600;
+        color: var(--text-muted);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        background: rgba(255,255,255,0.05);
+        border-bottom: 1px solid var(--border);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+    .table-modern thead th:first-child { border-radius: 10px 0 0 0; }
+    .table-modern thead th:last-child { border-radius: 0 10px 0 0; }
+    .table-modern tbody tr {
+        transition: background 0.15s;
+    }
+    .table-modern tbody tr:hover td {
+        background: rgba(5,150,105,0.03);
+    }
+    .table-modern tbody td {
+        padding: 10px 12px;
+        border-bottom: 1px solid rgba(128,128,128,0.06);
+        color: var(--text);
+        vertical-align: middle;
+    }
+    .table-modern tbody tr:last-child td:first-child { border-radius: 0 0 0 10px; }
+    .table-modern tbody tr:last-child td:last-child { border-radius: 0 0 10px 0; }
+    .table-modern-wrap {
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        overflow: hidden;
+        max-height: 420px;
+        overflow-y: auto;
+    }
+
+    .user-mini {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .user-mini .mini-avatar {
+        width: 28px; height: 28px;
+        border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 12px; font-weight: 700;
+        color: white;
+        flex-shrink: 0;
+        background: linear-gradient(135deg, #059669, #34d399);
+    }
+    .user-mini .mini-info {
+        flex: 1;
+        min-width: 0;
+    }
+    .user-mini .mini-info .name {
+        font-weight: 600;
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .user-mini .mini-info .sub {
+        font-size: 10px;
+        color: var(--text-muted);
+    }
+
+    /* 空状态 */
+    .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+        color: var(--text-muted);
+    }
+    .empty-state .icon { font-size: 40px; margin-bottom: 8px; opacity: 0.5; }
+    .empty-state .text { font-size: 13px; }
+
+    /* 用户选择器美化 */
+    .admin-user-picker-modern {
+        min-width: 220px;
+    }
+    .admin-user-picker-modern .picker-shell {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 12px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.08);
+        transition: border-color 0.2s;
+    }
+    .admin-user-picker-modern .picker-shell:focus-within {
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(5,150,105,0.08);
+    }
+    .admin-user-picker-modern .picker-input {
+        width: 100%;
+        padding: 8px 12px 8px 32px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.12);
+        font-size: 12px;
+        outline: none;
+        color: var(--text);
+        box-sizing: border-box;
+    }
+    .admin-user-picker-modern .picker-input:focus { border-color: var(--primary); }
+    .admin-user-picker-modern .picker-input-wrap {
+        position: relative;
+    }
+    .admin-user-picker-modern .picker-input-wrap .input-icon {
+        position: absolute;
+        left: 9px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 12px;
+        opacity: 0.4;
+        pointer-events: none;
+    }
+    .admin-user-picker-modern .picker-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        max-height: 160px;
+        overflow-y: auto;
+        padding-right: 2px;
+    }
+    .admin-user-picker-modern .picker-option {
+        width: 100%;
+        text-align: left;
+        padding: 7px 10px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background: rgba(255,255,255,0.08);
+        color: var(--text);
+        cursor: pointer;
+        font-size: 12px;
+        transition: all 0.18s;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .admin-user-picker-modern .picker-option:hover {
+        background: rgba(255,255,255,0.16);
+        border-color: rgba(5,150,105,0.15);
+    }
+    .admin-user-picker-modern .picker-option:active {
+        transform: scale(0.98);
+    }
+    .admin-user-picker-modern .picker-option.is-selected {
+        background: rgba(5,150,105,0.14);
+        border-color: rgba(5,150,105,0.22);
+        color: var(--primary);
+        font-weight: 600;
+    }
+    .admin-user-picker-modern .picker-option .opt-avatar {
+        width: 22px; height: 22px;
+        border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 10px; font-weight: 700;
+        color: white;
+        flex-shrink: 0;
+        background: linear-gradient(135deg, #059669, #34d399);
+    }
+    .admin-user-picker-modern .picker-empty {
+        padding: 12px;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 12px;
+    }
 </style>
 </head>
 <body>
@@ -425,9 +810,8 @@
             <button id="tabLikesBtn" onclick="switchTab('likes')">❤️ 点赞数据</button>
             <button id="tabCommentsBtn" onclick="switchTab('comments')">💬 评论数据</button>
             <button id="tabReportsBtn" onclick="switchTab('reports')">🚨 举报管理</button>
-            <button id="tabBansBtn" onclick="switchTab('bans')">🔒 封禁管理</button>
+            <button id="tabBansBtn" onclick="switchTab('bans')">🔒 拉黑封禁</button>
             <button id="tabMutesBtn" onclick="switchTab('mutes')">🤐 禁言管理</button>
-            <button id="tabBlacklistBtn" onclick="switchTab('blacklist')">⛔ 黑名单</button>
             <button id="tabPhotosBtn" onclick="switchTab('photos')">📷 照片管理</button>
             <button onclick="toggleTheme()" title="切换主题">🌓</button>
             <button class="danger" onclick="doAdminLogout()">退出</button>
@@ -442,7 +826,6 @@
         <div class="tab-panel" id="tabReports"></div>
         <div class="tab-panel" id="tabBans"></div>
         <div class="tab-panel" id="tabMutes"></div>
-        <div class="tab-panel" id="tabBlacklist"></div>
         <div class="tab-panel" id="tabPhotos"></div>
     </div>
 </div>
