@@ -979,11 +979,18 @@
         window.openPhotoPreview = function() {
           var result = originalOpenPhotoPreview.apply(this, arguments);
           requestAnimationFrame(function() {
+            var toolbar = byId('ppPreviewToolbar') || document.querySelector('#photoPreviewOverlay .pp-preview-toolbar');
+            if (toolbar) {
+              toolbar.style.left = '50%';
+              toolbar.style.right = 'auto';
+              toolbar.style.marginLeft = '0';
+              toolbar.style.transform = 'translate3d(-50%,0,0)';
+            }
             ['ppZoomOutBtn', 'ppZoomInBtn', 'ppInfoBtn', 'ppShareBtn', 'ppRotateBtn'].forEach(function(id) {
               var btn = byId(id);
               if (btn) {
                 btn.style.opacity = '1';
-                btn.style.transform = id === 'ppInfoBtn' ? 'translateX(-50%)' : 'translateY(0)';
+                btn.style.transform = 'translateY(0)';
               }
             });
             var compact = byId('ppCompactBtn');
@@ -1057,6 +1064,53 @@
     installWhenReady();
   }
 
+  function installAlbumTransitionOverrides() {
+    if (window.__xtjAlbumTransitionOverridesInstalled) return;
+    window.__xtjAlbumTransitionOverridesInstalled = true;
+
+    function animatePhotoWallSwap() {
+      var grid = byId('photoGrid');
+      var container = byId('photoWallContainer');
+      if (!grid || !container) return;
+      container.classList.remove('xtj-pw-view-enter');
+      container.classList.add('xtj-pw-view-switching');
+      grid.classList.remove('xtj-pw-grid-enter');
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          container.classList.add('xtj-pw-view-enter');
+          grid.classList.add('xtj-pw-grid-enter');
+          setTimeout(function() {
+            container.classList.remove('xtj-pw-view-switching');
+            container.classList.remove('xtj-pw-view-enter');
+            grid.classList.remove('xtj-pw-grid-enter');
+          }, 240);
+        });
+      });
+    }
+
+    function wrap(name) {
+      var fn = window[name];
+      if (typeof fn !== 'function' || fn.__xtjAlbumAnimated) return;
+      var wrapped = function() {
+        animatePhotoWallSwap();
+        return fn.apply(this, arguments);
+      };
+      wrapped.__xtjAlbumAnimated = true;
+      window[name] = wrapped;
+    }
+
+    function installWhenReady() {
+      if (typeof window.toggleAlbumView !== 'function' || typeof window.openPhotoAlbumGroup !== 'function') {
+        setTimeout(installWhenReady, 200);
+        return;
+      }
+      wrap('toggleAlbumView');
+      wrap('openPhotoAlbumGroup');
+    }
+
+    installWhenReady();
+  }
+
   function overridePublishHandler() {
     window.doPublish = publishPost;
   }
@@ -1084,6 +1138,7 @@
     attachPostPreview();
     attachPostPreviewBridge();
     installPreviewControlOverrides();
+    installAlbumTransitionOverrides();
     wrapPhotoPreviewClose();
     overridePhotoHandlers();
     overridePublishHandler();
