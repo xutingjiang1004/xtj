@@ -74,6 +74,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             is_pinned: false,
             pinned_at: null,
             updated_at: null,
+            edited_at: null,
             fileSize: null,
             originalSize: null,
             mimeType: ""
@@ -2784,7 +2785,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     visibility: normalized.visibility || "public",
                     is_pinned: !!normalized.is_pinned,
                     pinned_at: normalized.pinned_at || null,
-                    updated_at: normalized.updated_at || null
+                    updated_at: normalized.updated_at || null,
+                    edited_at: (normalized._contentMeta && normalized._contentMeta.edited_at) || null
                 }, metaOverrides || {});
                 var nextText = typeof text === "string" ? text : normalized.content || "";
                 return buildPostContentPayload(nextText, meta);
@@ -2812,13 +2814,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var nextPinned = updates.is_pinned != null ? !!updates.is_pinned : !!normalized.is_pinned;
                 var nextPinnedAt = Object.prototype.hasOwnProperty.call(updates, "pinned_at") ? updates.pinned_at : normalized.pinned_at;
                 var nextUpdatedAt = Object.prototype.hasOwnProperty.call(updates, "updated_at") ? updates.updated_at : normalized.updated_at;
+                var nextEditedAt = Object.prototype.hasOwnProperty.call(updates, "edited_at")
+                    ? updates.edited_at
+                    : ((normalized._contentMeta && normalized._contentMeta.edited_at) || null);
                 var nextContent = typeof updates.content === "string" ? updates.content : normalized.content;
 
                 var newContent = buildPostStorageContent(normalized, nextContent, {
                     visibility: nextVisibility,
                     is_pinned: nextPinned,
                     pinned_at: nextPinnedAt,
-                    updated_at: nextUpdatedAt
+                    updated_at: nextUpdatedAt,
+                    edited_at: nextEditedAt
                 });
                 var updatePayload = {
                     content: newContent,
@@ -2865,7 +2871,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function formatPostTime(post) {
                 var normalized = normalizePost(post);
                 var time = normalized.created_at ? new Date(normalized.created_at).toLocaleString() : "";
-                if (normalized.updated_at) return time + " (已编辑)";
+                var editedAt = normalized._contentMeta && normalized._contentMeta.edited_at ? normalized._contentMeta.edited_at : null;
+                if (editedAt) return time + " (已编辑)";
                 return time;
             }
 
@@ -3078,6 +3085,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var result = await updatePostRecord(post, {
                         content: nextContent.slice(0, 2000),
                         visibility: nextVisibility,
+                        edited_at: new Date().toISOString(),
                         updated_at: new Date().toISOString()
                     });
                     if (!result.ok) {
@@ -4424,6 +4432,40 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return sb.storage.from('uploads').getPublicUrl(val).data.publicUrl;
             }
 
+            function sanitizeStorageFileName(name) {
+                var raw = String(name || "file");
+                var extMatch = raw.match(/(\.[a-zA-Z0-9]{1,8})$/);
+                var ext = extMatch ? extMatch[1].toLowerCase() : "";
+                var base = ext ? raw.slice(0, -ext.length) : raw;
+                if (base.normalize) base = base.normalize("NFKD");
+                base = base.replace(/[^\w\-]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
+                if (!base) base = "media";
+                return base + ext;
+            }
+
+            function buildStorageUploadPath(scope, fileName) {
+                return String(scope || "misc") + "/" + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + sanitizeStorageFileName(fileName);
+            }
+
+            window.handleDockChatImageError = function(img) {
+                if (!img || !img.parentNode) return;
+                var fullSrc = img.getAttribute("data-full-src") || img.currentSrc || img.src || "";
+                var fallback = document.createElement("button");
+                fallback.type = "button";
+                fallback.className = "msg-media-fallback";
+                fallback.innerHTML = '<span class="msg-media-fallback-icon">图片</span><span class="msg-media-fallback-text">查看图片</span>';
+                fallback.onclick = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (fullSrc && typeof window.openImageViewer === "function") {
+                        window.openImageViewer(fullSrc);
+                    } else {
+                        showToast("图片加载失败");
+                    }
+                };
+                img.parentNode.replaceChild(fallback, img);
+            };
+
             function isMsgReadByMe(msg) {
                 var key = 'xtj_dmread_' + window.currentUser + '_' + msg.user_name;
                 return !!localStorage.getItem(key);
@@ -4937,7 +4979,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
                     let body = '';
                     if (m.actor_key && m.actor_key.startsWith('__dm_img__')) {
-                        body = '<img class="msg-img" src="' + getMediaUrl('__dm_img__', m.actor_key.replace('__dm_img__', '')) + '" onclick="openImageViewer(this.src)" loading="lazy" />';
+                        var imageSrc = getMediaUrl('__dm_img__', m.actor_key.replace('__dm_img__', ''));
+                        body = '<img class="msg-img" src="' + imageSrc + '" data-full-src="' + imageSrc + '" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" />';
                         if (m.content) body += '<div class="msg-text">' + escapeHtml(m.content) + '</div>';
                     } else if (m.actor_key && m.actor_key.startsWith('__dm_vid__')) {
                         body = '<video class="msg-img" src="' + getMediaUrl('__dm_vid__', m.actor_key.replace('__dm_vid__', '')) + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
@@ -4975,19 +5018,23 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 try {
                     let actorKey = DM_MARKER;
                     if (file) {
-                        const path = 'chat/' + Date.now() + '_' + file.name;
-                        await sb.storage.from("uploads").upload(path, file);
+                        const path = buildStorageUploadPath('chat', file.name);
+                        await sb.storage.from("uploads").upload(path, file, {
+                            cacheControl: '3600',
+                            upsert: false,
+                            contentType: file.type || 'application/octet-stream'
+                        });
                         actorKey = file.type.startsWith('video/') ? '__dm_vid__' + path : '__dm_img__' + path;
                     }
                     const { error } = await sb.from("posts").insert([{ user_name: currentUser, content: content, media_type: DM_MARKER, media_url: dockChatActiveUser, actor_key: actorKey }]);
                     if (error) throw error;
-                    clearDockChatFilePreview();
+                    clearDockChatFilePreview(false);
                     await loadDockChatMessages(dockChatActiveUser, true);
                     const msgs = document.getElementById('dockChatMessages');
                     if (msgs) {
                         msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
-                        const lastMsg = msgs.lastElementChild;
-                        if (lastMsg && lastMsg.classList.contains('chat-msg')) {
+                        const lastMsg = msgs.lastElementChild && msgs.lastElementChild.querySelector ? msgs.lastElementChild.querySelector('.chat-msg') : null;
+                        if (lastMsg) {
                             lastMsg.classList.add('sent-anim');
                             setTimeout(function() {
                                 msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
@@ -5009,11 +5056,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 name.textContent = file.name; input.classList.add('hidden'); preview.classList.remove('hidden');
             }
 
-            function clearDockChatFilePreview() {
+            function clearDockChatFilePreview(restoreFocus) {
                 const preview = document.getElementById('dockChatFilePreview'), input = document.getElementById('dockChatInput');
                 const fileInput = document.getElementById('dockChatFileInp');
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
-                preview.classList.add('hidden'); input.classList.remove('hidden'); fileInput.value = ''; input.focus();
+                preview.classList.add('hidden'); input.classList.remove('hidden'); fileInput.value = '';
+                if (restoreFocus !== false) input.focus();
             }
 
             try {
@@ -5026,32 +5074,53 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             window.addEventListener('DOMContentLoaded', async function() {
-                // iOS 闂佹鍠氬ú蹇擃嚕閻熸澘姣夊ǎ鍥跺枛椤? 闂侇剙鐏濋崢?dock-bar 琚敭鐩橀《涓婂幓
+                // iOS 键盘与可视视口适配
                 (function() {
                     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
                     if (!isIOS) return;
 
                     const dockBar = document.getElementById('dockBar');
                     const inputs = ['dockChatInput', 'postInp', 'announcementAdminInput', 'announcementAdminTitle', 'authUserInput', 'authPassInput'];
+                    const root = document.documentElement;
                     let keyboardOpen = false;
 
+                    function hasActiveInput() {
+                        var active = document.activeElement;
+                        return !!(active && inputs.indexOf(active.id) >= 0);
+                    }
+
+                    function updateIOSViewport() {
+                        var vv = window.visualViewport;
+                        var appHeight = vv ? Math.round(vv.height) : window.innerHeight;
+                        root.style.setProperty('--xtj-app-height', appHeight + 'px');
+                        var keyboardGap = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
+                        root.style.setProperty('--xtj-ios-keyboard-gap', keyboardGap + 'px');
+                        var chatFocused = document.activeElement && document.activeElement.id === 'dockChatInput' && currentDockTab === 'chat';
+                        document.body.classList.toggle('ios-chat-keyboard-open', !!(chatFocused && keyboardGap > 0));
+                        if (dockBar) dockBar.style.display = hasActiveInput() ? 'none' : 'flex';
+                        if (chatFocused) setTimeout(scrollDockChatBottom, 80);
+                    }
+
                     function handleFocus(e) {
-                        if (dockBar) dockBar.style.display = 'none';
                         keyboardOpen = true;
-                        // 璁╄緭鍏ユ鑷姩??锟藉埌鍙鍖哄煙
+                        updateIOSViewport();
                         setTimeout(() => {
                             if (e.target && e.target.scrollIntoViewIfNeeded) {
                                 e.target.scrollIntoViewIfNeeded(true);
                             } else if (e.target && e.target.scrollIntoView) {
-                                e.target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                e.target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                             }
                         }, 300);
                     }
 
                     function handleBlur() {
-                        if (document.body.classList.contains('photo-previewing')) return;
-                        if (dockBar) dockBar.style.display = 'flex';
-                        keyboardOpen = false;
+                        setTimeout(function() {
+                            keyboardOpen = hasActiveInput();
+                            if (!keyboardOpen && !document.body.classList.contains('photo-previewing')) {
+                                document.body.classList.remove('ios-chat-keyboard-open');
+                            }
+                            updateIOSViewport();
+                        }, 80);
                     }
 
                     inputs.forEach(id => {
@@ -5061,11 +5130,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             el.addEventListener('blur', handleBlur);
                         }
                     });
-
-                    // 濞寸姾顕ф慨?閿涙矮濞囬敓?100dvh 闁哄洤銇橀崬?--vh 鏂规锛岀Щ??resize 鍥炶皟涓殑 adjustIOSHeight
-                    // window.addEventListener('resize', function() {
-                    //     if (!keyboardOpen) adjustIOSHeight();
-                    // });
+                    if (window.visualViewport) {
+                        window.visualViewport.addEventListener('resize', updateIOSViewport);
+                        window.visualViewport.addEventListener('scroll', updateIOSViewport);
+                    }
+                    window.addEventListener('orientationchange', function() {
+                        setTimeout(updateIOSViewport, 180);
+                    });
+                    window.addEventListener('resize', function() {
+                        if (!keyboardOpen) updateIOSViewport();
+                    });
+                    updateIOSViewport();
                 })();
 
                 // 濞寸姾顕ф慨?閿涙矮濞囬敓?100dvh 闁哄洤銇橀崬?--vh 鏂规锛岀Щ闄ゆ棫锟?iOS 閻犲鍟弳锝嗙閿濆洨鍨?
