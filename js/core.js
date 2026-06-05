@@ -6846,7 +6846,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var postMap = statGetPostMap();
 
                 function buildLikesCol() {
-                    var h = '<div class="stat-col-kicker">点赞记录<span class="stat-col-kicker-count">' + statAllLikes.length + '</span></div>';
+                    var h = '';
                     if (statAllLikes.length) {
                         h += statAllLikes.slice(0, 5).map(function(l, index) {
                             return buildStatRecordEntry('likes', l, postMap[String(l.post_id)] || null, index);
@@ -6861,7 +6861,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
 
                 function buildCommentsCol() {
-                    var h = '<div class="stat-col-kicker">评论记录<span class="stat-col-kicker-count">' + statAllComments.length + '</span></div>';
+                    var h = '';
                     if (statAllComments.length) {
                         h += statAllComments.slice().reverse().slice(0, 5).map(function(c, index) {
                             return buildStatRecordEntry('comments', c, postMap[String(c.post_id)] || null, index);
