@@ -3870,18 +3870,19 @@
         }
         .profile-activity-list {
             display: grid;
-            gap: 12px;
+            gap: 0;
         }
         .profile-activity-item {
             display: grid;
             grid-template-columns: minmax(0, 1fr) auto auto;
             gap: 14px;
             align-items: center;
-            padding: 14px 16px;
-            border: 1px solid rgba(206, 227, 214, 0.84);
-            border-radius: 18px;
-            background: rgba(252,255,253,0.92);
-            box-shadow: 0 10px 24px rgba(34, 73, 51, 0.06);
+            padding: 14px 0;
+            border: 0;
+            border-radius: 0;
+            border-bottom: 1px solid rgba(201, 225, 210, 0.82);
+            background: transparent;
+            box-shadow: none;
             cursor: pointer;
             animation: xtjFloatIn 0.28s cubic-bezier(0.16,1,.3,1) both;
             animation-delay: var(--xtj-enter-delay, 0ms);
@@ -3891,11 +3892,14 @@
                 box-shadow 0.24s cubic-bezier(0.16,1,0.3,1),
                 border-color 0.24s cubic-bezier(0.16,1,0.3,1);
         }
+        .profile-activity-item:last-child {
+            border-bottom: 0;
+        }
         .profile-activity-item:hover {
             transform: translateY(-1px);
-            background: rgba(255,255,255,0.98);
-            border-color: rgba(184, 215, 196, 0.96);
-            box-shadow: 0 14px 28px rgba(24, 61, 41, 0.10);
+            background: rgba(255,255,255,0.48);
+            border-color: rgba(184, 215, 196, 0.92);
+            box-shadow: none;
         }
         .profile-activity-item:focus-visible {
             outline: 2px solid rgba(89, 161, 116, 0.42);
@@ -4010,7 +4014,7 @@
             background: rgba(255, 247, 249, 0.74);
         }
         .profile-activity-more {
-            margin-top: 12px;
+            margin-top: 14px;
             width: 100%;
             min-height: 40px;
             border-radius: 14px;
@@ -8245,14 +8249,15 @@ body.ios-chat-keyboard-open .chat-input-area {
 .post-detail-media-card,
 .post-detail-content,
 .post-detail-panel {
-  background: rgba(252, 255, 253, 0.9);
-  border: 1px solid rgba(208, 230, 216, 0.86);
-  border-radius: 24px;
-  box-shadow: 0 10px 26px rgba(72, 120, 92, 0.06);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .post-detail-media-card {
-  padding: 12px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid rgba(196, 221, 205, 0.82);
 }
 
 .post-detail-media {
@@ -8273,7 +8278,7 @@ body.ios-chat-keyboard-open .chat-input-area {
 
 .post-detail-content {
   margin: 0;
-  padding: 16px 18px;
+  padding: 14px 0 6px;
   font-size: 15px;
   line-height: 1.75;
 }
@@ -8294,16 +8299,19 @@ body.ios-chat-keyboard-open .chat-input-area {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  padding: 6px 0 14px;
+  border-bottom: 1px solid rgba(196, 221, 205, 0.82);
 }
 
 .post-detail-lists {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 18px;
+  padding-top: 2px;
 }
 
 .post-detail-panel {
-  padding: 16px;
+  padding: 0;
 }
 
 .post-detail-panel-title {
@@ -8311,7 +8319,7 @@ body.ios-chat-keyboard-open .chat-input-area {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   font-size: 15px;
   font-weight: 800;
   color: #28513b;
@@ -8326,7 +8334,7 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 .post-detail-mini-row + .post-detail-mini-row {
-  margin-top: 10px;
+  margin-top: 0;
 }
 
 .post-detail-mini-row {
@@ -8334,10 +8342,15 @@ body.ios-chat-keyboard-open .chat-input-area {
   align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
-  padding: 12px 14px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(211, 232, 219, 0.74);
+  padding: 12px 0;
+  border-radius: 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgba(201, 225, 210, 0.82);
+}
+
+.post-detail-mini-row:last-child {
+  border-bottom: 0;
 }
 
 .post-detail-mini-main {
@@ -8407,9 +8420,19 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 #profileActivityModal .profile-activity-item {
-  border-radius: 18px !important;
-  padding: 14px 16px !important;
+  border-radius: 0 !important;
+  padding: 14px 0 !important;
   align-items: center !important;
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(201, 225, 210, 0.82) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#profileActivityModal .profile-activity-item:last-child {
+  border-bottom: 0 !important;
 }
 
 #statModal .stat-hero {
