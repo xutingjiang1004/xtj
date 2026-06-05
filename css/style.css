@@ -6140,18 +6140,31 @@
 
         /* Shared non-dock button system */
         :is(
+            button:not(.dock-tab),
+            input[type="button"],
+            input[type="submit"],
+            input[type="reset"],
             .btn,
             .btn-primary,
             .btn-ghost,
             .action-btn,
             .file-label,
             .theme-toggle-btn,
+            .announcement-btn,
+            .announcement-close-btn,
+            .announcement-tab,
+            .post-filter-user-reset,
+            .filter-toggle-btn,
+            .post-vis-toggle .vis-btn,
             .post-filter-clear,
             .photo-wall-btn,
+            .pw-album-back-btn,
             .photo-wall-upload-btn,
             .announcement-back-btn,
             .announcement-delete-btn,
             .announcement-admin-btn,
+            .profile-activity-btn,
+            .profile-activity-more,
             .profile-detail-logout-btn,
             .upc-msg-btn,
             .photo-preview-close,
@@ -6162,12 +6175,18 @@
             .pp-delete-btn,
             .pp-info-modal-close,
             .pp-confirm-btn,
+            .stat-close-btn,
+            .stat-record-more-btn,
+            .stat-record-action,
+            .spi-open-btn,
             .send-btn,
             .chat-img-btn,
             .chat-header .back-btn,
             .chat-header .chat-close-btn,
             .img-viewer .iv-close,
-            .pw-confirm-actions button
+            .pw-confirm-actions button,
+            .pw-upload-sheet-close,
+            .pw-upload-sheet-btn
         ) {
             position: relative;
             isolation: isolate;
@@ -6198,18 +6217,31 @@
             overflow: hidden;
         }
         :is(
+            button:not(.dock-tab),
+            input[type="button"],
+            input[type="submit"],
+            input[type="reset"],
             .btn,
             .btn-primary,
             .btn-ghost,
             .action-btn,
             .file-label,
             .theme-toggle-btn,
+            .announcement-btn,
+            .announcement-close-btn,
+            .announcement-tab,
+            .post-filter-user-reset,
+            .filter-toggle-btn,
+            .post-vis-toggle .vis-btn,
             .post-filter-clear,
             .photo-wall-btn,
+            .pw-album-back-btn,
             .photo-wall-upload-btn,
             .announcement-back-btn,
             .announcement-delete-btn,
             .announcement-admin-btn,
+            .profile-activity-btn,
+            .profile-activity-more,
             .profile-detail-logout-btn,
             .upc-msg-btn,
             .photo-preview-close,
@@ -6221,11 +6253,17 @@
             .pp-info-modal-close,
             .pp-confirm-btn,
             .send-btn,
+            .stat-close-btn,
+            .stat-record-more-btn,
+            .stat-record-action,
+            .spi-open-btn,
             .chat-img-btn,
             .chat-header .back-btn,
             .chat-header .chat-close-btn,
             .img-viewer .iv-close,
             .pw-confirm-actions button,
+            .pw-upload-sheet-close,
+            .pw-upload-sheet-btn,
         ):focus-visible {
             box-shadow:
                 0 0 0 3px rgba(5, 150, 105, 0.14),
@@ -6234,18 +6272,31 @@
             border-color: var(--button-glass-border-hover);
         }
         :is(
+            button:not(.dock-tab),
+            input[type="button"],
+            input[type="submit"],
+            input[type="reset"],
             .btn,
             .btn-primary,
             .btn-ghost,
             .action-btn,
             .file-label,
             .theme-toggle-btn,
+            .announcement-btn,
+            .announcement-close-btn,
+            .announcement-tab,
+            .post-filter-user-reset,
+            .filter-toggle-btn,
+            .post-vis-toggle .vis-btn,
             .post-filter-clear,
             .photo-wall-btn,
+            .pw-album-back-btn,
             .photo-wall-upload-btn,
             .announcement-back-btn,
             .announcement-delete-btn,
             .announcement-admin-btn,
+            .profile-activity-btn,
+            .profile-activity-more,
             .profile-detail-logout-btn,
             .upc-msg-btn,
             .photo-preview-close,
@@ -6257,25 +6308,44 @@
             .pp-info-modal-close,
             .pp-confirm-btn,
             .send-btn,
+            .stat-close-btn,
+            .stat-record-more-btn,
+            .stat-record-action,
+            .spi-open-btn,
             .chat-img-btn,
             .chat-header .back-btn,
             .chat-header .chat-close-btn,
             .img-viewer .iv-close,
             .pw-confirm-actions button,
+            .pw-upload-sheet-close,
+            .pw-upload-sheet-btn,
         ):disabled,
         :is(
+            button:not(.dock-tab),
+            input[type="button"],
+            input[type="submit"],
+            input[type="reset"],
             .btn,
             .btn-primary,
             .btn-ghost,
             .action-btn,
             .file-label,
             .theme-toggle-btn,
+            .announcement-btn,
+            .announcement-close-btn,
+            .announcement-tab,
+            .post-filter-user-reset,
+            .filter-toggle-btn,
+            .post-vis-toggle .vis-btn,
             .post-filter-clear,
             .photo-wall-btn,
+            .pw-album-back-btn,
             .photo-wall-upload-btn,
             .announcement-back-btn,
             .announcement-delete-btn,
             .announcement-admin-btn,
+            .profile-activity-btn,
+            .profile-activity-more,
             .profile-detail-logout-btn,
             .upc-msg-btn,
             .photo-preview-close,
@@ -6287,11 +6357,17 @@
             .pp-info-modal-close,
             .pp-confirm-btn,
             .send-btn,
+            .stat-close-btn,
+            .stat-record-more-btn,
+            .stat-record-action,
+            .spi-open-btn,
             .chat-img-btn,
             .chat-header .back-btn,
             .chat-header .chat-close-btn,
             .img-viewer .iv-close,
             .pw-confirm-actions button,
+            .pw-upload-sheet-close,
+            .pw-upload-sheet-btn,
         )[aria-disabled="true"] {
             opacity: 0.5;
             cursor: not-allowed;
@@ -6302,18 +6378,31 @@
         }
         @media (hover: hover) and (pointer: fine) {
             :is(
+                button:not(.dock-tab),
+                input[type="button"],
+                input[type="submit"],
+                input[type="reset"],
                 .btn,
                 .btn-primary,
                 .btn-ghost,
                 .action-btn,
                 .file-label,
                 .theme-toggle-btn,
+                .announcement-btn,
+                .announcement-close-btn,
+                .announcement-tab,
+                .post-filter-user-reset,
+                .filter-toggle-btn,
+                .post-vis-toggle .vis-btn,
                 .post-filter-clear,
                 .photo-wall-btn,
+                .pw-album-back-btn,
                 .photo-wall-upload-btn,
                 .announcement-back-btn,
                 .announcement-delete-btn,
                 .announcement-admin-btn,
+                .profile-activity-btn,
+                .profile-activity-more,
                 .profile-detail-logout-btn,
                 .upc-msg-btn,
                 .photo-preview-close,
@@ -6325,11 +6414,17 @@
                 .pp-info-modal-close,
                 .pp-confirm-btn,
                 .send-btn,
+                .stat-close-btn,
+                .stat-record-more-btn,
+                .stat-record-action,
+                .spi-open-btn,
                 .chat-img-btn,
                 .chat-header .back-btn,
                 .chat-header .chat-close-btn,
                 .img-viewer .iv-close,
                 .pw-confirm-actions button,
+                .pw-upload-sheet-close,
+                .pw-upload-sheet-btn,
             ):not(:disabled):not([aria-disabled="true"]):hover {
                 transform: translateY(-1px);
                 border-color: var(--button-glass-border-hover);
@@ -6340,18 +6435,31 @@
             }
         }
         :is(
+            button:not(.dock-tab),
+            input[type="button"],
+            input[type="submit"],
+            input[type="reset"],
             .btn,
             .btn-primary,
             .btn-ghost,
             .action-btn,
             .file-label,
             .theme-toggle-btn,
+            .announcement-btn,
+            .announcement-close-btn,
+            .announcement-tab,
+            .post-filter-user-reset,
+            .filter-toggle-btn,
+            .post-vis-toggle .vis-btn,
             .post-filter-clear,
             .photo-wall-btn,
+            .pw-album-back-btn,
             .photo-wall-upload-btn,
             .announcement-back-btn,
             .announcement-delete-btn,
             .announcement-admin-btn,
+            .profile-activity-btn,
+            .profile-activity-more,
             .profile-detail-logout-btn,
             .upc-msg-btn,
             .photo-preview-close,
@@ -6363,11 +6471,17 @@
             .pp-info-modal-close,
             .pp-confirm-btn,
             .send-btn,
+            .stat-close-btn,
+            .stat-record-more-btn,
+            .stat-record-action,
+            .spi-open-btn,
             .chat-img-btn,
             .chat-header .back-btn,
             .chat-header .chat-close-btn,
             .img-viewer .iv-close,
             .pw-confirm-actions button,
+            .pw-upload-sheet-close,
+            .pw-upload-sheet-btn,
         ):not(:disabled):not([aria-disabled="true"]):active {
             transform: translateY(0) scale(0.97);
             background:
@@ -6376,18 +6490,31 @@
             box-shadow: var(--button-glass-highlight), var(--button-glass-shadow-active);
         }
         :is(
+            button:not(.dock-tab),
+            input[type="button"],
+            input[type="submit"],
+            input[type="reset"],
             .btn,
             .btn-primary,
             .btn-ghost,
             .action-btn,
             .file-label,
             .theme-toggle-btn,
+            .announcement-btn,
+            .announcement-close-btn,
+            .announcement-tab,
+            .post-filter-user-reset,
+            .filter-toggle-btn,
+            .post-vis-toggle .vis-btn,
             .post-filter-clear,
             .photo-wall-btn,
+            .pw-album-back-btn,
             .photo-wall-upload-btn,
             .announcement-back-btn,
             .announcement-delete-btn,
             .announcement-admin-btn,
+            .profile-activity-btn,
+            .profile-activity-more,
             .profile-detail-logout-btn,
             .upc-msg-btn,
             .photo-preview-close,
@@ -6399,29 +6526,48 @@
             .pp-info-modal-close,
             .pp-confirm-btn,
             .send-btn,
+            .stat-close-btn,
+            .stat-record-more-btn,
+            .stat-record-action,
+            .spi-open-btn,
             .chat-img-btn,
             .chat-header .back-btn,
             .chat-header .chat-close-btn,
             .img-viewer .iv-close,
             .pw-confirm-actions button,
+            .pw-upload-sheet-close,
+            .pw-upload-sheet-btn,
         ) .ui-icon {
             width: var(--button-icon-size);
             height: var(--button-icon-size);
             flex-shrink: 0;
         }
         :is(
+            button:not(.dock-tab),
+            input[type="button"],
+            input[type="submit"],
+            input[type="reset"],
             .btn,
             .btn-primary,
             .btn-ghost,
             .action-btn,
             .file-label,
             .theme-toggle-btn,
+            .announcement-btn,
+            .announcement-close-btn,
+            .announcement-tab,
+            .post-filter-user-reset,
+            .filter-toggle-btn,
+            .post-vis-toggle .vis-btn,
             .post-filter-clear,
             .photo-wall-btn,
+            .pw-album-back-btn,
             .photo-wall-upload-btn,
             .announcement-back-btn,
             .announcement-delete-btn,
             .announcement-admin-btn,
+            .profile-activity-btn,
+            .profile-activity-more,
             .profile-detail-logout-btn,
             .upc-msg-btn,
             .photo-preview-close,
@@ -6433,11 +6579,17 @@
             .pp-info-modal-close,
             .pp-confirm-btn,
             .send-btn,
+            .stat-close-btn,
+            .stat-record-more-btn,
+            .stat-record-action,
+            .spi-open-btn,
             .chat-img-btn,
             .chat-header .back-btn,
             .chat-header .chat-close-btn,
             .img-viewer .iv-close,
             .pw-confirm-actions button,
+            .pw-upload-sheet-close,
+            .pw-upload-sheet-btn,
         ) svg {
             width: var(--button-icon-size);
             height: var(--button-icon-size);
@@ -8790,4 +8942,127 @@ body.ios-chat-keyboard-open .chat-input-area {
   .profile-activity-btn.is-danger
 ) {
   box-shadow: 0 10px 22px rgba(26, 71, 48, 0.14);
+}
+
+#statModal .stat-surface-card,
+#statModal .stat-two-col .stat-col {
+  background: rgba(238, 249, 242, 0.54) !important;
+  border: 1px solid rgba(184, 214, 193, 0.64) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
+}
+
+#statModal .stat-two-col,
+#statModal .stat-two-col.stat-two-col--flat {
+  gap: 0;
+}
+
+#statModal .stat-two-col .stat-col,
+#statModal .stat-two-col.stat-two-col--flat .stat-col.stat-col--flat {
+  padding: 0 !important;
+  border-radius: 22px !important;
+  overflow: hidden;
+}
+
+#statModal .stat-section-title {
+  margin-bottom: 0;
+  padding: 16px 18px 12px;
+  border-bottom-color: rgba(148, 183, 161, 0.18);
+}
+
+#statModal .stat-like-item,
+#statModal .stat-view-item,
+#statModal .stat-comment-item {
+  margin: 0 !important;
+  padding: 16px 18px 14px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#statModal .stat-like-item + .stat-like-item,
+#statModal .stat-view-item + .stat-view-item,
+#statModal .stat-comment-item + .stat-comment-item {
+  margin-top: 0;
+  border-top: 1px solid rgba(148, 183, 161, 0.16);
+}
+
+#statModal .stat-like-item:hover,
+#statModal .stat-view-item:hover,
+#statModal .stat-comment-item:hover,
+#statModal .stat-two-col .stat-col:hover {
+  transform: none;
+  background: rgba(255, 255, 255, 0.16) !important;
+  border-color: rgba(184, 214, 193, 0.64) !important;
+}
+
+[data-theme="dark"] #statModal .stat-surface-card,
+[data-theme="dark"] #statModal .stat-two-col .stat-col {
+  background: rgba(42, 53, 43, 0.68) !important;
+  border-color: rgba(94, 110, 89, 0.5) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+}
+
+[data-theme="dark"] #statModal .stat-section-title {
+  border-bottom-color: rgba(120, 138, 112, 0.16);
+}
+
+[data-theme="dark"] #statModal .stat-like-item + .stat-like-item,
+[data-theme="dark"] #statModal .stat-view-item + .stat-view-item,
+[data-theme="dark"] #statModal .stat-comment-item + .stat-comment-item {
+  border-top-color: rgba(120, 138, 112, 0.18);
+}
+
+[data-theme="dark"] #statModal .stat-like-item:hover,
+[data-theme="dark"] #statModal .stat-view-item:hover,
+[data-theme="dark"] #statModal .stat-comment-item:hover,
+[data-theme="dark"] #statModal .stat-two-col .stat-col:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(
+    button:not(.dock-tab),
+    input[type="button"],
+    input[type="submit"],
+    input[type="reset"],
+    .btn,
+    .btn-primary,
+    .btn-ghost,
+    .action-btn,
+    .file-label,
+    .theme-toggle-btn,
+    .announcement-btn,
+    .announcement-close-btn,
+    .announcement-tab,
+    .post-filter-user-reset,
+    .filter-toggle-btn,
+    .post-vis-toggle .vis-btn,
+    .post-filter-clear,
+    .photo-wall-btn,
+    .pw-album-back-btn,
+    .photo-wall-upload-btn,
+    .announcement-back-btn,
+    .announcement-delete-btn,
+    .announcement-admin-btn,
+    .profile-activity-btn,
+    .profile-activity-more,
+    .profile-detail-logout-btn,
+    .upc-msg-btn,
+    .pp-confirm-btn,
+    .stat-close-btn,
+    .stat-record-more-btn,
+    .stat-record-action,
+    .spi-open-btn,
+    .send-btn,
+    .chat-img-btn,
+    .pw-confirm-actions button,
+    .pw-upload-sheet-close,
+    .pw-upload-sheet-btn
+  ) {
+    transition-duration: 0.18s !important;
+    transition-property: transform, box-shadow, background, border-color, color, opacity !important;
+  }
 }

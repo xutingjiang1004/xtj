@@ -194,6 +194,142 @@
         return new Date(d).toLocaleString();
     }
 
+    function getSelectableAdminUsers() {
+        return allUsers
+            .map(function(u) { return (u && u.name ? String(u.name).trim() : ''); })
+            .filter(function(name) { return !!name && name !== ADMIN; })
+            .sort(function(a, b) { return a.localeCompare(b, 'zh-CN'); });
+    }
+
+    function isSelectableAdminUser(userName) {
+        var normalized = String(userName || '').trim();
+        if (!normalized || normalized === ADMIN) return false;
+        return getSelectableAdminUsers().indexOf(normalized) !== -1;
+    }
+
+    function getAdminUserPickerElements(inputId) {
+        return {
+            root: document.getElementById(inputId + 'Picker'),
+            hidden: document.getElementById(inputId),
+            search: document.getElementById(inputId + 'Search'),
+            list: document.getElementById(inputId + 'List')
+        };
+    }
+
+    function buildAdminUserOptionsMarkup(inputId, query, selectedName) {
+        var normalizedQuery = String(query || '').trim().toLowerCase();
+        var selected = String(selectedName || '').trim();
+        var users = getSelectableAdminUsers().filter(function(name) {
+            return !normalizedQuery || name.toLowerCase().indexOf(normalizedQuery) !== -1;
+        });
+        if (!users.length) {
+            return '<div class="admin-user-option admin-user-option-empty">无匹配用户</div>';
+        }
+        return users.map(function(name) {
+            var activeClass = name === selected ? ' is-selected' : '';
+            var escapedName = escapeHtml(name).replace(/'/g, '&#39;');
+            return '<button type="button" class="admin-user-option' + activeClass + '" onclick="selectAdminUserOption(\'' + inputId + '\', \'' + escapedName + '\')">' + escapeHtml(name) + '</button>';
+        }).join('');
+    }
+
+    window.filterAdminUserOptions = function(inputId) {
+        var els = getAdminUserPickerElements(inputId);
+        if (!els.search || !els.hidden || !els.list) return;
+        var query = els.search.value || '';
+        var selected = els.hidden.value || '';
+        if (query.trim() !== selected.trim()) {
+            els.hidden.value = '';
+            if (els.root) els.root.classList.remove('has-selection');
+        }
+        els.list.innerHTML = buildAdminUserOptionsMarkup(inputId, query, selected);
+    };
+
+    window.selectAdminUserOption = function(inputId, userName) {
+        var els = getAdminUserPickerElements(inputId);
+        if (!els.search || !els.hidden || !els.list) return;
+        els.hidden.value = userName;
+        els.search.value = userName;
+        if (els.root) els.root.classList.add('has-selection');
+        els.list.innerHTML = buildAdminUserOptionsMarkup(inputId, userName, userName);
+    };
+
+    /* function buildAdminUserPicker(inputId, listId, placeholder) {
+        var users = getSelectableAdminUsers();
+        var options = users.map(function(name) {
+            return '<option value="' + escapeHtml(name) + '"></option>';
+        }).join('');
+        return [
+            '<div class="admin-user-picker">',
+            '<input id="' + inputId + '" class="admin-user-input" list="' + listId + '" placeholder="' + escapeHtml(users.length ? (placeholder || '选择用户') : '暂无可选用户') + '" autocomplete="off" spellcheck="false" onfocus="showAdminUserPicker(\\'' + inputId + '\\')" onclick="showAdminUserPicker(\\'' + inputId + '\\")"' + (users.length ? '' : ' disabled') + '>',
+            '<datalist id="' + listId + '">' + options + '</datalist>',
+            '</div>'
+        ].join('');
+    } */
+
+    function validateAdminTargetUser(userName, inputId) {
+        var normalized = String(userName || '').trim();
+        var els = getAdminUserPickerElements(inputId);
+        var input = els.search || els.hidden || document.getElementById(inputId);
+        if (!normalized) {
+            showToast('请选择用户', 'error');
+            if (input) input.focus();
+            return false;
+        }
+        if (normalized === ADMIN) {
+            showToast('管理员不能在这里对自己执行操作', 'error');
+            if (input) input.focus();
+            return false;
+        }
+        if (!isSelectableAdminUser(normalized)) {
+            showToast('请从用户列表中选择真实用户', 'error');
+            if (input) input.focus();
+            return false;
+        }
+        return true;
+    }
+
+    /* function buildAdminUserPicker(inputId, listId, placeholder) {
+        var users = getSelectableAdminUsers();
+        var options = users.map(function(name) {
+            return '<option value="' + escapeHtml(name) + '"></option>';
+        }).join('');
+        var placeholderText = users.length ? (placeholder || '选择用户') : '暂无可选用户';
+        return [
+            '<div class="admin-user-picker">',
+            '<input id="' + inputId + '" class="admin-user-input" list="' + listId + '" placeholder="' + escapeHtml(placeholderText) + '" autocomplete="off" spellcheck="false" onfocus="showAdminUserPicker(\'' + inputId + '\')" onclick="showAdminUserPicker(\'' + inputId + '\')"' + (users.length ? '' : ' disabled') + '>',
+            '<datalist id="' + listId + '">' + options + '</datalist>',
+            '</div>'
+        ].join('');
+    } */
+
+    function buildAdminUserPicker(inputId, listId, placeholder) {
+        var users = getSelectableAdminUsers();
+        var options = users.map(function(name) {
+            return '<option value="' + escapeHtml(name) + '"></option>';
+        }).join('');
+        var placeholderText = users.length ? (placeholder || '选择用户') : '暂无可选用户';
+        return [
+            '<div class="admin-user-picker">',
+            '<input id="' + inputId + '" class="admin-user-input" list="' + listId + '" placeholder="' + escapeHtml(placeholderText) + '" autocomplete="off" spellcheck="false" onfocus="showAdminUserPicker(\'' + inputId + '\')" onclick="showAdminUserPicker(\'' + inputId + '\')"' + (users.length ? '' : ' disabled') + '>',
+            '<datalist id="' + listId + '">' + options + '</datalist>',
+            '</div>'
+        ].join('');
+    }
+
+    function buildAdminUserPicker(inputId, placeholder) {
+        var users = getSelectableAdminUsers();
+        var placeholderText = users.length ? (placeholder || '选择用户') : '暂无可选用户';
+        return [
+            '<div class="admin-user-picker' + (users.length ? '' : ' is-disabled') + '" id="' + inputId + 'Picker">',
+            '<input type="hidden" id="' + inputId + '" value="">',
+            '<div class="admin-user-picker-shell">',
+            '<input id="' + inputId + 'Search" class="admin-user-input" placeholder="' + escapeHtml(placeholderText) + '" autocomplete="off" spellcheck="false" oninput="filterAdminUserOptions(\'' + inputId + '\')"' + (users.length ? '' : ' disabled') + '>',
+            '<div class="admin-user-list" id="' + inputId + 'List">' + buildAdminUserOptionsMarkup(inputId, '', '') + '</div>',
+            '</div>',
+            '</div>'
+        ].join('');
+    }
+
     function renderTab(tab) {
         var el = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
         if (!el) return;
@@ -692,8 +828,8 @@
         h += '</div>';
 
         h += '<div class="card"><h3>🔒 添加封禁</h3>';
-        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">用户名</label><input id="banUserName" placeholder="输入用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:140px;"></div>';
+        h += '<div class="admin-user-form-row">';
+        h += '<div class="admin-field"><label>用户名</label>' + buildAdminUserPicker('banUserName', '选择封禁用户') + '</div>';
         h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">封禁时长</label><select id="banDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
         h += '<option value="1">1小时</option>';
         h += '<option value="6">6小时</option>';
@@ -734,7 +870,7 @@
         var userName = document.getElementById('banUserName').value.trim();
         var duration = parseInt(document.getElementById('banDuration').value);
         var reason = document.getElementById('banReason').value.trim();
-        if (!userName) { showToast('请输入用户名', 'error'); return; }
+        if (!validateAdminTargetUser(userName, 'banUserName')) return;
         var banType = duration === 0 ? 'permanent' : 'temporary';
         var expiresAt = null;
         if (duration > 0) {
@@ -793,8 +929,8 @@
         h += '</div>';
 
         h += '<div class="card"><h3>🤐 添加禁言</h3>';
-        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">用户名</label><input id="muteUserName" placeholder="输入用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:140px;"></div>';
+        h += '<div class="admin-user-form-row">';
+        h += '<div class="admin-field"><label>用户名</label>' + buildAdminUserPicker('muteUserName', '选择禁言用户') + '</div>';
         h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">禁言时长</label><select id="muteDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
         h += '<option value="1">1小时</option>';
         h += '<option value="6">6小时</option>';
@@ -843,7 +979,7 @@
         var userName = document.getElementById('muteUserName').value.trim();
         var duration = parseInt(document.getElementById('muteDuration').value);
         var reason = document.getElementById('muteReason').value.trim();
-        if (!userName) { showToast('请输入用户名', 'error'); return; }
+        if (!validateAdminTargetUser(userName, 'muteUserName')) return;
         var expiresAt = null;
         if (duration > 0) {
             var d = new Date();
@@ -904,8 +1040,8 @@
         h += '</div>';
 
         h += '<div class="card"><h3>⛔ 添加黑名单</h3>';
-        h += '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">用户名</label><input id="blUserName" placeholder="输入用户名" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:140px;"></div>';
+        h += '<div class="admin-user-form-row">';
+        h += '<div class="admin-field"><label>用户名</label>' + buildAdminUserPicker('blUserName', '选择拉黑用户') + '</div>';
         h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">拉黑时长</label><select id="blDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
         h += '<option value="1">1小时</option>';
         h += '<option value="6">6小时</option>';
@@ -948,7 +1084,7 @@
         var userName = document.getElementById('blUserName').value.trim();
         var duration = parseInt(document.getElementById('blDuration').value);
         var reason = document.getElementById('blReason').value.trim();
-        if (!userName) { showToast('请输入用户名', 'error'); return; }
+        if (!validateAdminTargetUser(userName, 'blUserName')) return;
         var expiresAt = null;
         if (duration > 0) {
             var d = new Date();
