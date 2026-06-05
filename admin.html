@@ -52,9 +52,26 @@
         width: 100%; padding: 12px; border-radius: 12px;
         border: none; background: var(--primary); color: white;
         font-size: 15px; font-weight: 600; cursor: pointer;
-        transition: all 0.3s; margin-top: 6px;
+        transition:
+            transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        transform: translateY(0) scale(1);
+        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.12);
+        margin-top: 6px;
     }
-    .login-card button:hover { opacity: 0.88; }
+    .login-card button:hover {
+        opacity: 0.96;
+        transform: translateY(-1px);
+        box-shadow: 0 12px 22px rgba(26, 71, 48, 0.16);
+    }
+    .login-card button:active {
+        transform: translateY(0) scale(0.965);
+        box-shadow: 0 6px 14px rgba(26, 71, 48, 0.10);
+        transition-duration: 0.12s;
+    }
     .login-err { color: var(--danger); font-size: 12px; margin-top: 8px; text-align: center; }
 
     .dashboard { display: none; }
@@ -68,13 +85,30 @@
     .dash-header h1 { font-size: 18px; }
     .dash-header .dh-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .dash-header button {
-        padding: 6px 16px; border-radius: 8px; border: 1px solid var(--border);
+        padding: 6px 16px; border-radius: 12px; border: 1px solid var(--border);
         background: rgba(255,255,255,0.1); cursor: pointer; font-size: 13px;
-        color: var(--text); transition: all 0.3s;
+        color: var(--text);
+        transition:
+            transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        transform: translateY(0) scale(1);
+        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.08);
     }
-    .dash-header button:hover { background: rgba(255,255,255,0.18); }
+    .dash-header button:hover {
+        background: rgba(255,255,255,0.18);
+        transform: translateY(-1px);
+        box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12);
+    }
     .dash-header button.active { background: var(--primary); color: white; border-color: var(--primary); }
     .dash-header button.danger { color: var(--danger); border-color: rgba(255,59,96,0.3); }
+    .dash-header button:active {
+        transform: translateY(0) scale(0.965);
+        box-shadow: 0 6px 14px rgba(26, 71, 48, 0.08);
+        transition-duration: 0.12s;
+    }
 
     .dash-content { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
     .tab-panel { display: none; }
@@ -104,14 +138,31 @@
     .table-wrap { max-height: 400px; overflow-y: auto; border-radius: var(--radius); }
 
     .btn-sm {
-        padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border);
+        padding: 4px 12px; border-radius: 12px; border: 1px solid var(--border);
         background: rgba(255,255,255,0.1); cursor: pointer; font-size: 12px;
-        color: var(--text); transition: all 0.3s; margin: 2px;
+        color: var(--text); margin: 2px;
+        transition:
+            transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        transform: translateY(0) scale(1);
+        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.08);
     }
-    .btn-sm:hover { background: rgba(255,255,255,0.18); }
+    .btn-sm:hover {
+        background: rgba(255,255,255,0.18);
+        transform: translateY(-1px);
+        box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12);
+    }
     .btn-sm.del { color: var(--danger); border-color: rgba(255,59,96,0.3); }
     .btn-sm.del:hover { background: rgba(255,59,96,0.12); }
     .btn-sm.primary { background: var(--primary); color: white; border-color: var(--primary); }
+    .btn-sm:active {
+        transform: translateY(0) scale(0.965);
+        box-shadow: 0 6px 14px rgba(26, 71, 48, 0.08);
+        transition-duration: 0.12s;
+    }
 
     textarea {
         width: 100%; min-height: 80px; padding: 12px; border-radius: 12px;
@@ -122,7 +173,28 @@
     textarea:focus { border-color: var(--primary); }
     .publish-row { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; }
     .publish-row textarea { flex: 1; }
-    .publish-row button { flex-shrink: 0; padding: 8px 20px; }
+    .publish-row button {
+        flex-shrink: 0; padding: 8px 20px; border-radius: 12px; border: 1px solid var(--border);
+        background: rgba(255,255,255,0.12); color: var(--text); cursor: pointer;
+        transition:
+            transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        transform: translateY(0) scale(1);
+        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.08);
+    }
+    .publish-row button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12);
+        background: rgba(255,255,255,0.18);
+    }
+    .publish-row button:active {
+        transform: translateY(0) scale(0.965);
+        box-shadow: 0 6px 14px rgba(26, 71, 48, 0.08);
+        transition-duration: 0.12s;
+    }
 
     .loading { text-align: center; padding: 40px; color: var(--text-muted); }
     .empty { text-align: center; padding: 32px; color: var(--text-muted); font-size: 13px; }
@@ -158,6 +230,26 @@
     .toast-success { background: rgba(5,150,105,0.88); }
     .toast-error { background: rgba(255,59,96,0.88); }
     .toast-info { background: rgba(59,130,246,0.88); }
+
+    .modal-dialog .modal-btns button {
+        transition:
+            transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        transform: translateY(0) scale(1);
+        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.08);
+    }
+    .modal-dialog .modal-btns button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12);
+    }
+    .modal-dialog .modal-btns button:active {
+        transform: translateY(0) scale(0.965);
+        box-shadow: 0 6px 14px rgba(26, 71, 48, 0.08);
+        transition-duration: 0.12s;
+    }
     @keyframes toastIn { 0%{opacity:0;transform:translateY(-20px) scale(0.9)} 100%{opacity:1;transform:translateY(0) scale(1)} }
     @keyframes toastOut { 0%{opacity:1;transform:translateY(0) scale(1)} 100%{opacity:0;transform:translateY(-20px) scale(0.9)} }
 
@@ -179,13 +271,30 @@
     .modal-dialog .modal-btns { display: flex; gap: 10px; justify-content: flex-end; }
     .modal-dialog .modal-btns button {
         padding: 10px 22px; border-radius: 10px; border: 1px solid var(--border);
-        font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.25s;
+        font-size: 14px; font-weight: 600; cursor: pointer;
         background: rgba(255,255,255,0.1); color: var(--text);
+        transition:
+            transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+            color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        transform: translateY(0) scale(1);
+        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.08);
     }
-    .modal-dialog .modal-btns button:hover { background: rgba(255,255,255,0.18); }
+    .modal-dialog .modal-btns button:hover {
+        background: rgba(255,255,255,0.18);
+        transform: translateY(-1px);
+        box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12);
+    }
     .modal-dialog .modal-btns button.btn-danger { background: var(--danger); color: white; border-color: var(--danger); }
     .modal-dialog .modal-btns button.btn-danger:hover { opacity: 0.85; }
     .modal-dialog .modal-btns button.btn-cancel { background: rgba(255,255,255,0.08); }
+    .modal-dialog .modal-btns button:active {
+        transform: translateY(0) scale(0.965);
+        box-shadow: 0 6px 14px rgba(26, 71, 48, 0.08);
+        transition-duration: 0.12s;
+    }
 
     @media (max-width: 640px) {
         .dash-header { flex-direction: column; align-items: flex-start; }

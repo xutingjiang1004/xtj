@@ -1428,19 +1428,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         extraNote = '<div class="profile-activity-note">' + escapeHtml(postText.length > 36 ? postText.slice(0, 36) + '...' : postText) + '</div>';
                     } else if (!hasMedia && summary === '无文字内容') {
                         extraNote = '<div class="profile-activity-note">原帖没有文字内容</div>';
+                    } else if (!hasMedia && summary && summary !== '无文字内容') {
+                        extraNote = '<div class="profile-activity-note">' + escapeHtml(summary) + '</div>';
                     }
                     var actionHtml = isLikes
                         ? '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();unlikeFromProfile(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">取消点赞</button>'
                         : '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();deleteProfileComment(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">删除评论</button>';
-                    var titleRow = '<div class="profile-activity-topline"><div class="profile-activity-title">' + titlePrefix + inlineSummary + '</div>' + (hasMedia ? mediaHtml : '') + '</div>';
+                    var titleRow = '<div class="profile-activity-title">' + titlePrefix + inlineSummary + '</div>';
                     return [
-                        '<article class="profile-activity-item" role="button" tabindex="0" onclick="' + openPostOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + openPostOnclick + '}\" style="--xtj-enter-delay:' + Math.min(index * 28, 180) + 'ms;">',
+                        '<article class="profile-activity-item' + (hasMedia ? ' has-media' : ' no-media') + '" role="button" tabindex="0" onclick="' + openPostOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + openPostOnclick + '}\" style="--xtj-enter-delay:' + Math.min(index * 28, 180) + 'ms;">',
                         '<div class="profile-activity-main">',
                         '<div class="profile-activity-body">',
                         titleRow,
                         extraNote,
                         '</div>',
                         '</div>',
+                        hasMedia ? '<div class="profile-activity-media-col">' + mediaHtml + '</div>' : '',
                         '<div class="profile-activity-side"><span class="profile-activity-time">' + new Date(item.created_at).toLocaleString() + '</span><div class="profile-activity-actions">' + actionHtml + '</div></div>',
                         '</article>'
                     ].join('');
