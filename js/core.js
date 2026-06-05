@@ -6965,9 +6965,44 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         (function installFinalUiAndDataOverrides() {
             if (window.__xtjFinalUiOverridesV1) return;
             window.__xtjFinalUiOverridesV1 = true;
+            var ANN_CACHE_KEY = "xtj_announcements_cache_v1";
+            var ANN_CACHE_DURATION = 3 * 60 * 1000;
 
             function sleep(ms) {
                 return new Promise(function(resolve) { setTimeout(resolve, ms); });
+            }
+
+            function readFeedSnapshotCache() {
+                try {
+                    var raw = localStorage.getItem(CACHE_KEY);
+                    if (!raw) return null;
+                    var parsed = JSON.parse(raw);
+                    if (!parsed || !parsed.data) return null;
+                    return parsed;
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function readAnnouncementCache() {
+                try {
+                    var raw = localStorage.getItem(ANN_CACHE_KEY);
+                    if (!raw) return null;
+                    var parsed = JSON.parse(raw);
+                    if (!parsed || !Array.isArray(parsed.data)) return null;
+                    return parsed;
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function writeAnnouncementCache(items) {
+                try {
+                    localStorage.setItem(ANN_CACHE_KEY, JSON.stringify({
+                        data: Array.isArray(items) ? items : [],
+                        timestamp: Date.now()
+                    }));
+                } catch (e) {}
             }
 
             function applyStatSnapshot(posts, comments, likes) {
@@ -7005,13 +7040,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return Promise.race([request, timeout]);
             }
 
-                        renderChatLoadingState = function(el, options) {
+            renderChatLoadingState = function(el, options) {
                 if (!el) return;
                 var title = options && options.title ? options.title : '加载中..';
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
                 el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant);
-                if (window.initAllSpringLoaders) {
+                if (variant !== 'chat-list' && variant !== 'chat-detail' && window.initAllSpringLoaders) {
                     window.initAllSpringLoaders(el);
                 }
             };
@@ -7063,6 +7098,68 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 if (statPollTimer) clearInterval(statPollTimer);
                 statPollTimer = setInterval(refreshStatModal, 15000);
+            };
+
+            var originalInitialLoad = initialLoad;
+            initialLoad = async function(skipCache) {
+                var usedFastSnapshot = false;
+                if (!skipCache) {
+                    if (Array.isArray(feedAllPosts) && feedAllPosts.length) {
+                        usedFastSnapshot = true;
+                        await renderFeed({
+                            posts: feedAllPosts,
+                            comments: feedAllComments || [],
+                            likes: feedAllLikes || []
+                        });
+                    } else {
+                        var cachedFeed = readFeedSnapshotCache();
+                        if (cachedFeed && cachedFeed.data) {
+                            usedFastSnapshot = true;
+                            feedAllPosts = normalizePosts(cachedFeed.data.posts || []);
+                            feedAllComments = cachedFeed.data.comments || [];
+                            feedAllLikes = cachedFeed.data.likes || [];
+                            await renderFeed({
+                                posts: feedAllPosts,
+                                comments: feedAllComments,
+                                likes: feedAllLikes
+                            });
+                        }
+                    }
+                }
+                if (currentUser) loadDockChatList();
+                if (!usedFastSnapshot || skipCache) {
+                    return originalInitialLoad.call(this, skipCache);
+                }
+                loadFeed(true);
+            };
+            window.initialLoad = initialLoad;
+
+            var originalLoadAnnouncements = loadAnnouncements;
+            loadAnnouncements = async function() {
+                var listEl = document.getElementById('announcementList');
+                var cachedAnnouncements = readAnnouncementCache();
+                if (cachedAnnouncements && cachedAnnouncements.data.length && Date.now() - cachedAnnouncements.timestamp < ANN_CACHE_DURATION) {
+                    announcements = cachedAnnouncements.data;
+                    updateAnnouncementBadge();
+                    if (listEl && !listEl.children.length) {
+                        renderAnnouncementList();
+                    }
+                }
+                try {
+                    await originalLoadAnnouncements.apply(this, arguments);
+                    writeAnnouncementCache(announcements || []);
+                    if (listEl && announcements && announcements.length) {
+                        renderAnnouncementList();
+                    }
+                } catch (e) {
+                    if (cachedAnnouncements && cachedAnnouncements.data.length) {
+                        announcements = cachedAnnouncements.data;
+                        updateAnnouncementBadge();
+                        if (listEl) renderAnnouncementList();
+                        return;
+                    }
+                    throw e;
+                }
             };
         })();
 
