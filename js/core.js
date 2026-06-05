@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -5581,6 +5581,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // 版本更新日志
             const changelogData = [
+                {
+                    version: 'v0.70',
+                    date: '2026-06-05',
+                    content: `
+                        <h4>后台管理大更新</h4>
+                        <ul>
+                            <li>用户列表 UI 全面美化：卡片式网格布局 + 筛选排序搜索</li>
+                            <li>筛选功能：按状态（全部/管理员/拉黑封禁中/禁言中）快速筛选</li>
+                            <li>排序功能：按注册时间/最近登录/帖子数排序</li>
+                            <li>拉黑封禁表和禁言表新增解除时间列，一目了然</li>
+                            <li>封禁改名为拉黑封禁，移除冗余的黑名单版块</li>
+                        </ul>
+                        <h4>修复</h4>
+                        <ul>
+                            <li>修复用户列表最近登录时间显示旧数据问题</li>
+                            <li>修复管理面板初始化未加载 bans/mutes 数据</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重做了后台用户列表 UI 和交互体验，更清晰直观</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.69',
                     date: '2026-06-04',
