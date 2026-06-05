@@ -1015,6 +1015,8 @@
       if (infoBtn) infoBtn.title = '照片信息';
       var compactBtn = byId('ppCompactBtn');
       if (compactBtn && compactBtn.parentNode) compactBtn.parentNode.removeChild(compactBtn);
+      if (rotateBtn) rotateBtn.title = '旋转 90 度';
+      if (infoBtn) infoBtn.title = '照片信息';
 
       window.zoomIn = function() {
         mutatePreviewTransform(function(state) {
@@ -1031,6 +1033,14 @@
             state.ty = 0;
           }
         });
+      };
+
+      window.ppRotatePhoto = function() {
+        if (mutatePreviewTransform(function(state) {
+          state.rotation = ((state.rotation || 0) + 90) % 360;
+        })) {
+          toast('已旋转 90°');
+        }
       };
 
       window.ppRotatePhoto = function() {
@@ -1100,12 +1110,13 @@
     }
 
     function installWhenReady() {
-      if (typeof window.toggleAlbumView !== 'function' || typeof window.openPhotoAlbumGroup !== 'function') {
+      if (typeof window.toggleAlbumView !== 'function' || typeof window.openPhotoAlbumGroup !== 'function' || typeof window.switchPhotoWallView !== 'function') {
         setTimeout(installWhenReady, 200);
         return;
       }
       wrap('toggleAlbumView');
       wrap('openPhotoAlbumGroup');
+      wrap('switchPhotoWallView');
     }
 
     installWhenReady();
