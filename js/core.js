@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -559,6 +559,101 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             const AUTH_MARKER = '__auth__';
             const DM_MARKER = '__dm__';
 
+            // ===================== 用户限制状态管理 =====================
+            var userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
+            var restrictionPollTimer = null;
+            var RESTRICTION_POLL_INTERVAL = 15000; // 15秒轮询
+
+            async function checkUserRestrictions() {
+                if (!currentUser || currentUser === ADMIN_NAME) return;
+                try {
+                    var { data, error } = await sb.rpc('get_user_restrictions', { p_user_name: currentUser });
+                    if (error) { console.error('检查用户限制失败:', error); return; }
+                    var prev = JSON.stringify(userRestrictions);
+                    userRestrictions = data || { is_banned: false, is_blacklisted: false, is_muted: false };
+                    if (JSON.stringify(userRestrictions) !== prev) {
+                        applyRestrictions();
+                    }
+                } catch(e) { console.error('检查用户限制异常:', e); }
+            }
+
+            function applyRestrictions() {
+                if (userRestrictions.is_blacklisted || userRestrictions.is_banned) {
+                    showBlockedScreen();
+                } else {
+                    hideBlockedScreen();
+                }
+                if (userRestrictions.is_muted) {
+                    showMuteIndicator();
+                } else {
+                    hideMuteIndicator();
+                }
+            }
+
+            function showBlockedScreen() {
+                var existing = document.getElementById('blockedOverlay');
+                if (existing) {
+                    existing.style.display = 'flex';
+                    return;
+                }
+                var overlay = document.createElement('div');
+                overlay.id = 'blockedOverlay';
+                overlay.innerHTML = '<div style="text-align:center;max-width:400px;padding:40px 24px;background:rgba(255,255,255,0.95);border-radius:20px;box-shadow:0 16px 48px rgba(0,0,0,0.2);">' +
+                    '<div style="font-size:48px;margin-bottom:16px;">🚫</div>' +
+                    '<h2 style="font-size:20px;margin-bottom:8px;color:#1d1d24;">账号已被限制访问</h2>' +
+                    '<p style="font-size:14px;color:#6b6c7a;line-height:1.6;margin-bottom:20px;">' +
+                    (userRestrictions.is_blacklisted ? '您的账号已被管理员加入黑名单，暂时无法访问本站。' : '') +
+                    (userRestrictions.is_banned ? '您的账号已被管理员封禁，暂时无法访问本站。' : '') +
+                    '</p><p style="font-size:12px;color:#999;">如有疑问，请联系管理员</p></div>';
+                overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);';
+                document.body.appendChild(overlay);
+                document.body.style.overflow = 'hidden';
+            }
+
+            function hideBlockedScreen() {
+                var overlay = document.getElementById('blockedOverlay');
+                if (overlay) overlay.style.display = 'none';
+                document.body.style.overflow = '';
+            }
+
+            function showMuteIndicator() {
+                var existing = document.getElementById('muteIndicator');
+                if (existing) return;
+                var bar = document.createElement('div');
+                bar.id = 'muteIndicator';
+                bar.innerHTML = '<span style="font-size:14px;">🤐 您已被禁言，无法发布内容、评论、点赞或发送消息</span>';
+                bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9998;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;text-align:center;padding:10px 16px;font-size:13px;font-weight:500;';
+                document.body.insertBefore(bar, document.body.firstChild);
+                var pubBox = document.getElementById('publishBox');
+                if (pubBox) pubBox.style.opacity = '0.4';
+                if (pubBox) pubBox.style.pointerEvents = 'none';
+            }
+
+            function hideMuteIndicator() {
+                var bar = document.getElementById('muteIndicator');
+                if (bar) bar.remove();
+                var pubBox = document.getElementById('publishBox');
+                if (pubBox) { pubBox.style.opacity = ''; pubBox.style.pointerEvents = ''; }
+            }
+
+            function isUserMuted() {
+                return userRestrictions.is_muted && currentUser !== ADMIN_NAME;
+            }
+
+            function isUserBlocked() {
+                return (userRestrictions.is_blacklisted || userRestrictions.is_banned) && currentUser !== ADMIN_NAME;
+            }
+
+            function startRestrictionPolling() {
+                stopRestrictionPolling();
+                checkUserRestrictions();
+                restrictionPollTimer = setInterval(checkUserRestrictions, RESTRICTION_POLL_INTERVAL);
+            }
+
+            function stopRestrictionPolling() {
+                if (restrictionPollTimer) { clearInterval(restrictionPollTimer); restrictionPollTimer = null; }
+            }
+
             async function findAuthRecord(nickname) {
                 const { data } = await sb.from("posts")
                     .select("id, user_name, media_url")
@@ -883,6 +978,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             window.upcSendMessage = function() {
                 if (!upcTargetUser || !currentUser) return;
+                if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
                 closeModal('userProfileModal');
                 setTimeout(function() { openChat(upcTargetUser); }, 300);
             };
@@ -1653,11 +1749,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     // 閿熸枻鎷烽敓鏂ゆ嫹閺堚偓杩戠櫥褰曟椂闂达紙椤甸潰姣忥拷顐奸敓鏂ゆ嫹闁棄鍩涢弬甯礉韫囧懘銆廰wait纭繚鍐欏叆??
                     await saveUserInfo(currentUser, false);
                     
-                    try { subscribeToMessages(); startDMPolling(); updateUnreadBadge(); loadAnnouncements(); subscribeToAnnouncements(); } catch(e) {}
+                    try { startRestrictionPolling(); subscribeToMessages(); startDMPolling(); updateUnreadBadge(); loadAnnouncements(); subscribeToAnnouncements(); } catch(e) {}
                 } else {
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
                     annBtnWrapper.style.display = "none";
+                    
+                    stopRestrictionPolling();
+                    hideBlockedScreen();
+                    hideMuteIndicator();
                     
                     // 更新鎴戠殑椤甸潰显示閿涘牊婀櫥褰曪拷??
                     profileName.textContent = "未登录";
@@ -1714,6 +1814,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // DEPRECATED_DO_NOT_EDIT ===================== [瀹告彃绨惧锟?娑撳鏌熼敓?361鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 =====================
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
+                if (isUserMuted()) { showToast("您已被禁言，无法发布内容"); return; }
                 var content = document.getElementById("postInp").value.trim();
                 var file = document.getElementById("fileInp").files[0];
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
@@ -1740,6 +1841,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // ===================== 点赞 =====================
             window.toggleLike = async function (btn, postId) {
                 if (!currentUser) { showToast("请先登录"); return; }
+                if (isUserMuted()) { showToast("您已被禁言，无法互动"); return; }
                 const isLiked = btn.classList.contains("liked");
                 const statsText = btn.closest('.post').querySelector('.post-stats-text');
 
@@ -1804,6 +1906,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 setTimeout(() => document.getElementById("commInp").focus(), 100);
             };
             document.getElementById("commBtn").onclick = async () => {
+                if (isUserMuted()) { showToast("您已被禁言，无法发表评论"); return; }
                 const content = document.getElementById("commInp").value.trim();
                 if (!content) { showToast("请输入评论内容"); return; }
                 const btn = document.getElementById("commBtn");
@@ -3477,6 +3580,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             });
             window.doPublish = async function () {
                 if (!currentUser) { showToast("请先登录"); return; }
+                if (isUserMuted()) { showToast("您已被禁言，无法发布内容"); return; }
                 var content = document.getElementById("postInp").value.trim();
                 var file = document.getElementById("fileInp").files[0];
                 var visibilityEl = document.getElementById("postVisibility");
@@ -4789,6 +4893,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             window.openChat = function(userName) {
                 if (!window.currentUser) { showToast('请先登录'); return; }
+                if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
                 if (userName === window.currentUser) { switchDockTab('chat', true); return; }
                 if (currentDockTab === 'posts') {
                     const postsPanel = document.getElementById('panelPosts');
@@ -5009,6 +5114,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             async function sendDockChatMessage() {
+                if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
                 const inp = document.getElementById('dockChatInput');
                 const content = inp.value.trim();
                 const fileInput = document.getElementById('dockChatFileInp');
