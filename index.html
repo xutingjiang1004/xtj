@@ -280,17 +280,6 @@
                         <div class="profile-activity-list" id="profileCommentsList"></div>
                         <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" onclick="toggleProfileActivity('comments')" style="display:none;">更多评论内容</button>
                     </section>
-                    <section class="profile-activity-card" id="profileReportsCard">
-                        <div class="profile-activity-head">
-                            <div>
-                                <div class="profile-activity-kicker">我的举报</div>
-                                <h4>举报记录</h4>
-                            </div>
-                            <span class="profile-activity-count" id="profileReportsCount">0</span>
-                        </div>
-                        <div class="profile-activity-list" id="profileReportsList"></div>
-                        <button type="button" class="profile-activity-more" id="profileReportsMoreBtn" onclick="toggleProfileActivity('reports')" style="display:none;">更多举报内容</button>
-                    </section>
                 </div>
                 <div class="profile-settings">
                     <div class="profile-setting-item">
@@ -759,10 +748,14 @@
     <div class="report-modal-overlay" id="reportModal" onclick="if(event.target===this)closeReportModal()">
         <div class="report-modal" onclick="event.stopPropagation()">
             <div class="report-modal-header">
-                <span>🚩 举报内容</span>
+                <div class="report-modal-header-left">
+                    <span>🚩 举报内容</span>
+                    <button class="report-records-btn" id="reportRecordsToggleBtn" onclick="toggleReportRecords()">举报记录</button>
+                </div>
                 <button class="btn btn-ghost" onclick="closeReportModal()" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
-            <div class="report-modal-body">
+            <!-- 举报表单 -->
+            <div class="report-modal-body" id="reportModalFormBody">
                 <div class="report-field">
                     <label>选择举报类型</label>
                     <div class="report-type-tabs">
@@ -793,6 +786,12 @@
                 </div>
                 <button class="btn btn-primary report-submit-btn" id="reportSubmitBtn" onclick="submitReport()" disabled>提交举报</button>
                 <div class="report-error" id="reportError" style="display:none;"></div>
+            </div>
+            <!-- 举报记录面板 -->
+            <div class="report-records-panel" id="reportRecordsPanel" style="display:none;">
+                <div class="report-records-list" id="reportRecordsList">
+                    <div class="report-records-loading">加载中...</div>
+                </div>
             </div>
         </div>
     </div>
