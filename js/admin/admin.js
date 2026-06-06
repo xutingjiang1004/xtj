@@ -46,6 +46,13 @@
         if (body) opts.body = JSON.stringify(body);
         var res = await fetch(API_BASE + path, opts);
         var data = await res.json();
+        if (res.status === 401) {
+            clearSession();
+            try {
+                document.getElementById('dashboard').style.display = 'none';
+                document.getElementById('loginWrap').style.display = 'flex';
+            } catch (e) {}
+        }
         if (!res.ok) throw new Error(data.error || '请求失败 (' + res.status + ')');
         return data;
     }
@@ -101,7 +108,7 @@
             var raw = localStorage.getItem(SESSION_KEY);
             if (!raw) return false;
             var s = JSON.parse(raw);
-            return (Date.now() - s.t) < 24 * 60 * 60 * 1000;
+            return (Date.now() - s.t) < 2 * 60 * 60 * 1000;
         } catch(e) { return false; }
     }
 
