@@ -105,10 +105,10 @@
     .dash-header button.active { background: var(--primary); color: white; border-color: var(--primary); }
     .dash-header button.danger { color: var(--danger); border-color: rgba(255,59,96,0.3); }
     .notif-badge {
-        position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px;
-        padding: 0 4px; border-radius: 8px; background: #ef4444; color: #fff;
-        font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
-        box-shadow: 0 2px 4px rgba(239,68,68,0.4); pointer-events: none;
+        position: absolute; top: -8px; right: -8px; min-width: 18px; height: 18px;
+        padding: 0 5px; border-radius: 9px; background: #ef4444; color: #fff;
+        font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
+        box-shadow: 0 2px 6px rgba(239,68,68,0.5); pointer-events: none; z-index: 100;
     }
     .dash-header button:active {
         transform: translateY(0) scale(0.965);
@@ -971,7 +971,7 @@
             <button id="tabPostsBtn" onclick="switchTab('posts')">📝 帖子管理</button>
             <button id="tabLikesBtn" onclick="switchTab('likes')">❤️ 点赞数据</button>
             <button id="tabCommentsBtn" onclick="switchTab('comments')">💬 评论数据</button>
-            <button id="tabReportsBtn" onclick="switchTab('reports')" style="position:relative">🚨 举报管理<span id="reportBadge" class="notif-badge" style="display:none">0</span></button>
+            <button id="tabReportsBtn" onclick="switchTab('reports')" style="position:relative;overflow:visible">🚨 举报管理<span id="reportBadge" class="notif-badge" style="display:none">0</span></button>
             <button id="tabBansBtn" onclick="switchTab('bans')">🔒 拉黑封禁</button>
             <button id="tabMutesBtn" onclick="switchTab('mutes')">🤐 禁言管理</button>
             <button id="tabBlacklistBtn" onclick="switchTab('blacklist')">🚫 黑名单</button>
