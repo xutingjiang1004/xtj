@@ -20,6 +20,56 @@
     var confirmCallback = null;
     var currentTab = 'ann';
 
+    (function installAdminButtonMotion() {
+        if (window.__xtjAdminButtonMotionV1) return;
+        window.__xtjAdminButtonMotionV1 = true;
+        var selector = [
+            'button',
+            '[role="button"]',
+            'input[type="button"]',
+            'input[type="submit"]',
+            'input[type="reset"]',
+            '.admin-tab',
+            '.filter-chip',
+            '.action-pill',
+            '.user-option'
+        ].join(',');
+
+        function getMotionTarget(event) {
+            var target = event.target && event.target.closest ? event.target.closest(selector) : null;
+            if (!target || target.disabled || target.getAttribute('aria-disabled') === 'true') return null;
+            return target;
+        }
+
+        document.addEventListener('pointerdown', function(event) {
+            var target = getMotionTarget(event);
+            if (!target) return;
+            target.classList.remove('xtj-btn-release');
+            target.classList.add('xtj-btn-pressing');
+        }, true);
+
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(type) {
+            document.addEventListener(type, function(event) {
+                var target = getMotionTarget(event);
+                if (!target || !target.classList.contains('xtj-btn-pressing')) return;
+                target.classList.remove('xtj-btn-pressing');
+                target.classList.add('xtj-btn-release');
+                setTimeout(function() {
+                    target.classList.remove('xtj-btn-release');
+                }, 240);
+            }, true);
+        });
+
+        document.addEventListener('click', function(event) {
+            var target = getMotionTarget(event);
+            if (!target) return;
+            target.classList.add('xtj-btn-clicked');
+            setTimeout(function() {
+                target.classList.remove('xtj-btn-clicked');
+            }, 260);
+        }, true);
+    })();
+
     // ===================== API 辅助函数 =====================
     function getToken() {
         try { return localStorage.getItem(TOKEN_KEY) || ''; } catch(e) { return ''; }
