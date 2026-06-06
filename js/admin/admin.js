@@ -200,6 +200,16 @@
         } else {
             await loadAllData();
         }
+
+        // 启动举报轮询（每 30 秒检查新举报）
+        setInterval(async function() {
+            var prevLen = reportsData.length;
+            await loadReportsData();
+            if (currentTab === 'reports' && reportsData.length !== prevLen) {
+                var el = document.getElementById('tabReports');
+                if (el) renderReportsTab(el);
+            }
+        }, 30000);
     }
 
     // ===================== 管理员登录（通过 API 或本地回退） =====================
@@ -320,6 +330,7 @@
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
                 reportsData = apiData.reports || [];
+                updateReportBadge();
                 bansData = apiData.bans || [];
                 mutesData = apiData.mutes || [];
                 blacklistData = apiData.blacklist || [];
@@ -1003,6 +1014,19 @@
                 reportsData = (res.data || []).map(parseReportFromPost);
             }
         } catch(e) { reportsData = []; }
+        updateReportBadge();
+    }
+
+    function updateReportBadge() {
+        var badge = document.getElementById('reportBadge');
+        if (!badge) return;
+        var pending = reportsData.filter(function(r) { return r.status === 'pending'; }).length;
+        if (pending > 0) {
+            badge.textContent = pending > 99 ? '99+' : pending;
+            badge.style.display = '';
+        } else {
+            badge.style.display = 'none';
+        }
     }
 
     async function renderReportsTab(el) {
@@ -1612,6 +1636,7 @@
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
                 reportsData = apiData.reports || [];
+                updateReportBadge();
                 bansData = apiData.bans || [];
                 mutesData = apiData.mutes || [];
                 blacklistData = apiData.blacklist || [];
