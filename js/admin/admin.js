@@ -8,6 +8,7 @@
     var AUTH_MARKER = "__auth__";
     var DM_MARKER = "__dm__";
     var ANN_MARKER = "__ann__";
+    var REPORT_MARKER = '__report__';
     var SESSION_KEY = "xtj_admin_session";
     var TOKEN_KEY = "xtj_admin_token";
     var TAB_KEY = "xtj_admin_tab";
@@ -961,14 +962,45 @@
 
     var reportsData = [];
 
+    function parseReportFromPost(p) {
+        var c = {};
+        try { c = JSON.parse(p.content || '{}'); } catch(e) {}
+        return {
+            id: p.id,
+            created_at: p.created_at,
+            reporter_name: p.user_name,
+            target_type: c.target_type || 'post',
+            target_id: c.target_id || '',
+            target_user: c.target_user || '',
+            report_category: c.report_category || '',
+            report_reason: c.report_reason || '',
+            status: c.status || 'pending',
+            admin_response: c.admin_response || null,
+            reviewed_at: c.reviewed_at || null,
+            reviewed_by: c.reviewed_by || null,
+            response_at: c.response_at || null
+        };
+    }
+
+    async function updateReportInPost(id, updates) {
+        var { data: post, error: getErr } = await sb.from('posts').select('id, content').eq('id', id).maybeSingle();
+        if (getErr) throw getErr;
+        if (!post) throw new Error('举报记录不存在');
+        var c = {};
+        try { c = JSON.parse(post.content || '{}'); } catch(e) {}
+        Object.keys(updates).forEach(function(k) { c[k] = updates[k]; });
+        var { error: updErr } = await sb.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+        if (updErr) throw updErr;
+    }
+
     async function loadReportsData() {
         try {
             if (API_BASE && getToken()) {
                 var data = await apiCall('GET', '/admin/reports');
                 reportsData = data.data || [];
             } else {
-                var res = await sb.from('reports').select('*').order('created_at', { ascending: false }).limit(500);
-                reportsData = res.data || [];
+                var res = await sb.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500);
+                reportsData = (res.data || []).map(parseReportFromPost);
             }
         } catch(e) { reportsData = []; }
     }
@@ -1082,7 +1114,7 @@
                         var actorKey = (postRes && postRes.data && postRes.data.actor_key) || 'admin_' + Date.now();
                         await sb.rpc('delete_post_with_actor', { p_post_id: r.target_id, p_actor_key: actorKey });
                     }
-                    await sb.from('reports').update({ status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN }).eq('id', id);
+                    await updateReportInPost(id, { status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN });
                 }
                 await loadReportsData();
                 document.querySelector('.report-detail-modal')?.remove();
@@ -1100,7 +1132,7 @@
                 if (API_BASE && getToken()) {
                     await apiCall('POST', '/admin/report/' + id + '/ban-user', { duration_hours: 72 });
                 } else {
-                    await sb.from('reports').update({ status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN }).eq('id', id);
+                    await updateReportInPost(id, { status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN });
                     // 封禁用户
                     var existing = await sb.from('bans').select('id, is_active').eq('user_name', r.target_user);
                     var banData = { user_name: r.target_user, ban_type: 'temporary', ban_reason: '举报处理：' + (r.report_reason || '违规内容'), ban_duration_hours: 72, banned_by: ADMIN, is_active: true };
@@ -1126,7 +1158,7 @@
                 if (API_BASE && getToken()) {
                     await apiCall('PUT', '/admin/report/' + id, { status: 'actioned' });
                 } else {
-                    await sb.from('reports').update({ status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN }).eq('id', id);
+                    await updateReportInPost(id, { status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN });
                 }
                 await loadReportsData();
                 document.querySelector('.report-detail-modal')?.remove();
@@ -1150,13 +1182,13 @@
                     showToast('已回复并处理', 'success');
                 }).catch(function(e) { showToast('操作失败: ' + e.message, 'error'); });
             } else {
-                sb.from('reports').update({
+                updateReportInPost(id, {
                     admin_response: response,
                     response_at: new Date().toISOString(),
                     status: 'actioned',
                     reviewed_at: new Date().toISOString(),
                     reviewed_by: ADMIN
-                }).eq('id', id).then(async function() {
+                }).then(async function() {
                     await loadReportsData();
                     document.querySelector('.report-detail-modal')?.remove();
                     renderTab('reports');
@@ -1172,7 +1204,7 @@
                 if (API_BASE && getToken()) {
                     await apiCall('PUT', '/admin/report/' + id, { status: 'dismissed' });
                 } else {
-                    await sb.from('reports').update({ status: 'dismissed', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN }).eq('id', id);
+                    await updateReportInPost(id, { status: 'dismissed', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN });
                 }
                 await loadReportsData();
                 renderTab('reports');
