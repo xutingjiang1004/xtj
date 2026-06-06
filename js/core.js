@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -935,7 +935,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     } catch(e) {}
                 }
                 if (showAvatar) {
-                    avatarEl.innerHTML = '<img src="' + showAvatar + '" alt="头像">';
+                    avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(showAvatar)) + '" alt="头像">';
                 } else {
                     avatarEl.innerHTML = '<span id="upcAvatarText">' + userName[0].toUpperCase() + '</span>';
                 }
@@ -966,7 +966,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             if (cv[currentUser]) {
                                 avatarCache[currentUser] = cv[currentUser];
                                 if (document.getElementById('userProfileModal').classList.contains('active')) {
-                                    avatarEl.innerHTML = '<img src="' + cv[currentUser] + '" alt="头像">';
+                                    avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(cv[currentUser])) + '" alt="头像">';
                                 }
                             }
                         } catch(e) {}
@@ -989,7 +989,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                         if (document.getElementById('userProfileModal').classList.contains('active')) {
                             var url = (userName === currentUser && avatarCache[currentUser]) ? avatarCache[currentUser] : avatarRes.data[0].media_url;
-                            avatarEl.innerHTML = '<img src="' + url + '" alt="头像">';
+                            avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(url)) + '" alt="头像">';
                         }
                     }
                     
@@ -1079,14 +1079,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                     if (cachedAvatars[currentUser]) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
-                        avatarEl.innerHTML = '<img src="' + cachedAvatars[currentUser] + '" alt="头像">';
+                        avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser])) + '" alt="头像">';
                         return;
                     }
                 } catch(e) {}
                 
                 // 鍏煎牏锟姐倝宕橀崨顓犳憼缂傛挸鐡ㄩ弰鍓э拷?
                 if (avatarCache[currentUser]) {
-                    avatarEl.innerHTML = '<img src="' + avatarCache[currentUser] + '" alt="头像">';
+                    avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(avatarCache[currentUser])) + '" alt="头像">';
                 }
                 
                 try {
@@ -1297,7 +1297,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         avatarCache[currentUser] = cachedAvatars[currentUser];
                         const profileAvatar = document.getElementById('profileAvatar');
                         if (profileAvatar) {
-                            profileAvatar.innerHTML = '<img src="' + cachedAvatars[currentUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            profileAvatar.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(cachedAvatars[currentUser])) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                         }
                         return;
                     }
@@ -1407,13 +1407,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             function dedupeProfileLikes(items) {
-                var seen = Object.create(null);
-                return (items || []).filter(function(item) {
-                    var postKey = item && item.post_id != null ? String(item.post_id) : '';
-                    if (!postKey || seen[postKey]) return false;
-                    seen[postKey] = true;
-                    return true;
-                });
+                return Array.isArray(items) ? items.slice() : [];
             }
 
             function profileActivitySummary(post) {
@@ -1466,6 +1460,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var summary = post ? profileActivitySummary(post) : '原帖已不可用';
                     var actorName = String(currentUser || item.user_name || '你');
                     var hasMedia = !!(normalized && normalized.media_url);
+                    var canOpenPost = !!(post && item.post_id);
                     var postText = normalized ? String(normalized.content || '').trim() : '';
                     var titlePrefix = escapeHtml(actorName) + (isLikes ? '点赞了：' : '评论了：');
                     var inlineSummary = !hasMedia && summary && summary !== '无文字内容'
@@ -1485,8 +1480,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         ? '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();unlikeFromProfile(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">取消点赞</button>'
                         : '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();deleteProfileComment(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">删除评论</button>';
                     var titleRow = '<div class="profile-activity-title">' + titlePrefix + inlineSummary + '</div>';
+                    var cardAttrs = canOpenPost
+                        ? ' role="button" tabindex="0" onclick="' + openPostOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + openPostOnclick + '}"'
+                        : '';
                     return [
-                        '<article class="profile-activity-item' + (hasMedia ? ' has-media' : ' no-media') + '" role="button" tabindex="0" onclick="' + openPostOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + openPostOnclick + '}\" style="--xtj-enter-delay:' + Math.min(index * 28, 180) + 'ms;">',
+                        '<article class="profile-activity-item' + (hasMedia ? ' has-media' : ' no-media') + (canOpenPost ? '' : ' is-disabled') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 28, 180) + 'ms;">',
                         '<div class="profile-activity-main">',
                         '<div class="profile-activity-body">',
                         titleRow,
@@ -1561,18 +1559,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // ===================== 举报弹窗内的举报记录 =====================
             window.toggleReportRecords = async function() {
-                var panel = document.getElementById('reportRecordsPanel');
-                var btn = document.getElementById('reportRecordsToggleBtn');
-                if (!panel) return;
-                if (!panel.classList.contains('open')) {
-                    // 展开右侧记录面板
-                    panel.classList.add('open');
-                    if (btn) btn.textContent = '收起记录';
-                    await loadMyReportRecords();
-                } else {
-                    // 收起右侧记录面板
-                    panel.classList.remove('open');
-                    if (btn) btn.textContent = '举报记录';
+                var nextView = typeof _reportView !== 'undefined' && _reportView === 'records' ? 'form' : 'records';
+                if (typeof window.switchReportView === 'function') {
+                    await window.switchReportView(nextView);
                 }
             };
 
@@ -1616,26 +1605,34 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         return;
                     }
                     list.innerHTML = records.map(function(r) {
-                        var statusText = r.status === 'pending' ? '待处理' : (r.status === 'actioned' ? '已处理' : (r.status === 'reviewed' ? '已审阅' : r.status));
-                        var statusColor = r.status === 'pending' ? '#f5a623' : (r.status === 'actioned' ? '#10b981' : '#6b7280');
-                        var targetInfo = '<strong>被举报：</strong>' + (r.target_user ? escapeHtml(r.target_user) + ' · ' : '') + (r.target_type === 'photo' ? '照片墙' : '帖子') + ' · <span style="color:' + statusColor + ';">' + statusText + '</span>';
-                        var reasonText = escapeHtml(String(r.report_reason || '')).slice(0, 120);
+                        var targetTypeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
+                        var statusText = r.status === 'pending' ? '待处理' : (r.status === 'actioned' ? '已处理' : (r.status === 'reviewed' ? '已审阅' : String(r.status || '处理中')));
+                        var statusClass = r.status === 'actioned' ? ' report-record-status--actioned' : (r.status === 'reviewed' ? ' report-record-status--reviewed' : '');
+                        var reasonText = escapeHtml(String(r.report_reason || '未填写举报原因'));
                         var hasReply = !!r.admin_response;
                         var replyId = 'reportReply_' + r.id;
-                        var replyBtnHtml = hasReply ? '<button class="report-reply-toggle" onclick="toggleReportReply(\'' + replyId + '\',this)">查看回复</button>' : '';
+                        var footerNotes = [];
+                        footerNotes.push('<span class="report-record-note">举报对象：' + (r.target_user ? escapeHtml(r.target_user) : '未知发布者') + '</span>');
+                        if (r.reviewed_at) footerNotes.push('<span class="report-record-note">处理时间：' + escapeHtml(formatReportTime(r.reviewed_at)) + '</span>');
+                        var replyBtnHtml = hasReply ? '<button class="report-reply-toggle" type="button" onclick="toggleReportReply(\'' + replyId + '\',this)">查看回复</button>' : '';
                         var replyContentHtml = hasReply ? '<div id="' + replyId + '" class="profile-activity-report-reply" style="display:none;"><div class="profile-activity-admin-reply-inner"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div></div>' : '';
                         return [
-                            '<div class="report-record-item">',
+                            '<article class="report-record-item">',
+                            '<div class="report-record-head">',
+                            '<div class="report-record-badges">',
+                            '<span class="report-record-badge">' + escapeHtml(targetTypeLabel) + '</span>',
+                            '<span class="report-record-status' + statusClass + '">' + escapeHtml(statusText) + '</span>',
+                            '</div>',
+                            '<span class="report-record-time">' + escapeHtml(formatReportTime(r.created_at)) + '</span>',
+                            '</div>',
                             '<div class="report-record-main">',
-                            '<div class="report-record-title">' + targetInfo + '</div>',
-                            '<div class="report-record-reason">举报原因：' + reasonText + '</div>',
+                            '<div class="report-record-title">举报' + escapeHtml(targetTypeLabel) + (r.target_user ? ' · ' + escapeHtml(r.target_user) : '') + '</div>',
+                            '<div class="report-record-reason">' + reasonText + '</div>',
+                            '<div class="report-record-footer">' + footerNotes.join('') + '</div>',
                             '</div>',
-                            '<div class="report-record-side">',
-                            '<span class="report-record-time">' + new Date(r.created_at).toLocaleString() + '</span>',
-                            replyBtnHtml,
-                            '</div>',
-                            '</div>',
-                            replyContentHtml
+                            '<div class="report-record-side">' + replyBtnHtml + '</div>',
+                            replyContentHtml,
+                            '</article>'
                         ].join('');
                     }).join('');
                 } catch(e) {
@@ -2408,6 +2405,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 });
             }
 
+            function shouldKeepViewHistoryEntry(entry) {
+                var viewer = String(entry && entry.user_name || '').trim();
+                var author = String(entry && entry.post_author || '').trim();
+                return !!viewer && !!author && viewer !== author;
+            }
+
             function getViewHistory() {
                 try {
                     var history = window.safeLocalStorageGetJSON(VIEW_HISTORY_KEY, []);
@@ -2417,10 +2420,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (!changed && JSON.stringify(next) !== JSON.stringify(entry || {})) changed = true;
                         return next;
                     }) : [];
+                    var filtered = normalized.filter(function(entry) {
+                        var keep = shouldKeepViewHistoryEntry(entry);
+                        if (!keep) changed = true;
+                        return keep;
+                    });
                     if (changed) {
-                        try { localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(normalized)); } catch (e) {}
+                        try { localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(filtered)); } catch (e) {}
                     }
-                    return normalized;
+                    return filtered;
                 } catch(e) { return []; }
             }
 
@@ -2509,13 +2517,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 if (currentUser && postInfoCache[postId]) {
                     var rawContent = postInfoCache[postId].content || '';
-                    saveViewHistory({
-                        user_name: currentUser,
-                        post_id: postId,
-                        post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || VIEW_HISTORY_MEDIA_LABEL),
-                        post_author: postInfoCache[postId].user_name || VIEW_HISTORY_DELETED_AUTHOR,
-                        viewed_at: new Date().toISOString()
-                    });
+                    var postAuthor = String(postInfoCache[postId].user_name || VIEW_HISTORY_DELETED_AUTHOR).trim();
+                    if (postAuthor && currentUser !== postAuthor) {
+                        saveViewHistory({
+                            user_name: currentUser,
+                            post_id: postId,
+                            post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || VIEW_HISTORY_MEDIA_LABEL),
+                            post_author: postAuthor,
+                            viewed_at: new Date().toISOString()
+                        });
+                    }
                 }
                 if (Array.isArray(feedAllPosts)) {
                     feedAllPosts = feedAllPosts.map(function(post) {
@@ -5878,6 +5889,32 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // 版本更新日志
             const changelogData = [
                 {
+                    version: 'v0.72',
+                    date: '2026-06-06',
+                    content: `
+                        <h4>举报弹层、统计页面与后台用户管理重做</h4>
+                        <ul>
+                            <li>首页举报弹层改成顶部双标签结构：发起举报 / 举报记录 分开显示，布局更干净</li>
+                            <li>举报记录改成独立卡片层级，状态、原因、时间和管理员回复不再叠在一起</li>
+                            <li>浏览记录新增自浏览过滤：用户浏览自己的帖子不再写入记录，旧脏记录也会自动清掉</li>
+                            <li>总动态、总浏览、点赞评论、我的点赞、我的评论统一改成“有图才显示缩略图”</li>
+                            <li>修复我的页面点赞记录和评论记录排版被破坏的问题，恢复稳定预览和更多弹层</li>
+                            <li>聊天列表和聊天详情加载动画统一为照片墙同款，不再混用旧 spring loader</li>
+                            <li>深色模式下“我的”页个人资料、深色模式、通知、关于去掉白色磨砂，和背景更统一</li>
+                        </ul>
+                        <h4>后台管理提效</h4>
+                        <ul>
+                            <li>后台用户主列表改成直接可操作的用户卡片，支持快速禁言、封禁、拉黑</li>
+                            <li>封禁 / 禁言 / 黑名单三个管理区改成上方配置时长和原因，下方直接点用户执行</li>
+                            <li>管理员可直接看到当前状态并快速解除，不再先选用户再提交</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重做了总动态按用户分组的入口结构、记录列表排版和后台用户操作流，整体更简洁、更直接</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.71',
                     date: '2026-06-06',
                     content: `
@@ -6639,16 +6676,100 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
         // ===================== 举报功能 =====================
         var _reportType = 'post';
+        var _reportView = 'form';
         var _reportSelectedId = null;
         var _reportSelectedReason = null;
         var _reportTargetUser = null;
         var _reportContentData = [];
+
+        function getReportViewNodes() {
+            return {
+                formBtn: document.getElementById('reportViewFormBtn'),
+                recordsBtn: document.getElementById('reportRecordsViewBtn'),
+                formPanel: document.getElementById('reportModalFormBody'),
+                recordsPanel: document.getElementById('reportRecordsPanel')
+            };
+        }
+
+        function getReportSelectedItem() {
+            return (_reportContentData || []).find(function(item) {
+                return String(item.id) === String(_reportSelectedId);
+            }) || null;
+        }
+
+        function formatReportTime(value) {
+            if (!value) return '';
+            try {
+                return new Date(value).toLocaleString();
+            } catch(_) {
+                return '';
+            }
+        }
+
+        function formatReportDate(value) {
+            if (!value) return '';
+            try {
+                return new Date(value).toLocaleDateString();
+            } catch(_) {
+                return '';
+            }
+        }
+
+        function buildReportSelectedPreview(item) {
+            if (!item) {
+                return '<div class="report-selected-empty">还没有选择举报对象，请先从上方列表中选择一条内容。</div>';
+            }
+            var itemType = item.type === 'photo' ? '照片墙' : '帖子';
+            var userName = escapeHtml(item.user_name || _reportTargetUser || '未知');
+            var text = escapeHtml(item.text || (item.thumb ? '已选择图片内容' : '已选择内容'));
+            return [
+                '<div class="report-selected-top">',
+                '<span class="report-selected-chip">' + escapeHtml(itemType) + '</span>',
+                '<span class="report-selected-user">发布者：' + userName + '</span>',
+                '</div>',
+                '<div class="report-selected-text">' + text + '</div>'
+            ].join('');
+        }
+
+        function updateReportSelectedPreview() {
+            var info = document.getElementById('reportSelectedInfo');
+            if (!info) return;
+            var preview = info.querySelector('.report-selected-preview');
+            if (!preview) return;
+            preview.innerHTML = buildReportSelectedPreview(getReportSelectedItem());
+        }
+
+        window.switchReportView = async function(view) {
+            var nextView = view === 'records' ? 'records' : 'form';
+            _reportView = nextView;
+            var nodes = getReportViewNodes();
+            if (nodes.formBtn) {
+                nodes.formBtn.classList.toggle('active', nextView === 'form');
+                nodes.formBtn.setAttribute('aria-selected', nextView === 'form' ? 'true' : 'false');
+            }
+            if (nodes.recordsBtn) {
+                nodes.recordsBtn.classList.toggle('active', nextView === 'records');
+                nodes.recordsBtn.setAttribute('aria-selected', nextView === 'records' ? 'true' : 'false');
+            }
+            if (nodes.formPanel) {
+                nodes.formPanel.classList.toggle('active', nextView === 'form');
+                nodes.formPanel.setAttribute('aria-hidden', nextView === 'form' ? 'false' : 'true');
+            }
+            if (nodes.recordsPanel) {
+                nodes.recordsPanel.classList.toggle('active', nextView === 'records');
+                nodes.recordsPanel.setAttribute('aria-hidden', nextView === 'records' ? 'false' : 'true');
+            }
+            if (nextView === 'records') {
+                await loadMyReportRecords();
+            }
+        };
 
         window.openReportModal = function() {
             if (!currentUser) { showToast('请先登录'); return; }
             var overlay = document.getElementById('reportModal');
             if (!overlay) return;
             _reportType = 'post';
+            _reportView = 'form';
             _reportSelectedId = null;
             _reportSelectedReason = null;
             _reportTargetUser = null;
@@ -6660,10 +6781,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             document.getElementById('reportCustomReason').value = '';
             document.getElementById('reportSubmitBtn').disabled = true;
             document.getElementById('reportError').style.display = 'none';
-            document.getElementById('reportSelectedInfo').style.display = 'none';
+            document.getElementById('reportError').textContent = '';
+            updateReportSelectedPreview();
             overlay.classList.add('active');
             document.body.style.overflow = 'hidden';
+            switchReportView('form');
             loadReportContentList();
+            var dialog = document.getElementById('reportModalDialog');
+            if (dialog && typeof dialog.focus === 'function') {
+                setTimeout(function() {
+                    try { dialog.focus(); } catch(_) {}
+                }, 0);
+            }
         };
 
         window.closeReportModal = function() {
@@ -6681,7 +6810,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 t.classList.toggle('active', t.dataset.type === type);
             });
             document.getElementById('reportSubmitBtn').disabled = true;
-            document.getElementById('reportSelectedInfo').style.display = 'none';
+            updateReportSelectedPreview();
             loadReportContentList();
         };
 
@@ -6691,7 +6820,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             container.innerHTML = '<div class="report-loading">加载中...</div>';
 
             if (_reportType === 'post') {
-                // 加载所有帖子
                 try {
                     sb.from('posts')
                         .select('id, user_name, content, media_url, media_type, created_at')
@@ -6712,8 +6840,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     txt = j.content || j.title || j.caption || j.text || (typeof j === 'object' ? '' : txt) || '';
                                 } catch(e) {}
                                 if (!txt && p.media_url) txt = '(图片)';
-                                if (txt.length > 60) txt = txt.substring(0, 60) + '...';
-                                return { id: p.id, user_name: p.user_name, text: txt, thumb: p.media_url || '', type: 'post' };
+                                if (txt.length > 72) txt = txt.substring(0, 72) + '...';
+                                return {
+                                    id: p.id,
+                                    user_name: p.user_name,
+                                    text: txt,
+                                    thumb: p.media_url || '',
+                                    type: 'post',
+                                    created_at: p.created_at,
+                                    kindLabel: p.media_url ? (p.media_type === 'video' ? '视频帖' : '图片帖') : '文字帖'
+                                };
                             }).filter(function(item) { return item.text || item.thumb; });
                             renderReportContentList(container);
                         }).catch(function() {
@@ -6723,7 +6859,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
                 }
             } else {
-                // 加载照片墙照片
                 try {
                     sb.from('posts')
                         .select('id, user_name, content, media_url, media_type, created_at')
@@ -6739,8 +6874,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     txt = j.caption || j.title || j.content || '';
                                     if (!thumb) thumb = j.thumb || j.url || j.image_url || '';
                                 } catch(e) {}
-                                if (txt.length > 60) txt = txt.substring(0, 60) + '...';
-                                return { id: p.id, user_name: p.user_name, text: txt || '(照片)', thumb: thumb, type: 'photo' };
+                                if (txt.length > 72) txt = txt.substring(0, 72) + '...';
+                                return {
+                                    id: p.id,
+                                    user_name: p.user_name,
+                                    text: txt || '(照片)',
+                                    thumb: thumb,
+                                    type: 'photo',
+                                    created_at: p.created_at,
+                                    kindLabel: '照片墙'
+                                };
                             }).filter(function(item) { return item.thumb || item.text; });
                             renderReportContentList(container);
                         }).catch(function() {
@@ -6760,14 +6903,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             var h = '';
             _reportContentData.forEach(function(item) {
                 var selected = _reportSelectedId === item.id ? ' selected' : '';
-                var thumbHtml = item.thumb ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="">' : '<div class="rc-thumb" style="display:flex;align-items:center;justify-content:center;font-size:18px;">📄</div>';
+                var thumbHtml = item.thumb
+                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="">'
+                    : '<div class="rc-thumb" style="display:flex;align-items:center;justify-content:center;font-size:18px;">📄</div>';
                 h += '<div class="report-content-item' + selected + '" data-id="' + escapeHtml(item.id) + '" data-user="' + escapeHtml(item.user_name) + '" onclick="selectReportContent(this)">';
                 h += thumbHtml;
-                h += '<div class="rc-info"><div class="rc-user">' + escapeHtml(item.user_name) + '</div>';
-                h += '<div class="rc-text">' + escapeHtml(item.text) + '</div></div>';
-                h += '</div>';
+                h += '<div class="rc-info">';
+                h += '<div class="rc-meta"><div class="rc-user">' + escapeHtml(item.user_name) + '</div><span class="rc-type">' + escapeHtml(item.kindLabel || (item.type === 'photo' ? '照片墙' : '帖子')) + '</span>' + (item.created_at ? '<span class="rc-time">' + escapeHtml(formatReportDate(item.created_at)) + '</span>' : '') + '</div>';
+                h += '<div class="rc-text">' + escapeHtml(item.text || (item.thumb ? '图片内容' : '无文字内容')) + '</div>';
+                h += '</div></div>';
             });
             container.innerHTML = h;
+            updateReportSelectedPreview();
         }
 
         window.selectReportContent = function(el) {
@@ -6778,11 +6925,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 item.classList.toggle('selected', item.dataset.id === id);
             });
             updateReportSubmitState();
-            // 显示预览
-            var info = document.getElementById('reportSelectedInfo');
-            var preview = info.querySelector('.report-selected-preview');
-            preview.textContent = '已选择：' + (_reportType === 'post' ? '帖子' : '照片') + ' · 发布者：' + (_reportTargetUser || '未知');
-            info.style.display = 'block';
+            updateReportSelectedPreview();
         };
 
         window.selectReportReason = function(btn) {
@@ -6800,11 +6943,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
         function updateReportSubmitState() {
             var btn = document.getElementById('reportSubmitBtn');
-            if (_reportSelectedId && _reportSelectedReason) {
-                btn.disabled = false;
-            } else {
-                btn.disabled = true;
-            }
+            if (!btn) return;
+            btn.disabled = !(_reportSelectedId && _reportSelectedReason);
         }
 
         window.submitReport = async function() {
@@ -6849,13 +6989,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         report_reason: finalReason,
                         status: 'pending'
                     });
-                    var { error } = await window.sb.from('posts').insert([{
+                    var result = await window.sb.from('posts').insert([{
                         user_name: currentUser,
                         content: reportContent,
                         media_type: REPORT_MARKER,
                         actor_key: REPORT_MARKER
                     }]);
-                    if (error) throw new Error(error.message);
+                    if (result.error) throw new Error(result.error.message);
                 }
                 window.showToast('举报已提交，管理员会尽快处理', 'success');
                 closeReportModal();
@@ -6863,7 +7003,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 console.error('[XTJ] submitReport error:', e);
                 errEl.style.display = 'block';
                 errEl.textContent = '提交失败：' + e.message;
-                // fallback: 如果模态框内的错误提示不可见，用 toast 再提示一次
                 try { window.showToast('提交失败：' + e.message, 'error'); } catch(_) {}
             } finally {
                 btn.disabled = false;
@@ -6871,7 +7010,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
         };
 
-        // 绑定举报按钮关闭事件
         var reportOverlay = document.getElementById('reportModal');
         if (reportOverlay) {
             reportOverlay.addEventListener('keydown', function(e) {
@@ -7222,6 +7360,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return '';
             }
 
+            function statMediaColumnMarkup(mediaHtml) {
+                return mediaHtml ? '<div class="stat-row-media">' + mediaHtml + '</div>' : '';
+            }
+
             window.openStatPostDetail = function(postId) {
                 if (!postId) return;
                 window.closeStatRecordsModal();
@@ -7265,8 +7407,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var mediaHtml = statMediaThumbMarkup(normalized, 'spi-thumb', mediaOnclick, normalized.media_type === 'video' ? '点击查看视频' : '点击全屏预览');
                 var delay = Math.min((Number(normalized._statIndex) || 0) * 26, 220);
                 return [
-                    '<article class="stat-post-item stat-row" role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}" style="--xtj-enter-delay:' + delay + 'ms;">',
-                    '<div class="stat-row-media">' + (mediaHtml || '<span class="stat-text-thumb">文</span>') + '</div>',
+                    '<article class="stat-post-item stat-row' + (mediaHtml ? '' : ' stat-row--no-media') + '" role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}" style="--xtj-enter-delay:' + delay + 'ms;">',
+                    statMediaColumnMarkup(mediaHtml),
                     '<div class="stat-row-main">',
                     '<div class="stat-row-title">' + (display ? escapeHtml(display) : escapeHtml(statPostSummary(normalized, 'plain'))) + '</div>',
                     '<div class="stat-row-meta"><span>' + new Date(normalized.created_at).toLocaleString() + '</span>' + tag + '</div>',
@@ -7311,8 +7453,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                     return [
                         '<button type="button" class="stat-user-summary stat-user-summary-card" onclick="loadUserAllPosts(\'' + nameJs + '\')" style="--xtj-enter-delay:' + Math.min(index * 42, 240) + 'ms;">',
-                        '<div class="stat-user-main">',
-                        '<div class="suh-avatar">' + escapeHtml(name).slice(0, 1).toUpperCase() + '</div>',
+                        '<div class="stat-user-main stat-user-main--simple">',
                         '<div class="suh-copy"><span class="suh-name">' + escapeHtml(name) + '</span><span class="suh-sub">最近更新 ' + escapeHtml(latest) + '</span></div>',
                         '<span class="suh-count">' + posts.length + ' 条</span>',
                         '</div>',
@@ -7354,8 +7495,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     noteHtml = '<div class="stat-record-note">' + escapeHtml(String(post.content).trim().slice(0, 36)) + '</div>';
                 }
                 return [
-                    '<article class="stat-record-entry stat-row ' + (isLike ? 'stat-like-item' : 'stat-comment-item') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 26, 220) + 'ms;">',
-                    '<div class="stat-row-media">' + (mediaHtml || '<span class="stat-text-thumb">文</span>') + '</div>',
+                    '<article class="stat-record-entry stat-row ' + (isLike ? 'stat-like-item' : 'stat-comment-item') + (mediaHtml ? '' : ' stat-row--no-media') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 26, 220) + 'ms;">',
+                    statMediaColumnMarkup(mediaHtml),
                     '<div class="stat-row-main">',
                     '<div class="stat-row-title">' + actorName + (isLike ? ' 点赞了：' : ' 评论了：') + '</div>',
                     '<div class="stat-row-copy">' + escapeHtml(summary) + noteHtml + '</div>',
@@ -7404,8 +7545,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var mediaHtml = post ? statMediaThumbMarkup(post, 'stat-record-thumb', mediaOnclick, post.media_type === 'video' ? '点击查看视频' : '点击全屏预览') : '';
                     var postText = post ? statPostSummary(post, 'bracket') : (v.post_content || '（内容已不可用）');
                     return [
-                        '<article class="stat-view-item stat-row" ' + (post ? 'role="button" tabindex="0" onclick="' + detailOnclick + '"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 32, 220) + 'ms;">',
-                        '<div class="stat-row-media">' + (mediaHtml || '<span class="stat-text-thumb">文</span>') + '</div>',
+                        '<article class="stat-view-item stat-row' + (mediaHtml ? '' : ' stat-row--no-media') + '" ' + (post ? 'role="button" tabindex="0" onclick="' + detailOnclick + '"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 32, 220) + 'ms;">',
+                        statMediaColumnMarkup(mediaHtml),
                         '<div class="stat-row-main">',
                         '<div class="stat-row-title">' + escapeHtml(v.user_name) + ' 浏览了 ' + escapeHtml(v.post_author || '') + ' 的帖子</div>',
                         '<div class="stat-row-copy">' + escapeHtml(v.post_content || postText) + '</div>',
@@ -7619,28 +7760,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
                 el.classList.add('xtj-chat-photo-loading');
-                el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant.indexOf('chat') === -1 ? 'chat-list' : variant);
+                el.innerHTML = window.__xtjSharedPhotoLoaderHtml || window.xtjMagicLoadingHtml(title, subtitle, variant.indexOf('chat') === -1 ? 'chat-list' : variant);
             };
 
             (function installChatPhotoLoaderFinal() {
                 if (window.__xtjChatPhotoLoaderFinalV1) return;
                 window.__xtjChatPhotoLoaderFinalV1 = true;
                 var originalMagicLoader = window.xtjMagicLoadingHtml;
+                window.__xtjSharedPhotoLoaderHtml = window.__xtjSharedPhotoLoaderHtml || [
+                    '<div class="xtj-magic-loading xtj-magic-loading--photo xtj-magic-loading--chat" role="status" aria-live="polite">',
+                    '  <div class="xtj-photo-loader" aria-label="聊天加载动画">',
+                    '    <span class="xtj-photo-loader-ring"></span>',
+                    '    <span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span>',
+                    '    <span class="xtj-photo-loader-core"></span>',
+                    '    <span class="xtj-photo-loader-dot dot-a"></span>',
+                    '    <span class="xtj-photo-loader-dot dot-b"></span>',
+                    '    <span class="xtj-photo-loader-dot dot-c"></span>',
+                    '  </div>',
+                    '</div>'
+                ].join('');
                 window.xtjMagicLoadingHtml = function(title, subtitle, variant) {
                     var mode = String(variant || '');
                     if (mode.indexOf('chat') !== -1 || /聊天|消息/.test(String(title || '') + String(subtitle || ''))) {
-                        return [
-                            '<div class="xtj-magic-loading xtj-magic-loading--photo xtj-magic-loading--chat" role="status" aria-live="polite">',
-                            '  <div class="xtj-photo-loader" aria-label="聊天加载动画">',
-                            '    <span class="xtj-photo-loader-ring"></span>',
-                            '    <span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span>',
-                            '    <span class="xtj-photo-loader-core"></span>',
-                            '    <span class="xtj-photo-loader-dot dot-a"></span>',
-                            '    <span class="xtj-photo-loader-dot dot-b"></span>',
-                            '    <span class="xtj-photo-loader-dot dot-c"></span>',
-                            '  </div>',
-                            '</div>'
-                        ].join('');
+                        return window.__xtjSharedPhotoLoaderHtml;
                     }
                     return originalMagicLoader ? originalMagicLoader.apply(this, arguments) : '';
                 };
