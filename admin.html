@@ -895,10 +895,39 @@
     ).xtj-btn-clicked {
         box-shadow: 0 12px 24px rgba(26, 71, 48, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
     }
+    :where(
+        button,
+        [role="button"],
+        input[type="button"],
+        input[type="submit"],
+        .btn-sm,
+        .filter-chip,
+        .admin-user-option,
+        .admin-user-picker-modern .picker-option,
+        .top-tabs button,
+        .modal-btns button,
+        .search-bar button,
+        .publish-row button
+    ) {
+        position: relative;
+        overflow: hidden;
+    }
+    .xtj-btn-ripple {
+        position: absolute;
+        pointer-events: none;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(45, 160, 103, 0.24) 0%, rgba(45, 160, 103, 0.16) 34%, rgba(45, 160, 103, 0) 72%);
+        transform: scale(0.2);
+        opacity: 0.95;
+        animation: xtjAdminButtonRipple 0.36s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
     @keyframes xtjAdminButtonRelease {
         from { transform: translateY(0) scale(0.965); }
         62% { transform: translateY(-1px) scale(1.012); }
         to { transform: translateY(0) scale(1); }
+    }
+    @keyframes xtjAdminButtonRipple {
+        to { transform: scale(1.12); opacity: 0; }
     }
 </style>
 </head>
