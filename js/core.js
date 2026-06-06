@@ -6691,6 +6691,33 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
         }
 
+        function bindReportViewButtons() {
+            var nodes = getReportViewNodes();
+            if (nodes.formBtn) {
+                nodes.formBtn.onclick = function(e) {
+                    if (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                    window.switchReportView('form');
+                };
+            }
+            if (nodes.recordsBtn) {
+                nodes.recordsBtn.onclick = function(e) {
+                    if (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                    window.switchReportView('records');
+                };
+            }
+        }
+
+        function resetReportModalScroll() {
+            var scroller = document.querySelector('#reportModal .report-modal-content');
+            if (scroller) scroller.scrollTop = 0;
+        }
+
         function getReportSelectedItem() {
             return (_reportContentData || []).find(function(item) {
                 return String(item.id) === String(_reportSelectedId);
@@ -6759,6 +6786,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 nodes.recordsPanel.classList.toggle('active', nextView === 'records');
                 nodes.recordsPanel.setAttribute('aria-hidden', nextView === 'records' ? 'false' : 'true');
             }
+            resetReportModalScroll();
             if (nextView === 'records') {
                 await loadMyReportRecords();
             }
@@ -6785,6 +6813,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             updateReportSelectedPreview();
             overlay.classList.add('active');
             document.body.style.overflow = 'hidden';
+            bindReportViewButtons();
+            resetReportModalScroll();
             switchReportView('form');
             loadReportContentList();
             var dialog = document.getElementById('reportModalDialog');
