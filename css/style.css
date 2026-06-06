@@ -3768,6 +3768,14 @@
             display: flex;
             flex-direction: column;
         }
+        /* 改版：弹窗内容左右布局容器 */
+        .report-modal-content {
+            display: flex;
+            flex-direction: row;
+            flex: 1;
+            min-height: 0;
+            overflow: hidden;
+        }
         .report-records-list {
             flex: 1;
             display: flex;
@@ -10377,5 +10385,90 @@ body.ios-chat-keyboard-open .chat-input-area {
   #statModal .stat-user-preview,
   #statModal .stat-user-cta {
     margin-left: 0;
+  }
+}
+
+/* =============================
+   举报弹窗改版 - 左右布局
+   ============================= */
+/* 弹窗加宽 */
+.report-modal {
+  max-width: 780px !important;
+}
+
+/* 内容区 flex 行容器 */
+.report-modal-content {
+  display: flex !important;
+  flex-direction: row !important;
+  flex: 1 !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+/* 左侧表单 */
+.report-modal-body {
+  flex: 1 !important;
+  min-width: 0 !important;
+  overflow-y: auto !important;
+}
+
+/* 右侧记录面板 */
+.report-records-panel {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  flex: none !important;
+  border-left: 1px solid rgba(190, 224, 203, 0.5);
+  transition: width 0.28s ease, min-width 0.28s ease, max-width 0.28s ease, padding 0.28s ease !important;
+}
+.report-records-panel.open {
+  width: 340px !important;
+  min-width: 340px !important;
+  max-width: 340px !important;
+  padding: 0 0 16px 0 !important;
+  overflow-y: auto !important;
+}
+
+/* 记录列表在右侧面板内 */
+.report-records-list {
+  padding: 0 16px !important;
+  gap: 8px !important;
+}
+
+/* 记录项右面板内紧凑 */
+.report-records-panel.open .report-record-item {
+  padding: 10px 12px !important;
+  gap: 8px !important;
+}
+
+/* 面板标题 */
+.report-records-header {
+  padding: 14px 16px 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #244734;
+  flex-shrink: 0;
+}
+[data-theme="dark"] .report-records-header {
+  color: #6ee7b7;
+}
+
+/* 手机端适配：堆叠显示 */
+@media (max-width: 720px) {
+  .report-modal {
+    max-width: 94vw !important;
+  }
+  .report-modal-content {
+    flex-direction: column !important;
+  }
+  .report-records-panel.open {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    max-height: 50vh !important;
+    border-left: none !important;
+    border-top: 1px solid rgba(190, 224, 203, 0.5);
   }
 }
