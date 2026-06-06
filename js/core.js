@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -1554,17 +1554,23 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var statusText = r.status === 'pending' ? '待处理' : (r.status === 'actioned' ? '已处理' : (r.status === 'reviewed' ? '已审阅' : r.status));
                     var statusColor = r.status === 'pending' ? '#f5a623' : (r.status === 'actioned' ? '#10b981' : '#6b7280');
                     var targetInfo = '<strong>被举报：</strong>' + (r.target_user ? escapeHtml(r.target_user) + ' · ' : '') + (r.target_type === 'photo' ? '照片墙' : '帖子') + ' · <span style="color:' + statusColor + ';">' + statusText + '</span>';
-                    var replyHtml = r.admin_response ? '<div class="profile-activity-admin-reply" style="margin-top:8px;padding:8px 10px;background:rgba(5,150,105,0.08);border-left:3px solid #0a9669;border-radius:4px;font-size:12px;color:#065f46;"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div>' : '';
                     var reasonText = escapeHtml((String(r.report_reason || '')).slice(0, 120));
+                    var hasReply = !!r.admin_response;
+                    var replyId = 'reportReply_' + r.id;
+                    var replyBtnHtml = hasReply ? '<button class="report-reply-toggle" onclick="toggleReportReply(\'' + replyId + '\',this)">查看回复</button>' : '';
+                    var replyContentHtml = hasReply ? '<div id="' + replyId + '" class="profile-activity-report-reply" style="display:none;"><div class="profile-activity-admin-reply-inner"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div></div>' : '';
                     return [
                         '<article class="profile-activity-item" style="cursor:default;">',
                         '<div class="profile-activity-main">',
                         '<div class="profile-activity-title">' + targetInfo + '</div>',
                         '<div class="profile-activity-content" style="font-size:13px;color:#4b5563;">举报原因：' + reasonText + '</div>',
-                        replyHtml,
                         '</div>',
-                        '<div class="profile-activity-side"><span class="profile-activity-time">' + new Date(r.created_at).toLocaleString() + '</span></div>',
-                        '</article>'
+                        '<div class="profile-activity-side">',
+                        '<span class="profile-activity-time">' + new Date(r.created_at).toLocaleString() + '</span>',
+                        replyBtnHtml,
+                        '</div>',
+                        '</article>',
+                        replyContentHtml
                     ].join('');
                 }).join('');
                 listEl.innerHTML = html;
@@ -1588,22 +1594,40 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         var statusText = r.status === 'pending' ? '待处理' : (r.status === 'actioned' ? '已处理' : (r.status === 'reviewed' ? '已审阅' : r.status));
                         var statusColor = r.status === 'pending' ? '#f5a623' : (r.status === 'actioned' ? '#10b981' : '#6b7280');
                         var targetInfo = '<strong>被举报：</strong>' + (r.target_user ? escapeHtml(r.target_user) + ' · ' : '') + (r.target_type === 'photo' ? '照片墙' : '帖子') + ' · <span style="color:' + statusColor + ';">' + statusText + '</span>';
-                        var replyHtml = r.admin_response ? '<div class="profile-activity-admin-reply" style="margin-top:8px;padding:8px 10px;background:rgba(5,150,105,0.08);border-left:3px solid #0a9669;border-radius:4px;font-size:12px;color:#065f46;"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div>' : '';
+                        var hasReply = !!r.admin_response;
+                        var replyId = 'reportReply_' + r.id;
+                        var replyBtnHtml = hasReply ? '<button class="report-reply-toggle" onclick="toggleReportReply(\'' + replyId + '\',this)">查看回复</button>' : '';
+                        var replyContentHtml = hasReply ? '<div id="' + replyId + '" class="profile-activity-report-reply" style="display:none;"><div class="profile-activity-admin-reply-inner"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div></div>' : '';
                         return [
                             '<article class="profile-activity-item" style="cursor:default;">',
                             '<div class="profile-activity-main">',
                             '<div class="profile-activity-title">' + targetInfo + '</div>',
                             '<div class="profile-activity-content" style="font-size:13px;color:#4b5563;">举报原因：' + escapeHtml(String(r.report_reason || '')) + '</div>',
-                            replyHtml,
                             '</div>',
-                            '<div class="profile-activity-side"><span class="profile-activity-time">' + new Date(r.created_at).toLocaleString() + '</span></div>',
-                            '</article>'
+                            '<div class="profile-activity-side">',
+                            '<span class="profile-activity-time">' + new Date(r.created_at).toLocaleString() + '</span>',
+                            replyBtnHtml,
+                            '</div>',
+                            '</article>',
+                            replyContentHtml
                         ].join('');
                     }).join('');
                 }
                 profileActivityState.modalKind = 'reports';
                 modal.classList.add('active');
             }
+
+            window.toggleReportReply = function(id, btn) {
+                var el = document.getElementById(id);
+                if (!el) return;
+                if (el.style.display === 'none') {
+                    el.style.display = 'block';
+                    if (btn) btn.textContent = '收起回复';
+                } else {
+                    el.style.display = 'none';
+                    if (btn) btn.textContent = '查看回复';
+                }
+            };
 
             async function loadProfileActivity(forceRefresh) {
                 forceRefresh = !!forceRefresh;

@@ -4260,6 +4260,41 @@
             font-size: 13px;
             line-height: 1.7;
         }
+        .report-reply-toggle {
+            display: inline-block;
+            margin-top: 4px;
+            padding: 2px 10px;
+            border: 1px solid rgba(5,150,105,0.3);
+            border-radius: 999px;
+            background: rgba(5,150,105,0.06);
+            color: #0a9669;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.18s ease;
+            white-space: nowrap;
+            line-height: 22px;
+        }
+        .report-reply-toggle:hover {
+            background: rgba(5,150,105,0.14);
+            border-color: rgba(5,150,105,0.5);
+        }
+        .profile-activity-report-reply {
+            margin: -4px 0 8px 0;
+            animation: xtjFloatIn 0.2s ease both;
+        }
+        .profile-activity-admin-reply-inner {
+            padding: 10px 14px;
+            background: rgba(5,150,105,0.06);
+            border-left: 3px solid #0a9669;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #065f46;
+            line-height: 1.6;
+        }
+        .profile-activity-admin-reply-inner strong {
+            color: #047857;
+        }
         .profile-avatar {
             width: 50px !important;
             height: 50px !important;
@@ -4498,6 +4533,23 @@
             background: rgba(33, 41, 37, 0.36);
             border-color: rgba(124, 138, 127, 0.28);
             color: #e8f2ea;
+        }
+        [data-theme="dark"] .report-reply-toggle {
+            background: rgba(5,150,105,0.12);
+            border-color: rgba(5,150,105,0.35);
+            color: #6ee7b7;
+        }
+        [data-theme="dark"] .report-reply-toggle:hover {
+            background: rgba(5,150,105,0.25);
+            border-color: rgba(5,150,105,0.55);
+        }
+        [data-theme="dark"] .profile-activity-admin-reply-inner {
+            background: rgba(5,150,105,0.08);
+            border-left-color: #34d399;
+            color: #a7f3d0;
+        }
+        [data-theme="dark"] .profile-activity-admin-reply-inner strong {
+            color: #6ee7b7;
         }
         [data-theme="dark"] .profile-totals-bar {
             background: transparent;
