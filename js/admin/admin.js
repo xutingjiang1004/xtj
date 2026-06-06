@@ -953,25 +953,25 @@
         if (!reportsData.length) {
             h += '<div class="empty">暂无举报</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>举报人</th><th>类型</th><th>目标</th><th>分类</th><th>原因</th><th>时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>举报人</th><th>类型</th><th>被举报人</th><th>分类</th><th>原因</th><th>时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
             reportsData.forEach(function(r) {
                 var statusBadge = r.status === 'pending' ? '<span class="badge badge-red">待处理</span>' :
                                  r.status === 'reviewed' ? '<span class="badge badge-green">已审阅</span>' :
                                  r.status === 'dismissed' ? '<span class="badge" style="background:rgba(128,128,128,0.15);color:var(--text-muted)">已驳回</span>' :
                                  '<span class="badge badge-green">已处理</span>';
                 h += '<tr><td>' + escapeHtml(r.reporter_name) + '</td>';
-                h += '<td>' + r.target_type + '</td>';
-                h += '<td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.target_id) + '</td>';
-                h += '<td>' + r.report_category + '</td>';
+                h += '<td>' + (r.target_type === 'photo' ? '照片墙' : '帖子') + '</td>';
+                h += '<td><strong>' + escapeHtml(r.target_user || '-') + '</strong></td>';
+                h += '<td>' + escapeHtml(r.report_category) + '</td>';
                 h += '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.report_reason || '-') + '</td>';
                 h += '<td>' + formatTime(r.created_at) + '</td>';
                 h += '<td>' + statusBadge + '</td>';
                 h += '<td style="white-space:nowrap;">';
                 if (r.status === 'pending') {
-                    h += '<button class="btn-sm primary" onclick="approveReport(\'' + r.id + '\')">处理</button> ';
+                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + r.id + '\')">处理</button> ';
                     h += '<button class="btn-sm" onclick="dismissReport(\'' + r.id + '\')">驳回</button>';
                 } else {
-                    h += '<button class="btn-sm" onclick="viewReportDetail(\'' + r.id + '\')">详情</button>';
+                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + r.id + '\')">详情</button>';
                 }
                 h += '</td></tr>';
             });
@@ -981,9 +981,114 @@
         el.innerHTML = h;
     }
 
-    window.approveReport = function(id) {
+    window.handleReportDetail = function(id) {
         var r = reportsData.find(function(x) { return x.id === id; });
-        showConfirm('处理举报', '确认将此举报标记为"已处理"？\n\n目标：' + (r ? r.target_id : '') + '\n分类：' + (r ? r.report_category : ''), '确认处理', async function() {
+        if (!r) return;
+        
+        var modal = document.createElement('div');
+        modal.className = 'report-detail-modal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+        
+        var box = document.createElement('div');
+        box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.onclick = function(e) { e.stopPropagation(); };
+        
+        var typeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
+        var statusLabel = r.status === 'pending' ? '待处理' : r.status === 'actioned' ? '已处理' : r.status === 'dismissed' ? '已驳回' : r.status;
+        
+        var html = '<h3 style="margin:0 0 16px;">举报详情</h3>';
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:16px;">';
+        html += '<div><strong>举报人：</strong>' + escapeHtml(r.reporter_name) + '</div>';
+        html += '<div><strong>被举报人：</strong>' + escapeHtml(r.target_user || '-') + '</div>';
+        html += '<div><strong>类型：</strong>' + typeLabel + '</div>';
+        html += '<div><strong>分类：</strong>' + escapeHtml(r.report_category) + '</div>';
+        html += '<div><strong>状态：</strong>' + statusLabel + '</div>';
+        html += '<div><strong>时间：</strong>' + formatTime(r.created_at) + '</div>';
+        html += '</div>';
+        html += '<div style="margin-bottom:12px;"><strong>目标ID：</strong><code>' + escapeHtml(r.target_id) + '</code></div>';
+        html += '<div style="margin-bottom:12px;padding:10px;background:rgba(0,0,0,0.05);border-radius:8px;"><strong>举报原因：</strong>' + escapeHtml(r.report_reason || '-') + '</div>';
+        if (r.admin_response) {
+            html += '<div style="margin-bottom:12px;padding:10px;background:rgba(5,150,105,0.08);border-radius:8px;"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div>';
+        }
+        if (r.reviewed_by) {
+            html += '<div style="margin-bottom:12px;font-size:12px;color:var(--text-muted);">处理人：' + escapeHtml(r.reviewed_by) + ' · 处理时间：' + formatTime(r.reviewed_at) + '</div>';
+        }
+        
+        html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">';
+        if (r.status === 'pending') {
+            html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + r.id + '\')">删除内容</button>';
+            html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + r.id + '\')">封禁用户</button>';
+            html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + r.id + '\')">标记已处理</button>';
+        }
+        html += '<button class="btn-sm" style="margin-left:auto;" onclick="this.closest(\'.report-detail-modal\').remove()">关闭</button>';
+        html += '</div>';
+        
+        if (r.status === 'pending') {
+            html += '<div style="border-top:1px solid rgba(0,0,0,0.1);padding-top:12px;margin-top:8px;">';
+            html += '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">回复举报人（选填）</label>';
+            html += '<textarea id="reportResponse_' + r.id + '" rows="2" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);font-size:13px;resize:vertical;font-family:inherit;" placeholder="输入回复内容..."></textarea>';
+            html += '<button class="btn-sm primary" style="margin-top:8px;" onclick="doRespondReport(\'' + r.id + '\')">回复并处理</button>';
+            html += '</div>';
+        }
+        
+        box.innerHTML = html;
+        modal.appendChild(box);
+        document.body.appendChild(modal);
+    };
+
+    window.doDeleteReportPost = function(id) {
+        var r = reportsData.find(function(x) { return x.id === id; });
+        showConfirm('删除内容', '确认删除被举报的' + (r && r.target_type === 'photo' ? '照片' : '帖子') + '？此操作不可撤销。', '确认删除', async function() {
+            try {
+                if (API_BASE && getToken()) {
+                    await apiCall('POST', '/admin/report/' + id + '/delete-post');
+                } else {
+                    if (r && (r.target_type === 'post' || r.target_type === 'photo')) {
+                        var postRes = await sb.from('posts').select('actor_key').eq('id', r.target_id).maybeSingle();
+                        var actorKey = (postRes && postRes.data && postRes.data.actor_key) || 'admin_' + Date.now();
+                        await sb.rpc('delete_post_with_actor', { p_post_id: r.target_id, p_actor_key: actorKey });
+                    }
+                    await sb.from('reports').update({ status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN }).eq('id', id);
+                }
+                await loadReportsData();
+                document.querySelector('.report-detail-modal')?.remove();
+                renderTab('reports');
+                showToast('内容已删除，举报已处理', 'success');
+            } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+        });
+    };
+
+    window.doBanReportUser = function(id) {
+        var r = reportsData.find(function(x) { return x.id === id; });
+        if (!r || !r.target_user) { showToast('无法确定被举报用户', 'error'); return; }
+        showConfirm('封禁用户', '确认封禁用户 ' + r.target_user + '？\n\n选择封禁时长：', '确认封禁', async function() {
+            try {
+                if (API_BASE && getToken()) {
+                    await apiCall('POST', '/admin/report/' + id + '/ban-user', { duration_hours: 72 });
+                } else {
+                    await sb.from('reports').update({ status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN }).eq('id', id);
+                    // 封禁用户
+                    var existing = await sb.from('bans').select('id, is_active').eq('user_name', r.target_user);
+                    var banData = { user_name: r.target_user, ban_type: 'temporary', ban_reason: '举报处理：' + (r.report_reason || '违规内容'), ban_duration_hours: 72, banned_by: ADMIN, is_active: true };
+                    if (existing && existing.data && existing.data.length) {
+                        await sb.from('bans').update(banData).eq('id', existing.data[0].id);
+                    } else {
+                        banData.expires_at = new Date(Date.now() + 72 * 3600000).toISOString();
+                        await sb.from('bans').insert([banData]);
+                    }
+                }
+                await loadReportsData();
+                await loadBansData();
+                document.querySelector('.report-detail-modal')?.remove();
+                renderTab('reports');
+                showToast('用户已封禁，举报已处理', 'success');
+            } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+        });
+    };
+
+    window.doMarkReportActioned = function(id) {
+        showConfirm('标记处理', '确认将此举报标记为已处理？', '确认', async function() {
             try {
                 if (API_BASE && getToken()) {
                     await apiCall('PUT', '/admin/report/' + id, { status: 'actioned' });
@@ -991,14 +1096,45 @@
                     await sb.from('reports').update({ status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN }).eq('id', id);
                 }
                 await loadReportsData();
+                document.querySelector('.report-detail-modal')?.remove();
                 renderTab('reports');
                 showToast('举报已处理', 'success');
             } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
         });
     };
 
+    window.doRespondReport = function(id) {
+        var textarea = document.getElementById('reportResponse_' + id);
+        if (!textarea) return;
+        var response = textarea.value.trim();
+        if (!response) { showToast('请输入回复内容', 'error'); return; }
+        try {
+            if (API_BASE && getToken()) {
+                apiCall('PUT', '/admin/report/' + id + '/respond', { response: response }).then(async function() {
+                    await loadReportsData();
+                    document.querySelector('.report-detail-modal')?.remove();
+                    renderTab('reports');
+                    showToast('已回复并处理', 'success');
+                }).catch(function(e) { showToast('操作失败: ' + e.message, 'error'); });
+            } else {
+                sb.from('reports').update({
+                    admin_response: response,
+                    response_at: new Date().toISOString(),
+                    status: 'actioned',
+                    reviewed_at: new Date().toISOString(),
+                    reviewed_by: ADMIN
+                }).eq('id', id).then(async function() {
+                    await loadReportsData();
+                    document.querySelector('.report-detail-modal')?.remove();
+                    renderTab('reports');
+                    showToast('已回复并处理', 'success');
+                }).catch(function(e) { showToast('操作失败: ' + e.message, 'error'); });
+            }
+        } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+    };
+
     window.dismissReport = function(id) {
-        showConfirm('驳回举报', '确认将此举报标记为"已驳回"？', '确认驳回', async function() {
+        showConfirm('驳回举报', '确认将此举报标记为已驳回？', '确认驳回', async function() {
             try {
                 if (API_BASE && getToken()) {
                     await apiCall('PUT', '/admin/report/' + id, { status: 'dismissed' });
@@ -1010,13 +1146,6 @@
                 showToast('举报已驳回', 'success');
             } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
         });
-    };
-
-    window.viewReportDetail = function(id) {
-        var r = reportsData.find(function(x) { return x.id === id; });
-        if (!r) return;
-        var detail = '举报人：' + r.reporter_name + '\n类型：' + r.target_type + '\n目标ID：' + r.target_id + '\n目标用户：' + (r.target_user || '-') + '\n分类：' + r.report_category + '\n原因：' + (r.report_reason || '-') + '\n证据：' + (r.evidence_url || '-') + '\n状态：' + r.status + '\n时间：' + formatTime(r.created_at) + '\n处理人：' + (r.reviewed_by || '-');
-        alert(detail);
     };
 
     var bansData = [];
