@@ -10556,6 +10556,9 @@ body.ios-chat-keyboard-open .chat-input-area {
   width: min(680px, calc(100vw - 32px)) !important;
   max-width: none !important;
   max-height: min(86vh, 920px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
   border-radius: 26px !important;
   background: rgba(248, 253, 250, 0.96) !important;
   border: 1px solid rgba(204, 230, 214, 0.88) !important;
@@ -10669,31 +10672,36 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 .report-modal-content {
-  display: block !important;
+  display: flex !important;
+  flex-direction: column !important;
   flex: 1 !important;
   min-height: 0 !important;
-  overflow: hidden !important;
-  padding: 16px 24px 24px !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding: 12px 20px 20px !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .report-view-panel {
   display: none;
-  height: 100%;
   min-height: 0;
 }
 
 .report-view-panel.active {
   display: flex !important;
+  flex-direction: column !important;
+  width: 100%;
 }
 
 .report-modal-body {
-  flex: 1 !important;
+  flex: 0 0 auto !important;
   min-width: 0 !important;
-  overflow-y: auto !important;
-  padding: 0 4px 0 0 !important;
+  overflow: visible !important;
+  padding: 0 !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 14px !important;
+  gap: 12px !important;
 }
 
 #reportModalFormBody > .report-field,
@@ -10703,11 +10711,16 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 #reportModalFormBody > .report-field {
-  padding: 16px 18px;
-  border-radius: 20px;
-  border: 1px solid rgba(197, 225, 207, 0.82);
-  background: rgba(245, 253, 248, 0.72);
-  box-shadow: 0 10px 24px rgba(28, 76, 49, 0.06);
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#reportModalFormBody > .report-field + .report-field {
+  padding-top: 14px !important;
+  border-top: 1px solid rgba(203, 229, 213, 0.72) !important;
 }
 
 #reportModalFormBody > .report-field:nth-of-type(1) { order: 1; }
@@ -10727,10 +10740,10 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 .report-type-tabs {
-  padding: 4px !important;
-  border-radius: 16px !important;
-  background: rgba(232, 247, 238, 0.76) !important;
-  border: 1px solid rgba(192, 224, 204, 0.74) !important;
+  padding: 3px !important;
+  border-radius: 999px !important;
+  background: rgba(232, 247, 238, 0.72) !important;
+  border: 1px solid rgba(192, 224, 204, 0.64) !important;
   gap: 4px !important;
 }
 
@@ -10755,11 +10768,12 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 .report-content-select {
-  max-height: 244px !important;
-  border-radius: 18px !important;
-  border: 1px solid rgba(197, 225, 207, 0.82) !important;
-  background: rgba(255, 255, 255, 0.56) !important;
+  max-height: min(28vh, 220px) !important;
+  border-radius: 16px !important;
+  border: 1px solid rgba(197, 225, 207, 0.76) !important;
+  background: rgba(255, 255, 255, 0.48) !important;
   overflow: auto !important;
+  box-shadow: none !important;
 }
 
 .report-content-item {
@@ -10866,11 +10880,11 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 .report-selected-preview {
-  border-radius: 16px !important;
-  background: rgba(224, 247, 232, 0.76) !important;
-  border: 1px solid rgba(181, 220, 195, 0.72) !important;
+  border-radius: 14px !important;
+  background: rgba(224, 247, 232, 0.52) !important;
+  border: 1px solid rgba(181, 220, 195, 0.6) !important;
   color: #315f46 !important;
-  padding: 16px !important;
+  padding: 14px !important;
 }
 
 .report-selected-empty {
@@ -10931,9 +10945,9 @@ body.ios-chat-keyboard-open .chat-input-area {
   width: auto !important;
   min-width: 0 !important;
   max-width: none !important;
-  padding: 0 4px 0 0 !important;
-  overflow-y: auto !important;
-  flex: 1 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  flex: 0 0 auto !important;
   display: none !important;
   flex-direction: column !important;
   gap: 12px !important;
@@ -10982,15 +10996,18 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 .report-records-list {
+  display: flex !important;
+  flex-direction: column !important;
   padding: 0 !important;
   gap: 10px !important;
 }
 
 .report-records-empty {
-  border-radius: 18px;
-  border: 1px dashed rgba(189, 217, 199, 0.84);
-  background: rgba(247, 252, 249, 0.76);
+  border-radius: 14px;
+  border: 1px dashed rgba(189, 217, 199, 0.74);
+  background: rgba(247, 252, 249, 0.58);
   line-height: 1.7;
+  box-shadow: none;
 }
 
 .report-record-item {
@@ -10998,12 +11015,17 @@ body.ios-chat-keyboard-open .chat-input-area {
   flex-direction: column !important;
   align-items: stretch !important;
   justify-content: flex-start !important;
-  gap: 12px !important;
-  padding: 16px 18px !important;
-  background: rgba(255,255,255,0.6) !important;
-  border-radius: 18px !important;
-  border: 1px solid rgba(200,220,210,0.58) !important;
-  box-shadow: 0 10px 24px rgba(28, 76, 49, 0.06) !important;
+  gap: 10px !important;
+  padding: 14px 0 16px !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(198, 225, 209, 0.72) !important;
+  box-shadow: none !important;
+}
+
+.report-record-item:first-child {
+  padding-top: 0 !important;
 }
 
 .report-record-head {
@@ -11238,6 +11260,11 @@ body.ios-chat-keyboard-open .chat-input-area {
   border-color: rgba(118, 151, 130, 0.22) !important;
 }
 
+[data-theme="dark"] #reportModalFormBody > .report-field {
+  background: transparent !important;
+  border-color: rgba(118, 151, 130, 0.18) !important;
+}
+
 [data-theme="dark"] .report-content-item:hover {
   background: rgba(255,255,255,0.05) !important;
 }
@@ -11277,6 +11304,29 @@ body.ios-chat-keyboard-open .chat-input-area {
   font-size: 12px !important;
   font-weight: 800 !important;
   line-height: 1.2 !important;
+}
+
+@media (max-width: 720px) {
+  .report-modal-content {
+    padding: 10px 16px 16px !important;
+  }
+
+  .report-modal-body {
+    gap: 10px !important;
+  }
+
+  #reportModalFormBody > .report-field {
+    padding: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  #reportModalFormBody > .report-field + .report-field {
+    padding-top: 12px !important;
+  }
+
+  .report-record-item {
+    padding: 12px 0 14px !important;
+  }
 }
 
 .report-reply-toggle:hover {
