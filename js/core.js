@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -1733,6 +1733,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var unauthUI = document.getElementById("unauthUI");
                 var authUI = document.getElementById("authUI");
                 var annBtnWrapper = document.getElementById("announcement-btn-wrapper");
+                var reportBtnWrapper = document.getElementById("report-btn-wrapper");
                 var profileName = document.getElementById("profileName");
                 var profileStatus = document.getElementById("profileStatus");
                 var publishBox = document.getElementById("publishBox");
@@ -1741,6 +1742,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     unauthUI.style.display = "none";
                     authUI.style.display = "flex";
                     annBtnWrapper.style.display = "block";
+                    if (reportBtnWrapper) reportBtnWrapper.style.display = "block";
                     document.getElementById("myName").textContent = currentUser;
                     var avatar = document.getElementById("myAvatar");
                     avatar.textContent = currentUser[0].toUpperCase();
@@ -6401,6 +6403,226 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     openAnnouncementModal();
                 });
             }
+
+        // ===================== 举报功能 =====================
+        var _reportType = 'post';
+        var _reportSelectedId = null;
+        var _reportSelectedReason = null;
+        var _reportTargetUser = null;
+        var _reportContentData = [];
+
+        window.openReportModal = function() {
+            if (!currentUser) { showToast('请先登录'); return; }
+            var overlay = document.getElementById('reportModal');
+            if (!overlay) return;
+            _reportType = 'post';
+            _reportSelectedId = null;
+            _reportSelectedReason = null;
+            _reportTargetUser = null;
+            _reportContentData = [];
+            document.querySelectorAll('.report-type-tab').forEach(function(t) {
+                t.classList.toggle('active', t.dataset.type === 'post');
+            });
+            document.querySelectorAll('.report-reason-btn').forEach(function(b) { b.classList.remove('selected'); });
+            document.getElementById('reportCustomReason').value = '';
+            document.getElementById('reportSubmitBtn').disabled = true;
+            document.getElementById('reportError').style.display = 'none';
+            document.getElementById('reportSelectedInfo').style.display = 'none';
+            overlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            loadReportContentList();
+        };
+
+        window.closeReportModal = function() {
+            var overlay = document.getElementById('reportModal');
+            if (!overlay) return;
+            overlay.classList.remove('active');
+            document.body.style.overflow = '';
+        };
+
+        window.switchReportType = function(type) {
+            _reportType = type;
+            _reportSelectedId = null;
+            _reportTargetUser = null;
+            document.querySelectorAll('.report-type-tab').forEach(function(t) {
+                t.classList.toggle('active', t.dataset.type === type);
+            });
+            document.getElementById('reportSubmitBtn').disabled = true;
+            document.getElementById('reportSelectedInfo').style.display = 'none';
+            loadReportContentList();
+        };
+
+        function loadReportContentList() {
+            var container = document.getElementById('reportContentList');
+            if (!container) return;
+            container.innerHTML = '<div class="report-loading">加载中...</div>';
+
+            if (_reportType === 'post') {
+                // 加载所有帖子
+                try {
+                    sb.from('posts')
+                        .select('id, user_name, content, media_url, media_type, created_at')
+                        .neq('media_type', '__avatar__')
+                        .neq('media_type', '__user_info__')
+                        .neq('media_type', '__ann__')
+                        .neq('media_type', '__photo_wall__')
+                        .order('created_at', { ascending: false })
+                        .limit(200)
+                        .then(function(res) {
+                            _reportContentData = (res.data || []).map(function(p) {
+                                var txt = p.content || '';
+                                try { var j = JSON.parse(txt); txt = j.title || j.content || txt; } catch(e) {}
+                                if (txt.length > 60) txt = txt.substring(0, 60) + '...';
+                                return { id: p.id, user_name: p.user_name, text: txt, thumb: p.media_url || '', type: 'post' };
+                            });
+                            renderReportContentList(container);
+                        }).catch(function() {
+                            container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
+                        });
+                } catch(e) {
+                    container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
+                }
+            } else {
+                // 加载照片墙照片
+                try {
+                    sb.from('posts')
+                        .select('id, user_name, content, media_url, media_type, created_at')
+                        .eq('media_type', '__photo_wall__')
+                        .order('created_at', { ascending: false })
+                        .limit(200)
+                        .then(function(res) {
+                            _reportContentData = (res.data || []).map(function(p) {
+                                var txt = p.content || '';
+                                try { var j = JSON.parse(txt); txt = j.caption || j.title || txt || ''; } catch(e) {}
+                                if (txt.length > 60) txt = txt.substring(0, 60) + '...';
+                                return { id: p.id, user_name: p.user_name, text: txt || '(照片)', thumb: p.media_url || '', type: 'photo' };
+                            });
+                            renderReportContentList(container);
+                        }).catch(function() {
+                            container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
+                        });
+                } catch(e) {
+                    container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
+                }
+            }
+        }
+
+        function renderReportContentList(container) {
+            if (!_reportContentData.length) {
+                container.innerHTML = '<div class="report-loading">暂无内容</div>';
+                return;
+            }
+            var h = '';
+            _reportContentData.forEach(function(item) {
+                var selected = _reportSelectedId === item.id ? ' selected' : '';
+                var thumbHtml = item.thumb ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="">' : '<div class="rc-thumb" style="display:flex;align-items:center;justify-content:center;font-size:18px;">📄</div>';
+                h += '<div class="report-content-item' + selected + '" data-id="' + escapeHtml(item.id) + '" data-user="' + escapeHtml(item.user_name) + '" onclick="selectReportContent(this)">';
+                h += thumbHtml;
+                h += '<div class="rc-info"><div class="rc-user">' + escapeHtml(item.user_name) + '</div>';
+                h += '<div class="rc-text">' + escapeHtml(item.text) + '</div></div>';
+                h += '</div>';
+            });
+            container.innerHTML = h;
+        }
+
+        window.selectReportContent = function(el) {
+            var id = el.dataset.id;
+            _reportSelectedId = id;
+            _reportTargetUser = el.dataset.user;
+            document.querySelectorAll('#reportContentList .report-content-item').forEach(function(item) {
+                item.classList.toggle('selected', item.dataset.id === id);
+            });
+            updateReportSubmitState();
+            // 显示预览
+            var info = document.getElementById('reportSelectedInfo');
+            var preview = info.querySelector('.report-selected-preview');
+            preview.textContent = '已选择：' + (_reportType === 'post' ? '帖子' : '照片') + ' · 发布者：' + (_reportTargetUser || '未知');
+            info.style.display = 'block';
+        };
+
+        window.selectReportReason = function(btn) {
+            var reason = btn.dataset.reason;
+            if (_reportSelectedReason === reason) {
+                _reportSelectedReason = null;
+                btn.classList.remove('selected');
+            } else {
+                document.querySelectorAll('.report-reason-btn').forEach(function(b) { b.classList.remove('selected'); });
+                _reportSelectedReason = reason;
+                btn.classList.add('selected');
+            }
+            updateReportSubmitState();
+        };
+
+        function updateReportSubmitState() {
+            var btn = document.getElementById('reportSubmitBtn');
+            if (_reportSelectedId && _reportSelectedReason) {
+                btn.disabled = false;
+            } else {
+                btn.disabled = true;
+            }
+        }
+
+        window.submitReport = async function() {
+            if (!_reportSelectedId || !_reportSelectedReason) {
+                document.getElementById('reportError').style.display = 'block';
+                document.getElementById('reportError').textContent = '请选择举报内容和举报原因';
+                return;
+            }
+            var btn = document.getElementById('reportSubmitBtn');
+            var errEl = document.getElementById('reportError');
+            btn.disabled = true;
+            btn.textContent = '提交中...';
+            errEl.style.display = 'none';
+
+            var customReason = document.getElementById('reportCustomReason').value.trim();
+            var finalReason = customReason ? _reportSelectedReason + '：' + customReason : _reportSelectedReason;
+
+            try {
+                if (API_BASE) {
+                    var res = await fetch(API_BASE + '/api/report', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            reporter_name: currentUser,
+                            target_type: _reportType,
+                            target_id: _reportSelectedId,
+                            target_user: _reportTargetUser,
+                            report_category: _reportSelectedReason,
+                            report_reason: finalReason
+                        })
+                    });
+                    var data = await res.json();
+                    if (!res.ok) throw new Error(data.error || '提交失败');
+                } else {
+                    var { error } = await sb.from('reports').insert([{
+                        reporter_name: currentUser,
+                        target_type: _reportType,
+                        target_id: _reportSelectedId,
+                        target_user: _reportTargetUser,
+                        report_category: _reportSelectedReason,
+                        report_reason: finalReason,
+                        status: 'pending'
+                    }]);
+                    if (error) throw new Error(error.message);
+                }
+                showToast('举报已提交，管理员会尽快处理', 'success');
+                closeReportModal();
+            } catch(e) {
+                errEl.style.display = 'block';
+                errEl.textContent = '提交失败：' + e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '提交举报';
+            }
+        };
+
+        // 绑定举报按钮关闭事件
+        var reportOverlay = document.getElementById('reportModal');
+        if (reportOverlay) {
+            reportOverlay.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') closeReportModal();
+            });
+        }
 
         (function installUiTextRepair() {
             // This repair system is superseded by features.js which handles mojibake more accurately.

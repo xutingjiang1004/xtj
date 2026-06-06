@@ -3649,6 +3649,236 @@
             box-shadow: 0 4px 12px rgba(5,150,105,0.35);
         }
 
+        /* ========== 举报按钮样式 ========== */
+        .report-btn {
+            position: relative;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            border: 1px solid rgba(255,255,255,0.4);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: var(--trans-smooth);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+        .report-btn:hover {
+            background: rgba(255,100,80,0.25);
+            transform: scale(1.025);
+            border-color: rgba(255,100,80,0.5);
+        }
+        .report-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: none;
+            stroke: var(--text-main);
+            stroke-width: 1.8;
+        }
+
+        /* 举报模态框 */
+        .report-modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1001;
+            background: rgba(0,0,0,0.4);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .report-modal-overlay.active {
+            display: flex;
+            animation: fadeIn 0.25s ease;
+        }
+        .report-modal {
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid rgba(255, 255, 255, 0.7);
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 520px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+            overflow: hidden;
+            animation: modalPop 0.3s ease;
+        }
+        [data-theme="dark"] .report-modal {
+            background: rgba(28, 32, 30, 0.94);
+            border-color: rgba(255,255,255,0.12);
+        }
+        .report-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+            font-size: 16px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .report-modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .report-field label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+        }
+        .report-type-tabs {
+            display: flex;
+            gap: 8px;
+        }
+        .report-type-tab {
+            flex: 1;
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.15);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            text-align: center;
+            transition: var(--trans-smooth);
+            color: var(--text-main);
+        }
+        .report-type-tab.active {
+            background: rgba(5,150,105,0.15);
+            border-color: rgba(5,150,105,0.5);
+            color: #059669;
+        }
+        .report-type-tab:hover {
+            background: rgba(255,255,255,0.25);
+        }
+        .report-content-select {
+            max-height: 200px;
+            overflow-y: auto;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.1);
+        }
+        .report-content-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            transition: var(--trans-smooth);
+            font-size: 13px;
+        }
+        .report-content-item:last-child { border-bottom: none; }
+        .report-content-item:hover {
+            background: rgba(255,255,255,0.15);
+        }
+        .report-content-item.selected {
+            background: rgba(5,150,105,0.12);
+            border-left: 3px solid #059669;
+        }
+        .report-content-item .rc-thumb {
+            width: 40px;
+            height: 40px;
+            border-radius: 6px;
+            object-fit: cover;
+            background: rgba(0,0,0,0.1);
+            flex-shrink: 0;
+        }
+        .report-content-item .rc-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .report-content-item .rc-user {
+            font-weight: 600;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+        .report-content-item .rc-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text-main);
+        }
+        .report-loading {
+            text-align: center;
+            padding: 30px;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+        .report-reason-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        .report-reason-btn {
+            padding: 10px 8px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.15);
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            text-align: center;
+            transition: var(--trans-smooth);
+            color: var(--text-main);
+        }
+        .report-reason-btn:hover {
+            background: rgba(255,255,255,0.25);
+        }
+        .report-reason-btn.selected {
+            background: rgba(255,59,96,0.15);
+            border-color: rgba(255,59,96,0.5);
+            color: #ff3b60;
+        }
+        .report-reason-input {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.15);
+            font-size: 13px;
+            resize: vertical;
+            outline: none;
+            color: var(--text-main);
+            margin-top: 8px;
+            font-family: inherit;
+        }
+        .report-reason-input:focus {
+            border-color: rgba(5,150,105,0.4);
+            background: rgba(255,255,255,0.25);
+        }
+        .report-submit-btn {
+            width: 100%;
+            padding: 12px;
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .report-submit-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .report-error {
+            color: #ff3b60;
+            font-size: 13px;
+            text-align: center;
+        }
+        .report-selected-preview {
+            padding: 10px;
+            border-radius: 10px;
+            background: rgba(5,150,105,0.08);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
         /* ========== "我的"按钮光波动画 ========== */
         .dock-tab.anim-profile .anim-layer {
             animation: profileContainerFade 0.9s ease forwards;
