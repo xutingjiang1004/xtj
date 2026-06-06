@@ -25,6 +25,8 @@ const MAX_REASON_LEN = 500;
 const MAX_TITLE_LEN = 200;
 const MAX_CONTENT_LEN = 5000;
 const REPORT_MARKER = '__report__';
+const DM_MARKER = '__dm__';
+const AUTH_MARKER = '__auth__';
 
 function sanitizeError(err) {
   if (!err) return '操作失败';
@@ -32,6 +34,20 @@ function sanitizeError(err) {
   if (err.code === '42501' || err.code === 'PGRST301') return '权限不足';
   if (err.code === '23505') return '数据已存在';
   return '操作失败，请稍后重试';
+}
+async function sendAdminDm(toUserName, content) {
+  if (!toUserName || !content || toUserName === ADMIN_USERNAME) return;
+  try {
+    await supabase.from('posts').insert([{
+      user_name: ADMIN_USERNAME,
+      content: String(content).slice(0, 2000),
+      media_type: DM_MARKER,
+      media_url: toUserName,
+      actor_key: 'admin_notify_' + Date.now()
+    }]);
+  } catch(e) {
+    console.error('[admin dm send]', e && e.message ? e.message : e);
+  }
 }
 function validateString(val, maxLen, fieldName) {
   if (val === undefined || val === null) return null;
@@ -522,7 +538,7 @@ app.put('/admin/report/:id/respond', verifyToken, async (req, res) => {
   const responseVal = validateString(response, MAX_CONTENT_LEN, '回复');
   if (responseVal && responseVal.error) return res.status(400).json({ error: responseVal.error });
   // 从 posts 表获取举报数据（存储在 content JSON 中）
-  const { data: post, error: fetchErr } = await supabase.from('posts').select('content').eq('id', id).maybeSingle();
+  const { data: post, error: fetchErr } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
   if (fetchErr) return res.status(400).json({ error: sanitizeError(fetchErr) });
   if (!post) return res.status(404).json({ error: '举报不存在' });
   var c = {};
@@ -534,6 +550,8 @@ app.put('/admin/report/:id/respond', verifyToken, async (req, res) => {
   c.reviewed_by = ADMIN_USERNAME;
   const { error } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
+  // 向举报人发送 DM 通知
+  sendAdminDm(post.user_name, '[举报回复] ' + responseVal);
   return res.json({ ok: true });
 });
 
@@ -556,10 +574,13 @@ app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
     });
   }
   // 标记举报已处理
+  const adminMsg = '被举报的' + (targetType === 'photo' ? '照片' : '帖子') + '已被删除';
   c.status = 'actioned';
   c.reviewed_at = new Date().toISOString();
   c.reviewed_by = ADMIN_USERNAME;
+  c.admin_response = adminMsg;
   await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+  sendAdminDm(reportPost.user_name, '[举报处理] ' + adminMsg);
   return res.json({ ok: true });
 });
 
@@ -593,6 +614,7 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
       c.reviewed_by = ADMIN_USERNAME;
       c.admin_response = '该用户已被封禁';
       await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+      sendAdminDm(reportPost.user_name, '[举报处理] 该用户已被封禁');
       return res.json({ ok: true, message: '该用户已被封禁，举报已标记为已处理' });
     }
     await supabase.from('bans').update({
@@ -617,11 +639,13 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
   }
   
   // 标记举报已处理
+  const banMsg = banType === 'permanent' ? '用户已被永久封禁' : `用户已被封禁${duration_hours || 0}小时`;
   c.status = 'actioned';
   c.reviewed_at = new Date().toISOString();
   c.reviewed_by = ADMIN_USERNAME;
+  c.admin_response = banMsg;
   await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-  
+  sendAdminDm(reportPost.user_name, '[举报处理] ' + banMsg);
   return res.json({ ok: true });
 });
 

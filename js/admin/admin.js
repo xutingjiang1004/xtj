@@ -315,7 +315,7 @@
                 // 通过 API 加载数据
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
                 annList = postData.filter(function(p) { return p.media_type === ANN_MARKER; });
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
@@ -329,7 +329,7 @@
                 var likeRes = await sb.from('likes').select('*').order('created_at', {ascending: false}).limit(5000);
                 var commRes = await sb.from('comments').select('*').order('created_at', {ascending: false}).limit(5000);
 
-                allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
                 annList = (postRes.data || []).filter(function(p) { return p.media_type === ANN_MARKER; });
                 allLikes = likeRes.data || [];
                 allComments = commRes.data || [];
@@ -758,7 +758,7 @@
     };
 
     function renderPostsTab(el) {
-        var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__'; });
+        var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__' && p.media_type !== REPORT_MARKER; });
         var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
         h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
         var filtered = visiblePosts;
@@ -1607,7 +1607,7 @@
             if (API_BASE && getToken()) {
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
                 annList = postData.filter(function(p) { return p.media_type === ANN_MARKER; });
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
@@ -1619,7 +1619,7 @@
                 var postRes = await sb.from('posts').select('*').neq('media_type', '__avatar__').order('created_at', {ascending: false}).limit(5000);
                 var likeRes = await sb.from('likes').select('*').order('created_at', {ascending: false}).limit(5000);
                 var commRes = await sb.from('comments').select('*').order('created_at', {ascending: false}).limit(5000);
-                allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
                 annList = (postRes.data || []).filter(function(p) { return p.media_type === ANN_MARKER; });
                 allLikes = likeRes.data || [];
                 allComments = commRes.data || [];
