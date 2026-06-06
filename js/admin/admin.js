@@ -64,6 +64,20 @@
             var target = getMotionTarget(event);
             if (!target) return;
             target.classList.add('xtj-btn-clicked');
+            try {
+                var rect = target.getBoundingClientRect();
+                var ripple = document.createElement('span');
+                var size = Math.max(rect.width, rect.height) * 1.35;
+                ripple.className = 'xtj-btn-ripple';
+                ripple.style.width = size + 'px';
+                ripple.style.height = size + 'px';
+                ripple.style.left = (event.clientX - rect.left - size / 2) + 'px';
+                ripple.style.top = (event.clientY - rect.top - size / 2) + 'px';
+                target.appendChild(ripple);
+                setTimeout(function() {
+                    if (ripple && ripple.parentNode) ripple.parentNode.removeChild(ripple);
+                }, 360);
+            } catch (e) {}
             setTimeout(function() {
                 target.classList.remove('xtj-btn-clicked');
             }, 260);
