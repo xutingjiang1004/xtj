@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -6578,7 +6578,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             var finalReason = customReason ? _reportSelectedReason + '：' + customReason : _reportSelectedReason;
 
             try {
-                if (API_BASE) {
+                if (typeof API_BASE !== 'undefined' && API_BASE) {
                     var res = await fetch(API_BASE + '/api/report', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
