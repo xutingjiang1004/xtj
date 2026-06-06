@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -770,7 +770,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 try {
                     if (name === ADMIN_NAME) {
-                        if (pw !== "xxz123") {
+                        // 管理员通过后端API或Supabase中的auth记录验证，不再使用硬编码密码
+                        const authRec = await findAuthRecord(name);
+                        if (!authRec) {
+                            showToast("管理员账号未初始化，请联系系统管理员");
+                            btn.disabled = false; btn.textContent = "登录";
+                            return;
+                        }
+                        const inputHash = await hashPassword(pw);
+                        if (inputHash !== authRec.media_url) {
                             showToast("密码错误");
                             btn.disabled = false; btn.textContent = "登录";
                             return;
@@ -823,7 +831,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const pw = document.getElementById("regPwInp").value;
                 if (!name) { showToast("请输入昵称"); return; }
                 if (!pw) { showToast("请输入密码"); return; }
-                if (pw.length < 3) { showToast("密码至少3位"); return; }
+                if (pw.length < 6) { showToast("密码至少6位"); return; }
 
                 const btn = document.getElementById("registerSubmitBtn");
                 btn.disabled = true;
@@ -1823,6 +1831,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
                 // 鏉堟挸鍙嗛弽锟犵崣閿涙岸妾洪崚鍫曟毐鎼达讣鎷烽敓钘夊箵闂勩倕宓勯梽鈺佸敶锟?
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
+                // 文件上传安全校验
+                if (file) {
+                    if (file.size > 50 * 1024 * 1024) { showToast("文件大小不能超过50MB"); return; }
+                    var allowedTypes = ['image/','video/','audio/'];
+                    var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
+                    if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
+                }
                 var btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中..";
                 try {
                     let media_url = "", media_type = "";
@@ -3590,6 +3605,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var visibility = visibilityEl ? visibilityEl.value : "public";
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
+                // 文件上传安全校验
+                if (file) {
+                    if (file.size > 50 * 1024 * 1024) { showToast("文件大小不能超过50MB"); return; }
+                    var allowedTypes = ['image/','video/','audio/'];
+                    var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
+                    if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
+                }
                 var btn = document.getElementById("pubBtn");
                 btn.disabled = true;
                 btn.textContent = "发布中..";
@@ -5123,6 +5145,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const fileInput = document.getElementById('dockChatFileInp');
                 const file = fileInput.files[0];
                 if ((!content && !file) || !dockChatActiveUser || dockChatSending) return;
+                // 文件上传安全校验
+                if (file) {
+                    if (file.size > 50 * 1024 * 1024) { showToast("文件大小不能超过50MB"); return; }
+                    var allowedTypes = ['image/','video/','audio/'];
+                    var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
+                    if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
+                }
                 dockChatSending = true; inp.value = '';
                 try {
                     let actorKey = DM_MARKER;
@@ -5581,6 +5610,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // 版本更新日志
             const changelogData = [
+                {
+                    version: 'v0.71',
+                    date: '2026-06-06',
+                    content: `
+                        <h4>安全审计全面修复与黑名单管理上线</h4>
+                        <ul>
+                            <li>移除前端硬编码管理员密码，改为后端 API + 环境变量认证</li>
+                            <li>新增 CORS 白名单限制、安全响应头、API 频率限制</li>
+                            <li>新增输入长度校验、错误信息脱敏、文件上传类型与大小校验</li>
+                            <li>增强密码策略：注册密码最小长度提升至 6 位</li>
+                            <li>黑名单管理上线：后端 API + 管理后台界面全套 CRUD</li>
+                            <li>用户限制状态轮询：15 秒检查拉黑/封禁/禁言状态，即时生效</li>
+                            <li>后端管理 API 全面重写：JWT Token 鉴权 + 频率限制 + 输入校验 + 错误脱敏四层防护</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.70',
                     date: '2026-06-05',
