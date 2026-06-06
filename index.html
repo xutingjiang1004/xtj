@@ -322,7 +322,7 @@
                             </span>
                             <span class="profile-setting-text">关于</span>
                         </div>
-                        <span class="profile-setting-value">xtj v0.69</span>
+                        <span class="profile-setting-value">xtj v0.72</span>
                     </div>
                 </div>
                 <div class="profile-totals-bar" id="profileTotalsBar" aria-label="累计互动数据">
@@ -745,18 +745,28 @@
     </div>
 
     <!-- 举报模态框 -->
-    <div class="report-modal-overlay" id="reportModal" onclick="if(event.target===this)closeReportModal()">
-        <div class="report-modal" onclick="event.stopPropagation()">
+    <div class="report-modal-overlay" id="reportModal" tabindex="-1" onclick="if(event.target===this)closeReportModal()">
+        <div class="report-modal" id="reportModalDialog" tabindex="-1" onclick="event.stopPropagation()">
             <div class="report-modal-header">
-                <div class="report-modal-header-left">
+                <div class="report-modal-header-copy report-modal-header-copy--primary">
+                    <span class="report-modal-kicker">内容安全</span>
+                    <h3>举报内容</h3>
+                    <p>提交后仅管理员可见，我们会尽快核查并处理。</p>
+                </div>
+                <div class="report-modal-header-copy">
                     <span>🚩 举报内容</span>
                     <button class="report-records-btn" id="reportRecordsToggleBtn" onclick="toggleReportRecords()">举报记录</button>
                 </div>
                 <button class="btn btn-ghost" onclick="closeReportModal()" style="padding:4px 12px; font-size:16px;">✕</button>
+                <button class="report-modal-close" type="button" aria-label="关闭举报弹窗" onclick="closeReportModal()">×</button>
+            </div>
+            <div class="report-modal-tabs" role="tablist" aria-label="举报弹窗视图切换">
+                <button class="report-view-tab active" id="reportViewFormBtn" type="button" role="tab" aria-selected="true" aria-controls="reportModalFormBody" onclick="switchReportView('form')">发起举报</button>
+                <button class="report-view-tab" id="reportRecordsViewBtn" type="button" role="tab" aria-selected="false" aria-controls="reportRecordsPanel" onclick="toggleReportRecords()">举报记录</button>
             </div>
             <div class="report-modal-content">
                 <!-- 举报表单 -->
-                <div class="report-modal-body" id="reportModalFormBody">
+                <div class="report-modal-body report-view-panel active" id="reportModalFormBody" role="tabpanel" aria-labelledby="reportViewFormBtn">
                     <div class="report-field">
                         <label>选择举报类型</label>
                         <div class="report-type-tabs">
@@ -782,14 +792,23 @@
                         </div>
                         <textarea id="reportCustomReason" class="report-reason-input" placeholder="补充说明（选填）" rows="2"></textarea>
                     </div>
-                    <div class="report-field" id="reportSelectedInfo" style="display:none;">
-                        <div class="report-selected-preview"></div>
+                    <div class="report-field" id="reportSelectedInfo">
+                        <div class="report-selected-preview">
+                            <div class="report-selected-empty">还没有选择举报对象，请先从上方列表中选择一条内容。</div>
+                        </div>
                     </div>
                     <button class="btn btn-primary report-submit-btn" id="reportSubmitBtn" onclick="submitReport()" disabled>提交举报</button>
                     <div class="report-error" id="reportError" style="display:none;"></div>
                 </div>
                 <!-- 举报记录面板 -->
-                <div class="report-records-panel" id="reportRecordsPanel">
+                <div class="report-records-panel report-view-panel" id="reportRecordsPanel" role="tabpanel" aria-labelledby="reportRecordsViewBtn" aria-hidden="true">
+                    <div class="report-records-header report-records-header--primary">
+                        <div>
+                            <span class="report-records-kicker">我的举报</span>
+                            <h4>举报记录</h4>
+                        </div>
+                        <span class="report-records-hint">查看处理状态与管理员回复</span>
+                    </div>
                     <div class="report-records-header">📋 我的举报记录</div>
                     <div class="report-records-list" id="reportRecordsList">
                         <div class="report-records-empty">点击上方「举报记录」查看</div>
