@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -1730,6 +1730,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return;
                 }
                 if (kind === 'reports') {
+                    // 用户查看举报记录时清除回复通知角标
+                    if (typeof clearReportReplyBadge === 'function') {
+                        clearReportReplyBadge();
+                    }
                     renderProfileActivityReportsModal();
                 } else {
                     renderProfileActivityModal(kind);
@@ -1892,7 +1896,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     // 閿熸枻鎷烽敓鏂ゆ嫹閺堚偓杩戠櫥褰曟椂闂达紙椤甸潰姣忥拷顐奸敓鏂ゆ嫹闁棄鍩涢弬甯礉韫囧懘銆廰wait纭繚鍐欏叆??
                     await saveUserInfo(currentUser, false);
                     
-                    try { startRestrictionPolling(); subscribeToMessages(); startDMPolling(); updateUnreadBadge(); loadAnnouncements(); subscribeToAnnouncements(); } catch(e) {}
+                    try { startRestrictionPolling(); subscribeToMessages(); startDMPolling(); updateUnreadBadge(); loadAnnouncements(); subscribeToAnnouncements(); startReportReplyPolling(); } catch(e) {}
                 } else {
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
@@ -4853,6 +4857,64 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 } catch(e) {}
             }
 
+            // ===================== 举报回复通知检测 =====================
+            var reportReplyPollTimer = null;
+            var REPORT_REPLY_POLL_INTERVAL = 60000; // 60秒
+
+            async function checkReportReplies() {
+                if (!window.currentUser) return;
+                try {
+                    var lastCheck = parseInt(localStorage.getItem('xtj_report_reply_check') || '0', 10);
+                    var res = await sb.from('posts')
+                        .select('id, content, created_at')
+                        .eq('user_name', window.currentUser)
+                        .eq('media_type', REPORT_MARKER)
+                        .order('created_at', { ascending: false })
+                        .limit(160);
+                    if (res && res.error) return;
+                    var newReplies = 0;
+                    (res.data || []).forEach(function(p) {
+                        try {
+                            var c = JSON.parse(p.content || '{}');
+                            if (c.admin_response && c.response_at) {
+                                var responseTime = new Date(c.response_at).getTime();
+                                if (responseTime > lastCheck) {
+                                    newReplies++;
+                                }
+                            }
+                        } catch(e) {}
+                    });
+                    var badge = document.getElementById('navReportBadge');
+                    if (badge) {
+                        if (newReplies > 0) {
+                            badge.textContent = newReplies > 99 ? '99+' : newReplies;
+                            badge.classList.add('show');
+                        } else {
+                            badge.classList.remove('show');
+                        }
+                    }
+                } catch(e) {}
+            }
+
+            function startReportReplyPolling() {
+                if (reportReplyPollTimer) {
+                    clearInterval(reportReplyPollTimer);
+                }
+                checkReportReplies();
+                reportReplyPollTimer = setInterval(checkReportReplies, REPORT_REPLY_POLL_INTERVAL);
+            }
+
+            function clearReportReplyBadge() {
+                localStorage.setItem('xtj_report_reply_check', String(Date.now()));
+                var badge = document.getElementById('navReportBadge');
+                if (badge) {
+                    badge.classList.remove('show');
+                    badge.textContent = '0';
+                }
+                // 立即重新检测以更新角标
+                setTimeout(checkReportReplies, 200);
+            }
+
             let refreshTimeout = null;
             const debouncedLoadFeed = (forceRefresh = false) => {
                 if (refreshTimeout) clearTimeout(refreshTimeout);
@@ -4995,7 +5057,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     startDMPolling(300000);
                 }
                 if (tab === 'ai') { ensurePhotoWallLoaded().then(function() { if (typeof window.initPhotoWall === 'function') window.initPhotoWall(); }); }
-                if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); loadProfileActivity(false); }
+                if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); loadProfileActivity(false); if (typeof clearReportReplyBadge === 'function') clearReportReplyBadge(); }
             };
 
             // Animation class mapping
