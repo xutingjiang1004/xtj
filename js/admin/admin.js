@@ -238,27 +238,25 @@
                 btn.textContent = '登录';
             }
         } else {
-            // 回退：API 未配置时使用本地密码校验（仅开发环境）
+            // 回退：API 未配置时使用 Supabase auth 记录校验（仅开发环境）
             var storedPw = null;
             try {
-                // 尝试从 Supabase 获取管理员密码哈希（安全存储）
-                var { data: pwData } = await window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+                var tempSb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                var { data: pwData } = await tempSb
                     .from('posts')
                     .select('media_url')
                     .eq('user_name', ADMIN)
-                    .eq('media_type', '__admin_pw__')
+                    .eq('media_type', AUTH_MARKER)
                     .maybeSingle();
                 if (pwData && pwData.media_url) {
                     storedPw = pwData.media_url;
                 }
             } catch(e) {}
             
-            // 如果 Supabase 中未找到密码记录，则无法通过本地验证，必须通过 API 登录
             if (!storedPw) {
-                err.textContent = '管理员账号未初始化，请通过 API 登录';
+                err.textContent = '管理员账号未初始化，请先在前端网站用 xxz/xxz123 注册';
                 return;
             }
-            // 简单哈希比较（与登录一致的 SHA-256）
             var encoder = new TextEncoder();
             var hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(pw));
             var hashArray = Array.from(new Uint8Array(hashBuffer));
