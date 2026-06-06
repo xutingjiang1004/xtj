@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -1517,104 +1517,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!profileActivityState.modalKind) return;
                 var modal = document.getElementById('profileActivityModal');
                 if (!modal || !modal.classList.contains('active')) return;
-                if (profileActivityState.modalKind === 'reports') {
-                    renderProfileActivityReportsModal();
-                } else {
-                    renderProfileActivityModal(profileActivityState.modalKind);
-                }
+                renderProfileActivityModal(profileActivityState.modalKind);
             }
 
             function renderProfileActivity() {
                 renderProfileTotals();
                 renderProfileActivityList('likes');
                 renderProfileActivityList('comments');
-                renderProfileActivityReports();
                 refreshProfileActivityModalIfNeeded();
-            }
-
-            function renderProfileActivityReports() {
-                var listEl = document.getElementById('profileReportsList');
-                var countEl = document.getElementById('profileReportsCount');
-                var moreBtn = document.getElementById('profileReportsMoreBtn');
-                if (!listEl || !countEl || !moreBtn) return;
-                var reports = profileActivityState.reports || [];
-                var count = profileActivityState.totals && profileActivityState.totals.reports != null ? profileActivityState.totals.reports : reports.length;
-                countEl.textContent = String(count || 0);
-                if (!currentUser) {
-                    listEl.innerHTML = '<div class="profile-activity-empty">登录后，这里会显示你的举报记录。</div>';
-                    moreBtn.style.display = 'none';
-                    return;
-                }
-                if (!reports.length) {
-                    listEl.innerHTML = '<div class="profile-activity-empty">你还没有举报记录。</div>';
-                    moreBtn.style.display = 'none';
-                    return;
-                }
-                var html = reports.slice(0, 2).map(function(r) {
-                    var statusText = r.status === 'pending' ? '待处理' : (r.status === 'actioned' ? '已处理' : (r.status === 'reviewed' ? '已审阅' : r.status));
-                    var statusColor = r.status === 'pending' ? '#f5a623' : (r.status === 'actioned' ? '#10b981' : '#6b7280');
-                    var targetInfo = '<strong>被举报：</strong>' + (r.target_user ? escapeHtml(r.target_user) + ' · ' : '') + (r.target_type === 'photo' ? '照片墙' : '帖子') + ' · <span style="color:' + statusColor + ';">' + statusText + '</span>';
-                    var reasonText = escapeHtml((String(r.report_reason || '')).slice(0, 120));
-                    var hasReply = !!r.admin_response;
-                    var replyId = 'reportReply_' + r.id;
-                    var replyBtnHtml = hasReply ? '<button class="report-reply-toggle" onclick="toggleReportReply(\'' + replyId + '\',this)">查看回复</button>' : '';
-                    var replyContentHtml = hasReply ? '<div id="' + replyId + '" class="profile-activity-report-reply" style="display:none;"><div class="profile-activity-admin-reply-inner"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div></div>' : '';
-                    return [
-                        '<article class="profile-activity-item" style="cursor:default;">',
-                        '<div class="profile-activity-main">',
-                        '<div class="profile-activity-title">' + targetInfo + '</div>',
-                        '<div class="profile-activity-content" style="font-size:13px;color:#4b5563;">举报原因：' + reasonText + '</div>',
-                        '</div>',
-                        '<div class="profile-activity-side">',
-                        '<span class="profile-activity-time">' + new Date(r.created_at).toLocaleString() + '</span>',
-                        replyBtnHtml,
-                        '</div>',
-                        '</article>',
-                        replyContentHtml
-                    ].join('');
-                }).join('');
-                listEl.innerHTML = html;
-                moreBtn.style.display = count > 2 ? 'block' : 'none';
-                moreBtn.textContent = '更多举报内容';
-            }
-
-            function renderProfileActivityReportsModal() {
-                var listEl = document.getElementById('profileActivityModalList');
-                var titleEl = document.getElementById('profileActivityModalTitle');
-                var kickerEl = document.getElementById('profileActivityModalKicker');
-                var modal = document.getElementById('profileActivityModal');
-                if (!listEl || !titleEl || !kickerEl || !modal) return;
-                var reports = profileActivityState.reports || [];
-                titleEl.textContent = '举报记录';
-                kickerEl.textContent = '我的举报';
-                if (!reports.length) {
-                    listEl.innerHTML = '<div class="profile-activity-empty">你还没有举报记录。</div>';
-                } else {
-                    listEl.innerHTML = reports.map(function(r) {
-                        var statusText = r.status === 'pending' ? '待处理' : (r.status === 'actioned' ? '已处理' : (r.status === 'reviewed' ? '已审阅' : r.status));
-                        var statusColor = r.status === 'pending' ? '#f5a623' : (r.status === 'actioned' ? '#10b981' : '#6b7280');
-                        var targetInfo = '<strong>被举报：</strong>' + (r.target_user ? escapeHtml(r.target_user) + ' · ' : '') + (r.target_type === 'photo' ? '照片墙' : '帖子') + ' · <span style="color:' + statusColor + ';">' + statusText + '</span>';
-                        var hasReply = !!r.admin_response;
-                        var replyId = 'reportReply_' + r.id;
-                        var replyBtnHtml = hasReply ? '<button class="report-reply-toggle" onclick="toggleReportReply(\'' + replyId + '\',this)">查看回复</button>' : '';
-                        var replyContentHtml = hasReply ? '<div id="' + replyId + '" class="profile-activity-report-reply" style="display:none;"><div class="profile-activity-admin-reply-inner"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div></div>' : '';
-                        return [
-                            '<article class="profile-activity-item" style="cursor:default;">',
-                            '<div class="profile-activity-main">',
-                            '<div class="profile-activity-title">' + targetInfo + '</div>',
-                            '<div class="profile-activity-content" style="font-size:13px;color:#4b5563;">举报原因：' + escapeHtml(String(r.report_reason || '')) + '</div>',
-                            '</div>',
-                            '<div class="profile-activity-side">',
-                            '<span class="profile-activity-time">' + new Date(r.created_at).toLocaleString() + '</span>',
-                            replyBtnHtml,
-                            '</div>',
-                            '</article>',
-                            replyContentHtml
-                        ].join('');
-                    }).join('');
-                }
-                profileActivityState.modalKind = 'reports';
-                modal.classList.add('active');
             }
 
             window.toggleReportReply = function(id, btn) {
@@ -1628,6 +1538,94 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (btn) btn.textContent = '查看回复';
                 }
             };
+
+            // ===================== 举报弹窗内的举报记录 =====================
+            window.toggleReportRecords = async function() {
+                var panel = document.getElementById('reportRecordsPanel');
+                var btn = document.getElementById('reportRecordsToggleBtn');
+                var formBody = document.getElementById('reportModalFormBody');
+                if (!panel) return;
+                if (panel.style.display === 'none' || !panel.style.display) {
+                    // 显示举报记录面板，隐藏表单
+                    formBody.style.display = 'none';
+                    panel.style.display = 'block';
+                    if (btn) btn.textContent = '返回举报';
+                    await loadMyReportRecords();
+                } else {
+                    // 隐藏举报记录面板，显示表单
+                    panel.style.display = 'none';
+                    formBody.style.display = '';
+                    if (btn) btn.textContent = '举报记录';
+                }
+            };
+
+            async function loadMyReportRecords() {
+                if (!window.currentUser) {
+                    var list = document.getElementById('reportRecordsList');
+                    if (list) list.innerHTML = '<div class="report-records-empty">请先登录</div>';
+                    return;
+                }
+                var list = document.getElementById('reportRecordsList');
+                if (!list) return;
+                try {
+                    if (!window.sb) {
+                        list.innerHTML = '<div class="report-records-empty">数据库连接未初始化</div>';
+                        return;
+                    }
+                    var res = await sb.from('posts')
+                        .select('id, content, created_at')
+                        .eq('user_name', window.currentUser)
+                        .eq('media_type', REPORT_MARKER)
+                        .order('created_at', { ascending: false })
+                        .limit(160);
+                    if (res && res.error) throw res.error;
+                    var records = (res.data || []).map(function(p) {
+                        var c = {};
+                        try { c = JSON.parse(p.content || '{}'); } catch(e) {}
+                        return {
+                            id: p.id,
+                            created_at: p.created_at,
+                            target_type: c.target_type || 'post',
+                            target_id: c.target_id || '',
+                            target_user: c.target_user || '',
+                            report_reason: c.report_reason || '',
+                            status: c.status || 'pending',
+                            admin_response: c.admin_response || null,
+                            reviewed_at: c.reviewed_at || null
+                        };
+                    });
+                    if (!records.length) {
+                        list.innerHTML = '<div class="report-records-empty">你还没有举报记录。</div>';
+                        return;
+                    }
+                    list.innerHTML = records.map(function(r) {
+                        var statusText = r.status === 'pending' ? '待处理' : (r.status === 'actioned' ? '已处理' : (r.status === 'reviewed' ? '已审阅' : r.status));
+                        var statusColor = r.status === 'pending' ? '#f5a623' : (r.status === 'actioned' ? '#10b981' : '#6b7280');
+                        var targetInfo = '<strong>被举报：</strong>' + (r.target_user ? escapeHtml(r.target_user) + ' · ' : '') + (r.target_type === 'photo' ? '照片墙' : '帖子') + ' · <span style="color:' + statusColor + ';">' + statusText + '</span>';
+                        var reasonText = escapeHtml(String(r.report_reason || '')).slice(0, 120);
+                        var hasReply = !!r.admin_response;
+                        var replyId = 'reportReply_' + r.id;
+                        var replyBtnHtml = hasReply ? '<button class="report-reply-toggle" onclick="toggleReportReply(\'' + replyId + '\',this)">查看回复</button>' : '';
+                        var replyContentHtml = hasReply ? '<div id="' + replyId + '" class="profile-activity-report-reply" style="display:none;"><div class="profile-activity-admin-reply-inner"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div></div>' : '';
+                        return [
+                            '<div class="report-record-item">',
+                            '<div class="report-record-main">',
+                            '<div class="report-record-title">' + targetInfo + '</div>',
+                            '<div class="report-record-reason">举报原因：' + reasonText + '</div>',
+                            '</div>',
+                            '<div class="report-record-side">',
+                            '<span class="report-record-time">' + new Date(r.created_at).toLocaleString() + '</span>',
+                            replyBtnHtml,
+                            '</div>',
+                            '</div>',
+                            replyContentHtml
+                        ].join('');
+                    }).join('');
+                } catch(e) {
+                    console.error('[XTJ] loadMyReportRecords error:', e);
+                    list.innerHTML = '<div class="report-records-empty">加载失败，请重试</div>';
+                }
+            }
 
             async function loadProfileActivity(forceRefresh) {
                 forceRefresh = !!forceRefresh;
@@ -1753,15 +1751,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     showToast('请先登录');
                     return;
                 }
-                if (kind === 'reports') {
-                    // 用户查看举报记录时清除回复通知角标
-                    if (typeof clearReportReplyBadge === 'function') {
-                        clearReportReplyBadge();
-                    }
-                    renderProfileActivityReportsModal();
-                } else {
-                    renderProfileActivityModal(kind);
-                }
+                renderProfileActivityModal(kind);
             };
 
             window.closeProfileActivityModal = function() {
