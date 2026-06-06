@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -547,12 +547,27 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         };
 
             // ===================== 密码閸濆牆?=====================
-            async function hashPassword(password) {
+            async function hashPassword(password, salt) {
+                var input = salt ? salt + ':' + password : password;
                 const encoder = new TextEncoder();
-                const data = encoder.encode(password);
+                const data = encoder.encode(input);
                 const hashBuffer = await crypto.subtle.digest('SHA-256', data);
                 const hashArray = Array.from(new Uint8Array(hashBuffer));
                 return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+            // 带盐的密码哈希（使用用户名作为盐）
+            async function hashPasswordWithSalt(password, username) {
+                return hashPassword(password, username);
+            }
+            // 验证密码：先尝试新盐值哈希，若失败则回退旧无盐哈希
+            async function verifyPassword(inputPw, storedHash, username) {
+                if (!inputPw || !storedHash) return false;
+                // 优先尝试带盐哈希
+                var saltedHash = await hashPassword(inputPw, username);
+                if (saltedHash === storedHash) return true;
+                // 回退旧版无盐哈希
+                var oldHash = await hashPassword(inputPw);
+                return oldHash === storedHash;
             }
 
             // ===================== 闁谎嗩嚙缂?/ 婵炲鍔岄崬?/ 闁谎嗩嚙閸?=====================
@@ -775,7 +790,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         let authRec = await findAuthRecord(name);
                         if (!authRec) {
                             try {
-                                const pwHash = await hashPassword(pw);
+                                const pwHash = await hashPasswordWithSalt(pw, name);
                                 await sb.from("posts").insert({
                                     user_name: name,
                                     content: AUTH_MARKER,
@@ -797,8 +812,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 return;
                             }
                         }
-                        const inputHash = await hashPassword(pw);
-                        if (inputHash !== authRec.media_url) {
+                        var pwOk = await verifyPassword(pw, authRec.media_url, name);
+                        if (!pwOk) {
                             showToast("密码错误");
                             btn.disabled = false; btn.textContent = "登录";
                             return;
@@ -810,8 +825,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
-                        const inputHash = await hashPassword(pw);
-                        if (inputHash !== authRec.media_url) {
+                        var pwOk = await verifyPassword(pw, authRec.media_url, name);
+                        if (!pwOk) {
                             showToast("密码错误");
                             btn.disabled = false; btn.textContent = "登录";
                             return;
@@ -865,7 +880,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         return;
                     }
 
-                    const pwHash = await hashPassword(pw);
+                    const pwHash = await hashPasswordWithSalt(pw, name);
                     const { error } = await sb.from("posts").insert([{
                         user_name: name,
                         content: AUTH_MARKER,
@@ -1084,7 +1099,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         .limit(1);
                     
                     if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                        avatarEl.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" alt="头像">';
+                        var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarRes.data[0].media_url));
+                        avatarEl.innerHTML = '<img src="' + safeAvatarUrl + '" alt="头像">';
                         avatarCache[currentUser] = avatarRes.data[0].media_url;
                         // 閸氬本顒為柛鎺旀ocalStorage
                         try {
@@ -1234,6 +1250,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             function updateAllAvatarElements(avatarUrl) {
+                var safeUrl = escapeHtml(sanitizeUrl(avatarUrl));
+                if (!safeUrl) return;
+                var imgHtml = '<img src="' + safeUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                 var els = [
                     document.getElementById('profileAvatar'),
                     document.getElementById('myAvatar'),
@@ -1242,7 +1261,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 ];
                 els.forEach(function(el) {
                     if (el) {
-                        el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                        el.innerHTML = imgHtml;
                     }
                 });
                 document.querySelectorAll('#feed .post .avatar').forEach(function(el) {
@@ -1250,13 +1269,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (header) {
                         var nameEl = header.querySelector('.user-name');
                         if (nameEl && nameEl.textContent === currentUser) {
-                            el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            el.innerHTML = imgHtml;
                         }
                     }
                 });
                 document.querySelectorAll('#dockChatMessages .chat-msg-avatar').forEach(function(el) {
                     if (el.closest('.chat-msg-row.sent')) {
-                        el.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                        el.innerHTML = imgHtml;
                     }
                 });
                 document.querySelectorAll('#dockChatList .chat-list-item').forEach(function(el) {
@@ -1264,7 +1283,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (nameEl && nameEl.textContent === currentUser) {
                         var avEl = el.querySelector('.cli-avatar');
                         if (avEl) {
-                            avEl.innerHTML = '<img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            avEl.innerHTML = imgHtml;
                         }
                     }
                 });
@@ -1296,7 +1315,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     const profileAvatar = document.getElementById('profileAvatar');
                     if (profileAvatar) {
                         if (avatarRes.data && avatarRes.data.length > 0 && avatarRes.data[0].media_url) {
-                            profileAvatar.innerHTML = '<img src="' + avatarRes.data[0].media_url + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                            var safeProfileAvatarUrl = escapeHtml(sanitizeUrl(avatarRes.data[0].media_url));
+                            profileAvatar.innerHTML = '<img src="' + safeProfileAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
                             avatarCache[currentUser] = avatarRes.data[0].media_url;
                             // 閸氬本顒為柛鎺旀ocalStorage
                             try {
@@ -1543,18 +1563,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             window.toggleReportRecords = async function() {
                 var panel = document.getElementById('reportRecordsPanel');
                 var btn = document.getElementById('reportRecordsToggleBtn');
-                var formBody = document.getElementById('reportModalFormBody');
                 if (!panel) return;
-                if (panel.style.display === 'none' || !panel.style.display) {
-                    // 显示举报记录面板，隐藏表单
-                    formBody.style.display = 'none';
-                    panel.style.display = 'block';
-                    if (btn) btn.textContent = '返回举报';
+                if (!panel.classList.contains('open')) {
+                    // 展开右侧记录面板
+                    panel.classList.add('open');
+                    if (btn) btn.textContent = '收起记录';
                     await loadMyReportRecords();
                 } else {
-                    // 隐藏举报记录面板，显示表单
-                    panel.style.display = 'none';
-                    formBody.style.display = '';
+                    // 收起右侧记录面板
+                    panel.classList.remove('open');
                     if (btn) btn.textContent = '举报记录';
                 }
             };
@@ -1775,7 +1792,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 if (post.media_type === 'image' && post.media_url && typeof window.openImageViewer === 'function') {
                     window.closeProfileActivityModal();
-                    window.openImageViewer(post.media_url);
+                    window.openImageViewer(sanitizeUrl(post.media_url) || post.media_url);
                     return;
                 }
                 window.closeProfileActivityModal();
@@ -2811,10 +2828,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         } catch(e) {}
                     }
                 }
+                var safeName = username.replace(/'/g, "\\'");
                 if (avatarUrl) {
-                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + username.replace(/'/g, "\\'") + '\')"><img src="' + avatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+                    var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
+                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
                 } else {
-                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + username.replace(/'/g, "\\'") + '\')">' + username[0].toUpperCase() + '</div>';
+                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')">' + username[0].toUpperCase() + '</div>';
                 }
             }
 
@@ -4724,8 +4743,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
             window.safeJsStr = safeJsStr;
 
-
-
+            // 安全地过滤 URL，防止 javascript: 等 XSS 攻击
+            function sanitizeUrl(url) {
+                var s = String(url == null ? '' : url).trim();
+                // 只允许 http://, https://, data:, blob: 协议
+                if (/^(https?:|data:|blob:)/i.test(s)) return s;
+                // 相对路径也允许（以 / 或 ./ 开头）
+                if (/^[/.]/.test(s)) return s;
+                return '';
+            }
+            window.sanitizeUrl = sanitizeUrl;
 
             function formatMsgTime(dateStr) {
                 var d = new Date(dateStr);
