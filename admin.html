@@ -846,6 +846,60 @@
             animation-duration: 0.18s !important;
         }
     }
+    :where(
+        button,
+        [role="button"],
+        input[type="button"],
+        input[type="submit"],
+        .btn-sm,
+        .filter-chip,
+        .admin-user-option,
+        .admin-user-picker-modern .picker-option,
+        .top-tabs button,
+        .modal-btns button,
+        .search-bar button,
+        .publish-row button
+    ).xtj-btn-pressing {
+        transform: translateY(0) scale(0.965) !important;
+        transition-duration: 0.12s !important;
+    }
+    :where(
+        button,
+        [role="button"],
+        input[type="button"],
+        input[type="submit"],
+        .btn-sm,
+        .filter-chip,
+        .admin-user-option,
+        .admin-user-picker-modern .picker-option,
+        .top-tabs button,
+        .modal-btns button,
+        .search-bar button,
+        .publish-row button
+    ).xtj-btn-release {
+        animation: xtjAdminButtonRelease 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    :where(
+        button,
+        [role="button"],
+        input[type="button"],
+        input[type="submit"],
+        .btn-sm,
+        .filter-chip,
+        .admin-user-option,
+        .admin-user-picker-modern .picker-option,
+        .top-tabs button,
+        .modal-btns button,
+        .search-bar button,
+        .publish-row button
+    ).xtj-btn-clicked {
+        box-shadow: 0 12px 24px rgba(26, 71, 48, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.72) !important;
+    }
+    @keyframes xtjAdminButtonRelease {
+        from { transform: translateY(0) scale(0.965); }
+        62% { transform: translateY(-1px) scale(1.012); }
+        to { transform: translateY(0) scale(1); }
+    }
 </style>
 </head>
 <body>

@@ -6574,6 +6574,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         : '<img ' + detailMediaAttrs + ' src="' + escapeHtml(normalizedPost.media_url) + '" onclick="openImageViewer(\'' + safeJsStr(normalizedPost.media_url) + '\')" loading="lazy" />'
                 ) : '';
                 var visibilityLabel = normalizedPost.visibility === 'private' ? '私密' : '公开';
+                var contentText = String(normalizedPost.content || '').trim();
                 var detailActions = [];
                 if (canEditPost(normalizedPost)) {
                     detailActions.push('<button type="button" class="action-btn edit" onclick="openEditPost(\'' + String(normalizedPost.id).replace(/'/g, "\\'") + '\')">编辑</button>');
@@ -6582,35 +6583,35 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     detailActions.push('<button type="button" class="action-btn del" onclick="openDelete(\'' + String(normalizedPost.id).replace(/'/g, "\\'") + '\', \'' + String(normalizedPost.actor_key || "").replace(/'/g, "\\'") + '\')">删除</button>');
                 }
                 return [
-                    '<article class="post-detail-shell">',
-                    '  <header class="post-detail-top">',
-                    '    <div class="post-detail-owner">',
-                    '      <div class="post-detail-avatar">' + escapeHtml(String(normalizedPost.user_name || '?').slice(0, 1).toUpperCase()) + '</div>',
-                    '      <div class="post-detail-owner-copy">',
-                    '        <div class="pdh-name">' + escapeHtml(normalizedPost.user_name || '未知用户') + '</div>',
-                    '        <div class="pdh-time">' + new Date(normalizedPost.created_at).toLocaleString() + '</div>',
+                    '<article class="post-detail-shell post-detail-shell--clean">',
+                    '  <section class="post-detail-main-card">',
+                    '    <header class="post-detail-top">',
+                    '      <div class="post-detail-owner">',
+                    '        <div class="post-detail-avatar">' + escapeHtml(String(normalizedPost.user_name || '?').slice(0, 1).toUpperCase()) + '</div>',
+                    '        <div class="post-detail-owner-copy">',
+                    '          <div class="pdh-name">' + escapeHtml(normalizedPost.user_name || '未知用户') + '</div>',
+                    '          <div class="pdh-time">' + new Date(normalizedPost.created_at).toLocaleString() + '</div>',
+                    '        </div>',
                     '      </div>',
-                    '    </div>',
-                    '    <div class="pdh-badges"><span class="post-detail-visibility">' + visibilityLabel + '</span></div>',
-                    '  </header>',
+                    '      <span class="post-detail-visibility">' + visibilityLabel + '</span>',
+                    '    </header>',
                     mediaHtml ? '<div class="post-detail-media-card"><div class="post-detail-media">' + mediaHtml + '</div></div>' : '',
-                    normalizedPost.content ? '<div class="post-detail-content">' + escapeHtml(normalizedPost.content) + '</div>' : '',
-                    '<div class="post-detail-stats">' + buildPostStatsLine(normalizedPost, (likes || []).length, (comments || []).length) + '</div>',
+                    contentText ? '<div class="post-detail-content">' + escapeHtml(contentText) + '</div>' : '',
+                    '    <div class="post-detail-stats">' + buildPostStatsLine(normalizedPost, (likes || []).length, (comments || []).length) + '</div>',
                     detailActions.length ? '<div class="post-detail-actions">' + detailActions.join("") + '</div>' : '',
-                    '  <div class="post-detail-lists">',
-                    '    <section class="post-detail-panel">',
-                    '      <div class="post-detail-panel-title">点赞用户 <span>' + likes.length + '</span></div>',
+                    '  </section>',
+                    '  <section class="post-detail-panel post-detail-panel--stack">',
+                    '    <div class="post-detail-panel-title">点赞用户 <span>' + likes.length + '</span></div>',
                     likes.length ? likes.map(function(l) {
                         return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(l.user_name) + '</div><div class="post-detail-mini-copy">留下了喜欢</div></div><span class="post-detail-mini-time">' + new Date(l.created_at).toLocaleString() + '</span></article>';
                     }).join('') : '<div class="stat-empty post-detail-empty">暂无点赞</div>',
-                    '    </section>',
-                    '    <section class="post-detail-panel">',
-                    '      <div class="post-detail-panel-title">评论记录 <span>' + comments.length + '</span></div>',
+                    '  </section>',
+                    '  <section class="post-detail-panel post-detail-panel--stack">',
+                    '    <div class="post-detail-panel-title">评论记录 <span>' + comments.length + '</span></div>',
                     comments.length ? comments.map(function(c) {
                         return '<article class="post-detail-mini-row"><div class="post-detail-mini-main"><div class="post-detail-mini-name">' + escapeHtml(c.user_name) + '</div><div class="post-detail-mini-copy">' + escapeHtml(c.content || '无评论内容') + '</div></div><span class="post-detail-mini-time">' + new Date(c.created_at).toLocaleString() + '</span></article>';
                     }).join('') : '<div class="stat-empty post-detail-empty">暂无评论</div>',
-                    '    </section>',
-                    '  </div>',
+                    '  </section>',
                     '</article>'
                 ].join('');
             }
@@ -6781,21 +6782,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         ? '<span class="spi-img-tag">视频</span>'
                         : '<span class="spi-img-tag spi-img-tag--text">文字</span>');
                 var display = String(normalized.content || '').trim();
-                if (display.length > 36) display = display.slice(0, 36) + '...';
+                if (display.length > 52) display = display.slice(0, 52) + '...';
                 var detailOnclick = "openStatPostDetail('" + safeJsStr(String(normalized.id)) + "')";
                 var mediaOnclick = "openStatPostMedia('" + safeJsStr(String(normalized.id)) + "')";
                 var mediaHtml = statMediaThumbMarkup(normalized, 'spi-thumb', mediaOnclick, normalized.media_type === 'video' ? '点击查看视频' : '点击全屏预览');
                 var delay = Math.min((Number(normalized._statIndex) || 0) * 26, 220);
                 return [
-                    '<article class="stat-post-item" style="--xtj-enter-delay:' + delay + 'ms;">',
-                    mediaHtml,
-                    '<div class="spi-main">',
-                    '<div class="spi-content-row">',
-                    display ? '<span class="spi-content" onclick="' + detailOnclick + '" title="点击查看帖子详情">' + escapeHtml(display) + '</span>' : '',
-                    tag,
+                    '<article class="stat-post-item stat-row" role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}" style="--xtj-enter-delay:' + delay + 'ms;">',
+                    '<div class="stat-row-media">' + (mediaHtml || '<span class="stat-text-thumb">文</span>') + '</div>',
+                    '<div class="stat-row-main">',
+                    '<div class="stat-row-title">' + (display ? escapeHtml(display) : escapeHtml(statPostSummary(normalized, 'plain'))) + '</div>',
+                    '<div class="stat-row-meta"><span>' + new Date(normalized.created_at).toLocaleString() + '</span>' + tag + '</div>',
                     '</div>',
-                    '<div class="spi-bottom"><span class="spi-time">' + new Date(normalized.created_at).toLocaleString() + '</span><button type="button" class="spi-open-btn" onclick="' + detailOnclick + '">查看详情</button></div>',
-                    '</div>',
+                    '<button type="button" class="spi-open-btn stat-row-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button>',
                     '</article>'
                 ].join('');
             }
@@ -6834,13 +6833,15 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         previewMedia += '<div class="stat-user-preview-more">+' + (posts.filter(function(post) { return !!(post && post.media_url); }).length - 3) + '</div>';
                     }
                     return [
-                        '<section class="stat-user-group" style="--xtj-enter-delay:' + Math.min(index * 42, 240) + 'ms;">',
-                        '<button type="button" class="stat-user-summary stat-user-summary-card" onclick="loadUserAllPosts(\'' + nameJs + '\')">',
-                        '<div class="stat-user-header"><div class="suh-left"><div class="suh-avatar">' + escapeHtml(name).slice(0, 1).toUpperCase() + '</div><div class="suh-copy"><span class="suh-name">' + escapeHtml(name) + '</span><span class="suh-sub">最近更新 ' + escapeHtml(latest) + '</span></div></div><span class="suh-count">' + posts.length + ' 条</span></div>',
+                        '<button type="button" class="stat-user-summary stat-user-summary-card" onclick="loadUserAllPosts(\'' + nameJs + '\')" style="--xtj-enter-delay:' + Math.min(index * 42, 240) + 'ms;">',
+                        '<div class="stat-user-main">',
+                        '<div class="suh-avatar">' + escapeHtml(name).slice(0, 1).toUpperCase() + '</div>',
+                        '<div class="suh-copy"><span class="suh-name">' + escapeHtml(name) + '</span><span class="suh-sub">最近更新 ' + escapeHtml(latest) + '</span></div>',
+                        '<span class="suh-count">' + posts.length + ' 条</span>',
+                        '</div>',
                         previewMedia ? '<div class="stat-user-preview">' + previewMedia + '</div>' : '',
                         '<div class="stat-user-cta"><span class="stat-user-note">' + escapeHtml(statPostSummary(posts[0], 'plain')) + '</span><span class="stat-user-link">查看记录</span></div>',
-                        '</button>',
-                        '</section>'
+                        '</button>'
                     ].join('');
                 }).join('');
             };
@@ -6850,8 +6851,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!body) return;
                 var userPosts = sortPosts(statAllPosts.filter(function(p) { return p.user_name === userName; }));
                 body.innerHTML = [
-                    '<button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">返回总动态</button>',
-                    '<div class="stat-inline-title">' + escapeHtml(userName) + ' 的历史记录 · ' + userPosts.length + ' 条</div>',
+                    '<div class="stat-history-head"><button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">返回总动态</button><div class="stat-inline-title">' + escapeHtml(userName) + ' 的历史记录 · ' + userPosts.length + ' 条</div></div>',
                     '<div class="stat-stack">' + userPosts.map(function(p, index) {
                         return statPostItemMarkup(Object.assign({}, p, { _statIndex: index }));
                     }).join('') + '</div>'
@@ -6877,15 +6877,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     noteHtml = '<div class="stat-record-note">' + escapeHtml(String(post.content).trim().slice(0, 36)) + '</div>';
                 }
                 return [
-                    '<article class="stat-record-entry ' + (isLike ? 'stat-like-item' : 'stat-comment-item') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 26, 220) + 'ms;">',
-                    '  <div class="stat-record-shell">',
-                    '    <div class="stat-record-main">',
-                    '      <div class="stat-record-head"><div class="' + (isLike ? 'sli-user' : 'sci-user') + '">' + actorName + '</div><span class="' + (isLike ? 'sli-time' : 'sci-time') + '">' + timeText + '</span></div>',
-                    '      <div class="stat-record-inline"><span class="stat-record-inline-title">' + actorName + (isLike ? ' 点赞了：' : ' 评论了：') + '</span>' + (mediaHtml ? '<span class="stat-record-inline-media">' + mediaHtml + '</span>' : '') + '</div>',
-                    '      <div class="' + (isLike ? 'sli-target' : 'sci-target') + '">' + escapeHtml(summary) + noteHtml + '</div>',
-                    '      <div class="stat-record-actions">' + (post ? '<button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看帖子详情</button>' : '') + '</div>',
-                    '    </div>',
-                    '  </div>',
+                    '<article class="stat-record-entry stat-row ' + (isLike ? 'stat-like-item' : 'stat-comment-item') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 26, 220) + 'ms;">',
+                    '<div class="stat-row-media">' + (mediaHtml || '<span class="stat-text-thumb">文</span>') + '</div>',
+                    '<div class="stat-row-main">',
+                    '<div class="stat-row-title">' + actorName + (isLike ? ' 点赞了：' : ' 评论了：') + '</div>',
+                    '<div class="stat-row-copy">' + escapeHtml(summary) + noteHtml + '</div>',
+                    '</div>',
+                    '<div class="stat-row-side"><span class="stat-row-time">' + timeText + '</span>' + (post ? '<button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button>' : '') + '</div>',
                     '</article>'
                 ].join('');
             }
@@ -6929,15 +6927,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var mediaHtml = post ? statMediaThumbMarkup(post, 'stat-record-thumb', mediaOnclick, post.media_type === 'video' ? '点击查看视频' : '点击全屏预览') : '';
                     var postText = post ? statPostSummary(post, 'bracket') : (v.post_content || '（内容已不可用）');
                     return [
-                        '<article class="stat-view-item" style="--xtj-enter-delay:' + Math.min(index * 32, 220) + 'ms;">',
-                        '<div class="stat-view-layout">',
-                        mediaHtml,
-                        '<div class="svi-info">',
-                        '<div class="stat-record-head"><div class="svi-user">' + escapeHtml(v.user_name) + '</div><span class="svi-time">' + new Date(v.viewed_at).toLocaleString() + '</span></div>',
-                        '<div class="svi-target">浏览了 <b>' + escapeHtml(v.post_author) + '</b> 的帖子：' + escapeHtml(v.post_content || postText) + '</div>',
-                        post ? '<button type="button" class="stat-record-action" onclick="' + detailOnclick + '">查看帖子详情</button>' : '',
+                        '<article class="stat-view-item stat-row" ' + (post ? 'role="button" tabindex="0" onclick="' + detailOnclick + '"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 32, 220) + 'ms;">',
+                        '<div class="stat-row-media">' + (mediaHtml || '<span class="stat-text-thumb">文</span>') + '</div>',
+                        '<div class="stat-row-main">',
+                        '<div class="stat-row-title">' + escapeHtml(v.user_name) + ' 浏览了 ' + escapeHtml(v.post_author || '') + ' 的帖子</div>',
+                        '<div class="stat-row-copy">' + escapeHtml(v.post_content || postText) + '</div>',
                         '</div>',
-                        '</div>',
+                        '<div class="stat-row-side"><span class="stat-row-time">' + new Date(v.viewed_at).toLocaleString() + '</span>' + (post ? '<button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button>' : '') + '</div>',
                         '</article>'
                     ].join('');
                 }).join('');
@@ -6978,7 +6974,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return h;
                 }
 
-                body.innerHTML = '<div class="stat-two-col stat-two-col--flat"><div class="stat-col stat-col--flat">' + buildLikesCol() + '</div><div class="stat-col stat-col--flat">' + buildCommentsCol() + '</div></div>';
+                body.innerHTML = '<div class="stat-two-col stat-two-col--flat"><section class="stat-col stat-col--flat"><div class="stat-col-title">点赞记录 <span>' + statAllLikes.length + '</span></div>' + buildLikesCol() + '</section><section class="stat-col stat-col--flat"><div class="stat-col-title">评论记录 <span>' + statAllComments.length + '</span></div>' + buildCommentsCol() + '</section></div>';
             };
 
             window.openPostDetail = async function(postId) {
@@ -7145,11 +7141,91 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var title = options && options.title ? options.title : '加载中..';
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
-                el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant);
-                if (variant !== 'chat-list' && variant !== 'chat-detail' && window.initAllSpringLoaders) {
-                    window.initAllSpringLoaders(el);
-                }
+                el.classList.add('xtj-chat-photo-loading');
+                el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant.indexOf('chat') === -1 ? 'chat-list' : variant);
             };
+
+            (function installChatPhotoLoaderFinal() {
+                if (window.__xtjChatPhotoLoaderFinalV1) return;
+                window.__xtjChatPhotoLoaderFinalV1 = true;
+                var originalMagicLoader = window.xtjMagicLoadingHtml;
+                window.xtjMagicLoadingHtml = function(title, subtitle, variant) {
+                    var mode = String(variant || '');
+                    if (mode.indexOf('chat') !== -1 || /聊天|消息/.test(String(title || '') + String(subtitle || ''))) {
+                        return [
+                            '<div class="xtj-magic-loading xtj-magic-loading--photo xtj-magic-loading--chat" role="status" aria-live="polite">',
+                            '  <div class="xtj-photo-loader" aria-label="聊天加载动画">',
+                            '    <span class="xtj-photo-loader-ring"></span>',
+                            '    <span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span>',
+                            '    <span class="xtj-photo-loader-core"></span>',
+                            '    <span class="xtj-photo-loader-dot dot-a"></span>',
+                            '    <span class="xtj-photo-loader-dot dot-b"></span>',
+                            '    <span class="xtj-photo-loader-dot dot-c"></span>',
+                            '  </div>',
+                            '</div>'
+                        ].join('');
+                    }
+                    return originalMagicLoader ? originalMagicLoader.apply(this, arguments) : '';
+                };
+            })();
+
+            (function installButtonMotionFinal() {
+                if (window.__xtjButtonMotionFinalV1) return;
+                window.__xtjButtonMotionFinalV1 = true;
+                var selector = [
+                    'button',
+                    '[role="button"]',
+                    'input[type="button"]',
+                    'input[type="submit"]',
+                    'input[type="reset"]',
+                    '.file-label',
+                    '.photo-wall-btn',
+                    '.chat-img-btn',
+                    '.send-btn',
+                    '.action-btn',
+                    '.stat-record-action',
+                    '.profile-activity-more',
+                    '.profile-activity-btn'
+                ].join(',');
+
+                function isDock(target) {
+                    return !!(target && target.closest && target.closest('#dockBar, .dock-bar, .dock-tab'));
+                }
+
+                function getMotionTarget(event) {
+                    var target = event.target && event.target.closest ? event.target.closest(selector) : null;
+                    if (!target || isDock(target) || target.disabled || target.getAttribute('aria-disabled') === 'true') return null;
+                    return target;
+                }
+
+                document.addEventListener('pointerdown', function(event) {
+                    var target = getMotionTarget(event);
+                    if (!target) return;
+                    target.classList.remove('xtj-btn-release');
+                    target.classList.add('xtj-btn-pressing');
+                }, true);
+
+                ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(type) {
+                    document.addEventListener(type, function(event) {
+                        var target = getMotionTarget(event);
+                        if (!target || !target.classList.contains('xtj-btn-pressing')) return;
+                        target.classList.remove('xtj-btn-pressing');
+                        target.classList.add('xtj-btn-release');
+                        window.setTimeout(function() {
+                            target.classList.remove('xtj-btn-release');
+                        }, 240);
+                    }, true);
+                });
+
+                document.addEventListener('click', function(event) {
+                    var target = getMotionTarget(event);
+                    if (!target) return;
+                    target.classList.add('xtj-btn-clicked');
+                    window.setTimeout(function() {
+                        target.classList.remove('xtj-btn-clicked');
+                    }, 260);
+                }, true);
+            })();
 
             renderPostFilterUserLoader = function() {
                 return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;">' +
