@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -6596,15 +6596,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         .neq('media_type', '__user_info__')
                         .neq('media_type', '__ann__')
                         .neq('media_type', '__photo_wall__')
+                        .neq('media_type', '__report__')
+                        .neq('media_type', '__dm__')
+                        .neq('media_type', '__auth__')
                         .order('created_at', { ascending: false })
                         .limit(200)
                         .then(function(res) {
                             _reportContentData = (res.data || []).map(function(p) {
                                 var txt = p.content || '';
-                                try { var j = JSON.parse(txt); txt = j.title || j.content || txt; } catch(e) {}
+                                try {
+                                    var j = JSON.parse(txt);
+                                    txt = j.content || j.title || j.caption || j.text || (typeof j === 'object' ? '' : txt) || '';
+                                } catch(e) {}
+                                if (!txt && p.media_url) txt = '(图片)';
                                 if (txt.length > 60) txt = txt.substring(0, 60) + '...';
                                 return { id: p.id, user_name: p.user_name, text: txt, thumb: p.media_url || '', type: 'post' };
-                            });
+                            }).filter(function(item) { return item.text || item.thumb; });
                             renderReportContentList(container);
                         }).catch(function() {
                             container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
@@ -6622,11 +6629,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         .limit(200)
                         .then(function(res) {
                             _reportContentData = (res.data || []).map(function(p) {
+                                var thumb = p.media_url || '';
                                 var txt = p.content || '';
-                                try { var j = JSON.parse(txt); txt = j.caption || j.title || txt || ''; } catch(e) {}
+                                try {
+                                    var j = JSON.parse(txt);
+                                    txt = j.caption || j.title || j.content || '';
+                                    if (!thumb) thumb = j.thumb || j.url || j.image_url || '';
+                                } catch(e) {}
                                 if (txt.length > 60) txt = txt.substring(0, 60) + '...';
-                                return { id: p.id, user_name: p.user_name, text: txt || '(照片)', thumb: p.media_url || '', type: 'photo' };
-                            });
+                                return { id: p.id, user_name: p.user_name, text: txt || '(照片)', thumb: thumb, type: 'photo' };
+                            }).filter(function(item) { return item.thumb || item.text; });
                             renderReportContentList(container);
                         }).catch(function() {
                             container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
