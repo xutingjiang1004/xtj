@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -348,7 +348,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             const toast = document.createElement('div');
             toast.className = 'toast';
             if (typeof window.__xtjUiTextRepair === 'function') {
-                try { message = window.__xtjUiTextRepair(message); } catch (e) {}
+                try { var _repaired = window.__xtjUiTextRepair(message); if (_repaired != null) message = _repaired; } catch (e) {}
             }
             toast.textContent = message == null ? '' : String(message);
             container.appendChild(toast);
@@ -6614,6 +6614,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var data = await res.json();
                     if (!res.ok) throw new Error(data.error || '提交失败');
                 } else {
+                    if (!window.sb) throw new Error('数据库连接未初始化，请刷新页面重试');
+                    if (!currentUser) throw new Error('请先登录');
                     var reportContent = JSON.stringify({
                         target_type: _reportType,
                         target_id: _reportSelectedId,
@@ -6622,7 +6624,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         report_reason: finalReason,
                         status: 'pending'
                     });
-                    var { error } = await sb.from('posts').insert([{
+                    var { error } = await window.sb.from('posts').insert([{
                         user_name: currentUser,
                         content: reportContent,
                         media_type: REPORT_MARKER,
@@ -6630,11 +6632,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }]);
                     if (error) throw new Error(error.message);
                 }
-                showToast('举报已提交，管理员会尽快处理', 'success');
+                window.showToast('举报已提交，管理员会尽快处理', 'success');
                 closeReportModal();
             } catch(e) {
+                console.error('[XTJ] submitReport error:', e);
                 errEl.style.display = 'block';
                 errEl.textContent = '提交失败：' + e.message;
+                // fallback: 如果模态框内的错误提示不可见，用 toast 再提示一次
+                try { window.showToast('提交失败：' + e.message, 'error'); } catch(_) {}
             } finally {
                 btn.disabled = false;
                 btn.textContent = '提交举报';
@@ -6652,7 +6657,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         (function installUiTextRepair() {
             // This repair system is superseded by features.js which handles mojibake more accurately.
             // Only expose stop/repair hooks for backward compatibility.
-            window.__xtjUiTextRepair = function(node) {};
+            window.__xtjUiTextRepair = function(node) { return node; };
             window.__xtjUiTextRepairStop = function() {};
             return;
         })();
