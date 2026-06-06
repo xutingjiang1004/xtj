@@ -154,14 +154,14 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   }
   
   if (username !== ADMIN_USERNAME) {
-    return res.status(401).json({ error: '璐﹀彿鎴栧瘑鐮佷笉姝ｇ‘' });
+    return res.status(401).json({ error: '账号不存在' });
   }
   
   if (!ADMIN_PASSWORD) {
-    return res.status(500).json({ error: '鏈嶅姟鍣ㄦ湭閰嶇疆绠＄悊鍛樺瘑鐮侊紝璇疯仈绯荤鐞嗗憳' });
+    return res.status(500).json({ error: '服务器未配置管理员密码，请联系管理员' });
   }
   if (password !== ADMIN_PASSWORD) {
-    return res.status(401).json({ error: '璐﹀彿鎴栧瘑鐮佷笉姝ｇ‘' });
+    return res.status(401).json({ error: '密码错误' });
   }
   
   const token = generateToken();
