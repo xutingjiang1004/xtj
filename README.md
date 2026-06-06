@@ -4,7 +4,7 @@
 
 ### 安全修复（重要）
 - 移除前端硬编码管理员密码：xxz123 从前端 JS/HTML 中彻底清除，改为通过后端 API + 环境变量 ADMIN_PASSWORD 认证
-- 新增 CORS 白名单限制：后端 API 仅允许 https://xtj.onrender.com 访问，拒绝其他域名跨域请求
+- 新增 CORS 白名单限制：后端 API 仅允许指定的前端域名访问，拒绝其他域名跨域请求
 - 新增安全响应头：X-Content-Type-Options、X-Frame-Options DENY、HSTS、X-XSS-Protection、Referrer-Policy
 - 新增 API 频率限制：所有管理端点添加频率限制（登录 10次/分钟，管理操作 20-30次/分钟），防止暴力破解
 - 新增输入长度校验：用户名≤50字、原因≤500字、标题≤200字、内容≤5000字，防止超长输入攻击
