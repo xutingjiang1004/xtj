@@ -3179,9 +3179,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 toggleBtns.forEach(function(b) {
                     b.classList.toggle("active", b.getAttribute("data-vis") === vis);
                 });
+                var visWrap = document.getElementById("editPostVisibility");
+                if (visWrap) {
+                    visWrap.classList.remove("is-switching");
+                    visWrap.classList.remove("is-saved");
+                }
                 // Re-enable save button
                 var btn = document.getElementById("saveEditPostBtn");
-                if (btn) { btn.disabled = false; btn.textContent = "保存修改"; }
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = "保存修改";
+                    btn.classList.remove("is-submitting");
+                    btn.classList.remove("is-success");
+                }
                 openModal("editPostModal");
             };
 
@@ -3202,6 +3212,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 btn.disabled = true;
                 btn.textContent = "保存中..";
+                btn.classList.add("is-submitting");
+                btn.classList.remove("is-success");
                 try {
                     var result = await updatePostRecord(post, {
                         content: nextContent.slice(0, 2000),
@@ -3234,7 +3246,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     } else {
                         clearFeedCache();
                     }
-                    closeModal("editPostModal");
+                    btn.textContent = "已保存";
+                    btn.classList.remove("is-submitting");
+                    btn.classList.add("is-success");
+                    var visWrap = document.getElementById("editPostVisibility");
+                    if (visWrap) {
+                        visWrap.classList.remove("is-switching");
+                        visWrap.classList.add("is-saved");
+                    }
                     editPostId = null;
                     if (syncedPost) {
                         await renderFeedFromMemoryState();
@@ -3243,12 +3262,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         await loadFeed(true);
                     }
                     showToast(nextVisibility === "private" ? "已改为私密" : "已改为公开");
+                    await new Promise(function(resolve) { setTimeout(resolve, 180); });
+                    closeModal("editPostModal");
                 } catch (e) {
                     console.error("[edit-post] save failed", e);
                     showToast("保存失败: " + (e && e.message ? e.message : "网络错误"));
                 } finally {
                     btn.disabled = false;
                     btn.textContent = "保存修改";
+                    btn.classList.remove("is-submitting");
+                    btn.classList.remove("is-success");
                 }
             };
             window._legacyTogglePostPinBase = async function(postId, btn) {
@@ -3590,9 +3613,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (!vis) return;
                     console.log('[vis-toggle] click, value:', vis);
                     document.getElementById('editPostVisibilityVal').value = vis;
+                    var visWrap = document.getElementById('editPostVisibility');
+                    if (visWrap) {
+                        visWrap.classList.remove('is-saved');
+                        visWrap.classList.add('is-switching');
+                    }
                     document.querySelectorAll('#editPostVisibility .vis-btn').forEach(function(b) {
                         b.classList.toggle('active', b.getAttribute('data-vis') === vis);
                     });
+                    setTimeout(function() {
+                        var wrap = document.getElementById('editPostVisibility');
+                        if (wrap) wrap.classList.remove('is-switching');
+                    }, 220);
                     return;
                 }
             });
@@ -6803,7 +6835,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                     return [
                         '<section class="stat-user-group" style="--xtj-enter-delay:' + Math.min(index * 42, 240) + 'ms;">',
-                        '<button type="button" class="stat-user-summary" onclick="loadUserAllPosts(\'' + nameJs + '\')">',
+                        '<button type="button" class="stat-user-summary stat-user-summary-card" onclick="loadUserAllPosts(\'' + nameJs + '\')">',
                         '<div class="stat-user-header"><div class="suh-left"><div class="suh-avatar">' + escapeHtml(name).slice(0, 1).toUpperCase() + '</div><div class="suh-copy"><span class="suh-name">' + escapeHtml(name) + '</span><span class="suh-sub">最近更新 ' + escapeHtml(latest) + '</span></div></div><span class="suh-count">' + posts.length + ' 条</span></div>',
                         previewMedia ? '<div class="stat-user-preview">' + previewMedia + '</div>' : '',
                         '<div class="stat-user-cta"><span class="stat-user-note">' + escapeHtml(statPostSummary(posts[0], 'plain')) + '</span><span class="stat-user-link">查看记录</span></div>',
