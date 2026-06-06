@@ -88,21 +88,37 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 
-// 安全响应头
+// 安全响应头 + CSRF 防护
 app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  // 绉婚櫎 Express 榛樿鐨?X-Powered-By 澶?  res.removeHeader('X-Powered-By');
-  // Remove Express default X-Powered-By header.
   res.removeHeader('X-Powered-By');
+
+  // CSRF 防护：对非 GET/HEAD/OPTIONS 请求检查 Origin/Referer
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    const origin = req.headers['origin'] || '';
+    const referer = req.headers['referer'] || '';
+    const allowed = ALLOWED_ORIGINS.some(function(o) {
+      return origin === o || referer.startsWith(o + '/');
+    });
+    if (!allowed && origin) {
+      return res.status(403).json({ error: '拒绝跨站请求' });
+    }
+  }
 
 // 频率限制中间件
 const rateLimitStore = new Map();
+function getRealIp(req) {
+  // 优先信任 X-Forwarded-For（部署在反向代理后）
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) return forwarded.split(',')[0].trim();
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
 function rateLimit(windowMs, maxRequests) {
   return (req, res, next) => {
-    const key = req.ip || req.socket.remoteAddress || 'unknown';
+    const key = getRealIp(req);
     const now = Date.now();
     const record = rateLimitStore.get(key) || { count: 0, resetAt: now + windowMs };
 
@@ -177,7 +193,11 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   if (!ADMIN_PASSWORD) {
     return res.status(500).json({ error: '服务器未配置管理员密码，请联系管理员' });
   }
-  if (password !== ADMIN_PASSWORD) {
+  // 使用 timingSafeEqual 防止时序侧信道攻击
+  const pwBuf = Buffer.from(password);
+  const adminBuf = Buffer.from(ADMIN_PASSWORD);
+  const pwMatch = pwBuf.length === adminBuf.length && crypto.timingSafeEqual(pwBuf, adminBuf);
+  if (!pwMatch) {
     return res.status(401).json({ error: '密码错误' });
   }
   
@@ -661,9 +681,22 @@ app.post('/api/report', rateLimit(60000, 10), async (req, res) => {
   const reasonVal = validateString(report_reason, MAX_REASON_LEN, '举报原因');
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
   
+  // 验证举报人账号存在
+  const { data: userCheck } = await supabase.from('posts')
+    .select('id')
+    .eq('user_name', reporterVal)
+    .eq('media_type', AUTH_MARKER)
+    .limit(1);
+  if (!userCheck || userCheck.length === 0) {
+    return res.status(400).json({ error: '举报人账号不存在' });
+  }
+  
   const reportContent = JSON.stringify({
-    target_type, target_id, target_user: targetUserVal || null,
-    report_category, report_reason: reasonVal || '',
+    target_type: String(target_type).slice(0, 20),
+    target_id: String(target_id).slice(0, 100),
+    target_user: String(targetUserVal || '').slice(0, 50),
+    report_category: String(report_category).slice(0, 50),
+    report_reason: String(reasonVal || '').slice(0, MAX_REASON_LEN),
     status: 'pending'
   });
   const { error } = await supabase.from('posts').insert([{
@@ -677,7 +710,15 @@ app.post('/api/report', rateLimit(60000, 10), async (req, res) => {
 });
 
 // 用户查看自己的举报
-app.get('/api/my-reports', rateLimit(60000, 20), async (req, res) => {
+app.get('/api/my-reports', rateLimit(60000, 20), function(req, res, next) {
+  // 需要 Authorization: Bearer <API_SECRET> 验证
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token || token !== API_SECRET) {
+    return res.status(401).json({ error: '未授权访问' });
+  }
+  next();
+}, async (req, res) => {
   const userName = req.query.user_name;
   if (!userName) return res.status(400).json({ error: '缺少用户名' });
   const { data, error } = await supabase.from('posts')

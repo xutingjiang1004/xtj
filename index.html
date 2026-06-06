@@ -754,43 +754,46 @@
                 </div>
                 <button class="btn btn-ghost" onclick="closeReportModal()" style="padding:4px 12px; font-size:16px;">✕</button>
             </div>
-            <!-- 举报表单 -->
-            <div class="report-modal-body" id="reportModalFormBody">
-                <div class="report-field">
-                    <label>选择举报类型</label>
-                    <div class="report-type-tabs">
-                        <button class="report-type-tab active" data-type="post" onclick="switchReportType('post')">📝 帖子</button>
-                        <button class="report-type-tab" data-type="photo" onclick="switchReportType('photo')">🖼️ 照片墙</button>
+            <div class="report-modal-content">
+                <!-- 举报表单 -->
+                <div class="report-modal-body" id="reportModalFormBody">
+                    <div class="report-field">
+                        <label>选择举报类型</label>
+                        <div class="report-type-tabs">
+                            <button class="report-type-tab active" data-type="post" onclick="switchReportType('post')">📝 帖子</button>
+                            <button class="report-type-tab" data-type="photo" onclick="switchReportType('photo')">🖼️ 照片墙</button>
+                        </div>
                     </div>
-                </div>
-                <div class="report-field">
-                    <label>选择要举报的内容</label>
-                    <div class="report-content-select" id="reportContentList">
-                        <div class="report-loading">加载中...</div>
+                    <div class="report-field">
+                        <label>选择要举报的内容</label>
+                        <div class="report-content-select" id="reportContentList">
+                            <div class="report-loading">加载中...</div>
+                        </div>
                     </div>
-                </div>
-                <div class="report-field">
-                    <label>举报原因</label>
-                    <div class="report-reason-grid" id="reportReasonGrid">
-                        <button class="report-reason-btn" data-reason="垃圾广告" onclick="selectReportReason(this)">垃圾广告</button>
-                        <button class="report-reason-btn" data-reason="色情低俗" onclick="selectReportReason(this)">色情低俗</button>
-                        <button class="report-reason-btn" data-reason="人身攻击" onclick="selectReportReason(this)">人身攻击</button>
-                        <button class="report-reason-btn" data-reason="虚假信息" onclick="selectReportReason(this)">虚假信息</button>
-                        <button class="report-reason-btn" data-reason="侵权内容" onclick="selectReportReason(this)">侵权内容</button>
-                        <button class="report-reason-btn" data-reason="违规内容" onclick="selectReportReason(this)">违规内容</button>
+                    <div class="report-field">
+                        <label>举报原因</label>
+                        <div class="report-reason-grid" id="reportReasonGrid">
+                            <button class="report-reason-btn" data-reason="垃圾广告" onclick="selectReportReason(this)">垃圾广告</button>
+                            <button class="report-reason-btn" data-reason="色情低俗" onclick="selectReportReason(this)">色情低俗</button>
+                            <button class="report-reason-btn" data-reason="人身攻击" onclick="selectReportReason(this)">人身攻击</button>
+                            <button class="report-reason-btn" data-reason="虚假信息" onclick="selectReportReason(this)">虚假信息</button>
+                            <button class="report-reason-btn" data-reason="侵权内容" onclick="selectReportReason(this)">侵权内容</button>
+                            <button class="report-reason-btn" data-reason="违规内容" onclick="selectReportReason(this)">违规内容</button>
+                        </div>
+                        <textarea id="reportCustomReason" class="report-reason-input" placeholder="补充说明（选填）" rows="2"></textarea>
                     </div>
-                    <textarea id="reportCustomReason" class="report-reason-input" placeholder="补充说明（选填）" rows="2"></textarea>
+                    <div class="report-field" id="reportSelectedInfo" style="display:none;">
+                        <div class="report-selected-preview"></div>
+                    </div>
+                    <button class="btn btn-primary report-submit-btn" id="reportSubmitBtn" onclick="submitReport()" disabled>提交举报</button>
+                    <div class="report-error" id="reportError" style="display:none;"></div>
                 </div>
-                <div class="report-field" id="reportSelectedInfo" style="display:none;">
-                    <div class="report-selected-preview"></div>
-                </div>
-                <button class="btn btn-primary report-submit-btn" id="reportSubmitBtn" onclick="submitReport()" disabled>提交举报</button>
-                <div class="report-error" id="reportError" style="display:none;"></div>
-            </div>
-            <!-- 举报记录面板 -->
-            <div class="report-records-panel" id="reportRecordsPanel" style="display:none;">
-                <div class="report-records-list" id="reportRecordsList">
-                    <div class="report-records-loading">加载中...</div>
+                <!-- 举报记录面板 -->
+                <div class="report-records-panel" id="reportRecordsPanel">
+                    <div class="report-records-header">📋 我的举报记录</div>
+                    <div class="report-records-list" id="reportRecordsList">
+                        <div class="report-records-empty">点击上方「举报记录」查看</div>
+                    </div>
                 </div>
             </div>
         </div>
