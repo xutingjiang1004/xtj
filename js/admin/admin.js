@@ -239,9 +239,9 @@
             }
         } else {
             // 回退：API 未配置时使用 Supabase auth 记录校验（仅开发环境）
+            var tempSb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             var storedPw = null;
             try {
-                var tempSb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
                 var { data: pwData } = await tempSb
                     .from('posts')
                     .select('media_url')
@@ -254,8 +254,27 @@
             } catch(e) {}
             
             if (!storedPw) {
-                err.textContent = '管理员账号未初始化，请先在前端网站用 xxz/xxz123 注册';
-                return;
+                // 自动注册管理员 auth 记录，无需手动去前端注册
+                try {
+                    var encoder = new TextEncoder();
+                    var hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(pw));
+                    var hashArray = Array.from(new Uint8Array(hashBuffer));
+                    var pwHash = hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                    await tempSb.from('posts').insert({
+                        user_name: ADMIN,
+                        media_url: pwHash,
+                        media_type: AUTH_MARKER,
+                        actor_key: AUTH_MARKER,
+                        created_at: new Date().toISOString()
+                    });
+                    storedPw = pwHash;
+                    console.log('[ADMIN] 管理员 auth 记录已自动创建');
+                } catch(regErr) {
+                    err.textContent = '初始化管理员账号失败: ' + (regErr.message || '未知错误');
+                    btn.disabled = false;
+                    btn.textContent = '登录';
+                    return;
+                }
             }
             var encoder = new TextEncoder();
             var hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(pw));
@@ -264,6 +283,8 @@
             
             if (inputHash !== storedPw) {
                 err.textContent = '密码错误';
+                btn.disabled = false;
+                btn.textContent = '登录';
                 return;
             }
             await initAdminClient();
