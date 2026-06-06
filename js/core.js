@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -558,6 +558,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // ===================== 闁谎嗩嚙缂?/ 婵炲鍔岄崬?/ 闁谎嗩嚙閸?=====================
             const AUTH_MARKER = '__auth__';
             const DM_MARKER = '__dm__';
+            const REPORT_MARKER = '__report__';
 
             // ===================== 用户限制状态管理 =====================
             var userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
@@ -770,12 +771,31 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 try {
                     if (name === ADMIN_NAME) {
-                        // 管理员通过后端API或Supabase中的auth记录验证，不再使用硬编码密码
-                        const authRec = await findAuthRecord(name);
+                        // 管理员通过 Supabase 中的 auth 记录验证；若记录不存在则自动创建一条，使用当前输入的密码
+                        let authRec = await findAuthRecord(name);
                         if (!authRec) {
-                            showToast("管理员账号未初始化，请联系系统管理员");
-                            btn.disabled = false; btn.textContent = "登录";
-                            return;
+                            try {
+                                const pwHash = await hashPassword(pw);
+                                await sb.from("posts").insert({
+                                    user_name: name,
+                                    content: AUTH_MARKER,
+                                    media_url: pwHash,
+                                    media_type: AUTH_MARKER,
+                                    actor_key: AUTH_MARKER
+                                });
+                                console.log('[AUTH] 管理员 auth 记录已自动创建');
+                            } catch (authErr) {
+                                console.error('[AUTH] 自动创建管理员记录失败:', authErr);
+                                showToast("管理员初始化失败: " + (authErr.message || "未知错误"));
+                                btn.disabled = false; btn.textContent = "登录";
+                                return;
+                            }
+                            authRec = await findAuthRecord(name);
+                            if (!authRec) {
+                                showToast("管理员账号初始化失败，请重试");
+                                btn.disabled = false; btn.textContent = "登录";
+                                return;
+                            }
                         }
                         const inputHash = await hashPassword(pw);
                         if (inputHash !== authRec.media_url) {
@@ -6594,14 +6614,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var data = await res.json();
                     if (!res.ok) throw new Error(data.error || '提交失败');
                 } else {
-                    var { error } = await sb.from('reports').insert([{
-                        reporter_name: currentUser,
+                    var reportContent = JSON.stringify({
                         target_type: _reportType,
                         target_id: _reportSelectedId,
                         target_user: _reportTargetUser,
                         report_category: _reportSelectedReason,
                         report_reason: finalReason,
                         status: 'pending'
+                    });
+                    var { error } = await sb.from('posts').insert([{
+                        user_name: currentUser,
+                        content: reportContent,
+                        media_type: REPORT_MARKER,
+                        actor_key: REPORT_MARKER
                     }]);
                     if (error) throw new Error(error.message);
                 }

@@ -1,4 +1,4 @@
-﻿// xtj Admin API service for Render deployment.
+// xtj Admin API service for Render deployment.
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
@@ -24,6 +24,7 @@ const MAX_USERNAME_LEN = 50;
 const MAX_REASON_LEN = 500;
 const MAX_TITLE_LEN = 200;
 const MAX_CONTENT_LEN = 5000;
+const REPORT_MARKER = '__report__';
 
 function sanitizeError(err) {
   if (!err) return '操作失败';
@@ -187,7 +188,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
       supabase.from('posts').select('*').neq('media_type', '__avatar__').order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
-      supabase.from('reports').select('*').order('created_at', { ascending: false }).limit(500),
+      supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500),
       supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500),
       supabase.from('mutes').select('*').order('created_at', { ascending: false }).limit(500),
       supabase.from('blacklist').select('*').order('created_at', { ascending: false }).limit(500)
@@ -466,9 +467,28 @@ app.put('/admin/blacklist/:id/lift', verifyToken, async (req, res) => {
 
 // ===================== 涓炬姤绠＄悊 =====================
 app.get('/admin/reports', verifyToken, async (req, res) => {
-  const { data, error } = await supabase.from('reports').select('*').order('created_at', { ascending: false }).limit(500);
+  const { data, error } = await supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
-  return res.json({ data });
+  const reports = (data || []).map(function(p) {
+      var c = {};
+      try { c = JSON.parse(p.content || '{}'); } catch(e) {}
+      return {
+          id: p.id,
+          created_at: p.created_at,
+          reporter_name: p.user_name,
+          target_type: c.target_type || 'post',
+          target_id: c.target_id || '',
+          target_user: c.target_user || '',
+          report_category: c.report_category || '',
+          report_reason: c.report_reason || '',
+          status: c.status || 'pending',
+          admin_response: c.admin_response || null,
+          reviewed_at: c.reviewed_at || null,
+          reviewed_by: c.reviewed_by || null,
+          response_at: c.response_at || null
+      };
+  });
+  return res.json({ data: reports });
 });
 
 app.put('/admin/report/:id', verifyToken, async (req, res) => {
@@ -478,9 +498,16 @@ app.put('/admin/report/:id', verifyToken, async (req, res) => {
   if (!allowedStatuses.includes(status)) {
     return res.status(400).json({ error: '无效的状态值' });
   }
-  const { error } = await supabase.from('reports').update({
-    status, reviewed_at: new Date().toISOString(), reviewed_by: ADMIN_USERNAME
-  }).eq('id', id);
+  // 从 posts 表获取举报数据（存储在 content JSON 中）
+  const { data: post, error: fetchErr } = await supabase.from('posts').select('content').eq('id', id).maybeSingle();
+  if (fetchErr) return res.status(400).json({ error: sanitizeError(fetchErr) });
+  if (!post) return res.status(404).json({ error: '举报不存在' });
+  var c = {};
+  try { c = JSON.parse(post.content || '{}'); } catch(e) {}
+  c.status = status;
+  c.reviewed_at = new Date().toISOString();
+  c.reviewed_by = ADMIN_USERNAME;
+  const { error } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true });
 });
@@ -494,13 +521,18 @@ app.put('/admin/report/:id/respond', verifyToken, async (req, res) => {
   }
   const responseVal = validateString(response, MAX_CONTENT_LEN, '回复');
   if (responseVal && responseVal.error) return res.status(400).json({ error: responseVal.error });
-  const { error } = await supabase.from('reports').update({
-    admin_response: responseVal,
-    response_at: new Date().toISOString(),
-    status: 'actioned',
-    reviewed_at: new Date().toISOString(),
-    reviewed_by: ADMIN_USERNAME
-  }).eq('id', id);
+  // 从 posts 表获取举报数据（存储在 content JSON 中）
+  const { data: post, error: fetchErr } = await supabase.from('posts').select('content').eq('id', id).maybeSingle();
+  if (fetchErr) return res.status(400).json({ error: sanitizeError(fetchErr) });
+  if (!post) return res.status(404).json({ error: '举报不存在' });
+  var c = {};
+  try { c = JSON.parse(post.content || '{}'); } catch(e) {}
+  c.admin_response = responseVal;
+  c.response_at = new Date().toISOString();
+  c.status = 'actioned';
+  c.reviewed_at = new Date().toISOString();
+  c.reviewed_by = ADMIN_USERNAME;
+  const { error } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true });
 });
@@ -508,23 +540,26 @@ app.put('/admin/report/:id/respond', verifyToken, async (req, res) => {
 // 管理员处理举报 + 删除帖子
 app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
   const { id } = req.params;
-  // 先获取举报信息
-  const { data: report } = await supabase.from('reports').select('*').eq('id', id).maybeSingle();
-  if (!report) return res.status(404).json({ error: '举报不存在' });
-  if (report.target_type === 'post' || report.target_type === 'photo') {
-    const { data: post } = await supabase.from('posts').select('actor_key').eq('id', report.target_id).maybeSingle();
+  // 从 posts 表获取举报数据（存储在 content JSON 中）
+  const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
+  if (!reportPost) return res.status(404).json({ error: '举报不存在' });
+  var c = {};
+  try { c = JSON.parse(reportPost.content || '{}'); } catch(e) {}
+  const targetType = c.target_type || 'post';
+  const targetId = c.target_id || '';
+  if (targetType === 'post' || targetType === 'photo') {
+    const { data: post } = await supabase.from('posts').select('actor_key').eq('id', targetId).maybeSingle();
     const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
     await supabase.rpc('delete_post_with_actor', {
-      p_post_id: report.target_id,
+      p_post_id: targetId,
       p_actor_key: actorKey
     });
   }
   // 标记举报已处理
-  await supabase.from('reports').update({
-    status: 'actioned',
-    reviewed_at: new Date().toISOString(),
-    reviewed_by: ADMIN_USERNAME
-  }).eq('id', id);
+  c.status = 'actioned';
+  c.reviewed_at = new Date().toISOString();
+  c.reviewed_by = ADMIN_USERNAME;
+  await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
   return res.json({ ok: true });
 });
 
@@ -532,10 +567,13 @@ app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
 app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
   const { id } = req.params;
   const { duration_hours } = req.body;
-  // 获取举报信息
-  const { data: report } = await supabase.from('reports').select('*').eq('id', id).maybeSingle();
-  if (!report) return res.status(404).json({ error: '举报不存在' });
-  const targetUser = report.target_user;
+  // 从 posts 表获取举报数据（存储在 content JSON 中）
+  const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
+  if (!reportPost) return res.status(404).json({ error: '举报不存在' });
+  var c = {};
+  try { c = JSON.parse(reportPost.content || '{}'); } catch(e) {}
+  const targetUser = c.target_user;
+  const reportReason = c.report_reason || '';
   if (!targetUser) return res.status(400).json({ error: '无法确定被举报用户' });
   
   const banType = (duration_hours || 0) === 0 ? 'permanent' : 'temporary';
@@ -550,16 +588,15 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
     const activeBan = existing.find(b => b.is_active);
     if (activeBan) {
       // 已经封禁，只更新举报状态
-      await supabase.from('reports').update({
-        status: 'actioned',
-        reviewed_at: new Date().toISOString(),
-        reviewed_by: ADMIN_USERNAME,
-        admin_response: '该用户已被封禁'
-      }).eq('id', id);
+      c.status = 'actioned';
+      c.reviewed_at = new Date().toISOString();
+      c.reviewed_by = ADMIN_USERNAME;
+      c.admin_response = '该用户已被封禁';
+      await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
       return res.json({ ok: true, message: '该用户已被封禁，举报已标记为已处理' });
     }
     await supabase.from('bans').update({
-      ban_reason: '举报处理：' + (report.report_reason || '违规内容'),
+      ban_reason: '举报处理：' + (reportReason || '违规内容'),
       ban_duration_hours: duration_hours || 0,
       ban_type: banType,
       banned_by: ADMIN_USERNAME,
@@ -571,7 +608,7 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
     await supabase.from('bans').insert([{
       user_name: targetUser,
       ban_type: banType,
-      ban_reason: '举报处理：' + (report.report_reason || '违规内容'),
+      ban_reason: '举报处理：' + (reportReason || '违规内容'),
       ban_duration_hours: duration_hours || 0,
       banned_by: ADMIN_USERNAME,
       expires_at: expiresAt,
@@ -580,11 +617,10 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
   }
   
   // 标记举报已处理
-  await supabase.from('reports').update({
-    status: 'actioned',
-    reviewed_at: new Date().toISOString(),
-    reviewed_by: ADMIN_USERNAME
-  }).eq('id', id);
+  c.status = 'actioned';
+  c.reviewed_at = new Date().toISOString();
+  c.reviewed_by = ADMIN_USERNAME;
+  await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
   
   return res.json({ ok: true });
 });
@@ -601,14 +637,16 @@ app.post('/api/report', rateLimit(60000, 10), async (req, res) => {
   const reasonVal = validateString(report_reason, MAX_REASON_LEN, '举报原因');
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
   
-  const { error } = await supabase.from('reports').insert([{
-    reporter_name: reporterVal,
-    target_type,
-    target_id,
-    target_user: targetUserVal || null,
-    report_category,
-    report_reason: reasonVal || '',
+  const reportContent = JSON.stringify({
+    target_type, target_id, target_user: targetUserVal || null,
+    report_category, report_reason: reasonVal || '',
     status: 'pending'
+  });
+  const { error } = await supabase.from('posts').insert([{
+    user_name: reporterVal,
+    content: reportContent,
+    media_type: REPORT_MARKER,
+    actor_key: REPORT_MARKER
   }]);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true });
@@ -618,13 +656,33 @@ app.post('/api/report', rateLimit(60000, 10), async (req, res) => {
 app.get('/api/my-reports', rateLimit(60000, 20), async (req, res) => {
   const userName = req.query.user_name;
   if (!userName) return res.status(400).json({ error: '缺少用户名' });
-  const { data, error } = await supabase.from('reports')
+  const { data, error } = await supabase.from('posts')
     .select('*')
-    .eq('reporter_name', userName)
+    .eq('media_type', REPORT_MARKER)
+    .eq('user_name', userName)
     .order('created_at', { ascending: false })
     .limit(50);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
-  return res.json({ data });
+  const reports = (data || []).map(function(p) {
+    var c = {};
+    try { c = JSON.parse(p.content || '{}'); } catch(e) {}
+    return {
+      id: p.id,
+      created_at: p.created_at,
+      reporter_name: p.user_name,
+      target_type: c.target_type || 'post',
+      target_id: c.target_id || '',
+      target_user: c.target_user || '',
+      report_category: c.report_category || '',
+      report_reason: c.report_reason || '',
+      status: c.status || 'pending',
+      admin_response: c.admin_response || null,
+      reviewed_at: c.reviewed_at || null,
+      reviewed_by: c.reviewed_by || null,
+      response_at: c.response_at || null
+    };
+  });
+  return res.json({ data: reports });
 });
 
 // ===================== 鐢ㄦ埛鏁版嵁锛堝彧璇伙級 =====================
