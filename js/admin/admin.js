@@ -12,6 +12,30 @@
     var SESSION_KEY = "xtj_admin_session";
     var TOKEN_KEY = "xtj_admin_token";
     var TAB_KEY = "xtj_admin_tab";
+    // 简单的 token 混淆（非加密，仅防止直接读取 localStorage）
+
+    var TOKEN_SALT = 'xtj_7k3m';
+
+    function _obfuscateToken(raw) {
+        if (!raw) return '';
+        var result = '';
+        for (var i = 0; i < raw.length; i++) {
+            result += String.fromCharCode(raw.charCodeAt(i) ^ TOKEN_SALT.charCodeAt(i % TOKEN_SALT.length));
+        }
+        return btoa(result);
+    }
+
+    function _deobfuscateToken(encoded) {
+        if (!encoded) return '';
+        try {
+            var raw = atob(encoded);
+            var result = '';
+            for (var i = 0; i < raw.length; i++) {
+                result += String.fromCharCode(raw.charCodeAt(i) ^ TOKEN_SALT.charCodeAt(i % TOKEN_SALT.length));
+            }
+            return result;
+        } catch(e) { return ''; }
+    }
 
     var sb = null;
     var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [];
@@ -87,11 +111,11 @@
 
     // ===================== API 辅助函数 =====================
     function getToken() {
-        try { return localStorage.getItem(TOKEN_KEY) || ''; } catch(e) { return ''; }
+        try { return _deobfuscateToken(localStorage.getItem(TOKEN_KEY) || ''); } catch(e) { return ''; }
     }
 
     function setToken(t) {
-        try { localStorage.setItem(TOKEN_KEY, t); } catch(e) {}
+        try { localStorage.setItem(TOKEN_KEY, _obfuscateToken(t)); } catch(e) {}
     }
 
     function clearToken() {
@@ -188,10 +212,10 @@
         saveSession();
         
         var savedTab = localStorage.getItem(TAB_KEY);
-        if (savedTab && ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos'].indexOf(savedTab) !== -1) {
+        if (savedTab && ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos','stats'].indexOf(savedTab) !== -1) {
             currentTab = savedTab;
             await loadAllData(true);
-            ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos'].forEach(function(t) {
+            ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos','stats'].forEach(function(t) {
                 document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.remove('active');
                 document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn').classList.remove('active');
             });
@@ -279,7 +303,6 @@
                         created_at: new Date().toISOString()
                     });
                     storedPw = pwHash;
-                    console.log('[ADMIN] 管理员 auth 记录已自动创建');
                 } catch(regErr) {
                     err.textContent = '初始化管理员账号失败: ' + (regErr.message || '未知错误');
                     btn.disabled = false;
@@ -396,7 +419,6 @@
                 renderTab(currentTab);
             }
         } catch(e) {
-            console.error(e);
             showToast('数据加载失败，请刷新重试', 'error');
         }
     }
@@ -1712,11 +1734,223 @@
         });
     };
 
+    // ===================== 数据统计仪表盘 =====================
+    var statsDateStart = '';
+    var statsDateEnd = '';
+    var statsChartMode = 'visits'; // visits | attacks | posts | comments | likes
+
+    async function renderStatsTab(el) {
+        el.innerHTML = '<div class="loading">加载统计数据中...</div>';
+
+        try {
+            // 并行请求汇总和每日数据
+            var dailyQuery = '/admin/stats/daily';
+            if (statsDateStart) dailyQuery += '?start=' + statsDateStart;
+            if (statsDateEnd) dailyQuery += (statsDateStart ? '&' : '?') + 'end=' + statsDateEnd;
+
+            var summaryPromise = API_BASE && getToken() ? apiCall('GET', '/admin/stats') : Promise.resolve(null);
+            var dailyPromise = API_BASE && getToken() ? apiCall('GET', dailyQuery) : Promise.resolve(null);
+
+            var summary = await summaryPromise;
+            var dailyData = await dailyPromise;
+
+            if (!summary) {
+                el.innerHTML = '<div class="empty-state"><div class="icon">📊</div><div class="text">需要配置 API_BASE 才能加载统计数据</div></div>';
+                return;
+            }
+
+            var daily = (dailyData && dailyData.daily) || [];
+
+            // ===== 日期筛选器 =====
+            var h = '<div class="card"><div class="date-filter-row">';
+            h += '<span style="font-weight:600;font-size:14px;">日期筛选：</span>';
+            h += '<input type="date" id="statsDateStart" value="' + escapeHtml(statsDateStart) + '" onchange="statsDateStart=this.value;renderTab(\'stats\')" title="开始日期">';
+            h += '<span style="color:var(--text-muted);">至</span>';
+            h += '<input type="date" id="statsDateEnd" value="' + escapeHtml(statsDateEnd) + '" onchange="statsDateEnd=this.value;renderTab(\'stats\')" title="结束日期">';
+            if (statsDateStart || statsDateEnd) {
+                h += '<button onclick="statsDateStart=\'\';statsDateEnd=\'\';renderTab(\'stats\')">清除筛选</button>';
+            }
+            h += '<button class="btn-sm primary" style="margin-left:auto;" onclick="apiCall(\'POST\',\'/admin/stats/refresh\').then(function(){renderTab(\'stats\');}).catch(function(){})">刷新缓存</button>';
+            h += '</div></div>';
+
+            // ===== 总览数据卡片 =====
+            h += '<div class="stats-row">';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_users || 0) + '</div><div class="lbl">用户数量</div></div>';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_posts || 0) + '</div><div class="lbl">帖子数量</div></div>';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_comments || 0) + '</div><div class="lbl">评论数量</div></div>';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_likes || 0) + '</div><div class="lbl">点赞数量</div></div>';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_photos || 0) + '</div><div class="lbl">照片数量</div></div>';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_visits || 0) + '</div><div class="lbl">访问总次数</div></div>';
+            h += '<div class="stat-box danger"><div class="val">' + (summary.total_attacks || 0) + '</div><div class="lbl">被攻击次数</div></div>';
+            h += '<div class="stat-box warn"><div class="val">' + (summary.total_visits || 0) + '</div><div class="lbl">API防火墙拦截</div></div>';
+            h += '</div>';
+
+            // ===== 每日图表切换按钮 =====
+            h += '<div class="card"><h3>每日数据趋势</h3>';
+            h += '<div class="filter-chips" style="margin-bottom:12px;">';
+            var modes = [
+                { key: 'visits', label: '访问量', color: '#059669' },
+                { key: 'attacks', label: '攻击量', color: '#ff3b60' },
+                { key: 'posts', label: '发帖量', color: '#3b82f6' },
+                { key: 'comments', label: '评论量', color: '#f59e0b' },
+                { key: 'likes', label: '点赞量', color: '#ec4899' },
+                { key: 'new_users', label: '新用户', color: '#8b5cf6' }
+            ];
+            modes.forEach(function(m) {
+                h += '<span class="filter-chip' + (statsChartMode === m.key ? ' active' : '') + '" onclick="statsChartMode=\'' + m.key + '\';renderTab(\'stats\')" style="cursor:pointer;">' + m.label + '</span>';
+            });
+            h += '</div>';
+
+            // ===== 柱状图 =====
+            if (daily.length === 0) {
+                h += '<div class="empty">暂无每日数据</div>';
+            } else {
+                // 计算最大值用于高度比例
+                var maxVal = 0;
+                daily.forEach(function(d) {
+                    var v = d[statsChartMode] || 0;
+                    if (v > maxVal) maxVal = v;
+                });
+                if (maxVal === 0) maxVal = 1;
+
+                h += '<div class="chart-bar-row">';
+                daily.forEach(function(d) {
+                    var v = d[statsChartMode] || 0;
+                    var heightPct = Math.max(4, Math.round((v / maxVal) * 100));
+                    var modeInfo = modes.find(function(m) { return m.key === statsChartMode; });
+                    var barColor = modeInfo ? modeInfo.color : '#059669';
+                    var shortDate = d.date ? d.date.slice(5) : '';
+                    h += '<div class="chart-bar" style="height:' + heightPct + '%;background:' + barColor + ';" title="' + escapeHtml(d.date) + ': ' + v + '">';
+                    h += '<span class="bar-tip">' + v + '</span>';
+                    h += '</div>';
+                });
+                h += '</div>';
+
+                // 日期标签
+                h += '<div class="chart-bar-labels">';
+                daily.forEach(function(d) {
+                    var shortDate = d.date ? d.date.slice(5) : '';
+                    h += '<div class="chart-bar-label">' + escapeHtml(shortDate) + '</div>';
+                });
+                h += '</div>';
+
+                // 图例
+                h += '<div class="chart-legend">';
+                h += '<span><span class="dot" style="background:' + (modes.find(function(m){return m.key===statsChartMode;})||modes[0]).color + ';"></span> ' + (modes.find(function(m){return m.key===statsChartMode;})||modes[0]).label + '</span>';
+                h += '<span style="color:var(--text-muted);font-size:11px;">最高: ' + maxVal + '</span>';
+                h += '<span style="color:var(--text-muted);font-size:11px;">共 ' + daily.length + ' 天</span>';
+                h += '</div>';
+            }
+            h += '</div>';
+
+            // ===== 攻击类型分布 =====
+            if (summary.attack_types && Object.keys(summary.attack_types).length > 0) {
+                h += '<div class="card"><h3>攻击类型分布</h3>';
+                var attackEntries = Object.entries(summary.attack_types).sort(function(a, b) { return b[1] - a[1]; });
+                var attackMax = attackEntries[0] ? attackEntries[0][1] : 1;
+                h += '<div style="display:flex;flex-direction:column;gap:8px;">';
+                attackEntries.forEach(function(entry) {
+                    var pct = Math.round((entry[1] / attackMax) * 100);
+                    h += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;">';
+                    h += '<span style="width:120px;text-align:right;color:var(--text-muted);">' + escapeHtml(entry[0]) + '</span>';
+                    h += '<div style="flex:1;height:18px;background:rgba(255,59,96,0.1);border-radius:9px;overflow:hidden;">';
+                    h += '<div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg, #ff3b60, #fb7185);border-radius:9px;transition:width 0.5s ease;"></div>';
+                    h += '</div>';
+                    h += '<span style="width:40px;font-weight:600;">' + entry[1] + '</span>';
+                    h += '</div>';
+                });
+                h += '</div></div>';
+            }
+
+            // ===== 每日数据详表 =====
+            if (daily.length > 0) {
+                h += '<div class="card"><h3>每日数据明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + daily.length + ' 天</span></h3>';
+                h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>访问</th><th>攻击</th><th>帖子</th><th>评论</th><th>点赞</th><th>新用户</th></tr></thead><tbody>';
+                // 倒序显示（最新在前）
+                var reversed = daily.slice().reverse();
+                reversed.forEach(function(d) {
+                    h += '<tr>';
+                    h += '<td><strong>' + escapeHtml(d.date) + '</strong></td>';
+                    h += '<td>' + (d.visits || 0) + '</td>';
+                    h += '<td style="color:' + (d.attacks > 0 ? 'var(--danger)' : 'var(--text-muted)') + ';">' + (d.attacks || 0) + '</td>';
+                    h += '<td>' + (d.posts || 0) + '</td>';
+                    h += '<td>' + (d.comments || 0) + '</td>';
+                    h += '<td>' + (d.likes || 0) + '</td>';
+                    h += '<td>' + (d.new_users || 0) + '</td>';
+                    h += '</tr>';
+                });
+                h += '</tbody></table></div></div>';
+            }
+
+            // 缓存时间提示
+            if (summary.cached_at) {
+                h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + '（每60秒刷新）</div>';
+            }
+
+            el.innerHTML = h;
+
+            // ===== 异步加载用户访问明细（不阻塞主渲染） =====
+            loadUserVisitStats(el);
+        } catch(e) {
+            el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">统计数据加载失败: ' + escapeHtml(e.message) + '</div></div>';
+        }
+    }
+
+    // ===================== 用户访问明细（异步加载） =====================
+    async function loadUserVisitStats(el) {
+        var container = document.createElement('div');
+        container.className = 'card';
+        container.innerHTML = '<h3>用户访问明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">加载中...</span></h3><div class="loading">加载用户访问数据中...</div>';
+        el.appendChild(container);
+
+        try {
+            var userData = await apiCall('GET', '/admin/stats/users');
+            if (!userData || !userData.users) {
+                container.innerHTML = '<h3>用户访问明细</h3><div class="empty">暂无用户访问数据</div>';
+                return;
+            }
+
+            var users = userData.users;
+            var totalUsers = userData.total || 0;
+
+            var h = '<h3>用户访问明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + totalUsers + ' 个用户</span></h3>';
+
+            if (users.length === 0) {
+                h += '<div class="empty">暂无用户访问数据</div>';
+            } else {
+                h += '<div class="table-wrap"><table><thead><tr>';
+                h += '<th>用户</th><th>总访问次数</th><th>今日访问</th><th>最近登录</th><th>注册时间</th>';
+                h += '</tr></thead><tbody>';
+
+                var today = new Date().toISOString().slice(0, 10);
+                users.forEach(function(u) {
+                    var todayVisits = u.daily_visits && u.daily_visits[today] ? u.daily_visits[today] : 0;
+                    var lastLogin = u.last_login || u.last_visit || '';
+                    var regTime = u.reg_time || '';
+
+                    h += '<tr>';
+                    h += '<td><strong>' + escapeHtml(u.user_name) + '</strong></td>';
+                    h += '<td><span style="color:var(--primary);font-weight:600;">' + u.total_visits + '</span></td>';
+                    h += '<td>' + (todayVisits > 0 ? '<span style="color:#059669;font-weight:600;">' + todayVisits + '</span>' : '0') + '</td>';
+                    h += '<td style="font-size:11px;color:var(--text-muted);">' + (lastLogin ? formatTime(lastLogin) : '--') + '</td>';
+                    h += '<td style="font-size:11px;color:var(--text-muted);">' + (regTime ? formatTime(regTime) : '--') + '</td>';
+                    h += '</tr>';
+                });
+
+                h += '</tbody></table></div>';
+            }
+
+            container.innerHTML = h;
+        } catch(e) {
+            container.innerHTML = '<h3>用户访问明细</h3><div class="empty">用户访问数据加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
     var _origSwitchTab = window.switchTab;
     window.switchTab = function(tab) {
         currentTab = tab;
         saveCurrentTab();
-        ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos'].forEach(function(t) {
+        ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos','stats'].forEach(function(t) {
             var panel = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
             var btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn');
             if (panel) panel.classList.remove('active');
@@ -1744,6 +1978,7 @@
             case 'mutes': renderMutesTab(el); break;
             case 'blacklist': renderBlacklistTab(el); break;
             case 'photos': renderPhotosTab(el); break;
+            case 'stats': renderStatsTab(el); break;
         }
     };
 
@@ -2000,7 +2235,6 @@
             if (!keepTab) { switchTab('ann'); }
             else { window.renderTab(currentTab); }
         } catch(e) {
-            console.error(e);
             showToast('数据加载失败，请刷新重试', 'error');
         }
     };
