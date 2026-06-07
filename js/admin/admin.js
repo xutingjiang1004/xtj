@@ -2204,6 +2204,9 @@
                         // 保留最早（最旧）的 reg_time，只覆盖更新 last_login
                         if (userInfoMap[ui.user_name]) {
                             if (parsed.last_login) userInfoMap[ui.user_name].last_login = parsed.last_login;
+                            if (parsed.reg_time && (!userInfoMap[ui.user_name].reg_time || parsed.reg_time < userInfoMap[ui.user_name].reg_time)) {
+                                userInfoMap[ui.user_name].reg_time = parsed.reg_time;
+                            }
                         } else {
                             userInfoMap[ui.user_name] = parsed;
                         }
