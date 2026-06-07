@@ -127,22 +127,33 @@ function validateDurationHours(value) {
 }
 
 // ===================== 涓棿浠?=====================
-// CORS 闄愬埗锛氫粎鍏佽鎸囧畾鍩熷悕
+// CORS 限制：仅允许指定域名
 app.use(cors({
   origin: function (origin, callback) {
-    // 鍏佽鏃?origin 鐨勮姹傦紙濡?curl銆丳ostman銆佸悓婧愯姹傦級
+    // 允许无 origin 的请求（如 curl、Postman、同源请求）
     if (!origin) return callback(null, true);
     if (ALLOWED_ORIGINS.includes(origin)) {
       return callback(null, true);
     }
-    console.warn('[CORS] Rejected origin ' + origin);
-    logAttack(req.ip || 'unknown', 'CORS', 'Rejected origin: ' + origin.slice(0, 100));
-    callback(new Error('不允许的来源'));
+    // 返回 403 而非 500（错误由后续错误处理器记录日志并返回 403）
+    var err = new Error('不允许的来源');
+    err.status = 403;
+    callback(err);
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   maxAge: 86400
 }));
+
+// CORS 错误处理器（此处的 req 可用，用于记录攻击日志）
+app.use(function corsErrorHandler(err, req, res, next) {
+  if (err.message === '不允许的来源') {
+    console.warn('[CORS] Rejected origin ' + (req.headers.origin || 'unknown'));
+    logAttack(getRealIp(req), 'CORS', 'Rejected origin: ' + (req.headers.origin || '').slice(0, 100));
+    return res.status(403).json({ error: '不允许的来源' });
+  }
+  next(err);
+});
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -191,7 +202,7 @@ function getRealIp(req) {
 }
 function rateLimit(windowMs, maxRequests) {
   return (req, res, next) => {
-    const key = getRealIp(req);
+    const key = getRealIp(req) + ':' + req.path;
     const now = Date.now();
     const record = rateLimitStore.get(key) || { count: 0, resetAt: now + windowMs };
 
@@ -286,7 +297,8 @@ app.get('/admin/verify', verifyToken, (req, res) => {
   return res.json({ ok: true });
 });
 
-// 绠＄悊鍛樼櫥鍑?app.post('/admin/logout', verifyToken, (req, res) => {
+// 管理员登出
+app.post('/admin/logout', verifyToken, (req, res) => {
   adminTokens.delete(req.adminToken);
   return res.json({ ok: true });
 });
