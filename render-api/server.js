@@ -11,6 +11,8 @@ const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const API_SECRET = process.env.API_SECRET || crypto.randomBytes(32).toString('hex');
 const TOKEN_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ithowxqignlhkwaykglt.supabase.co';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 // Allowed frontend origins.
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://xtj.onrender.com').split(',').map(s => s.trim());
@@ -18,6 +20,15 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://xtj.onrender.co
 if (!ADMIN_PASSWORD) {
   console.warn('[WARN] ADMIN_PASSWORD is not configured.');
 }
+if (!SUPABASE_SERVICE_KEY) {
+  console.warn('[WARN] SUPABASE_SERVICE_KEY is not configured. Using ANON KEY fallback.');
+}
+
+// 初始化 Supabase 客户端
+const supabase = createClient(
+  SUPABASE_URL,
+  SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || ''
+);
 
 // ===================== 输入校验 =====================
 const MAX_USERNAME_LEN = 50;
@@ -27,6 +38,52 @@ const MAX_CONTENT_LEN = 5000;
 const REPORT_MARKER = '__report__';
 const DM_MARKER = '__dm__';
 const AUTH_MARKER = '__auth__';
+const VISIT_MARKER = '__visit__';
+const ATTACK_MARKER = '__attack__';
+
+// 统计数据内存缓存（减少数据库查询）
+let statsCache = { data: null, ts: 0 };
+const STATS_CACHE_TTL = 60000; // 1分钟
+
+// 记录访问日志
+async function logVisit(ip) {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    await supabase.from('posts').insert([{
+      user_name: ip || 'unknown',
+      content: JSON.stringify({ date: today }),
+      media_type: VISIT_MARKER,
+      media_url: today,
+      actor_key: 'visit_' + Date.now()
+    }]);
+  } catch(e) { /* 静默失败 */ }
+}
+
+// 记录攻击/拦截日志
+async function logAttack(ip, type, detail) {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    await supabase.from('posts').insert([{
+      user_name: ip || 'unknown',
+      content: JSON.stringify({ type, detail: String(detail || '').slice(0, 200), date: today }),
+      media_type: ATTACK_MARKER,
+      media_url: type,
+      actor_key: 'attack_' + Date.now()
+    }]);
+  } catch(e) { /* 静默失败 */ }
+}
+
+// 访问计数去重（同IP同天只计一次）
+const visitCache = new Map(); // ip_date -> true
+function shouldCountVisit(ip) {
+  const today = new Date().toISOString().slice(0, 10);
+  const key = ip + '_' + today;
+  if (visitCache.has(key)) return false;
+  visitCache.set(key, true);
+  // 每30分钟清理旧缓存
+  if (visitCache.size > 10000) visitCache.clear();
+  return true;
+}
 
 function sanitizeError(err) {
   if (!err) return '操作失败';
@@ -79,7 +136,8 @@ app.use(cors({
       return callback(null, true);
     }
     console.warn('[CORS] Rejected origin ' + origin);
-    callback(new Error('涓嶅厑璁哥殑鏉ユ簮'));
+    logAttack(req.ip || 'unknown', 'CORS', 'Rejected origin: ' + origin.slice(0, 100));
+    callback(new Error('不允许的来源'));
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -88,13 +146,24 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 
-// 安全响应头 + CSRF 防护
+// 安全响应头 + CSRF 防护 + 访问记录
 app.use((req, res, next) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; media-src 'self' https:; connect-src 'self' https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
   res.removeHeader('X-Powered-By');
+
+  // 访问记录（只记录 GET / 和 /health，避免每个请求都写数据库）
+  const ip = getRealIp(req);
+  if (req.method === 'GET' && (req.path === '/' || req.path === '/health')) {
+    if (shouldCountVisit(ip)) {
+      logVisit(ip);
+    }
+  }
 
   // CSRF 防护：对非 GET/HEAD/OPTIONS 请求检查 Origin/Referer
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
@@ -104,9 +173,13 @@ app.use((req, res, next) => {
       return origin === o || referer.startsWith(o + '/');
     });
     if (!allowed && origin) {
+      logAttack(ip, 'CSRF', 'Origin: ' + origin.slice(0, 100));
       return res.status(403).json({ error: '拒绝跨站请求' });
     }
   }
+
+  next();
+});
 
 // 频率限制中间件
 const rateLimitStore = new Map();
@@ -135,6 +208,7 @@ function rateLimit(windowMs, maxRequests) {
     res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetAt / 1000));
 
     if (record.count > maxRequests) {
+      logAttack(key, 'RATE_LIMIT', req.method + ' ' + req.path);
       return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
     }
     next();
@@ -761,11 +835,297 @@ app.get('/admin/users', verifyToken, async (req, res) => {
   return res.json({ data });
 });
 
-// ===================== 鍚姩 =====================
+// ===================== 数据统计 API =====================
+// 汇总统计
+app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    // 使用缓存减少数据库查询
+    if (statsCache.data && (Date.now() - statsCache.ts) < STATS_CACHE_TTL) {
+      return res.json(statsCache.data);
+    }
+
+    const [postsRes, usersRes, visitsRes, attacksRes, likesRes, commentsRes, photosRes] = await Promise.all([
+      supabase.from('posts').select('id, media_type, content, created_at').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).order('created_at', { ascending: false }).limit(10000),
+      supabase.from('posts').select('id').eq('media_type', AUTH_MARKER),
+      supabase.from('posts').select('id, content, media_url, created_at').eq('media_type', VISIT_MARKER).order('created_at', { ascending: false }).limit(10000),
+      supabase.from('posts').select('id, content, media_url, created_at').eq('media_type', ATTACK_MARKER).order('created_at', { ascending: false }).limit(10000),
+      supabase.from('likes').select('id'),
+      supabase.from('comments').select('id'),
+      supabase.from('posts').select('id').eq('media_type', '__photo_wall__'),
+    ]);
+
+    const posts = (postsRes.data || []).filter(p => {
+      if (p.content) {
+        try { var c = JSON.parse(p.content); if (c && c.target_type) return false; } catch(e) {}
+      }
+      return true;
+    });
+    const users = usersRes.data || [];
+    const visits = visitsRes.data || [];
+    const attacks = attacksRes.data || [];
+    const likes = likesRes.data || [];
+    const comments = commentsRes.data || [];
+    const photos = photosRes.data || [];
+
+    // 按日期聚合访问数据
+    const dailyVisits = {};
+    visits.forEach(v => {
+      var d = v.media_url || '';
+      if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
+      if (d) dailyVisits[d] = (dailyVisits[d] || 0) + 1;
+    });
+
+    // 按日期聚合攻击数据
+    const dailyAttacks = {};
+    attacks.forEach(a => {
+      var d = a.media_url || '';
+      if (!d) { try { var c = JSON.parse(a.content || '{}'); d = c.date || ''; } catch(e) {} }
+      if (d) dailyAttacks[d] = (dailyAttacks[d] || 0) + 1;
+    });
+
+    // 攻击类型分布
+    const attackTypes = {};
+    attacks.forEach(a => {
+      var t = a.media_url || 'unknown';
+      attackTypes[t] = (attackTypes[t] || 0) + 1;
+    });
+
+    const result = {
+      total_users: users.length,
+      total_posts: posts.length,
+      total_comments: comments.length,
+      total_likes: likes.length,
+      total_photos: photos.length,
+      total_visits: visits.length,
+      total_attacks: attacks.length,
+      daily_visits: dailyVisits,
+      daily_attacks: dailyAttacks,
+      attack_types: attackTypes,
+      cached_at: new Date().toISOString()
+    };
+
+    statsCache = { data: result, ts: Date.now() };
+    return res.json(result);
+  } catch (e) {
+    console.error('[API] 统计加载失败:', e.message);
+    return res.status(500).json({ error: '统计加载失败' });
+  }
+});
+
+// 每日明细统计（支持日期筛选）
+app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    const startDate = req.query.start || '';
+    const endDate = req.query.end || '';
+
+    const [visitsRes, attacksRes, postsRes, commentsRes, likesRes, usersRes] = await Promise.all([
+      supabase.from('posts').select('id, content, media_url, created_at').eq('media_type', VISIT_MARKER).order('created_at', { ascending: false }).limit(10000),
+      supabase.from('posts').select('id, content, media_url, created_at').eq('media_type', ATTACK_MARKER).order('created_at', { ascending: false }).limit(10000),
+      supabase.from('posts').select('id, created_at').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').order('created_at', { ascending: false }).limit(10000),
+      supabase.from('comments').select('id, created_at').order('created_at', { ascending: false }).limit(10000),
+      supabase.from('likes').select('id, created_at').order('created_at', { ascending: false }).limit(10000),
+      supabase.from('posts').select('id, created_at').eq('media_type', AUTH_MARKER).order('created_at', { ascending: false }).limit(10000),
+    ]);
+
+    // 辅助函数：按天聚合
+    function aggregateByDate(records, dateField) {
+      var map = {};
+      (records || []).forEach(r => {
+        var d = (r[dateField] || '').slice(0, 10);
+        if (d) map[d] = (map[d] || 0) + 1;
+      });
+      return map;
+    }
+
+    // 辅助函数：过滤日期范围
+    function filterByDate(map, start, end) {
+      var result = {};
+      var keys = Object.keys(map).sort();
+      keys.forEach(function(k) {
+        if ((!start || k >= start) && (!end || k <= end)) {
+          result[k] = map[k];
+        }
+      });
+      return result;
+    }
+
+    const dailyVisitsAll = {};
+    (visitsRes.data || []).forEach(v => {
+      var d = v.media_url || '';
+      if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
+      if (d) dailyVisitsAll[d] = (dailyVisitsAll[d] || 0) + 1;
+    });
+
+    const dailyAttacksAll = {};
+    (attacksRes.data || []).forEach(a => {
+      var d = '';
+      try { var c = JSON.parse(a.content || '{}'); d = c.date || a.media_url || ''; } catch(e) { d = a.media_url || ''; }
+      if (d) dailyAttacksAll[d] = (dailyAttacksAll[d] || 0) + 1;
+    });
+
+    const dailyPostsMap = aggregateByDate(postsRes.data || [], 'created_at');
+    const dailyCommentsMap = aggregateByDate(commentsRes.data || [], 'created_at');
+    const dailyLikesMap = aggregateByDate(likesRes.data || [], 'created_at');
+    const dailyUsersMap = aggregateByDate(usersRes.data || [], 'created_at');
+
+    // 合并所有日期
+    var allDates = {};
+    [dailyVisitsAll, dailyAttacksAll, dailyPostsMap, dailyCommentsMap, dailyLikesMap, dailyUsersMap].forEach(function(m) {
+      Object.keys(m).forEach(function(d) { allDates[d] = true; });
+    });
+
+    var dailyArr = Object.keys(allDates).sort().map(function(d) {
+      return {
+        date: d,
+        visits: dailyVisitsAll[d] || 0,
+        attacks: dailyAttacksAll[d] || 0,
+        posts: dailyPostsMap[d] || 0,
+        comments: dailyCommentsMap[d] || 0,
+        likes: dailyLikesMap[d] || 0,
+        new_users: dailyUsersMap[d] || 0
+      };
+    });
+
+    // 如果有日期筛选，过滤
+    if (startDate || endDate) {
+      dailyArr = dailyArr.filter(function(item) {
+        return (!startDate || item.date >= startDate) && (!endDate || item.date <= endDate);
+      });
+    }
+
+    return res.json({
+      daily: dailyArr,
+      date_range: { start: startDate || 'all', end: endDate || 'all' }
+    });
+  } catch (e) {
+    console.error('[API] 每日统计加载失败:', e.message);
+    return res.status(500).json({ error: '每日统计加载失败' });
+  }
+});
+
+// 清除统计缓存
+app.post('/admin/stats/refresh', verifyToken, (req, res) => {
+  statsCache = { data: null, ts: 0 };
+  return res.json({ ok: true });
+});
+
+// ===================== 用户访问日志（前端调用） =====================
+const USER_VISIT_MARKER = '__user_visit__';
+app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
+  try {
+    const { user_name } = req.body;
+    const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
+    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date().toISOString();
+
+    // 记录用户访问（用 __user_visit__ 标记，区别于 IP 级别的 __visit__）
+    await supabase.from('posts').insert([{
+      user_name: userNameVal,
+      content: JSON.stringify({ date: today }),
+      media_type: USER_VISIT_MARKER,
+      media_url: today,
+      actor_key: 'uvisit_' + Date.now()
+    }]);
+
+    // 更新用户最近登录时间
+    const { data: existing } = await supabase.from('posts')
+      .select('id, content')
+      .eq('user_name', userNameVal)
+      .eq('media_type', '__user_info__')
+      .maybeSingle();
+
+    if (existing) {
+      var info = {};
+      try { info = JSON.parse(existing.content || '{}'); } catch(e) {}
+      info.last_login = now;
+      await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.id);
+    }
+
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[API] 用户访问记录失败:', e.message);
+    return res.status(500).json({ error: '记录失败' });
+  }
+});
+
+// ===================== 用户访问统计（管理员） =====================
+app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    // 获取所有用户访问记录
+    const { data: visits } = await supabase.from('posts')
+      .select('user_name, content, media_url, created_at')
+      .eq('media_type', USER_VISIT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(10000);
+
+    // 获取所有用户信息（含 last_login）
+    const { data: userInfos } = await supabase.from('posts')
+      .select('user_name, content')
+      .eq('media_type', '__user_info__')
+      .limit(5000);
+
+    // 按用户聚合访问数据
+    const userVisitMap = {};
+    (visits || []).forEach(v => {
+      const name = v.user_name;
+      if (!name) return;
+      if (!userVisitMap[name]) {
+        userVisitMap[name] = { total: 0, daily: {}, last_visit: '' };
+      }
+      userVisitMap[name].total++;
+
+      var d = v.media_url || '';
+      if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
+      if (d) {
+        userVisitMap[name].daily[d] = (userVisitMap[name].daily[d] || 0) + 1;
+      }
+
+      var visitTime = v.created_at || '';
+      if (visitTime && visitTime > userVisitMap[name].last_visit) {
+        userVisitMap[name].last_visit = visitTime;
+      }
+    });
+
+    // 构建用户信息映射（last_login）
+    const userInfoMap = {};
+    (userInfos || []).forEach(ui => {
+      try {
+        var info = JSON.parse(ui.content || '{}');
+        userInfoMap[ui.user_name] = info;
+      } catch(e) {}
+    });
+
+    // 生成结果列表
+    const result = Object.keys(userVisitMap).map(name => {
+      const v = userVisitMap[name];
+      const info = userInfoMap[name] || {};
+      return {
+        user_name: name,
+        total_visits: v.total,
+        daily_visits: v.daily,
+        last_visit: v.last_visit || info.last_login || null,
+        last_login: info.last_login || null,
+        reg_time: info.reg_time || null
+      };
+    });
+
+    // 按总访问次数降序排列
+    result.sort((a, b) => b.total_visits - a.total_visits);
+
+    return res.json({ users: result, total: result.length });
+  } catch(e) {
+    console.error('[API] 用户访问统计失败:', e.message);
+    return res.status(500).json({ error: '用户访问统计加载失败' });
+  }
+});
+
+// ===================== 启动 =====================
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`[xtj-admin-api] running on port ${port}`);
-  console.log(`[xtj-admin-api] admin username: ${ADMIN_USERNAME}`);
   console.log(`[xtj-admin-api] password configured: ${ADMIN_PASSWORD ? 'yes' : 'no'}`);
+  console.log(`[xtj-admin-api] supabase key type: ${SUPABASE_SERVICE_KEY ? 'service_role' : (process.env.SUPABASE_ANON_KEY ? 'anon' : 'none')}`);
   console.log(`[xtj-admin-api] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
 });
