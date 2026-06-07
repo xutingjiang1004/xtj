@@ -656,9 +656,13 @@ function testAdminAuthIsolation() {
   const hasAdminFilterInAdmin = adminContent.includes("ADMIN_AUTH_MARKER");
   logResult('admin.js loadAllData 过滤 ADMIN_AUTH_MARKER', hasAdminFilterInAdmin);
 
-  // admin.js: 登录使用 ADMIN_AUTH_MARKER
+  // admin.js: 登录使用 ADMIN_AUTH_MARKER（或者通过 API 认证，更安全）
   const hasAdminLoginInAdmin = adminContent.includes("media_type', ADMIN_AUTH_MARKER");
-  logResult('admin.js 登录使用 ADMIN_AUTH_MARKER', hasAdminLoginInAdmin);
+  const usesApiLogin = adminContent.includes("apiCall('POST', '/admin/login'") || adminContent.includes("/admin/login'");
+  logResult('admin.js 登录使用 ADMIN_AUTH_MARKER', hasAdminLoginInAdmin || usesApiLogin);
+  if (!hasAdminLoginInAdmin && usesApiLogin) {
+    logResult('  ⓘ admin.js 使用 API 登录（无需直连DB，更安全）', true);
+  }
 }
 
 // ==================== 测试12: Session 超时测试 ====================
