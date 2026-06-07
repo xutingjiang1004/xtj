@@ -1145,7 +1145,9 @@ app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res
       try {
         var info = JSON.parse(ui.content || '{}');
         if (userInfoMap[ui.user_name]) {
-          if (info.last_login) userInfoMap[ui.user_name].last_login = info.last_login;
+          if (info.last_login && (!userInfoMap[ui.user_name].last_login || info.last_login > userInfoMap[ui.user_name].last_login)) {
+            userInfoMap[ui.user_name].last_login = info.last_login;
+          }
           if (info.reg_time && (!userInfoMap[ui.user_name].reg_time || info.reg_time < userInfoMap[ui.user_name].reg_time)) {
             userInfoMap[ui.user_name].reg_time = info.reg_time;
           }
