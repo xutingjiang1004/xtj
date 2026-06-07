@@ -1755,7 +1755,23 @@
     var statsChartMode = 'visits'; // visits | attacks | posts | comments | likes
 
     async function renderStatsTab(el) {
-        el.innerHTML = '<div class="loading">加载统计数据中...</div>';
+        // ===== 先渲染骨架屏 =====
+        var skeletonHtml = '<div class="card"><div class="date-filter-row">';
+        skeletonHtml += '<span style="font-weight:600;font-size:14px;">日期筛选：</span>';
+        skeletonHtml += '<input type="date" value="' + escapeHtml(statsDateStart) + '" disabled>';
+        skeletonHtml += '<span style="color:var(--text-muted);">至</span>';
+        skeletonHtml += '<input type="date" value="' + escapeHtml(statsDateEnd) + '" disabled>';
+        skeletonHtml += '</div></div>';
+        skeletonHtml += '<div class="stats-row">';
+        var labels = ['用户数量','帖子数量','评论数量','点赞数量','照片数量','访问总次数','被攻击次数','API防火墙拦截'];
+        labels.forEach(function(l) {
+            skeletonHtml += '<div class="stat-box skeleton-pulse"><div class="val" style="height:28px;width:60%;background:rgba(255,255,255,0.08);border-radius:6px;">&nbsp;</div><div class="lbl">' + l + '</div></div>';
+        });
+        skeletonHtml += '</div>';
+        skeletonHtml += '<div class="card"><h3>每日数据趋势</h3><div class="skeleton-pulse" style="height:120px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
+        skeletonHtml += '<div class="card"><h3>攻击类型分布</h3><div class="skeleton-pulse" style="height:80px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
+        skeletonHtml += '<div class="card"><h3>用户访问明细</h3><div class="skeleton-pulse" style="height:60px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
+        el.innerHTML = skeletonHtml;
 
         try {
             var summary, dailyData;
@@ -1771,58 +1787,92 @@
                 summary = await summaryR;
                 dailyData = await dailyR;
             } else if (sb) {
-                // 模式2：直接查询 Supabase（无 API_BASE 时回退）
-                var allPostData, allLikeData, allCommData, userInfoData, visitData;
+                // 模式2：直连 Supabase（全部并行查询，只取必要字段，极速加载）
+                var EXCLUDE = [AUTH_MARKER, DM_MARKER, REPORT_MARKER, '__user_info__', '__visit__', '__attack__', '__user_visit__'];
+                var BASE_FILTER = function(q) {
+                    EXCLUDE.forEach(function(m) { q = q.neq('media_type', m); });
+                    return q.neq('media_type', '__avatar__');
+                };
 
-                // 并行查询所有数据
-                var p1 = sb.from('posts').select('*').neq('media_type', '__avatar__').order('created_at', { ascending: false }).limit(5000);
-                var p2 = sb.from('likes').select('*').order('created_at', { ascending: false }).limit(5000);
-                var p3 = sb.from('comments').select('*').order('created_at', { ascending: false }).limit(5000);
-                var p4 = sb.from('posts').select('user_name, content, created_at').eq('media_type', '__user_info__').limit(5000);
+                // 并行发起所有查询（只取需要的字段，大幅减少数据传输）
+                var Q = [
+                    // 0: 帖子计数
+                    BASE_FILTER(sb.from('posts').select('id', { count: 'exact', head: true })).limit(5000),
+                    // 1: 点赞计数
+                    sb.from('likes').select('id', { count: 'exact', head: true }).limit(5000),
+                    // 2: 评论计数
+                    sb.from('comments').select('id', { count: 'exact', head: true }).limit(5000),
+                    // 3: 用户信息计数
+                    sb.from('posts').select('id', { count: 'exact', head: true }).eq('media_type', '__user_info__').limit(5000),
+                    // 4: IP访问计数
+                    sb.from('posts').select('id', { count: 'exact', head: true }).eq('media_type', '__visit__').limit(5000),
+                    // 5: 攻击计数
+                    sb.from('posts').select('id', { count: 'exact', head: true }).eq('media_type', '__attack__').limit(5000),
+                    // 6: 用户访问计数
+                    sb.from('posts').select('id', { count: 'exact', head: true }).eq('media_type', '__user_visit__').limit(5000),
+                    // 7: 每日帖子 created_at
+                    BASE_FILTER(sb.from('posts').select('created_at')).limit(5000),
+                    // 8: 每日评论 created_at
+                    sb.from('comments').select('created_at').limit(5000),
+                    // 9: 每日点赞 created_at
+                    sb.from('likes').select('created_at').limit(5000),
+                    // 10: 每日新用户 created_at
+                    sb.from('posts').select('created_at').eq('media_type', '__user_info__').limit(5000),
+                    // 11: 每日访问（IP级）media_url, content
+                    sb.from('posts').select('media_url, content').eq('media_type', '__visit__').limit(5000),
+                    // 12: 每日用户访问 media_url, content
+                    sb.from('posts').select('media_url, content').eq('media_type', '__user_visit__').limit(5000),
+                    // 13: 每日攻击 media_url, content
+                    sb.from('posts').select('media_url, content').eq('media_type', '__attack__').limit(5000),
+                    // 14: 照片计数 media_url
+                    BASE_FILTER(sb.from('posts').select('media_url')).limit(5000),
+                ];
 
-                var r1 = await p1, r2 = await p2, r3 = await p3, r4 = await p4;
+                var results = await Promise.all(Q.map(function(q) { return q; }));
 
-                allPostData = (r1.data || []).filter(function(p) {
-                    return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__';
+                // 汇总计数（从 count 查询获取）
+                var totalPosts = results[0].count || 0;
+                var totalLikes = results[1].count || 0;
+                var totalComments = results[2].count || 0;
+                var totalUsers = results[3].count || 0;
+                var totalIpVisits = results[4].count || 0;
+                var totalAttacks = results[5].count || 0;
+                var totalUserVisits = results[6].count || 0;
+
+                // 照片计数
+                var photoCount = 0;
+                (results[14].data || []).forEach(function(p) {
+                    if (p.media_url && /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(p.media_url)) photoCount++;
                 });
-                allLikeData = r2.data || [];
-                allCommData = r3.data || [];
-                userInfoData = r4.data || [];
-
-                // 查询访问和攻击记录
-                var visitRes = await sb.from('posts').select('*').eq('media_type', '__visit__').limit(5000);
-                var attackRes = await sb.from('posts').select('*').eq('media_type', '__attack__').limit(5000);
-                var userVisitRes = await sb.from('posts').select('*').eq('media_type', '__user_visit__').limit(5000);
-
-                var visitsData = visitRes.data || [];
-                var attacksData = attackRes.data || [];
-                var userVisitsData = userVisitRes.data || [];
-
-                // 计算汇总
-                var photoCount = allPostData.filter(function(p) { return p.media_url && /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(p.media_url); }).length;
 
                 // 攻击类型分布
                 var attackTypes = {};
-                attacksData.forEach(function(a) {
-                    var reason = a.content || '未知';
-                    attackTypes[reason] = (attackTypes[reason] || 0) + 1;
+                (results[13].data || []).forEach(function(a) {
+                    var ct = a.content || '';
+                    var type = '未知';
+                    if (ct.indexOf('RATE_LIMIT') >= 0) type = 'RATE_LIMIT';
+                    else if (ct.indexOf('CSRF') >= 0) type = 'CSRF';
+                    else if (ct.indexOf('CORS') >= 0) type = 'CORS';
+                    else if (ct.indexOf('XSS') >= 0) type = 'XSS';
+                    else if (ct.indexOf('PATH') >= 0) type = 'PATH_TRAVERSAL';
+                    else type = ct.slice(0, 30) || '未知';
+                    attackTypes[type] = (attackTypes[type] || 0) + 1;
                 });
 
                 summary = {
-                    total_users: userInfoData.length,
-                    total_posts: allPostData.length,
-                    total_comments: allCommData.length,
-                    total_likes: allLikeData.length,
+                    total_users: totalUsers,
+                    total_posts: totalPosts,
+                    total_comments: totalComments,
+                    total_likes: totalLikes,
                     total_photos: photoCount,
-                    total_visits: visitsData.length + userVisitsData.length,
-                    total_attacks: attacksData.length,
+                    total_visits: totalIpVisits + totalUserVisits,
+                    total_attacks: totalAttacks,
                     attack_types: attackTypes,
                     cached_at: new Date().toISOString()
                 };
 
-                // 计算每日数据
+                // 每日数据聚合
                 var dailyMap = {};
-                var today = new Date().toISOString().slice(0, 10);
 
                 function addToDaily(date, key, val) {
                     if (!date) return;
@@ -1834,39 +1884,24 @@
                     dailyMap[date][key] = (dailyMap[date][key] || 0) + val;
                 }
 
-                visitsData.forEach(function(v) {
-                    var d = v.media_url || '';
-                    if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
-                    addToDaily(d, 'visits', 1);
-                });
-                userVisitsData.forEach(function(v) {
-                    var d = v.media_url || '';
-                    if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
-                    addToDaily(d, 'visits', 1);
-                });
-                attacksData.forEach(function(v) {
-                    var d = v.media_url || '';
-                    if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
-                    addToDaily(d, 'attacks', 1);
-                });
-                allPostData.forEach(function(p) {
-                    var d = p.created_at ? p.created_at.slice(0, 10) : '';
-                    addToDaily(d, 'posts', 1);
-                });
-                allCommData.forEach(function(c) {
-                    var d = c.created_at ? c.created_at.slice(0, 10) : '';
-                    addToDaily(d, 'comments', 1);
-                });
-                allLikeData.forEach(function(l) {
-                    var d = l.created_at ? l.created_at.slice(0, 10) : '';
-                    addToDaily(d, 'likes', 1);
-                });
-                userInfoData.forEach(function(u) {
-                    var d = u.created_at ? u.created_at.slice(0, 10) : '';
-                    addToDaily(d, 'new_users', 1);
-                });
+                function addList(data, key, dateField) {
+                    (data || []).forEach(function(item) {
+                        var d = dateField === 'created_at' ? (item.created_at || '').slice(0, 10) : (item.media_url || '');
+                        if (!d && dateField === 'media_url') {
+                            try { var c = JSON.parse(item.content || '{}'); d = c.date || ''; } catch(e) {}
+                        }
+                        addToDaily(d, key, 1);
+                    });
+                }
 
-                // 转换为数组并按日期排序
+                addList(results[7].data, 'posts', 'created_at');
+                addList(results[8].data, 'comments', 'created_at');
+                addList(results[9].data, 'likes', 'created_at');
+                addList(results[10].data, 'new_users', 'created_at');
+                addList(results[11].data, 'visits', 'media_url');
+                addList(results[12].data, 'visits', 'media_url');
+                addList(results[13].data, 'attacks', 'media_url');
+
                 dailyData = { daily: Object.values(dailyMap).sort(function(a, b) { return a.date.localeCompare(b.date); }) };
             }
 
@@ -1877,7 +1912,7 @@
 
             var daily = (dailyData && dailyData.daily) || [];
 
-            // ===== 日期筛选器 =====
+            // ===== 渲染真实内容 =====
             var h = '<div class="card"><div class="date-filter-row">';
             h += '<span style="font-weight:600;font-size:14px;">日期筛选：</span>';
             h += '<input type="date" id="statsDateStart" value="' + escapeHtml(statsDateStart) + '" onchange="statsDateStart=this.value;renderTab(\'stats\')" title="开始日期">';
@@ -1886,7 +1921,9 @@
             if (statsDateStart || statsDateEnd) {
                 h += '<button onclick="statsDateStart=\'\';statsDateEnd=\'\';renderTab(\'stats\')">清除筛选</button>';
             }
-            h += '<button class="btn-sm primary" style="margin-left:auto;" onclick="apiCall(\'POST\',\'/admin/stats/refresh\').then(function(){renderTab(\'stats\');}).catch(function(){})">刷新缓存</button>';
+            if (API_BASE && getToken()) {
+                h += '<button class="btn-sm primary" style="margin-left:auto;" onclick="apiCall(\'POST\',\'/admin/stats/refresh\').then(function(){renderTab(\'stats\');}).catch(function(){})">刷新缓存</button>';
+            }
             h += '</div></div>';
 
             // ===== 总览数据卡片 =====
@@ -1901,9 +1938,7 @@
             h += '<div class="stat-box warn"><div class="val">' + (summary.total_visits || 0) + '</div><div class="lbl">API防火墙拦截</div></div>';
             h += '</div>';
 
-            // ===== 每日图表切换按钮 =====
-            h += '<div class="card"><h3>每日数据趋势</h3>';
-            h += '<div class="filter-chips" style="margin-bottom:12px;">';
+            // ===== 每日图表 =====
             var modes = [
                 { key: 'visits', label: '访问量', color: '#059669' },
                 { key: 'attacks', label: '攻击量', color: '#ff3b60' },
@@ -1912,54 +1947,46 @@
                 { key: 'likes', label: '点赞量', color: '#ec4899' },
                 { key: 'new_users', label: '新用户', color: '#8b5cf6' }
             ];
+
+            h += '<div class="card"><h3>每日数据趋势</h3>';
+            h += '<div class="filter-chips" style="margin-bottom:12px;">';
             modes.forEach(function(m) {
                 h += '<span class="filter-chip' + (statsChartMode === m.key ? ' active' : '') + '" onclick="statsChartMode=\'' + m.key + '\';renderTab(\'stats\')" style="cursor:pointer;">' + m.label + '</span>';
             });
             h += '</div>';
 
-            // ===== 柱状图 =====
             if (daily.length === 0) {
-                h += '<div class="empty">暂无每日数据</div>';
+                h += '<div class="empty" style="padding:24px;text-align:center;color:var(--text-muted);">暂无每日数据，刷新页面后开始记录访问</div>';
             } else {
-                // 计算最大值用于高度比例
                 var maxVal = 0;
-                daily.forEach(function(d) {
-                    var v = d[statsChartMode] || 0;
-                    if (v > maxVal) maxVal = v;
-                });
+                daily.forEach(function(d) { var v = d[statsChartMode] || 0; if (v > maxVal) maxVal = v; });
                 if (maxVal === 0) maxVal = 1;
 
                 var activeMode = modes.find(function(m) { return m.key === statsChartMode; }) || modes[0];
-                var labelStep = daily.length > 18 ? 2 : 1;
-                h += '<div class="chart-shell">';
+                // 如果数据太多，只显示最近30天以防止图表过密
+                var chartData = daily.length > 30 ? daily.slice(-30) : daily;
+
                 h += '<div class="chart-legend">';
                 h += '<span><span class="dot" style="background:' + activeMode.color + ';"></span>' + activeMode.label + '</span>';
-                h += '<span>最高值 ' + maxVal + '</span>';
-                h += '<span>共 ' + daily.length + ' 天</span>';
+                h += '<span style="color:var(--text-muted);font-size:11px;">最高: ' + maxVal + '</span>';
+                h += '<span style="color:var(--text-muted);font-size:11px;">共 ' + daily.length + ' 天</span>';
                 h += '</div>';
                 h += '<div class="chart-bar-row">';
-                daily.forEach(function(d) {
+                chartData.forEach(function(d) {
                     var v = d[statsChartMode] || 0;
                     var heightPct = Math.max(4, Math.round((v / maxVal) * 100));
                     h += '<div class="chart-bar" style="height:' + heightPct + '%;background:' + activeMode.color + ';" title="' + escapeHtml(d.date) + ': ' + v + '">';
                     h += '<span class="bar-tip">' + v + '</span>';
                     h += '</div>';
                 });
-                h += '</div></div>';
-
-                // 日期标签
-                h += '<div class="chart-bar-labels">';
-                daily.forEach(function(d, index) {
-                    var shortDate = d.date ? d.date.slice(5).replace('-', '<br>') : '';
-                    h += '<div class="chart-bar-label">' + ((index % labelStep === 0 || index === daily.length - 1) ? shortDate : '&nbsp;') + '</div>';
-                });
                 h += '</div>';
 
-                // 图例
-                h += '<div class="chart-legend">';
-                h += '<span><span class="dot" style="background:' + (modes.find(function(m){return m.key===statsChartMode;})||modes[0]).color + ';"></span> ' + (modes.find(function(m){return m.key===statsChartMode;})||modes[0]).label + '</span>';
-                h += '<span style="color:var(--text-muted);font-size:11px;">最高: ' + maxVal + '</span>';
-                h += '<span style="color:var(--text-muted);font-size:11px;">共 ' + daily.length + ' 天</span>';
+                var labelStep = chartData.length > 18 ? 2 : 1;
+                h += '<div class="chart-bar-labels">';
+                chartData.forEach(function(d, index) {
+                    var shortDate = d.date ? d.date.slice(5) : '';
+                    h += '<div class="chart-bar-label">' + ((index % labelStep === 0 || index === chartData.length - 1) ? escapeHtml(shortDate) : '') + '</div>';
+                });
                 h += '</div>';
             }
             h += '</div>';
@@ -1987,7 +2014,6 @@
             if (daily.length > 0) {
                 h += '<div class="card"><h3>每日数据明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + daily.length + ' 天</span></h3>';
                 h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>访问</th><th>攻击</th><th>帖子</th><th>评论</th><th>点赞</th><th>新用户</th></tr></thead><tbody>';
-                // 倒序显示（最新在前）
                 var reversed = daily.slice().reverse();
                 reversed.forEach(function(d) {
                     h += '<tr>';
@@ -2003,14 +2029,13 @@
                 h += '</tbody></table></div></div>';
             }
 
-            // 缓存时间提示
             if (summary.cached_at) {
-                h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + '（每60秒刷新）</div>';
+                h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + (API_BASE && getToken() ? '（每60秒刷新）' : '（直连Supabase实时查询）') + '</div>';
             }
 
             el.innerHTML = h;
 
-            // ===== 异步加载用户访问明细（不阻塞主渲染） =====
+            // ===== 异步加载用户访问明细 =====
             loadUserVisitStats(el);
         } catch(e) {
             el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">统计数据加载失败: ' + escapeHtml(e.message) + '</div></div>';
@@ -2030,12 +2055,13 @@
             if (API_BASE && getToken()) {
                 userData = await apiCall('GET', '/admin/stats/users');
             } else if (sb) {
-                // Supabase 直接模式
-                var userVisitRes = await sb.from('posts').select('*').eq('media_type', '__user_visit__').limit(5000);
-                var userInfoRes = await sb.from('posts').select('user_name, content, created_at').eq('media_type', '__user_info__').limit(5000);
+                // Supabase 直接模式（并行查询 + 只取必要字段）
+                var uvR = sb.from('posts').select('user_name, media_url, content, created_at').eq('media_type', '__user_visit__').limit(5000);
+                var uiR = sb.from('posts').select('user_name, content, created_at').eq('media_type', '__user_info__').limit(5000);
 
-                var userVisitsData = userVisitRes.data || [];
-                var userInfoList = userInfoRes.data || [];
+                var uvRes = await uvR, uiRes = await uiR;
+                var userVisitsData = uvRes.data || [];
+                var userInfoList = uiRes.data || [];
 
                 // 按用户聚合
                 var userVisitMap = {};

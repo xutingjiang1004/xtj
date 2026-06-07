@@ -138,6 +138,16 @@
     .stat-box.danger .val { color: var(--danger); }
     .stat-box.warn .val { color: #f59e0b; }
 
+    /* 骨架屏脉冲动画 */
+    @keyframes skeletonPulse {
+        0% { opacity: 0.3; }
+        50% { opacity: 0.6; }
+        100% { opacity: 0.3; }
+    }
+    .skeleton-pulse {
+        animation: skeletonPulse 1.5s ease-in-out infinite;
+    }
+
     /* 统计图表 */
     .chart-shell {
         display: grid;

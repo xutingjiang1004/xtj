@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -34,17 +34,82 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         try { currentUser = localStorage.getItem("xtj_user") || ""; } catch(e) { currentUser = ""; }
         window.currentUser = currentUser;
 
-        // 记录用户访问到后端统计
+        // 记录用户访问到后端统计（API优先，Supabase直连兜底）
+        var _visitLoggedToday = false;
         function logUserVisitToApi(userName) {
-            if (!userName || typeof API_BASE === 'undefined' || !API_BASE) return;
+            if (!userName) return;
+            if (typeof API_BASE !== 'undefined' && API_BASE) {
+                try {
+                    fetch(API_BASE + '/api/log-user-visit', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_name: userName })
+                    }).catch(function(){});
+                } catch(e) {}
+            } else if (sb && !_visitLoggedToday) {
+                // 无后端API时直接写Supabase，同天只记录一次
+                _visitLoggedToday = true;
+                var today = new Date().toISOString().slice(0, 10);
+                try {
+                    sb.from('posts').insert([{
+                        user_name: userName || 'anonymous',
+                        content: JSON.stringify({ date: today }),
+                        media_type: '__user_visit__',
+                        media_url: today,
+                        actor_key: 'uvisit_' + Date.now()
+                    }]).then(function(){}, function(){});
+                } catch(e) {}
+            }
+        }
+
+        // IP级访问记录（无后端API时直接写Supabase）
+        var _ipVisitDay = '';
+        function logIpVisitToSupabase() {
+            if (typeof API_BASE !== 'undefined' && API_BASE) return; // 有后端API时不重复记录
+            if (!sb) return;
+            var today = new Date().toISOString().slice(0, 10);
+            if (_ipVisitDay === today) return; // 同天只记一次
+            _ipVisitDay = today;
             try {
-                fetch(API_BASE + '/api/log-user-visit', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_name: userName })
-                }).catch(function(){});
+                sb.from('posts').insert([{
+                    user_name: 'visitor',
+                    content: JSON.stringify({ date: today }),
+                    media_type: '__visit__',
+                    media_url: today,
+                    actor_key: 'visit_' + Date.now()
+                }]).then(function(){}, function(){});
             } catch(e) {}
         }
+
+        // 前端攻击检测（无后端API时记录到Supabase）
+        var _attackClickTimes = [];
+        var _attackLoggedToday = false;
+        function logFrontendAttack(type, detail) {
+            if (typeof API_BASE !== 'undefined' && API_BASE) return;
+            if (!sb) return;
+            var today = new Date().toISOString().slice(0, 10);
+            try {
+                sb.from('posts').insert([{
+                    user_name: 'frontend',
+                    content: JSON.stringify({ type: type, detail: String(detail || '').slice(0, 200), date: today }),
+                    media_type: '__attack__',
+                    media_url: type,
+                    actor_key: 'fa_' + Date.now()
+                }]).then(function(){}, function(){});
+            } catch(e) {}
+        }
+        // 检测异常快速点击（>8次/秒）
+        document.addEventListener('click', function() {
+            var now = Date.now();
+            _attackClickTimes.push(now);
+            _attackClickTimes = _attackClickTimes.filter(function(t) { return now - t < 1000; });
+            if (_attackClickTimes.length > 8 && !_attackLoggedToday) {
+                _attackLoggedToday = true;
+                logFrontendAttack('RAPID_CLICK', '异常高频点击 ' + _attackClickTimes.length + '次/秒');
+                setTimeout(function() { _attackLoggedToday = false; }, 60000);
+            }
+        }, true);
+
         let dockChatListCacheTime = 0;
         const DOCK_CHAT_CACHE_DURATION = 120000;
         let deviceId;
@@ -5645,8 +5710,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 // window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
 
                 await initUI(); initialLoad();
-                // 记录用户访问（用于统计）
+                // 记录访问（用户+IP）
                 if (currentUser) logUserVisitToApi(currentUser);
+                logIpVisitToSupabase();
                 // 鎭㈠娑撳﹥保存閻ㄥ嫭鐖ｇ粵楣冿拷?
                 const savedTab = localStorage.getItem('xtj_current_tab');
                 if (savedTab && savedTab !== 'posts') {
