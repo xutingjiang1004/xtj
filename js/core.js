@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -797,18 +797,24 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var userInfo = { reg_time: regTime, last_login: new Date().toISOString() };
                     var contentStr = JSON.stringify(userInfo);
 
-                    // 灏濊瘯找到锟筋澁鎷烽弬棰佺閺壜ゎ唶瑜版洖鑻烾PDATE锛堟瘮DELETE+INSERT闁哄洦娼欒ぐ鏌ユ閻欏懐绀夐梺顒€鐏濋崢顥窵S闁归攱甯炵划绋LETE闁?
+                    // 尝试 UPDATE 已有记录（保留旧 reg_time，只更新 last_login）
                     var updated = false;
                     try {
                         var latest = await sb.from("posts")
-                            .select("id")
+                            .select("id, content")
                             .eq("user_name", name)
                             .eq("media_type", "__user_info__")
                             .order("created_at", { ascending: false })
                             .limit(1);
                         if (latest.data && latest.data.length > 0) {
+                            var oldContent = latest.data[0].content;
+                            var merged = { last_login: new Date().toISOString() };
+                            try {
+                                var oldParsed = JSON.parse(oldContent);
+                                if (oldParsed.reg_time) merged.reg_time = oldParsed.reg_time;
+                            } catch(e) {}
                             var updRes = await sb.from("posts")
-                                .update({ content: contentStr })
+                                .update({ content: JSON.stringify(merged) })
                                 .eq("id", latest.data[0].id);
                             if (!updRes.error) {
                                 updated = true;
@@ -816,7 +822,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     } catch(e) {}
 
-                    // UPDATE失败鎴栨棤记录鏃讹紝INSERT涓€鏉℃柊记录
+                    // UPDATE 失败或无记录时，INSERT 新记录
                     if (!updated) {
                         var insertRes = await sb.from("posts").insert([{
                             user_name: name,

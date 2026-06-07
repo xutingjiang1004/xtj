@@ -1418,38 +1418,68 @@
         h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前拉黑封禁</div></div>';
         h += '</div>';
 
-        h += '<div class="card"><h3>添加拉黑封禁</h3>';
-        h += '<div class="admin-user-form-row">';
-        h += '<div class="admin-field"><label>用户名</label>' + buildAdminUserPicker('banUserName', '选择拉黑封禁用户') + '</div>';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">拉黑封禁时长</label><select id="banDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
-        h += '<option value="1">1小时</option><option value="6">6小时</option><option value="12">12小时</option><option value="24" selected>1天</option><option value="72">3天</option><option value="168">7天</option><option value="720">30天</option><option value="0">永久拉黑封禁</option>';
-        h += '</select></div>';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">拉黑封禁原因</label><input id="banReason" placeholder="输入原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:180px;"></div>';
-        h += '<button class="btn-sm primary" onclick="addBan()" style="height:36px;">执行拉黑封禁</button>';
-        h += '</div></div>';
-
-        h += '<div class="card"><h3>拉黑封禁列表</h3>';
+        h += '<div class="card">';
+        h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">';
+        h += '<h3 style="margin:0;">拉黑封禁列表</h3>';
+        h += '<button class="btn-sm primary" onclick="showAddBanModal()">+ 添加拉黑封禁</button>';
+        h += '</div>';
         if (!bansData.length) {
             h += '<div class="empty">暂无拉黑封禁记录</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>类型</th><th>原因</th><th>操作人</th><th>拉黑封禁时间</th><th>过期时间</th><th>状态</th><th>解除时间</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>类型</th><th>原因</th><th>操作人</th><th>时间</th><th>过期</th><th>状态</th><th>操作</th></tr></thead><tbody>';
             bansData.forEach(function(b) {
                 var statusBadge = b.is_active ? '<span class="badge badge-red">拉黑封禁中</span>' : '<span class="badge badge-green">已解除</span>';
-                var liftTime = !b.is_active && b.lifted_at ? formatTime(b.lifted_at) : '-';
-                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td>';
+                h += '<tr>';
+                h += '<td><strong>' + escapeHtml(b.user_name) + '</strong></td>';
                 h += '<td>' + (b.ban_type === 'permanent' ? '永久' : formatDuration(b.ban_duration_hours || 0)) + '</td>';
-                h += '<td style="max-width:150px;">' + escapeHtml(b.ban_reason || '-') + '</td>';
+                h += '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(b.ban_reason || '-') + '</td>';
                 h += '<td>' + escapeHtml(b.banned_by || '-') + '</td>';
-                h += '<td>' + formatTime(b.banned_at) + '</td>';
-                h += '<td>' + (b.expires_at ? formatTime(b.expires_at) : '-') + '</td>';
+                h += '<td style="font-size:12px;">' + formatTime(b.banned_at) + '</td>';
+                h += '<td style="font-size:12px;">' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td>';
                 h += '<td>' + statusBadge + '</td>';
-                h += '<td>' + (b.is_active ? (b.expires_at ? formatTime(b.expires_at) : '永久') + ' <button class="btn-sm" onclick="liftBan(\'' + b.id + '\')">提前解除</button>' : liftTime) + '</td></tr>';
+                h += '<td style="white-space:nowrap;">';
+                if (b.is_active) {
+                    h += '<button class="btn-sm" onclick="liftBan(\'' + b.id + '\')">解除</button>';
+                } else {
+                    h += '<span style="font-size:11px;color:var(--text-muted);">' + (b.lifted_at ? formatTime(b.lifted_at) : '-') + '</span>';
+                }
+                h += '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
         h += '</div>';
         el.innerHTML = h;
     }
+
+    window.showAddBanModal = function() {
+        var modal = document.createElement('div');
+        modal.className = 'report-detail-modal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+
+        var box = document.createElement('div');
+        box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.onclick = function(e) { e.stopPropagation(); };
+
+        var html = '<h3 style="margin:0 0 16px;">添加拉黑封禁</h3>';
+        html += '<div style="margin-bottom:12px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">用户名</label>';
+        html += buildAdminUserPicker('banUserName', '选择拉黑封禁用户');
+        html += '</div>';
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">';
+        html += '<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">拉黑封禁时长</label><select id="banDuration" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);background:rgba(255,255,255,0.8);font-size:13px;outline:none;">';
+        html += '<option value="1">1小时</option><option value="6">6小时</option><option value="12">12小时</option><option value="24" selected>1天</option><option value="72">3天</option><option value="168">7天</option><option value="720">30天</option><option value="0">永久</option>';
+        html += '</select></div>';
+        html += '<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">原因</label><input id="banReason" placeholder="违反社区规定" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);background:rgba(255,255,255,0.8);font-size:13px;outline:none;"></div>';
+        html += '</div>';
+        html += '<div style="display:flex;gap:8px;justify-content:flex-end;">';
+        html += '<button class="btn-sm" onclick="this.closest(\'.report-detail-modal\').remove()">取消</button>';
+        html += '<button class="btn-sm primary" onclick="addBan()">确认拉黑封禁</button>';
+        html += '</div>';
+
+        box.innerHTML = html;
+        modal.appendChild(box);
+        document.body.appendChild(modal);
+    };
 
     window.addBan = async function() {
         var userName = document.getElementById('banUserName').value.trim();
@@ -1480,8 +1510,7 @@
                     }
                 }
             }
-            document.getElementById('banUserName').value = '';
-            document.getElementById('banReason').value = '';
+            document.querySelector('.report-detail-modal')?.remove();
             await loadBansData();
             renderTab('bans');
             showToast('已拉黑封禁 ' + userName, 'success');
@@ -1527,39 +1556,68 @@
         h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前禁言</div></div>';
         h += '</div>';
 
-        h += '<div class="card"><h3>添加禁言</h3>';
-        h += '<div class="admin-user-form-row">';
-        h += '<div class="admin-field"><label>用户名</label>' + buildAdminUserPicker('muteUserName', '选择禁言用户') + '</div>';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">禁言时长</label><select id="muteDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
-        h += '<option value="1">1小时</option><option value="6">6小时</option><option value="12">12小时</option><option value="24" selected>1天</option><option value="72">3天</option><option value="168">7天</option><option value="720">30天</option><option value="0">永久禁言</option>';
-        h += '</select></div>';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">禁言原因</label><input id="muteReason" placeholder="输入原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:180px;"></div>';
-        h += '<button class="btn-sm primary" onclick="addMute()" style="height:36px;">执行禁言</button>';
-        h += '</div></div>';
-
-        h += '<div class="card"><h3>禁言列表</h3>';
+        h += '<div class="card">';
+        h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">';
+        h += '<h3 style="margin:0;">禁言列表</h3>';
+        h += '<button class="btn-sm primary" onclick="showAddMuteModal()">+ 添加禁言</button>';
+        h += '</div>';
         if (!mutesData.length) {
             h += '<div class="empty">暂无禁言记录</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>操作人</th><th>开始时间</th><th>过期时间</th><th>状态</th><th>解除时间</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>操作人</th><th>时间</th><th>过期</th><th>状态</th><th>操作</th></tr></thead><tbody>';
             mutesData.forEach(function(m) {
-                var durationLabel = m.duration_hours > 0 ? formatDuration(m.duration_hours) : '永久';
                 var statusBadge = m.is_active ? '<span class="badge badge-red">禁言中</span>' : '<span class="badge badge-green">已解除</span>';
-                var liftTime = !m.is_active && m.lifted_at ? formatTime(m.lifted_at) : '-';
-                h += '<tr><td><strong>' + escapeHtml(m.user_name) + '</strong></td>';
-                h += '<td>' + durationLabel + '</td>';
-                h += '<td style="max-width:150px;">' + escapeHtml(m.reason || '-') + '</td>';
+                h += '<tr>';
+                h += '<td><strong>' + escapeHtml(m.user_name) + '</strong></td>';
+                h += '<td>' + (m.duration_hours > 0 ? formatDuration(m.duration_hours) : '永久') + '</td>';
+                h += '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(m.reason || '-') + '</td>';
                 h += '<td>' + escapeHtml(m.muted_by || '-') + '</td>';
-                h += '<td>' + formatTime(m.created_at) + '</td>';
-                h += '<td>' + (m.expires_at ? formatTime(m.expires_at) : '永久') + '</td>';
+                h += '<td style="font-size:12px;">' + formatTime(m.created_at) + '</td>';
+                h += '<td style="font-size:12px;">' + (m.expires_at ? formatTime(m.expires_at) : '永久') + '</td>';
                 h += '<td>' + statusBadge + '</td>';
-                h += '<td>' + (m.is_active ? (m.expires_at ? formatTime(m.expires_at) : '永久') + ' <button class="btn-sm" onclick="liftMute(\'' + m.id + '\')">提前解除</button>' : liftTime) + '</td></tr>';
+                h += '<td style="white-space:nowrap;">';
+                if (m.is_active) {
+                    h += '<button class="btn-sm" onclick="liftMute(\'' + m.id + '\')">解除</button>';
+                } else {
+                    h += '<span style="font-size:11px;color:var(--text-muted);">' + (m.lifted_at ? formatTime(m.lifted_at) : '-') + '</span>';
+                }
+                h += '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
         h += '</div>';
         el.innerHTML = h;
     }
+
+    window.showAddMuteModal = function() {
+        var modal = document.createElement('div');
+        modal.className = 'report-detail-modal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+
+        var box = document.createElement('div');
+        box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.onclick = function(e) { e.stopPropagation(); };
+
+        var html = '<h3 style="margin:0 0 16px;">添加禁言</h3>';
+        html += '<div style="margin-bottom:12px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">用户名</label>';
+        html += buildAdminUserPicker('muteUserName', '选择禁言用户');
+        html += '</div>';
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">';
+        html += '<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">禁言时长</label><select id="muteDuration" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);background:rgba(255,255,255,0.8);font-size:13px;outline:none;">';
+        html += '<option value="1">1小时</option><option value="6">6小时</option><option value="12">12小时</option><option value="24" selected>1天</option><option value="72">3天</option><option value="168">7天</option><option value="720">30天</option><option value="0">永久</option>';
+        html += '</select></div>';
+        html += '<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">原因</label><input id="muteReason" placeholder="违反社区规定" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);background:rgba(255,255,255,0.8);font-size:13px;outline:none;"></div>';
+        html += '</div>';
+        html += '<div style="display:flex;gap:8px;justify-content:flex-end;">';
+        html += '<button class="btn-sm" onclick="this.closest(\'.report-detail-modal\').remove()">取消</button>';
+        html += '<button class="btn-sm primary" onclick="addMute()">确认禁言</button>';
+        html += '</div>';
+
+        box.innerHTML = html;
+        modal.appendChild(box);
+        document.body.appendChild(modal);
+    };
 
     function formatDuration(hours) {
         if (hours >= 720) return Math.floor(hours / 720) + '个月';
@@ -1582,8 +1640,7 @@
                 var { error } = await sb.from('mutes').insert([{ user_name: userName, reason: reason || '违反社区规定', duration_hours: duration, muted_by: ADMIN, expires_at: expiresAt, is_active: true }]);
                 if (error) { showToast('禁言失败: ' + error.message, 'error'); return; }
             }
-            document.getElementById('muteUserName').value = '';
-            document.getElementById('muteReason').value = '';
+            document.querySelector('.report-detail-modal')?.remove();
             await loadMutesData();
             renderTab('mutes');
             showToast('已禁言 ' + userName, 'success');
@@ -1626,39 +1683,68 @@
         h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前黑名单</div></div>';
         h += '</div>';
 
-        h += '<div class="card"><h3>添加黑名单</h3>';
-        h += '<div class="admin-user-form-row">';
-        h += '<div class="admin-field"><label>用户名</label>' + buildAdminUserPicker('blacklistUserName', '选择黑名单用户') + '</div>';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">黑名单时长</label><select id="blacklistDuration" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);">';
-        h += '<option value="1">1小时</option><option value="6">6小时</option><option value="12">12小时</option><option value="24" selected>1天</option><option value="72">3天</option><option value="168">7天</option><option value="720">30天</option><option value="0">永久</option>';
-        h += '</select></div>';
-        h += '<div style="display:flex;flex-direction:column;gap:4px;"><label style="font-size:11px;color:var(--text-muted);">原因</label><input id="blacklistReason" placeholder="输入原因" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.15);font-size:13px;outline:none;color:var(--text);width:180px;"></div>';
-        h += '<button class="btn-sm primary" onclick="addBlacklist()" style="height:36px;">加入黑名单</button>';
-        h += '</div></div>';
-
-        h += '<div class="card"><h3>黑名单列表</h3>';
+        h += '<div class="card">';
+        h += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">';
+        h += '<h3 style="margin:0;">黑名单列表</h3>';
+        h += '<button class="btn-sm primary" onclick="showAddBlacklistModal()">+ 添加黑名单</button>';
+        h += '</div>';
         if (!blacklistData.length) {
             h += '<div class="empty">暂无黑名单记录</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>操作人</th><th>加入时间</th><th>过期时间</th><th>状态</th><th>解除</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>操作人</th><th>时间</th><th>过期</th><th>状态</th><th>操作</th></tr></thead><tbody>';
             blacklistData.forEach(function(b) {
-                var durationLabel = b.duration_hours > 0 ? formatDuration(b.duration_hours) : '永久';
                 var statusBadge = b.is_active ? '<span class="badge badge-red">黑名单中</span>' : '<span class="badge badge-green">已解除</span>';
-                var liftTime = !b.is_active && b.lifted_at ? formatTime(b.lifted_at) : '-';
-                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td>';
-                h += '<td>' + durationLabel + '</td>';
-                h += '<td style="max-width:150px;">' + escapeHtml(b.reason || '-') + '</td>';
+                h += '<tr>';
+                h += '<td><strong>' + escapeHtml(b.user_name) + '</strong></td>';
+                h += '<td>' + (b.duration_hours > 0 ? formatDuration(b.duration_hours) : '永久') + '</td>';
+                h += '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(b.reason || '-') + '</td>';
                 h += '<td>' + escapeHtml(b.added_by || '-') + '</td>';
-                h += '<td>' + formatTime(b.created_at) + '</td>';
-                h += '<td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td>';
+                h += '<td style="font-size:12px;">' + formatTime(b.created_at) + '</td>';
+                h += '<td style="font-size:12px;">' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td>';
                 h += '<td>' + statusBadge + '</td>';
-                h += '<td>' + (b.is_active ? (b.expires_at ? formatTime(b.expires_at) : '永久') + ' <button class="btn-sm" onclick="liftBlacklist(\'' + b.id + '\')">提前解除</button>' : liftTime) + '</td></tr>';
+                h += '<td style="white-space:nowrap;">';
+                if (b.is_active) {
+                    h += '<button class="btn-sm" onclick="liftBlacklist(\'' + b.id + '\')">解除</button>';
+                } else {
+                    h += '<span style="font-size:11px;color:var(--text-muted);">' + (b.lifted_at ? formatTime(b.lifted_at) : '-') + '</span>';
+                }
+                h += '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
         h += '</div>';
         el.innerHTML = h;
     }
+
+    window.showAddBlacklistModal = function() {
+        var modal = document.createElement('div');
+        modal.className = 'report-detail-modal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+
+        var box = document.createElement('div');
+        box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:460px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.onclick = function(e) { e.stopPropagation(); };
+
+        var html = '<h3 style="margin:0 0 16px;">添加黑名单</h3>';
+        html += '<div style="margin-bottom:12px;"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">用户名</label>';
+        html += buildAdminUserPicker('blacklistUserName', '选择黑名单用户');
+        html += '</div>';
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">';
+        html += '<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">时长</label><select id="blacklistDuration" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);background:rgba(255,255,255,0.8);font-size:13px;outline:none;">';
+        html += '<option value="1">1小时</option><option value="6">6小时</option><option value="12">12小时</option><option value="24" selected>1天</option><option value="72">3天</option><option value="168">7天</option><option value="720">30天</option><option value="0">永久</option>';
+        html += '</select></div>';
+        html += '<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px;">原因</label><input id="blacklistReason" placeholder="违反社区规定" style="width:100%;padding:8px 12px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);background:rgba(255,255,255,0.8);font-size:13px;outline:none;"></div>';
+        html += '</div>';
+        html += '<div style="display:flex;gap:8px;justify-content:flex-end;">';
+        html += '<button class="btn-sm" onclick="this.closest(\'.report-detail-modal\').remove()">取消</button>';
+        html += '<button class="btn-sm primary" onclick="addBlacklist()">加入黑名单</button>';
+        html += '</div>';
+
+        box.innerHTML = html;
+        modal.appendChild(box);
+        document.body.appendChild(modal);
+    };
 
     window.addBlacklist = async function() {
         var userName = document.getElementById('blacklistUserName').value.trim();
@@ -1674,8 +1760,7 @@
                 var { error } = await sb.from('blacklist').insert([{ user_name: userName, reason: reason || '违反社区规定', duration_hours: duration, added_by: ADMIN, expires_at: expiresAt, is_active: true }]);
                 if (error) { showToast('加入黑名单失败: ' + error.message, 'error'); return; }
             }
-            document.getElementById('blacklistUserName').value = '';
-            document.getElementById('blacklistReason').value = '';
+            document.querySelector('.report-detail-modal')?.remove();
             await loadBlacklistData();
             renderTab('blacklist');
             showToast('已加入黑名单 ' + userName, 'success');
@@ -1750,17 +1835,17 @@
     };
 
     // ===================== 数据统计仪表盘 =====================
-    var statsDateStart = '';
-    var statsDateEnd = '';
-    var statsChartMode = 'visits'; // visits | attacks | posts | comments | likes
+    window.statsDateStart = window.statsDateStart || '';
+    window.statsDateEnd = window.statsDateEnd || '';
+    window.statsChartMode = window.statsChartMode || 'visits'; // visits | attacks | posts | comments | likes
 
     async function renderStatsTab(el) {
         // ===== 先渲染骨架屏 =====
         var skeletonHtml = '<div class="card"><div class="date-filter-row">';
         skeletonHtml += '<span style="font-weight:600;font-size:14px;">日期筛选：</span>';
-        skeletonHtml += '<input type="date" value="' + escapeHtml(statsDateStart) + '" disabled>';
+        skeletonHtml += '<input type="date" value="' + escapeHtml(window.statsDateStart) + '" disabled>';
         skeletonHtml += '<span style="color:var(--text-muted);">至</span>';
-        skeletonHtml += '<input type="date" value="' + escapeHtml(statsDateEnd) + '" disabled>';
+        skeletonHtml += '<input type="date" value="' + escapeHtml(window.statsDateEnd) + '" disabled>';
         skeletonHtml += '</div></div>';
         skeletonHtml += '<div class="stats-row">';
         var labels = ['用户数量','帖子数量','评论数量','点赞数量','照片数量','访问总次数','被攻击次数','API防火墙拦截'];
@@ -1779,10 +1864,18 @@
             if (API_BASE && getToken()) {
                 // 模式1：通过后端 API
                 var dailyQuery = '/admin/stats/daily';
-                if (statsDateStart) dailyQuery += '?start=' + statsDateStart;
-                if (statsDateEnd) dailyQuery += (statsDateStart ? '&' : '?') + 'end=' + statsDateEnd;
+                var summaryQuery = '/admin/stats';
+                if (window.statsDateStart) dailyQuery += '?start=' + window.statsDateStart;
+                if (window.statsDateEnd) dailyQuery += (window.statsDateStart ? '&' : '?') + 'end=' + window.statsDateEnd;
 
-                var summaryR = apiCall('GET', '/admin/stats');
+                // summary也支持日期筛选
+                if (window.statsDateStart || window.statsDateEnd) {
+                    summaryQuery += '?';
+                    if (window.statsDateStart) summaryQuery += 'start=' + window.statsDateStart;
+                    if (window.statsDateEnd) summaryQuery += (window.statsDateStart ? '&' : '') + 'end=' + window.statsDateEnd;
+                }
+
+                var summaryR = apiCall('GET', summaryQuery);
                 var dailyR = apiCall('GET', dailyQuery);
                 summary = await summaryR;
                 dailyData = await dailyR;
@@ -1793,6 +1886,21 @@
                     EXCLUDE.forEach(function(m) { q = q.neq('media_type', m); });
                     return q.neq('media_type', '__avatar__');
                 };
+
+                // 日期筛选辅助：对数据查询添加数据库级日期过滤
+                var sd = window.statsDateStart, ed = window.statsDateEnd;
+                function dateFilter(q, field) {
+                    if (sd) q = q.gte(field, sd);
+                    if (ed) q = q.lte(field, ed);
+                    return q;
+                }
+                function dateCreatedFilter(q) {
+                    if (sd) q = q.gte('created_at', sd + 'T00:00:00.000Z');
+                    if (ed) q = q.lte('created_at', ed + 'T23:59:59.999Z');
+                    return q;
+                }
+                // 有日期筛选时不需要limit（数据库已过滤），否则保留较大limit
+                var dataLimit = (sd || ed) ? undefined : 100000;
 
                 // 并行发起所有查询（只取需要的字段，大幅减少数据传输）
                 var Q = [
@@ -1810,23 +1918,29 @@
                     sb.from('posts').select('id', { count: 'exact', head: true }).eq('media_type', '__attack__').limit(5000),
                     // 6: 用户访问计数
                     sb.from('posts').select('id', { count: 'exact', head: true }).eq('media_type', '__user_visit__').limit(5000),
-                    // 7: 每日帖子 created_at
-                    BASE_FILTER(sb.from('posts').select('created_at')).limit(5000),
+                    // 7: 每日帖子 created_at（有日期筛选时数据库级过滤）
+                    dateCreatedFilter(BASE_FILTER(sb.from('posts').select('created_at'))),
                     // 8: 每日评论 created_at
-                    sb.from('comments').select('created_at').limit(5000),
+                    dateCreatedFilter(sb.from('comments').select('created_at')),
                     // 9: 每日点赞 created_at
-                    sb.from('likes').select('created_at').limit(5000),
+                    dateCreatedFilter(sb.from('likes').select('created_at')),
                     // 10: 每日新用户 created_at
-                    sb.from('posts').select('created_at').eq('media_type', '__user_info__').limit(5000),
+                    dateCreatedFilter(sb.from('posts').select('created_at').eq('media_type', '__user_info__')),
                     // 11: 每日访问（IP级）media_url, content
-                    sb.from('posts').select('media_url, content').eq('media_type', '__visit__').limit(5000),
+                    dateFilter(sb.from('posts').select('media_url, content').eq('media_type', '__visit__'), 'media_url'),
                     // 12: 每日用户访问 media_url, content
-                    sb.from('posts').select('media_url, content').eq('media_type', '__user_visit__').limit(5000),
+                    dateFilter(sb.from('posts').select('media_url, content').eq('media_type', '__user_visit__'), 'media_url'),
                     // 13: 每日攻击 media_url, content
-                    sb.from('posts').select('media_url, content').eq('media_type', '__attack__').limit(5000),
+                    dateCreatedFilter(sb.from('posts').select('media_url, content').eq('media_type', '__attack__')),
                     // 14: 照片计数 media_url
                     BASE_FILTER(sb.from('posts').select('media_url')).limit(5000),
                 ];
+
+                // 对数据查询（7-14）在无日期筛选时设置limit
+                for (var i = 7; i <= 13; i++) {
+                    if (dataLimit && Q[i]) Q[i] = Q[i].limit(dataLimit);
+                }
+                // 注意：query 14 照片计数仍保留原limit(5000)
 
                 var results = await Promise.all(Q.map(function(q) { return q; }));
 
@@ -1858,6 +1972,8 @@
                     else type = ct.slice(0, 30) || '未知';
                     attackTypes[type] = (attackTypes[type] || 0) + 1;
                 });
+                // API防火墙拦截 = RATE_LIMIT + CORS + CSRF（API层面的拦截）
+                var firewallIntercepts = (attackTypes['CORS'] || 0) + (attackTypes['CSRF'] || 0);
 
                 summary = {
                     total_users: totalUsers,
@@ -1867,6 +1983,7 @@
                     total_photos: photoCount,
                     total_visits: totalIpVisits + totalUserVisits,
                     total_attacks: totalAttacks,
+                    firewall_intercepts: firewallIntercepts,
                     attack_types: attackTypes,
                     cached_at: new Date().toISOString()
                 };
@@ -1876,8 +1993,8 @@
 
                 function addToDaily(date, key, val) {
                     if (!date) return;
-                    if (statsDateStart && date < statsDateStart) return;
-                    if (statsDateEnd && date > statsDateEnd) return;
+                    if (window.statsDateStart && date < window.statsDateStart) return;
+                    if (window.statsDateEnd && date > window.statsDateEnd) return;
                     if (!dailyMap[date]) {
                         dailyMap[date] = { date: date, visits: 0, attacks: 0, posts: 0, comments: 0, likes: 0, new_users: 0 };
                     }
@@ -1900,7 +2017,7 @@
                 addList(results[10].data, 'new_users', 'created_at');
                 addList(results[11].data, 'visits', 'media_url');
                 addList(results[12].data, 'visits', 'media_url');
-                addList(results[13].data, 'attacks', 'media_url');
+                addList(results[13].data, 'attacks', 'created_at');
 
                 dailyData = { daily: Object.values(dailyMap).sort(function(a, b) { return a.date.localeCompare(b.date); }) };
             }
@@ -1915,11 +2032,11 @@
             // ===== 渲染真实内容 =====
             var h = '<div class="card"><div class="date-filter-row">';
             h += '<span style="font-weight:600;font-size:14px;">日期筛选：</span>';
-            h += '<input type="date" id="statsDateStart" value="' + escapeHtml(statsDateStart) + '" onchange="statsDateStart=this.value;renderTab(\'stats\')" title="开始日期">';
+            h += '<input type="date" id="statsDateStart" value="' + escapeHtml(window.statsDateStart) + '" onchange="window.statsDateStart=this.value;renderTab(\'stats\')" title="开始日期">';
             h += '<span style="color:var(--text-muted);">至</span>';
-            h += '<input type="date" id="statsDateEnd" value="' + escapeHtml(statsDateEnd) + '" onchange="statsDateEnd=this.value;renderTab(\'stats\')" title="结束日期">';
-            if (statsDateStart || statsDateEnd) {
-                h += '<button onclick="statsDateStart=\'\';statsDateEnd=\'\';renderTab(\'stats\')">清除筛选</button>';
+            h += '<input type="date" id="statsDateEnd" value="' + escapeHtml(window.statsDateEnd) + '" onchange="window.statsDateEnd=this.value;renderTab(\'stats\')" title="结束日期">';
+            if (window.statsDateStart || window.statsDateEnd) {
+                h += '<button onclick="window.statsDateStart=\'\';window.statsDateEnd=\'\';renderTab(\'stats\')">清除筛选</button>';
             }
             if (API_BASE && getToken()) {
                 h += '<button class="btn-sm primary" style="margin-left:auto;" onclick="apiCall(\'POST\',\'/admin/stats/refresh\').then(function(){renderTab(\'stats\');}).catch(function(){})">刷新缓存</button>';
@@ -1935,7 +2052,7 @@
             h += '<div class="stat-box"><div class="val">' + (summary.total_photos || 0) + '</div><div class="lbl">照片数量</div></div>';
             h += '<div class="stat-box"><div class="val">' + (summary.total_visits || 0) + '</div><div class="lbl">访问总次数</div></div>';
             h += '<div class="stat-box danger"><div class="val">' + (summary.total_attacks || 0) + '</div><div class="lbl">被攻击次数</div></div>';
-            h += '<div class="stat-box warn"><div class="val">' + (summary.total_visits || 0) + '</div><div class="lbl">API防火墙拦截</div></div>';
+            h += '<div class="stat-box warn"><div class="val">' + (summary.firewall_intercepts || 0) + '</div><div class="lbl">API防火墙拦截</div></div>';
             h += '</div>';
 
             // ===== 每日图表 =====
@@ -1951,7 +2068,7 @@
             h += '<div class="card"><h3>每日数据趋势</h3>';
             h += '<div class="filter-chips" style="margin-bottom:12px;">';
             modes.forEach(function(m) {
-                h += '<span class="filter-chip' + (statsChartMode === m.key ? ' active' : '') + '" onclick="statsChartMode=\'' + m.key + '\';renderTab(\'stats\')" style="cursor:pointer;">' + m.label + '</span>';
+                h += '<span class="filter-chip' + (window.statsChartMode === m.key ? ' active' : '') + '" onclick="window.statsChartMode=\'' + m.key + '\';renderTab(\'stats\')" style="cursor:pointer;">' + m.label + '</span>';
             });
             h += '</div>';
 
@@ -1959,10 +2076,10 @@
                 h += '<div class="empty" style="padding:24px;text-align:center;color:var(--text-muted);">暂无每日数据，刷新页面后开始记录访问</div>';
             } else {
                 var maxVal = 0;
-                daily.forEach(function(d) { var v = d[statsChartMode] || 0; if (v > maxVal) maxVal = v; });
+                daily.forEach(function(d) { var v = d[window.statsChartMode] || 0; if (v > maxVal) maxVal = v; });
                 if (maxVal === 0) maxVal = 1;
 
-                var activeMode = modes.find(function(m) { return m.key === statsChartMode; }) || modes[0];
+                var activeMode = modes.find(function(m) { return m.key === window.statsChartMode; }) || modes[0];
                 // 如果数据太多，只显示最近30天以防止图表过密
                 var chartData = daily.length > 30 ? daily.slice(-30) : daily;
 
@@ -1973,7 +2090,7 @@
                 h += '</div>';
                 h += '<div class="chart-bar-row">';
                 chartData.forEach(function(d) {
-                    var v = d[statsChartMode] || 0;
+                    var v = d[window.statsChartMode] || 0;
                     var heightPct = Math.max(4, Math.round((v / maxVal) * 100));
                     h += '<div class="chart-bar" style="height:' + heightPct + '%;background:' + activeMode.color + ';" title="' + escapeHtml(d.date) + ': ' + v + '">';
                     h += '<span class="bar-tip">' + v + '</span>';
@@ -2016,14 +2133,17 @@
                 h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>访问</th><th>攻击</th><th>帖子</th><th>评论</th><th>点赞</th><th>新用户</th></tr></thead><tbody>';
                 var reversed = daily.slice().reverse();
                 reversed.forEach(function(d) {
+                    // 跳过全0行（访问/攻击/帖子/评论/点赞/新用户全为0）
+                    var total = (d.visits || 0) + (d.attacks || 0) + (d.posts || 0) + (d.comments || 0) + (d.likes || 0) + (d.new_users || 0);
+                    if (total === 0) return;
                     h += '<tr>';
                     h += '<td><strong>' + escapeHtml(d.date) + '</strong></td>';
-                    h += '<td>' + (d.visits || 0) + '</td>';
-                    h += '<td style="color:' + (d.attacks > 0 ? 'var(--danger)' : 'var(--text-muted)') + ';">' + (d.attacks || 0) + '</td>';
-                    h += '<td>' + (d.posts || 0) + '</td>';
-                    h += '<td>' + (d.comments || 0) + '</td>';
-                    h += '<td>' + (d.likes || 0) + '</td>';
-                    h += '<td>' + (d.new_users || 0) + '</td>';
+                    h += '<td' + (d.visits ? '' : ' class="zero-val"') + '>' + (d.visits || '') + '</td>';
+                    h += '<td' + (d.attacks ? '' : ' class="zero-val"') + ' style="color:' + (d.attacks > 0 ? 'var(--danger)' : 'var(--text-muted)') + ';">' + (d.attacks || '') + '</td>';
+                    h += '<td' + (d.posts ? '' : ' class="zero-val"') + '>' + (d.posts || '') + '</td>';
+                    h += '<td' + (d.comments ? '' : ' class="zero-val"') + '>' + (d.comments || '') + '</td>';
+                    h += '<td' + (d.likes ? '' : ' class="zero-val"') + '>' + (d.likes || '') + '</td>';
+                    h += '<td' + (d.new_users ? '' : ' class="zero-val"') + '>' + (d.new_users || '') + '</td>';
                     h += '</tr>';
                 });
                 h += '</tbody></table></div></div>';
@@ -2056,8 +2176,8 @@
                 userData = await apiCall('GET', '/admin/stats/users');
             } else if (sb) {
                 // Supabase 直接模式（并行查询 + 只取必要字段）
-                var uvR = sb.from('posts').select('user_name, media_url, content, created_at').eq('media_type', '__user_visit__').limit(5000);
-                var uiR = sb.from('posts').select('user_name, content, created_at').eq('media_type', '__user_info__').limit(5000);
+                var uvR = sb.from('posts').select('user_name, media_url, content, created_at').eq('media_type', '__user_visit__').order('created_at', { ascending: false }).limit(5000);
+                var uiR = sb.from('posts').select('user_name, content, created_at').eq('media_type', '__user_info__').order('created_at', { ascending: false }).limit(5000);
 
                 var uvRes = await uvR, uiRes = await uiR;
                 var userVisitsData = uvRes.data || [];
@@ -2079,7 +2199,15 @@
 
                 var userInfoMap = {};
                 userInfoList.forEach(function(ui) {
-                    try { userInfoMap[ui.user_name] = JSON.parse(ui.content || '{}'); } catch(e) {}
+                    try {
+                        var parsed = JSON.parse(ui.content || '{}');
+                        // 保留最早（最旧）的 reg_time，只覆盖更新 last_login
+                        if (userInfoMap[ui.user_name]) {
+                            if (parsed.last_login) userInfoMap[ui.user_name].last_login = parsed.last_login;
+                        } else {
+                            userInfoMap[ui.user_name] = parsed;
+                        }
+                    } catch(e) {}
                 });
 
                 var users = Object.keys(userVisitMap).map(function(name) {
