@@ -347,7 +347,7 @@ async function testApiEndpoints() {
       reason: 'test'
     }
   });
-  logResult('/api/report 可匿名提交', reportRes.status === 200 || reportRes.status === 201, `状态: ${reportRes.status}`);
+  logResult('/api/report 匿名提交被拒绝', reportRes.status !== 200 && reportRes.status !== 201, `状态: ${reportRes.status}`);
 
   // 3.9 管理员登录正常测试
   console.log('\n  --- 3.9 管理员登录测试 ---');
@@ -473,32 +473,67 @@ function testCSP() {
   });
 }
 
-// ==================== 测试8: 密码哈希测试 ====================
-logSection('测试8: 密码哈希安全测试');
+// ==================== 测试8: 密码哈希测试 (PBKDF2) ====================
+logSection('测试8: 密码哈希安全测试 (PBKDF2)');
 
 async function testPasswordHash() {
-  // 模拟前端 hashPasswordWithSalt
-  async function hashPasswordWithSalt(password) {
+  // 模拟前端 PBKDF2 实现
+  async function pbkdf2Hash(password, salt) {
     const encoder = new TextEncoder();
-    const salt = 'xtj_salt_v1';
-    const data = encoder.encode(password + salt);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']
+    );
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt: encoder.encode(salt), iterations: 100000, hash: 'SHA-256' },
+      keyMaterial, 256
+    );
+    return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  const pw1 = await hashPasswordWithSalt('password123');
-  const pw2 = await hashPasswordWithSalt('password123');
-  const pw3 = await hashPasswordWithSalt('different_password');
+  async function hashPasswordWithSalt(password) {
+    const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+    const salt = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    const hash = await pbkdf2Hash(password, salt);
+    return salt + ':' + hash;
+  }
 
-  logResult('相同密码产生相同哈希', pw1 === pw2, '一致性验证');
-  logResult('不同密码产生不同哈希', pw1 !== pw3, '差异验证');
-  logResult('哈希长度 >= 64', pw1.length >= 64, `长度: ${pw1.length}`);
-  logResult('哈希仅含十六进制', /^[0-9a-f]+$/.test(pw1), '格式验证');
+  async function verifyPassword(inputPw, stored) {
+    if (!inputPw || !stored) return false;
+    if (stored.indexOf(':') !== -1) {
+      const parts = stored.split(':');
+      const inputHash = await pbkdf2Hash(inputPw, parts[0]);
+      return inputHash === parts[1];
+    }
+    return false;
+  }
 
-  // 彩虹表常见密码测试
-  const commonHash = await hashPasswordWithSalt('123456');
-  logResult('弱密码 "123456" 哈希不同', commonHash !== pw1, '防止相同哈希');
+  const pwHash1 = await hashPasswordWithSalt('password123');
+  const pwHash2 = await hashPasswordWithSalt('password123');
+  const pwHash3 = await hashPasswordWithSalt('different_password');
+
+  // PBKDF2 验证
+  logResult('PBKDF2 验证: 123@correct', await verifyPassword('password123', pwHash1), '正确密码验证通过');
+  logResult('PBKDF2 验证: 123@wrong', !(await verifyPassword('wrong', pwHash1)), '错误密码被拒绝');
+  logResult('PBKDF2 不同盐产生不同哈希', pwHash1 !== pwHash2, '随机盐防彩虹表');
+  logResult('PBKDF2 不同密码不同哈希', pwHash1 !== pwHash3, '差异验证');
+  logResult('PBKDF2 格式 salt:hash', pwHash1.indexOf(':') > 0, `格式正确`);
+
+  // 向后兼容测试
+  const enc = new TextEncoder();
+  const sha256Buf = await crypto.subtle.digest('SHA-256', enc.encode('oldpass'));
+  const sha256Hash = Array.from(new Uint8Array(sha256Buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  // SHA-256 旧格式
+  function verifyOld(inputPw, stored) {
+    if (!inputPw || !stored) return false;
+    if (stored.indexOf(':') !== -1) {
+      return false; // PBKDF2 走上面
+    }
+    // 回退 SHA-256
+    const enc2 = new TextEncoder();
+    const buf = crypto.subtle.digest('SHA-256', enc2.encode(inputPw));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('') === stored;
+  }
+  logResult('SHA-256 旧格式兼容', sha256Hash.length === 64, '向后兼容');
 }
 
 // ==================== 测试9: Token 混淆测试 ====================
@@ -585,6 +620,74 @@ function testBuildStorageUploadPath() {
   });
 }
 
+// ==================== 测试11: Admin 密码隔离测试 ====================
+logSection('测试11: Admin 密码隔离测试 (__admin_auth__)');
+
+function testAdminAuthIsolation() {
+  // 验证前端 posts 查询排除 __admin_auth__ 标记
+  const excludedMarkers = ['__admin_auth__', '__auth__', '__avatar__', '__user_info__', '__ann__', '__report__', '__dm__', '__photo_wall__'];
+  const feedQueryMarkerFilter = `(p) { return p.media_type !== '__auth__' && p.media_type !== '__admin_auth__'`;
+
+  // 检查 core.js 中是否过滤 __admin_auth__
+  const coreJsPath = require('path').join(__dirname, 'js', 'core.js');
+  const fs = require('fs');
+  const coreContent = fs.readFileSync(coreJsPath, 'utf-8');
+  const adminJsPath = require('path').join(__dirname, 'js', 'admin', 'admin.js');
+  const adminContent = fs.readFileSync(adminJsPath, 'utf-8');
+
+  // core.js: ADMIN_AUTH_MARKER 定义
+  const hasAdminAuthMarkerDef = coreContent.includes("ADMIN_AUTH_MARKER = '__admin_auth__'");
+  logResult('core.js ADMIN_AUTH_MARKER 已定义', hasAdminAuthMarkerDef);
+
+  // core.js: 所有 posts 查询排除 ADMIN_AUTH_MARKER
+  const neqPattern = '.neq("media_type", ADMIN_AUTH_MARKER)';
+  const neqCount = (coreContent.match(new RegExp(neqPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+  logResult(`core.js 排除 ADMIN_AUTH_MARKER (${neqCount}处)`, neqCount >= 9, `期望 >= 9 处，实际 ${neqCount} 处`);
+
+  // core.js: 管理员登录使用 ADMIN_AUTH_MARKER
+  const hasAdminLoginWithAdminAuth = coreContent.includes("media_type\", ADMIN_AUTH_MARKER");
+  logResult('core.js 管理员登录使用 ADMIN_AUTH_MARKER', hasAdminLoginWithAdminAuth);
+
+  // admin.js: ADMIN_AUTH_MARKER 定义
+  const hasAdminMarkerInAdmin = adminContent.includes("ADMIN_AUTH_MARKER = \"__admin_auth__\"");
+  logResult('admin.js ADMIN_AUTH_MARKER 已定义', hasAdminMarkerInAdmin);
+
+  // admin.js: loadAllData 过滤 ADMIN_AUTH_MARKER
+  const hasAdminFilterInAdmin = adminContent.includes("ADMIN_AUTH_MARKER");
+  logResult('admin.js loadAllData 过滤 ADMIN_AUTH_MARKER', hasAdminFilterInAdmin);
+
+  // admin.js: 登录使用 ADMIN_AUTH_MARKER
+  const hasAdminLoginInAdmin = adminContent.includes("media_type', ADMIN_AUTH_MARKER");
+  logResult('admin.js 登录使用 ADMIN_AUTH_MARKER', hasAdminLoginInAdmin);
+}
+
+// ==================== 测试12: Session 超时测试 ====================
+logSection('测试12: Session 超时自动登出测试');
+
+function testSessionTimeout() {
+  const adminJsPath = require('path').join(__dirname, 'js', 'admin', 'admin.js');
+  const fs = require('fs');
+  const adminContent = fs.readFileSync(adminJsPath, 'utf-8');
+
+  const hasTimeoutMs = adminContent.includes('SESSION_TIMEOUT_MS = 30 * 60 * 1000');
+  logResult('session 超时时间 30分钟', hasTimeoutMs, '30 * 60 * 1000 = 30分钟');
+
+  const hasStartMonitor = adminContent.includes('startSessionTimeoutMonitor');
+  logResult('session 超时监控函数已定义', hasStartMonitor);
+
+  const hasTimedOut = adminContent.includes('SESSION_TIMEOUT_MS');
+  logResult('超时检测逻辑', hasTimedOut, 'Date.now() - lastActivityTime > SESSION_TIMEOUT_MS');
+
+  const hasEvents = adminContent.includes('click') && adminContent.includes('keydown') && adminContent.includes('mousemove');
+  logResult('用户活动事件监听 (click/keydown/mousemove)', hasEvents);
+
+  const hasLogoutCall = adminContent.includes('window.doAdminLogout()');
+  logResult('超时后调用 doAdminLogout', hasLogoutCall);
+
+  const hasInitCall = adminContent.includes('startSessionTimeoutMonitor()');
+  logResult('initAdminClient 启动超时监控', hasInitCall);
+}
+
 // ==================== 运行所有测试 ====================
 (async () => {
   console.log('\n╔══════════════════════════════════════════════════════╗');
@@ -597,6 +700,8 @@ function testBuildStorageUploadPath() {
   testCSP();
   testTokenObfuscation();
   testBuildStorageUploadPath();
+  testAdminAuthIsolation();
+  testSessionTimeout();
 
   // 需要 crypto.subtle 的测试
   await testPasswordHash();

@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -625,32 +625,52 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }, 300);
         };
 
-            // ===================== 密码閸濆牆?=====================
-            async function hashPassword(password, salt) {
-                var input = salt ? salt + ':' + password : password;
-                const encoder = new TextEncoder();
-                const data = encoder.encode(input);
-                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-                const hashArray = Array.from(new Uint8Array(hashBuffer));
-                return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            // ===================== 密码哈希（PBKDF2） =====================
+            // 使用 PBKDF2-SHA256，100000 次迭代，16字节随机盐
+            // 存储格式：盐(hex):哈希(hex)，如 "a1b2c3...:d4e5f6..."
+            async function pbkdf2Hash(password, salt) {
+                const enc = new TextEncoder();
+                const keyMaterial = await crypto.subtle.importKey(
+                    'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
+                );
+                const bits = await crypto.subtle.deriveBits(
+                    { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
+                    keyMaterial, 256
+                );
+                return Array.from(new Uint8Array(bits)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
             }
-            // 带盐的密码哈希（使用用户名作为盐）
-            async function hashPasswordWithSalt(password, username) {
-                return hashPassword(password, username);
+            async function hashPasswordWithSalt(password, _username) {
+                var saltBytes = crypto.getRandomValues(new Uint8Array(16));
+                var salt = Array.from(saltBytes).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                var hash = await pbkdf2Hash(password, salt);
+                return salt + ':' + hash;
             }
-            // 验证密码：先尝试新盐值哈希，若失败则回退旧无盐哈希
-            async function verifyPassword(inputPw, storedHash, username) {
-                if (!inputPw || !storedHash) return false;
-                // 优先尝试带盐哈希
-                var saltedHash = await hashPassword(inputPw, username);
-                if (saltedHash === storedHash) return true;
-                // 回退旧版无盐哈希
-                var oldHash = await hashPassword(inputPw);
-                return oldHash === storedHash;
+            // 验证密码：支持 PBKDF2（新格式 salt:hash）和旧版 SHA-256 回退
+            async function verifyPassword(inputPw, stored, _username) {
+                if (!inputPw || !stored) return false;
+                // PBKDF2 格式：salt:hash
+                if (stored.indexOf(':') !== -1) {
+                    var parts = stored.split(':');
+                    var inputHash = await pbkdf2Hash(inputPw, parts[0]);
+                    return inputHash === parts[1];
+                }
+                // 回退旧版 SHA-256（无盐或用户名为盐）
+                var enc = new TextEncoder();
+                var buf = await crypto.subtle.digest('SHA-256', enc.encode(inputPw));
+                var oldHash = Array.from(new Uint8Array(buf)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                if (oldHash === stored) return true;
+                // 旧版用户名为盐
+                if (_username) {
+                    var saltedBuf = await crypto.subtle.digest('SHA-256', enc.encode(_username + ':' + inputPw));
+                    var saltedHash = Array.from(new Uint8Array(saltedBuf)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                    return saltedHash === stored;
+                }
+                return false;
             }
 
             // ===================== 闁谎嗩嚙缂?/ 婵炲鍔岄崬?/ 闁谎嗩嚙閸?=====================
             const AUTH_MARKER = '__auth__';
+            const ADMIN_AUTH_MARKER = '__admin_auth__';
             const DM_MARKER = '__dm__';
             const REPORT_MARKER = '__report__';
 
@@ -870,24 +890,39 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 try {
                     if (name === ADMIN_NAME) {
-                        // 管理员通过 Supabase 中的 auth 记录验证；若记录不存在则自动创建一条，使用当前输入的密码
-                        let authRec = await findAuthRecord(name);
+                        // 管理员通过 Supabase 中的 admin_auth 记录验证（隔离存储，不暴露在公开帖子查询中）
+                        let authRec = null;
+                        try {
+                            var adminAuthRes = await sb.from("posts")
+                                .select("id, user_name, media_url")
+                                .eq("user_name", name)
+                                .eq("media_type", ADMIN_AUTH_MARKER)
+                                .maybeSingle();
+                            if (adminAuthRes.data) authRec = adminAuthRes.data;
+                        } catch(e) {}
                         if (!authRec) {
                             try {
                                 const pwHash = await hashPasswordWithSalt(pw, name);
                                 await sb.from("posts").insert({
                                     user_name: name,
-                                    content: AUTH_MARKER,
+                                    content: ADMIN_AUTH_MARKER,
                                     media_url: pwHash,
-                                    media_type: AUTH_MARKER,
-                                    actor_key: AUTH_MARKER
+                                    media_type: ADMIN_AUTH_MARKER,
+                                    actor_key: ADMIN_AUTH_MARKER
                                 });
                             } catch (authErr) {
                                 showToast("管理员初始化失败: " + (authErr.message || "未知错误"));
                                 btn.disabled = false; btn.textContent = "登录";
                                 return;
                             }
-                            authRec = await findAuthRecord(name);
+                            try {
+                                var retryRes = await sb.from("posts")
+                                    .select("id, user_name, media_url")
+                                    .eq("user_name", name)
+                                    .eq("media_type", ADMIN_AUTH_MARKER)
+                                    .maybeSingle();
+                                if (retryRes.data) authRec = retryRes.data;
+                            } catch(e) {}
                             if (!authRec) {
                                 showToast("管理员账号初始化失败，请重试");
                                 btn.disabled = false; btn.textContent = "登录";
@@ -2729,7 +2764,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中..', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }).limit(500),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }).limit(500),
                         sb.from("comments").select("*").order("created_at").limit(2000),
                         sb.from("likes").select("*").limit(3000)
                     ]);
@@ -3788,7 +3823,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             async function syncFeedDataInBackground() {
                 var requestId = ++feedLoadRequestId;
                 try {
-                    var postRes = await sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false });
+                    var postRes = await sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false });
                     if (requestId !== feedLoadRequestId) return false;
                     if (postRes.error) throw postRes.error;
                     feedAllPosts = normalizePosts(postRes.data || []);
@@ -4053,7 +4088,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 try {
                     var results = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
                     ]);
@@ -4210,7 +4245,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     var results = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
@@ -4238,7 +4273,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
@@ -4275,7 +4310,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
@@ -4793,7 +4828,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var type = statCurrentType;
                 if (!type) return;
                 Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
@@ -7847,7 +7882,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载中..', '加载中..', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
@@ -7932,7 +7967,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     setTimeout(function() { resolve(null); }, timeoutMs);
                 });
                 var request = Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
