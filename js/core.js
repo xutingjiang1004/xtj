@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -33,6 +33,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         let currentUser;
         try { currentUser = localStorage.getItem("xtj_user") || ""; } catch(e) { currentUser = ""; }
         window.currentUser = currentUser;
+
+        // 记录用户访问到后端统计
+        function logUserVisitToApi(userName) {
+            if (!userName || typeof API_BASE === 'undefined' || !API_BASE) return;
+            try {
+                fetch(API_BASE + '/api/log-user-visit', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_name: userName })
+                }).catch(function(){});
+            } catch(e) {}
+        }
         let dockChatListCacheTime = 0;
         const DOCK_CHAT_CACHE_DURATION = 120000;
         let deviceId;
@@ -113,6 +125,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
         function clearFeedCache() {
             try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
+            feedVisiblePostsCache = null;
+            feedMapsCache = null;
         }
         window.clearFeedCache = clearFeedCache;
 
@@ -584,13 +598,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!currentUser || currentUser === ADMIN_NAME) return;
                 try {
                     var { data, error } = await sb.rpc('get_user_restrictions', { p_user_name: currentUser });
-                    if (error) { console.error('检查用户限制失败:', error); return; }
+                    if (error) { return; }
                     var prev = JSON.stringify(userRestrictions);
                     userRestrictions = data || { is_banned: false, is_blacklisted: false, is_muted: false };
                     if (JSON.stringify(userRestrictions) !== prev) {
                         applyRestrictions();
                     }
-                } catch(e) { console.error('检查用户限制异常:', e); }
+                } catch(e) { }
             }
 
             function applyRestrictions() {
@@ -733,7 +747,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                 .eq("id", latest.data[0].id);
                             if (!updRes.error) {
                                 updated = true;
-                                console.log("saveUserInfo [更新] " + name + " 登录时间 (UPDATE): " + userInfo.last_login);
                             }
                         }
                     } catch(e) {}
@@ -747,13 +760,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             actor_key: "__user_info__"
                         }]);
                         if (insertRes.error) {
-                            console.error("saveUserInfo insert濠㈡儼绮剧憴?", insertRes.error.message);
+                            // silently ignore
                         } else {
-                            console.log("saveUserInfo [鎻掑叆] " + name + " 登录时间 (INSERT): " + userInfo.last_login);
+                            // login info saved
                         }
                     }
                 } catch(e) {
-                    console.error("saveUserInfo濠㈡儼绮剧憴?", e);
                 }
             }
 
@@ -798,9 +810,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                                     media_type: AUTH_MARKER,
                                     actor_key: AUTH_MARKER
                                 });
-                                console.log('[AUTH] 管理员 auth 记录已自动创建');
                             } catch (authErr) {
-                                console.error('[AUTH] 自动创建管理员记录失败:', authErr);
                                 showToast("管理员初始化失败: " + (authErr.message || "未知错误"));
                                 btn.disabled = false; btn.textContent = "登录";
                                 return;
@@ -844,8 +854,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     
                     await initUI();
                     initialLoad(true);
+                    // 记录用户访问
+                    logUserVisitToApi(name);
                 } catch (e) {
-                    console.error(e);
                     showToast("登录失败，请重试");
                 } finally {
                     btn.disabled = false;
@@ -905,8 +916,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     
                     await initUI();
                     initialLoad(true);
+                    // 记录用户访问
+                    logUserVisitToApi(name);
                 } catch (e) {
-                    console.error(e);
                     showToast("注册失败，请重试");
                 } finally {
                     btn.disabled = false;
@@ -1186,9 +1198,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 
                 try {
                     // 濞寸姾顕ф慨?閿涙岸鍣搁弸鍕礋閿熻緝杈炬嫹锟?Supabase Storage 闁?avatars/ 闁烩晩鍠栫紞?
-                    const timestamp = Date.now();
-                    const random = Math.floor(Math.random() * 1000);
-                    const path = `avatars/${timestamp}_${random}_${file.name}`;
+                    const path = buildStorageUploadPath('avatars', file.name);
                     
                     // 上传锟?Supabase Storage
                     const { error: uploadErr } = await sb.storage.from('uploads').upload(path, file);
@@ -1643,6 +1653,21 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             async function loadProfileActivity(forceRefresh) {
                 forceRefresh = !!forceRefresh;
+                if (loadProfileActivity._debounceTimer) {
+                    clearTimeout(loadProfileActivity._debounceTimer);
+                }
+                if (forceRefresh) {
+                    // 强制刷新立即执行
+                    return _doLoadProfileActivity(true);
+                }
+                return new Promise(function(resolve) {
+                    loadProfileActivity._debounceTimer = setTimeout(function() {
+                        loadProfileActivity._debounceTimer = null;
+                        _doLoadProfileActivity(false).then(resolve);
+                    }, 500);
+                });
+            }
+            async function _doLoadProfileActivity(forceRefresh) {
                 if (!document.getElementById('panelProfile')) return;
                 if (!currentUser) {
                     profileActivityState.likes = [];
@@ -2006,7 +2031,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 try {
                     let media_url = "", media_type = "";
                     if (file) {
-                        const path = `${Date.now()}_${file.name}`;
+                        const path = buildStorageUploadPath('posts', file.name);
                         await sb.storage.from("uploads").upload(path, file);
                         media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
                         media_type = file.type.startsWith("image") ? "image" : "video";
@@ -2563,6 +2588,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let feedAllLikes = [];
             let feedScrollObserver = null;
             let feedLoadRequestId = 0;
+            let feedVisiblePostsCache = null; // 缓存过滤后的帖子
+            let feedMapsCache = null; // 缓存 buildPostMaps 结果
 
             // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?412鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
             async function loadFeed(forceRefresh = false) {
@@ -2597,7 +2624,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中..', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }).limit(500),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }).limit(500),
                         sb.from("comments").select("*").order("created_at").limit(2000),
                         sb.from("likes").select("*").limit(3000)
                     ]);
@@ -2653,7 +2680,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (feedEndReached) return;
                 
                 const feed = document.getElementById('feed');
-                const visiblePosts = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__ann__' && p.user_name);
+                if (!feedVisiblePostsCache) {
+                    feedVisiblePostsCache = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__ann__' && p.user_name);
+                }
+                const visiblePosts = feedVisiblePostsCache;
                 
                 const startIdx = feedPage * FEED_PAGE_SIZE;
                 const endIdx = startIdx + FEED_PAGE_SIZE;
@@ -2675,14 +2705,29 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 
                 const nextPosts = visiblePosts.slice(startIdx, endIdx);
-                appendMorePosts(nextPosts, feedAllComments, feedAllLikes);
+                if (!feedMapsCache) {
+                    feedMapsCache = buildPostMaps(feedAllComments, feedAllLikes);
+                }
+                appendMorePosts(nextPosts, feedMapsCache);
                 feedPage++;
             }
 
             // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?503鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
-            function appendMorePosts(posts, comments, likes) {
+            function appendMorePosts(posts, mapsOrComments, likes) {
                 const feed = document.getElementById('feed');
-                const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
+                var commentMap, likeMap, likeUserMap;
+                // 兼容旧调用：如果传了3个参数，说明是旧的 (posts, comments, likes) 格式
+                if (likes !== undefined) {
+                    var maps = buildPostMaps(mapsOrComments, likes);
+                    commentMap = maps.commentMap;
+                    likeMap = maps.likeMap;
+                    likeUserMap = maps.likeUserMap;
+                } else {
+                    // 新格式: (posts, mapsObj)
+                    commentMap = (mapsOrComments && mapsOrComments.commentMap) || {};
+                    likeMap = (mapsOrComments && mapsOrComments.likeMap) || {};
+                    likeUserMap = (mapsOrComments && mapsOrComments.likeUserMap) || {};
+                }
                 
                 const postsHtml = posts.map(p => {
                     const pLikes = likeMap[p.id] || [];
@@ -2740,6 +2785,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?532鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
             async function renderFeed({ posts, comments, likes }) {
                 const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__ann__' && p.user_name);
+                feedVisiblePostsCache = visiblePosts; // 缓存
+                feedMapsCache = buildPostMaps(comments, likes); // 缓存
                 document.getElementById("sPosts").textContent = visiblePosts.length;
                 document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
                 document.getElementById("sLikes").textContent = likes.length + comments.length;
@@ -2791,11 +2838,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             async function loadAvatarsForUsers(usernames) {
                 if (!usernames || usernames.length === 0) return;
+                // 过滤掉已在缓存中的用户
+                var uncached = usernames.filter(function(u) { return !avatarCache[u]; });
+                if (uncached.length === 0) return;
                 try {
                     var allData = [];
                     var batchSize = 80; // Supabase .in() 闁哄牃鍋撳鑸垫皑瀹?0涓」锛岋拷?0娴ｆ瑩锟?
-                    for (var i = 0; i < usernames.length; i += batchSize) {
-                        var batch = usernames.slice(i, i + batchSize);
+                    for (var i = 0; i < uncached.length; i += batchSize) {
+                        var batch = uncached.slice(i, i + batchSize);
                         var { data: batchData } = await sb.from("posts")
                             .select("user_name, media_url")
                             .eq("media_type", "__avatar__")
@@ -3343,7 +3393,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             window.openEditPost = function(postId) {
-                console.log('[openEditPost] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
                 var target = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
                 if (!target || !canEditPost(target)) {
                     showToast("无权编辑这条帖子");
@@ -3455,7 +3504,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
             window._legacyTogglePostPinBase = async function(postId, btn) {
-                console.log('[togglePostPin] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
                 if (!postId) { showToast("置顶失败: postId 为空"); return; }
                 var nextPinned;
                 var originalText;
@@ -3496,7 +3544,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
             window._legacyTogglePostPin = async function(postId, btn) {
-                console.log('[togglePostPin override] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
                 if (!postId) { showToast("置顶失败: postId 为空"); return; }
                 var nextPinned;
                 var originalText;
@@ -3668,7 +3715,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             window.togglePostPin = async function(postId, btn) {
-                console.log('[togglePostPin final override] called with postId:', postId, 'feedAllPosts length:', feedAllPosts.length);
                 if (!postId) {
                     showToast('置顶失败: postId 为空');
                     return;
@@ -3779,10 +3825,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 // Pin button: delegate only (no inline onclick)
                 var pinBtn = e.target.closest('.action-btn.pin');
                 if (pinBtn) {
-                    if (pinBtn.disabled) { console.log('[pin] btn disabled, skip'); return; }
+                    if (pinBtn.disabled) { return; }
                     var pid = pinBtn.getAttribute('data-post-id');
-                    if (!pid) { console.warn('[pin] no data-post-id'); return; }
-                    console.log('[pin] delegated click, postId:', pid);
+                    if (!pid) { return; }
                     window.togglePostPin(pid, pinBtn);
                     return;
                 }
@@ -3791,7 +3836,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (visBtn) {
                     var vis = visBtn.getAttribute('data-vis');
                     if (!vis) return;
-                    console.log('[vis-toggle] click, value:', vis);
                     document.getElementById('editPostVisibilityVal').value = vis;
                     var visWrap = document.getElementById('editPostVisibility');
                     if (visWrap) {
@@ -3831,7 +3875,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var media_url = "";
                     var media_type = "";
                     if (file) {
-                        var path = Date.now() + "_" + file.name;
+                        var path = buildStorageUploadPath('posts', file.name);
                         var uploadRes = await sb.storage.from("uploads").upload(path, file);
                         if (uploadRes.error) throw uploadRes.error;
                         media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
@@ -4785,7 +4829,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var raw = String(name || "file");
                 var extMatch = raw.match(/(\.[a-zA-Z0-9]{1,8})$/);
                 var ext = extMatch ? extMatch[1].toLowerCase() : "";
-                var base = ext ? raw.slice(0, -ext.length) : raw;
+                // 阻止危险扩展名
+                var dangerousExts = {'.exe':1,'.bat':1,'.cmd':1,'.com':1,'.msi':1,'.scr':1,'.pif':1,'.vbs':1,'.ps1':1,'.sh':1,'.php':1,'.jsp':1,'.asp':1,'.aspx':1,'.cgi':1,'.pl':1,'.py':1,'.rb':1};
+                if (dangerousExts[ext]) ext = ".blocked";
+                var base = ext ? raw.slice(0, -extMatch[0].length) : raw;
                 if (base.normalize) base = base.normalize("NFKD");
                 base = base.replace(/[^\w\-]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
                 if (!base) base = "media";
@@ -5565,6 +5612,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 // window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
 
                 await initUI(); initialLoad();
+                // 记录用户访问（用于统计）
+                if (currentUser) logUserVisitToApi(currentUser);
                 // 鎭㈠娑撳﹥保存閻ㄥ嫭鐖ｇ粵楣冿拷?
                 const savedTab = localStorage.getItem('xtj_current_tab');
                 if (savedTab && savedTab !== 'posts') {
@@ -5756,7 +5805,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         loadAvatarsForUsers(Array.from(publishers));
                     }
                 } catch(e) {
-                    console.error('加载失败:', e);
+                    // quietly fail
                 }
             }
 
