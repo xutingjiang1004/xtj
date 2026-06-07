@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -762,35 +762,35 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 try {
                     var regTime = null;
 
-                    // 浼樺厛浠?__auth__ 记录鑾峰彇娉ㄥ唽时间閿涘牊娓舵潈濞侊拷??
+                    // 优先从已有的 __user_info__ 记录读取 reg_time（已正确设置的注册时间最可靠）
                     try {
-                        var authRes = await sb.from("posts")
-                            .select("created_at")
+                        var existing = await sb.from("posts")
+                            .select("content, id")
                             .eq("user_name", name)
-                            .eq("media_type", AUTH_MARKER)
-                            .order("created_at", { ascending: true })
+                            .eq("media_type", "__user_info__")
+                            .order("created_at", { ascending: false })
                             .limit(1);
-                        if (authRes.data && authRes.data.length > 0 && authRes.data[0].created_at) {
-                            regTime = authRes.data[0].created_at;
+                        if (existing.data && existing.data.length > 0) {
+                            try { var parsed = JSON.parse(existing.data[0].content); if (parsed.reg_time) regTime = parsed.reg_time; } catch(e) {}
                         }
                     } catch(e) {}
 
-                    // 閸氬骸顦敍姘矤閻滅増锟?__user_info__ 涓锟?reg_time閿涘牏鏁imit(1)闁兼澘鐭傚鐚癮ybeSingle閿涘苯顔愰敊锟筋樋琛岋拷锟?
+                    // 如果 __user_info__ 没有 reg_time，从 __auth__ 记录获取（仅作为后备）
                     if (!regTime) {
                         try {
-                            var existing = await sb.from("posts")
-                                .select("content, id")
+                            var authRes = await sb.from("posts")
+                                .select("created_at")
                                 .eq("user_name", name)
-                                .eq("media_type", "__user_info__")
-                                .order("created_at", { ascending: false })
+                                .eq("media_type", AUTH_MARKER)
+                                .order("created_at", { ascending: true })
                                 .limit(1);
-                            if (existing.data && existing.data.length > 0) {
-                                try { var parsed = JSON.parse(existing.data[0].content); if (parsed.reg_time) regTime = parsed.reg_time; } catch(e) {}
+                            if (authRes.data && authRes.data.length > 0 && authRes.data[0].created_at) {
+                                regTime = authRes.data[0].created_at;
                             }
                         } catch(e) {}
                     }
 
-                    // 閺堫澁鎷烽崥搴℃倵婢跺浄绱伴弬鎵暏閹撮鏁ら敓鏂ゆ嫹鍓嶆椂閿熸枻锟?
+                    // 仍然没有且是新用户，使用当前时间
                     if (!regTime && isNewUser) {
                         regTime = new Date().toISOString();
                     }
