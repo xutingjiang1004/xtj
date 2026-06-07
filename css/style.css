@@ -11486,3 +11486,374 @@ body.ios-chat-keyboard-open .chat-input-area {
   border-color: rgba(101, 182, 135, 0.22) !important;
   color: #cfeedd !important;
 }
+
+/* Flat refresh: profile + report */
+.dock-profile-container .profile-user-card {
+  padding: 14px 0 16px !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(179, 214, 191, 0.56) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.dock-profile-container .profile-user-card:hover,
+.dock-profile-container .profile-user-card:active {
+  transform: none !important;
+  background: rgba(234, 246, 238, 0.42) !important;
+  box-shadow: none !important;
+}
+
+.dock-profile-container .profile-avatar {
+  box-shadow: 0 6px 18px rgba(39, 93, 62, 0.12) !important;
+}
+
+.dock-profile-container .profile-chevron {
+  opacity: 0.38 !important;
+}
+
+.dock-profile-container .profile-settings {
+  gap: 0 !important;
+  margin-top: 6px !important;
+}
+
+.dock-profile-container .profile-setting-item {
+  min-height: 58px !important;
+  padding: 15px 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(179, 214, 191, 0.56) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.dock-profile-container .profile-setting-item:last-child {
+  border-bottom: 1px solid rgba(179, 214, 191, 0.56) !important;
+}
+
+.dock-profile-container .profile-setting-item:hover {
+  transform: none !important;
+  background: rgba(234, 246, 238, 0.42) !important;
+  border-color: rgba(179, 214, 191, 0.56) !important;
+  box-shadow: none !important;
+}
+
+.dock-profile-container .profile-setting-label {
+  gap: 10px !important;
+}
+
+.dock-profile-container .profile-setting-icon {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 10px !important;
+  background: rgba(226, 244, 233, 0.8) !important;
+  border: 1px solid rgba(190, 223, 202, 0.72) !important;
+  box-shadow: none !important;
+}
+
+.dock-profile-container .profile-setting-value {
+  color: rgba(44, 84, 61, 0.72) !important;
+}
+
+#profileActivityModal .glass.profile-activity-modal,
+#profileActivityModal .profile-activity-modal {
+  background: rgba(249, 253, 250, 0.985) !important;
+  border: 1px solid rgba(206, 230, 214, 0.9) !important;
+  border-radius: 28px !important;
+  box-shadow: 0 24px 56px rgba(27, 72, 47, 0.16) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#profileActivityModal .profile-activity-modal-head {
+  padding-bottom: 14px !important;
+  margin-bottom: 10px !important;
+  border-bottom: 1px solid rgba(195, 224, 205, 0.66) !important;
+}
+
+#profileActivityModal .profile-activity-modal-head h3 {
+  color: #214633 !important;
+}
+
+#profileActivityModal .profile-activity-modal-list {
+  padding-right: 2px !important;
+  background: transparent !important;
+}
+
+#profileActivityModal .profile-activity-item {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(198, 225, 208, 0.68) !important;
+  box-shadow: none !important;
+}
+
+#profileActivityModal .profile-activity-item:hover {
+  background: rgba(238, 248, 242, 0.54) !important;
+}
+
+#profileActivityModal .profile-activity-item:last-child {
+  border-bottom: 0 !important;
+}
+
+.report-modal-overlay,
+.report-history-overlay {
+  background: rgba(14, 25, 18, 0.18) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.report-modal,
+.report-history-modal {
+  width: min(660px, calc(100vw - 28px)) !important;
+  border-radius: 26px !important;
+  background: #f8fcf9 !important;
+  border: 1px solid rgba(207, 229, 214, 0.92) !important;
+  box-shadow: 0 24px 56px rgba(27, 72, 47, 0.14) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.report-modal-header {
+  align-items: center !important;
+  padding: 20px 22px 16px !important;
+  border-bottom: 1px solid rgba(196, 224, 205, 0.68) !important;
+  background: transparent !important;
+}
+
+.report-modal-header-left {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.report-modal-header-left > span {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  color: #214633 !important;
+  font-size: 24px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.report-records-btn {
+  min-width: 0 !important;
+  height: 34px !important;
+  padding: 0 12px !important;
+  border-radius: 999px !important;
+  border: 1px solid rgba(191, 221, 201, 0.94) !important;
+  background: rgba(232, 247, 238, 0.92) !important;
+  box-shadow: none !important;
+  color: #1b6f4a !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.01em !important;
+}
+
+.report-records-btn:hover,
+.report-records-btn:focus-visible {
+  background: rgba(223, 244, 231, 0.98) !important;
+  border-color: rgba(103, 184, 135, 0.54) !important;
+  box-shadow: 0 10px 22px rgba(33, 83, 55, 0.08) !important;
+  transform: translateY(-1px) !important;
+}
+
+.report-records-btn:active {
+  transform: translateY(0) scale(0.98) !important;
+}
+
+.report-modal-close {
+  background: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.report-modal-tabs {
+  padding: 14px 22px 0 !important;
+}
+
+.report-modal-content {
+  padding: 10px 22px 22px !important;
+}
+
+.report-modal-body {
+  gap: 10px !important;
+}
+
+#reportModalFormBody > .report-field + .report-field {
+  padding-top: 12px !important;
+  border-top: 1px solid rgba(196, 224, 205, 0.68) !important;
+}
+
+.report-field label {
+  margin-bottom: 8px !important;
+  color: #456b56 !important;
+}
+
+.report-type-tabs {
+  padding: 2px !important;
+  border-radius: 14px !important;
+  border: 1px solid rgba(196, 224, 205, 0.74) !important;
+  background: rgba(234, 247, 239, 0.9) !important;
+}
+
+.report-type-tab {
+  min-height: 38px !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+}
+
+.report-content-select,
+.report-selected-preview,
+.report-reason-input {
+  border-radius: 16px !important;
+  border: 1px solid rgba(199, 225, 208, 0.84) !important;
+  background: rgba(255, 255, 255, 0.82) !important;
+  box-shadow: none !important;
+}
+
+.report-content-select {
+  max-height: min(27vh, 212px) !important;
+}
+
+.report-content-item {
+  padding: 13px 14px !important;
+}
+
+.report-content-item:hover {
+  background: rgba(241, 249, 244, 0.92) !important;
+}
+
+.report-content-item.selected {
+  background: rgba(222, 244, 230, 0.88) !important;
+  box-shadow: inset 2px 0 0 rgba(21, 145, 92, 0.84) !important;
+}
+
+.report-reason-grid {
+  gap: 7px !important;
+}
+
+.report-reason-btn {
+  min-height: 40px !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+}
+
+.report-reason-btn:hover {
+  background: rgba(240, 249, 243, 0.95) !important;
+  transform: translateY(-1px) !important;
+}
+
+.report-reason-btn.selected {
+  box-shadow: inset 0 0 0 1px rgba(17, 145, 89, 0.18), 0 10px 20px rgba(31, 97, 62, 0.08) !important;
+}
+
+.report-submit-btn {
+  min-height: 46px !important;
+  border-radius: 14px !important;
+  box-shadow: 0 14px 28px rgba(28, 98, 63, 0.12) !important;
+}
+
+.report-submit-btn:hover {
+  transform: translateY(-1px) !important;
+}
+
+.report-record-item {
+  padding: 16px 0 18px !important;
+  border-bottom: 1px solid rgba(196, 224, 205, 0.68) !important;
+}
+
+.report-record-item:last-child {
+  border-bottom: 0 !important;
+}
+
+.report-record-reply {
+  margin-top: 10px !important;
+  padding: 12px 14px !important;
+  border-radius: 14px !important;
+  background: rgba(231, 246, 237, 0.84) !important;
+  border: 1px solid rgba(190, 223, 201, 0.78) !important;
+}
+
+[data-theme="dark"] .dock-profile-container .profile-user-card,
+[data-theme="dark"] .dock-profile-container .profile-setting-item {
+  background: transparent !important;
+  border-color: rgba(86, 126, 103, 0.38) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+[data-theme="dark"] .dock-profile-container .profile-user-card:hover,
+[data-theme="dark"] .dock-profile-container .profile-setting-item:hover {
+  background: rgba(35, 56, 44, 0.42) !important;
+}
+
+[data-theme="dark"] .dock-profile-container .profile-setting-icon {
+  background: rgba(31, 57, 43, 0.78) !important;
+  border-color: rgba(86, 126, 103, 0.4) !important;
+  color: #9bdcb6 !important;
+}
+
+[data-theme="dark"] #profileActivityModal .glass.profile-activity-modal,
+[data-theme="dark"] #profileActivityModal .profile-activity-modal {
+  background: rgba(22, 31, 26, 0.985) !important;
+  border-color: rgba(73, 104, 85, 0.54) !important;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.34) !important;
+}
+
+[data-theme="dark"] #profileActivityModal .profile-activity-modal-head {
+  border-bottom-color: rgba(73, 104, 85, 0.48) !important;
+}
+
+[data-theme="dark"] #profileActivityModal .profile-activity-item {
+  border-bottom-color: rgba(73, 104, 85, 0.42) !important;
+}
+
+[data-theme="dark"] #profileActivityModal .profile-activity-item:hover {
+  background: rgba(34, 50, 41, 0.56) !important;
+}
+
+[data-theme="dark"] .report-modal,
+[data-theme="dark"] .report-history-modal {
+  background: #18211c !important;
+  border-color: rgba(72, 104, 84, 0.56) !important;
+  box-shadow: 0 24px 56px rgba(0, 0, 0, 0.34) !important;
+}
+
+[data-theme="dark"] .report-modal-header,
+[data-theme="dark"] #reportModalFormBody > .report-field + .report-field,
+[data-theme="dark"] .report-record-item {
+  border-color: rgba(72, 104, 84, 0.48) !important;
+}
+
+[data-theme="dark"] .report-records-btn {
+  background: rgba(31, 57, 43, 0.92) !important;
+  border-color: rgba(86, 126, 103, 0.48) !important;
+  color: #9bdcb6 !important;
+}
+
+[data-theme="dark"] .report-records-btn:hover,
+[data-theme="dark"] .report-records-btn:focus-visible {
+  background: rgba(38, 66, 50, 0.96) !important;
+}
+
+[data-theme="dark"] .report-modal-close,
+[data-theme="dark"] .report-content-select,
+[data-theme="dark"] .report-selected-preview,
+[data-theme="dark"] .report-reason-input {
+  background: rgba(24, 37, 30, 0.94) !important;
+  border-color: rgba(72, 104, 84, 0.56) !important;
+}
+
+[data-theme="dark"] .report-type-tabs {
+  background: rgba(28, 42, 34, 0.94) !important;
+  border-color: rgba(72, 104, 84, 0.56) !important;
+}
+
+[data-theme="dark"] .report-type-tab.active,
+[data-theme="dark"] .report-content-item.selected,
+[data-theme="dark"] .report-record-reply {
+  background: rgba(31, 57, 43, 0.92) !important;
+  border-color: rgba(86, 126, 103, 0.48) !important;
+}

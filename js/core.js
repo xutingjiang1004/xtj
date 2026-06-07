@@ -1645,7 +1645,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                     var triggerBtn = document.getElementById('reportRecordsToggleBtn');
                     if (triggerBtn) {
-                        triggerBtn.innerHTML = '📋 举报记录';
+                        triggerBtn.innerHTML = '📋 记录';
                         triggerBtn.setAttribute('aria-label', '打开举报记录');
                     }
                     list.innerHTML = records.map(function(r) {
@@ -6881,7 +6881,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             ensureReportHistoryModal();
             var triggerBtn = document.getElementById('reportRecordsToggleBtn');
             if (triggerBtn) {
-                triggerBtn.innerHTML = '📋 举报记录';
+                triggerBtn.innerHTML = '📋 记录';
                 triggerBtn.setAttribute('aria-label', '打开举报记录');
             }
             _reportType = 'post';
