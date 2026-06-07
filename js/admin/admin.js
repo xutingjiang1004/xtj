@@ -2132,7 +2132,7 @@
                 h += '<div class="card"><h3>每日数据明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + daily.length + ' 天</span></h3>';
                 h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>访问</th><th>攻击</th><th>帖子</th><th>评论</th><th>点赞</th><th>新用户</th></tr></thead><tbody>';
                 var reversed = daily.slice().reverse();
-                reversed.forEach(function(d) {
+                reversed.forEach(function(d, idx) {
                     // 跳过全0行（访问/攻击/帖子/评论/点赞/新用户全为0）
                     var total = (d.visits || 0) + (d.attacks || 0) + (d.posts || 0) + (d.comments || 0) + (d.likes || 0) + (d.new_users || 0);
                     if (total === 0) return;
@@ -2145,6 +2145,8 @@
                     h += '<td' + (d.likes ? '' : ' class="zero-val"') + '>' + (d.likes || '') + '</td>';
                     h += '<td' + (d.new_users ? '' : ' class="zero-val"') + '>' + (d.new_users || '') + '</td>';
                     h += '</tr>';
+                    // 每行数据之间加分隔横线
+                    h += '<tr class="divider-row"><td colspan="7"></td></tr>';
                 });
                 h += '</tbody></table></div></div>';
             }
