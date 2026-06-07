@@ -219,7 +219,32 @@
     td { color: var(--text); }
     tr:hover td { background: rgba(5,150,105,0.03); }
     .table-wrap { max-height: 400px; overflow-y: auto; border-radius: var(--radius); }
+    .table-wrap table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: var(--card-bg);
+        backdrop-filter: blur(12px);
+    }
     .zero-val { color: transparent !important; }
+
+    /* 每日数据明细分隔横线 */
+    .divider-row td {
+        padding: 0 !important;
+        border-bottom: none !important;
+        height: 1px;
+        line-height: 1px;
+        background: transparent;
+        position: relative;
+    }
+    .divider-row td::after {
+        content: '';
+        display: block;
+        height: 1px;
+        background: var(--border);
+        margin: 0 12px;
+    }
+    .divider-row:hover td { background: transparent !important; }
 
     .btn-sm {
         padding: 4px 12px; border-radius: 12px; border: 1px solid var(--border);
