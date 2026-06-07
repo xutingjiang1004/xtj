@@ -827,7 +827,7 @@ app.get('/api/my-reports', rateLimit(60000, 20), function(req, res, next) {
 // ===================== 鐢ㄦ埛鏁版嵁锛堝彧璇伙級 =====================
 app.get('/admin/users', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('posts')
-    .select('user_name, created_at')
+    .select('user_name, content, created_at')
     .eq('media_type', '__user_info__')
     .order('created_at', { ascending: false })
     .limit(5000);
@@ -839,16 +839,39 @@ app.get('/admin/users', verifyToken, async (req, res) => {
 // 汇总统计
 app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    // 使用缓存减少数据库查询
-    if (statsCache.data && (Date.now() - statsCache.ts) < STATS_CACHE_TTL) {
+    const startDate = req.query.start || '';
+    const endDate = req.query.end || '';
+
+    // 有日期筛选时不使用缓存
+    if (!startDate && !endDate && statsCache.data && (Date.now() - statsCache.ts) < STATS_CACHE_TTL) {
       return res.json(statsCache.data);
     }
 
+    // 构建带日期筛选的查询
+    function buildSummaryQuery(table, selectFields, eqField, eqValue, dateField) {
+      var q = supabase.from(table).select(selectFields);
+      if (eqField) q = q.eq(eqField, eqValue);
+      if (dateField === 'media_url') {
+        if (startDate) q = q.gte('media_url', startDate);
+        if (endDate) q = q.lte('media_url', endDate);
+      } else if (startDate || endDate) {
+        if (startDate) q = q.gte('created_at', startDate + 'T00:00:00.000Z');
+        if (endDate) q = q.lte('created_at', endDate + 'T23:59:59.999Z');
+      }
+      q = q.order('created_at', { ascending: false });
+      if (!startDate && !endDate) q = q.limit(100000);
+      return q;
+    }
+
     const [postsRes, usersRes, visitsRes, attacksRes, likesRes, commentsRes, photosRes] = await Promise.all([
-      supabase.from('posts').select('id, media_type, content, created_at').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).order('created_at', { ascending: false }).limit(10000),
-      supabase.from('posts').select('id').eq('media_type', AUTH_MARKER),
-      supabase.from('posts').select('id, content, media_url, created_at').eq('media_type', VISIT_MARKER).order('created_at', { ascending: false }).limit(10000),
-      supabase.from('posts').select('id, content, media_url, created_at').eq('media_type', ATTACK_MARKER).order('created_at', { ascending: false }).limit(10000),
+      buildSummaryQuery('posts', 'id, media_type, content, created_at', null, null, 'created_at')
+        .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
+        .neq('media_type', '__photo_wall__').neq('media_type', '__ann__')
+        .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
+        .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER),
+      buildSummaryQuery('posts', 'id', 'media_type', AUTH_MARKER, 'created_at'),
+      buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
+      buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
       supabase.from('likes').select('id'),
       supabase.from('comments').select('id'),
       supabase.from('posts').select('id').eq('media_type', '__photo_wall__'),
@@ -878,8 +901,8 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
     // 按日期聚合攻击数据
     const dailyAttacks = {};
     attacks.forEach(a => {
-      var d = a.media_url || '';
-      if (!d) { try { var c = JSON.parse(a.content || '{}'); d = c.date || ''; } catch(e) {} }
+      var d = '';
+      try { var c = JSON.parse(a.content || '{}'); d = c.date || a.media_url || ''; } catch(e) { d = a.media_url || ''; }
       if (d) dailyAttacks[d] = (dailyAttacks[d] || 0) + 1;
     });
 
@@ -890,6 +913,9 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
       attackTypes[t] = (attackTypes[t] || 0) + 1;
     });
 
+    // API防火墙拦截 = CORS + CSRF（RATE_LIMIT是速率限制，不计入拦截）
+    var firewallIntercepts = (attackTypes['CORS'] || 0) + (attackTypes['CSRF'] || 0);
+
     const result = {
       total_users: users.length,
       total_posts: posts.length,
@@ -898,13 +924,16 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
       total_photos: photos.length,
       total_visits: visits.length,
       total_attacks: attacks.length,
+      firewall_intercepts: firewallIntercepts,
       daily_visits: dailyVisits,
       daily_attacks: dailyAttacks,
       attack_types: attackTypes,
       cached_at: new Date().toISOString()
     };
 
-    statsCache = { data: result, ts: Date.now() };
+    if (!startDate && !endDate) {
+      statsCache = { data: result, ts: Date.now() };
+    }
     return res.json(result);
   } catch (e) {
     console.error('[API] 统计加载失败:', e.message);
@@ -918,13 +947,35 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
     const startDate = req.query.start || '';
     const endDate = req.query.end || '';
 
+    // 构建带日期筛选的查询（数据库级别筛选，避免limit截断旧数据）
+    function buildQuery(table, selectFields, eqField, eqValue, dateField) {
+      var q = supabase.from(table).select(selectFields);
+      if (eqField) q = q.eq(eqField, eqValue);
+      // visits/attacks 的日期在 media_url 字段，其他用 created_at
+      if (dateField === 'media_url') {
+        if (startDate) q = q.gte('media_url', startDate);
+        if (endDate) q = q.lte('media_url', endDate);
+      } else {
+        if (startDate) q = q.gte('created_at', startDate + 'T00:00:00.000Z');
+        if (endDate) q = q.lte('created_at', endDate + 'T23:59:59.999Z');
+      }
+      q = q.order('created_at', { ascending: false });
+      // 无日期筛选时保留较大limit，有日期筛选时数据库层面已过滤无需limit
+      if (!startDate && !endDate) q = q.limit(100000);
+      return q;
+    }
+
     const [visitsRes, attacksRes, postsRes, commentsRes, likesRes, usersRes] = await Promise.all([
-      supabase.from('posts').select('id, content, media_url, created_at').eq('media_type', VISIT_MARKER).order('created_at', { ascending: false }).limit(10000),
-      supabase.from('posts').select('id, content, media_url, created_at').eq('media_type', ATTACK_MARKER).order('created_at', { ascending: false }).limit(10000),
-      supabase.from('posts').select('id, created_at').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').order('created_at', { ascending: false }).limit(10000),
-      supabase.from('comments').select('id, created_at').order('created_at', { ascending: false }).limit(10000),
-      supabase.from('likes').select('id, created_at').order('created_at', { ascending: false }).limit(10000),
-      supabase.from('posts').select('id, created_at').eq('media_type', AUTH_MARKER).order('created_at', { ascending: false }).limit(10000),
+      buildQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
+      buildQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
+      buildQuery('posts', 'id, created_at', null, null, 'created_at')
+        .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
+        .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
+        .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER)
+        .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__'),
+      buildQuery('comments', 'id, created_at', null, null, 'created_at'),
+      buildQuery('likes', 'id, created_at', null, null, 'created_at'),
+      buildQuery('posts', 'id, created_at', 'media_type', AUTH_MARKER, 'created_at'),
     ]);
 
     // 辅助函数：按天聚合
