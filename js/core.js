@@ -1518,12 +1518,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var listEl = document.getElementById(isLikes ? 'profileLikesList' : 'profileCommentsList');
                 var countEl = document.getElementById(isLikes ? 'profileLikesCount' : 'profileCommentsCount');
                 var moreBtn = document.getElementById(isLikes ? 'profileLikesMoreBtn' : 'profileCommentsMoreBtn');
+                var cardEl = document.getElementById(isLikes ? 'profileLikesCard' : 'profileCommentsCard');
                 if (!listEl || !countEl || !moreBtn) return;
-                var payload = buildProfileActivityListMarkup(kind, 1);
+                var payload = buildProfileActivityListMarkup(kind, 0);
                 countEl.textContent = String(payload.totalCount || 0);
-                listEl.innerHTML = payload.html;
-                moreBtn.style.display = payload.hasMore ? 'block' : 'none';
-                moreBtn.textContent = isLikes ? '更多点赞内容' : '更多评论内容';
+                listEl.innerHTML = '';
+                listEl.style.display = 'none';
+                moreBtn.style.display = 'none';
+                if (cardEl) {
+                    cardEl.classList.toggle('is-empty', !payload.totalCount);
+                    cardEl.setAttribute('aria-label', (isLikes ? '点赞记录' : '评论记录') + '，共 ' + String(payload.totalCount || 0) + ' 条');
+                }
             }
 
             function renderProfileActivityModal(kind) {
@@ -1554,18 +1559,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 renderProfileActivityList('comments');
                 refreshProfileActivityModalIfNeeded();
             }
-
-            window.toggleReportReply = function(id, btn) {
-                var el = document.getElementById(id);
-                if (!el) return;
-                if (el.style.display === 'none') {
-                    el.style.display = 'block';
-                    if (btn) btn.textContent = '收起回复';
-                } else {
-                    el.style.display = 'none';
-                    if (btn) btn.textContent = '查看回复';
-                }
-            };
 
             function ensureReportHistoryModal() {
                 if (document.getElementById('reportHistoryModal')) return;
@@ -1650,18 +1643,23 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         list.innerHTML = '<div class="report-records-empty">你还没有举报记录。</div>';
                         return;
                     }
+                    var triggerBtn = document.getElementById('reportRecordsToggleBtn');
+                    if (triggerBtn) {
+                        triggerBtn.innerHTML = '📋 举报记录';
+                        triggerBtn.setAttribute('aria-label', '打开举报记录');
+                    }
                     list.innerHTML = records.map(function(r) {
                         var targetTypeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
                         var statusText = r.status === 'pending' ? '待处理' : (r.status === 'actioned' ? '已处理' : (r.status === 'reviewed' ? '已审阅' : String(r.status || '处理中')));
                         var statusClass = r.status === 'actioned' ? ' report-record-status--actioned' : (r.status === 'reviewed' ? ' report-record-status--reviewed' : '');
                         var reasonText = escapeHtml(String(r.report_reason || '未填写举报原因'));
                         var hasReply = !!r.admin_response;
-                        var replyId = 'reportReply_' + r.id;
                         var footerNotes = [];
                         footerNotes.push('<span class="report-record-note">举报对象：' + (r.target_user ? escapeHtml(r.target_user) : '未知发布者') + '</span>');
                         if (r.reviewed_at) footerNotes.push('<span class="report-record-note">处理时间：' + escapeHtml(formatReportTime(r.reviewed_at)) + '</span>');
-                        var replyBtnHtml = hasReply ? '<button class="report-reply-toggle" type="button" onclick="toggleReportReply(\'' + replyId + '\',this)">查看回复</button>' : '';
-                        var replyContentHtml = hasReply ? '<div id="' + replyId + '" class="profile-activity-report-reply" style="display:none;"><div class="profile-activity-admin-reply-inner"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div></div>' : '';
+                        var replyContentHtml = hasReply
+                            ? '<div class="report-record-reply"><div class="report-record-reply-label">管理员回复</div><div class="report-record-reply-body">' + escapeHtml(r.admin_response) + '</div></div>'
+                            : '';
                         return [
                             '<article class="report-record-item">',
                             '<div class="report-record-head">',
@@ -1676,7 +1674,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             '<div class="report-record-reason">' + reasonText + '</div>',
                             '<div class="report-record-footer">' + footerNotes.join('') + '</div>',
                             '</div>',
-                            '<div class="report-record-side">' + replyBtnHtml + '</div>',
                             replyContentHtml,
                             '</article>'
                         ].join('');
@@ -6882,6 +6879,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             var overlay = document.getElementById('reportModal');
             if (!overlay) return;
             ensureReportHistoryModal();
+            var triggerBtn = document.getElementById('reportRecordsToggleBtn');
+            if (triggerBtn) {
+                triggerBtn.innerHTML = '📋 举报记录';
+                triggerBtn.setAttribute('aria-label', '打开举报记录');
+            }
             _reportType = 'post';
             _reportView = 'form';
             _reportSelectedId = null;
