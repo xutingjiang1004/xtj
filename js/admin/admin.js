@@ -1,10 +1,7 @@
 (function() {
-    var SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
-    var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
-    var ADMIN = "xxz";
-    // 管理员密码不再硬编码 — 由后端 API 的 ADMIN_PASSWORD 环境变量控制
-    // API 地址：部署后设为实际地址，本地开发留空则回退到直接 Supabase 调用
-    var API_BASE = "";
+    // ===================== 安全配置（从 window.XTJ_CONFIG 读取） =====================
+    // 重要：禁止在本文件中硬编码 API_BASE
+    // API_BASE 由 js/config.js 注入，或由 Render 部署环境动态设置
     var AUTH_MARKER = "__auth__";
     var ADMIN_AUTH_MARKER = "__admin_auth__";
     var DM_MARKER = "__dm__";
@@ -14,18 +11,31 @@
     var TOKEN_KEY = "xtj_admin_token";
     var TAB_KEY = "xtj_admin_tab";
 
-    // 初始化 Supabase 客户端（直连模式使用）
-    var sb = null;
-    if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
-        try {
-            sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        } catch(e) {
-            console.warn('[admin] Supabase client init failed:', e.message);
-        }
+    // ===================== API_BASE 安全检测 =====================
+    // 取全局配置，若未配置则拒绝进入管理后台
+    var API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || "";
+    if (!API_BASE) {
+        console.error('[admin] 后台 API 未配置（window.XTJ_CONFIG.API_BASE 为空），已拒绝进入管理后台');
+        // 页面加载后显示错误
+        document.addEventListener('DOMContentLoaded', function() {
+            var container = document.getElementById('loginContainer') || document.body;
+            if (container) {
+                container.innerHTML = '<div style="padding:40px;text-align:center;font-size:18px;color:#e74c3c;">'
+                    + '<h2>安全拒绝</h2>'
+                    + '<p>后台 API 未配置，已拒绝进入管理后台。</p>'
+                    + '<p style="font-size:14px;color:#888;">请联系管理员配置 <code>window.XTJ_CONFIG.API_BASE</code></p>'
+                    + '</div>';
+            }
+        });
     }
-    window.sb = sb;
-    // 简单的 token 混淆（非加密，仅防止直接读取 localStorage）
 
+    // 禁止创建 Supabase 直连客户端 — 所有管理操作必须通过 API_BASE
+    // 移除 window.sb 避免其他代码意外使用
+    if (window.sb) {
+        delete window.sb;
+    }
+
+    // ===================== Token 管理（前后端共享，仅用于 API 鉴权） =====================
     var TOKEN_SALT = 'xtj_7k3m';
 
     function _obfuscateToken(raw) {
@@ -49,7 +59,9 @@
         } catch(e) { return ''; }
     }
 
-    // ===================== PBKDF2 密码哈希 =====================
+    // ===================== 密码哈希（前端不再验证密码，仅保留供其他场景使用） =====================
+    // 注意：管理员密码验证只发生在后端 /admin/login
+    // 以下函数保留但不用于管理员登录验证
     async function adminPbkdf2Hash(password, salt) {
         var enc = new TextEncoder();
         var keyMaterial = await crypto.subtle.importKey(
@@ -66,20 +78,6 @@
         var salt = Array.from(saltBytes).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
         var hash = await adminPbkdf2Hash(password, salt);
         return salt + ':' + hash;
-    }
-    async function adminVerifyPassword(inputPw, stored) {
-        if (!inputPw || !stored) return false;
-        // PBKDF2 格式：salt:hash
-        if (stored.indexOf(':') !== -1) {
-            var parts = stored.split(':');
-            var inputHash = await adminPbkdf2Hash(inputPw, parts[0]);
-            return inputHash === parts[1];
-        }
-        // 回退旧版 SHA-256
-        var enc = new TextEncoder();
-        var buf = await crypto.subtle.digest('SHA-256', enc.encode(inputPw));
-        var oldHash = Array.from(new Uint8Array(buf)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-        return oldHash === stored;
     }
 
     // ===================== Session 超时管理（30分钟无操作自动登出） =====================
@@ -265,8 +263,8 @@
         return !!getToken();
     }
 
+    // 安全说明：不再创建 Supabase 客户端，所有管理操作通过 API_BASE 执行
     async function initAdminClient() {
-        sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
         document.getElementById('loginWrap').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         saveSession();
@@ -309,80 +307,37 @@
         var err = document.getElementById('loginErr');
         var btn = document.querySelector('#loginWrap button');
         
-        if (name !== ADMIN) { err.textContent = '账号不正确'; return; }
+        if (!API_BASE) {
+            err.textContent = '后台 API 未配置，拒绝登录';
+            return;
+        }
+        if (!name) { err.textContent = '请输入管理员账号'; return; }
         if (!pw) { err.textContent = '请输入密码'; return; }
         
         err.textContent = '';
         
-        if (API_BASE) {
-            // 通过 API 认证
-            btn.disabled = true;
-            btn.textContent = '验证中...';
-            try {
-                var res = await fetch(API_BASE + '/admin/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: name, password: pw })
-                });
-                var data = await res.json();
-                if (!res.ok) {
-                    err.textContent = data.error || '登录失败';
-                    btn.disabled = false;
-                    btn.textContent = '登录';
-                    return;
-                }
-                setToken(data.token);
-                await initAdminClient();
-            } catch(e) {
-                err.textContent = 'API 连接失败: ' + e.message;
-                btn.disabled = false;
-                btn.textContent = '登录';
-            }
-        } else {
-            // 回退：API 未配置时使用 Supabase admin_auth 记录校验（PBKDF2，隔离存储）
-            btn.disabled = true;
-            btn.textContent = '验证中...';
-            var tempSb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            var storedPw = null;
-            try {
-                var { data: pwData } = await tempSb
-                    .from('posts')
-                    .select('media_url')
-                    .eq('user_name', ADMIN)
-                    .eq('media_type', ADMIN_AUTH_MARKER)
-                    .maybeSingle();
-                if (pwData && pwData.media_url) {
-                    storedPw = pwData.media_url;
-                }
-            } catch(e) {}
-            
-            if (!storedPw) {
-                // 自动创建管理员账号（PBKDF2 哈希）
-                try {
-                    var pwHash = await adminHashPassword(pw);
-                    await tempSb.from('posts').insert({
-                        user_name: ADMIN,
-                        media_url: pwHash,
-                        media_type: ADMIN_AUTH_MARKER,
-                        actor_key: ADMIN_AUTH_MARKER,
-                        created_at: new Date().toISOString()
-                    });
-                    storedPw = pwHash;
-                } catch(regErr) {
-                    err.textContent = '初始化管理员账号失败: ' + (regErr.message || '未知错误');
-                    btn.disabled = false;
-                    btn.textContent = '登录';
-                    return;
-                }
-            }
-            var pwOk = await adminVerifyPassword(pw, storedPw);
-            if (!pwOk) {
-                err.textContent = '密码错误';
+        // 仅通过 API 认证 — 禁止直连 Supabase
+        btn.disabled = true;
+        btn.textContent = '验证中...';
+        try {
+            var res = await fetch(API_BASE + '/admin/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: name, password: pw })
+            });
+            var data = await res.json();
+            if (!res.ok) {
+                err.textContent = data.error || '登录失败';
                 btn.disabled = false;
                 btn.textContent = '登录';
                 return;
             }
+            setToken(data.token);
             await initAdminClient();
+        } catch(e) {
+            err.textContent = 'API 连接失败，请检查网络';
+            btn.disabled = false;
+            btn.textContent = '登录';
         }
     };
 
@@ -393,7 +348,6 @@
                 headers: { 'Authorization': 'Bearer ' + getToken() }
             }).catch(function() {});
         }
-        sb = null;
         allPosts = []; allLikes = []; allComments = []; allUsers = [];
         annList = [];
         clearSession();
@@ -405,47 +359,34 @@
 
     async function loadAllData(keepTab) {
         try {
-            if (API_BASE && getToken()) {
-                // 通过 API 加载数据
-                var apiData = await apiCall('GET', '/admin/data');
-                var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
-                annList = postData.filter(function(p) { return p.media_type === ANN_MARKER; });
-                allLikes = apiData.likes || [];
-                allComments = apiData.comments || [];
-                reportsData = apiData.reports || [];
-                updateReportBadge();
-                bansData = apiData.bans || [];
-                mutesData = apiData.mutes || [];
-                blacklistData = apiData.blacklist || [];
-            } else {
-                // 直接 Supabase 查询
-                var postRes = await sb.from('posts').select('*').neq('media_type', '__avatar__').order('created_at', {ascending: false}).limit(5000);
-                var likeRes = await sb.from('likes').select('*').order('created_at', {ascending: false}).limit(5000);
-                var commRes = await sb.from('comments').select('*').order('created_at', {ascending: false}).limit(5000);
-
-                allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
-                annList = (postRes.data || []).filter(function(p) { return p.media_type === ANN_MARKER; });
-                allLikes = likeRes.data || [];
-                allComments = commRes.data || [];
-                await loadReportsData();
-                await loadBansData();
-                await loadMutesData();
-                await loadBlacklistData();
+            if (!API_BASE || !getToken()) {
+                throw new Error('API 未配置或未登录，拒绝加载数据');
             }
+            // 通过 API 加载数据（安全：仅服务端密钥可访问敏感数据）
+            var apiData = await apiCall('GET', '/admin/data');
+            var postData = apiData.posts || [];
+            allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
+            annList = postData.filter(function(p) { return p.media_type === ANN_MARKER; });
+            allLikes = apiData.likes || [];
+            allComments = apiData.comments || [];
+            reportsData = apiData.reports || [];
+            updateReportBadge();
+            bansData = apiData.bans || [];
+            mutesData = apiData.mutes || [];
+            blacklistData = apiData.blacklist || [];
 
             var userMap = {};
             allPosts.forEach(function(p) { userMap[p.user_name] = true; });
             allLikes.forEach(function(l) { userMap[l.user_name] = true; });
             allComments.forEach(function(c) { userMap[c.user_name] = true; });
             
-            // 加载用户信息
+            // 加载用户信息（仅通过 API）
             var userInfoList = [];
-            if (API_BASE && getToken()) {
-                try { var userRes = await apiCall('GET', '/admin/users'); userInfoList = userRes.data || []; } catch(e) {}
-            }
-            if (!userInfoList.length) {
-                userInfoList = (sb ? (await sb.from('posts').select('user_name, content, created_at').eq('media_type', '__user_info__').order('created_at', {ascending: false}).limit(5000)).data : []) || [];
+            try { 
+                var userRes = await apiCall('GET', '/admin/users'); 
+                userInfoList = userRes.data || []; 
+            } catch(e) {
+                console.warn('[admin] 加载用户信息失败:', e.message);
             }
             
             var userInfoMap = {};
@@ -466,12 +407,7 @@
                 };
             });
 
-            if (!API_BASE || !getToken()) {
-                await loadReportsData();
-                await loadBansData();
-                await loadMutesData();
-                await loadBlacklistData();
-            }
+            // 数据已经在 /admin/data 中加载，不需要单独加载
             await loadPhotosAdminData();
 
             if (!keepTab) {
@@ -1178,46 +1114,10 @@
 
     var reportsData = [];
 
-    function parseReportFromPost(p) {
-        var c = {};
-        try { c = JSON.parse(p.content || '{}'); } catch(e) {}
-        return {
-            id: p.id,
-            created_at: p.created_at,
-            reporter_name: p.user_name,
-            target_type: c.target_type || 'post',
-            target_id: c.target_id || '',
-            target_user: c.target_user || '',
-            report_category: c.report_category || '',
-            report_reason: c.report_reason || '',
-            status: c.status || 'pending',
-            admin_response: c.admin_response || null,
-            reviewed_at: c.reviewed_at || null,
-            reviewed_by: c.reviewed_by || null,
-            response_at: c.response_at || null
-        };
-    }
-
-    async function updateReportInPost(id, updates) {
-        var { data: post, error: getErr } = await sb.from('posts').select('id, content').eq('id', id).maybeSingle();
-        if (getErr) throw getErr;
-        if (!post) throw new Error('举报记录不存在');
-        var c = {};
-        try { c = JSON.parse(post.content || '{}'); } catch(e) {}
-        Object.keys(updates).forEach(function(k) { c[k] = updates[k]; });
-        var { error: updErr } = await sb.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-        if (updErr) throw updErr;
-    }
-
     async function loadReportsData() {
         try {
-            if (API_BASE && getToken()) {
-                var data = await apiCall('GET', '/admin/reports');
-                reportsData = data.data || [];
-            } else {
-                var res = await sb.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500);
-                reportsData = (res.data || []).map(parseReportFromPost);
-            }
+            var data = await apiCall('GET', '/admin/reports');
+            reportsData = data.data || [];
         } catch(e) { reportsData = []; }
         updateReportBadge();
     }
@@ -1335,16 +1235,7 @@
         var r = reportsData.find(function(x) { return x.id === id; });
         showConfirm('删除内容', '确认删除被举报的' + (r && r.target_type === 'photo' ? '照片' : '帖子') + '？此操作不可撤销。', '确认删除', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('POST', '/admin/report/' + id + '/delete-post');
-                } else {
-                    if (r && (r.target_type === 'post' || r.target_type === 'photo')) {
-                        var postRes = await sb.from('posts').select('actor_key').eq('id', r.target_id).maybeSingle();
-                        var actorKey = (postRes && postRes.data && postRes.data.actor_key) || 'admin_' + Date.now();
-                        await sb.rpc('delete_post_with_actor', { p_post_id: r.target_id, p_actor_key: actorKey });
-                    }
-                    await updateReportInPost(id, { status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN });
-                }
+                await apiCall('POST', '/admin/report/' + id + '/delete-post');
                 await loadReportsData();
                 document.querySelector('.report-detail-modal')?.remove();
                 renderTab('reports');
@@ -1358,37 +1249,23 @@
         if (!r || !r.target_user) { showToast('无法确定被举报用户', 'error'); return; }
         showConfirm('封禁用户', '确认封禁用户 ' + r.target_user + '？\n\n选择封禁时长：', '确认封禁', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('POST', '/admin/report/' + id + '/ban-user', { duration_hours: 72 });
-                } else {
-                    await updateReportInPost(id, { status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN });
-                    // 封禁用户
-                    var existing = await sb.from('bans').select('id, is_active').eq('user_name', r.target_user);
-                    var banData = { user_name: r.target_user, ban_type: 'temporary', ban_reason: '举报处理：' + (r.report_reason || '违规内容'), ban_duration_hours: 72, banned_by: ADMIN, is_active: true };
-                    if (existing && existing.data && existing.data.length) {
-                        await sb.from('bans').update(banData).eq('id', existing.data[0].id);
-                    } else {
-                        banData.expires_at = new Date(Date.now() + 72 * 3600000).toISOString();
-                        await sb.from('bans').insert([banData]);
-                    }
+                if (!API_BASE || !getToken()) {
+                    throw new Error('API 未配置，拒绝操作');
                 }
+                await apiCall('POST', '/admin/report/' + id + '/ban-user', { duration_hours: 72 });
                 await loadReportsData();
                 await loadBansData();
                 document.querySelector('.report-detail-modal')?.remove();
                 renderTab('reports');
                 showToast('用户已封禁，举报已处理', 'success');
-            } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
+            } catch(e) { showToast('操作失败', 'error'); }
         });
     };
 
     window.doMarkReportActioned = function(id) {
         showConfirm('标记处理', '确认将此举报标记为已处理？', '确认', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('PUT', '/admin/report/' + id, { status: 'actioned' });
-                } else {
-                    await updateReportInPost(id, { status: 'actioned', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN });
-                }
+                await apiCall('PUT', '/admin/report/' + id, { status: 'actioned' });
                 await loadReportsData();
                 document.querySelector('.report-detail-modal')?.remove();
                 renderTab('reports');
@@ -1403,38 +1280,19 @@
         var response = textarea.value.trim();
         if (!response) { showToast('请输入回复内容', 'error'); return; }
         try {
-            if (API_BASE && getToken()) {
-                apiCall('PUT', '/admin/report/' + id + '/respond', { response: response }).then(async function() {
-                    await loadReportsData();
-                    document.querySelector('.report-detail-modal')?.remove();
-                    renderTab('reports');
-                    showToast('已回复并处理', 'success');
-                }).catch(function(e) { showToast('操作失败: ' + e.message, 'error'); });
-            } else {
-                updateReportInPost(id, {
-                    admin_response: response,
-                    response_at: new Date().toISOString(),
-                    status: 'actioned',
-                    reviewed_at: new Date().toISOString(),
-                    reviewed_by: ADMIN
-                }).then(async function() {
-                    await loadReportsData();
-                    document.querySelector('.report-detail-modal')?.remove();
-                    renderTab('reports');
-                    showToast('已回复并处理', 'success');
-                }).catch(function(e) { showToast('操作失败: ' + e.message, 'error'); });
-            }
+            apiCall('PUT', '/admin/report/' + id + '/respond', { response: response }).then(async function() {
+                await loadReportsData();
+                document.querySelector('.report-detail-modal')?.remove();
+                renderTab('reports');
+                showToast('已回复并处理', 'success');
+            }).catch(function(e) { showToast('操作失败: ' + e.message, 'error'); });
         } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
     };
 
     window.dismissReport = function(id) {
         showConfirm('驳回举报', '确认将此举报标记为已驳回？', '确认驳回', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('PUT', '/admin/report/' + id, { status: 'dismissed' });
-                } else {
-                    await updateReportInPost(id, { status: 'dismissed', reviewed_at: new Date().toISOString(), reviewed_by: ADMIN });
-                }
+                await apiCall('PUT', '/admin/report/' + id, { status: 'dismissed' });
                 await loadReportsData();
                 renderTab('reports');
                 showToast('举报已驳回', 'success');
@@ -1446,13 +1304,8 @@
 
     async function loadBansData() {
         try {
-            if (API_BASE && getToken()) {
-                var data = await apiCall('GET', '/admin/bans');
-                bansData = data.data || [];
-            } else {
-                var res = await sb.from('bans').select('*').order('banned_at', { ascending: false }).limit(500);
-                bansData = res.data || [];
-            }
+            var data = await apiCall('GET', '/admin/bans');
+            bansData = data.data || [];
         } catch(e) { bansData = []; }
     }
 
@@ -1533,29 +1386,7 @@
         var reason = document.getElementById('banReason').value.trim();
         if (!validateAdminTargetUser(userName, 'banUserName')) return;
         try {
-            if (API_BASE && getToken()) {
-                await apiCall('POST', '/admin/ban', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
-            } else {
-                var banType = duration === 0 ? 'permanent' : 'temporary';
-                var expiresAt = null;
-                if (duration > 0) { var d = new Date(); d.setHours(d.getHours() + duration); expiresAt = d.toISOString(); }
-                var { data: existingBans, error: findErr } = await sb.from('bans').select('id, is_active').eq('user_name', userName);
-                if (findErr) { showToast('查询失败: ' + findErr.message, 'error'); return; }
-                if (existingBans && existingBans.length) {
-                    var activeBan = existingBans.find(function(b) { return b.is_active; });
-                    if (activeBan) { showToast('该用户已被拉黑封禁', 'error'); return; }
-                    var { error: updErr } = await sb.from('bans').update({ ban_reason: reason || '违反社区规定', ban_duration_hours: duration, ban_type: banType, banned_by: ADMIN, expires_at: expiresAt, is_active: true, banned_at: new Date().toISOString() }).eq('id', existingBans[0].id);
-                    if (updErr) { showToast('拉黑封禁失败: ' + updErr.message, 'error'); return; }
-                } else {
-                    var { error } = await sb.from('bans').insert([{ user_name: userName, ban_type: banType, ban_reason: reason || '违反社区规定', ban_duration_hours: duration, banned_by: ADMIN, expires_at: expiresAt, is_active: true }]);
-                    if (error) {
-                        if (error.code === '23505') {
-                            var { error: updErr2 } = await sb.from('bans').update({ ban_reason: reason || '违反社区规定', ban_duration_hours: duration, ban_type: banType, banned_by: ADMIN, expires_at: expiresAt, is_active: true, banned_at: new Date().toISOString() }).eq('user_name', userName);
-                            if (updErr2) { showToast('拉黑封禁失败: ' + updErr2.message, 'error'); return; }
-                        } else { showToast('拉黑封禁失败: ' + error.message, 'error'); return; }
-                    }
-                }
-            }
+            await apiCall('POST', '/admin/ban', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
             document.querySelector('.report-detail-modal')?.remove();
             await loadBansData();
             renderTab('bans');
@@ -1566,11 +1397,7 @@
     window.liftBan = function(id) {
         showConfirm('解除拉黑封禁', '确认解除该用户的拉黑封禁？', '确认解除', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('PUT', '/admin/ban/' + id + '/lift');
-                } else {
-                    await sb.from('bans').update({ is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN }).eq('id', id);
-                }
+                await apiCall('PUT', '/admin/ban/' + id + '/lift');
                 await loadBansData();
                 renderTab('bans');
                 showToast('已解除拉黑封禁', 'success');
@@ -1584,13 +1411,8 @@
 
     async function loadMutesData() {
         try {
-            if (API_BASE && getToken()) {
-                var data = await apiCall('GET', '/admin/mutes');
-                mutesData = data.data || [];
-            } else {
-                var res = await sb.from('mutes').select('*').order('created_at', { ascending: false }).limit(500);
-                mutesData = res.data || [];
-            }
+            var data = await apiCall('GET', '/admin/mutes');
+            mutesData = data.data || [];
         } catch(e) { mutesData = []; }
     }
 
@@ -1678,14 +1500,7 @@
         var reason = document.getElementById('muteReason').value.trim();
         if (!validateAdminTargetUser(userName, 'muteUserName')) return;
         try {
-            if (API_BASE && getToken()) {
-                await apiCall('POST', '/admin/mute', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
-            } else {
-                var expiresAt = null;
-                if (duration > 0) { var d = new Date(); d.setHours(d.getHours() + duration); expiresAt = d.toISOString(); }
-                var { error } = await sb.from('mutes').insert([{ user_name: userName, reason: reason || '违反社区规定', duration_hours: duration, muted_by: ADMIN, expires_at: expiresAt, is_active: true }]);
-                if (error) { showToast('禁言失败: ' + error.message, 'error'); return; }
-            }
+            await apiCall('POST', '/admin/mute', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
             document.querySelector('.report-detail-modal')?.remove();
             await loadMutesData();
             renderTab('mutes');
@@ -1696,11 +1511,7 @@
     window.liftMute = function(id) {
         showConfirm('解除禁言', '确认解除该用户的禁言？', '确认解除', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('PUT', '/admin/mute/' + id + '/lift');
-                } else {
-                    await sb.from('mutes').update({ is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN }).eq('id', id);
-                }
+                await apiCall('PUT', '/admin/mute/' + id + '/lift');
                 await loadMutesData();
                 renderTab('mutes');
                 showToast('已解除禁言', 'success');
@@ -1798,14 +1609,7 @@
         var reason = document.getElementById('blacklistReason').value.trim();
         if (!validateAdminTargetUser(userName, 'blacklistUserName')) return;
         try {
-            if (API_BASE && getToken()) {
-                await apiCall('POST', '/admin/blacklist', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
-            } else {
-                var expiresAt = null;
-                if (duration > 0) { var d = new Date(); d.setHours(d.getHours() + duration); expiresAt = d.toISOString(); }
-                var { error } = await sb.from('blacklist').insert([{ user_name: userName, reason: reason || '违反社区规定', duration_hours: duration, added_by: ADMIN, expires_at: expiresAt, is_active: true }]);
-                if (error) { showToast('加入黑名单失败: ' + error.message, 'error'); return; }
-            }
+            await apiCall('POST', '/admin/blacklist', { user_name: userName, duration_hours: duration, reason: reason || '违反社区规定' });
             document.querySelector('.report-detail-modal')?.remove();
             await loadBlacklistData();
             renderTab('blacklist');
@@ -1816,11 +1620,7 @@
     window.liftBlacklist = function(id) {
         showConfirm('解除黑名单', '确认解除该用户的黑名单？', '确认解除', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('PUT', '/admin/blacklist/' + id + '/lift');
-                } else {
-                    await sb.from('blacklist').update({ is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN }).eq('id', id);
-                }
+                await apiCall('PUT', '/admin/blacklist/' + id + '/lift');
                 await loadBlacklistData();
                 renderTab('blacklist');
                 showToast('已解除黑名单', 'success');
@@ -1832,7 +1632,7 @@
 
     async function loadPhotosAdminData() {
         try {
-            var res = await sb.from('posts').select('id,user_name,media_url,content,created_at,views,actor_key').eq('media_type', '__photo_wall__').order('created_at', { ascending: false }).limit(500);
+            var res = await apiCall('GET', '/admin/photos');
             photosAdminData = res.data || [];
         } catch(e) { photosAdminData = []; }
     }
@@ -1868,11 +1668,7 @@
     window.deleteAdminPhoto = function(id, actorKey) {
         showConfirm('删除照片', '确认删除此照片？此操作不可恢复。', '确认删除', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('DELETE', '/admin/photo/' + id);
-                } else {
-                    await sb.from('posts').delete().eq('id', id);
-                }
+                await apiCall('DELETE', '/admin/photo/' + id);
                 await loadPhotosAdminData();
                 renderTab('photos');
                 showToast('照片已删除', 'success');
@@ -1908,7 +1704,7 @@
             var summary, dailyData;
 
             if (API_BASE && getToken()) {
-                // 模式1：通过后端 API
+                // 通过后端 API
                 var dailyQuery = '/admin/stats/daily';
                 var summaryQuery = '/admin/stats';
                 if (window.statsDateStart) dailyQuery += '?start=' + window.statsDateStart;
@@ -1925,147 +1721,6 @@
                 var dailyR = apiCall('GET', dailyQuery);
                 summary = await summaryR;
                 dailyData = await dailyR;
-            } else if (sb) {
-                // 模式2：直连 Supabase（全部并行查询，只取必要字段，极速加载）
-                var EXCLUDE = [AUTH_MARKER, DM_MARKER, REPORT_MARKER, '__user_info__', '__visit__', '__attack__', '__user_visit__'];
-                var BASE_FILTER = function(q) {
-                    EXCLUDE.forEach(function(m) { q = q.neq('media_type', m); });
-                    return q.neq('media_type', '__avatar__');
-                };
-
-                // 日期筛选辅助：对数据查询添加数据库级日期过滤
-                var sd = window.statsDateStart, ed = window.statsDateEnd;
-                function dateFilter(q, field) {
-                    if (sd) q = q.gte(field, sd);
-                    if (ed) q = q.lte(field, ed);
-                    return q;
-                }
-                function dateCreatedFilter(q) {
-                    if (sd) q = q.gte('created_at', sd + 'T00:00:00.000Z');
-                    if (ed) q = q.lte('created_at', ed + 'T23:59:59.999Z');
-                    return q;
-                }
-                // 有日期筛选时不需要limit（数据库已过滤），否则保留较大limit
-                var dataLimit = (sd || ed) ? undefined : 100000;
-
-                // 并行发起所有查询（只取需要的字段，大幅减少数据传输）
-                var Q = [
-                    // 0: 帖子计数
-                    BASE_FILTER(sb.from('posts').select('id', { count: 'exact', head: true })).limit(5000),
-                    // 1: 点赞计数
-                    sb.from('likes').select('id', { count: 'exact', head: true }).limit(5000),
-                    // 2: 评论计数
-                    sb.from('comments').select('id', { count: 'exact', head: true }).limit(5000),
-                    // 3: 用户信息计数
-                    sb.from('posts').select('id', { count: 'exact', head: true }).eq('media_type', '__user_info__').limit(5000),
-                    // 4: IP访问计数
-                    sb.from('posts').select('id', { count: 'exact', head: true }).eq('media_type', '__visit__').limit(5000),
-                    // 5: 攻击计数
-                    sb.from('posts').select('id', { count: 'exact', head: true }).eq('media_type', '__attack__').limit(5000),
-                    // 6: 用户访问计数
-                    sb.from('posts').select('id', { count: 'exact', head: true }).eq('media_type', '__user_visit__').limit(5000),
-                    // 7: 每日帖子 created_at（有日期筛选时数据库级过滤）
-                    dateCreatedFilter(BASE_FILTER(sb.from('posts').select('created_at'))),
-                    // 8: 每日评论 created_at
-                    dateCreatedFilter(sb.from('comments').select('created_at')),
-                    // 9: 每日点赞 created_at
-                    dateCreatedFilter(sb.from('likes').select('created_at')),
-                    // 10: 每日新用户 created_at
-                    dateCreatedFilter(sb.from('posts').select('created_at').eq('media_type', '__user_info__')),
-                    // 11: 每日访问（IP级）media_url, content
-                    dateFilter(sb.from('posts').select('media_url, content').eq('media_type', '__visit__'), 'media_url'),
-                    // 12: 每日用户访问 media_url, content
-                    dateFilter(sb.from('posts').select('media_url, content').eq('media_type', '__user_visit__'), 'media_url'),
-                    // 13: 每日攻击 media_url, content
-                    dateCreatedFilter(sb.from('posts').select('media_url, content').eq('media_type', '__attack__')),
-                    // 14: 照片计数 media_url
-                    BASE_FILTER(sb.from('posts').select('media_url')).limit(5000),
-                ];
-
-                // 对数据查询（7-14）在无日期筛选时设置limit
-                for (var i = 7; i <= 13; i++) {
-                    if (dataLimit && Q[i]) Q[i] = Q[i].limit(dataLimit);
-                }
-                // 注意：query 14 照片计数仍保留原limit(5000)
-
-                var results = await Promise.all(Q.map(function(q) { return q; }));
-
-                // 汇总计数（从 count 查询获取）
-                var totalPosts = results[0].count || 0;
-                var totalLikes = results[1].count || 0;
-                var totalComments = results[2].count || 0;
-                var totalUsers = results[3].count || 0;
-                var totalIpVisits = results[4].count || 0;
-                var totalAttacks = results[5].count || 0;
-                var totalUserVisits = results[6].count || 0;
-
-                // 照片计数
-                var photoCount = 0;
-                (results[14].data || []).forEach(function(p) {
-                    if (p.media_url && /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(p.media_url)) photoCount++;
-                });
-
-                // 攻击类型分布
-                var attackTypes = {};
-                (results[13].data || []).forEach(function(a) {
-                    var ct = a.content || '';
-                    var type = '未知';
-                    if (ct.indexOf('RATE_LIMIT') >= 0) type = 'RATE_LIMIT';
-                    else if (ct.indexOf('CSRF') >= 0) type = 'CSRF';
-                    else if (ct.indexOf('CORS') >= 0) type = 'CORS';
-                    else if (ct.indexOf('XSS') >= 0) type = 'XSS';
-                    else if (ct.indexOf('PATH') >= 0) type = 'PATH_TRAVERSAL';
-                    else type = ct.slice(0, 30) || '未知';
-                    attackTypes[type] = (attackTypes[type] || 0) + 1;
-                });
-                // API防火墙拦截 = RATE_LIMIT + CORS + CSRF（API层面的拦截）
-                var firewallIntercepts = (attackTypes['CORS'] || 0) + (attackTypes['CSRF'] || 0);
-
-                summary = {
-                    total_users: totalUsers,
-                    total_posts: totalPosts,
-                    total_comments: totalComments,
-                    total_likes: totalLikes,
-                    total_photos: photoCount,
-                    total_visits: totalIpVisits + totalUserVisits,
-                    total_attacks: totalAttacks,
-                    firewall_intercepts: firewallIntercepts,
-                    attack_types: attackTypes,
-                    cached_at: new Date().toISOString()
-                };
-
-                // 每日数据聚合
-                var dailyMap = {};
-
-                function addToDaily(date, key, val) {
-                    if (!date) return;
-                    if (window.statsDateStart && date < window.statsDateStart) return;
-                    if (window.statsDateEnd && date > window.statsDateEnd) return;
-                    if (!dailyMap[date]) {
-                        dailyMap[date] = { date: date, visits: 0, attacks: 0, posts: 0, comments: 0, likes: 0, new_users: 0 };
-                    }
-                    dailyMap[date][key] = (dailyMap[date][key] || 0) + val;
-                }
-
-                function addList(data, key, dateField) {
-                    (data || []).forEach(function(item) {
-                        var d = dateField === 'created_at' ? (item.created_at || '').slice(0, 10) : (item.media_url || '');
-                        if (!d && dateField === 'media_url') {
-                            try { var c = JSON.parse(item.content || '{}'); d = c.date || ''; } catch(e) {}
-                        }
-                        addToDaily(d, key, 1);
-                    });
-                }
-
-                addList(results[7].data, 'posts', 'created_at');
-                addList(results[8].data, 'comments', 'created_at');
-                addList(results[9].data, 'likes', 'created_at');
-                addList(results[10].data, 'new_users', 'created_at');
-                addList(results[11].data, 'visits', 'media_url');
-                addList(results[12].data, 'visits', 'media_url');
-                addList(results[13].data, 'attacks', 'created_at');
-
-                dailyData = { daily: Object.values(dailyMap).sort(function(a, b) { return a.date.localeCompare(b.date); }) };
             }
 
             if (!summary) {
@@ -2173,6 +1828,11 @@
                 h += '</div></div>';
             }
 
+            // ===== 攻击详情占位（异步加载） =====
+            h += '<div id="attackDetailsContainer"></div>';
+            // ===== API防火墙拦截详情占位（异步加载） =====
+            h += '<div id="firewallDetailsContainer"></div>';
+
             // ===== 每日数据详表 =====
             if (daily.length > 0) {
                 h += '<div class="card"><h3>每日数据明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + daily.length + ' 天</span></h3>';
@@ -2203,10 +1863,160 @@
 
             el.innerHTML = h;
 
+            // ===== 异步加载攻击详情 =====
+            loadAttackDetails(el);
+            // ===== 异步加载防火墙拦截详情 =====
+            loadFirewallDetails(el);
             // ===== 异步加载用户访问明细 =====
             loadUserVisitStats(el);
         } catch(e) {
             el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">统计数据加载失败: ' + escapeHtml(e.message) + '</div></div>';
+        }
+    }
+
+    // ===================== 攻击详情（异步加载） =====================
+    async function loadAttackDetails(el) {
+        var container = document.createElement('div');
+        container.id = 'attackDetailsCard';
+        container.className = 'card';
+        container.innerHTML = '<h3>被攻击详情 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">加载中...</span></h3><div class="loading">加载攻击记录中...</div>';
+        // 替换占位符
+        var placeholder = document.getElementById('attackDetailsContainer');
+        if (placeholder) placeholder.replaceWith(container);
+
+        try {
+            var attackData;
+
+            if (API_BASE && getToken()) {
+                attackData = await apiCall('GET', '/admin/stats/attacks?limit=200');
+            }
+
+            if (!attackData || !attackData.data || attackData.data.length === 0) {
+                container.innerHTML = '<h3>被攻击详情</h3><div class="empty">暂无攻击记录</div>';
+                return;
+            }
+
+            var attacks = attackData.data;
+            var h = '<h3>被攻击详情 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + attackData.total + ' 条记录</span></h3>';
+            h += '<div class="filter-chips" style="margin-bottom:10px;">';
+            // 攻击类型过滤按钮
+            var typeCounts = {};
+            attacks.forEach(function(a) {
+                typeCounts[a.type] = (typeCounts[a.type] || 0) + 1;
+            });
+            var allTypes = Object.keys(typeCounts).sort();
+            h += '<span class="filter-chip active" id="attackFilterAll" onclick="filterAttacks(\'all\')">全部 (' + attacks.length + ')</span>';
+            allTypes.forEach(function(t) {
+                h += '<span class="filter-chip" id="attackFilter_' + escapeHtml(t) + '" onclick="filterAttacks(\'' + encodeURIComponent(t) + '\')">' + escapeHtml(t) + ' (' + typeCounts[t] + ')</span>';
+            });
+            h += '</div>';
+
+            h += '<div class="table-wrap" style="max-height:500px;"><table class="table-modern"><thead><tr>';
+            h += '<th>时间</th><th>IP地址</th><th>攻击类型</th><th>详情</th>';
+            h += '</tr></thead><tbody id="attackTableBody">';
+
+            attacks.forEach(function(a) {
+                var typeColor = a.type === 'CORS' ? '#f59e0b' :
+                               a.type === 'CSRF' ? '#ff3b60' :
+                               a.type === 'RATE_LIMIT' ? '#8b5cf6' :
+                               '#6b7280';
+                var timeStr = a.created_at ? formatTime(a.created_at) : (a.attack_date || '--');
+                h += '<tr class="attack-row" data-type="' + escapeHtml(a.type) + '">';
+                h += '<td style="font-size:11px;white-space:nowrap;">' + timeStr + '</td>';
+                h += '<td><code style="font-size:12px;background:rgba(0,0,0,0.06);padding:2px 6px;border-radius:4px;">' + escapeHtml(a.ip) + '</code></td>';
+                h += '<td><span class="badge" style="background:' + typeColor + '20;color:' + typeColor + ';font-size:11px;">' + escapeHtml(a.type) + '</span></td>';
+                h += '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted);">' + escapeHtml(a.detail) + '</td>';
+                h += '</tr>';
+            });
+
+            h += '</tbody></table></div>';
+            h += '<div style="font-size:11px;color:var(--text-muted);padding:8px 0 0;text-align:center;">仅显示最近 200 条记录</div>';
+
+            container.innerHTML = h;
+
+            // 添加全局过滤函数
+            if (!window.filterAttacks) {
+                window.filterAttacks = function(type) {
+                    var decodedType = decodeURIComponent(type);
+                    document.querySelectorAll('#attackDetailsCard .filter-chip').forEach(function(c) {
+                        c.classList.remove('active');
+                    });
+                    if (decodedType === 'all') {
+                        document.getElementById('attackFilterAll')?.classList.add('active');
+                    } else {
+                        var btn = document.getElementById('attackFilter_' + decodedType);
+                        if (btn) btn.classList.add('active');
+                    }
+                    document.querySelectorAll('#attackTableBody .attack-row').forEach(function(row) {
+                        if (decodedType === 'all' || row.getAttribute('data-type') === decodedType) {
+                            row.style.display = '';
+                        } else {
+                            row.style.display = 'none';
+                        }
+                    });
+                };
+            }
+        } catch(e) {
+            container.innerHTML = '<h3>被攻击详情</h3><div class="empty">攻击记录加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    // ===================== API防火墙拦截详情（异步加载） =====================
+    async function loadFirewallDetails(el) {
+        var container = document.createElement('div');
+        container.id = 'firewallDetailsCard';
+        container.className = 'card';
+        container.innerHTML = '<h3>API防火墙拦截详情 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">加载中...</span></h3><div class="loading">加载防火墙拦截记录中...</div>';
+        var placeholder = document.getElementById('firewallDetailsContainer');
+        if (placeholder) placeholder.replaceWith(container);
+
+        try {
+            var firewallData;
+
+            if (API_BASE && getToken()) {
+                // 分别获取CORS和CSRF拦截记录
+                var corsData = await apiCall('GET', '/admin/stats/attacks?limit=100&type=CORS');
+                var csrfData = await apiCall('GET', '/admin/stats/attacks?limit=100&type=CSRF');
+                firewallData = {
+                    data: (corsData.data || []).concat(csrfData.data || []),
+                    cors_total: corsData.total || 0,
+                    csrf_total: csrfData.total || 0
+                };
+            }
+
+            if (!firewallData || !firewallData.data || firewallData.data.length === 0) {
+                container.innerHTML = '<h3>API防火墙拦截详情</h3><div class="empty">暂无防火墙拦截记录</div>';
+                return;
+            }
+
+            var records = firewallData.data;
+            records.sort(function(a, b) {
+                return (b.created_at || '').localeCompare(a.created_at || '');
+            });
+
+            var h = '<h3>API防火墙拦截详情 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">CORS: ' + (firewallData.cors_total || 0) + ' 次 | CSRF: ' + (firewallData.csrf_total || 0) + ' 次</span></h3>';
+            h += '<div class="table-wrap" style="max-height:400px;"><table class="table-modern"><thead><tr>';
+            h += '<th>时间</th><th>来源IP</th><th>拦截类型</th><th>详情</th>';
+            h += '</tr></thead><tbody>';
+
+            records.forEach(function(r) {
+                var isCors = r.type === 'CORS';
+                var badgeColor = isCors ? '#f59e0b' : '#ff3b60';
+                var badgeLabel = isCors ? 'CORS跨域' : 'CSRF跨站';
+                var timeStr = r.created_at ? formatTime(r.created_at) : (r.attack_date || '--');
+                h += '<tr>';
+                h += '<td style="font-size:11px;white-space:nowrap;">' + timeStr + '</td>';
+                h += '<td><code style="font-size:12px;background:rgba(0,0,0,0.06);padding:2px 6px;border-radius:4px;">' + escapeHtml(r.ip) + '</code></td>';
+                h += '<td><span class="badge" style="background:' + badgeColor + '20;color:' + badgeColor + ';font-size:11px;">' + badgeLabel + '</span></td>';
+                h += '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-muted);">' + escapeHtml(r.detail) + '</td>';
+                h += '</tr>';
+            });
+
+            h += '</tbody></table></div>';
+
+            container.innerHTML = h;
+        } catch(e) {
+            container.innerHTML = '<h3>API防火墙拦截详情</h3><div class="empty">防火墙拦截记录加载失败: ' + escapeHtml(e.message) + '</div>';
         }
     }
 
@@ -2222,62 +2032,6 @@
 
             if (API_BASE && getToken()) {
                 userData = await apiCall('GET', '/admin/stats/users');
-            } else if (sb) {
-                // Supabase 直接模式（并行查询 + 只取必要字段）
-                var uvR = sb.from('posts').select('user_name, media_url, content, created_at').eq('media_type', '__user_visit__').order('created_at', { ascending: false }).limit(5000);
-                var uiR = sb.from('posts').select('user_name, content, created_at').eq('media_type', '__user_info__').order('created_at', { ascending: false }).limit(5000);
-
-                var uvRes = await uvR, uiRes = await uiR;
-                var userVisitsData = uvRes.data || [];
-                var userInfoList = uiRes.data || [];
-
-                // 按用户聚合
-                var userVisitMap = {};
-                userVisitsData.forEach(function(v) {
-                    var name = v.user_name;
-                    if (!name) return;
-                    if (!userVisitMap[name]) userVisitMap[name] = { total: 0, daily: {}, last_visit: '' };
-                    userVisitMap[name].total++;
-                    var d = v.media_url || '';
-                    if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
-                    if (d) userVisitMap[name].daily[d] = (userVisitMap[name].daily[d] || 0) + 1;
-                    var vt = v.created_at || '';
-                    if (vt && vt > userVisitMap[name].last_visit) userVisitMap[name].last_visit = vt;
-                });
-
-                var userInfoMap = {};
-                userInfoList.forEach(function(ui) {
-                    try {
-                        var parsed = JSON.parse(ui.content || '{}');
-                        // 保留最早（最旧）的 reg_time，只覆盖更新 last_login
-                        if (userInfoMap[ui.user_name]) {
-                            if (parsed.last_login && (!userInfoMap[ui.user_name].last_login || parsed.last_login > userInfoMap[ui.user_name].last_login)) {
-                                userInfoMap[ui.user_name].last_login = parsed.last_login;
-                            }
-                            if (parsed.reg_time && (!userInfoMap[ui.user_name].reg_time || parsed.reg_time < userInfoMap[ui.user_name].reg_time)) {
-                                userInfoMap[ui.user_name].reg_time = parsed.reg_time;
-                            }
-                        } else {
-                            userInfoMap[ui.user_name] = parsed;
-                        }
-                    } catch(e) {}
-                });
-
-                var users = Object.keys(userVisitMap).map(function(name) {
-                    var v = userVisitMap[name];
-                    var info = userInfoMap[name] || {};
-                    return {
-                        user_name: name,
-                        total_visits: v.total,
-                        daily_visits: v.daily,
-                        last_visit: v.last_visit || info.last_login || null,
-                        last_login: info.last_login || null,
-                        reg_time: info.reg_time || null
-                    };
-                });
-                users.sort(function(a, b) { return b.total_visits - a.total_visits; });
-
-                userData = { users: users, total: users.length };
             }
 
             if (!userData || !userData.users) {
