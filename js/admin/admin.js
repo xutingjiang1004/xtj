@@ -12,6 +12,17 @@
     var SESSION_KEY = "xtj_admin_session";
     var TOKEN_KEY = "xtj_admin_token";
     var TAB_KEY = "xtj_admin_tab";
+
+    // 初始化 Supabase 客户端（直连模式使用）
+    var sb = null;
+    if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
+        try {
+            sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        } catch(e) {
+            console.warn('[admin] Supabase client init failed:', e.message);
+        }
+    }
+    window.sb = sb;
     // 简单的 token 混淆（非加密，仅防止直接读取 localStorage）
 
     var TOKEN_SALT = 'xtj_7k3m';
@@ -37,7 +48,6 @@
         } catch(e) { return ''; }
     }
 
-    var sb = null;
     var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [];
     var searchUser = '', searchPost = '';
     var userFilterStatus = 'all';
@@ -1743,19 +1753,120 @@
         el.innerHTML = '<div class="loading">加载统计数据中...</div>';
 
         try {
-            // 并行请求汇总和每日数据
-            var dailyQuery = '/admin/stats/daily';
-            if (statsDateStart) dailyQuery += '?start=' + statsDateStart;
-            if (statsDateEnd) dailyQuery += (statsDateStart ? '&' : '?') + 'end=' + statsDateEnd;
+            var summary, dailyData;
 
-            var summaryPromise = API_BASE && getToken() ? apiCall('GET', '/admin/stats') : Promise.resolve(null);
-            var dailyPromise = API_BASE && getToken() ? apiCall('GET', dailyQuery) : Promise.resolve(null);
+            if (API_BASE && getToken()) {
+                // 模式1：通过后端 API
+                var dailyQuery = '/admin/stats/daily';
+                if (statsDateStart) dailyQuery += '?start=' + statsDateStart;
+                if (statsDateEnd) dailyQuery += (statsDateStart ? '&' : '?') + 'end=' + statsDateEnd;
 
-            var summary = await summaryPromise;
-            var dailyData = await dailyPromise;
+                var summaryR = apiCall('GET', '/admin/stats');
+                var dailyR = apiCall('GET', dailyQuery);
+                summary = await summaryR;
+                dailyData = await dailyR;
+            } else if (sb) {
+                // 模式2：直接查询 Supabase（无 API_BASE 时回退）
+                var allPostData, allLikeData, allCommData, userInfoData, visitData;
+
+                // 并行查询所有数据
+                var p1 = sb.from('posts').select('*').neq('media_type', '__avatar__').order('created_at', { ascending: false }).limit(5000);
+                var p2 = sb.from('likes').select('*').order('created_at', { ascending: false }).limit(5000);
+                var p3 = sb.from('comments').select('*').order('created_at', { ascending: false }).limit(5000);
+                var p4 = sb.from('posts').select('user_name, content, created_at').eq('media_type', '__user_info__').limit(5000);
+
+                var r1 = await p1, r2 = await p2, r3 = await p3, r4 = await p4;
+
+                allPostData = (r1.data || []).filter(function(p) {
+                    return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__';
+                });
+                allLikeData = r2.data || [];
+                allCommData = r3.data || [];
+                userInfoData = r4.data || [];
+
+                // 查询访问和攻击记录
+                var visitRes = await sb.from('posts').select('*').eq('media_type', '__visit__').limit(5000);
+                var attackRes = await sb.from('posts').select('*').eq('media_type', '__attack__').limit(5000);
+                var userVisitRes = await sb.from('posts').select('*').eq('media_type', '__user_visit__').limit(5000);
+
+                var visitsData = visitRes.data || [];
+                var attacksData = attackRes.data || [];
+                var userVisitsData = userVisitRes.data || [];
+
+                // 计算汇总
+                var photoCount = allPostData.filter(function(p) { return p.media_url && /\.(jpg|jpeg|png|gif|webp|heic|heif)$/i.test(p.media_url); }).length;
+
+                // 攻击类型分布
+                var attackTypes = {};
+                attacksData.forEach(function(a) {
+                    var reason = a.content || '未知';
+                    attackTypes[reason] = (attackTypes[reason] || 0) + 1;
+                });
+
+                summary = {
+                    total_users: userInfoData.length,
+                    total_posts: allPostData.length,
+                    total_comments: allCommData.length,
+                    total_likes: allLikeData.length,
+                    total_photos: photoCount,
+                    total_visits: visitsData.length + userVisitsData.length,
+                    total_attacks: attacksData.length,
+                    attack_types: attackTypes,
+                    cached_at: new Date().toISOString()
+                };
+
+                // 计算每日数据
+                var dailyMap = {};
+                var today = new Date().toISOString().slice(0, 10);
+
+                function addToDaily(date, key, val) {
+                    if (!date) return;
+                    if (statsDateStart && date < statsDateStart) return;
+                    if (statsDateEnd && date > statsDateEnd) return;
+                    if (!dailyMap[date]) {
+                        dailyMap[date] = { date: date, visits: 0, attacks: 0, posts: 0, comments: 0, likes: 0, new_users: 0 };
+                    }
+                    dailyMap[date][key] = (dailyMap[date][key] || 0) + val;
+                }
+
+                visitsData.forEach(function(v) {
+                    var d = v.media_url || '';
+                    if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
+                    addToDaily(d, 'visits', 1);
+                });
+                userVisitsData.forEach(function(v) {
+                    var d = v.media_url || '';
+                    if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
+                    addToDaily(d, 'visits', 1);
+                });
+                attacksData.forEach(function(v) {
+                    var d = v.media_url || '';
+                    if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
+                    addToDaily(d, 'attacks', 1);
+                });
+                allPostData.forEach(function(p) {
+                    var d = p.created_at ? p.created_at.slice(0, 10) : '';
+                    addToDaily(d, 'posts', 1);
+                });
+                allCommData.forEach(function(c) {
+                    var d = c.created_at ? c.created_at.slice(0, 10) : '';
+                    addToDaily(d, 'comments', 1);
+                });
+                allLikeData.forEach(function(l) {
+                    var d = l.created_at ? l.created_at.slice(0, 10) : '';
+                    addToDaily(d, 'likes', 1);
+                });
+                userInfoData.forEach(function(u) {
+                    var d = u.created_at ? u.created_at.slice(0, 10) : '';
+                    addToDaily(d, 'new_users', 1);
+                });
+
+                // 转换为数组并按日期排序
+                dailyData = { daily: Object.values(dailyMap).sort(function(a, b) { return a.date.localeCompare(b.date); }) };
+            }
 
             if (!summary) {
-                el.innerHTML = '<div class="empty-state"><div class="icon">📊</div><div class="text">需要配置 API_BASE 才能加载统计数据</div></div>';
+                el.innerHTML = '<div class="empty-state"><div class="icon">📊</div><div class="text">统计数据加载失败：无法连接后端 API 或 Supabase</div></div>';
                 return;
             }
 
@@ -1904,7 +2015,54 @@
         el.appendChild(container);
 
         try {
-            var userData = await apiCall('GET', '/admin/stats/users');
+            var userData;
+
+            if (API_BASE && getToken()) {
+                userData = await apiCall('GET', '/admin/stats/users');
+            } else if (sb) {
+                // Supabase 直接模式
+                var userVisitRes = await sb.from('posts').select('*').eq('media_type', '__user_visit__').limit(5000);
+                var userInfoRes = await sb.from('posts').select('user_name, content, created_at').eq('media_type', '__user_info__').limit(5000);
+
+                var userVisitsData = userVisitRes.data || [];
+                var userInfoList = userInfoRes.data || [];
+
+                // 按用户聚合
+                var userVisitMap = {};
+                userVisitsData.forEach(function(v) {
+                    var name = v.user_name;
+                    if (!name) return;
+                    if (!userVisitMap[name]) userVisitMap[name] = { total: 0, daily: {}, last_visit: '' };
+                    userVisitMap[name].total++;
+                    var d = v.media_url || '';
+                    if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
+                    if (d) userVisitMap[name].daily[d] = (userVisitMap[name].daily[d] || 0) + 1;
+                    var vt = v.created_at || '';
+                    if (vt && vt > userVisitMap[name].last_visit) userVisitMap[name].last_visit = vt;
+                });
+
+                var userInfoMap = {};
+                userInfoList.forEach(function(ui) {
+                    try { userInfoMap[ui.user_name] = JSON.parse(ui.content || '{}'); } catch(e) {}
+                });
+
+                var users = Object.keys(userVisitMap).map(function(name) {
+                    var v = userVisitMap[name];
+                    var info = userInfoMap[name] || {};
+                    return {
+                        user_name: name,
+                        total_visits: v.total,
+                        daily_visits: v.daily,
+                        last_visit: v.last_visit || info.last_login || null,
+                        last_login: info.last_login || null,
+                        reg_time: info.reg_time || null
+                    };
+                });
+                users.sort(function(a, b) { return b.total_visits - a.total_visits; });
+
+                userData = { users: users, total: users.length };
+            }
+
             if (!userData || !userData.users) {
                 container.innerHTML = '<h3>用户访问明细</h3><div class="empty">暂无用户访问数据</div>';
                 return;
