@@ -232,17 +232,9 @@
     .divider-row td {
         padding: 0 !important;
         border-bottom: none !important;
-        height: 1px;
-        line-height: 1px;
-        background: transparent;
-        position: relative;
-    }
-    .divider-row td::after {
-        content: '';
-        display: block;
-        height: 1px;
-        background: var(--border);
-        margin: 0 12px;
+        border-top: 1px solid var(--border);
+        height: 0;
+        line-height: 0;
     }
     .divider-row:hover td { background: transparent !important; }
 
