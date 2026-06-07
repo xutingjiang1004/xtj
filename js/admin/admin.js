@@ -6,6 +6,7 @@
     // API 地址：部署后设为实际地址，本地开发留空则回退到直接 Supabase 调用
     var API_BASE = "";
     var AUTH_MARKER = "__auth__";
+    var ADMIN_AUTH_MARKER = "__admin_auth__";
     var DM_MARKER = "__dm__";
     var ANN_MARKER = "__ann__";
     var REPORT_MARKER = '__report__';
@@ -46,6 +47,55 @@
             }
             return result;
         } catch(e) { return ''; }
+    }
+
+    // ===================== PBKDF2 密码哈希 =====================
+    async function adminPbkdf2Hash(password, salt) {
+        var enc = new TextEncoder();
+        var keyMaterial = await crypto.subtle.importKey(
+            'raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']
+        );
+        var bits = await crypto.subtle.deriveBits(
+            { name: 'PBKDF2', salt: enc.encode(salt), iterations: 100000, hash: 'SHA-256' },
+            keyMaterial, 256
+        );
+        return Array.from(new Uint8Array(bits)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+    }
+    async function adminHashPassword(password) {
+        var saltBytes = crypto.getRandomValues(new Uint8Array(16));
+        var salt = Array.from(saltBytes).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+        var hash = await adminPbkdf2Hash(password, salt);
+        return salt + ':' + hash;
+    }
+    async function adminVerifyPassword(inputPw, stored) {
+        if (!inputPw || !stored) return false;
+        // PBKDF2 格式：salt:hash
+        if (stored.indexOf(':') !== -1) {
+            var parts = stored.split(':');
+            var inputHash = await adminPbkdf2Hash(inputPw, parts[0]);
+            return inputHash === parts[1];
+        }
+        // 回退旧版 SHA-256
+        var enc = new TextEncoder();
+        var buf = await crypto.subtle.digest('SHA-256', enc.encode(inputPw));
+        var oldHash = Array.from(new Uint8Array(buf)).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+        return oldHash === stored;
+    }
+
+    // ===================== Session 超时管理（30分钟无操作自动登出） =====================
+    var SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30分钟
+    var lastActivityTime = Date.now();
+    function resetActivityTimer() { lastActivityTime = Date.now(); }
+    function startSessionTimeoutMonitor() {
+        ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(function(evt) {
+            document.addEventListener(evt, resetActivityTimer, { passive: true });
+        });
+        setInterval(function() {
+            if (Date.now() - lastActivityTime > SESSION_TIMEOUT_MS) {
+                console.warn('[admin] 会话超时，自动登出');
+                window.doAdminLogout();
+            }
+        }, 30000); // 每30秒检查一次
     }
 
     var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [];
@@ -220,6 +270,7 @@
         document.getElementById('loginWrap').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         saveSession();
+        startSessionTimeoutMonitor(); // 启动30分钟无操作自动登出
         
         var savedTab = localStorage.getItem(TAB_KEY);
         if (savedTab === 'blacklist') savedTab = 'bans';
@@ -288,7 +339,9 @@
                 btn.textContent = '登录';
             }
         } else {
-            // 回退：API 未配置时使用 Supabase auth 记录校验（仅开发环境）
+            // 回退：API 未配置时使用 Supabase admin_auth 记录校验（PBKDF2，隔离存储）
+            btn.disabled = true;
+            btn.textContent = '验证中...';
             var tempSb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             var storedPw = null;
             try {
@@ -296,7 +349,7 @@
                     .from('posts')
                     .select('media_url')
                     .eq('user_name', ADMIN)
-                    .eq('media_type', AUTH_MARKER)
+                    .eq('media_type', ADMIN_AUTH_MARKER)
                     .maybeSingle();
                 if (pwData && pwData.media_url) {
                     storedPw = pwData.media_url;
@@ -304,17 +357,14 @@
             } catch(e) {}
             
             if (!storedPw) {
-                // 自动注册管理员 auth 记录，无需手动去前端注册
+                // 自动创建管理员账号（PBKDF2 哈希）
                 try {
-                    var encoder = new TextEncoder();
-                    var hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(pw));
-                    var hashArray = Array.from(new Uint8Array(hashBuffer));
-                    var pwHash = hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                    var pwHash = await adminHashPassword(pw);
                     await tempSb.from('posts').insert({
                         user_name: ADMIN,
                         media_url: pwHash,
-                        media_type: AUTH_MARKER,
-                        actor_key: AUTH_MARKER,
+                        media_type: ADMIN_AUTH_MARKER,
+                        actor_key: ADMIN_AUTH_MARKER,
                         created_at: new Date().toISOString()
                     });
                     storedPw = pwHash;
@@ -325,12 +375,8 @@
                     return;
                 }
             }
-            var encoder = new TextEncoder();
-            var hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(pw));
-            var hashArray = Array.from(new Uint8Array(hashBuffer));
-            var inputHash = hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-            
-            if (inputHash !== storedPw) {
+            var pwOk = await adminVerifyPassword(pw, storedPw);
+            if (!pwOk) {
                 err.textContent = '密码错误';
                 btn.disabled = false;
                 btn.textContent = '登录';
@@ -363,7 +409,7 @@
                 // 通过 API 加载数据
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
                 annList = postData.filter(function(p) { return p.media_type === ANN_MARKER; });
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
@@ -378,7 +424,7 @@
                 var likeRes = await sb.from('likes').select('*').order('created_at', {ascending: false}).limit(5000);
                 var commRes = await sb.from('comments').select('*').order('created_at', {ascending: false}).limit(5000);
 
-                allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
                 annList = (postRes.data || []).filter(function(p) { return p.media_type === ANN_MARKER; });
                 allLikes = likeRes.data || [];
                 allComments = commRes.data || [];
@@ -2700,7 +2746,7 @@
             if (API_BASE && getToken()) {
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
                 annList = postData.filter(function(p) { return p.media_type === ANN_MARKER; });
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
@@ -2713,7 +2759,7 @@
                 var postRes = await sb.from('posts').select('*').neq('media_type', '__avatar__').order('created_at', {ascending: false}).limit(5000);
                 var likeRes = await sb.from('likes').select('*').order('created_at', {ascending: false}).limit(5000);
                 var commRes = await sb.from('comments').select('*').order('created_at', {ascending: false}).limit(5000);
-                allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
                 annList = (postRes.data || []).filter(function(p) { return p.media_type === ANN_MARKER; });
                 allLikes = likeRes.data || [];
                 allComments = commRes.data || [];
