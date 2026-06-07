@@ -953,6 +953,48 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
   }
 });
 
+// 攻击详情 API（返回完整攻击记录，含 IP、时间、类型、详情）
+app.get('/admin/stats/attacks', verifyToken, rateLimit(60000, 20), async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+    const offset = parseInt(req.query.offset) || 0;
+    const typeFilter = req.query.type || ''; // 可选，按攻击类型筛选
+
+    var query = supabase.from('posts')
+      .select('id, user_name, content, media_url, created_at, actor_key')
+      .eq('media_type', ATTACK_MARKER);
+
+    if (typeFilter) {
+      query = query.eq('media_url', typeFilter);
+    }
+
+    const { data, error, count } = await query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+
+    const attacks = (data || []).map(function(a) {
+      var detail = {};
+      try { detail = JSON.parse(a.content || '{}'); } catch(e) {}
+      return {
+        id: a.id,
+        ip: a.user_name,
+        type: a.media_url || detail.type || 'unknown',
+        detail: detail.detail || '',
+        attack_date: detail.date || '',
+        created_at: a.created_at,
+        actor_key: a.actor_key
+      };
+    });
+
+    return res.json({ data: attacks, total: attacks.length });
+  } catch (e) {
+    console.error('[API] 攻击详情加载失败:', e.message);
+    return res.status(500).json({ error: '攻击详情加载失败' });
+  }
+});
+
 // 每日明细统计（支持日期筛选）
 app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
