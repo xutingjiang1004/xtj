@@ -1567,21 +1567,57 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
             };
 
+            function ensureReportHistoryModal() {
+                if (document.getElementById('reportHistoryModal')) return;
+                var wrap = document.createElement('div');
+                wrap.innerHTML = [
+                    '<div class="report-modal-overlay report-history-overlay" id="reportHistoryModal" onclick="if(event.target===this)closeReportHistoryModal()">',
+                    '  <div class="report-modal report-history-modal" onclick="event.stopPropagation()">',
+                    '    <div class="report-modal-header">',
+                    '      <div class="report-modal-header-left"><span>📋 我的举报记录</span></div>',
+                    '      <button class="btn btn-ghost" onclick="closeReportHistoryModal()" style="padding:4px 12px; font-size:16px;">✕</button>',
+                    '    </div>',
+                    '    <div class="report-history-body">',
+                    '      <div class="report-records-list" id="reportHistoryList"><div class="report-records-empty">加载中...</div></div>',
+                    '    </div>',
+                    '  </div>',
+                    '</div>'
+                ].join('');
+                document.body.appendChild(wrap.firstElementChild);
+            }
+
+            function syncReportModalBodyLock() {
+                var formModal = document.getElementById('reportModal');
+                var historyModal = document.getElementById('reportHistoryModal');
+                var formOpen = !!(formModal && formModal.classList.contains('active'));
+                var historyOpen = !!(historyModal && historyModal.classList.contains('active'));
+                document.body.style.overflow = formOpen || historyOpen ? 'hidden' : '';
+            }
+
             // ===================== 举报弹窗内的举报记录 =====================
             window.toggleReportRecords = async function() {
-                var nextView = typeof _reportView !== 'undefined' && _reportView === 'records' ? 'form' : 'records';
-                if (typeof window.switchReportView === 'function') {
-                    await window.switchReportView(nextView);
-                }
+                ensureReportHistoryModal();
+                var modal = document.getElementById('reportHistoryModal');
+                if (!modal) return;
+                modal.classList.add('active');
+                syncReportModalBodyLock();
+                await loadMyReportRecords();
+            };
+
+            window.closeReportHistoryModal = function() {
+                var modal = document.getElementById('reportHistoryModal');
+                if (!modal) return;
+                modal.classList.remove('active');
+                syncReportModalBodyLock();
             };
 
             async function loadMyReportRecords() {
                 if (!window.currentUser) {
-                    var list = document.getElementById('reportRecordsList');
+                    var list = document.getElementById('reportHistoryList') || document.getElementById('reportRecordsList');
                     if (list) list.innerHTML = '<div class="report-records-empty">请先登录</div>';
                     return;
                 }
-                var list = document.getElementById('reportRecordsList');
+                var list = document.getElementById('reportHistoryList') || document.getElementById('reportRecordsList');
                 if (!list) return;
                 try {
                     if (!window.sb) {
@@ -6845,6 +6881,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (!currentUser) { showToast('请先登录'); return; }
             var overlay = document.getElementById('reportModal');
             if (!overlay) return;
+            ensureReportHistoryModal();
             _reportType = 'post';
             _reportView = 'form';
             _reportSelectedId = null;
@@ -6861,7 +6898,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             document.getElementById('reportError').textContent = '';
             updateReportSelectedPreview();
             overlay.classList.add('active');
-            document.body.style.overflow = 'hidden';
+            window.closeReportHistoryModal();
+            syncReportModalBodyLock();
             bindReportViewButtons();
             resetReportModalScroll();
             switchReportView('form');
@@ -6878,7 +6916,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             var overlay = document.getElementById('reportModal');
             if (!overlay) return;
             overlay.classList.remove('active');
-            document.body.style.overflow = '';
+            window.closeReportHistoryModal();
+            syncReportModalBodyLock();
         };
 
         window.switchReportType = function(type) {
