@@ -11306,6 +11306,42 @@ body.ios-chat-keyboard-open .chat-input-area {
   line-height: 1.2 !important;
 }
 
+.report-history-overlay {
+  z-index: 1003 !important;
+}
+
+.report-history-modal {
+  width: min(620px, calc(100vw - 32px)) !important;
+  max-height: min(82vh, 760px) !important;
+}
+
+.report-history-body {
+  padding: 14px 20px 20px !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+
+.report-records-btn,
+.report-submit-btn,
+.report-type-tab,
+.report-reason-btn {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease !important;
+}
+
+.report-records-btn:hover,
+.report-submit-btn:hover,
+.report-type-tab:hover,
+.report-reason-btn:hover {
+  transform: translateY(-1px);
+}
+
+.report-records-btn:active,
+.report-submit-btn:active,
+.report-type-tab:active,
+.report-reason-btn:active {
+  transform: scale(0.97);
+}
+
 @media (max-width: 720px) {
   .report-modal-content {
     padding: 10px 16px 16px !important;
