@@ -1929,24 +1929,29 @@
                 });
                 if (maxVal === 0) maxVal = 1;
 
+                var activeMode = modes.find(function(m) { return m.key === statsChartMode; }) || modes[0];
+                var labelStep = daily.length > 18 ? 2 : 1;
+                h += '<div class="chart-shell">';
+                h += '<div class="chart-legend">';
+                h += '<span><span class="dot" style="background:' + activeMode.color + ';"></span>' + activeMode.label + '</span>';
+                h += '<span>最高值 ' + maxVal + '</span>';
+                h += '<span>共 ' + daily.length + ' 天</span>';
+                h += '</div>';
                 h += '<div class="chart-bar-row">';
                 daily.forEach(function(d) {
                     var v = d[statsChartMode] || 0;
                     var heightPct = Math.max(4, Math.round((v / maxVal) * 100));
-                    var modeInfo = modes.find(function(m) { return m.key === statsChartMode; });
-                    var barColor = modeInfo ? modeInfo.color : '#059669';
-                    var shortDate = d.date ? d.date.slice(5) : '';
-                    h += '<div class="chart-bar" style="height:' + heightPct + '%;background:' + barColor + ';" title="' + escapeHtml(d.date) + ': ' + v + '">';
+                    h += '<div class="chart-bar" style="height:' + heightPct + '%;background:' + activeMode.color + ';" title="' + escapeHtml(d.date) + ': ' + v + '">';
                     h += '<span class="bar-tip">' + v + '</span>';
                     h += '</div>';
                 });
-                h += '</div>';
+                h += '</div></div>';
 
                 // 日期标签
                 h += '<div class="chart-bar-labels">';
-                daily.forEach(function(d) {
-                    var shortDate = d.date ? d.date.slice(5) : '';
-                    h += '<div class="chart-bar-label">' + escapeHtml(shortDate) + '</div>';
+                daily.forEach(function(d, index) {
+                    var shortDate = d.date ? d.date.slice(5).replace('-', '<br>') : '';
+                    h += '<div class="chart-bar-label">' + ((index % labelStep === 0 || index === daily.length - 1) ? shortDate : '&nbsp;') + '</div>';
                 });
                 h += '</div>';
 
