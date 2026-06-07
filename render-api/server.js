@@ -1139,12 +1139,19 @@ app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res
       }
     });
 
-    // 构建用户信息映射（last_login）
+    // 构建用户信息映射（保留最早的 reg_time，只覆盖 last_login）
     const userInfoMap = {};
     (userInfos || []).forEach(ui => {
       try {
         var info = JSON.parse(ui.content || '{}');
-        userInfoMap[ui.user_name] = info;
+        if (userInfoMap[ui.user_name]) {
+          if (info.last_login) userInfoMap[ui.user_name].last_login = info.last_login;
+          if (info.reg_time && (!userInfoMap[ui.user_name].reg_time || info.reg_time < userInfoMap[ui.user_name].reg_time)) {
+            userInfoMap[ui.user_name].reg_time = info.reg_time;
+          }
+        } else {
+          userInfoMap[ui.user_name] = info;
+        }
       } catch(e) {}
     });
 
