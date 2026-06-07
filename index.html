@@ -258,7 +258,7 @@
                     <span class="profile-chevron">→</span>
                 </div>
                 <div class="profile-activity-board">
-                    <section class="profile-activity-card" id="profileLikesCard">
+                    <section class="profile-activity-card profile-activity-card--summary" id="profileLikesCard" role="button" tabindex="0" onclick="toggleProfileActivity('likes')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('likes');}">
                         <div class="profile-activity-head">
                             <div>
                                 <div class="profile-activity-kicker">我的互动</div>
@@ -269,7 +269,7 @@
                         <div class="profile-activity-list" id="profileLikesList"></div>
                         <button type="button" class="profile-activity-more" id="profileLikesMoreBtn" onclick="toggleProfileActivity('likes')" style="display:none;">更多点赞内容</button>
                     </section>
-                    <section class="profile-activity-card" id="profileCommentsCard">
+                    <section class="profile-activity-card profile-activity-card--summary" id="profileCommentsCard" role="button" tabindex="0" onclick="toggleProfileActivity('comments')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProfileActivity('comments');}">
                         <div class="profile-activity-head">
                             <div>
                                 <div class="profile-activity-kicker">我的留言</div>
