@@ -127,7 +127,7 @@ function validateDurationHours(value) {
   return { value: Math.floor(raw) };
 }
 
-// ===================== 涓棿浠?=====================
+// ===================== 中间件 ======================
 // CORS 限制：仅允许指定域名
 app.use(cors({
   origin: function (origin, callback) {
@@ -253,10 +253,10 @@ function verifyToken(req, res, next) {
   next();
 }
 
-// ===================== 鍋ュ悍妫€鏌?=====================
+// ===================== 健康检查 ======================
 app.get('/health', (_, res) => res.json({ ok: true, ts: Date.now() }));
 
-// ===================== 绠＄悊鍛樼櫥褰?=====================
+// ===================== 管理员登录 ======================
 app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   const { username, password } = req.body;
   
@@ -304,7 +304,7 @@ app.post('/admin/logout', verifyToken, (req, res) => {
   return res.json({ ok: true });
 });
 
-// ===================== 鏁版嵁鍔犺浇锛堝彧璇伙紝浣嗛渶瑕佽璇侊級 =====================
+// ===================== 数据加载（只读，但需要认证） ======================
 app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
   try {
     const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes] = await Promise.all([
@@ -327,21 +327,21 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
       blacklist: blacklistRes.data || []
     });
   } catch (e) {
-    console.error('[API] 鏁版嵁鍔犺浇澶辫触:', e.message);
-    return res.status(500).json({ error: '鏁版嵁鍔犺浇澶辫触' });
+    console.error('[API] 数据加载失败:', e.message);
+    return res.status(500).json({ error: '数据加载失败' });
   }
 });
 
-// ===================== 鍏憡绠＄悊 =====================
+// ===================== 公告管理 ======================
 app.post('/admin/announcement', verifyToken, rateLimit(60000, 20), async (req, res) => {
   const { title, content } = req.body;
   if (!title && !content) {
-    return res.status(400).json({ error: '璇疯嚦灏戝～鍐欐爣棰樻垨鍐呭' });
+    return res.status(400).json({ error: '请至少填写标题或内容' });
   }
   
-  const titleVal = validateString(title, MAX_TITLE_LEN, '鏍囬');
+  const titleVal = validateString(title, MAX_TITLE_LEN, '标题');
   if (titleVal && titleVal.error) return res.status(400).json({ error: titleVal.error });
-  const contentVal = validateString(content, MAX_CONTENT_LEN, '鍐呭');
+  const contentVal = validateString(content, MAX_CONTENT_LEN, '内容');
   if (contentVal && contentVal.error) return res.status(400).json({ error: contentVal.error });
   
   const storeData = JSON.stringify({ title: titleVal || '', content: contentVal || '' });
@@ -367,10 +367,10 @@ app.delete('/admin/announcement/:id', verifyToken, async (req, res) => {
   return res.json({ ok: true });
 });
 
-// ===================== 甯栧瓙绠＄悊 =====================
+// ===================== 帖子管理 ======================
 app.delete('/admin/post/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
-  // 鍏堣幏鍙栧笘瀛愮殑 actor_key
+  // 先获取帖子的 actor_key
   const { data: post } = await supabase.from('posts').select('actor_key').eq('id', id).maybeSingle();
   const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
   
@@ -382,7 +382,7 @@ app.delete('/admin/post/:id', verifyToken, async (req, res) => {
   return res.json({ ok: true });
 });
 
-// ===================== 璇勮绠＄悊 =====================
+// ===================== 评论管理 ======================
 app.delete('/admin/comment/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
   const { data, error } = await supabase.rpc('delete_comment_v2', {
@@ -393,7 +393,7 @@ app.delete('/admin/comment/:id', verifyToken, async (req, res) => {
   return res.json({ ok: true, data });
 });
 
-// ===================== 鐓х墖绠＄悊 =====================
+// ===================== 照片管理 ======================
 app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
   const { error } = await supabase.from('posts').delete().eq('id', id);
@@ -401,7 +401,7 @@ app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
   return res.json({ ok: true });
 });
 
-// ===================== 灏佺绠＄悊 =====================
+// ===================== 封禁管理 ======================
 app.get('/admin/bans', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
@@ -478,7 +478,7 @@ app.put('/admin/ban/:id/lift', verifyToken, async (req, res) => {
   return res.json({ ok: true });
 });
 
-// ===================== 绂佽█绠＄悊 =====================
+// ===================== 禁言管理 ======================
 app.get('/admin/mutes', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('mutes').select('*').order('created_at', { ascending: false }).limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
@@ -525,7 +525,7 @@ app.put('/admin/mute/:id/lift', verifyToken, async (req, res) => {
   return res.json({ ok: true });
 });
 
-// ===================== 榛戝悕鍗曠鐞?=====================
+// ===================== 黑名单管理 ======================
 app.get('/admin/blacklist', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('blacklist').select('*').order('created_at', { ascending: false }).limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
@@ -588,7 +588,7 @@ app.put('/admin/blacklist/:id/lift', verifyToken, async (req, res) => {
   return res.json({ ok: true });
 });
 
-// ===================== 涓炬姤绠＄悊 =====================
+// ===================== 举报管理 ======================
 app.get('/admin/reports', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
@@ -837,7 +837,7 @@ app.get('/api/my-reports', rateLimit(60000, 20), function(req, res, next) {
   return res.json({ data: reports });
 });
 
-// ===================== 鐢ㄦ埛鏁版嵁锛堝彧璇伙級 =====================
+// ===================== 用户数据（只读） ======================
 app.get('/admin/users', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('posts')
     .select('user_name, content, created_at')
