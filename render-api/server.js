@@ -21,13 +21,14 @@ if (!ADMIN_PASSWORD) {
   console.warn('[WARN] ADMIN_PASSWORD is not configured.');
 }
 if (!SUPABASE_SERVICE_KEY) {
-  console.warn('[WARN] SUPABASE_SERVICE_KEY is not configured. Using ANON KEY fallback.');
+  console.error('[FATAL] SUPABASE_SERVICE_KEY is required. Server will not start without a service role key.');
+  process.exit(1);
 }
 
-// 初始化 Supabase 客户端
+// 初始化 Supabase 客户端（仅使用 service_role key，禁止 anon key 兜底）
 const supabase = createClient(
   SUPABASE_URL,
-  SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || ''
+  SUPABASE_SERVICE_KEY
 );
 
 // ===================== 输入校验 =====================
