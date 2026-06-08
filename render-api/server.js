@@ -180,7 +180,20 @@ app.use(function corsErrorHandler(err, req, res, next) {
   next(err);
 });
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '1mb' }));
+
+// 安全响应头 + CSRF 防护 + 访问记录（放在静态文件之前，确保 HTML 也带上安全头）
+app.use((req, res, next) => {
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; media-src 'self' https:; connect-src 'self' https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+  res.removeHeader('X-Powered-By');
+  next();
+});
 
 // 托管前端静态文件（index.html, admin.html, js/ 等）
 app.use(express.static(path.join(__dirname, '..'), {
@@ -191,17 +204,6 @@ app.use(express.static(path.join(__dirname, '..'), {
     }
   }
 }));
-
-// 安全响应头 + CSRF 防护 + 访问记录
-app.use((req, res, next) => {
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; media-src 'self' https:; connect-src 'self' https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
-  res.removeHeader('X-Powered-By');
 
   // 访问记录（只记录 GET / 和 /health，避免每个请求都写数据库）
   const ip = getRealIp(req);
@@ -336,19 +338,20 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
     return res.status(400).json({ error: '密码格式不正确' });
   }
   
-  if (username !== ADMIN_USERNAME) {
-    return res.status(401).json({ error: '账号不存在' });
-  }
-  
-  if (!ADMIN_PASSWORD) {
-    return res.status(500).json({ error: '服务器未配置管理员密码，请联系管理员' });
+  // 防止用户名枚举：无论用户名是否存在，都进行密码比对，返回统一错误
+  if (username !== ADMIN_USERNAME || !ADMIN_PASSWORD) {
+    // 用户名不存在或密码未配置 → 执行虚拟比对防时序
+    const dummyPw = Buffer.from('dummy');
+    const dummyAdmin = Buffer.from('dummy');
+    crypto.timingSafeEqual(dummyPw, dummyAdmin);
+    return res.status(401).json({ error: '账号或密码错误' });
   }
   // 使用 timingSafeEqual 防止时序侧信道攻击
   const pwBuf = Buffer.from(password);
   const adminBuf = Buffer.from(ADMIN_PASSWORD);
   const pwMatch = pwBuf.length === adminBuf.length && crypto.timingSafeEqual(pwBuf, adminBuf);
   if (!pwMatch) {
-    return res.status(401).json({ error: '密码错误' });
+    return res.status(401).json({ error: '账号或密码错误' });
   }
   
   const token = signToken();
