@@ -261,11 +261,33 @@ function rateLimit(windowMs, maxRequests) {
   };
 }
 
-// ===================== Token 管理 =====================
-const adminTokens = new Map(); // token -> { expiresAt }
+// ===================== Token 管理（无状态签名令牌，服务重启不掉登录） =====================
+const adminTokens = new Map(); // token -> { expiresAt }（仅用于延长有效期跟踪）
 
-function generateToken() {
-  return crypto.randomBytes(32).toString('hex');
+// 生成无状态签名 token：base64(expiry) + '.' + HMAC
+function signToken() {
+  const payload = JSON.stringify({ exp: Date.now() + TOKEN_EXPIRY_MS, user: ADMIN_USERNAME });
+  const b64 = Buffer.from(payload).toString('base64url');
+  const sig = crypto.createHmac('sha256', API_SECRET).update(b64).digest('base64url');
+  return b64 + '.' + sig;
+}
+
+// 验证无状态 token（优先于 Map 检查）
+function verifySignedToken(token) {
+  try {
+    var parts = token.split('.');
+    if (parts.length !== 2) return null;
+    var b64 = parts[0], sig = parts[1];
+    var expectedSig = crypto.createHmac('sha256', API_SECRET).update(b64).digest('base64url');
+    // timingSafeEqual 防止时序攻击
+    var sigBuf = Buffer.from(sig);
+    var expBuf = Buffer.from(expectedSig);
+    if (sigBuf.length !== expBuf.length) return null;
+    if (!crypto.timingSafeEqual(sigBuf, expBuf)) return null;
+    var payload = JSON.parse(Buffer.from(b64, 'base64url').toString());
+    if (Date.now() > payload.exp) return null;
+    return payload;
+  } catch(e) { return null; }
 }
 
 function verifyToken(req, res, next) {
@@ -276,6 +298,14 @@ function verifyToken(req, res, next) {
     return res.status(401).json({ error: '未提供认证令牌' });
   }
 
+  // 优先验证无状态签名（服务重启后仍然有效）
+  var payload = verifySignedToken(token);
+  if (payload) {
+    req.adminToken = token;
+    return next();
+  }
+
+  // 回退到内存 Map（兼容旧 token）
   const session = adminTokens.get(token);
   if (!session || Date.now() > session.expiresAt) {
     adminTokens.delete(token);
@@ -321,7 +351,7 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
     return res.status(401).json({ error: '密码错误' });
   }
   
-  const token = generateToken();
+  const token = signToken();
   adminTokens.set(token, { expiresAt: Date.now() + TOKEN_EXPIRY_MS });
   
   return res.json({ ok: true, token, username: ADMIN_USERNAME });
