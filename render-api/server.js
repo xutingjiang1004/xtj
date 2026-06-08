@@ -428,6 +428,16 @@ app.delete('/admin/comment/:id', verifyToken, async (req, res) => {
 });
 
 // ===================== 照片管理 ======================
+app.get('/admin/photos', verifyToken, async (req, res) => {
+  const { data, error } = await supabase.from('posts')
+    .select('id, user_name, content, media_url, actor_key, created_at')
+    .eq('media_type', '__photo_wall__')
+    .order('created_at', { ascending: false })
+    .limit(500);
+  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  return res.json({ data });
+});
+
 app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
   const { error } = await supabase.from('posts').delete().eq('id', id);
