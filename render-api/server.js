@@ -881,7 +881,8 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
         .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
         .neq('media_type', '__photo_wall__').neq('media_type', '__ann__')
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
-        .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER),
+        .neq('media_type', AUTH_MARKER).neq('media_type', ADMIN_AUTH_MARKER)
+        .neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER),
       buildSummaryQuery('posts', 'id', 'media_type', AUTH_MARKER, 'created_at'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
