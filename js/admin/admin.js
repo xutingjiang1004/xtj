@@ -10,6 +10,7 @@
     var SESSION_KEY = "xtj_admin_session";
     var TOKEN_KEY = "xtj_admin_token";
     var TAB_KEY = "xtj_admin_tab";
+    var ADMIN = '';
 
     // ===================== API_BASE 安全检测 =====================
     // 取全局配置，若未配置则拒绝进入管理后台
@@ -333,6 +334,7 @@
                 return;
             }
             setToken(data.token);
+            ADMIN = name;
             await initAdminClient();
         } catch(e) {
             err.textContent = 'API 连接失败，请检查网络';
