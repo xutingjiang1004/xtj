@@ -2,7 +2,12 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -15,7 +20,14 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ithowxqignlhkwaykglt.s
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 
 // Allowed frontend origins.
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://xtj.onrender.com').split(',').map(s => s.trim());
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+// 服务器自身域名（用于 CORS 自动检测同域请求）
+const SERVER_HOSTNAME = process.env.SERVER_HOSTNAME || process.env.RENDER_EXTERNAL_HOSTNAME || '';
+if (ALLOWED_ORIGINS.length === 0) {
+  // 未配置时允许所有同源请求（自动检测当前部署域名）
+  console.log('[CONFIG] ALLOWED_ORIGINS not set, will auto-detect from request origin');
+  if (SERVER_HOSTNAME) console.log('[CONFIG] Server hostname: ' + SERVER_HOSTNAME);
+}
 
 if (!ADMIN_PASSWORD) {
   console.warn('[WARN] ADMIN_PASSWORD is not configured.');
@@ -128,15 +140,26 @@ function validateDurationHours(value) {
 }
 
 // ===================== 中间件 ======================
-// CORS 限制：仅允许指定域名
+// CORS 限制：自动检测 + 白名单
 app.use(cors({
   origin: function (origin, callback) {
     // 允许无 origin 的请求（如 curl、Postman、同源请求）
     if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) {
+    // 检查白名单
+    if (ALLOWED_ORIGINS.length > 0 && ALLOWED_ORIGINS.includes(origin)) {
       return callback(null, true);
     }
-    // 返回 403 而非 500（错误由后续错误处理器记录日志并返回 403）
+    // 自动检测模式：检查是否匹配服务器域名或 Render 域名
+    if (ALLOWED_ORIGINS.length === 0) {
+      try {
+        var originHost = new URL(origin).hostname;
+        // 允许同域名（通过 SERVER_HOSTNAME 或 Render 环境变量）、Render 域名、本地开发域名
+        if (originHost === SERVER_HOSTNAME || originHost.endsWith('.onrender.com') || originHost === 'localhost' || originHost === '127.0.0.1') {
+          return callback(null, true);
+        }
+      } catch(e) {}
+    }
+    // 返回 403（错误由后续错误处理器记录日志并返回 403）
     var err = new Error('不允许的来源');
     err.status = 403;
     callback(err);
@@ -157,6 +180,16 @@ app.use(function corsErrorHandler(err, req, res, next) {
 });
 
 app.use(express.json({ limit: '10mb' }));
+
+// 托管前端静态文件（index.html, admin.html, js/ 等）
+app.use(express.static(path.join(__dirname, '..'), {
+  maxAge: '1h',
+  setHeaders: function(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  }
+}));
 
 // 安全响应头 + CSRF 防护 + 访问记录
 app.use((req, res, next) => {
