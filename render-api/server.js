@@ -1223,7 +1223,7 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
     if (existing) {
       var info = {};
       try { info = JSON.parse(existing.content || '{}'); } catch(e) {}
-      info.last_login = now;
+      info.last_visit = now;
       await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existing.id);
     }
 
@@ -1272,7 +1272,7 @@ app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res
       }
     });
 
-    // 构建用户信息映射（保留最早的 reg_time，只覆盖 last_login）
+    // 构建用户信息映射（保留最早的 reg_time，覆盖最新的 last_login / last_visit）
     const userInfoMap = {};
     (userInfos || []).forEach(ui => {
       try {
@@ -1280,6 +1280,9 @@ app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res
         if (userInfoMap[ui.user_name]) {
           if (info.last_login && (!userInfoMap[ui.user_name].last_login || info.last_login > userInfoMap[ui.user_name].last_login)) {
             userInfoMap[ui.user_name].last_login = info.last_login;
+          }
+          if (info.last_visit && (!userInfoMap[ui.user_name].last_visit || info.last_visit > userInfoMap[ui.user_name].last_visit)) {
+            userInfoMap[ui.user_name].last_visit = info.last_visit;
           }
           if (info.reg_time && (!userInfoMap[ui.user_name].reg_time || info.reg_time < userInfoMap[ui.user_name].reg_time)) {
             userInfoMap[ui.user_name].reg_time = info.reg_time;
@@ -1298,7 +1301,7 @@ app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res
         user_name: name,
         total_visits: v.total,
         daily_visits: v.daily,
-        last_visit: v.last_visit || info.last_login || null,
+        last_visit: v.last_visit || info.last_visit || info.last_login || null,
         last_login: info.last_login || null,
         reg_time: info.reg_time || null
       };

@@ -631,7 +631,7 @@
                 '</div>',
                 '<div class="user-card-stats"><div class="user-stat-item"><div class="num">' + stats.posts + '</div><div class="lbl">帖子</div></div><div class="user-stat-item"><div class="num">' + stats.likes + '</div><div class="lbl">点赞</div></div><div class="user-stat-item"><div class="num">' + stats.comments + '</div><div class="lbl">评论</div></div></div>',
                 '<div class="user-card-meta">',
-                '<div class="meta-row"><span class="label">最近登录</span><span class="value">' + escapeHtml(info.last_login ? formatTime(info.last_login) : '-') + '</span></div>',
+                '<div class="meta-row"><span class="label">最近登录</span><span class="value">' + escapeHtml((info.last_login || info.last_visit) ? formatTime(info.last_login || info.last_visit) : '-') + '</span></div>',
                 '<div class="meta-row"><span class="label">注册时间</span><span class="value">' + escapeHtml(info.reg_time ? formatTime(info.reg_time) : '-') + '</span></div>',
                 '<div class="meta-row"><span class="label">当前状态</span><span class="value">' + escapeHtml(activeRecord ? activeText : '可执行操作') + '</span></div>',
                 '</div>',
@@ -760,8 +760,8 @@
                 return pb - pa;
             }
             if (userSortBy === 'login') {
-                var la = a.info && a.info.last_login ? new Date(a.info.last_login).getTime() : 0;
-                var lb = b.info && b.info.last_login ? new Date(b.info.last_login).getTime() : 0;
+                var la = a.info && (a.info.last_login || a.info.last_visit) ? new Date(a.info.last_login || a.info.last_visit).getTime() : 0;
+                var lb = b.info && (b.info.last_login || b.info.last_visit) ? new Date(b.info.last_login || b.info.last_visit).getTime() : 0;
                 return lb - la;
             }
             var ra = a.info && a.info.reg_time ? new Date(a.info.reg_time).getTime() : 0;
@@ -779,7 +779,7 @@
                 var lc = allLikes.filter(function(l) { return l.user_name === u.name; }).length;
                 var cc = allComments.filter(function(c) { return c.user_name === u.name; }).length;
                 var regTime = u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-';
-                var lastLogin = u.info && u.info.last_login ? formatTime(u.info.last_login) : '-';
+                var lastLogin = u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-';
                 var isAdmin = u.name === ADMIN;
                 var isBanned = bansData.some(function(b) { return b.user_name === u.name && b.is_active; });
                 var isMuted = mutesData.some(function(m) { return m.user_name === u.name && m.is_active; });
@@ -2097,7 +2097,7 @@
         filtered.sort(function(a, b) {
             if (userSortBy === 'posts') return getUserActivityStats(b.name).posts - getUserActivityStats(a.name).posts;
             if (userSortBy === 'login') {
-                return (b.info && b.info.last_login ? new Date(b.info.last_login).getTime() : 0) - (a.info && a.info.last_login ? new Date(a.info.last_login).getTime() : 0);
+                return ((b.info && (b.info.last_login || b.info.last_visit)) ? new Date(b.info.last_login || b.info.last_visit).getTime() : 0) - ((a.info && (a.info.last_login || a.info.last_visit)) ? new Date(a.info.last_login || a.info.last_visit).getTime() : 0);
             }
             return (b.info && b.info.reg_time ? new Date(b.info.reg_time).getTime() : 0) - (a.info && a.info.reg_time ? new Date(a.info.reg_time).getTime() : 0);
         });
@@ -2112,7 +2112,7 @@
                 var flags = getUserStateFlags(u.name);
                 var safeName = u.name.replace(/'/g, "\\'");
                 var regTime = u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-';
-                var lastLogin = u.info && u.info.last_login ? formatTime(u.info.last_login) : '-';
+                var lastLogin = u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-';
                 h += '<div class="user-card' + (flags.isBanned ? ' is-banned' : '') + (flags.isMuted ? ' is-muted' : '') + (flags.isAdmin ? ' is-admin' : '') + '">';
                 h += '<div class="user-card-head"><div class="user-avatar' + (flags.isAdmin ? ' admin-avatar' : (flags.isBanned ? ' banned-avatar' : (flags.isMuted ? ' muted-avatar' : ''))) + '">' + escapeHtml((u.name || '?').slice(0, 1).toUpperCase()) + '</div><div class="user-card-name"><strong>' + escapeHtml(u.name) + '</strong><div class="user-tags">' + buildUserTagMarkup(flags) + '</div></div></div>';
                 h += '<div class="user-card-stats"><div class="user-stat-item"><div class="num">' + stats.posts + '</div><div class="lbl">帖子</div></div><div class="user-stat-item"><div class="num">' + stats.likes + '</div><div class="lbl">点赞</div></div><div class="user-stat-item"><div class="num">' + stats.comments + '</div><div class="lbl">评论</div></div></div>';
@@ -2292,7 +2292,7 @@
         }
         filtered.sort(function(a, b) {
             if (userSortBy === 'posts') return getUserActivityStats(b.name).posts - getUserActivityStats(a.name).posts;
-            if (userSortBy === 'login') return (b.info && b.info.last_login ? new Date(b.info.last_login).getTime() : 0) - (a.info && a.info.last_login ? new Date(a.info.last_login).getTime() : 0);
+            if (userSortBy === 'login') return ((b.info && (b.info.last_login || b.info.last_visit)) ? new Date(b.info.last_login || b.info.last_visit).getTime() : 0) - ((a.info && (a.info.last_login || a.info.last_visit)) ? new Date(a.info.last_login || a.info.last_visit).getTime() : 0);
             return (b.info && b.info.reg_time ? new Date(b.info.reg_time).getTime() : 0) - (a.info && a.info.reg_time ? new Date(a.info.reg_time).getTime() : 0);
         });
 
@@ -2313,7 +2313,7 @@
                     title: escapeHtml(u.name),
                     tags: '<div class="user-tags">' + window.buildUserTagMarkup(flags) + '</div>',
                     metrics: '<span>帖子 ' + stats.posts + '</span><span>点赞 ' + stats.likes + '</span><span>评论 ' + stats.comments + '</span>',
-                    meta: '<span>注册时间：' + escapeHtml(u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-') + '</span><span>最近登录：' + escapeHtml(u.info && u.info.last_login ? formatTime(u.info.last_login) : '-') + '</span>',
+                    meta: '<span>注册时间：' + escapeHtml(u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-') + '</span><span>最近登录：' + escapeHtml(u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-') + '</span>',
                     badge: flags.isBanned ? '<span class="badge badge-red">封禁中</span>' : (flags.isMuted ? '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">禁言中</span>' : '<span class="badge badge-green">正常</span>'),
                     actions: actions
                 });
