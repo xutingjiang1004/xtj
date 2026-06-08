@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -878,6 +878,25 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (e.key === 'Enter') document.getElementById('loginPwInp').focus();
             });
 
+            // API 请求辅助函数（用于管理员登录等需要后端 API 的场景）
+            async function apiCall(method, path, body) {
+                if (!API_BASE) {
+                    throw new Error('API_BASE 未配置');
+                }
+                var opts = {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' }
+                };
+                if (body) opts.body = JSON.stringify(body);
+                var res = await fetch(API_BASE + path, opts);
+                var data = await res.json();
+                if (!res.ok) {
+                    var errMsg = (data && data.error) || ('请求失败 (' + res.status + ')');
+                    throw new Error(errMsg);
+                }
+                return data;
+            }
+
             async function doLogin() {
                 const name = document.getElementById("loginNickInp").value.trim();
                 const pw = document.getElementById("loginPwInp").value;
@@ -890,48 +909,24 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 try {
                     if (name === ADMIN_NAME) {
-                        // 管理员通过 Supabase 中的 admin_auth 记录验证（隔离存储，不暴露在公开帖子查询中）
-                        let authRec = null;
-                        try {
-                            var adminAuthRes = await sb.from("posts")
-                                .select("id, user_name, media_url")
-                                .eq("user_name", name)
-                                .eq("media_type", ADMIN_AUTH_MARKER)
-                                .maybeSingle();
-                            if (adminAuthRes.data) authRec = adminAuthRes.data;
-                        } catch(e) {}
-                        if (!authRec) {
-                            try {
-                                const pwHash = await hashPasswordWithSalt(pw, name);
-                                await sb.from("posts").insert({
-                                    user_name: name,
-                                    content: ADMIN_AUTH_MARKER,
-                                    media_url: pwHash,
-                                    media_type: ADMIN_AUTH_MARKER,
-                                    actor_key: ADMIN_AUTH_MARKER
-                                });
-                            } catch (authErr) {
-                                showToast("管理员初始化失败: " + (authErr.message || "未知错误"));
-                                btn.disabled = false; btn.textContent = "登录";
-                                return;
-                            }
-                            try {
-                                var retryRes = await sb.from("posts")
-                                    .select("id, user_name, media_url")
-                                    .eq("user_name", name)
-                                    .eq("media_type", ADMIN_AUTH_MARKER)
-                                    .maybeSingle();
-                                if (retryRes.data) authRec = retryRes.data;
-                            } catch(e) {}
-                            if (!authRec) {
-                                showToast("管理员账号初始化失败，请重试");
-                                btn.disabled = false; btn.textContent = "登录";
-                                return;
-                            }
+                        // 安全：管理员登录必须通过后端 API，禁止直连 Supabase
+                        if (typeof API_BASE === 'undefined' || !API_BASE) {
+                            showToast("管理员登录需要后端 API 服务，请确保服务器已配置");
+                            btn.disabled = false; btn.textContent = "登录";
+                            return;
                         }
-                        var pwOk = await verifyPassword(pw, authRec.media_url, name);
-                        if (!pwOk) {
-                            showToast("密码错误");
+                        try {
+                            var loginRes = await apiCall('POST', '/admin/login', {
+                                username: name,
+                                password: pw
+                            });
+                            if (!loginRes || !loginRes.ok) {
+                                showToast((loginRes && loginRes.error) || "管理员登录失败");
+                                btn.disabled = false; btn.textContent = "登录";
+                                return;
+                            }
+                        } catch (apiErr) {
+                            showToast("管理员登录失败: 无法连接后端 API");
                             btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
