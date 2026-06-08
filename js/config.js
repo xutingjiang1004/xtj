@@ -12,9 +12,8 @@
  */
 (function() {
     window.XTJ_CONFIG = {
-        // 后端 API 地址，例如 "https://your-app.onrender.com"
-        // 如果为空，管理后台将拒绝进入
-        API_BASE: "",
+        // 后端 API 地址
+        API_BASE: "https://xtj.onrender.com",
         
         // 以下字段仅用于前端正常功能，不会暴露敏感权限
         SUPABASE_URL: "https://ithowxqignlhkwaykglt.supabase.co",
