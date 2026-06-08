@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -142,7 +142,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
             return postVisibilityObserver;
         }
-        const CACHE_KEY = "xtj_feed_cache_v2";
+        const CACHE_KEY = "xtj_feed_cache_v3";
         const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
 
         const POST_METADATA_MARKER = "__xtj_post_v2__";
@@ -360,7 +360,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             return sortPosts(normalizePosts(posts).filter(function(post) {
                 if (!post) return false;
-                if (post.media_type === AUTH_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__visit__" || post.media_type === "__attack__" || post.media_type === "__user_visit__" || post.media_type === "__ann__") return false;
+                if (post.media_type === AUTH_MARKER || post.media_type === ADMIN_AUTH_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__visit__" || post.media_type === "__attack__" || post.media_type === "__user_visit__" || post.media_type === "__ann__") return false;
                 if (!post.user_name) return false;
                 if (!canViewPost(post)) return false;
                 if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
@@ -2921,7 +2921,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?532鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
             async function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.user_name);
+                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.user_name);
                 feedVisiblePostsCache = visiblePosts; // 缓存
                 feedMapsCache = buildPostMaps(comments, likes); // 缓存
                 document.getElementById("sPosts").textContent = visiblePosts.length;
@@ -4247,7 +4247,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
                     statAllPosts = normalizePosts(results[0].data || []).filter(function(post) {
-                        return post.media_type !== AUTH_MARKER && post.media_type !== DM_MARKER && post.media_type !== "__photo_wall__" && canViewPost(post);
+                        return post.media_type !== AUTH_MARKER && post.media_type !== ADMIN_AUTH_MARKER && post.media_type !== DM_MARKER && post.media_type !== REPORT_MARKER && post.media_type !== "__avatar__" && post.media_type !== "__user_info__" && post.media_type !== "__photo_wall__" && post.media_type !== "__visit__" && post.media_type !== "__attack__" && post.media_type !== "__ann__" && canViewPost(post);
                     });
                     statAllComments = results[1].data || [];
                     statAllLikes = results[2].data || [];
