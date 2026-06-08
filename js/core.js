@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -143,7 +143,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             return postVisibilityObserver;
         }
         const CACHE_KEY = "xtj_feed_cache_v2";
-        const CACHE_DURATION = 5 * 60 * 1000; // 缂傛挸锟?鍒嗭拷锟?
+        const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
 
         const POST_METADATA_MARKER = "__xtj_post_v2__";
         const POST_META_DEFAULTS = {
@@ -360,7 +360,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             return sortPosts(normalizePosts(posts).filter(function(post) {
                 if (!post) return false;
-                if (post.media_type === AUTH_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__ann__") return false;
+                if (post.media_type === AUTH_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__visit__" || post.media_type === "__attack__" || post.media_type === "__user_visit__" || post.media_type === "__ann__") return false;
                 if (!post.user_name) return false;
                 if (!canViewPost(post)) return false;
                 if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
@@ -407,7 +407,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         }
         window.renderFilterSummary = renderFilterSummary;
 
-        // ========== 閻樿鎷烽敓鐣岊吀閻炲棗鎳￠崥宥団敄闂达紙鍚戝悗鍏硷拷顔愰敓?==========
+        // ========== 应用状态（向后兼容） ==========
         window.appState = {
             get currentUser() { return window.currentUser; },
             set currentUser(v) { window.currentUser = v; },
@@ -450,10 +450,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 overlay._closeTimer = null;
             }
             
-            // FLIP Animation: Step 1 - First (锟斤拷录鎸夐挳浣嶇疆)
+            // FLIP Animation: Step 1 - First (记录按钮位置)
             var origin = window._confirmOrigin;
             
-            // FLIP Animation: Step 2 - Last (设置鏈拷缁堢姸锟?
+            // FLIP Animation: Step 2 - Last (设置最终状态)
             overlay.classList.remove('closing');
             overlay.classList.add('active');
             var okBtn = document.getElementById('ppConfirmOkBtn');
@@ -468,7 +468,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             
             void dialog?.offsetHeight;
             
-            // FLIP Animation: Step 3 - Invert (鐠侊紕鐣诲顔肩磽楠炶泛寮介崥鎴濆綁锟?
+            // FLIP Animation: Step 3 - Invert (计算反转偏移)
             if (origin && dialog) {
                 var dialogRect = dialog.getBoundingClientRect();
                 var dx = origin.btnCx - dialogRect.left - dialogRect.width / 2;
@@ -493,7 +493,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             
             void dialog?.offsetHeight;
             
-            // FLIP Animation: Step 4 - Play (鎾斁鍔ㄧ敾)
+            // FLIP Animation: Step 4 - Play (播放动画)
             if (origin && dialog) {
                 dialog.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease-out';
                 dialog.style.transform = 'translate(0, 0) scale(1)';
@@ -518,10 +518,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     if (okBtn) okBtn.disabled = true;
                     overlay.classList.add('closing');
                     
-                    // FLIP Animation for Close: 鑾峰彇閿熸枻鎷峰墠瀵湱鐛ユ担宥囷拷?
+                    // FLIP Animation for Close: 获取删除按钮前位置
                     var dialogRect = dialog.getBoundingClientRect();
                     
-                    // 鑾峰彇鍒犻敓鏂ゆ嫹鎸夐挳閿熸枻鎷峰墠娴ｅ秶锟?
+                    // 获取删除按钮前位置
                     var deleteBtn = document.getElementById('ppDeleteBtn');
                     var btnRect = deleteBtn ? deleteBtn.getBoundingClientRect() : null;
                     
@@ -530,7 +530,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var targetScale = o.scale || 0.3;
                     
                     if (btnRect) {
-                        // 浣跨敤鎸夐挳锟斤拷前浣嶇疆锟斤紕鐣婚惄顔斤拷锟藉彉鎹?
+                        // 使用按钮前位置，计算变换
                         targetDx = btnRect.left + btnRect.width / 2 - dialogRect.left - dialogRect.width / 2;
                         targetDy = btnRect.top + btnRect.height / 2 - dialogRect.top - dialogRect.height / 2;
                         
@@ -539,13 +539,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         targetScale = btnSize / dialogSize * 0.6;
                     }
                     
-                    // Step 3 - Invert: 娣囶喗绻冪€垫柨缍嬮崜宥囧Ц锟?
+                    // Step 3 - Invert: 计算飞回偏移
                     dialog.style.transition = 'none';
                     dialog.style.transform = 'translate(0, 0) scale(1)';
                     dialog.style.opacity = '1';
                     void dialog.offsetHeight;
                     
-                    // Step 4 - Play: 鎾斁椋炲洖鍔拷??
+                    // Step 4 - Play: 播放飞回动画
                     dialog.style.transition = 'transform 0.3s cubic-bezier(0.55, 0, 1, 0.45), opacity 0.2s ease-in';
                     dialog.style.transform = 'translate(' + targetDx + 'px, ' + targetDy + 'px) scale(' + targetScale + ')';
                     dialog.style.opacity = '0';
@@ -1841,6 +1841,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             .neq('media_type', '__avatar__')
                             .neq('media_type', '__user_info__')
                             .neq('media_type', '__photo_wall__')
+                            .neq('media_type', '__visit__')
+                            .neq('media_type', '__attack__')
                             .neq('media_type', '__ann__'),
                         sb.from('posts')
                             .select('id, content, created_at, media_type')
@@ -2759,7 +2761,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中..', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }).limit(500),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false }).limit(500),
                         sb.from("comments").select("*").order("created_at").limit(2000),
                         sb.from("likes").select("*").limit(3000)
                     ]);
@@ -2816,7 +2818,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 
                 const feed = document.getElementById('feed');
                 if (!feedVisiblePostsCache) {
-                    feedVisiblePostsCache = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__ann__' && p.user_name);
+                    feedVisiblePostsCache = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.user_name);
                 }
                 const visiblePosts = feedVisiblePostsCache;
                 
@@ -2919,7 +2921,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?532鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
             async function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__ann__' && p.user_name);
+                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.user_name);
                 feedVisiblePostsCache = visiblePosts; // 缓存
                 feedMapsCache = buildPostMaps(comments, likes); // 缓存
                 document.getElementById("sPosts").textContent = visiblePosts.length;
@@ -3818,7 +3820,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             async function syncFeedDataInBackground() {
                 var requestId = ++feedLoadRequestId;
                 try {
-                    var postRes = await sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false });
+                    var postRes = await sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false });
                     if (requestId !== feedLoadRequestId) return false;
                     if (postRes.error) throw postRes.error;
                     feedAllPosts = normalizePosts(postRes.data || []);
@@ -4083,7 +4085,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 try {
                     var results = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
                     ]);
@@ -4240,7 +4242,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     var results = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
@@ -4268,7 +4270,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
@@ -4305,7 +4307,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
@@ -4823,7 +4825,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var type = statCurrentType;
                 if (!type) return;
                 Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
@@ -7048,6 +7050,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         .select('id, user_name, content, media_url, media_type, created_at')
                         .neq('media_type', '__avatar__')
                         .neq('media_type', '__user_info__')
+                        .neq('media_type', '__visit__')
+                        .neq('media_type', '__attack__')
                         .neq('media_type', '__ann__')
                         .neq('media_type', '__photo_wall__')
                         .neq('media_type', '__report__')
@@ -7877,7 +7881,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载中..', '加载中..', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
@@ -7962,7 +7966,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     setTimeout(function() { resolve(null); }, timeoutMs);
                 });
                 var request = Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
