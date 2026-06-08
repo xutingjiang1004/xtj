@@ -14,7 +14,7 @@
     // 自动检测：如果前端页面和后端 API 在同一个域名，直接用当前域名
     var hostname = window.location.hostname;
     var isRender = hostname.endsWith('.onrender.com') || hostname === 'localhost' || hostname === '127.0.0.1';
-    var defaultApiBase = isRender ? window.location.origin : "https://xtj-1.onrender.com";
+    var defaultApiBase = isRender ? window.location.origin : "https://xtj.onrender.com";
 
     window.XTJ_CONFIG = {
         // 后端 API 地址（自动检测同域部署，也可手动覆盖）
