@@ -154,8 +154,8 @@ app.use(cors({
     if (ALLOWED_ORIGINS.length === 0) {
       try {
         var originHost = new URL(origin).hostname;
-        // 允许同域名（通过 SERVER_HOSTNAME 或 Render 环境变量）、Render 域名、本地开发域名
-        if (originHost === SERVER_HOSTNAME || originHost.endsWith('.onrender.com') || originHost === 'localhost' || originHost === '127.0.0.1') {
+        // 允许同域名（通过 SERVER_HOSTNAME 或 Render 环境变量）、Render/ Vercel 域名、本地开发域名
+        if (originHost === SERVER_HOSTNAME || originHost.endsWith('.onrender.com') || originHost.endsWith('.vercel.app') || originHost === 'localhost' || originHost === '127.0.0.1') {
           return callback(null, true);
         }
       } catch(e) {}
