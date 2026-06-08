@@ -16,4 +16,24 @@ async function queryTable(name, limit = 5) {
             if (data.length > 0) {
                 console.log('字段:', Object.keys(data[0]).join(', '));
                 data.forEach((row, i) => {
-                    console
+                    console.log(`[${i+1}]`, JSON.stringify(row, null, 2));
+                });
+            }
+        } else {
+            const text = await res.text();
+            console.log(`\n=== ${name}: HTTP ${res.status} - ${text.substring(0, 200)}`);
+        }
+    } catch (e) {
+        console.log(`\n=== ${name}: 查询失败 - ${e.message}`);
+    }
+}
+
+async function main() {
+    console.log('=== 查询 bans/mutes/blacklist 数据内容 ===');
+    await queryTable('bans', 10);
+    await queryTable('mutes', 10);
+    await queryTable('blacklist', 10);
+    console.log('\n=== 查询完成 ===');
+}
+
+main().catch(console.error);
