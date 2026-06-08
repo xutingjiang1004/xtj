@@ -53,6 +53,7 @@ const DM_MARKER = '__dm__';
 const AUTH_MARKER = '__auth__';
 const VISIT_MARKER = '__visit__';
 const ATTACK_MARKER = '__attack__';
+const ADMIN_AUTH_MARKER = '__admin_auth__';
 
 // 统计数据内存缓存（减少数据库查询）
 let statsCache = { data: null, ts: 0 };
