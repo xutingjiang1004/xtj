@@ -819,29 +819,11 @@
         if (isNaN(hours) || hours < 0) { showToast('请输入有效的小时数', 'error'); return; }
         showConfirm('禁言用户', '确认禁言 ' + userName + (hours > 0 ? ' ' + hours + '小时' : ' 永久') + '？', '确认禁言', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('POST', '/admin/mute', {
+                await apiCall('POST', '/admin/mute', {
                         user_name: userName,
                         duration_hours: hours,
                         reason: '管理员操作'
                     });
-                } else {
-                    var expiresAt = null;
-                    if (hours > 0) {
-                        var d = new Date();
-                        d.setHours(d.getHours() + hours);
-                        expiresAt = d.toISOString();
-                    }
-                    var { error } = await sb.from('mutes').insert([{
-                        user_name: userName,
-                        reason: '管理员操作',
-                        duration_hours: hours,
-                        muted_by: ADMIN,
-                        expires_at: expiresAt,
-                        is_active: true
-                    }]);
-                    if (error) { showToast('禁言失败: ' + error.message, 'error'); return; }
-                }
                 await loadMutesData();
                 showToast('已禁言 ' + userName, 'success');
             } catch(e) { showToast('禁言失败: ' + e.message, 'error'); }
@@ -855,54 +837,11 @@
         if (isNaN(hours) || hours < 0) { showToast('请输入有效的小时数', 'error'); return; }
         showConfirm('拉黑封禁', '确认拉黑封禁 ' + userName + (hours > 0 ? ' ' + hours + '小时' : ' 永久') + '？', '确认拉黑封禁', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('POST', '/admin/ban', {
-                        user_name: userName,
-                        duration_hours: hours,
-                        reason: '管理员操作'
-                    });
-                } else {
-                    var expiresAt = null;
-                    if (hours > 0) {
-                        var d = new Date();
-                        d.setHours(d.getHours() + hours);
-                        expiresAt = d.toISOString();
-                    }
-                    var { data: existingBans, error: findErr } = await sb.from('bans').select('id, is_active').eq('user_name', userName);
-                    if (findErr) { showToast('查询失败: ' + findErr.message, 'error'); return; }
-                    if (existingBans && existingBans.length) {
-                        var activeBan = existingBans.find(function(b) { return b.is_active; });
-                        if (activeBan) { showToast('该用户已被拉黑封禁', 'error'); return; }
-                        var { error: updErr } = await sb.from('bans').update({
-                            ban_reason: '管理员操作', ban_duration_hours: hours,
-                            ban_type: hours > 0 ? 'temporary' : 'permanent',
-                            banned_by: ADMIN, expires_at: expiresAt, is_active: true,
-                            banned_at: new Date().toISOString()
-                        }).eq('id', existingBans[0].id);
-                        if (updErr) { showToast('拉黑封禁失败: ' + updErr.message, 'error'); return; }
-                    } else {
-                        var { error } = await sb.from('bans').insert([{
-                            user_name: userName, ban_reason: '管理员操作',
-                            ban_duration_hours: hours,
-                            ban_type: hours > 0 ? 'temporary' : 'permanent',
-                            banned_by: ADMIN, expires_at: expiresAt, is_active: true,
-                            banned_at: new Date().toISOString()
-                        }]);
-                        if (error) {
-                            if (error.code === '23505') {
-                                var { error: updErr2 } = await sb.from('bans').update({
-                                    ban_reason: '管理员操作', ban_duration_hours: hours,
-                                    ban_type: hours > 0 ? 'temporary' : 'permanent',
-                                    banned_by: ADMIN, expires_at: expiresAt, is_active: true,
-                                    banned_at: new Date().toISOString()
-                                }).eq('user_name', userName);
-                                if (updErr2) { showToast('拉黑封禁失败: ' + updErr2.message, 'error'); return; }
-                            } else {
-                                showToast('拉黑封禁失败: ' + error.message, 'error'); return;
-                            }
-                        }
-                    }
-                }
+                await apiCall('POST', '/admin/ban', {
+                    user_name: userName,
+                    duration_hours: hours,
+                    reason: '管理员操作'
+                });
                 await loadBansData();
                 showToast('已拉黑封禁 ' + userName, 'success');
             } catch(e) { showToast('拉黑封禁失败: ' + e.message, 'error'); }
@@ -1006,17 +945,7 @@
         if (!title && !content) { showToast('请至少填写标题或内容', 'error'); return; }
         
         try {
-            if (API_BASE && getToken()) {
-                await apiCall('POST', '/admin/announcement', { title: title, content: content });
-            } else {
-                var storeData = JSON.stringify({ title: title, content: content });
-                var res = await sb.from('posts').insert([{
-                    user_name: ADMIN, content: storeData,
-                    media_type: ANN_MARKER, media_url: '',
-                    actor_key: 'admin_' + Date.now()
-                }]);
-                if (res.error) { showToast('发布失败: ' + res.error.message, 'error'); return; }
-            }
+            await apiCall('POST', '/admin/announcement', { title: title, content: content });
             titleInp.value = '';
             contentInp.value = '';
             await loadAllData(true);
@@ -1525,9 +1454,6 @@
             if (API_BASE && getToken()) {
                 var data = await apiCall('GET', '/admin/blacklist');
                 blacklistData = data.data || [];
-            } else {
-                var res = await sb.from('blacklist').select('*').order('created_at', { ascending: false }).limit(500);
-                blacklistData = res.data || [];
             }
         } catch(e) { blacklistData = []; }
     }
@@ -1724,7 +1650,7 @@
             }
 
             if (!summary) {
-                el.innerHTML = '<div class="empty-state"><div class="icon">📊</div><div class="text">统计数据加载失败：无法连接后端 API 或 Supabase</div></div>';
+                el.innerHTML = '<div class="empty-state"><div class="icon">📊</div><div class="text">统计数据加载失败：无法连接后端 API</div></div>';
                 return;
             }
 
@@ -1858,7 +1784,7 @@
             }
 
             if (summary.cached_at) {
-                h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + (API_BASE && getToken() ? '（每60秒刷新）' : '（直连Supabase实时查询）') + '</div>';
+                h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + '（每60秒刷新）</div>';
             }
 
             el.innerHTML = h;
@@ -2118,36 +2044,11 @@
         if (isNaN(hours) || hours < 0) { showToast('请输入有效的小时数', 'error'); return; }
         showConfirm('加入黑名单', '确认将 ' + userName + (hours > 0 ? ' 拉黑 ' + hours + ' 小时' : ' 永久拉黑') + '？', '确认拉黑', async function() {
             try {
-                if (API_BASE && getToken()) {
-                    await apiCall('POST', '/admin/blacklist', {
-                        user_name: userName,
-                        duration_hours: hours,
-                        reason: '管理员操作'
-                    });
-                } else {
-                    var expiresAt = null;
-                    if (hours > 0) {
-                        var d = new Date();
-                        d.setHours(d.getHours() + hours);
-                        expiresAt = d.toISOString();
-                    }
-                    if (findActiveRecordByUser(blacklistData, userName)) {
-                        showToast('该用户已在黑名单中', 'error');
-                        return;
-                    }
-                    var insertRes = await sb.from('blacklist').insert([{
-                        user_name: userName,
-                        reason: '管理员操作',
-                        duration_hours: hours,
-                        added_by: ADMIN,
-                        expires_at: expiresAt,
-                        is_active: true
-                    }]);
-                    if (insertRes.error) {
-                        showToast('拉黑失败: ' + insertRes.error.message, 'error');
-                        return;
-                    }
-                }
+                await apiCall('POST', '/admin/blacklist', {
+                    user_name: userName,
+                    duration_hours: hours,
+                    reason: '管理员操作'
+                });
                 await loadBlacklistData();
                 renderTab('blacklist');
                 showToast('已拉黑 ' + userName, 'success');
@@ -2509,18 +2410,6 @@
                 bansData = apiData.bans || [];
                 mutesData = apiData.mutes || [];
                 blacklistData = apiData.blacklist || [];
-            } else {
-                var postRes = await sb.from('posts').select('*').neq('media_type', '__avatar__').order('created_at', {ascending: false}).limit(5000);
-                var likeRes = await sb.from('likes').select('*').order('created_at', {ascending: false}).limit(5000);
-                var commRes = await sb.from('comments').select('*').order('created_at', {ascending: false}).limit(5000);
-                allPosts = (postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
-                annList = (postRes.data || []).filter(function(p) { return p.media_type === ANN_MARKER; });
-                allLikes = likeRes.data || [];
-                allComments = commRes.data || [];
-                await loadReportsData();
-                await loadBansData();
-                await loadMutesData();
-                await loadBlacklistData();
             }
 
             var userMap = {};
@@ -2532,9 +2421,6 @@
             if (API_BASE && getToken()) {
                 try { var userRes = await apiCall('GET', '/admin/users'); userInfoList = userRes.data || []; } catch(e) {}
             }
-            if (!userInfoList.length) {
-                userInfoList = (sb ? (await sb.from('posts').select('user_name, content, created_at').eq('media_type', '__user_info__').order('created_at', {ascending: false}).limit(5000)).data : []) || [];
-            }
 
             var userInfoMap = {};
             userInfoList.forEach(function(ui) {
@@ -2545,12 +2431,7 @@
                 return { name: u, info: userInfoMap[u] || null };
             });
 
-            if (!API_BASE || !getToken()) {
-                await loadReportsData();
-                await loadBansData();
-                await loadMutesData();
-                await loadBlacklistData();
-            }
+            // 数据已在 API 路径中统一加载
             await loadPhotosAdminData();
 
             if (!keepTab) { switchTab('ann'); }

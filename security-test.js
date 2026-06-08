@@ -477,22 +477,19 @@ function testCSP() {
 logSection('测试8: 密码哈希安全测试 (PBKDF2)');
 
 async function testPasswordHash() {
-  // 模拟前端 PBKDF2 实现
-  async function pbkdf2Hash(password, salt) {
-    const encoder = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']
-    );
-    const bits = await crypto.subtle.deriveBits(
-      { name: 'PBKDF2', salt: encoder.encode(salt), iterations: 100000, hash: 'SHA-256' },
-      keyMaterial, 256
-    );
-    return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, '0')).join('');
+  // 模拟前端 PBKDF2 实现 - 使用 Node.js crypto.pbkdf2
+  function pbkdf2Hash(password, salt) {
+    return new Promise((resolve, reject) => {
+      crypto.pbkdf2(password, salt, 100000, 32, 'sha256', (err, key) => {
+        if (err) return reject(err);
+        resolve(key.toString('hex'));
+      });
+    });
   }
 
   async function hashPasswordWithSalt(password) {
-    const saltBytes = crypto.getRandomValues(new Uint8Array(16));
-    const salt = Array.from(saltBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    const saltBytes = crypto.randomBytes(16);
+    const salt = saltBytes.toString('hex');
     const hash = await pbkdf2Hash(password, salt);
     return salt + ':' + hash;
   }
@@ -516,23 +513,10 @@ async function testPasswordHash() {
   logResult('PBKDF2 验证: 123@wrong', !(await verifyPassword('wrong', pwHash1)), '错误密码被拒绝');
   logResult('PBKDF2 不同盐产生不同哈希', pwHash1 !== pwHash2, '随机盐防彩虹表');
   logResult('PBKDF2 不同密码不同哈希', pwHash1 !== pwHash3, '差异验证');
-  logResult('PBKDF2 格式 salt:hash', pwHash1.indexOf(':') > 0, `格式正确`);
+  logResult('PBKDF2 格式 salt:hash', pwHash1.indexOf(':') > 0, '格式正确');
 
-  // 向后兼容测试
-  const enc = new TextEncoder();
-  const sha256Buf = await crypto.subtle.digest('SHA-256', enc.encode('oldpass'));
-  const sha256Hash = Array.from(new Uint8Array(sha256Buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-  // SHA-256 旧格式
-  function verifyOld(inputPw, stored) {
-    if (!inputPw || !stored) return false;
-    if (stored.indexOf(':') !== -1) {
-      return false; // PBKDF2 走上面
-    }
-    // 回退 SHA-256
-    const enc2 = new TextEncoder();
-    const buf = crypto.subtle.digest('SHA-256', enc2.encode(inputPw));
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('') === stored;
-  }
+  // 向后兼容测试 (SHA-256 旧格式)
+  const sha256Hash = crypto.createHash('sha256').update('oldpass').digest('hex');
   logResult('SHA-256 旧格式兼容', sha256Hash.length === 64, '向后兼容');
 }
 
@@ -644,9 +628,13 @@ function testAdminAuthIsolation() {
   const neqCount = (coreContent.match(new RegExp(neqPattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
   logResult(`core.js 排除 ADMIN_AUTH_MARKER (${neqCount}处)`, neqCount >= 9, `期望 >= 9 处，实际 ${neqCount} 处`);
 
-  // core.js: 管理员登录使用 ADMIN_AUTH_MARKER
-  const hasAdminLoginWithAdminAuth = coreContent.includes("media_type\", ADMIN_AUTH_MARKER");
-  logResult('core.js 管理员登录使用 ADMIN_AUTH_MARKER', hasAdminLoginWithAdminAuth);
+  // core.js: 管理员登录通过后端 API (不再直连 Supabase)
+  const hasAdminApiLogin = coreContent.includes("apiCall('POST', '/admin/login'");
+  const hasAdminDirectDbLogin = coreContent.includes("media_type\", ADMIN_AUTH_MARKER");
+  logResult('core.js 管理员登录通过 API', hasAdminApiLogin, hasAdminDirectDbLogin ? '仍有直连 Supabase 代码!' : '使用 API 认证，更安全');
+  if (hasAdminApiLogin) {
+    logResult('  core.js API 登录实现正确', true, '/admin/login');
+  }
 
   // admin.js: ADMIN_AUTH_MARKER 定义
   const hasAdminMarkerInAdmin = adminContent.includes("ADMIN_AUTH_MARKER = \"__admin_auth__\"");
@@ -656,12 +644,12 @@ function testAdminAuthIsolation() {
   const hasAdminFilterInAdmin = adminContent.includes("ADMIN_AUTH_MARKER");
   logResult('admin.js loadAllData 过滤 ADMIN_AUTH_MARKER', hasAdminFilterInAdmin);
 
-  // admin.js: 登录使用 ADMIN_AUTH_MARKER（或者通过 API 认证，更安全）
-  const hasAdminLoginInAdmin = adminContent.includes("media_type', ADMIN_AUTH_MARKER");
-  const usesApiLogin = adminContent.includes("apiCall('POST', '/admin/login'") || adminContent.includes("/admin/login'");
-  logResult('admin.js 登录使用 ADMIN_AUTH_MARKER', hasAdminLoginInAdmin || usesApiLogin);
-  if (!hasAdminLoginInAdmin && usesApiLogin) {
-    logResult('  ⓘ admin.js 使用 API 登录（无需直连DB，更安全）', true);
+  // admin.js: 登录通过 API（无需直连 Supabase）
+  const hasAdminApiLoginInAdmin = adminContent.includes("apiCall('POST', '/admin/login'") || adminContent.includes("/admin/login'");
+  const hasAdminDirectDbLoginInAdmin = adminContent.includes("media_type', ADMIN_AUTH_MARKER");
+  logResult('admin.js 登录通过 API', hasAdminApiLoginInAdmin, hasAdminApiLoginInAdmin ? '使用 API 认证（无需直连DB，更安全）' : (hasAdminDirectDbLoginInAdmin ? '仍有直连 Supabase 代码' : ''));
+  if (hasAdminApiLoginInAdmin) {
+    logResult('  admin.js 使用 API 认证', true, '无需直连 Supabase');
   }
 }
 
@@ -692,6 +680,29 @@ function testSessionTimeout() {
   logResult('initAdminClient 启动超时监控', hasInitCall);
 }
 
+// ==================== 测试13: 服务端安全配置测试 ====================
+logSection('测试13: 服务端安全配置测试 (SUPABASE_SERVICE_KEY)');
+
+function testServerSecurityConfig() {
+  const serverJsPath = require('path').join(__dirname, 'render-api', 'server.js');
+  const fs = require('fs');
+  const serverContent = fs.readFileSync(serverJsPath, 'utf-8');
+
+  // 必须要求 SUPABASE_SERVICE_KEY，否则 fatal 退出
+  const hasServiceKeyCheck = serverContent.includes("if (!SUPABASE_SERVICE_KEY)");
+  const hasFatalExit = serverContent.includes("process.exit(1)");
+  logResult('server.js 强制要求 SUPABASE_SERVICE_KEY', hasServiceKeyCheck && hasFatalExit, hasServiceKeyCheck && hasFatalExit ? '无 key 时 fatal 退出' : '可能使用了不安全的回退');
+
+  // 使用 service_role key 初始化 Supabase 客户端（而非 anon key）
+  const usesServiceKey = /createClient\([\s\S]*?SUPABASE_SERVICE_KEY[\s\S]*?\)/.test(serverContent);
+  const hasAnonFallback = serverContent.includes("SUPABASE_SERVICE_KEY ||");
+  logResult('server.js 使用 service_role key', usesServiceKey && !hasAnonFallback, usesServiceKey ? '使用 service_role key（绕过 RLS）' : '使用了 anon key 作为客户端 key');
+
+  // 所有 admin 端点使用 /admin/ 前缀
+  const adminRouteCount = (serverContent.match(/\/admin\//g) || []).length;
+  logResult('server.js admin 端点数量', adminRouteCount >= 10, `找到 ${adminRouteCount} 个 /admin/ 路由`);
+}
+
 // ==================== 运行所有测试 ====================
 (async () => {
   console.log('\n╔══════════════════════════════════════════════════════╗');
@@ -706,8 +717,9 @@ function testSessionTimeout() {
   testBuildStorageUploadPath();
   testAdminAuthIsolation();
   testSessionTimeout();
+  testServerSecurityConfig();
 
-  // 需要 crypto.subtle 的测试
+  // 需要 crypto.pbkdf2 的测试
   await testPasswordHash();
 
   // API 测试（需要服务器）
