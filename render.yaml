@@ -30,6 +30,11 @@ services:
       - key: SUPABASE_SERVICE_KEY
         sync: false  # 标记为手动管理，不会被代码覆盖
       
+      # ⚠️ API 密钥（用于签发 token）— 在 Render Dashboard 手动设置一个随机字符串
+      # 不设置的话，每次部署重启都会生成新密钥，导致所有已登录用户被迫重新登录
+      - key: API_SECRET
+        sync: false
+      
       - key: SUPABASE_URL
         value: https://ithowxqignlhkwaykglt.supabase.co
       
