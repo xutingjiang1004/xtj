@@ -221,7 +221,10 @@ app.use(function(req, res, next) {
   if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
     const origin = req.headers['origin'] || '';
     const referer = req.headers['referer'] || '';
-    const allowed = ALLOWED_ORIGINS.some(function(o) {
+    const host = req.headers['host'] || '';
+    // 同源判断：无 origin（curl/Postman）、或 origin 匹配 Host 头、或匹配服务器域名
+    const isSameOrigin = !origin || origin.includes(host) || (SERVER_HOSTNAME && origin.includes(SERVER_HOSTNAME));
+    const allowed = isSameOrigin || ALLOWED_ORIGINS.some(function(o) {
       return origin === o || referer.startsWith(o + '/');
     });
     if (!allowed && origin) {
