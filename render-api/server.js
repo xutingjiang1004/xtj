@@ -11,6 +11,9 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+// 全局禁用 X-Powered-By（必须在任何路由之前）
+app.disable('x-powered-by');
+
 // ===================== 配置 =====================
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -191,7 +194,6 @@ app.use((req, res, next) => {
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; media-src 'self' https:; connect-src 'self' https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
-  res.removeHeader('X-Powered-By');
   next();
 });
 
@@ -205,6 +207,8 @@ app.use(express.static(path.join(__dirname, '..'), {
   }
 }));
 
+// 访问记录 + CSRF 防护
+app.use(function(req, res, next) {
   // 访问记录（只记录 GET / 和 /health，避免每个请求都写数据库）
   const ip = getRealIp(req);
   if (req.method === 'GET' && (req.path === '/' || req.path === '/health')) {
