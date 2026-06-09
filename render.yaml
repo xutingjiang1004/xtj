@@ -1,0 +1,46 @@
+# ===== xtj Render 部署配置 =====
+# 方案A：单一 Node.js Web Service（前后端合一）
+# 部署后访问: https://xtj.onrender.com/admin.html
+
+services:
+  - type: web
+    name: xtj
+    runtime: node
+    repo: https://github.com/xutingjiang1004/xtj
+    plan: free
+    region: singapore
+    branch: main
+    rootDir: .
+    buildCommand: cd render-api && npm install
+    startCommand: cd render-api && npm start
+    autoDeploy: true
+    
+    # 安全环境变量（请在 Render Dashboard 中设置实际值）
+    envVars:
+      - key: NODE_ENV
+        value: production
+      
+      # ⚠️ 管理员密码 — 在 Render Dashboard 手动设置
+      # 不要在此文件中填写明文密码！
+      - key: ADMIN_PASSWORD
+        sync: false  # 标记为手动管理，不会被代码覆盖
+      
+      # ⚠️ Supabase Service Role Key — 在 Render Dashboard 手动设置
+      # 去 https://supabase.com/dashboard → Settings → API → service_role
+      - key: SUPABASE_SERVICE_KEY
+        sync: false  # 标记为手动管理，不会被代码覆盖
+      
+      - key: SUPABASE_URL
+        value: https://ithowxqignlhkwaykglt.supabase.co
+      
+      - key: ADMIN_USERNAME
+        value: xxz
+      
+      # CORS 白名单（逗号分隔，留空则自动检测）
+      - key: ALLOWED_ORIGINS
+        value: ""
+
+# 部署后验证：
+# 1. 打开 https://你的服务名.onrender.com/health → 应返回 {"ok":true}
+# 2. 打开 https://你的服务名.onrender.com/admin.html → 应显示登录页面
+# 3. 打开 https://你的服务名.onrender.com/ → 应显示网站首页

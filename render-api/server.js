@@ -375,7 +375,7 @@ app.post('/admin/logout', verifyToken, (req, res) => {
 app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
   try {
     const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes] = await Promise.all([
-      supabase.from('posts').select('*').neq('media_type', '__avatar__').order('created_at', { ascending: false }).limit(5000),
+      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500),
@@ -1105,7 +1105,7 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
         .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
         .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER)
-        .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__'),
+        .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER),
       buildQuery('comments', 'id, created_at', null, null, 'created_at'),
       buildQuery('likes', 'id, created_at', null, null, 'created_at'),
       buildQuery('posts', 'id, created_at', 'media_type', AUTH_MARKER, 'created_at'),
