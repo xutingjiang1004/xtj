@@ -1163,9 +1163,11 @@
     <div class="login-card">
         <h1>🔐 xtj 管理后台</h1>
         <p>仅限管理员登录</p>
-        <input id="loginName" placeholder="管理员账号" autocomplete="off" />
-        <input id="loginPw" type="password" placeholder="管理员密码" />
-        <button onclick="doAdminLogin()">登录后台</button>
+        <form onsubmit="doAdminLogin();return false">
+            <input id="loginName" placeholder="管理员账号" autocomplete="off" />
+            <input id="loginPw" type="password" placeholder="管理员密码" />
+            <button type="submit">登录后台</button>
+        </form>
         <div class="login-err" id="loginErr"></div>
     </div>
 </div>
