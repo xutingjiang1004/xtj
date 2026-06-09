@@ -359,6 +359,20 @@
         document.getElementById('loginPw').value = '';
     };
 
+    // 登录表单键盘导航：Enter 切换到下一栏/提交
+    document.getElementById('loginName').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('loginPw').focus();
+        }
+    });
+    document.getElementById('loginPw').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            window.doAdminLogin();
+        }
+    });
+
     async function loadAllData(keepTab) {
         try {
             if (!API_BASE || !getToken()) {
