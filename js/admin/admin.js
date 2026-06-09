@@ -1046,14 +1046,19 @@
         else { html.setAttribute('data-theme', 'dark'); localStorage.setItem('xtj-admin-theme', 'dark'); }
     };
 
-    (function() {
+    (async function() {
         var saved = localStorage.getItem('xtj-admin-theme');
         if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.setAttribute('data-theme', 'dark');
         }
 
-        if (hasSession()) {
-            initAdminClient();
+        if (hasSession() && hasApiToken()) {
+            try {
+                await apiCall('GET', '/admin/verify');
+                initAdminClient();
+            } catch(e) {
+                clearSession();
+            }
         }
     })();
 
