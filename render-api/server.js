@@ -11,6 +11,9 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+// 信任反向代理（Render 会设置 X-Forwarded-For）
+app.set('trust proxy', 1);
+
 // 全局禁用 X-Powered-By（必须在任何路由之前）
 app.disable('x-powered-by');
 
@@ -58,8 +61,8 @@ const VISIT_MARKER = '__visit__';
 const ATTACK_MARKER = '__attack__';
 const ADMIN_AUTH_MARKER = '__admin_auth__';
 
-// 统计数据内存缓存（减少数据库查询）
-let statsCache = { data: null, ts: 0 };
+// 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
+let statsCache = { data: null, ts: 0, pending: null };
 const STATS_CACHE_TTL = 60000; // 1分钟
 
 // 记录访问日志
@@ -90,15 +93,21 @@ async function logAttack(ip, type, detail) {
   } catch(e) { /* 静默失败 */ }
 }
 
-// 访问计数去重（同IP同天只计一次）
+// 访问计数去重（同IP同天只计一次，按天自动清理）
 const visitCache = new Map(); // ip_date -> true
 function shouldCountVisit(ip) {
   const today = new Date().toISOString().slice(0, 10);
   const key = ip + '_' + today;
   if (visitCache.has(key)) return false;
   visitCache.set(key, true);
-  // 每30分钟清理旧缓存
-  if (visitCache.size > 10000) visitCache.clear();
+  // 每30分钟清理非今天的旧记录，避免full clear丢失去重数据
+  if (visitCache.size > 10000) {
+    var keysToDelete = [];
+    visitCache.forEach(function(_, k) {
+      if (!k.endsWith('_' + today)) keysToDelete.push(k);
+    });
+    keysToDelete.forEach(function(k) { visitCache.delete(k); });
+  }
   return true;
 }
 
@@ -223,7 +232,13 @@ app.use(function(req, res, next) {
     const referer = req.headers['referer'] || '';
     const host = req.headers['host'] || '';
     // 同源判断：无 origin（curl/Postman）、或 origin 匹配 Host 头、或匹配服务器域名
-    const isSameOrigin = !origin || origin.includes(host) || (SERVER_HOSTNAME && origin.includes(SERVER_HOSTNAME));
+    const isSameOrigin = !origin || (function() {
+      try {
+        var originHost = new URL(origin).host;
+        // 精确匹配：origin 的 host 必须等于 Host 头或服务器域名
+        return originHost === host || originHost === SERVER_HOSTNAME;
+      } catch(e) { return false; }
+    })();
     const allowed = isSameOrigin || ALLOWED_ORIGINS.some(function(o) {
       return origin === o || referer.startsWith(o + '/');
     });
@@ -238,10 +253,15 @@ app.use(function(req, res, next) {
 
 // 频率限制中间件
 const rateLimitStore = new Map();
+// 每5分钟清理过期的限流记录，防止内存泄漏
+setInterval(function() {
+  var now = Date.now();
+  rateLimitStore.forEach(function(record, key) {
+    if (now > record.resetAt) rateLimitStore.delete(key);
+  });
+}, 300000);
 function getRealIp(req) {
-  // 优先信任 X-Forwarded-For（部署在反向代理后）
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) return forwarded.split(',')[0].trim();
+  // trust proxy 已配置，req.ip 返回真实客户端 IP
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 function rateLimit(windowMs, maxRequests) {
@@ -272,6 +292,13 @@ function rateLimit(windowMs, maxRequests) {
 
 // ===================== Token 管理（无状态签名令牌，服务重启不掉登录） =====================
 const adminTokens = new Map(); // token -> { expiresAt }（仅用于延长有效期跟踪）
+// 每10分钟清理过期 token
+setInterval(function() {
+  var now = Date.now();
+  adminTokens.forEach(function(session, token) {
+    if (now > session.expiresAt) adminTokens.delete(token);
+  });
+}, 600000);
 
 // 生成无状态签名 token：base64(expiry) + '.' + HMAC
 function signToken() {
@@ -382,7 +409,7 @@ app.post('/admin/logout', verifyToken, (req, res) => {
 app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
   try {
     const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes] = await Promise.all([
-      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).order('created_at', { ascending: false }).limit(5000),
+      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500),
@@ -757,12 +784,14 @@ app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
   const targetType = c.target_type || 'post';
   const targetId = c.target_id || '';
   if (targetType === 'post' || targetType === 'photo') {
-    const { data: post } = await supabase.from('posts').select('actor_key').eq('id', targetId).maybeSingle();
+    const { data: post, error: fetchPostErr } = await supabase.from('posts').select('actor_key').eq('id', targetId).maybeSingle();
+    if (fetchPostErr) return res.status(400).json({ error: sanitizeError(fetchPostErr) });
     const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
-    await supabase.rpc('delete_post_with_actor', {
+    const { error: rpcErr } = await supabase.rpc('delete_post_with_actor', {
       p_post_id: targetId,
       p_actor_key: actorKey
     });
+    if (rpcErr) return res.status(400).json({ error: sanitizeError(rpcErr) });
   }
   // 标记举报已处理
   const adminMsg = '被举报的' + (targetType === 'photo' ? '照片' : '帖子') + '已被删除';
@@ -770,7 +799,8 @@ app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
   c.reviewed_at = new Date().toISOString();
   c.reviewed_by = ADMIN_USERNAME;
   c.admin_response = adminMsg;
-  await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+  const { error: updErr } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+  if (updErr) return res.status(400).json({ error: sanitizeError(updErr) });
   sendAdminDm(reportPost.user_name, '[举报处理] ' + adminMsg);
   return res.json({ ok: true });
 });
@@ -804,11 +834,12 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
       c.reviewed_at = new Date().toISOString();
       c.reviewed_by = ADMIN_USERNAME;
       c.admin_response = '该用户已被封禁';
-      await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+      const { error: updErr1 } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+      if (updErr1) return res.status(400).json({ error: sanitizeError(updErr1) });
       sendAdminDm(reportPost.user_name, '[举报处理] 该用户已被封禁');
       return res.json({ ok: true, message: '该用户已被封禁，举报已标记为已处理' });
     }
-    await supabase.from('bans').update({
+    const { error: updBanErr } = await supabase.from('bans').update({
       ban_reason: '举报处理：' + (reportReason || '违规内容'),
       ban_duration_hours: duration_hours || 0,
       ban_type: banType,
@@ -817,8 +848,13 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
       is_active: true,
       banned_at: new Date().toISOString()
     }).eq('id', existing[0].id);
+    if (updBanErr) {
+      // 回滚举报状态
+      await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+      return res.status(400).json({ error: sanitizeError(updBanErr) });
+    }
   } else {
-    await supabase.from('bans').insert([{
+    const { error: insErr } = await supabase.from('bans').insert([{
       user_name: targetUser,
       ban_type: banType,
       ban_reason: '举报处理：' + (reportReason || '违规内容'),
@@ -827,6 +863,7 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
       expires_at: expiresAt,
       is_active: true
     }]);
+    if (insErr) return res.status(400).json({ error: sanitizeError(insErr) });
   }
   
   // 标记举报已处理
@@ -835,7 +872,8 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
   c.reviewed_at = new Date().toISOString();
   c.reviewed_by = ADMIN_USERNAME;
   c.admin_response = banMsg;
-  await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+  const { error: finalUpdErr } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+  if (finalUpdErr) return res.status(400).json({ error: sanitizeError(finalUpdErr) });
   sendAdminDm(reportPost.user_name, '[举报处理] ' + banMsg);
   return res.json({ ok: true });
 });
@@ -943,8 +981,18 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
     if (!startDate && !endDate && statsCache.data && (Date.now() - statsCache.ts) < STATS_CACHE_TTL) {
       return res.json(statsCache.data);
     }
+    // 简单锁：并发请求等待500ms后重试缓存
+    if (!startDate && !endDate && statsCache.pending) {
+      // 已有查询进行中，等待缓存更新
+      await new Promise(function(r) { setTimeout(r, 500); });
+      if (statsCache.data && (Date.now() - statsCache.ts) < STATS_CACHE_TTL) {
+        return res.json(statsCache.data);
+      }
+    }
 
     // 构建带日期筛选的查询
+    // 无日期筛选时也使用合理上限，避免拉取全表
+    const MAX_STATS_LIMIT = 20000;
     function buildSummaryQuery(table, selectFields, eqField, eqValue, dateField) {
       var q = supabase.from(table).select(selectFields);
       if (eqField) q = q.eq(eqField, eqValue);
@@ -956,17 +1004,22 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
         if (endDate) q = q.lte('created_at', endDate + 'T23:59:59.999Z');
       }
       q = q.order('created_at', { ascending: false });
-      if (!startDate && !endDate) q = q.limit(100000);
+      if (!startDate && !endDate) q = q.limit(MAX_STATS_LIMIT);
       return q;
     }
 
+    // 创建 pending promise 防止并发重复查询
+    if (!startDate && !endDate) {
+      statsCache.pending = true;  // 简单锁标志
+    }
     const [postsRes, usersRes, visitsRes, attacksRes, likesRes, commentsRes, photosRes] = await Promise.all([
       buildSummaryQuery('posts', 'id, media_type, content, created_at', null, null, 'created_at')
         .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
         .neq('media_type', '__photo_wall__').neq('media_type', '__ann__')
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
         .neq('media_type', AUTH_MARKER).neq('media_type', ADMIN_AUTH_MARKER)
-        .neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER),
+        .neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER)
+        .neq('media_type', '__user_visit__'),
       buildSummaryQuery('posts', 'id', 'media_type', AUTH_MARKER, 'created_at'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
@@ -1030,10 +1083,11 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
     };
 
     if (!startDate && !endDate) {
-      statsCache = { data: result, ts: Date.now() };
+      statsCache = { data: result, ts: Date.now(), pending: null };
     }
     return res.json(result);
   } catch (e) {
+    statsCache.pending = null;
     console.error('[API] 统计加载失败:', e.message);
     return res.status(500).json({ error: '统计加载失败' });
   }
@@ -1101,7 +1155,7 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
       }
       q = q.order('created_at', { ascending: false });
       // 无日期筛选时保留较大limit，有日期筛选时数据库层面已过滤无需limit
-      if (!startDate && !endDate) q = q.limit(100000);
+      if (!startDate && !endDate) q = q.limit(MAX_STATS_LIMIT);
       return q;
     }
 
@@ -1112,7 +1166,8 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
         .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
         .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER)
-        .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER),
+        .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER)
+        .neq('media_type', '__user_visit__'),
       buildQuery('comments', 'id, created_at', null, null, 'created_at'),
       buildQuery('likes', 'id, created_at', null, null, 'created_at'),
       buildQuery('posts', 'id, created_at', 'media_type', AUTH_MARKER, 'created_at'),
@@ -1196,7 +1251,7 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
 
 // 清除统计缓存
 app.post('/admin/stats/refresh', verifyToken, (req, res) => {
-  statsCache = { data: null, ts: 0 };
+  statsCache = { data: null, ts: 0, pending: null };
   return res.json({ ok: true });
 });
 

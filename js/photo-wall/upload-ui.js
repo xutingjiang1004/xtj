@@ -694,115 +694,6 @@
     });
   }
 
-  function buildPostPreviewItems(img) {
-    function readFileSize(node) {
-      if (!node) return null;
-      var raw = node.getAttribute('data-file-size') || node.getAttribute('data-size') || (node.dataset ? node.dataset.fileSize : '');
-      var value = Number(raw);
-      return Number.isFinite(value) && value > 0 ? value : null;
-    }
-    var postCard = img.closest('.post');
-    if (postCard) {
-      var postId = postCard.getAttribute('data-post-id') || Date.now();
-      var username = ((postCard.querySelector('.user-name') || {}).textContent || '帖子图片').trim();
-      var timestamp = new Date().toISOString();
-      var postImages = Array.prototype.slice.call(postCard.querySelectorAll('.media img'));
-      return postImages.map(function(node, index) {
-        return {
-          id: 'post-' + postId + '-' + index,
-          imageUrl: node.currentSrc || node.src,
-          username: username,
-          timestamp: timestamp,
-          views: 0,
-          fileSize: readFileSize(node),
-          __xtjPostMode: true
-        };
-      }).filter(function(item) {
-        return !!item.imageUrl;
-      });
-    }
-
-    var detailMedia = img.closest('.post-detail-media');
-    if (detailMedia) {
-      var detailRoot = img.closest('#postDetailBody') || document;
-      var detailName = ((detailRoot.querySelector('.pdh-name') || {}).textContent || '帖子图片').trim();
-      var detailTime = new Date().toISOString();
-      var detailImages = Array.prototype.slice.call(detailRoot.querySelectorAll('.post-detail-media img'));
-      return detailImages.map(function(node, index) {
-        return {
-          id: 'post-detail-' + index + '-' + Date.now(),
-          imageUrl: node.currentSrc || node.src,
-          username: detailName,
-          timestamp: detailTime,
-          views: 0,
-          fileSize: readFileSize(node),
-          __xtjPostMode: true
-        };
-      }).filter(function(item) {
-        return !!item.imageUrl;
-      });
-    }
-
-    return [];
-  }
-
-  buildPostPreviewItems = function(img) {
-    function readNumberAttr(node, keys) {
-      if (!node) return null;
-      var raw = '';
-      for (var i = 0; i < keys.length; i++) {
-        raw = node.getAttribute(keys[i]) || raw;
-        if (!raw && node.dataset && keys[i].indexOf('data-') === 0) {
-          var dataKey = keys[i].slice(5).replace(/-([a-z])/g, function(_, letter) { return letter.toUpperCase(); });
-          raw = node.dataset[dataKey] || raw;
-        }
-        if (raw) break;
-      }
-      var value = Number(raw);
-      return Number.isFinite(value) && value >= 0 ? value : null;
-    }
-
-    function buildItemFromNode(node, index, fallbackId) {
-      if (!node) return null;
-      var imageUrl = node.currentSrc || node.src || node.getAttribute('data-media-url') || '';
-      if (!imageUrl) return null;
-      var postId = node.getAttribute('data-post-id') || fallbackId || Date.now();
-      return {
-        id: 'post-' + postId + '-' + index,
-        postId: postId,
-        imageUrl: imageUrl,
-        username: (node.getAttribute('data-post-user') || '').trim() || '帖子图片',
-        timestamp: node.getAttribute('data-post-created-at') || new Date().toISOString(),
-        views: readNumberAttr(node, ['data-post-views']) || 0,
-        fileSize: readNumberAttr(node, ['data-file-size', 'data-size']),
-        originalSize: readNumberAttr(node, ['data-original-size']),
-        __xtjPostMode: true
-      };
-    }
-
-    var postCard = img.closest('.post');
-    if (postCard) {
-      var postId = postCard.getAttribute('data-post-id') || Date.now();
-      return Array.prototype.slice.call(postCard.querySelectorAll('.media img')).map(function(node, index) {
-        return buildItemFromNode(node, index, postId);
-      }).filter(function(item) {
-        return !!(item && item.imageUrl);
-      });
-    }
-
-    var detailMedia = img.closest('.post-detail-media');
-    if (detailMedia) {
-      var detailRoot = img.closest('#postDetailBody') || document;
-      return Array.prototype.slice.call(detailRoot.querySelectorAll('.post-detail-media img')).map(function(node, index) {
-        return buildItemFromNode(node, index, node.getAttribute('data-post-id') || ('detail-' + Date.now()));
-      }).filter(function(item) {
-        return !!(item && item.imageUrl);
-      });
-    }
-
-    return [];
-  };
-
   function restorePostPreviewMode() {
     if (state.restoreTimer) {
       clearTimeout(state.restoreTimer);
@@ -1033,14 +924,6 @@
             state.ty = 0;
           }
         });
-      };
-
-      window.ppRotatePhoto = function() {
-        if (mutatePreviewTransform(function(state) {
-          state.rotation = ((state.rotation || 0) + 90) % 360;
-        })) {
-          toast('已旋转 90°');
-        }
       };
 
       window.ppRotatePhoto = function() {
