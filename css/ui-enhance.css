@@ -1,0 +1,468 @@
+/* ============================================================
+   XTJ UI Enhancement Suite
+   Visual refinements, loading animation, click effects, particles
+   Tailored for the frontend-skill & algorithmic-art directives
+   ============================================================ */
+
+/* ========== 1. Algorithmic Loading Overlay ========== */
+.xtj-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0b1217;
+  transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+              visibility 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: opacity;
+}
+.xtj-loading-overlay.is-done {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.xtj-loading-overlay canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.xtj-loading-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  text-align: center;
+  pointer-events: none;
+}
+.xtj-loading-title {
+  font-size: 42px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #34d399 0%, #60a5fa 40%, #f472b6 70%, #fbbf24 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 40px rgba(52, 211, 153, 0.3));
+  animation: xtjTitleGlow 3s ease-in-out infinite;
+  margin: 0;
+}
+.xtj-loading-sub {
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.35);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+}
+.xtj-loading-bar {
+  width: 160px;
+  height: 2px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  position: relative;
+}
+.xtj-loading-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #34d399, #60a5fa, #f472b6);
+  animation: xtjLoadFill 2.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+@keyframes xtjTitleGlow {
+  0%, 100% { filter: drop-shadow(0 0 40px rgba(52, 211, 153, 0.3)) brightness(1); }
+  50% { filter: drop-shadow(0 0 60px rgba(96, 165, 250, 0.4)) brightness(1.08); }
+}
+@keyframes xtjLoadFill {
+  0% { width: 0%; }
+  40% { width: 35%; }
+  70% { width: 70%; }
+  100% { width: 100%; }
+}
+
+/* ========== 2. Button Click Ripple ========== */
+.xtj-ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  transform: scale(0);
+  animation: xtjRippleAnim 0.65s ease-out forwards;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+@keyframes xtjRippleAnim {
+  to {
+    transform: scale(4);
+    opacity: 0;
+  }
+}
+.btn-primary .xtj-ripple {
+  background: rgba(255, 255, 255, 0.5);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97) !important;
+  transition: transform 0.1s cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+}
+
+/* ========== 3. Particle Burst on Primary Buttons ========== */
+.xtj-particle-burst {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99998;
+}
+.xtj-particle {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  animation: xtjParticleFly 0.9s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+@keyframes xtjParticleFly {
+  0% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--px), var(--py)) scale(0);
+    opacity: 0;
+  }
+}
+
+/* ========== 4. Post Card Enhanced Entry ========== */
+.post {
+  --post-enter-scale: 0.97;
+  --post-enter-blur: 6px;
+}
+.post.visible {
+  animation: xtjPostReveal 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes xtjPostReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+    filter: blur(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+/* ========== 5. Modal Enhanced Animation ========== */
+.modal-overlay.active .modal-box {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+.modal-box {
+  transform: translateY(40px) scale(0.94);
+  opacity: 0;
+  transition: transform 0.45s cubic-bezier(0.18, 1.1, 0.28, 1),
+              opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.modal-overlay {
+  transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+              backdrop-filter 0.4s ease;
+}
+.modal-overlay.active {
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ========== 6. Like Button Enhanced Heart Particles ========== */
+.xtj-heart-burst {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+}
+.xtj-heart-particle {
+  position: absolute;
+  font-size: 16px;
+  pointer-events: none;
+  animation: xtjHeartFly 1.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+  will-change: transform, opacity;
+}
+@keyframes xtjHeartFly {
+  0% {
+    transform: translate(0, 0) scale(0.3) rotate(0deg);
+    opacity: 1;
+  }
+  30% {
+    transform: translate(var(--hx1), var(--hy1)) scale(1.4) rotate(-15deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(var(--hx2), var(--hy2)) scale(0) rotate(25deg);
+    opacity: 0;
+  }
+}
+
+/* ========== 7. Glass Refinements ========== */
+.glass {
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              background 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.stat-card {
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  position: relative;
+  overflow: hidden;
+}
+.stat-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 50%);
+  pointer-events: none;
+}
+[data-theme="dark"] .stat-card::after {
+  background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, transparent 50%);
+}
+
+/* ========== 8. Toast Enhanced ========== */
+.toast {
+  animation: xtjToastIn 0.4s cubic-bezier(0.18, 1.3, 0.28, 1) forwards;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3),
+              inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+}
+@keyframes xtjToastIn {
+  0% {
+    transform: scale(0.65) translateY(-24px);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.05) translateY(2px);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
+}
+
+/* ========== 9. Chat Message Enhanced Entry ========== */
+.chat-msg {
+  animation: xtjMsgSlide 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+@keyframes xtjMsgSlide {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.chat-msg.sent {
+  background: linear-gradient(135deg, #059669, #10b981);
+  box-shadow: 0 4px 16px rgba(5, 150, 105, 0.25);
+}
+.chat-msg.received {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/* ========== 10. Photo Wall Enhanced ========== */
+.photo-wall-grid .pw-item {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+.photo-wall-grid .pw-item:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+  z-index: 2;
+}
+.photo-wall-grid .pw-item:active {
+  transform: scale(0.98);
+}
+
+/* ========== 11. Primary Button Hover Glow ========== */
+.btn-primary {
+  position: relative;
+}
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, var(--primary), #34d399, #60a5fa, var(--primary));
+  background-size: 300% 300%;
+  animation: xtjBtnShimmer 4s ease-in-out infinite;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+.btn-primary:hover::before {
+  opacity: 0.45;
+}
+@keyframes xtjBtnShimmer {
+  0%, 100% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+}
+
+/* ========== 12. Scrollbar Refinement ========== */
+.dock-panel::-webkit-scrollbar {
+  width: 4px;
+}
+.dock-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dock-panel::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+}
+[data-theme="dark"] .dock-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ========== 13. Publish Box Focus Glow ========== */
+.publish-box:focus-within {
+  border-color: rgba(5, 150, 105, 0.35);
+  box-shadow: 0 12px 40px rgba(5, 150, 105, 0.12),
+              0 0 0 4px rgba(5, 150, 105, 0.08);
+}
+
+/* ========== 14. Dark Mode Refinements ========== */
+[data-theme="dark"] .glass {
+  background: rgba(22, 22, 36, 0.35);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+[data-theme="dark"] .post {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+[data-theme="dark"] .chat-msg.received {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* ========== 15. Auth Form Refinement ========== */
+.auth-form .af-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ========== 16. Report Modal & Announcement Modal Refinements ========== */
+.report-modal {
+  transform-origin: center;
+  animation: xtjModalSlide 0.35s cubic-bezier(0.18, 1.1, 0.28, 1) forwards;
+}
+.announcement-modal {
+  transform-origin: center;
+  animation: xtjModalSlide 0.35s cubic-bezier(0.18, 1.1, 0.28, 1) forwards;
+}
+@keyframes xtjModalSlide {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ========== 17. Image Viewer Enhancement ========== */
+.img-viewer.active {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ========== 18. Loading Skeleton Soft Pulse ========== */
+.xtj-skeleton-card {
+  animation: xtjSkeletonPulse 2s ease-in-out infinite;
+}
+@keyframes xtjSkeletonPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ========== 19. Chat Entry Bar Enhancement ========== */
+.chat-entry-bar {
+  background: linear-gradient(135deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.08) 100%);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+[data-theme="dark"] .chat-entry-bar {
+  background: linear-gradient(135deg, rgba(30,30,50,0.35) 0%, rgba(25,25,45,0.15) 100%);
+}
+
+/* ========== 20. Photo Preview Enhancement ========== */
+.photo-preview-overlay {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.pp-slide-img {
+  transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.3s ease;
+}
+
+/* ========== 21. Dock Panel Slide Transition ========== */
+.dock-panel {
+  transition: opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.dock-panel:not(.active) {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0) scale(0.98);
+  pointer-events: none;
+}
+
+/* ========== 22. Chat Send Button Ripple ========== */
+.send-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ========== 23. Upload Button Enhancement ========== */
+.photo-wall-upload-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+/* ========== 24. User Profile Card Enhancement ========== */
+.profile-user-card {
+  cursor: pointer;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.profile-user-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px rgba(5, 150, 105, 0.12);
+}
+.profile-user-card:active {
+  transform: scale(0.98);
+}
+
+/* ========== 25. Announcement Items Refinement ========== */
+.announcement-item {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.25s ease;
+}
+.announcement-item.visible:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+/* ========== 26. Chat List Items Lift ========== */
+.chat-list-item {
+  transition: background 0.25s cubic-bezier(0.25, 1, 0.3, 1),
+              transform 0.25s cubic-bezier(0.25, 1, 0.3, 1);
+}
+.chat-list-item:hover {
+  transform: translateY(-1px) scale(1.01);
+}
+.chat-list-item:active {
+  transform: translateY(0) scale(0.99);
+}
