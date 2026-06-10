@@ -2212,6 +2212,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             function createHeartParticles(btn) {
+                if (typeof xtjHeartBurst === 'function') {
+                    xtjHeartBurst(btn);
+                }
                 const rect = btn.getBoundingClientRect();
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
