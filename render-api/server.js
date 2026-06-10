@@ -218,9 +218,9 @@ app.use(express.static(path.join(__dirname, '..'), {
 
 // 访问记录 + CSRF 防护
 app.use(function(req, res, next) {
-  // 访问记录（只记录 GET / 和 /health，避免每个请求都写数据库）
+  // 访问记录（只记录 GET /，排除 /health 避免 cron ping 产生垃圾数据）
   const ip = getRealIp(req);
-  if (req.method === 'GET' && (req.path === '/' || req.path === '/health')) {
+  if (req.method === 'GET' && req.path === '/') {
     if (shouldCountVisit(ip)) {
       logVisit(ip);
     }
