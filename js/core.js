@@ -1,9 +1,9 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
-            const SUPABASE_URL = "https://ithowxqignlhkwaykglt.supabase.co";
-            const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA";
+            const SUPABASE_URL = window.XTJ_CONFIG.SUPABASE_URL;
+            const SUPABASE_ANON_KEY = window.XTJ_CONFIG.SUPABASE_ANON_KEY;
             var sb;
             if (typeof window.supabase !== 'undefined') {
                 sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -180,10 +180,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         }
 
         function renderPostFilterUserLoader() {
-            return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;">' +
-                '<div class="spring-loader" style="width:120px;height:120px;margin:0 auto;">' +
-                '<canvas class="spring-canvas" width="120" height="120" style="width:120px;height:120px;" aria-hidden="true"></canvas>' +
-                '</div></div>';
+            return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-photo-loader" aria-label="加载中"><span class="xtj-photo-loader-ring"></span><span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span><span class="xtj-photo-loader-core"></span><span class="xtj-photo-loader-dot dot-a"></span><span class="xtj-photo-loader-dot dot-b"></span><span class="xtj-photo-loader-dot dot-c"></span></div></div>';
         }
 
         function isAdmin() { return currentUser === ADMIN_NAME; }
@@ -2939,14 +2936,28 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 comments.forEach(c => allUsers.add(c.user_name));
 
                 // 缂佹稑顦欢鐔稿緞閺夋垵鍓奸柛鏃傚Ь濞村洨鈧拷灞惧灇閸氾拷鈥虫櫃婵炴挸寮堕悡?
-                await loadAvatarsForUsers(Array.from(allUsers));
-                
-                // 濞寸姾顕ф慨?閿涙艾褰у〒鍙夌厠缁楊兛绔存い鐢垫畱閿熸枻鎷烽敓鏂ゆ嫹閿涘苯鎮楃紒顓ㄦ嫹閿熷€熺箖閺冪娀妾猴拷?姘З閿熸枻鎷烽敓鏂ゆ嫹
+                // 先渲染内容（此时头像为字母占位），再后台加载真实头像并更新 DOM
                 const firstPage = visiblePosts.slice(0, FEED_PAGE_SIZE);
                 feedPage = 1;
                 renderFeedWithAvatars(firstPage, comments, likes);
                 
-                // 閸氬骸褰撮閿熻妭濠忔嫹鏉炵晫绮虹拋鈩冩殶锟?
+                // 后台异步加载真实头像，不阻塞内容渲染
+                loadAvatarsForUsers(Array.from(allUsers)).then(function() {
+                    var feedEl = document.getElementById('feed');
+                    if (!feedEl) return;
+                    var avatars = feedEl.querySelectorAll('.avatar.clickable');
+                    avatars.forEach(function(avatarEl) {
+                        var username = avatarEl.getAttribute('onclick') || '';
+                        username = username.replace(/^.*openUserProfile\('([^']*)'.*$/, '$1');
+                        if (!username || avatarEl.querySelector('img')) return; // 已有 img 无需替换
+                        var avatarUrl = avatarCache[username];
+                        if (avatarUrl) {
+                            avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(avatarUrl)) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                        }
+                    });
+                });
+                
+                // 预加载统计数据
                 setTimeout(function() { prefetchStatData(); }, 1000);
             }
             window.renderFeed = renderFeed;
@@ -4197,12 +4208,27 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var allUsers = new Set();
                 filteredPosts.forEach(function(post) { allUsers.add(post.user_name); });
                 visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
-                await loadAvatarsForUsers(Array.from(allUsers));
                 var firstPage = filteredPosts.slice(0, FEED_PAGE_SIZE);
                 feedPage = 1;
                 feedEndReached = firstPage.length >= filteredPosts.length;
                 renderFeedWithAvatars(firstPage, visibleComments, scopedLikes);
                 renderFilterSummary(filteredPosts.length);
+                
+                // 后台异步加载真实头像，不阻塞内容渲染
+                loadAvatarsForUsers(Array.from(allUsers)).then(function() {
+                    var feedEl = document.getElementById('feed');
+                    if (!feedEl) return;
+                    var avatars = feedEl.querySelectorAll('.avatar.clickable');
+                    avatars.forEach(function(avatarEl) {
+                        var username = avatarEl.getAttribute('onclick') || '';
+                        username = username.replace(/^.*openUserProfile\('([^']*)'.*$/, '$1');
+                        if (!username || avatarEl.querySelector('img')) return;
+                        var avatarUrl = avatarCache[username];
+                        if (avatarUrl) {
+                            avatarEl.innerHTML = '<img src="' + escapeHtml(sanitizeUrl(avatarUrl)) + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                        }
+                    });
+                });
                 setTimeout(function() { prefetchStatData(); }, 1000);
             };
             window.renderFeed = renderFeed;
@@ -6076,6 +6102,41 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // 版本更新日志
             const changelogData = [
                 {
+                    version: 'v0.74',
+                    date: '2026-06-10',
+                    content: `
+                        <h4>安全审计全面修复</h4>
+                        <ul>
+                            <li>修复 Supabase RLS 策略中 AUTH_MARKER 未正确排除 __auth__ 记录的安全漏洞</li>
+                            <li>修复 X-Forwarded-For IP 伪造防护：改用 express trust proxy + req.ip</li>
+                            <li>修复 CSRF Origin 校验使用 includes() 子串匹配可被绕过的漏洞</li>
+                            <li>移除前端重复硬编码的 Supabase URL 和 Anon Key，统一从 config.js 读取</li>
+                            <li>管理后台举报处理 API 全部增加数据库操作错误检查和回滚逻辑</li>
+                        </ul>
+                        <h4>性能与内存泄漏修复</h4>
+                        <ul>
+                            <li>rateLimitStore 新增每5分钟过期记录自动清理，防止内存无限增长</li>
+                            <li>adminTokens 新增每10分钟过期 token 自动清理</li>
+                            <li>visitCache 访问去重改用按天清理旧记录，不再全量清除导致统计虚高</li>
+                            <li>statsCache 新增并发锁防止多请求重复触发数据库查询</li>
+                            <li>统计查询 limit(100000) 降为 20000，减少数据库压力</li>
+                            <li>新增 8 条数据库性能索引 SQL（posts/likes/comments/bans/mutes/blacklist）</li>
+                        </ul>
+                        <h4>加载动画全面升级</h4>
+                        <ul>
+                            <li>移除旧版 Canvas 春日藤蔓蝴蝶加载动画（~530 行 JS），替换为纯 CSS 照片墙同款动画</li>
+                            <li>新动画采用双旋转光环 + 脉冲核心 + 光点轨道设计，GPU 加速渲染流畅不掉帧</li>
+                            <li>修复加载动画阻塞内容渲染问题：头像改为后台异步加载，内容立即渲染字母占位头像</li>
+                            <li>清理 upload-ui.js 中重复定义的 buildPostPreviewItems 和 ppRotatePhoto 死代码</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重写了加载动画系统，从 Canvas 逐帧绘制改为纯 CSS 动画，页面冷启动加载速度显著提升</li>
+                            <li>重构了帖子渲染管线，头像和内容解耦，首屏内容即刻可见不再等待头像加载</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.73',
                     date: '2026-06-08',
                     content: `
@@ -7274,7 +7335,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (window.__xtjMagicLoaderV4Installed) return;
             window.__xtjMagicLoaderV4Installed = true;
 
-            var springLoaderHtml = '<div class="xtj-magic-loading" role="status" aria-live="polite"><div class="spring-loader" aria-label="春日藤蔓蝴蝶加载动画"><canvas class="spring-canvas" width="220" height="220" aria-hidden="true"></canvas></div></div>';
+            var springLoaderHtml = '<div class="xtj-magic-loading" role="status" aria-live="polite"><div class="xtj-photo-loader" aria-label="加载中"><span class="xtj-photo-loader-ring"></span><span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span><span class="xtj-photo-loader-core"></span><span class="xtj-photo-loader-dot dot-a"></span><span class="xtj-photo-loader-dot dot-b"></span><span class="xtj-photo-loader-dot dot-c"></span></div></div>';
             var photoWallLoaderHtml = [
                 '<div class="xtj-magic-loading xtj-magic-loading--photo" role="status" aria-live="polite">',
                 '  <div class="xtj-photo-loader" aria-label="照片墙加载动画">',
@@ -7365,25 +7426,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             function patchNode(root) {
-                // Keep explicit loaders, but do not rewrite arbitrary nodes into spring loaders.
+                // spring canvas loader removed — dead code
                 return;
-                root = root || document;
-                if (!root.querySelectorAll) return;
-                root.querySelectorAll('.xtj-magic-loading, .xtj-chat-loader, #feed .loading, #statModalBody .loading, #postDetailBody .loading, #dockChatMessages .chat-empty, #dockChatList .chat-empty, #postUserQuickList .post-user-chip--loading').forEach(function(node) {
-                    if (!node) return;
-                    if (node.querySelector('.spring-loader')) return;
-                    node.outerHTML = springLoaderHtml;
-                });
-                if (window.initAllSpringLoaders) {
-                    window.initAllSpringLoaders(root === document ? document : (root.parentNode || root));
-                }
             }
 
             patchNode(document);
-
-            if (window.initAllSpringLoaders) {
-                window.initAllSpringLoaders(document);
-            }
         })();
 
         (function installCleanStatUiOverrides() {
@@ -8089,10 +8136,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             })();
 
             renderPostFilterUserLoader = function() {
-                return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;">' +
-                    '<div class="spring-loader" style="width:120px;height:120px;margin:0 auto;">' +
-                    '<canvas class="spring-canvas" width="120" height="120" style="width:120px;height:120px;" aria-hidden="true"></canvas>' +
-                    '</div></div>';
+                return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-photo-loader" aria-label="加载中"><span class="xtj-photo-loader-ring"></span><span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span><span class="xtj-photo-loader-core"></span><span class="xtj-photo-loader-dot dot-a"></span><span class="xtj-photo-loader-dot dot-b"></span><span class="xtj-photo-loader-dot dot-c"></span></div></div>';
             };
 
             window.openStatDetail = async function(type) {

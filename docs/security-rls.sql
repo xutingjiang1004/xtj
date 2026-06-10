@@ -17,7 +17,7 @@ CREATE POLICY "anon_select_posts" ON posts
   USING (
     media_type NOT IN (
       '__admin_auth__', '__ann__', '__report__', '__dm__',
-      '__visit__', '__attack__', '__user_visit__', 'AUTH_MARKER'
+      '__visit__', '__attack__', '__user_visit__', '__auth__'
     )
   );
 
@@ -151,3 +151,27 @@ CREATE POLICY "anon_modify_blacklist" ON blacklist
 -- - 执行后重启 render-api 服务使新策略生效
 -- - service_role key 具有 RLS 绕过能力，因此不受这些策略限制
 -- ============================================================
+
+-- ============================================================
+-- 8. 数据库性能索引（强烈建议执行）
+-- ============================================================
+-- posts 表：按 media_type 和 created_at 的复合查询加速
+CREATE INDEX IF NOT EXISTS idx_posts_media_type ON posts(media_type);
+CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
+
+-- likes 表：按时间排序加速
+CREATE INDEX IF NOT EXISTS idx_likes_created_at ON likes(created_at DESC);
+
+-- comments 表：按时间排序加速
+CREATE INDEX IF NOT EXISTS idx_comments_created_at ON comments(created_at DESC);
+
+-- bans 表：按用户名和封禁时间加速
+CREATE INDEX IF NOT EXISTS idx_bans_user_name ON bans(user_name);
+CREATE INDEX IF NOT EXISTS idx_bans_banned_at ON bans(banned_at DESC);
+
+-- mutes 表：按时间加速
+CREATE INDEX IF NOT EXISTS idx_mutes_created_at ON mutes(created_at DESC);
+
+-- blacklist 表：按用户名和创建时间加速
+CREATE INDEX IF NOT EXISTS idx_blacklist_user_name ON blacklist(user_name);
+CREATE INDEX IF NOT EXISTS idx_blacklist_created_at ON blacklist(created_at DESC);

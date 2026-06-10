@@ -1,8 +1,5 @@
 .xtj-magic-loading,
-.xtj-magic-loading *,
-.spring-loader,
-.spring-loader *,
-.spring-canvas {
+.xtj-magic-loading * {
   pointer-events: none !important;
 }
 

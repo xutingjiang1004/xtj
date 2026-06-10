@@ -7229,30 +7229,11 @@
     position: relative;
 }
 
-/* ===== Spring Canvas Loader ===== */
-.spring-loader {
-  width: 220px;
-  height: 220px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: relative;
-  margin: 0 auto;
-}
-.spring-loader canvas {
-  width: 220px;
-  height: 220px;
-  display: block;
-  image-rendering: auto;
-}
+/* ===== Photo Loader（通用加载动画，与照片墙风格一致） ===== */
+
 @media (max-width: 480px) {
   .xtj-magic-loading {
-    min-height: 180px;
-  }
-  .spring-loader,
-  .spring-loader canvas {
-    width: 180px;
-    height: 180px;
+    min-height: 160px;
   }
 }
 
@@ -8720,6 +8701,10 @@ body.ios-chat-keyboard-open .chat-input-area {
 .xtj-photo-loader-dot.dot-a { top: 7px; left: 38px; }
 .xtj-photo-loader-dot.dot-b { right: 10px; bottom: 18px; animation-delay: .35s; }
 .xtj-photo-loader-dot.dot-c { left: 11px; bottom: 19px; animation-delay: .7s; }
+
+@keyframes xtjUploadSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes xtjUploadPulse { 0%,100% { transform: scale(.92); opacity: .62; } 50% { transform: scale(1.06); opacity: 1; } }
+@keyframes xtjUploadOrbit { 0%,100% { transform: scale(.8); opacity: .4; } 50% { transform: translateY(-5px) scale(1.2); opacity: 1; } }
 
 .chat-msg {
   animation: xtjChatMessageIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
