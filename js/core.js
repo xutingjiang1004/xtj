@@ -4146,6 +4146,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
                 var maxFileSize = isVipUser() ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
                 if (file && file.size > maxFileSize) { showToast("文件大小不能超过" + (isVipUser() ? "200MB" : "50MB")); return; }
+                if (file) {
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
@@ -7498,6 +7499,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     '</div>'
                 ].join('');
             };
+            window.__xtjSkeletonCardHtml = skeletonCardHtml;
 
             window.xtjMagicLoadingHtml = function(title, subtitle, variant) {
                 var mode = String(variant || '');
@@ -8186,7 +8188,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (window.__xtjChatPhotoLoaderFinalV1) return;
                 window.__xtjChatPhotoLoaderFinalV1 = true;
                 var originalMagicLoader = window.xtjMagicLoadingHtml;
-                window.__xtjSharedPhotoLoaderHtml = window.__xtjSharedPhotoLoaderHtml || skeletonCardHtml(true);
+                window.__xtjSharedPhotoLoaderHtml = window.__xtjSharedPhotoLoaderHtml || (window.__xtjSkeletonCardHtml ? window.__xtjSkeletonCardHtml(true) : '');
                 window.xtjMagicLoadingHtml = function(title, subtitle, variant) {
                     var mode = String(variant || '');
                     if (mode.indexOf('chat') !== -1 || /聊天|消息/.test(String(title || '') + String(subtitle || ''))) {

@@ -718,7 +718,7 @@
     window.closePhotoPreview.__xtjPostPreviewWrapped = true;
   }
 
-  buildPostPreviewItems = function(img) {
+  window.buildPostPreviewItems = function(img) {
     function readNumberAttr(node, keys) {
       if (!node) return null;
       var raw = '';
