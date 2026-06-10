@@ -22,6 +22,38 @@
     postInsert: 30000
   };
 
+  var DAILY_LIMIT_KEY = 'xtj_photo_upload_date';
+  var DAILY_COUNT_KEY = 'xtj_photo_upload_count';
+  var DAILY_LIMIT = 5;
+
+  function checkDailyUploadLimit() {
+    if (typeof window.isVipUser === 'function' && window.isVipUser()) return true;
+    var today = new Date().toDateString();
+    var storedDate = window.safeLocalStorageGet(DAILY_LIMIT_KEY, '');
+    var storedCount = parseInt(window.safeLocalStorageGet(DAILY_COUNT_KEY, '0'), 10) || 0;
+    if (storedDate !== today) {
+      window.safeLocalStorageSet(DAILY_LIMIT_KEY, today);
+      window.safeLocalStorageSet(DAILY_COUNT_KEY, '0');
+      return true;
+    }
+    if (storedCount >= DAILY_LIMIT) {
+      throw new Error('每日上传已达上限（' + DAILY_LIMIT + '张），开通 Pro 可享无限制上传');
+    }
+    return true;
+  }
+
+  function incrementDailyUploadCount(count) {
+    var today = new Date().toDateString();
+    var storedDate = window.safeLocalStorageGet(DAILY_LIMIT_KEY, '');
+    var storedCount = parseInt(window.safeLocalStorageGet(DAILY_COUNT_KEY, '0'), 10) || 0;
+    if (storedDate !== today) {
+      window.safeLocalStorageSet(DAILY_LIMIT_KEY, today);
+      window.safeLocalStorageSet(DAILY_COUNT_KEY, String(count));
+    } else {
+      window.safeLocalStorageSet(DAILY_COUNT_KEY, String(storedCount + count));
+    }
+  }
+
   function byId(id) {
     return document.getElementById(id);
   }
@@ -426,6 +458,8 @@
     if (!window.currentUser) throw new Error('请先登录');
     if (!state.photoFiles.length) throw new Error('请先选择照片');
 
+    checkDailyUploadLimit();
+
     state.photoUploading = true;
     showProgress();
     renderQueue(state.photoFiles);
@@ -496,6 +530,8 @@
         failCount++;
       }
     }
+
+    if (successCount > 0) incrementDailyUploadCount(successCount);
 
     if (window.saveLocalPhotoWallData) window.saveLocalPhotoWallData();
     if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();

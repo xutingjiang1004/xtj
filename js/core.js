@@ -260,20 +260,23 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
         function openVipModal() {
             if (!currentUser) { showToast('请先登录'); return; }
-            showModal('vipModal');
+            openModal('vipModal');
             updateVipModalUI();
         }
 
         function updateVipModalUI() {
             var btn = document.getElementById('vipPayBtn');
             var btnText = document.getElementById('vipPayBtnText');
+            var cancelArea = document.getElementById('vipCancelArea');
             if (!btn) return;
             if (__vipStatus.is_vip) {
                 btnText.textContent = '✅ 已是VIP会员';
                 btn.disabled = true;
+                if (cancelArea) cancelArea.style.display = '';
             } else {
                 btnText.textContent = '立即开通 ¥3';
                 btn.disabled = false;
+                if (cancelArea) cancelArea.style.display = 'none';
             }
         }
 
@@ -360,6 +363,58 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
         window.openVipModal = openVipModal;
         window.handleVipPurchase = handleVipPurchase;
+
+        window.handleCancelPro = async function() {
+            if (!currentUser) { showToast('请先登录'); return; }
+            if (!__vipStatus.is_vip) { showToast('您还不是VIP会员'); return; }
+
+            if (!confirm('确定取消 XTJ Pro 订阅吗？\n取消后VIP权益将立即失效。')) return;
+
+            // 1. 清除本地VIP缓存
+            if (typeof window.__xtjClearLocalVip === 'function') {
+                window.__xtjClearLocalVip();
+            }
+
+            // 2. 尝试在Supabase标记取消
+            if (window.sb) {
+                try {
+                    var { data: vipRows } = await window.sb.from('posts')
+                        .select('id, content')
+                        .eq('user_name', currentUser)
+                        .eq('media_type', '__vip__')
+                        .order('created_at', { ascending: false })
+                        .limit(5);
+                    if (vipRows && vipRows.length > 0) {
+                        for (var i = 0; i < vipRows.length; i++) {
+                            try {
+                                var c = JSON.parse(vipRows[i].content || '{}');
+                                if (c.is_active) {
+                                    c.is_active = false;
+                                    c.cancelled_at = new Date().toISOString();
+                                    await window.sb.from('posts')
+                                        .update({ content: JSON.stringify(c) })
+                                        .eq('id', vipRows[i].id);
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                } catch(e) {
+                    console.warn('[Pro] cancel supabase update failed', e);
+                }
+            }
+
+            // 3. 重置VIP状态
+            __vipStatus.is_vip = false;
+            __vipStatus.vip_info = null;
+            updateVipUI();
+            updateVipModalUI();
+            if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(false);
+
+            // 4. 刷新帖子列表
+            if (typeof refreshFeedDisplay === 'function') refreshFeedDisplay();
+
+            showToast('已取消 Pro 订阅');
+        };
 
         function clearFeedCache() {
             try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
@@ -867,7 +922,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // ===================== 用户限制状态管理 =====================
             var userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
             var restrictionPollTimer = null;
-            var RESTRICTION_POLL_INTERVAL = 15000; // 15秒轮询
+            var RESTRICTION_POLL_INTERVAL = 60000; // 60秒轮询（15秒太频繁）
 
             async function checkUserRestrictions() {
                 if (!currentUser || currentUser === ADMIN_NAME) return;
@@ -3239,9 +3294,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 var safeName = username.replace(/'/g, "\\'");
+                var isPro = isVipUser() && username === currentUser;
                 if (avatarUrl) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
-                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+                    var baseHtml = '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+                    return isPro ? '<div class="xtj-pro-avatar-ring">' + baseHtml + '</div>' : baseHtml;
                 } else {
                     return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')">' + username[0].toUpperCase() + '</div>';
                 }
@@ -3529,8 +3586,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: newContent,
                     visibility: nextVisibility,
                     is_pinned: nextPinned,
-                    pinned_at: nextPinnedAt,
-                    updated_at: nextUpdatedAt
+                    pinned_at: nextPinnedAt
                 };
                 var result = await sb.from("posts").update(updatePayload).eq("id", post.id).select("*").maybeSingle();
                 if (result.error) return { ok: false, error: result.error };
@@ -3553,9 +3609,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 if (Object.prototype.hasOwnProperty.call(updates, "pinned_at") && String(verified.pinned_at || "") !== String(nextPinnedAt || "")) {
                     return { ok: false, error: new Error("更新失败：pinned_at 未实际生效") };
-                }
-                if (Object.prototype.hasOwnProperty.call(updates, "updated_at") && String(verified.updated_at || "") !== String(nextUpdatedAt || "")) {
-                    return { ok: false, error: new Error("更新失败：updated_at 未实际生效") };
                 }
                 return { ok: true, data: result.data };
             }
@@ -3640,7 +3693,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     <div class="post-header-main">
                       <div class="user-info">
                         <span class="user-name">${escapeHtml(normalized.user_name)}</span>
-                        ${isVipUser() ? '<span class="xtj-vip-badge"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Pro</span>' : ''}
+                        ${isVipUser() && normalized.user_name === currentUser ? '<span class="xtj-vip-badge xtj-vip-enhanced"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Pro</span>' : ''}
                         <span class="post-time post-meta-line">${escapeHtml(formatPostTime(normalized))}</span>
                       </div>
                       <div class="post-badge-stack">${buildPostBadges(normalized)}</div>
@@ -4083,6 +4136,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var dbPost = normalizePost(fetchRes.data);
                     if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
                         showToast('无权置顶');
+                        return;
+                    }
+                    if (!isVipUser() && currentUser !== ADMIN_NAME) {
+                        showToast('仅 Pro 会员可使用置顶功能');
                         return;
                     }
 
@@ -8267,76 +8324,56 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             (function installButtonMotionFinal() {
                 if (window.__xtjButtonMotionFinalV1) return;
                 window.__xtjButtonMotionFinalV1 = true;
-                var selector = [
-                    'button',
-                    '[role="button"]',
-                    'input[type="button"]',
-                    'input[type="submit"]',
-                    'input[type="reset"]',
-                    '.file-label',
-                    '.photo-wall-btn',
-                    '.chat-img-btn',
-                    '.send-btn',
-                    '.action-btn',
-                    '.report-btn',
-                    '.report-type-tab',
-                    '.report-reason-btn',
-                    '.report-submit-btn',
-                    '.stat-record-action',
-                    '.profile-activity-more',
-                    '.profile-activity-btn'
-                ].join(',');
+                var selector = '.user-filter-btn,.search-toggle,.filter-toggle';
+                var gsapCache = false;
 
                 function isDock(target) {
                     return !!(target && target.closest && target.closest('#dockBar, .dock-bar, .dock-tab'));
                 }
 
-                function getMotionTarget(event) {
-                    var target = event.target && event.target.closest ? event.target.closest(selector) : null;
-                    if (!target || isDock(target) || target.disabled || target.getAttribute('aria-disabled') === 'true') return null;
-                    return target;
-                }
-
-                document.addEventListener('pointerdown', function(event) {
-                    var target = getMotionTarget(event);
+                document.addEventListener('click', function(event) {
+                    if (gsapCache === false) gsapCache = typeof gsap !== 'undefined';
+                    var target = event.target;
                     if (!target) return;
-                    target.classList.remove('xtj-btn-release');
-                    target.classList.add('xtj-btn-pressing');
+                    var btn = target.closest(selector);
+                    if (!btn) return;
+                    if (isDock(btn)) return;
+
+                    if (gsapCache) {
+                        var icon = btn.querySelector('svg, img, i');
+                        if (icon) {
+                            gsap.fromTo(icon, {scale:1}, {scale:1.18, duration:0.16, ease:'back.out(2.5)', clearProps:'scale'});
+                        }
+                    } else {
+                        btn.style.transform = 'scale(0.96)';
+                        window.setTimeout(function(){btn.style.transform='';}, 120);
+                    }
                 }, true);
 
-                ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(type) {
-                    document.addEventListener(type, function(event) {
-                        var target = getMotionTarget(event);
-                        if (!target || !target.classList.contains('xtj-btn-pressing')) return;
-                        target.classList.remove('xtj-btn-pressing');
-                        target.classList.add('xtj-btn-release');
-                        window.setTimeout(function() {
-                            target.classList.remove('xtj-btn-release');
-                        }, 240);
-                    }, true);
-                });
+                document.addEventListener('pointerdown', function(event) {
+                    var target = event.target;
+                    if (!target || isDock(target)) return;
+                    if (target.closest('button:not(.dock-tab),[role="button"]:not(.dock-tab),.action-btn,.send-btn,.chat-img-btn,.photo-wall-btn,.file-label')) {
+                        target.style.transition = 'transform 0.12s ease';
+                        target.style.transform = 'scale(0.96)';
+                    }
+                }, true);
 
-                document.addEventListener('click', function(event) {
-                    var target = getMotionTarget(event);
+                document.addEventListener('pointerup', function(event) {
+                    var target = event.target;
                     if (!target) return;
-                    target.classList.add('xtj-btn-clicked');
-                    try {
-                        var rect = target.getBoundingClientRect();
-                        var ripple = document.createElement('span');
-                        var size = Math.max(rect.width, rect.height) * 1.35;
-                        ripple.className = 'xtj-btn-ripple';
-                        ripple.style.width = size + 'px';
-                        ripple.style.height = size + 'px';
-                        ripple.style.left = (event.clientX - rect.left - size / 2) + 'px';
-                        ripple.style.top = (event.clientY - rect.top - size / 2) + 'px';
-                        target.appendChild(ripple);
-                        window.setTimeout(function() {
-                            if (ripple && ripple.parentNode) ripple.parentNode.removeChild(ripple);
-                        }, 360);
-                    } catch (_) {}
-                    window.setTimeout(function() {
-                        target.classList.remove('xtj-btn-clicked');
-                    }, 260);
+                    if (target.style.transform) {
+                        target.style.transition = 'transform 0.25s cubic-bezier(.34,1.4,.64,1)';
+                        target.style.transform = 'scale(1)';
+                        window.setTimeout(function(){target.style.transition='';target.style.transform='';}, 280);
+                    }
+                }, true);
+
+                document.addEventListener('pointercancel', function(event) {
+                    var target = event.target;
+                    if (!target) return;
+                    target.style.transform = '';
+                    target.style.transition = '';
                 }, true);
             })();
 
