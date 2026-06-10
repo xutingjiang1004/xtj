@@ -8369,8 +8369,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         tl.to(target, { scale: 0.955, duration: 0.1, ease: 'power2.out', overwrite: 'auto' }, 0);
                         pressTimelines[target._xtjBtnId] = tl;
                     } else {
-                        target.classList.remove('xtj-btn-release');
-                        target.classList.add('xtj-btn-pressing');
+                        target.style.transform = 'scale(0.955)';
                     }
                 }
 
@@ -8382,11 +8381,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                         gsap.to(target, { scale: 1, duration: 0.28, ease: 'back.out(1.6)', overwrite: 'auto' });
                     } else {
-                        target.classList.remove('xtj-btn-pressing');
-                        target.classList.add('xtj-btn-release');
-                        window.setTimeout(function() {
-                            target.classList.remove('xtj-btn-release');
-                        }, 240);
+                        target.style.transform = '';
                     }
                 }
 
@@ -8396,39 +8391,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         if (isSearchFilter) {
                             var icon = target.querySelector('svg') || target.querySelector('img') || target.querySelector('i');
                             if (icon) {
-                                var isActive = target.classList.contains('active') || target.getAttribute('aria-pressed') === 'true' || target.dataset.active === 'true';
-                                var fromRotate = isActive ? 0 : 0;
-                                var toRotate = isActive ? 0 : 0;
-                                gsap.fromTo(icon, { rotation: fromRotate, scale: 1 }, { rotation: toRotate, scale: 1.18, duration: 0.18, ease: 'back.out(2)', clearProps: 'rotation' });
+                                gsap.fromTo(icon, { x:0, y:0, scale: 1 }, { scale: 1.2, duration: 0.18, ease: 'back.out(2.5)', clearProps: 'scale' });
                             }
                         }
-                        gsap.fromTo(target, { boxShadow: '0 0 0 rgba(26,71,48,0)' }, {
-                            boxShadow: '0 8px 20px rgba(26,71,48,0.13), inset 0 1px 0 rgba(255,255,255,0.75)',
-                            duration: 0.22, ease: 'power2.out', overwrite: 'auto',
-                            onComplete: function() {
-                                gsap.to(target, { boxShadow: '0 0 0 rgba(26,71,48,0)', duration: 0.25, delay: 0.05, overwrite: 'auto' });
-                            }
-                        });
+                        gsap.fromTo(target, { opacity: 1 }, { opacity: 0.92, duration: 0.08, ease: 'power1.out', overwrite: 'auto', onComplete: function() {
+                            gsap.to(target, { opacity: 1, duration: 0.2, delay: 0.04, overwrite: 'auto' });
+                        }});
                     } else {
-                        target.classList.add('xtj-btn-clicked');
+                        target.style.opacity = '0.92';
                         window.setTimeout(function() {
-                            target.classList.remove('xtj-btn-clicked');
-                        }, 260);
+                            target.style.opacity = '';
+                        }, 120);
                     }
-                    try {
-                        var rect = target.getBoundingClientRect();
-                        var ripple = document.createElement('span');
-                        var size = Math.max(rect.width, rect.height) * 1.35;
-                        ripple.className = 'xtj-btn-ripple';
-                        ripple.style.width = size + 'px';
-                        ripple.style.height = size + 'px';
-                        ripple.style.left = (event.clientX - rect.left - size / 2) + 'px';
-                        ripple.style.top = (event.clientY - rect.top - size / 2) + 'px';
-                        target.appendChild(ripple);
-                        window.setTimeout(function() {
-                            if (ripple && ripple.parentNode) ripple.parentNode.removeChild(ripple);
-                        }, 360);
-                    } catch (_) {}
                 }
 
                 document.addEventListener('pointerdown', function(event) {

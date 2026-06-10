@@ -42,8 +42,8 @@
             --radius-sm: 16px;
             --radius-md: 24px;
             --radius-lg: 32px;
-            --trans-smooth: opacity 0.32s cubic-bezier(0.25, 1, 0.3, 1), transform 0.32s cubic-bezier(0.25, 1, 0.3, 1), background 0.32s cubic-bezier(0.25, 1, 0.3, 1), border-color 0.32s cubic-bezier(0.25, 1, 0.3, 1), box-shadow 0.32s cubic-bezier(0.25, 1, 0.3, 1), color 0.32s cubic-bezier(0.25, 1, 0.3, 1);
-            --trans-spring: opacity 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            --trans-smooth: opacity 0.32s cubic-bezier(0.25, 1, 0.3, 1), transform 0.32s cubic-bezier(0.25, 1, 0.3, 1), background 0.32s cubic-bezier(0.25, 1, 0.3, 1), border-color 0.32s cubic-bezier(0.25, 1, 0.3, 1), color 0.32s cubic-bezier(0.25, 1, 0.3, 1);
+            --trans-spring: opacity 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             --trans-ppt: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
             --panel-bg: rgba(233, 248, 237, 0.96);
             --dock-bg: rgba(223, 244, 229, 0.75);
@@ -9876,97 +9876,96 @@ body.ios-chat-keyboard-open .chat-input-area {
   .stat-record-action,
   .profile-activity-more,
   .profile-activity-btn
-).xtj-btn-pressing {
-  transform: translateY(0) scale(0.965) !important;
-  transition-duration: 0.12s !important;
-}
-
-:where(
-  button:not(.dock-tab),
-  [role="button"]:not(.dock-tab),
-  input[type="button"],
-  input[type="submit"],
-  input[type="reset"],
-  .file-label,
-  .photo-wall-btn,
-  .chat-img-btn,
-  .send-btn,
-  .action-btn,
-  .report-btn,
-  .report-type-tab,
-  .report-reason-btn,
-  .report-submit-btn,
-  .stat-record-action,
-  .profile-activity-more,
-  .profile-activity-btn
-).xtj-btn-release {
-  animation: xtjButtonRelease 0.24s var(--xtj-btn-ease);
-}
-
-:where(
-  button:not(.dock-tab),
-  [role="button"]:not(.dock-tab),
-  input[type="button"],
-  input[type="submit"],
-  input[type="reset"],
-  .file-label,
-  .photo-wall-btn,
-  .chat-img-btn,
-  .send-btn,
-  .action-btn,
-  .report-btn,
-  .report-type-tab,
-  .report-reason-btn,
-  .report-submit-btn,
-  .stat-record-action,
-  .profile-activity-more,
-  .profile-activity-btn
-).xtj-btn-clicked {
-  box-shadow: 0 12px 24px rgba(26, 71, 48, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.75) !important;
-}
-
-:where(
-  button:not(.dock-tab),
-  [role="button"]:not(.dock-tab),
-  .file-label,
-  .photo-wall-btn,
-  .chat-img-btn,
-  .send-btn,
-  .action-btn,
-  .report-btn,
-  .report-type-tab,
-  .report-reason-btn,
-  .report-submit-btn,
-  .stat-record-action,
-  .profile-activity-more,
-  .profile-activity-btn
 ) {
   position: relative;
   overflow: hidden;
 }
 
-.xtj-btn-ripple {
+.post,
+.profile-card,
+.photo-card,
+.glass,
+.dock-tab,
+.action-btn,
+.chat-msg {
+  transform: translateZ(0);
+  contain: content;
+}
+
+/* GPU 加速 - 所有按钮 */
+:where(
+  button:not(.dock-tab),
+  [role="button"]:not(.dock-tab),
+  .file-label,
+  .photo-wall-btn,
+  .chat-img-btn,
+  .send-btn,
+  .action-btn,
+  .report-btn,
+  .report-type-tab,
+  .report-reason-btn,
+  .report-submit-btn,
+  .stat-record-action,
+  .profile-activity-more,
+  .profile-activity-btn,
+  .user-filter-btn,
+  .search-toggle,
+  .filter-toggle
+) {
+  will-change: transform;
+  -webkit-tap-highlight-color: transparent;
+}
+:where(
+  button:not(.dock-tab),
+  [role="button"]:not(.dock-tab),
+  .file-label,
+  .photo-wall-btn,
+  .chat-img-btn,
+  .send-btn,
+  .action-btn,
+  .report-btn,
+  .report-type-tab,
+  .report-reason-btn,
+  .report-submit-btn,
+  .stat-record-action,
+  .profile-activity-more,
+  .profile-activity-btn,
+  .user-filter-btn,
+  .search-toggle,
+  .filter-toggle
+)::after {
+  content: '';
   position: absolute;
+  inset: 0;
   pointer-events: none;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(45, 160, 103, 0.26) 0%, rgba(45, 160, 103, 0.18) 34%, rgba(45, 160, 103, 0) 72%);
-  transform: scale(0.2);
-  opacity: 0.95;
-  animation: xtjButtonRipple 0.36s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  border-radius: inherit;
+  background: radial-gradient(circle at 50% 50%, rgba(45,160,103,0.12) 0%, transparent 60%);
+  opacity: 0;
+  transition: opacity 0s;
+}
+:where(
+  button:not(.dock-tab),
+  [role="button"]:not(.dock-tab),
+  .file-label,
+  .photo-wall-btn,
+  .chat-img-btn,
+  .send-btn,
+  .action-btn,
+  .report-btn,
+  .report-type-tab,
+  .report-reason-btn,
+  .report-submit-btn,
+  .stat-record-action,
+  .profile-activity-more,
+  .profile-activity-btn,
+  .user-filter-btn,
+  .search-toggle,
+  .filter-toggle
+):active::after {
+  opacity: 1;
+  transition: opacity 0s;
 }
 
-@keyframes xtjButtonRelease {
-  from { transform: translateY(0) scale(0.965); }
-  62% { transform: translateY(-1px) scale(1.012); }
-  to { transform: translateY(0) scale(1); }
-}
-
-@keyframes xtjButtonRipple {
-  to {
-    transform: scale(1.12);
-    opacity: 0;
-  }
-}
 
 #photoPreviewOverlay .pp-info-modal-content,
 .pp-info-modal-content {
@@ -11995,14 +11994,14 @@ body.ios-chat-keyboard-open .chat-input-area {
   padding: 0;
   overflow: hidden;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.92) !important;
-  backdrop-filter: blur(32px) saturate(200%) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
+  background: rgba(255, 255, 255, 0.97) !important;
+  backdrop-filter: blur(40px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
 }
 [data-theme="dark"] .vip-modal {
-  background: rgba(28, 28, 45, 0.96) !important;
-  backdrop-filter: blur(32px) saturate(200%) !important;
-  -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
+  background: rgba(28, 28, 45, 0.98) !important;
+  backdrop-filter: blur(40px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
 }
 .vip-modal-head {
   display: flex;
@@ -12470,11 +12469,6 @@ html.xtj-pro-active .heart-particle {
 html.xtj-pro-active .action-btn.liked {
   color: #f59e0b !important;
   text-shadow: 0 0 8px rgba(245,158,11,0.3);
-}
-
-/* ========== 按钮 GSAP 点击动画占位 ========== */
-.xtj-btn-clicked {
-  transition: transform 0.15s cubic-bezier(0.18, 1.3, 0.28, 1), box-shadow 0.15s ease;
 }
 
 /* ========== Pro 增强的 VIP 身份标识 ========== */
