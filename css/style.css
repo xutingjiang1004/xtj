@@ -12179,3 +12179,231 @@ body.ios-chat-keyboard-open .chat-input-area {
   height: 10px;
   fill: currentColor;
 }
+
+/* ========== Pro 会员弹窗增强 ========== */
+.vip-modal-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #fff;
+  margin-left: 8px;
+  vertical-align: middle;
+  animation: vipBadgePulse 2s ease-in-out infinite;
+}
+@keyframes vipBadgePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
+}
+.vip-plan-badge {
+  position: absolute;
+  top: -10px;
+  right: 16px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 12px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(245,158,11,0.3);
+  letter-spacing: 0.3px;
+}
+.vip-plan-card {
+  position: relative;
+}
+
+/* ========== Pro 庆祝动画层 ========== */
+.pro-celebration-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  transition: opacity 0.4s ease;
+}
+.pro-celebration-overlay.pro-celebration-exit {
+  opacity: 0;
+  pointer-events: none;
+}
+.pro-celebration-overlay.pro-celebration-exit .pro-celebration-card {
+  transform: scale(0.9) translateY(20px);
+  opacity: 0;
+  transition: all 0.5s ease;
+}
+.pro-celebration-bg {
+  position: absolute;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #f59e0b 0%, transparent 70%);
+  pointer-events: none;
+  opacity: 0;
+}
+#proCelebrationCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.pro-celebration-card {
+  position: relative;
+  z-index: 2;
+  background: linear-gradient(145deg, #1c1917, #292524);
+  border: 1px solid rgba(245,158,11,0.25);
+  border-radius: 24px;
+  padding: 40px 36px 32px;
+  max-width: 380px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(245,158,11,0.1);
+}
+.pro-celebration-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 16px;
+  background: linear-gradient(135deg, rgba(245,158,11,0.2), rgba(239,68,68,0.15));
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: celebIconGlow 2s ease-in-out infinite;
+}
+@keyframes celebIconGlow {
+  0%, 100% { box-shadow: 0 0 10px rgba(245,158,11,0.2); }
+  50% { box-shadow: 0 0 25px rgba(245,158,11,0.4); }
+}
+.pro-celebration-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fbbf24;
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+.pro-celebration-sub {
+  font-size: 14px;
+  color: #a8a29e;
+  margin-bottom: 20px;
+}
+.pro-celebration-info {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 12px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 12px;
+}
+.pro-celebration-info-item {
+  text-align: center;
+}
+.pro-celebration-info-label {
+  display: block;
+  font-size: 11px;
+  color: #78716c;
+  margin-bottom: 2px;
+}
+.pro-celebration-info-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fbbf24;
+}
+.pro-celebration-features {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+.pro-celebration-feature {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #d6d3d1;
+  padding: 6px 10px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 8px;
+}
+.pcf-icon {
+  font-size: 14px;
+}
+.pro-celebration-btn {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1c1917;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 15px rgba(245,158,11,0.3);
+}
+.pro-celebration-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(245,158,11,0.4);
+}
+.pro-celebration-btn:active {
+  transform: translateY(0);
+}
+
+/* ========== Pro 主题（开通后界面焕新） ========== */
+html.xtj-pro-active {
+  --pro-accent: #f59e0b;
+  --pro-accent-light: #fbbf24;
+  --pro-glow: rgba(245,158,11,0.15);
+}
+html.xtj-pro-active .dock-tab.active .dt-label {
+  color: var(--pro-accent);
+}
+html.xtj-pro-active .dock-tab.active .dt-icon {
+  color: var(--pro-accent);
+}
+html.xtj-pro-active .dock-tab.active .dt-svg {
+  filter: drop-shadow(0 0 6px rgba(245,158,11,0.4));
+}
+html.xtj-pro-active .xtj-vip-card {
+  border-color: var(--pro-accent);
+  box-shadow: 0 0 20px var(--pro-glow), 0 0 40px var(--pro-glow);
+  background: linear-gradient(135deg, rgba(245,158,11,0.08), rgba(245,158,11,0.02));
+}
+html.xtj-pro-active .xtj-vip-card .xtj-vip-card-badge.active {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  box-shadow: 0 0 12px rgba(245,158,11,0.3);
+}
+html.xtj-pro-active .avatar-ring {
+  box-shadow: 0 0 0 2px var(--pro-accent), 0 0 12px var(--pro-glow);
+  animation: proAvatarGlow 3s ease-in-out infinite;
+}
+@keyframes proAvatarGlow {
+  0%, 100% { box-shadow: 0 0 0 2px #f59e0b, 0 0 12px rgba(245,158,11,0.15); }
+  50% { box-shadow: 0 0 0 2px #fbbf24, 0 0 20px rgba(245,158,11,0.3); }
+}
+html.xtj-pro-active .xtj-vip-card .xtj-vip-card-sub {
+  color: var(--pro-accent-light);
+}
+html.xtj-pro-active .profile-setting-item.pro-setting-highlight {
+  border-color: rgba(245,158,11,0.2);
+  background: rgba(245,158,11,0.05);
+}
+html.xtj-pro-active .profile-setting-item.pro-setting-highlight .profile-setting-label {
+  color: var(--pro-accent-light);
+}
+html.xtj-pro-active .post-vip-badge {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  box-shadow: 0 0 8px rgba(245,158,11,0.3);
+  animation: proBadgePulse 2s ease-in-out infinite;
+}
+@keyframes proBadgePulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(245,158,11,0.3); }
+  50% { box-shadow: 0 0 16px rgba(245,158,11,0.5); }
+}

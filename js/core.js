@@ -197,6 +197,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
         async function updateVipStatus() {
             if (!currentUser) return;
+
+            // 先检查本地缓存（即使API不可用也能识别VIP状态）
+            if (typeof window.__xtjCheckLocalVip === 'function') {
+                var localVip = window.__xtjCheckLocalVip(currentUser);
+                if (localVip) {
+                    __vipStatus.is_vip = true;
+                    __vipStatus.vip_info = localVip;
+                    updateVipUI();
+                    if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(true);
+                    return;
+                }
+            }
+
+            // 尝试API查询
             try {
                 var url = API_BASE + '/api/vip/status?user_name=' + encodeURIComponent(currentUser);
                 var resp = await fetch(url);
@@ -204,7 +218,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 __vipStatus.is_vip = data.is_vip === true;
                 __vipStatus.vip_info = data.active_vip || null;
                 updateVipUI();
+                if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(__vipStatus.is_vip);
+                return;
             } catch(e) {}
+
+            // 回退到Supabase直接查询
+            if (typeof window.__xtjQueryVipStatus === 'function') {
+                try {
+                    var vipData = await window.__xtjQueryVipStatus(currentUser);
+                    if (vipData && vipData.is_active) {
+                        __vipStatus.is_vip = true;
+                        __vipStatus.vip_info = vipData;
+                        updateVipUI();
+                        if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(true);
+                    }
+                } catch(e) {}
+            }
         }
 
         function updateVipUI() {
@@ -256,6 +285,34 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             var btnText = document.getElementById('vipPayBtnText');
             if (btn) { btn.classList.add('loading'); btn.disabled = true; btnText.textContent = '处理中...'; }
 
+            var pErr = null;
+            // 优先使用前端直连开通（支持离线活动模式）
+            if (typeof window.__xtjDirectPurchasePro === 'function') {
+                try {
+                    var pResult = await window.__xtjDirectPurchasePro(currentUser);
+                    if (pResult.ok) {
+                        __vipStatus.is_vip = true;
+                        __vipStatus.vip_info = pResult;
+                        updateVipUI();
+                        updateVipModalUI();
+                        closeModal('vipModal');
+                        if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
+                        // 显示庆祝动画
+                        setTimeout(function() {
+                            if (typeof window.__xtjShowProCelebration === 'function') {
+                                window.__xtjShowProCelebration(pResult);
+                            }
+                            if (typeof window.__xtjApplyProTheme === 'function') {
+                                window.__xtjApplyProTheme(true);
+                            }
+                        }, 300);
+                        return;
+                    }
+                    pErr = pResult.error;
+                } catch(e) { pErr = e.message; }
+            }
+
+            // 回退到API远程开通
             try {
                 var resp = await fetch(API_BASE + '/api/vip/create-order', {
                     method: 'POST',
@@ -265,28 +322,37 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var data = await resp.json();
 
                 if (data.error) {
-                    showToast(data.error);
+                    showToast(data.error || '开通失败');
                     if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
                     return;
                 }
 
                 if (data.test_mode && data.result) {
-                    // 测试模式：直接激活
                     if (data.result.ok) {
                         __vipStatus.is_vip = true;
                         __vipStatus.vip_info = data.result;
-                        showToast('🎉 VIP 会员激活成功！');
                         updateVipUI();
                         updateVipModalUI();
                         closeModal('vipModal');
+                        setTimeout(function() {
+                            if (typeof window.__xtjShowProCelebration === 'function') {
+                                window.__xtjShowProCelebration(data.result);
+                            }
+                            if (typeof window.__xtjApplyProTheme === 'function') {
+                                window.__xtjApplyProTheme(true);
+                            }
+                        }, 300);
                     }
                 } else if (data.pay_url) {
-                    // 生产模式：跳转支付宝
                     window.location.href = API_BASE + data.pay_url;
                 }
             } catch(e) {
-                showToast('支付失败，请重试');
-                console.error('[VIP] 支付错误:', e);
+                if (pErr) {
+                    showToast('当前服务器API不可用，请确保后端服务已启动');
+                } else {
+                    showToast('支付失败，请重试');
+                }
+                console.error('[VIP] 支付错误:', e, pErr);
             }
 
             if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
