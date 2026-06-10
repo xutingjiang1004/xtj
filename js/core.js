@@ -267,13 +267,16 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         function updateVipModalUI() {
             var btn = document.getElementById('vipPayBtn');
             var btnText = document.getElementById('vipPayBtnText');
+            var cancelArea = document.getElementById('vipCancelArea');
             if (!btn) return;
             if (__vipStatus.is_vip) {
                 btnText.textContent = '✅ 已是VIP会员';
                 btn.disabled = true;
+                if (cancelArea) cancelArea.style.display = '';
             } else {
                 btnText.textContent = '立即开通 ¥3';
                 btn.disabled = false;
+                if (cancelArea) cancelArea.style.display = 'none';
             }
         }
 
@@ -360,6 +363,58 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
         window.openVipModal = openVipModal;
         window.handleVipPurchase = handleVipPurchase;
+
+        window.handleCancelPro = async function() {
+            if (!currentUser) { showToast('请先登录'); return; }
+            if (!__vipStatus.is_vip) { showToast('您还不是VIP会员'); return; }
+
+            if (!confirm('确定取消 XTJ Pro 订阅吗？\n取消后VIP权益将立即失效。')) return;
+
+            // 1. 清除本地VIP缓存
+            if (typeof window.__xtjClearLocalVip === 'function') {
+                window.__xtjClearLocalVip();
+            }
+
+            // 2. 尝试在Supabase标记取消
+            if (window.sb) {
+                try {
+                    var { data: vipRows } = await window.sb.from('posts')
+                        .select('id, content')
+                        .eq('user_name', currentUser)
+                        .eq('media_type', '__vip__')
+                        .order('created_at', { ascending: false })
+                        .limit(5);
+                    if (vipRows && vipRows.length > 0) {
+                        for (var i = 0; i < vipRows.length; i++) {
+                            try {
+                                var c = JSON.parse(vipRows[i].content || '{}');
+                                if (c.is_active) {
+                                    c.is_active = false;
+                                    c.cancelled_at = new Date().toISOString();
+                                    await window.sb.from('posts')
+                                        .update({ content: JSON.stringify(c) })
+                                        .eq('id', vipRows[i].id);
+                                }
+                            } catch(e) {}
+                        }
+                    }
+                } catch(e) {
+                    console.warn('[Pro] cancel supabase update failed', e);
+                }
+            }
+
+            // 3. 重置VIP状态
+            __vipStatus.is_vip = false;
+            __vipStatus.vip_info = null;
+            updateVipUI();
+            updateVipModalUI();
+            if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(false);
+
+            // 4. 刷新帖子列表
+            if (typeof refreshFeedDisplay === 'function') refreshFeedDisplay();
+
+            showToast('已取消 Pro 订阅');
+        };
 
         function clearFeedCache() {
             try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
@@ -3239,9 +3294,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     }
                 }
                 var safeName = username.replace(/'/g, "\\'");
+                var isPro = isVipUser() && username === currentUser;
                 if (avatarUrl) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
-                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+                    var baseHtml = '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+                    return isPro ? '<div class="xtj-pro-avatar-ring">' + baseHtml + '</div>' : baseHtml;
                 } else {
                     return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')">' + username[0].toUpperCase() + '</div>';
                 }
@@ -3529,8 +3586,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     content: newContent,
                     visibility: nextVisibility,
                     is_pinned: nextPinned,
-                    pinned_at: nextPinnedAt,
-                    updated_at: nextUpdatedAt
+                    pinned_at: nextPinnedAt
                 };
                 var result = await sb.from("posts").update(updatePayload).eq("id", post.id).select("*").maybeSingle();
                 if (result.error) return { ok: false, error: result.error };
@@ -3553,9 +3609,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 if (Object.prototype.hasOwnProperty.call(updates, "pinned_at") && String(verified.pinned_at || "") !== String(nextPinnedAt || "")) {
                     return { ok: false, error: new Error("更新失败：pinned_at 未实际生效") };
-                }
-                if (Object.prototype.hasOwnProperty.call(updates, "updated_at") && String(verified.updated_at || "") !== String(nextUpdatedAt || "")) {
-                    return { ok: false, error: new Error("更新失败：updated_at 未实际生效") };
                 }
                 return { ok: true, data: result.data };
             }
@@ -3640,7 +3693,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     <div class="post-header-main">
                       <div class="user-info">
                         <span class="user-name">${escapeHtml(normalized.user_name)}</span>
-                        ${isVipUser() && normalized.user_name === currentUser ? '<span class="xtj-vip-badge"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Pro</span>' : ''}
+                        ${isVipUser() && normalized.user_name === currentUser ? '<span class="xtj-vip-badge xtj-vip-enhanced"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Pro</span>' : ''}
                         <span class="post-time post-meta-line">${escapeHtml(formatPostTime(normalized))}</span>
                       </div>
                       <div class="post-badge-stack">${buildPostBadges(normalized)}</div>
@@ -4083,6 +4136,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var dbPost = normalizePost(fetchRes.data);
                     if (currentUser !== dbPost.user_name && currentUser !== ADMIN_NAME) {
                         showToast('无权置顶');
+                        return;
+                    }
+                    if (!isVipUser() && currentUser !== ADMIN_NAME) {
+                        showToast('仅 Pro 会员可使用置顶功能');
                         return;
                     }
 
@@ -8284,8 +8341,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     '.report-submit-btn',
                     '.stat-record-action',
                     '.profile-activity-more',
-                    '.profile-activity-btn'
+                    '.profile-activity-btn',
+                    '.user-filter-btn',
+                    '.search-toggle',
+                    '.filter-toggle'
                 ].join(',');
+
+                var pressTimelines = {};
 
                 function isDock(target) {
                     return !!(target && target.closest && target.closest('#dockBar, .dock-bar, .dock-tab'));
@@ -8297,29 +8359,62 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return target;
                 }
 
-                document.addEventListener('pointerdown', function(event) {
-                    var target = getMotionTarget(event);
-                    if (!target) return;
-                    target.classList.remove('xtj-btn-release');
-                    target.classList.add('xtj-btn-pressing');
-                }, true);
+                function gsapPress(target) {
+                    if (typeof gsap !== 'undefined') {
+                        if (pressTimelines[target._xtjBtnId]) {
+                            pressTimelines[target._xtjBtnId].kill();
+                        }
+                        if (!target._xtjBtnId) target._xtjBtnId = '_b' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+                        var tl = gsap.timeline();
+                        tl.to(target, { scale: 0.955, duration: 0.1, ease: 'power2.out', overwrite: 'auto' }, 0);
+                        pressTimelines[target._xtjBtnId] = tl;
+                    } else {
+                        target.classList.remove('xtj-btn-release');
+                        target.classList.add('xtj-btn-pressing');
+                    }
+                }
 
-                ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(type) {
-                    document.addEventListener(type, function(event) {
-                        var target = getMotionTarget(event);
-                        if (!target || !target.classList.contains('xtj-btn-pressing')) return;
+                function gsapRelease(target) {
+                    if (typeof gsap !== 'undefined') {
+                        if (pressTimelines[target._xtjBtnId]) {
+                            pressTimelines[target._xtjBtnId].kill();
+                            delete pressTimelines[target._xtjBtnId];
+                        }
+                        gsap.to(target, { scale: 1, duration: 0.28, ease: 'back.out(1.6)', overwrite: 'auto' });
+                    } else {
                         target.classList.remove('xtj-btn-pressing');
                         target.classList.add('xtj-btn-release');
                         window.setTimeout(function() {
                             target.classList.remove('xtj-btn-release');
                         }, 240);
-                    }, true);
-                });
+                    }
+                }
 
-                document.addEventListener('click', function(event) {
-                    var target = getMotionTarget(event);
-                    if (!target) return;
-                    target.classList.add('xtj-btn-clicked');
+                function gsapClickBurst(target, event) {
+                    if (typeof gsap !== 'undefined') {
+                        var isSearchFilter = target.classList.contains('user-filter-btn') || target.classList.contains('search-toggle') || target.classList.contains('filter-toggle');
+                        if (isSearchFilter) {
+                            var icon = target.querySelector('svg') || target.querySelector('img') || target.querySelector('i');
+                            if (icon) {
+                                var isActive = target.classList.contains('active') || target.getAttribute('aria-pressed') === 'true' || target.dataset.active === 'true';
+                                var fromRotate = isActive ? 0 : 0;
+                                var toRotate = isActive ? 0 : 0;
+                                gsap.fromTo(icon, { rotation: fromRotate, scale: 1 }, { rotation: toRotate, scale: 1.18, duration: 0.18, ease: 'back.out(2)', clearProps: 'rotation' });
+                            }
+                        }
+                        gsap.fromTo(target, { boxShadow: '0 0 0 rgba(26,71,48,0)' }, {
+                            boxShadow: '0 8px 20px rgba(26,71,48,0.13), inset 0 1px 0 rgba(255,255,255,0.75)',
+                            duration: 0.22, ease: 'power2.out', overwrite: 'auto',
+                            onComplete: function() {
+                                gsap.to(target, { boxShadow: '0 0 0 rgba(26,71,48,0)', duration: 0.25, delay: 0.05, overwrite: 'auto' });
+                            }
+                        });
+                    } else {
+                        target.classList.add('xtj-btn-clicked');
+                        window.setTimeout(function() {
+                            target.classList.remove('xtj-btn-clicked');
+                        }, 260);
+                    }
                     try {
                         var rect = target.getBoundingClientRect();
                         var ripple = document.createElement('span');
@@ -8334,9 +8429,26 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                             if (ripple && ripple.parentNode) ripple.parentNode.removeChild(ripple);
                         }, 360);
                     } catch (_) {}
-                    window.setTimeout(function() {
-                        target.classList.remove('xtj-btn-clicked');
-                    }, 260);
+                }
+
+                document.addEventListener('pointerdown', function(event) {
+                    var target = getMotionTarget(event);
+                    if (!target) return;
+                    gsapPress(target);
+                }, true);
+
+                ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(type) {
+                    document.addEventListener(type, function(event) {
+                        var target = getMotionTarget(event);
+                        if (!target) return;
+                        gsapRelease(target);
+                    }, true);
+                });
+
+                document.addEventListener('click', function(event) {
+                    var target = getMotionTarget(event);
+                    if (!target) return;
+                    gsapClickBurst(target, event);
                 }, true);
             })();
 
