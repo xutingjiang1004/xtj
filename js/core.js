@@ -180,7 +180,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         }
 
         function renderPostFilterUserLoader() {
-            return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-photo-loader" aria-label="加载中"><span class="xtj-photo-loader-ring"></span><span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span><span class="xtj-photo-loader-core"></span><span class="xtj-photo-loader-dot dot-a"></span><span class="xtj-photo-loader-dot dot-b"></span><span class="xtj-photo-loader-dot dot-c"></span></div></div>';
+            return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-loading-skeleton" style="width:100%"><div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div></div></div>';
         }
 
         function isAdmin() { return currentUser === ADMIN_NAME; }
@@ -3065,7 +3065,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (resetBtn) resetBtn.style.visibility = activeUser ? "visible" : "hidden";
                 if (postFilterUsersLoading && !postFilterUsers.length) {
                     list.innerHTML = renderPostFilterUserLoader();
-                    if (window.initAllSpringLoaders) window.initAllSpringLoaders(list);
                     return;
                 }
                 var users = Array.isArray(postFilterUsers) ? postFilterUsers : [];
@@ -7335,31 +7334,45 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (window.__xtjMagicLoaderV4Installed) return;
             window.__xtjMagicLoaderV4Installed = true;
 
-            var springLoaderHtml = '<div class="xtj-magic-loading" role="status" aria-live="polite"><div class="xtj-photo-loader" aria-label="加载中"><span class="xtj-photo-loader-ring"></span><span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span><span class="xtj-photo-loader-core"></span><span class="xtj-photo-loader-dot dot-a"></span><span class="xtj-photo-loader-dot dot-b"></span><span class="xtj-photo-loader-dot dot-c"></span></div></div>';
-            var photoWallLoaderHtml = [
-                '<div class="xtj-magic-loading xtj-magic-loading--photo" role="status" aria-live="polite">',
-                '  <div class="xtj-photo-loader" aria-label="照片墙加载动画">',
-                '    <span class="xtj-photo-loader-ring"></span>',
-                '    <span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span>',
-                '    <span class="xtj-photo-loader-core"></span>',
-                '    <span class="xtj-photo-loader-dot dot-a"></span>',
-                '    <span class="xtj-photo-loader-dot dot-b"></span>',
-                '    <span class="xtj-photo-loader-dot dot-c"></span>',
-                '  </div>',
-                '</div>'
-            ].join('');
+            var skeletonCardHtml = function(isChat) {
+                if (isChat) {
+                    return [
+                        '<div class="xtj-loading-skeleton xtj-loading-skeleton--chat">',
+                        '  <div class="xtj-skeleton-card"><div class="xtj-skeleton-body"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>',
+                        '  <div class="xtj-skeleton-card"><div class="xtj-skeleton-body"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>',
+                        '  <div class="xtj-skeleton-card"><div class="xtj-skeleton-body"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>',
+                        '  <div class="xtj-skeleton-card"><div class="xtj-skeleton-body"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>',
+                        '  <div class="xtj-skeleton-card"><div class="xtj-skeleton-body"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>',
+                        '</div>'
+                    ].join('');
+                }
+                return [
+                    '<div class="xtj-loading-skeleton">',
+                    '  <div class="xtj-skeleton-card">',
+                    '    <div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>',
+                    '    <div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div>',
+                    '  </div>',
+                    '  <div class="xtj-skeleton-card">',
+                    '    <div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>',
+                    '    <div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div>',
+                    '  </div>',
+                    '  <div class="xtj-skeleton-card">',
+                    '    <div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div>',
+                    '    <div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div>',
+                    '  </div>',
+                    '</div>'
+                ].join('');
+            };
 
             window.xtjMagicLoadingHtml = function(title, subtitle, variant) {
                 var mode = String(variant || '');
                 if (mode === 'chat-list' || mode === 'chat-detail') {
-                    return photoWallLoaderHtml;
+                    return skeletonCardHtml(true);
                 }
-                return springLoaderHtml;
+                return skeletonCardHtml(false);
             };
             window.xtjInitSpringUltLoaders = function(root) {
-                if (window.initAllSpringLoaders) {
-                    window.initAllSpringLoaders(root || document);
-                }
+                // No-op: spring loader removed
             };
 
             // Disabled on purpose: this global loader patch was replacing live content areas
@@ -8038,18 +8051,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (window.__xtjChatPhotoLoaderFinalV1) return;
                 window.__xtjChatPhotoLoaderFinalV1 = true;
                 var originalMagicLoader = window.xtjMagicLoadingHtml;
-                window.__xtjSharedPhotoLoaderHtml = window.__xtjSharedPhotoLoaderHtml || [
-                    '<div class="xtj-magic-loading xtj-magic-loading--photo xtj-magic-loading--chat" role="status" aria-live="polite">',
-                    '  <div class="xtj-photo-loader" aria-label="聊天加载动画">',
-                    '    <span class="xtj-photo-loader-ring"></span>',
-                    '    <span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span>',
-                    '    <span class="xtj-photo-loader-core"></span>',
-                    '    <span class="xtj-photo-loader-dot dot-a"></span>',
-                    '    <span class="xtj-photo-loader-dot dot-b"></span>',
-                    '    <span class="xtj-photo-loader-dot dot-c"></span>',
-                    '  </div>',
-                    '</div>'
-                ].join('');
+                window.__xtjSharedPhotoLoaderHtml = window.__xtjSharedPhotoLoaderHtml || skeletonCardHtml(true);
                 window.xtjMagicLoadingHtml = function(title, subtitle, variant) {
                     var mode = String(variant || '');
                     if (mode.indexOf('chat') !== -1 || /聊天|消息/.test(String(title || '') + String(subtitle || ''))) {
@@ -8136,7 +8138,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             })();
 
             renderPostFilterUserLoader = function() {
-                return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-photo-loader" aria-label="加载中"><span class="xtj-photo-loader-ring"></span><span class="xtj-photo-loader-ring xtj-photo-loader-ring--inner"></span><span class="xtj-photo-loader-core"></span><span class="xtj-photo-loader-dot dot-a"></span><span class="xtj-photo-loader-dot dot-b"></span><span class="xtj-photo-loader-dot dot-c"></span></div></div>';
+                return '<div class="xtj-magic-loading" style="display:flex;align-items:center;justify-content:center;min-height:140px;padding:16px 0;"><div class="xtj-loading-skeleton" style="width:100%"><div class="xtj-skeleton-card"><div class="xtj-skeleton-header"><div class="xtj-skeleton-avatar"></div><div class="xtj-skeleton-lines"><div class="xtj-skeleton-line medium"></div><div class="xtj-skeleton-line short"></div></div></div><div class="xtj-skeleton-body"><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line"></div><div class="xtj-skeleton-line short"></div></div></div></div></div>';
             };
 
             window.openStatDetail = async function(type) {

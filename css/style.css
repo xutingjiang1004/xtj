@@ -8648,63 +8648,124 @@ body.ios-chat-keyboard-open .chat-input-area {
   background: rgba(12, 18, 14, 0.16) !important;
 }
 
-.xtj-magic-loading--photo {
-  min-height: 148px;
+/* === Skeleton Loading Cards (Layer 3: glass shimmer + gloss overlay) === */
+.xtj-loading-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 4px 0;
+}
+
+.xtj-skeleton-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 16px;
+  min-height: 140px;
+}
+
+/* Glass gloss gradient (Layer 3) */
+.xtj-skeleton-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(135deg, rgba(255,255,255,0.12), transparent 45%);
+}
+
+/* Shimmer sweep (Layer 3) */
+.xtj-skeleton-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255,255,255,0.08) 45%,
+    rgba(255,255,255,0.15) 50%,
+    rgba(255,255,255,0.08) 55%,
+    transparent 100%);
+  animation: xtjSkeletonShimmer 2.2s ease-in-out infinite;
+}
+
+.xtj-skeleton-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  flex-shrink: 0;
+}
+
+.xtj-skeleton-line {
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.08);
+  width: 100%;
+}
+
+.xtj-skeleton-line.short { width: 60%; }
+.xtj-skeleton-line.medium { width: 80%; }
+
+.xtj-skeleton-header {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
-.xtj-photo-loader {
-  position: relative;
-  width: 84px;
-  height: 84px;
-  display: grid;
-  place-items: center;
+.xtj-skeleton-header .xtj-skeleton-lines {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.xtj-photo-loader-ring,
-.xtj-photo-loader-core {
-  position: absolute;
-  border-radius: 50%;
+.xtj-skeleton-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 50px;
 }
 
-.xtj-photo-loader-ring {
-  inset: 0;
-  border: 1.5px solid rgba(110, 183, 139, 0.22);
-  animation: xtjUploadSpin 3.1s linear infinite;
+@keyframes xtjSkeletonShimmer {
+  0% { transform: translateX(-150%) skewX(-15deg); }
+  100% { transform: translateX(150%) skewX(-15deg); }
 }
 
-.xtj-photo-loader-ring--inner {
-  inset: 10px;
-  border-color: rgba(135, 209, 165, 0.44);
-  animation-direction: reverse;
-  animation-duration: 2.2s;
+/* Dark mode skeleton */
+[data-theme="dark"] .xtj-skeleton-card {
+  background: rgba(255,255,255,0.03);
+  border-color: rgba(255,255,255,0.06);
+}
+[data-theme="dark"] .xtj-skeleton-avatar {
+  background: rgba(255,255,255,0.06);
+}
+[data-theme="dark"] .xtj-skeleton-line {
+  background: rgba(255,255,255,0.05);
 }
 
-.xtj-photo-loader-core {
-  inset: 18px;
-  background: radial-gradient(circle, rgba(123, 214, 160, 0.38), rgba(78, 143, 103, 0.06) 68%, transparent 72%);
-  animation: xtjUploadPulse 2.3s ease-in-out infinite;
+/* === Chat skeleton (narrower, single-line style) === */
+.xtj-loading-skeleton--chat .xtj-skeleton-card {
+  min-height: 60px;
+  padding: 12px 14px;
 }
-
-.xtj-photo-loader-dot {
-  position: absolute;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #6bcf9a;
-  box-shadow: 0 0 12px rgba(107, 207, 154, 0.55);
-  animation: xtjUploadOrbit 2.2s ease-in-out infinite;
+.xtj-loading-skeleton--chat .xtj-skeleton-body {
+  padding-left: 0;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
 }
-
-.xtj-photo-loader-dot.dot-a { top: 7px; left: 38px; }
-.xtj-photo-loader-dot.dot-b { right: 10px; bottom: 18px; animation-delay: .35s; }
-.xtj-photo-loader-dot.dot-c { left: 11px; bottom: 19px; animation-delay: .7s; }
-
-@keyframes xtjUploadSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-@keyframes xtjUploadPulse { 0%,100% { transform: scale(.92); opacity: .62; } 50% { transform: scale(1.06); opacity: 1; } }
-@keyframes xtjUploadOrbit { 0%,100% { transform: scale(.8); opacity: .4; } 50% { transform: translateY(-5px) scale(1.2); opacity: 1; } }
+.xtj-loading-skeleton--chat .xtj-skeleton-line {
+  height: 10px;
+}
 
 .chat-msg {
   animation: xtjChatMessageIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
@@ -9949,9 +10010,7 @@ body.ios-chat-keyboard-open .chat-input-area {
 .xtj-chat-photo-loading .xtj-magic-loading--chat,
 .xtj-magic-loading--chat {
   min-height: 180px;
-  display: grid;
-  place-items: center;
-  padding: 20px 0;
+  padding: 8px 0;
 }
 
 .profile-activity-item.is-disabled {

@@ -971,6 +971,8 @@ app.get('/admin/users', verifyToken, async (req, res) => {
 });
 
 // ===================== 数据统计 API =====================
+const MAX_STATS_LIMIT = 20000;
+
 // 汇总统计
 app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
@@ -992,7 +994,6 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
 
     // 构建带日期筛选的查询
     // 无日期筛选时也使用合理上限，避免拉取全表
-    const MAX_STATS_LIMIT = 20000;
     function buildSummaryQuery(table, selectFields, eqField, eqValue, dateField) {
       var q = supabase.from(table).select(selectFields);
       if (eqField) q = q.eq(eqField, eqValue);
