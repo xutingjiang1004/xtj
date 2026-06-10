@@ -4,6 +4,7 @@ console.log('[XTJ] core.js loaded, starting...');
 
             const SUPABASE_URL = window.XTJ_CONFIG.SUPABASE_URL;
             const SUPABASE_ANON_KEY = window.XTJ_CONFIG.SUPABASE_ANON_KEY;
+            var API_BASE = window.XTJ_CONFIG.API_BASE;
             var sb;
             if (typeof window.supabase !== 'undefined') {
                 sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -483,7 +484,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             return sortPosts(normalizePosts(posts).filter(function(post) {
                 if (!post) return false;
-                if (post.media_type === AUTH_MARKER || post.media_type === ADMIN_AUTH_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__visit__" || post.media_type === "__attack__" || post.media_type === "__user_visit__" || post.media_type === "__ann__") return false;
+                if (post.media_type === AUTH_MARKER || post.media_type === ADMIN_AUTH_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__visit__" || post.media_type === "__attack__" || post.media_type === "__user_visit__" || post.media_type === "__ann__" || post.media_type === "__vip__" || post.media_type === "__vip_order__") return false;
                 if (!post.user_name) return false;
                 if (!canViewPost(post)) return false;
                 if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
@@ -2892,7 +2893,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中..', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").order("created_at", { ascending: false }).limit(500),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }).limit(500),
                         sb.from("comments").select("*").order("created_at").limit(2000),
                         sb.from("likes").select("*").limit(3000)
                     ]);
@@ -3965,7 +3966,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             async function syncFeedDataInBackground() {
                 var requestId = ++feedLoadRequestId;
                 try {
-                    var postRes = await sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").order("created_at", { ascending: false });
+                    var postRes = await sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false });
                     if (requestId !== feedLoadRequestId) return false;
                     if (postRes.error) throw postRes.error;
                     feedAllPosts = normalizePosts(postRes.data || []);
@@ -4229,7 +4230,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 try {
                     var results = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
                     ]);
@@ -4401,12 +4402,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     var results = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
                     statAllPosts = normalizePosts(results[0].data || []).filter(function(post) {
-                        return post.media_type !== AUTH_MARKER && post.media_type !== ADMIN_AUTH_MARKER && post.media_type !== DM_MARKER && post.media_type !== REPORT_MARKER && post.media_type !== "__avatar__" && post.media_type !== "__user_info__" && post.media_type !== "__photo_wall__" && post.media_type !== "__visit__" && post.media_type !== "__attack__" && post.media_type !== "__user_visit__" && post.media_type !== "__ann__" && canViewPost(post);
+                        return post.media_type !== AUTH_MARKER && post.media_type !== ADMIN_AUTH_MARKER && post.media_type !== DM_MARKER && post.media_type !== REPORT_MARKER && post.media_type !== "__avatar__" && post.media_type !== "__user_info__" && post.media_type !== "__photo_wall__" && post.media_type !== "__visit__" && post.media_type !== "__attack__" && post.media_type !== "__user_visit__" && post.media_type !== "__ann__" && post.media_type !== "__vip__" && post.media_type !== "__vip_order__" && canViewPost(post);
                     });
                     statAllComments = results[1].data || [];
                     statAllLikes = results[2].data || [];
@@ -4429,11 +4430,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && canViewPost(p); });
+                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p); });
                     var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
                     statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
                     statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
@@ -4466,11 +4467,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && canViewPost(p); });
+                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p); });
                     var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
                     statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
                     statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
@@ -4984,7 +4985,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var type = statCurrentType;
                 if (!type) return;
                 Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
@@ -8072,12 +8073,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载中..', '加载中..', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
                     statAllPosts = normalizePosts(postRes.data || []).filter(function(p) {
-                        return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && canViewPost(p);
+                        return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p);
                     });
                     var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
                     statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
@@ -8157,7 +8158,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     setTimeout(function() { resolve(null); }, timeoutMs);
                 });
                 var request = Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").order("created_at", { ascending: false }),
+                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {

@@ -169,7 +169,6 @@
      8. Expose API
      ========================================================== */
   window.XTJEffects = {
-    dismissLoading: dismissLoadingOverlay,
     ripple: function (el) {
       // manual trigger if needed
     },
