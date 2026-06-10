@@ -512,6 +512,33 @@ app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
   return res.json({ ok: true });
 });
 
+// ===================== 用户照片删除 API（使用 service_role 绕过 RLS） ======================
+app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
+  try {
+    const { photoId, username } = req.body;
+    if (!photoId) return res.status(400).json({ error: '缺少照片ID' });
+
+    // 验证照片属于该用户（防止任意删除）
+    if (username) {
+      const { data: photo } = await supabase.from('posts')
+        .select('user_name')
+        .eq('id', photoId)
+        .maybeSingle();
+      if (photo && photo.user_name !== username) {
+        return res.status(403).json({ error: '无权删除此照片' });
+      }
+    }
+
+    const { error } = await supabase.from('posts').delete().eq('id', photoId);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[API] 照片删除失败:', e.message);
+    return res.status(500).json({ error: '删除失败' });
+  }
+});
+
 // ===================== 封禁管理 ======================
 app.get('/admin/bans', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500);
