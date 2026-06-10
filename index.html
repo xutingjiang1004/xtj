@@ -739,22 +739,24 @@
                         <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                     </svg>
                     XTJ Pro
+                    <span class="vip-modal-badge">限时活动</span>
                 </h3>
                 <button class="btn btn-ghost" onclick="closeModal('vipModal')" style="padding:4px 12px;font-size:16px;">✕</button>
             </div>
             <div class="vip-modal-body">
                 <div class="vip-plan-card vip-plan-card--active" id="vipPlanCard">
+                    <div class="vip-plan-badge">🔥 限时特惠</div>
                     <div class="vip-plan-price">
                         <span class="vip-plan-currency">¥</span>
                         <span class="vip-plan-amount">3</span>
                         <span class="vip-plan-period">/月</span>
                     </div>
                     <div class="vip-plan-name">XTJ Pro 会员</div>
-                    <div class="vip-plan-desc">解锁全部高级特权，提升使用体验</div>
+                    <div class="vip-plan-desc">解锁全部高级特权 · 限时活动进行中</div>
                     <div class="vip-plan-features">
                         <div class="vip-plan-feature">
                             <span class="vip-plan-feature-icon">👑</span>
-                            <span class="vip-plan-feature-text">VIP 专属身份标识</span>
+                            <span class="vip-plan-feature-text">专属 VIP 身份标识</span>
                         </div>
                         <div class="vip-plan-feature">
                             <span class="vip-plan-feature-icon">📸</span>
@@ -765,8 +767,16 @@
                             <span class="vip-plan-feature-text">大文件上传（≤200MB）</span>
                         </div>
                         <div class="vip-plan-feature">
+                            <span class="vip-plan-feature-icon">🎨</span>
+                            <span class="vip-plan-feature-text">Pro 专属奢华主题</span>
+                        </div>
+                        <div class="vip-plan-feature">
                             <span class="vip-plan-feature-icon">📌</span>
                             <span class="vip-plan-feature-text">帖子置顶特权</span>
+                        </div>
+                        <div class="vip-plan-feature">
+                            <span class="vip-plan-feature-icon">✨</span>
+                            <span class="vip-plan-feature-text">头像动态光效特效</span>
                         </div>
                     </div>
                     <button class="vip-pay-btn" id="vipPayBtn" onclick="handleVipPurchase()">
@@ -774,7 +784,10 @@
                     </button>
                 </div>
                 <div class="vip-modal-footer">
-                    <span class="vip-modal-footer-text" id="vipFooterText">订阅即表示同意服务条款</span>
+                    <span class="vip-modal-footer-text" id="vipFooterText">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" style="vertical-align:-1px;margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        订阅即表示同意服务条款 · 随时取消
+                    </span>
                 </div>
             </div>
         </div>
@@ -878,11 +891,13 @@
     <link rel="stylesheet" href="css/ui-enhance.css">
 
     <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
     <script defer src="js/config.js"></script>
     <script defer src="js/performance.js"></script>
     <script defer src="js/core.js"></script>
     <script defer src="js/features.js"></script>
     <script defer src="js/ui-effects.js"></script>
+    <script defer src="js/pro-upgrade.js"></script>
 <script src="js/photo-wall/upload.min.js"></script>
 <script src="js/photo-wall/upload-ui.js"></script>
 </body>
