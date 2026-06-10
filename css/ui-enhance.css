@@ -1,90 +1,10 @@
 /* ============================================================
    XTJ UI Enhancement Suite
-   Visual refinements, loading animation, click effects, particles
+   Visual refinements, click effects, particles
    Tailored for the frontend-skill & algorithmic-art directives
    ============================================================ */
 
-/* ========== 1. Algorithmic Loading Overlay ========== */
-.xtj-loading-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 99999;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #0b1217;
-  transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
-              visibility 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: opacity;
-}
-.xtj-loading-overlay.is-done {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-}
-.xtj-loading-overlay canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-.xtj-loading-content {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  text-align: center;
-  pointer-events: none;
-}
-.xtj-loading-title {
-  font-size: 42px;
-  font-weight: 900;
-  letter-spacing: -0.02em;
-  background: linear-gradient(135deg, #34d399 0%, #60a5fa 40%, #f472b6 70%, #fbbf24 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  filter: drop-shadow(0 0 40px rgba(52, 211, 153, 0.3));
-  animation: xtjTitleGlow 3s ease-in-out infinite;
-  margin: 0;
-}
-.xtj-loading-sub {
-  font-size: 13px;
-  font-weight: 500;
-  color: rgba(255, 255, 255, 0.35);
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
-}
-.xtj-loading-bar {
-  width: 160px;
-  height: 2px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.06);
-  overflow: hidden;
-  position: relative;
-}
-.xtj-loading-bar-fill {
-  height: 100%;
-  width: 0%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #34d399, #60a5fa, #f472b6);
-  animation: xtjLoadFill 2.2s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
-}
-@keyframes xtjTitleGlow {
-  0%, 100% { filter: drop-shadow(0 0 40px rgba(52, 211, 153, 0.3)) brightness(1); }
-  50% { filter: drop-shadow(0 0 60px rgba(96, 165, 250, 0.4)) brightness(1.08); }
-}
-@keyframes xtjLoadFill {
-  0% { width: 0%; }
-  40% { width: 35%; }
-  70% { width: 70%; }
-  100% { width: 100%; }
-}
-
-/* ========== 2. Button Click Ripple ========== */
+/* ========== 1. Button Click Ripple ========== */
 .xtj-ripple {
   position: absolute;
   border-radius: 50%;

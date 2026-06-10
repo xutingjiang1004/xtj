@@ -290,6 +290,22 @@
                         <button type="button" class="profile-activity-more" id="profileCommentsMoreBtn" onclick="toggleProfileActivity('comments')" style="display:none;">更多评论内容</button>
                     </section>
                 </div>
+                <div class="xtj-vip-card" id="vipCard" onclick="openVipModal()">
+                    <div class="xtj-vip-card-inner">
+                        <div class="xtj-vip-card-left">
+                            <div class="xtj-vip-card-icon">
+                                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
+                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                                </svg>
+                            </div>
+                            <div class="xtj-vip-card-text">
+                                <span class="xtj-vip-card-title">XTJ Pro</span>
+                                <span class="xtj-vip-card-sub" id="vipCardSub">¥3/月 · 解锁更多特权</span>
+                            </div>
+                        </div>
+                        <span class="xtj-vip-card-badge" id="vipCardBadge">开通</span>
+                    </div>
+                </div>
                 <div class="profile-settings">
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
@@ -708,6 +724,56 @@
                 <div class="upc-name" id="upcName">-</div>
                 <div class="upc-login" id="upcLogin">最近登录：加载中...</div>
                 <button class="upc-msg-btn" id="upcMsgBtn" onclick="upcSendMessage()">💬 发消息</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- VIP 套餐购买模态框 -->
+    <div class="modal-overlay" id="vipModal" onclick="if(event.target===this)closeModal('vipModal')">
+        <div class="modal-box glass vip-modal" onclick="event.stopPropagation()">
+            <div class="vip-modal-head">
+                <h3 class="vip-modal-title">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+                    </svg>
+                    XTJ Pro
+                </h3>
+                <button class="btn btn-ghost" onclick="closeModal('vipModal')" style="padding:4px 12px;font-size:16px;">✕</button>
+            </div>
+            <div class="vip-modal-body">
+                <div class="vip-plan-card vip-plan-card--active" id="vipPlanCard">
+                    <div class="vip-plan-price">
+                        <span class="vip-plan-currency">¥</span>
+                        <span class="vip-plan-amount">3</span>
+                        <span class="vip-plan-period">/月</span>
+                    </div>
+                    <div class="vip-plan-name">XTJ Pro 会员</div>
+                    <div class="vip-plan-desc">解锁全部高级特权，提升使用体验</div>
+                    <div class="vip-plan-features">
+                        <div class="vip-plan-feature">
+                            <span class="vip-plan-feature-icon">👑</span>
+                            <span class="vip-plan-feature-text">VIP 专属身份标识</span>
+                        </div>
+                        <div class="vip-plan-feature">
+                            <span class="vip-plan-feature-icon">📸</span>
+                            <span class="vip-plan-feature-text">照片墙无限上传</span>
+                        </div>
+                        <div class="vip-plan-feature">
+                            <span class="vip-plan-feature-icon">⬆️</span>
+                            <span class="vip-plan-feature-text">大文件上传（≤200MB）</span>
+                        </div>
+                        <div class="vip-plan-feature">
+                            <span class="vip-plan-feature-icon">📌</span>
+                            <span class="vip-plan-feature-text">帖子置顶特权</span>
+                        </div>
+                    </div>
+                    <button class="vip-pay-btn" id="vipPayBtn" onclick="handleVipPurchase()">
+                        <span id="vipPayBtnText">立即开通 ¥3</span>
+                    </button>
+                </div>
+                <div class="vip-modal-footer">
+                    <span class="vip-modal-footer-text" id="vipFooterText">订阅即表示同意服务条款</span>
+                </div>
             </div>
         </div>
     </div>
