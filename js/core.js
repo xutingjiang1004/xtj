@@ -185,6 +185,115 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
         function isAdmin() { return currentUser === ADMIN_NAME; }
 
+        var __vipStatus = { is_vip: false, vip_info: null };
+        function isVipUser() {
+            if (!currentUser) return false;
+            if (currentUser === ADMIN_NAME) return true;
+            return __vipStatus.is_vip === true;
+        }
+        function setVipStatus(v) { __vipStatus.is_vip = !!v; }
+        function getVipInfo() { return __vipStatus.vip_info; }
+
+        async function updateVipStatus() {
+            if (!currentUser) return;
+            try {
+                var url = API_BASE + '/api/vip/status?user_name=' + encodeURIComponent(currentUser);
+                var resp = await fetch(url);
+                var data = await resp.json();
+                __vipStatus.is_vip = data.is_vip === true;
+                __vipStatus.vip_info = data.active_vip || null;
+                updateVipUI();
+            } catch(e) {}
+        }
+
+        function updateVipUI() {
+            var badge = document.getElementById('vipCardBadge');
+            var sub = document.getElementById('vipCardSub');
+            if (__vipStatus.is_vip) {
+                if (badge) { badge.textContent = '已激活'; badge.className = 'xtj-vip-card-badge active'; }
+                if (sub) {
+                    var info = getVipInfo();
+                    if (info && info.expire_at) {
+                        var d = new Date(info.expire_at);
+                        sub.textContent = '有效期至 ' + d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
+                    } else {
+                        sub.textContent = 'VIP 会员已激活';
+                    }
+                }
+            } else {
+                if (badge) { badge.textContent = '开通'; badge.className = 'xtj-vip-card-badge'; }
+                if (sub) sub.textContent = '¥3/月 · 解锁更多特权';
+            }
+            // 刷新帖子列表以显示VIP徽章
+            if (typeof refreshFeedDisplay === 'function') refreshFeedDisplay();
+        }
+
+        function openVipModal() {
+            if (!currentUser) { showToast('请先登录'); return; }
+            showModal('vipModal');
+            updateVipModalUI();
+        }
+
+        function updateVipModalUI() {
+            var btn = document.getElementById('vipPayBtn');
+            var btnText = document.getElementById('vipPayBtnText');
+            if (!btn) return;
+            if (__vipStatus.is_vip) {
+                btnText.textContent = '✅ 已是VIP会员';
+                btn.disabled = true;
+            } else {
+                btnText.textContent = '立即开通 ¥3';
+                btn.disabled = false;
+            }
+        }
+
+        async function handleVipPurchase() {
+            if (!currentUser) { showToast('请先登录'); return; }
+            if (__vipStatus.is_vip) { showToast('您已是VIP会员'); closeModal('vipModal'); return; }
+
+            var btn = document.getElementById('vipPayBtn');
+            var btnText = document.getElementById('vipPayBtnText');
+            if (btn) { btn.classList.add('loading'); btn.disabled = true; btnText.textContent = '处理中...'; }
+
+            try {
+                var resp = await fetch(API_BASE + '/api/vip/create-order', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_name: currentUser, plan_id: 'pro_monthly' })
+                });
+                var data = await resp.json();
+
+                if (data.error) {
+                    showToast(data.error);
+                    if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
+                    return;
+                }
+
+                if (data.test_mode && data.result) {
+                    // 测试模式：直接激活
+                    if (data.result.ok) {
+                        __vipStatus.is_vip = true;
+                        __vipStatus.vip_info = data.result;
+                        showToast('🎉 VIP 会员激活成功！');
+                        updateVipUI();
+                        updateVipModalUI();
+                        closeModal('vipModal');
+                    }
+                } else if (data.pay_url) {
+                    // 生产模式：跳转支付宝
+                    window.location.href = API_BASE + data.pay_url;
+                }
+            } catch(e) {
+                showToast('支付失败，请重试');
+                console.error('[VIP] 支付错误:', e);
+            }
+
+            if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
+        }
+
+        window.openVipModal = openVipModal;
+        window.handleVipPurchase = handleVipPurchase;
+
         function clearFeedCache() {
             try { localStorage.removeItem(CACHE_KEY); } catch (e) {}
             feedVisiblePostsCache = null;
@@ -286,9 +395,26 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         window.canEditPost = canEditPost;
 
         function canPinPost(post) {
-            return !!currentUser && isAdmin();
+            if (!currentUser) return false;
+            if (isAdmin()) return true;
+            if (isVipUser()) return true;
+            return false;
         }
         window.canPinPost = canPinPost;
+
+        // Check if user can pin this specific post (own post limit: 1 per VIP)
+        async function canPinThisPost(post) {
+            if (isAdmin()) return true;
+            if (!isVipUser()) return false;
+            var p = normalizePost(post);
+            if (!p || p.user_name !== currentUser) return false;
+            // Count existing pinned posts by this user
+            var { data: pinnedPosts } = await sb.from('posts')
+                .select('id')
+                .eq('user_name', currentUser)
+                .eq('is_pinned', true);
+            return !pinnedPosts || pinnedPosts.length < 1;
+        }
 
         function canDeletePost(post) {
             var p = normalizePost(post);
@@ -759,7 +885,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             function startRestrictionPolling() {
                 stopRestrictionPolling();
                 checkUserRestrictions();
-                restrictionPollTimer = setInterval(checkUserRestrictions, RESTRICTION_POLL_INTERVAL);
+                updateVipStatus();
+                restrictionPollTimer = setInterval(function() {
+                    checkUserRestrictions();
+                    updateVipStatus();
+                }, RESTRICTION_POLL_INTERVAL);
             }
 
             function stopRestrictionPolling() {
@@ -2156,7 +2286,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
                 // 文件上传安全校验
                 if (file) {
-                    if (file.size > 50 * 1024 * 1024) { showToast("文件大小不能超过50MB"); return; }
+                    var maxFileSize = isVipUser() ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
+                    if (file.size > maxFileSize) { showToast("文件大小不能超过" + (isVipUser() ? "200MB" : "50MB")); return; }
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
@@ -3442,6 +3573,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     <div class="post-header-main">
                       <div class="user-info">
                         <span class="user-name">${escapeHtml(normalized.user_name)}</span>
+                        ${isVipUser() ? '<span class="xtj-vip-badge"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Pro</span>' : ''}
                         <span class="post-time post-meta-line">${escapeHtml(formatPostTime(normalized))}</span>
                       </div>
                       <div class="post-badge-stack">${buildPostBadges(normalized)}</div>
@@ -4011,9 +4143,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var visibility = visibilityEl ? visibilityEl.value : "public";
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
-                // 文件上传安全校验
-                if (file) {
-                    if (file.size > 50 * 1024 * 1024) { showToast("文件大小不能超过50MB"); return; }
+                var maxFileSize = isVipUser() ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
+                if (file && file.size > maxFileSize) { showToast("文件大小不能超过" + (isVipUser() ? "200MB" : "50MB")); return; }
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
@@ -5635,9 +5766,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const fileInput = document.getElementById('dockChatFileInp');
                 const file = fileInput.files[0];
                 if ((!content && !file) || !dockChatActiveUser || dockChatSending) return;
-                // 文件上传安全校验
+                var maxFileSize = isVipUser() ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
+                if (file && file.size > maxFileSize) { showToast("文件大小不能超过" + (isVipUser() ? "200MB" : "50MB")); return; }
                 if (file) {
-                    if (file.size > 50 * 1024 * 1024) { showToast("文件大小不能超过50MB"); return; }
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
