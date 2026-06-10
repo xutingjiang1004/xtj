@@ -42,8 +42,8 @@
             --radius-sm: 16px;
             --radius-md: 24px;
             --radius-lg: 32px;
-            --trans-smooth: opacity 0.32s cubic-bezier(0.25, 1, 0.3, 1), transform 0.32s cubic-bezier(0.25, 1, 0.3, 1), background 0.32s cubic-bezier(0.25, 1, 0.3, 1), border-color 0.32s cubic-bezier(0.25, 1, 0.3, 1), color 0.32s cubic-bezier(0.25, 1, 0.3, 1);
-            --trans-spring: opacity 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            --trans-smooth: opacity 0.32s cubic-bezier(0.25, 1, 0.3, 1), transform 0.32s cubic-bezier(0.25, 1, 0.3, 1), background 0.32s cubic-bezier(0.25, 1, 0.3, 1), border-color 0.32s cubic-bezier(0.25, 1, 0.3, 1), box-shadow 0.32s cubic-bezier(0.25, 1, 0.3, 1), color 0.32s cubic-bezier(0.25, 1, 0.3, 1);
+            --trans-spring: opacity 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             --trans-ppt: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
             --panel-bg: rgba(233, 248, 237, 0.96);
             --dock-bg: rgba(223, 244, 229, 0.75);
@@ -342,8 +342,8 @@
             background: rgba(255, 255, 255, 0.13);
             border: 1px solid rgba(255, 255, 255, 0.6);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.03), inset 0 0.5px 0 rgba(255, 255, 255, 0.7);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
         }
         [data-theme="dark"] .glass {
             background: rgba(30, 30, 40, 0.92);
@@ -821,7 +821,7 @@
             content-visibility: auto;
             contain-intrinsic-size: 200px;
             contain: layout paint style;
-            will-change: opacity, transform;
+            will-change: opacity, transform, filter;
         }
         [data-theme="dark"] .post {
             background: rgba(30, 30, 40, 0.92);
@@ -831,18 +831,6 @@
             opacity: 1; 
             transform: translateY(0) scale(1);
             filter: blur(0);
-        }
-
-        .post.xtj-expanded {
-            position: relative;
-            z-index: 10;
-            background: rgba(255,255,255,0.97);
-            border-color: rgba(255,255,255,0.9);
-            box-shadow: 0 20px 48px rgba(0,0,0,0.12);
-        }
-        [data-theme="dark"] .post.xtj-expanded {
-            background: rgba(40, 40, 55, 0.97);
-            border-color: rgba(255,255,255,0.15);
         }
 
         @media (prefers-reduced-motion: reduce) {
@@ -8581,6 +8569,51 @@ body.ios-chat-keyboard-open .chat-input-area {
   padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 }
 
+:where(
+  .btn-primary,
+  .btn,
+  .btn-ghost,
+  .file-label,
+  .photo-wall-btn,
+  .photo-wall-upload-btn,
+  .send-btn,
+  .chat-img-btn,
+  .announcement-btn,
+  .announcement-back-btn,
+  .post-filter-clear,
+  .profile-activity-btn,
+  .profile-activity-more,
+  .action-btn,
+  .stat-close-btn
+) {
+  transition:
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
+:where(
+  .btn-primary,
+  .btn-ghost,
+  .file-label,
+  .photo-wall-btn,
+  .photo-wall-upload-btn,
+  .send-btn,
+  .chat-img-btn,
+  .announcement-btn,
+  .announcement-back-btn,
+  .post-filter-clear,
+  .profile-activity-btn,
+  .profile-activity-more,
+  .action-btn,
+  .stat-close-btn
+):active {
+  transform: scale(0.97);
+}
+
 [data-theme="dark"] .chat-img-btn {
   background: rgba(28, 34, 49, 0.82);
   border-color: rgba(118, 137, 162, 0.34);
@@ -9258,6 +9291,122 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 :where(
+  .btn,
+  .btn-primary,
+  .btn-ghost,
+  .file-label,
+  .photo-wall-btn,
+  .pw-album-back-btn,
+  .photo-wall-upload-btn,
+  .send-btn,
+  .chat-img-btn,
+  .chat-header .back-btn,
+  .chat-header .chat-close-btn,
+  .announcement-btn,
+  .announcement-back-btn,
+  .announcement-tab,
+  .announcement-close-btn,
+  .post-filter-clear,
+  .post-filter-user-reset,
+  .filter-toggle-btn,
+  .post-vis-toggle .vis-btn,
+  .profile-activity-btn,
+  .profile-activity-more,
+  .action-btn,
+  .stat-close-btn,
+  .stat-record-more-btn,
+  .stat-record-action,
+  .spi-open-btn,
+  .back-to-stats-btn,
+  .stat-user-summary,
+  .pw-upload-sheet-close,
+  .pw-upload-sheet-btn
+) {
+  position: relative;
+  transition:
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+  transform: translateY(0) scale(1);
+  box-shadow: 0 8px 18px rgba(26, 71, 48, 0.08);
+}
+
+:where(
+  .btn-primary,
+  .btn,
+  .btn-ghost,
+  .file-label,
+  .photo-wall-btn,
+  .pw-album-back-btn,
+  .photo-wall-upload-btn,
+  .send-btn,
+  .chat-img-btn,
+  .chat-header .back-btn,
+  .chat-header .chat-close-btn,
+  .announcement-btn,
+  .announcement-back-btn,
+  .announcement-tab,
+  .announcement-close-btn,
+  .post-filter-clear,
+  .post-filter-user-reset,
+  .filter-toggle-btn,
+  .post-vis-toggle .vis-btn,
+  .profile-activity-btn,
+  .profile-activity-more,
+  .action-btn,
+  .stat-close-btn,
+  .stat-record-more-btn,
+  .stat-record-action,
+  .spi-open-btn,
+  .back-to-stats-btn,
+  .pw-upload-sheet-close,
+  .pw-upload-sheet-btn
+):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12);
+}
+
+:where(
+  .btn-primary,
+  .btn,
+  .btn-ghost,
+  .file-label,
+  .photo-wall-btn,
+  .pw-album-back-btn,
+  .photo-wall-upload-btn,
+  .send-btn,
+  .chat-img-btn,
+  .chat-header .back-btn,
+  .chat-header .chat-close-btn,
+  .announcement-btn,
+  .announcement-back-btn,
+  .announcement-tab,
+  .announcement-close-btn,
+  .post-filter-clear,
+  .post-filter-user-reset,
+  .filter-toggle-btn,
+  .post-vis-toggle .vis-btn,
+  .profile-activity-btn,
+  .profile-activity-more,
+  .action-btn,
+  .stat-close-btn,
+  .stat-record-more-btn,
+  .stat-record-action,
+  .spi-open-btn,
+  .back-to-stats-btn,
+  .pw-upload-sheet-close,
+  .pw-upload-sheet-btn
+):active {
+  transform: translateY(0) scale(0.965);
+  box-shadow: 0 6px 14px rgba(26, 71, 48, 0.08);
+  transition-duration: 0.12s;
+}
+
+:where(
   .announcement-tab.active,
   .filter-toggle-btn.active,
   .photo-wall-btn.active,
@@ -9349,22 +9498,46 @@ body.ios-chat-keyboard-open .chat-input-area {
 
 @media (prefers-reduced-motion: reduce) {
   :is(
-    button:not(.dock-tab):not(.stat-user-summary-card),
+    button:not(.dock-tab),
     input[type="button"],
     input[type="submit"],
     input[type="reset"],
-    .file-label,
-    .announcement-tab,
-    .photo-wall-btn,
+    .btn,
+    .btn-primary,
+    .btn-ghost,
     .action-btn,
+    .file-label,
+    .theme-toggle-btn,
+    .announcement-btn,
+    .announcement-close-btn,
+    .announcement-tab,
+    .post-filter-user-reset,
+    .filter-toggle-btn,
+    .post-vis-toggle .vis-btn,
+    .post-filter-clear,
+    .photo-wall-btn,
+    .pw-album-back-btn,
+    .photo-wall-upload-btn,
+    .announcement-back-btn,
+    .announcement-delete-btn,
+    .announcement-admin-btn,
     .profile-activity-btn,
     .profile-activity-more,
+    .profile-detail-logout-btn,
+    .upc-msg-btn,
+    .pp-confirm-btn,
+    .stat-close-btn,
+    .stat-record-more-btn,
+    .stat-record-action,
+    .spi-open-btn,
     .send-btn,
     .chat-img-btn,
-    .stat-close-btn
+    .pw-confirm-actions button,
+    .pw-upload-sheet-close,
+    .pw-upload-sheet-btn
   ) {
     transition-duration: 0.18s !important;
-    transition-property: transform, background-color, border-color, color, opacity !important;
+    transition-property: transform, box-shadow, background, border-color, color, opacity !important;
   }
 }
 
@@ -9412,12 +9585,14 @@ body.ios-chat-keyboard-open .chat-input-area {
 ) {
   transition:
     transform 0.24s var(--xtj-btn-ease),
+    box-shadow 0.24s var(--xtj-btn-ease),
     background-color 0.24s var(--xtj-btn-ease),
     border-color 0.24s var(--xtj-btn-ease),
     color 0.24s var(--xtj-btn-ease),
     opacity 0.24s var(--xtj-btn-ease) !important;
   transform: translateY(0) scale(1);
   transform-origin: center;
+  will-change: transform;
 }
 
 :where(
@@ -9701,93 +9876,97 @@ body.ios-chat-keyboard-open .chat-input-area {
   .stat-record-action,
   .profile-activity-more,
   .profile-activity-btn
+).xtj-btn-pressing {
+  transform: translateY(0) scale(0.965) !important;
+  transition-duration: 0.12s !important;
+}
+
+:where(
+  button:not(.dock-tab),
+  [role="button"]:not(.dock-tab),
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  .file-label,
+  .photo-wall-btn,
+  .chat-img-btn,
+  .send-btn,
+  .action-btn,
+  .report-btn,
+  .report-type-tab,
+  .report-reason-btn,
+  .report-submit-btn,
+  .stat-record-action,
+  .profile-activity-more,
+  .profile-activity-btn
+).xtj-btn-release {
+  animation: xtjButtonRelease 0.24s var(--xtj-btn-ease);
+}
+
+:where(
+  button:not(.dock-tab),
+  [role="button"]:not(.dock-tab),
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  .file-label,
+  .photo-wall-btn,
+  .chat-img-btn,
+  .send-btn,
+  .action-btn,
+  .report-btn,
+  .report-type-tab,
+  .report-reason-btn,
+  .report-submit-btn,
+  .stat-record-action,
+  .profile-activity-more,
+  .profile-activity-btn
+).xtj-btn-clicked {
+  box-shadow: 0 12px 24px rgba(26, 71, 48, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.75) !important;
+}
+
+:where(
+  button:not(.dock-tab),
+  [role="button"]:not(.dock-tab),
+  .file-label,
+  .photo-wall-btn,
+  .chat-img-btn,
+  .send-btn,
+  .action-btn,
+  .report-btn,
+  .report-type-tab,
+  .report-reason-btn,
+  .report-submit-btn,
+  .stat-record-action,
+  .profile-activity-more,
+  .profile-activity-btn
 ) {
   position: relative;
   overflow: hidden;
 }
 
-.post,
-.profile-card,
-.photo-card,
-.dock-tab,
-.action-btn,
-.chat-msg {
-  transform: translateZ(0);
-}
-
-/* Button ripple effect */
-:where(
-  button:not(.dock-tab),
-  [role="button"]:not(.dock-tab),
-  .file-label,
-  .photo-wall-btn,
-  .chat-img-btn,
-  .send-btn,
-  .action-btn,
-  .report-btn,
-  .report-type-tab,
-  .report-reason-btn,
-  .report-submit-btn,
-  .stat-record-action,
-  .profile-activity-more,
-  .profile-activity-btn,
-  .user-filter-btn,
-  .search-toggle,
-  .filter-toggle
-) {
-  -webkit-tap-highlight-color: transparent;
-}
-:where(
-  button:not(.dock-tab),
-  [role="button"]:not(.dock-tab),
-  .file-label,
-  .photo-wall-btn,
-  .chat-img-btn,
-  .send-btn,
-  .action-btn,
-  .report-btn,
-  .report-type-tab,
-  .report-reason-btn,
-  .report-submit-btn,
-  .stat-record-action,
-  .profile-activity-more,
-  .profile-activity-btn,
-  .user-filter-btn,
-  .search-toggle,
-  .filter-toggle
-)::after {
-  content: '';
+.xtj-btn-ripple {
   position: absolute;
-  inset: 0;
   pointer-events: none;
-  border-radius: inherit;
-  background: radial-gradient(circle at 50% 50%, rgba(45,160,103,0.12) 0%, transparent 60%);
-  opacity: 0;
-  transition: opacity 0s;
-}
-:where(
-  button:not(.dock-tab),
-  [role="button"]:not(.dock-tab),
-  .file-label,
-  .photo-wall-btn,
-  .chat-img-btn,
-  .send-btn,
-  .action-btn,
-  .report-btn,
-  .report-type-tab,
-  .report-reason-btn,
-  .report-submit-btn,
-  .stat-record-action,
-  .profile-activity-more,
-  .profile-activity-btn,
-  .user-filter-btn,
-  .search-toggle,
-  .filter-toggle
-):active::after {
-  opacity: 1;
-  transition: opacity 0s;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(45, 160, 103, 0.26) 0%, rgba(45, 160, 103, 0.18) 34%, rgba(45, 160, 103, 0) 72%);
+  transform: scale(0.2);
+  opacity: 0.95;
+  animation: xtjButtonRipple 0.36s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+@keyframes xtjButtonRelease {
+  from { transform: translateY(0) scale(0.965); }
+  62% { transform: translateY(-1px) scale(1.012); }
+  to { transform: translateY(0) scale(1); }
+}
+
+@keyframes xtjButtonRipple {
+  to {
+    transform: scale(1.12);
+    opacity: 0;
+  }
+}
 
 #photoPreviewOverlay .pp-info-modal-content,
 .pp-info-modal-content {
@@ -11816,14 +11995,6 @@ body.ios-chat-keyboard-open .chat-input-area {
   padding: 0;
   overflow: hidden;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.97) !important;
-  backdrop-filter: blur(40px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
-}
-[data-theme="dark"] .vip-modal {
-  background: rgba(28, 28, 45, 0.98) !important;
-  backdrop-filter: blur(40px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
 }
 .vip-modal-head {
   display: flex;
@@ -12026,6 +12197,19 @@ body.ios-chat-keyboard-open .chat-input-area {
   0%, 100% { box-shadow: 0 0 0 0 rgba(245,158,11,0.4); }
   50% { box-shadow: 0 0 0 6px rgba(245,158,11,0); }
 }
+.vip-plan-badge {
+  position: absolute;
+  top: -10px;
+  right: 16px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 12px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(245,158,11,0.3);
+  letter-spacing: 0.3px;
+}
 .vip-plan-card {
   position: relative;
 }
@@ -12222,83 +12406,4 @@ html.xtj-pro-active .post-vip-badge {
 @keyframes proBadgePulse {
   0%, 100% { box-shadow: 0 0 8px rgba(245,158,11,0.3); }
   50% { box-shadow: 0 0 16px rgba(245,158,11,0.5); }
-}
-
-/* ========== 取消订阅按钮 ========== */
-.vip-modal-cancel-area {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(0,0,0,0.06);
-}
-[data-theme="dark"] .vip-modal-cancel-area {
-  border-top-color: rgba(255,255,255,0.08);
-}
-.vip-cancel-btn {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid rgba(239,68,68,0.3);
-  border-radius: 10px;
-  background: rgba(239,68,68,0.06);
-  color: #ef4444;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.vip-cancel-btn:hover {
-  background: rgba(239,68,68,0.12);
-  border-color: rgba(239,68,68,0.5);
-}
-.vip-cancel-btn:active {
-  transform: scale(0.97);
-}
-
-/* ========== Pro 头像框（所有头像通用） ========== */
-.xtj-pro-avatar-ring {
-  position: relative;
-  display: inline-flex;
-}
-.xtj-pro-avatar-ring::before {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #f59e0b, #d97706, #fbbf24, #f59e0b);
-  background-size: 200% 200%;
-  animation: proAvatarRingSpin 3s linear infinite;
-  z-index: 0;
-  pointer-events: none;
-}
-.xtj-pro-avatar-ring .avatar {
-  position: relative;
-  z-index: 1;
-}
-.xtj-pro-avatar-ring .avatar img {
-  border: 2px solid transparent;
-  border-radius: 50%;
-}
-@keyframes proAvatarRingSpin {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-
-/* ========== Pro 点赞特效增强 ========== */
-html.xtj-pro-active .heart-particle {
-  font-size: 22px !important;
-  filter: drop-shadow(0 0 4px rgba(255,200,50,0.6)) !important;
-}
-html.xtj-pro-active .action-btn.liked {
-  color: #f59e0b !important;
-  text-shadow: 0 0 8px rgba(245,158,11,0.3);
-}
-
-/* ========== Pro 增强的 VIP 身份标识 ========== */
-.xtj-vip-badge.xtj-vip-enhanced {
-  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
-  box-shadow: 0 0 12px rgba(245,158,11,0.3);
-  animation: proBadgePulse 2s ease-in-out infinite;
-}
-.xtj-vip-badge.xtj-vip-enhanced svg {
-  filter: drop-shadow(0 0 3px rgba(255,215,0,0.5));
 }
