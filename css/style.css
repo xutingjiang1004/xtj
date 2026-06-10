@@ -342,8 +342,8 @@
             background: rgba(255, 255, 255, 0.13);
             border: 1px solid rgba(255, 255, 255, 0.6);
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.03), inset 0 0.5px 0 rgba(255, 255, 255, 0.7);
-            backdrop-filter: blur(24px) saturate(180%);
-            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
         }
         [data-theme="dark"] .glass {
             background: rgba(30, 30, 40, 0.92);
@@ -821,7 +821,7 @@
             content-visibility: auto;
             contain-intrinsic-size: 200px;
             contain: layout paint style;
-            will-change: opacity, transform, filter;
+            will-change: opacity, transform;
         }
         [data-theme="dark"] .post {
             background: rgba(30, 30, 40, 0.92);
@@ -8569,51 +8569,6 @@ body.ios-chat-keyboard-open .chat-input-area {
   padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
 }
 
-:where(
-  .btn-primary,
-  .btn,
-  .btn-ghost,
-  .file-label,
-  .photo-wall-btn,
-  .photo-wall-upload-btn,
-  .send-btn,
-  .chat-img-btn,
-  .announcement-btn,
-  .announcement-back-btn,
-  .post-filter-clear,
-  .profile-activity-btn,
-  .profile-activity-more,
-  .action-btn,
-  .stat-close-btn
-) {
-  transition:
-    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: transform;
-}
-
-:where(
-  .btn-primary,
-  .btn-ghost,
-  .file-label,
-  .photo-wall-btn,
-  .photo-wall-upload-btn,
-  .send-btn,
-  .chat-img-btn,
-  .announcement-btn,
-  .announcement-back-btn,
-  .post-filter-clear,
-  .profile-activity-btn,
-  .profile-activity-more,
-  .action-btn,
-  .stat-close-btn
-):active {
-  transform: scale(0.97);
-}
-
 [data-theme="dark"] .chat-img-btn {
   background: rgba(28, 34, 49, 0.82);
   border-color: rgba(118, 137, 162, 0.34);
@@ -9291,122 +9246,6 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 :where(
-  .btn,
-  .btn-primary,
-  .btn-ghost,
-  .file-label,
-  .photo-wall-btn,
-  .pw-album-back-btn,
-  .photo-wall-upload-btn,
-  .send-btn,
-  .chat-img-btn,
-  .chat-header .back-btn,
-  .chat-header .chat-close-btn,
-  .announcement-btn,
-  .announcement-back-btn,
-  .announcement-tab,
-  .announcement-close-btn,
-  .post-filter-clear,
-  .post-filter-user-reset,
-  .filter-toggle-btn,
-  .post-vis-toggle .vis-btn,
-  .profile-activity-btn,
-  .profile-activity-more,
-  .action-btn,
-  .stat-close-btn,
-  .stat-record-more-btn,
-  .stat-record-action,
-  .spi-open-btn,
-  .back-to-stats-btn,
-  .stat-user-summary,
-  .pw-upload-sheet-close,
-  .pw-upload-sheet-btn
-) {
-  position: relative;
-  transition:
-    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: transform;
-  transform: translateY(0) scale(1);
-  box-shadow: 0 8px 18px rgba(26, 71, 48, 0.08);
-}
-
-:where(
-  .btn-primary,
-  .btn,
-  .btn-ghost,
-  .file-label,
-  .photo-wall-btn,
-  .pw-album-back-btn,
-  .photo-wall-upload-btn,
-  .send-btn,
-  .chat-img-btn,
-  .chat-header .back-btn,
-  .chat-header .chat-close-btn,
-  .announcement-btn,
-  .announcement-back-btn,
-  .announcement-tab,
-  .announcement-close-btn,
-  .post-filter-clear,
-  .post-filter-user-reset,
-  .filter-toggle-btn,
-  .post-vis-toggle .vis-btn,
-  .profile-activity-btn,
-  .profile-activity-more,
-  .action-btn,
-  .stat-close-btn,
-  .stat-record-more-btn,
-  .stat-record-action,
-  .spi-open-btn,
-  .back-to-stats-btn,
-  .pw-upload-sheet-close,
-  .pw-upload-sheet-btn
-):hover {
-  transform: translateY(-1px);
-  box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12);
-}
-
-:where(
-  .btn-primary,
-  .btn,
-  .btn-ghost,
-  .file-label,
-  .photo-wall-btn,
-  .pw-album-back-btn,
-  .photo-wall-upload-btn,
-  .send-btn,
-  .chat-img-btn,
-  .chat-header .back-btn,
-  .chat-header .chat-close-btn,
-  .announcement-btn,
-  .announcement-back-btn,
-  .announcement-tab,
-  .announcement-close-btn,
-  .post-filter-clear,
-  .post-filter-user-reset,
-  .filter-toggle-btn,
-  .post-vis-toggle .vis-btn,
-  .profile-activity-btn,
-  .profile-activity-more,
-  .action-btn,
-  .stat-close-btn,
-  .stat-record-more-btn,
-  .stat-record-action,
-  .spi-open-btn,
-  .back-to-stats-btn,
-  .pw-upload-sheet-close,
-  .pw-upload-sheet-btn
-):active {
-  transform: translateY(0) scale(0.965);
-  box-shadow: 0 6px 14px rgba(26, 71, 48, 0.08);
-  transition-duration: 0.12s;
-}
-
-:where(
   .announcement-tab.active,
   .filter-toggle-btn.active,
   .photo-wall-btn.active,
@@ -9498,46 +9337,22 @@ body.ios-chat-keyboard-open .chat-input-area {
 
 @media (prefers-reduced-motion: reduce) {
   :is(
-    button:not(.dock-tab),
+    button:not(.dock-tab):not(.stat-user-summary-card),
     input[type="button"],
     input[type="submit"],
     input[type="reset"],
-    .btn,
-    .btn-primary,
-    .btn-ghost,
-    .action-btn,
     .file-label,
-    .theme-toggle-btn,
-    .announcement-btn,
-    .announcement-close-btn,
     .announcement-tab,
-    .post-filter-user-reset,
-    .filter-toggle-btn,
-    .post-vis-toggle .vis-btn,
-    .post-filter-clear,
     .photo-wall-btn,
-    .pw-album-back-btn,
-    .photo-wall-upload-btn,
-    .announcement-back-btn,
-    .announcement-delete-btn,
-    .announcement-admin-btn,
+    .action-btn,
     .profile-activity-btn,
     .profile-activity-more,
-    .profile-detail-logout-btn,
-    .upc-msg-btn,
-    .pp-confirm-btn,
-    .stat-close-btn,
-    .stat-record-more-btn,
-    .stat-record-action,
-    .spi-open-btn,
     .send-btn,
     .chat-img-btn,
-    .pw-confirm-actions button,
-    .pw-upload-sheet-close,
-    .pw-upload-sheet-btn
+    .stat-close-btn
   ) {
     transition-duration: 0.18s !important;
-    transition-property: transform, box-shadow, background, border-color, color, opacity !important;
+    transition-property: transform, background-color, border-color, color, opacity !important;
   }
 }
 
@@ -9585,14 +9400,12 @@ body.ios-chat-keyboard-open .chat-input-area {
 ) {
   transition:
     transform 0.24s var(--xtj-btn-ease),
-    box-shadow 0.24s var(--xtj-btn-ease),
     background-color 0.24s var(--xtj-btn-ease),
     border-color 0.24s var(--xtj-btn-ease),
     color 0.24s var(--xtj-btn-ease),
     opacity 0.24s var(--xtj-btn-ease) !important;
   transform: translateY(0) scale(1);
   transform-origin: center;
-  will-change: transform;
 }
 
 :where(
@@ -9884,15 +9697,13 @@ body.ios-chat-keyboard-open .chat-input-area {
 .post,
 .profile-card,
 .photo-card,
-.glass,
 .dock-tab,
 .action-btn,
 .chat-msg {
   transform: translateZ(0);
-  contain: content;
 }
 
-/* GPU 加速 - 所有按钮 */
+/* Button ripple effect */
 :where(
   button:not(.dock-tab),
   [role="button"]:not(.dock-tab),
@@ -9912,7 +9723,6 @@ body.ios-chat-keyboard-open .chat-input-area {
   .search-toggle,
   .filter-toggle
 ) {
-  will-change: transform;
   -webkit-tap-highlight-color: transparent;
 }
 :where(

@@ -922,7 +922,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // ===================== 用户限制状态管理 =====================
             var userRestrictions = { is_banned: false, is_blacklisted: false, is_muted: false };
             var restrictionPollTimer = null;
-            var RESTRICTION_POLL_INTERVAL = 15000; // 15秒轮询
+            var RESTRICTION_POLL_INTERVAL = 60000; // 60秒轮询（15秒太频繁）
 
             async function checkUserRestrictions() {
                 if (!currentUser || currentUser === ADMIN_NAME) return;
@@ -8324,105 +8324,56 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             (function installButtonMotionFinal() {
                 if (window.__xtjButtonMotionFinalV1) return;
                 window.__xtjButtonMotionFinalV1 = true;
-                var selector = [
-                    'button',
-                    '[role="button"]',
-                    'input[type="button"]',
-                    'input[type="submit"]',
-                    'input[type="reset"]',
-                    '.file-label',
-                    '.photo-wall-btn',
-                    '.chat-img-btn',
-                    '.send-btn',
-                    '.action-btn',
-                    '.report-btn',
-                    '.report-type-tab',
-                    '.report-reason-btn',
-                    '.report-submit-btn',
-                    '.stat-record-action',
-                    '.profile-activity-more',
-                    '.profile-activity-btn',
-                    '.user-filter-btn',
-                    '.search-toggle',
-                    '.filter-toggle'
-                ].join(',');
-
-                var pressTimelines = {};
+                var selector = '.user-filter-btn,.search-toggle,.filter-toggle';
+                var gsapCache = false;
 
                 function isDock(target) {
                     return !!(target && target.closest && target.closest('#dockBar, .dock-bar, .dock-tab'));
                 }
 
-                function getMotionTarget(event) {
-                    var target = event.target && event.target.closest ? event.target.closest(selector) : null;
-                    if (!target || isDock(target) || target.disabled || target.getAttribute('aria-disabled') === 'true') return null;
-                    return target;
-                }
-
-                function gsapPress(target) {
-                    if (typeof gsap !== 'undefined') {
-                        if (pressTimelines[target._xtjBtnId]) {
-                            pressTimelines[target._xtjBtnId].kill();
-                        }
-                        if (!target._xtjBtnId) target._xtjBtnId = '_b' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
-                        var tl = gsap.timeline();
-                        tl.to(target, { scale: 0.955, duration: 0.1, ease: 'power2.out', overwrite: 'auto' }, 0);
-                        pressTimelines[target._xtjBtnId] = tl;
-                    } else {
-                        target.style.transform = 'scale(0.955)';
-                    }
-                }
-
-                function gsapRelease(target) {
-                    if (typeof gsap !== 'undefined') {
-                        if (pressTimelines[target._xtjBtnId]) {
-                            pressTimelines[target._xtjBtnId].kill();
-                            delete pressTimelines[target._xtjBtnId];
-                        }
-                        gsap.to(target, { scale: 1, duration: 0.28, ease: 'back.out(1.6)', overwrite: 'auto' });
-                    } else {
-                        target.style.transform = '';
-                    }
-                }
-
-                function gsapClickBurst(target, event) {
-                    if (typeof gsap !== 'undefined') {
-                        var isSearchFilter = target.classList.contains('user-filter-btn') || target.classList.contains('search-toggle') || target.classList.contains('filter-toggle');
-                        if (isSearchFilter) {
-                            var icon = target.querySelector('svg') || target.querySelector('img') || target.querySelector('i');
-                            if (icon) {
-                                gsap.fromTo(icon, { x:0, y:0, scale: 1 }, { scale: 1.2, duration: 0.18, ease: 'back.out(2.5)', clearProps: 'scale' });
-                            }
-                        }
-                        gsap.fromTo(target, { opacity: 1 }, { opacity: 0.92, duration: 0.08, ease: 'power1.out', overwrite: 'auto', onComplete: function() {
-                            gsap.to(target, { opacity: 1, duration: 0.2, delay: 0.04, overwrite: 'auto' });
-                        }});
-                    } else {
-                        target.style.opacity = '0.92';
-                        window.setTimeout(function() {
-                            target.style.opacity = '';
-                        }, 120);
-                    }
-                }
-
-                document.addEventListener('pointerdown', function(event) {
-                    var target = getMotionTarget(event);
+                document.addEventListener('click', function(event) {
+                    if (gsapCache === false) gsapCache = typeof gsap !== 'undefined';
+                    var target = event.target;
                     if (!target) return;
-                    gsapPress(target);
+                    var btn = target.closest(selector);
+                    if (!btn) return;
+                    if (isDock(btn)) return;
+
+                    if (gsapCache) {
+                        var icon = btn.querySelector('svg, img, i');
+                        if (icon) {
+                            gsap.fromTo(icon, {scale:1}, {scale:1.18, duration:0.16, ease:'back.out(2.5)', clearProps:'scale'});
+                        }
+                    } else {
+                        btn.style.transform = 'scale(0.96)';
+                        window.setTimeout(function(){btn.style.transform='';}, 120);
+                    }
                 }, true);
 
-                ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(type) {
-                    document.addEventListener(type, function(event) {
-                        var target = getMotionTarget(event);
-                        if (!target) return;
-                        gsapRelease(target);
-                    }, true);
-                });
+                document.addEventListener('pointerdown', function(event) {
+                    var target = event.target;
+                    if (!target || isDock(target)) return;
+                    if (target.closest('button:not(.dock-tab),[role="button"]:not(.dock-tab),.action-btn,.send-btn,.chat-img-btn,.photo-wall-btn,.file-label')) {
+                        target.style.transition = 'transform 0.12s ease';
+                        target.style.transform = 'scale(0.96)';
+                    }
+                }, true);
 
-                document.addEventListener('click', function(event) {
-                    var target = getMotionTarget(event);
+                document.addEventListener('pointerup', function(event) {
+                    var target = event.target;
                     if (!target) return;
-                    gsapClickBurst(target, event);
+                    if (target.style.transform) {
+                        target.style.transition = 'transform 0.25s cubic-bezier(.34,1.4,.64,1)';
+                        target.style.transform = 'scale(1)';
+                        window.setTimeout(function(){target.style.transition='';target.style.transform='';}, 280);
+                    }
+                }, true);
+
+                document.addEventListener('pointercancel', function(event) {
+                    var target = event.target;
+                    if (!target) return;
+                    target.style.transform = '';
+                    target.style.transition = '';
                 }, true);
             })();
 

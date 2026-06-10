@@ -228,41 +228,22 @@
     canvas.height = window.innerHeight;
 
     var particles = [];
-    var numParticles = 80;
-    var colors = ['#f59e0b', '#d97706', '#fbbf24', '#fcd34d', '#fef3c7', '#fffbeb'];
+    var numParticles = 30;
+    var colors = ['#f59e0b', '#d97706', '#fbbf24'];
     var startTime = Date.now();
     var animId = null;
-
-    function randomRange(min, max) { return Math.random() * (max - min) + min; }
 
     for (var i = 0; i < numParticles; i++) {
       particles.push({
         x: canvas.width / 2 + (Math.random() - 0.5) * 100,
         y: canvas.height / 2 + (Math.random() - 0.5) * 100,
-        vx: (Math.random() - 0.5) * 8,
-        vy: -Math.random() * 6 - 2,
-        size: randomRange(3, 11),
+        vx: (Math.random() - 0.5) * 6,
+        vy: -Math.random() * 4 - 1,
+        size: 2 + Math.random() * 4,
         color: colors[Math.floor(Math.random() * colors.length)],
         alpha: 1,
-        decay: randomRange(0.003, 0.012),
-        rotation: Math.random() * 360,
-        rotSpeed: (Math.random() - 0.5) * 8,
-        shape: Math.random() > 0.5 ? 'star' : 'circle'
+        decay: 0.005 + Math.random() * 0.005
       });
-    }
-
-    function drawStar(cx, cy, r, rot) {
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(rot || 0);
-      ctx.beginPath();
-      for (var i = 0; i < 5; i++) {
-        var angle = (i * 4 * Math.PI / 5) - Math.PI / 2;
-        var method = i === 0 ? 'moveTo' : 'lineTo';
-        ctx[method](Math.cos(angle) * r, Math.sin(angle) * r);
-      }
-      ctx.closePath();
-      ctx.restore();
     }
 
     function animate() {
@@ -273,47 +254,32 @@
         var p = particles[i];
         p.x += p.vx;
         p.y += p.vy;
-        p.vy += 0.05;
+        p.vy += 0.04;
         p.alpha -= p.decay;
-        p.rotation += p.rotSpeed;
 
         if (p.alpha <= 0 || p.y > canvas.height + 20) {
           particles.splice(i, 1);
           continue;
         }
 
-        ctx.save();
         ctx.globalAlpha = p.alpha;
         ctx.fillStyle = p.color;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 12;
-
-        if (p.shape === 'star') {
-          drawStar(p.x, p.y, p.size, p.rotation * Math.PI / 180);
-          ctx.fill();
-        } else {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        ctx.restore();
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
       }
 
-      if (particles.length > 0 && elapsed < duration) {
-        if (particles.length < numParticles * 0.3 && Math.random() > 0.7) {
+      if (particles.length > 0) {
+        if (particles.length < 8 && Math.random() > 0.7) {
           particles.push({
-            x: canvas.width / 2 + (Math.random() - 0.5) * 150,
+            x: canvas.width / 2 + (Math.random() - 0.5) * 100,
             y: canvas.height / 2,
-            vx: (Math.random() - 0.5) * 10,
-            vy: -Math.random() * 8 - 3,
-            size: randomRange(3, 10),
+            vx: (Math.random() - 0.5) * 6,
+            vy: -Math.random() * 5 - 1,
+            size: 2 + Math.random() * 4,
             color: colors[Math.floor(Math.random() * colors.length)],
             alpha: 1,
-            decay: randomRange(0.004, 0.014),
-            rotation: Math.random() * 360,
-            rotSpeed: (Math.random() - 0.5) * 10,
-            shape: Math.random() > 0.5 ? 'star' : 'circle'
+            decay: 0.005 + Math.random() * 0.005
           });
         }
         animId = requestAnimationFrame(animate);
@@ -322,16 +288,7 @@
       }
     }
 
-    animate();
-
-    window.addEventListener('resize', function() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    });
-
-    return function stop() {
-      if (animId) cancelAnimationFrame(animId);
-    };
+    animId = requestAnimationFrame(animate);
   };
 
   window.__xtjApplyProTheme = function(isPro) {
