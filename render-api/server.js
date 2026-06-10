@@ -1380,6 +1380,314 @@ app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res
   }
 });
 
+// ===================== VIP 会员 API =====================
+const VIP_MARKER = '__vip__';
+const VIP_ORDER_MARKER = '__vip_order__';
+const VIP_PLAN_MARKER = '__vip_plan__';
+// 测试模式：无需支付宝凭证即可支付
+const LOCAL_TEST_MODE = process.env.NODE_ENV !== 'production' || !process.env.ALIPAY_APP_ID;
+
+const VIP_PLANS = [
+  {
+    id: 'pro_monthly',
+    name: 'XTJ Pro',
+    price: 3,
+    currency: 'CNY',
+    duration_days: 30,
+    features: ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post']
+  }
+];
+
+// 获取可用套餐列表
+app.get('/api/vip/plans', rateLimit(60000, 30), (req, res) => {
+  return res.json({ plans: VIP_PLANS });
+});
+
+// 验证用户是否存在的辅助函数
+async function verifyUserExists(userName) {
+  const { data } = await supabase.from('posts')
+    .select('id')
+    .eq('user_name', userName)
+    .eq('media_type', AUTH_MARKER)
+    .limit(1);
+  return data && data.length > 0;
+}
+
+// 创建订单
+app.post('/api/vip/create-order', rateLimit(60000, 10), async (req, res) => {
+  try {
+    const { user_name, plan_id } = req.body;
+    const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
+    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
+
+    // 验证用户存在
+    const userExists = await verifyUserExists(userNameVal);
+    if (!userExists) return res.status(400).json({ error: '用户不存在' });
+
+    const plan = VIP_PLANS.find(p => p.id === plan_id);
+    if (!plan) return res.status(400).json({ error: '无效的套餐ID' });
+
+    // 检查是否已是VIP有效期内
+    const { data: activeVip } = await supabase.from('posts')
+      .select('*')
+      .eq('user_name', userNameVal)
+      .eq('media_type', VIP_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (activeVip && activeVip.length > 0) {
+      try {
+        var vipInfo = JSON.parse(activeVip[0].content || '{}');
+        if (vipInfo.is_active && vipInfo.expire_at && new Date(vipInfo.expire_at) > new Date()) {
+          return res.json({ error: '您已经是VIP会员，无需重复购买' });
+        }
+      } catch(e) {}
+    }
+
+    // 生成订单号
+    const orderNo = 'XTJ' + Date.now() + String(Math.random()).slice(2, 8);
+    const now = new Date().toISOString();
+    const orderContent = JSON.stringify({
+      user_name: userNameVal,
+      plan_id: plan.id,
+      plan_name: plan.name,
+      amount: plan.price,
+      currency: plan.currency,
+      status: 'pending',
+      order_no: orderNo,
+      created_at: now
+    });
+
+    const { error: orderErr } = await supabase.from('posts').insert([{
+      user_name: userNameVal,
+      content: orderContent,
+      media_type: VIP_ORDER_MARKER,
+      media_url: orderNo,
+      actor_key: 'vip_order_' + Date.now()
+    }]);
+
+    if (orderErr) return res.status(400).json({ error: sanitizeError(orderErr) });
+
+    if (LOCAL_TEST_MODE) {
+      // 测试模式：立即完成支付
+      const orderResult = await processVipPayment(userNameVal, orderNo, plan);
+      return res.json({ order_no: orderNo, amount: plan.price, test_mode: true, result: orderResult });
+    }
+
+    // 生产模式返回支付宝支付表单/URL（需要配置 ALIPAY_APP_ID 等环境变量）
+    return res.json({
+      order_no: orderNo,
+      amount: plan.price,
+      pay_url: '/api/vip/pay/' + orderNo,
+      test_mode: false
+    });
+  } catch(e) {
+    console.error('[VIP] 创建订单失败:', e.message);
+    return res.status(500).json({ error: '创建订单失败' });
+  }
+});
+
+// 测试模式：直接激活VIP（免支付流程）
+app.post('/api/vip/activate-test', rateLimit(60000, 5), async (req, res) => {
+  if (!LOCAL_TEST_MODE) return res.status(403).json({ error: '生产模式下不支持测试激活' });
+  try {
+    const { user_name } = req.body;
+    const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
+    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
+
+    const userExists = await verifyUserExists(userNameVal);
+    if (!userExists) return res.status(400).json({ error: '用户不存在' });
+
+    const plan = VIP_PLANS[0];
+    const orderNo = 'TEST' + Date.now() + String(Math.random()).slice(2, 6);
+    const result = await processVipPayment(userNameVal, orderNo, plan);
+    return res.json(result);
+  } catch(e) {
+    console.error('[VIP] 测试激活失败:', e.message);
+    return res.status(500).json({ error: '激活失败' });
+  }
+});
+
+// 处理VIP支付完成
+async function processVipPayment(userName, orderNo, plan) {
+  const now = new Date();
+  const expireAt = new Date(now.getTime() + plan.duration_days * 24 * 60 * 60 * 1000).toISOString();
+  const vipContent = JSON.stringify({
+    plan_id: plan.id,
+    plan_name: plan.name,
+    price: plan.price,
+    is_active: true,
+    order_no: orderNo,
+    start_at: now.toISOString(),
+    expire_at: expireAt,
+    features: plan.features,
+    activated_at: now.toISOString()
+  });
+
+  // 更新订单状态
+  const { data: orders } = await supabase.from('posts')
+    .select('id')
+    .eq('media_type', VIP_ORDER_MARKER)
+    .eq('media_url', orderNo)
+    .limit(1);
+
+  if (orders && orders.length > 0) {
+    try {
+      var orderData = JSON.parse(orders[0].content || '{}');
+      orderData.status = 'paid';
+      orderData.paid_at = now.toISOString();
+      await supabase.from('posts').update({ content: JSON.stringify(orderData) }).eq('id', orders[0].id);
+    } catch(e) {}
+  }
+
+  // 写入VIP记录
+  const { error: vipErr } = await supabase.from('posts').insert([{
+    user_name: userName,
+    content: vipContent,
+    media_type: VIP_MARKER,
+    media_url: plan.id,
+    actor_key: 'vip_' + Date.now()
+  }]);
+
+  if (vipErr) throw vipErr;
+
+  return {
+    ok: true,
+    user_name: userName,
+    plan_name: plan.name,
+    expire_at: expireAt,
+    is_active: true
+  };
+}
+
+// 查询VIP状态
+app.get('/api/vip/status', rateLimit(60000, 60), async (req, res) => {
+  try {
+    const userName = req.query.user_name;
+    if (!userName) return res.status(400).json({ error: '缺少用户名' });
+
+    const { data: vipRecords } = await supabase.from('posts')
+      .select('*')
+      .eq('user_name', userName)
+      .eq('media_type', VIP_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    var activeVip = null;
+    var allVips = (vipRecords || []).map(function(r) {
+      try {
+        var c = JSON.parse(r.content || '{}');
+        if (c.is_active && c.expire_at && new Date(c.expire_at) > new Date() && !activeVip) {
+          activeVip = c;
+        }
+        return c;
+      } catch(e) { return null; }
+    }).filter(Boolean);
+
+    return res.json({
+      is_vip: !!activeVip,
+      active_vip: activeVip,
+      history: allVips
+    });
+  } catch(e) {
+    console.error('[VIP] 查询状态失败:', e.message);
+    return res.status(500).json({ error: '查询VIP状态失败' });
+  }
+});
+
+// 生产模式：获取支付宝支付URL（需配置真实支付宝参数）
+app.get('/api/vip/pay/:orderNo', async (req, res) => {
+  const orderNo = req.params.orderNo;
+  const { data: orders } = await supabase.from('posts')
+    .select('*')
+    .eq('media_type', VIP_ORDER_MARKER)
+    .eq('media_url', orderNo)
+    .limit(1);
+
+  if (!orders || orders.length === 0) return res.status(404).json({ error: '订单不存在' });
+
+  try {
+    var orderData = JSON.parse(orders[0].content || '{}');
+    if (orderData.status === 'paid') return res.json({ error: '订单已支付' });
+
+    if (LOCAL_TEST_MODE) {
+      return res.redirect('/?vip=success');
+    }
+
+    // ===== 真实支付宝支付 =====
+    // 使用电脑网站支付 alipay.trade.page.pay
+    // product_code: FAST_INSTANT_TRADE_PAY
+    // 需要安装 alipay-sdk (npm install alipay-sdk)
+    // const AlipaySdk = require('alipay-sdk').default;
+    // const alipaySdk = new AlipaySdk({
+    //   appId: process.env.ALIPAY_APP_ID,
+    //   privateKey: process.env.ALIPAY_PRIVATE_KEY,
+    //   alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
+    //   gateway: 'https://openapi.alipay.com/gateway.do',
+    // });
+    // const bizContent = {
+    //   out_trade_no: orderNo,
+    //   product_code: 'FAST_INSTANT_TRADE_PAY',
+    //   total_amount: orderData.amount.toFixed(2),
+    //   subject: 'XTJ Pro 会员'
+    // };
+    // const form = alipaySdk.pageExec('alipay.trade.page.pay', {}, bizContent);
+    // return res.send(form); // 返回支付宝跳转表单HTML
+    // =============================
+
+    return res.json({ error: '支付宝支付尚未配置' });
+  } catch(e) {
+    console.error('[VIP] 支付跳转失败:', e.message);
+    return res.status(500).json({ error: '支付跳转失败' });
+  }
+});
+
+// 支付宝异步通知接收（生产环境使用）
+app.post('/api/vip/notify', async (req, res) => {
+  // 验签：需验证 sign 参数
+  const params = req.body;
+  if (!params || !params.sign) {
+    return res.status(400).send('fail');
+  }
+
+  // 验证 trade_status
+  if (params.trade_status === 'TRADE_SUCCESS' || params.trade_status === 'TRADE_FINISHED') {
+    const orderNo = params.out_trade_no;
+    const tradeNo = params.trade_no;
+    const totalAmount = parseFloat(params.total_amount || '0');
+
+    // 查询对应订单
+    const { data: orders } = await supabase.from('posts')
+      .select('*')
+      .eq('media_type', VIP_ORDER_MARKER)
+      .eq('media_url', orderNo)
+      .limit(1);
+
+    if (orders && orders.length > 0) {
+      try {
+        var orderData = JSON.parse(orders[0].content || '{}');
+        if (orderData.status === 'paid') return res.send('success');
+
+        // 核对金额
+        if (Math.abs(orderData.amount - totalAmount) > 0.01) {
+          console.error('[VIP] 金额不匹配:', orderNo, orderData.amount, totalAmount);
+          return res.send('fail');
+        }
+
+        const plan = VIP_PLANS.find(p => p.id === orderData.plan_id);
+        if (plan) {
+          await processVipPayment(orderData.user_name, orderNo, plan);
+        }
+      } catch(e) {
+        console.error('[VIP] 通知处理失败:', e.message);
+        return res.send('fail');
+      }
+    }
+  }
+
+  res.send('success');
+});
+
 // ===================== 启动 =====================
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
@@ -1387,4 +1695,5 @@ app.listen(port, () => {
   console.log(`[xtj-admin-api] password configured: ${ADMIN_PASSWORD ? 'yes' : 'no'}`);
   console.log(`[xtj-admin-api] supabase key type: ${SUPABASE_SERVICE_KEY ? 'service_role' : (process.env.SUPABASE_ANON_KEY ? 'anon' : 'none')}`);
   console.log(`[xtj-admin-api] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`[xtj-admin-api] vip local test mode: ${LOCAL_TEST_MODE ? 'enabled' : 'disabled'}`);
 });
