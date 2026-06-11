@@ -1,0 +1,19 @@
+========================================================================
+  请将此 RSA2 公钥上传至支付宝沙箱控制台
+  https://open.alipay.com/platform/developerIndex.htm
+  路径：沙箱环境 → 应用信息 → 接口加签方式 → 设置/查看
+========================================================================
+
+-----BEGIN RSA PUBLIC KEY-----
+MIIBCgKCAQEArkM8jyT6IdxH/MlLyIKICwSHMYEkLVbmkRN6hiiF3QFkETWUxacs
+r15h+klzbSup4nLzW5mnCuOJXODbyOV5VCkd5ymF85C18UsZAfKurZq4CxOtp1uf
+ArwEXN8ux4TCEwMYI15Xu1yBEsR9EwNGYe4PKTFW9Ru8XPBpUnYhYMQKQQ+twcLB
+/Kee95t7dKzvgMRy9TKnaf43A7pxweLwVPqyGKkNW7HhdYTR0MI0n/X6S2f9SGM
+P30NVYo65hS2NJELkwnj+GK2BTW5StHpnNBabfdweilVNpjTSZen196JJ4gclFWs
+oEsWxhzvmasiz1yptyMhzoFA5uh/7+JfOQIDAQAB
+-----END RSA PUBLIC KEY-----
+
+========================================================================
+  上传后请将控制台返回的「支付宝公钥」填写到 .env 文件的
+  ALIPAY_PUBLIC_KEY 配置项中
+========================================================================
