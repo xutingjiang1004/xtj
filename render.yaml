@@ -11,8 +11,8 @@ services:
     region: singapore
     branch: main
     rootDir: .
-    buildCommand: cd render-api && npm install
-    startCommand: cd render-api && npm start
+    buildCommand: npm install
+    startCommand: node --env-file=render-api/.env render-api/server.js
     autoDeploy: true
     
     # 安全环境变量（请在 Render Dashboard 中设置实际值）
