@@ -6,13 +6,12 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "start": "node server.js"
+    "start": "node --env-file=.env server.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "alipay-sdk": "^4.14.0",
     "cors": "^2.8.5",
-    "dotenv": "^17.4.2",
     "express": "^5.1.0"
   }
 }

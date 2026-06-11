@@ -6,14 +6,10 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
 import { AlipaySdk } from 'alipay-sdk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// 加载 .env 配置（本地开发环境）
-dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 
