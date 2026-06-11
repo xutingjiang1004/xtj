@@ -286,70 +286,34 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             var btn = document.getElementById('vipPayBtn');
             var btnText = document.getElementById('vipPayBtnText');
-            if (btn) { btn.classList.add('loading'); btn.disabled = true; btnText.textContent = '处理中...'; }
+            if (btn) { btn.classList.add('loading'); btn.disabled = true; btnText.textContent = '激活中...'; }
 
-            function handleVipSuccess(result) {
-                __vipStatus.is_vip = true;
-                __vipStatus.vip_info = result;
-                updateVipUI();
-                updateVipModalUI();
-                closeModal('vipModal');
-                if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
-                setTimeout(function() {
-                    if (typeof window.__xtjShowProCelebration === 'function') {
-                        window.__xtjShowProCelebration(result);
-                    }
-                    if (typeof window.__xtjApplyProTheme === 'function') {
-                        window.__xtjApplyProTheme(true);
-                    }
-                }, 300);
-            }
-
-            // Step 1: 尝试服务器API（优先使用支付宝或测试模式）
-            try {
-                var resp = await fetch(API_BASE + '/api/vip/create-order', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_name: currentUser, plan_id: 'pro_monthly' })
-                });
-                var data = await resp.json();
-
-                if (data.error) {
-                    showToast(data.error || '开通失败');
-                    return;
-                }
-
-                if (data.test_mode && data.result && data.result.ok) {
-                    // 测试模式：服务器自动激活VIP
-                    handleVipSuccess(data.result);
-                    return;
-                }
-
-                if (data.pay_url) {
-                    // 真实支付模式：跳转到支付宝
-                    window.location.href = API_BASE + data.pay_url;
-                    return;
-                }
-
-                showToast('支付服务异常');
-                return;
-            } catch(e) {
-                console.warn('[VIP] API不可用，尝试前端直连:', e.message);
-            }
-
-            // Step 2: 回退到前端直连开通（API不可用时）
+            // 直接前端激活Pro，所有用户免费开通
             if (typeof window.__xtjDirectPurchasePro === 'function') {
                 try {
                     var pResult = await window.__xtjDirectPurchasePro(currentUser);
                     if (pResult.ok) {
-                        handleVipSuccess(pResult);
+                        __vipStatus.is_vip = true;
+                        __vipStatus.vip_info = pResult;
+                        updateVipUI();
+                        updateVipModalUI();
+                        closeModal('vipModal');
+                        if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通'; }
+                        setTimeout(function() {
+                            if (typeof window.__xtjShowProCelebration === 'function') {
+                                window.__xtjShowProCelebration(pResult);
+                            }
+                            if (typeof window.__xtjApplyProTheme === 'function') {
+                                window.__xtjApplyProTheme(true);
+                            }
+                        }, 300);
                         return;
                     }
-                } catch(e2) { console.error('[VIP] 直连失败:', e2); }
+                } catch(e) { console.error('[VIP] 激活失败:', e); }
             }
 
-            showToast('支付服务暂时不可用，请稍后重试');
-            if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
+            showToast('激活失败，请重试');
+            if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通'; }
         }
 
         window.openVipModal = openVipModal;
@@ -8382,8 +8346,25 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var title = document.getElementById('statModalTitle');
                 var body = document.getElementById('statModalBody');
                 var modal = document.getElementById('statModal');
-                if (title) title.textContent = titles[type] || '缁熻璇︽儏';
+                if (title) title.textContent = titles[type] || '统计详情';
                 if (modal) modal.classList.add('active');
+                // 全面清除GSAP残留在弹窗上的内联样式，并杀死正在运行的GSAP动画
+                var box = modal ? modal.querySelector('.stat-detail-modal') : null;
+                if (box) {
+                    if (typeof gsap !== 'undefined' && gsap.killTweensOf) {
+                        gsap.killTweensOf(box);
+                        gsap.set(box, { y: 0, scale: 1, opacity: 1, filter: 'blur(0px)', clearProps: 'filter' });
+                    }
+                    box.style.transform = ''; box.style.opacity = ''; box.style.filter = '';
+                    box.style.translate = ''; box.style.scale = ''; box.style.rotate = '';
+                }
+                if (modal) {
+                    if (typeof gsap !== 'undefined' && gsap.killTweensOf) {
+                        gsap.killTweensOf(modal);
+                        gsap.set(modal, { backdropFilter: '', backgroundColor: '' });
+                    }
+                    modal.style.backdropFilter = ''; modal.style.backgroundColor = '';
+                }
 
                 var sourcePosts = Array.isArray(feedAllPosts) && feedAllPosts.length ? feedAllPosts : statAllPosts;
                 var sourceComments = Array.isArray(feedAllComments) && feedAllComments.length ? feedAllComments : statAllComments;
