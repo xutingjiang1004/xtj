@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -288,34 +288,24 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             var btnText = document.getElementById('vipPayBtnText');
             if (btn) { btn.classList.add('loading'); btn.disabled = true; btnText.textContent = '处理中...'; }
 
-            var pErr = null;
-            // 优先使用前端直连开通（支持离线活动模式）
-            if (typeof window.__xtjDirectPurchasePro === 'function') {
-                try {
-                    var pResult = await window.__xtjDirectPurchasePro(currentUser);
-                    if (pResult.ok) {
-                        __vipStatus.is_vip = true;
-                        __vipStatus.vip_info = pResult;
-                        updateVipUI();
-                        updateVipModalUI();
-                        closeModal('vipModal');
-                        if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
-                        // 显示庆祝动画
-                        setTimeout(function() {
-                            if (typeof window.__xtjShowProCelebration === 'function') {
-                                window.__xtjShowProCelebration(pResult);
-                            }
-                            if (typeof window.__xtjApplyProTheme === 'function') {
-                                window.__xtjApplyProTheme(true);
-                            }
-                        }, 300);
-                        return;
+            function handleVipSuccess(result) {
+                __vipStatus.is_vip = true;
+                __vipStatus.vip_info = result;
+                updateVipUI();
+                updateVipModalUI();
+                closeModal('vipModal');
+                if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
+                setTimeout(function() {
+                    if (typeof window.__xtjShowProCelebration === 'function') {
+                        window.__xtjShowProCelebration(result);
                     }
-                    pErr = pResult.error;
-                } catch(e) { pErr = e.message; }
+                    if (typeof window.__xtjApplyProTheme === 'function') {
+                        window.__xtjApplyProTheme(true);
+                    }
+                }, 300);
             }
 
-            // 回退到API远程开通
+            // Step 1: 尝试服务器API（优先使用支付宝或测试模式）
             try {
                 var resp = await fetch(API_BASE + '/api/vip/create-order', {
                     method: 'POST',
@@ -326,38 +316,39 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
                 if (data.error) {
                     showToast(data.error || '开通失败');
-                    if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
                     return;
                 }
 
-                if (data.test_mode && data.result) {
-                    if (data.result.ok) {
-                        __vipStatus.is_vip = true;
-                        __vipStatus.vip_info = data.result;
-                        updateVipUI();
-                        updateVipModalUI();
-                        closeModal('vipModal');
-                        setTimeout(function() {
-                            if (typeof window.__xtjShowProCelebration === 'function') {
-                                window.__xtjShowProCelebration(data.result);
-                            }
-                            if (typeof window.__xtjApplyProTheme === 'function') {
-                                window.__xtjApplyProTheme(true);
-                            }
-                        }, 300);
-                    }
-                } else if (data.pay_url) {
+                if (data.test_mode && data.result && data.result.ok) {
+                    // 测试模式：服务器自动激活VIP
+                    handleVipSuccess(data.result);
+                    return;
+                }
+
+                if (data.pay_url) {
+                    // 真实支付模式：跳转到支付宝
                     window.location.href = API_BASE + data.pay_url;
+                    return;
                 }
+
+                showToast('支付服务异常');
+                return;
             } catch(e) {
-                if (pErr) {
-                    showToast('当前服务器API不可用，请确保后端服务已启动');
-                } else {
-                    showToast('支付失败，请重试');
-                }
-                console.error('[VIP] 支付错误:', e, pErr);
+                console.warn('[VIP] API不可用，尝试前端直连:', e.message);
             }
 
+            // Step 2: 回退到前端直连开通（API不可用时）
+            if (typeof window.__xtjDirectPurchasePro === 'function') {
+                try {
+                    var pResult = await window.__xtjDirectPurchasePro(currentUser);
+                    if (pResult.ok) {
+                        handleVipSuccess(pResult);
+                        return;
+                    }
+                } catch(e2) { console.error('[VIP] 直连失败:', e2); }
+            }
+
+            showToast('支付服务暂时不可用，请稍后重试');
             if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通 ¥3'; }
         }
 
