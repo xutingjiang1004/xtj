@@ -2,12 +2,18 @@
 import express from 'express';
 import cors from 'cors';
 import crypto from 'crypto';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createClient } from '@supabase/supabase-js';
+import dotenv from 'dotenv';
+import { AlipaySdk } from 'alipay-sdk';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// 加载 .env 配置（本地开发环境）
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 const app = express();
 
@@ -23,7 +29,14 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const API_SECRET = process.env.API_SECRET || crypto.randomBytes(32).toString('hex');
 const TOKEN_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ithowxqignlhkwaykglt.supabase.co';
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
+// SUPABASE SERVICE_KEY 优先，回退到 ANON KEY（本地开发/演示模式）
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+if (!SUPABASE_SERVICE_KEY) {
+  // 从 config.js 读取 ANON KEY 作为最终回退
+  console.warn('[WARN] SUPABASE_SERVICE_KEY not set. Using configured ANON KEY as fallback.');
+} else {
+  console.log('[SUPABASE] Service key loaded' + (process.env.SUPABASE_SERVICE_KEY ? '' : ' (anon fallback)'));
+}
 
 // Allowed frontend origins.
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -39,7 +52,7 @@ if (!ADMIN_PASSWORD) {
   console.warn('[WARN] ADMIN_PASSWORD is not configured.');
 }
 if (!SUPABASE_SERVICE_KEY) {
-  console.error('[FATAL] SUPABASE_SERVICE_KEY is required. Server will not start without a service role key.');
+  console.error('[FATAL] No Supabase key available. Server will not start.');
   process.exit(1);
 }
 
@@ -1412,7 +1425,8 @@ const VIP_MARKER = '__vip__';
 const VIP_ORDER_MARKER = '__vip_order__';
 const VIP_PLAN_MARKER = '__vip_plan__';
 // 测试模式：无需支付宝凭证即可支付
-const LOCAL_TEST_MODE = process.env.NODE_ENV !== 'production' || !process.env.ALIPAY_APP_ID;
+// 当 ALIPAY_APP_ID 和 ALIPAY_PUBLIC_KEY 都配置时使用真实沙箱支付
+const LOCAL_TEST_MODE = !(process.env.ALIPAY_APP_ID && process.env.ALIPAY_PUBLIC_KEY);
 
 const VIP_PLANS = [
   {
@@ -1424,6 +1438,31 @@ const VIP_PLANS = [
     features: ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post']
   }
 ];
+
+// ===================== 支付宝 SDK 初始化 =====================
+let alipaySdk = null;
+if (!LOCAL_TEST_MODE) {
+  try {
+    const privateKeyPath = process.env.ALIPAY_APP_PRIVATE_KEY_PATH || path.join(__dirname, 'alipay_private_key.pem');
+    const privateKey = fs.readFileSync(privateKeyPath, 'utf8');
+
+    alipaySdk = new AlipaySdk({
+      appId: process.env.ALIPAY_APP_ID,
+      privateKey: privateKey,
+      alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
+      gateway: process.env.ALIPAY_GATEWAY || 'https://openapi-sandbox.dl.alipaydev.com/gateway.do',
+      signType: 'RSA2'
+    });
+    console.log('[Alipay] SDK initialized (sandbox mode)');
+  } catch(e) {
+    console.error('[Alipay] SDK init failed:', e.message);
+    console.warn('[Alipay] Falling back to local test mode');
+  }
+}
+if (!alipaySdk) {
+  // 如果 SDK 初始化失败，仍然保持测试模式
+  console.log('[Alipay] Using local test mode (no Alipay)');
+}
 
 // 获取可用套餐列表
 app.get('/api/vip/plans', rateLimit(60000, 30), (req, res) => {
@@ -1637,32 +1676,35 @@ app.get('/api/vip/pay/:orderNo', async (req, res) => {
     var orderData = JSON.parse(orders[0].content || '{}');
     if (orderData.status === 'paid') return res.json({ error: '订单已支付' });
 
-    if (LOCAL_TEST_MODE) {
+    if (!alipaySdk) {
+      // 测试模式：直接跳转成功页
       return res.redirect('/?vip=success');
     }
 
-    // ===== 真实支付宝支付 =====
-    // 使用电脑网站支付 alipay.trade.page.pay
-    // product_code: FAST_INSTANT_TRADE_PAY
-    // 需要安装 alipay-sdk (npm install alipay-sdk)
-    // const AlipaySdk = require('alipay-sdk').default;
-    // const alipaySdk = new AlipaySdk({
-    //   appId: process.env.ALIPAY_APP_ID,
-    //   privateKey: process.env.ALIPAY_PRIVATE_KEY,
-    //   alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
-    //   gateway: 'https://openapi.alipay.com/gateway.do',
-    // });
-    // const bizContent = {
-    //   out_trade_no: orderNo,
-    //   product_code: 'FAST_INSTANT_TRADE_PAY',
-    //   total_amount: orderData.amount.toFixed(2),
-    //   subject: 'XTJ Pro 会员'
-    // };
-    // const form = alipaySdk.pageExec('alipay.trade.page.pay', {}, bizContent);
-    // return res.send(form); // 返回支付宝跳转表单HTML
-    // =============================
+    // ===== 支付宝手机网站支付 alipay.trade.wap.pay =====
+    const bizContent = {
+      out_trade_no: orderNo,
+      product_code: 'QUICK_WAP_WAY',
+      total_amount: (orderData.amount || 3).toFixed(2),
+      subject: 'XTJ Pro 会员',
+      body: 'XTJ Pro ' + (orderData.plan_name || '月度会员'),
+      quit_url: process.env.ALIPAY_RETURN_URL || 'http://localhost:3000',
+      time_expire: new Date(Date.now() + 30 * 60 * 1000).toISOString().replace(/\.\d{3}/, '')
+    };
 
-    return res.json({ error: '支付宝支付尚未配置' });
+    try {
+      // 使用 pageExec 生成自动跳转表单
+      const form = await alipaySdk.pageExec('alipay.trade.wap.pay', {
+        notifyUrl: process.env.ALIPAY_NOTIFY_URL || 'http://localhost:3000/api/vip/alipay/notify',
+        returnUrl: process.env.ALIPAY_RETURN_URL + '/?vip=success&order=' + orderNo
+      }, bizContent);
+
+      // 返回完整的自动提交HTML表单
+      return res.type('text/html; charset=utf-8').send(form);
+    } catch(alipayErr) {
+      console.error('[Alipay] pageExec error:', alipayErr.message);
+      return res.status(500).json({ error: '支付宝支付链接生成失败: ' + alipayErr.message });
+    }
   } catch(e) {
     console.error('[VIP] 支付跳转失败:', e.message);
     return res.status(500).json({ error: '支付跳转失败' });
