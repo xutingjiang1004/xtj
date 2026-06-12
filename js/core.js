@@ -1721,6 +1721,26 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return profileActivityState.posts || {};
             }
 
+            function isProfileActivityBlockedPost(post) {
+                if (!post) return true;
+                var normalized = normalizePost(post || {});
+                var mediaType = String(normalized.media_type || '');
+                return mediaType === AUTH_MARKER
+                    || mediaType === ADMIN_AUTH_MARKER
+                    || mediaType === DM_MARKER
+                    || mediaType === REPORT_MARKER
+                    || mediaType === '__avatar__'
+                    || mediaType === '__user_info__'
+                    || mediaType === '__photo_wall__'
+                    || mediaType === '__visit__'
+                    || mediaType === '__attack__'
+                    || mediaType === '__user_visit__'
+                    || mediaType === '__ann__'
+                    || mediaType === '__vip__'
+                    || mediaType === '__vip_order__'
+                    || mediaType === '__vip_plan__';
+            }
+
             function repairProfileActivityText(value) {
                 var text = value == null ? '' : String(value);
                 if (!text) return '';
@@ -1743,7 +1763,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             function getProfileActivityPost(postId) {
-                return getProfileActivityPostMap()[String(postId)] || null;
+                var post = getProfileActivityPostMap()[String(postId)] || null;
+                if (!post || isProfileActivityBlockedPost(post) || !canViewPost(post)) return null;
+                return post;
             }
 
             function dedupeProfileLikes(items) {
@@ -1819,7 +1841,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var actionHtml = isLikes
                         ? '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();unlikeFromProfile(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">取消点赞</button>'
                         : '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();deleteProfileComment(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">删除评论</button>';
-                    var titleRow = '<div class="profile-activity-title">' + titlePrefix + inlineSummary + '</div>';
                     var cardAttrs = canOpenPost
                         ? ' role="button" tabindex="0" onclick="' + openPostOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + openPostOnclick + '}"'
                         : '';
