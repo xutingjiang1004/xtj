@@ -1,5 +1,35 @@
 # 更新日志
 
+## v0.76 - 2026-06-12
+按钮点击修复、安全加固与全模块 Bug 修复
+
+### 新增
+- 通知/举报/Pro/点赞评论记录按钮点击无响应问题全面修复（CSS 防护 + 缺失弹窗 DOM 动态创建）
+- 帖子显示兜底机制：IntersectionObserver 异常时自动降级为可见，杜绝空白页
+- 举报弹窗顶部新增「举报表单」「举报记录」切换标签，与 JS 事件绑定对齐
+
+### 修复
+- 修复 API_BASE 硬编码问题：config.js 始终使用 `window.location.origin`，支持任意自定义域名和同域部署
+- 修复照片墙 upload.min.js 被重复加载导致事件重复绑定（静态 defer + 动态加载列表移除）
+- 修复 `/api/photo/delete` 安全漏洞：username 不允许为空，必须校验照片归属
+- 修复访问统计中间件放在 express.static 之后导致 GET / 不记录访问的问题（顺序对调）
+- 修复删除公告时重新生成 actor_key 导致 RLS 校验失败的问题
+- 修复举报举报列表未过滤 `__vip__`、`__vip_order__`、`__user_visit__` 等内部记录
+- 修复页面初次加载时右上角按钮（通知/举报）点击无响应的问题
+- 修复我的页 Pro 卡片在部分浏览器上点击无效的问题
+
+### 安全
+- 修复照片删除 API 未校验 username 导致任意传 photoId 即可删除照片的安全漏洞
+- 修复公告删除 RPC 调用传递错误 actor_key 导致数据库 RLS 校验失败的问题
+
+### 优化
+- IntersectionObserver 构造函数增加 try/catch 保护，兼容不支持该 API 的旧浏览器
+
+### Remade
+- 重写 config.js 的 API_BASE 逻辑：移除 Render 域名硬编码，简化为始终使用 `window.location.origin`
+- 重写举报弹窗布局：从无标签直接显示表单，改为「举报表单」「举报记录」双标签切换结构
+- 调整 server.js 中间件顺序：访问统计和 CSRF 防护移至 express.static 之前
+
 ## v0.73 - 2026-06-08
 全面更新 - 管理员禁言拉黑功能验证、测试数据插入、安全加固
 
