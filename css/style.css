@@ -12320,18 +12320,24 @@ html.xtj-pro-active .action-btn.liked {
   font-weight: 700 !important;
   letter-spacing: 0 !important;
   opacity: 1 !important;
+  text-shadow: none !important;
+  filter: none !important;
 }
 
 #profileActivityModal .profile-activity-inline-summary {
   color: rgba(33, 70, 51, 0.88) !important;
   font-weight: 600 !important;
   opacity: 1 !important;
+  text-shadow: none !important;
+  filter: none !important;
 }
 
 #profileActivityModal .profile-activity-note {
   color: rgba(47, 86, 63, 0.86) !important;
   font-size: 13px !important;
   opacity: 1 !important;
+  text-shadow: none !important;
+  filter: none !important;
 }
 
 #profileActivityModal .profile-activity-time,
@@ -12339,6 +12345,17 @@ html.xtj-pro-active .action-btn.liked {
 #profileActivityModal .profile-activity-empty {
   color: rgba(53, 92, 69, 0.78) !important;
   opacity: 1 !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+#profileActivityModal .profile-activity-body,
+#profileActivityModal .profile-activity-body * {
+  color: #214633 !important;
+  opacity: 1 !important;
+  mix-blend-mode: normal !important;
+  text-shadow: none !important;
+  filter: none !important;
 }
 
 #profileActivityModal .profile-activity-media,
@@ -12351,7 +12368,7 @@ html.xtj-pro-active .action-btn.liked {
   overflow: visible;
 }
 
-.dock-indicator {
+.dock-bar > .dock-indicator {
   position: absolute;
   top: 0;
   left: 0;
@@ -12376,8 +12393,8 @@ html.xtj-pro-active .action-btn.liked {
     opacity 0.22s ease;
 }
 
-.dock-indicator::before,
-.dock-indicator::after {
+.dock-bar > .dock-indicator::before,
+.dock-bar > .dock-indicator::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -12385,13 +12402,13 @@ html.xtj-pro-active .action-btn.liked {
   pointer-events: none;
 }
 
-.dock-indicator::before {
+.dock-bar > .dock-indicator::before {
   inset: 1px;
   background: linear-gradient(180deg, rgba(255,255,255,0.52), rgba(255,255,255,0.08) 64%, rgba(255,255,255,0.22));
   opacity: 0.9;
 }
 
-.dock-indicator::after {
+.dock-bar > .dock-indicator::after {
   inset: -6px 10px auto;
   height: 42%;
   border-radius: 999px;
@@ -12404,7 +12421,17 @@ html.xtj-pro-active .action-btn.liked {
   z-index: 1;
 }
 
-.dock-tab.active {
+.dock-bar .dock-tab.active {
   background: transparent !important;
   box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+.dock-bar .dock-tab.active::before {
+  content: none !important;
+  display: none !important;
+  opacity: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
 }
