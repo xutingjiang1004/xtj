@@ -133,13 +133,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
         }
         function getPostVisibilityObserver() {
             if (!postVisibilityObserver) {
-                postVisibilityObserver = new IntersectionObserver(e => {
-                    e.forEach(i => {
-                        if (i.isIntersecting) {
-                            i.target.classList.add('visible');
-                        }
-                    });
-                }, { threshold: 0.05 });
+                try {
+                    postVisibilityObserver = new IntersectionObserver(e => {
+                        e.forEach(i => {
+                            if (i.isIntersecting) {
+                                i.target.classList.add('visible');
+                            }
+                        });
+                    }, { threshold: 0.05 });
+                } catch(_) {
+                    postVisibilityObserver = { observe: function(el) { el.classList.add('visible'); } };
+                }
             }
             return postVisibilityObserver;
         }
@@ -386,7 +390,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             var scripts = [
                 'js/photo-wall/data.min.js',
                 'js/photo-wall/render.min.js',
-                'js/photo-wall/upload.min.js',
                 'js/photo-wall/preview.min.js',
                 'js/photo-wall/photo-wall.min.js'
             ];
@@ -1718,6 +1721,27 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return profileActivityState.posts || {};
             }
 
+            function repairProfileActivityText(value) {
+                var text = value == null ? '' : String(value);
+                if (!text) return '';
+                if (typeof window.__xtjUiTextRepair === 'function') {
+                    try {
+                        var repaired = window.__xtjUiTextRepair(text);
+                        if (typeof repaired === 'string' && repaired) text = repaired;
+                    } catch (e) {}
+                }
+                if (/[ÃÂâ€œâ€\u00A0-\u00FF]/.test(text) && !/[\u4e00-\u9fff]/.test(text)) {
+                    try {
+                        var utf8 = decodeURIComponent(text.split('').map(function(ch) {
+                            var code = ch.charCodeAt(0);
+                            return code <= 255 ? '%' + code.toString(16).padStart(2, '0') : ch;
+                        }).join(''));
+                        if (utf8 && utf8 !== text) text = utf8;
+                    } catch (e) {}
+                }
+                return text.replace(/\s+/g, ' ').trim();
+            }
+
             function getProfileActivityPost(postId) {
                 return getProfileActivityPostMap()[String(postId)] || null;
             }
@@ -1728,7 +1752,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             function profileActivitySummary(post) {
                 var normalized = normalizePost(post || {});
-                var text = String(normalized.content || '').trim();
+                var text = repairProfileActivityText(normalized.content || '');
                 if (text) return text.length > 28 ? text.slice(0, 28) + '...' : text;
                 if (normalized.media_type === 'video') return '视频动态';
                 if (normalized.media_type === 'image') return '图片动态';
@@ -1774,17 +1798,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var mediaHtml = post ? profileActivityMedia(post, item.post_id) : '';
                     var openPostOnclick = "openProfileActivityPost('" + safeJsStr(String(item.post_id)) + "')";
                     var summary = post ? profileActivitySummary(post) : '原帖已不可用';
-                    var actorName = String(currentUser || item.user_name || '你');
                     var hasMedia = !!(normalized && normalized.media_url);
                     var canOpenPost = !!(post && item.post_id);
-                    var postText = normalized ? String(normalized.content || '').trim() : '';
-                    var titlePrefix = escapeHtml(actorName) + (isLikes ? '点赞了：' : '评论了：');
+                    var postText = normalized ? repairProfileActivityText(normalized.content || '') : '';
+                    var commentText = repairProfileActivityText(item.content || '');
+                    var titlePrefix = isLikes ? '点赞了这条帖子' : '评论了这条帖子';
                     var inlineSummary = !hasMedia && summary && summary !== '无文字内容'
                         ? '<span class="profile-activity-inline-summary">' + escapeHtml(summary) + '</span>'
                         : '';
                     var extraNote = '';
-                    if (!isLikes && item.content) {
-                        extraNote = '<div class="profile-activity-note">我的评论：' + escapeHtml(item.content || '') + '</div>';
+                    if (!isLikes && commentText) {
+                        extraNote = '<div class="profile-activity-note">我的评论：' + escapeHtml(commentText) + '</div>';
                     } else if (hasMedia && postText) {
                         extraNote = '<div class="profile-activity-note">' + escapeHtml(postText.length > 36 ? postText.slice(0, 36) + '...' : postText) + '</div>';
                     } else if (!hasMedia && summary === '无文字内容') {
@@ -1803,7 +1827,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         '<article class="profile-activity-item' + (hasMedia ? ' has-media' : ' no-media') + (canOpenPost ? '' : ' is-disabled') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 28, 180) + 'ms;">',
                         '<div class="profile-activity-main">',
                         '<div class="profile-activity-body">',
-                        titleRow,
+                        '<div class="profile-activity-title">' + escapeHtml(titlePrefix) + inlineSummary + '</div>',
                         extraNote,
                         '</div>',
                         '</div>',
@@ -5401,6 +5425,23 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let lastTabTapTime = {};
             let lastTabTapCount = {};
             let isRefreshing = {};
+            function syncDockIndicator() {
+                var dockBar = document.getElementById('dockBar');
+                var indicator = document.getElementById('dockIndicator');
+                if (!dockBar || !indicator) return;
+                var activeBtn = dockBar.querySelector('.dock-tab.active') || dockBar.querySelector('.dock-tab[data-tab="' + currentDockTab + '"]');
+                if (!activeBtn) {
+                    indicator.style.opacity = '0';
+                    return;
+                }
+                var barRect = dockBar.getBoundingClientRect();
+                var btnRect = activeBtn.getBoundingClientRect();
+                indicator.style.width = btnRect.width + 'px';
+                indicator.style.height = btnRect.height + 'px';
+                indicator.style.transform = 'translate3d(' + (btnRect.left - barRect.left) + 'px,' + (btnRect.top - barRect.top) + 'px,0)';
+                indicator.style.opacity = '1';
+            }
+            window.syncDockIndicator = syncDockIndicator;
             window.switchDockTab = function(tab, skipReturn) {
                 if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
                 if (tab !== currentDockTab) {
@@ -5518,6 +5559,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (panel) panel.classList.add('active');
                 const tabBtn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
                 if (tabBtn) tabBtn.classList.add('active');
+                requestAnimationFrame(syncDockIndicator);
                 if (tab === 'posts') { if (window._rainResume) window._rainResume(); }
                 else { if (window._rainPause) window._rainPause(); }
                 if (tab === 'chat') {
@@ -5576,6 +5618,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     switchDockTab(tab);
                 });
             });
+            window.addEventListener('resize', function() {
+                requestAnimationFrame(syncDockIndicator);
+            });
+            setTimeout(function() {
+                requestAnimationFrame(syncDockIndicator);
+            }, 0);
             // ========== Dock 闁煎崬锕ら妵?==========
             let dockChatActiveUser = null;
             let dockChatSending = false;
@@ -6314,6 +6362,36 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             // 版本更新日志
             const changelogData = [
+                {
+                    version: 'v0.76',
+                    date: '2026-06-12',
+                    content: `
+                        <h4>按钮点击修复、安全加固与全模块 Bug 修复</h4>
+                        <ul>
+                            <li>通知/举报/Pro/点赞评论记录按钮点击无响应问题全面修复</li>
+                            <li>帖子显示兜底机制：IntersectionObserver 异常时自动降级为可见</li>
+                            <li>举报弹窗顶部新增「举报表单」「举报记录」切换标签，与 JS 事件绑定对齐</li>
+                        </ul>
+                        <h4>修复</h4>
+                        <ul>
+                            <li>API_BASE 始终使用 window.location.origin，支持任意自定义域名</li>
+                            <li>照片墙 upload.min.js 被重复加载导致事件重复绑定</li>
+                            <li>/api/photo/delete 安全漏洞：username 不允许为空，必须校验照片归属</li>
+                            <li>访问统计中间件放在 express.static 之后导致 GET / 不记录访问</li>
+                            <li>删除公告时重新生成 actor_key 导致 RLS 校验失败</li>
+                            <li>举报列表未过滤 __vip__、__vip_order__、__user_visit__ 等内部记录</li>
+                        </ul>
+                        <h4>安全</h4>
+                        <ul>
+                            <li>照片删除 API 未校验 username 可被任意删除照片的安全漏洞</li>
+                            <li>公告删除 RPC 调用传递错误 actor_key 导致 RLS 校验失败的问题</li>
+                        </ul>
+                        <h4>优化</h4>
+                        <ul>
+                            <li>IntersectionObserver 增加 try/catch 保护，兼容不支持该 API 的旧浏览器</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.74',
                     date: '2026-06-10',
@@ -7318,16 +7396,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (_reportType === 'post') {
                 try {
                     sb.from('posts')
-                        .select('id, user_name, content, media_url, media_type, created_at')
-                        .neq('media_type', '__avatar__')
-                        .neq('media_type', '__user_info__')
-                        .neq('media_type', '__visit__')
-                        .neq('media_type', '__attack__')
-                        .neq('media_type', '__ann__')
-                        .neq('media_type', '__photo_wall__')
-                        .neq('media_type', '__report__')
-                        .neq('media_type', '__dm__')
-                        .neq('media_type', '__auth__')
+                .select('id, user_name, content, media_url, media_type, created_at')
+                .neq('media_type', '__vip__')
+                .neq('media_type', '__vip_order__')
+                .neq('media_type', '__vip_plan__')
+                .neq('media_type', '__user_visit__')
+                .neq('media_type', '__avatar__')
+                .neq('media_type', '__user_info__')
+                .neq('media_type', '__visit__')
+                .neq('media_type', '__attack__')
+                .neq('media_type', '__ann__')
+                .neq('media_type', '__photo_wall__')
+                .neq('media_type', '__report__')
+                .neq('media_type', '__dm__')
+                .neq('media_type', '__auth__')
                         .order('created_at', { ascending: false })
                         .limit(200)
                         .then(function(res) {

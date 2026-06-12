@@ -215,17 +215,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// 托管前端静态文件（index.html, admin.html, js/ 等）
-app.use(express.static(path.join(__dirname, '..'), {
-  maxAge: '1h',
-  setHeaders: function(res, filePath) {
-    if (filePath.endsWith('.html')) {
-      res.setHeader('Cache-Control', 'no-cache');
-    }
-  }
-}));
-
-// 访问记录 + CSRF 防护
+// 访问记录 + CSRF 防护（必须放在 express.static 之前，否则 GET / 被静态文件截断不会记录）
 app.use(function(req, res, next) {
   // 访问记录（只记录 GET /，排除 /health 避免 cron ping 产生垃圾数据）
   const ip = getRealIp(req);
@@ -259,6 +249,16 @@ app.use(function(req, res, next) {
 
   next();
 });
+
+// 托管前端静态文件（index.html, admin.html, js/ 等）
+app.use(express.static(path.join(__dirname, '..'), {
+  maxAge: '1h',
+  setHeaders: function(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  }
+}));
 
 // 频率限制中间件
 const rateLimitStore = new Map();
@@ -469,9 +469,11 @@ app.post('/admin/announcement', verifyToken, rateLimit(60000, 20), async (req, r
 
 app.delete('/admin/announcement/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
+  const { data: post } = await supabase.from('posts').select('actor_key').eq('id', id).maybeSingle();
+  const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
   const { error } = await supabase.rpc('delete_post_with_actor', {
     p_post_id: id,
-    p_actor_key: 'admin_' + Date.now()
+    p_actor_key: actorKey
   });
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true });
@@ -526,17 +528,15 @@ app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
   try {
     const { photoId, username } = req.body;
     if (!photoId) return res.status(400).json({ error: '缺少照片ID' });
+    if (!username) return res.status(400).json({ error: '缺少用户名' });
 
-    // 验证照片属于该用户（防止任意删除）
-    if (username) {
-      const { data: photo } = await supabase.from('posts')
-        .select('user_name')
-        .eq('id', photoId)
-        .maybeSingle();
-      if (photo && photo.user_name !== username) {
-        return res.status(403).json({ error: '无权删除此照片' });
-      }
-    }
+    const { data: photo } = await supabase.from('posts')
+      .select('user_name')
+      .eq('id', photoId)
+      .maybeSingle();
+
+    if (!photo) return res.status(404).json({ error: '照片不存在' });
+    if (photo.user_name !== username) return res.status(403).json({ error: '无权删除此照片' });
 
     const { error } = await supabase.from('posts').delete().eq('id', photoId);
     if (error) return res.status(400).json({ error: sanitizeError(error) });

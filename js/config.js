@@ -11,16 +11,9 @@
  * - 所有敏感操作必须走 API_BASE 的后端接口
  */
 (function() {
-    // 自动检测：如果前端页面和后端 API 在同一个域名，直接用当前域名
-    var hostname = window.location.hostname;
-    var isRender = hostname.endsWith('.onrender.com') || hostname === 'localhost' || hostname === '127.0.0.1';
-    var defaultApiBase = isRender ? window.location.origin : "https://xtj.onrender.com";
-
     window.XTJ_CONFIG = {
-        // 后端 API 地址（自动检测同域部署，也可手动覆盖）
-        API_BASE: defaultApiBase,
-        
-        // 以下字段仅用于前端正常功能，不会暴露敏感权限
+        // 后端 API 地址：始终优先使用当前页面的 origin，支持任何自定义域名
+        API_BASE: window.location.origin,
         SUPABASE_URL: "https://ithowxqignlhkwaykglt.supabase.co",
         SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA"
     };
