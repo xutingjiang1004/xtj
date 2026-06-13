@@ -12,7 +12,7 @@
     <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
     <link rel="preconnect" href="https://ithowxqignlhkwaykglt.supabase.co" />
     <link rel="dns-prefetch" href="https://ithowxqignlhkwaykglt.supabase.co" />
-    <link rel="stylesheet" href="css/style.css?v=20260612_3" />
+    <link rel="stylesheet" href="css/style.css?v=20260613_1" />
     <link rel="stylesheet" href="css/loader-hotfix.css" />
     <style id="xtj-inline-hotfix-20260612">
         #profileActivityModal .profile-activity-title,
@@ -112,6 +112,32 @@
             background: transparent !important;
             box-shadow: none !important;
             border: 0 !important;
+        }
+
+        .dock-bar .dock-tab,
+        .dock-bar .dock-tab::before,
+        .dock-bar .dock-tab::after,
+        .dock-bar .dock-tab .dt-icon,
+        .dock-bar .dock-tab .dt-icon::before,
+        .dock-bar .dock-tab .dt-icon::after,
+        .dock-bar .dock-tab .dt-svg,
+        .dock-bar .dock-tab .anim-layer {
+            background: transparent !important;
+            background-image: none !important;
+            box-shadow: none !important;
+            border-color: transparent !important;
+        }
+
+        .dock-bar .dock-tab:not(.anim-post):not(.anim-chat):not(.anim-ai):not(.anim-profile) .anim-layer {
+            opacity: 0 !important;
+            visibility: hidden !important;
+        }
+
+        .dock-bar .dock-tab.anim-post .anim-layer,
+        .dock-bar .dock-tab.anim-chat .anim-layer,
+        .dock-bar .dock-tab.anim-ai .anim-layer,
+        .dock-bar .dock-tab.anim-profile .anim-layer {
+            visibility: visible !important;
         }
     </style>
 </head>
