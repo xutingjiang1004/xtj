@@ -2416,6 +2416,7 @@
             flex: 1;
             max-width: 80px;
             display: flex;
+            touch-action: manipulation;
             flex-direction: column;
             align-items: center;
             gap: 1px;
