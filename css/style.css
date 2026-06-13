@@ -3231,8 +3231,8 @@
         /* ========== 公告系统样式 ========== */
         .announcement-btn {
             position: relative;
-            width: 36px;
-            height: 36px;
+            width: 42px;
+            height: 42px;
             border-radius: 50%;
             background: rgba(255,255,255,0.2);
             border: 1px solid rgba(255,255,255,0.4);
@@ -3249,8 +3249,8 @@
             transform: scale(1.025);
         }
         .announcement-btn svg {
-            width: 20px;
-            height: 20px;
+            width: 22px;
+            height: 22px;
             fill: none;
             stroke: var(--text-main);
             stroke-width: 1.8;
@@ -3707,8 +3707,8 @@
         /* ========== 举报按钮样式 ========== */
         .report-btn {
             position: relative;
-            width: 36px;
-            height: 36px;
+            width: 42px;
+            height: 42px;
             border-radius: 50%;
             background: rgba(255,255,255,0.2);
             border: 1px solid rgba(255,255,255,0.4);
@@ -3726,8 +3726,8 @@
             border-color: rgba(255,100,80,0.5);
         }
         .report-btn svg {
-            width: 20px;
-            height: 20px;
+            width: 22px;
+            height: 22px;
             fill: none;
             stroke: var(--text-main);
             stroke-width: 1.8;
