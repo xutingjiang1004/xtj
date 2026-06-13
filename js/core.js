@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -5488,6 +5488,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var currentX = indicatorRect.width
                     ? (indicatorRect.left - barRect.left)
                     : (activeRect.left - barRect.left + (activeRect.width - slotW) / 2);
+                var firstRect = dockTabs[0].getBoundingClientRect();
+                var lastRect = dockTabs[dockTabs.length - 1].getBoundingClientRect();
                 return {
                     dockBar: dockBar,
                     indicator: indicator,
@@ -5497,7 +5499,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     currentY: activeRect.top - barRect.top,
                     currentWidth: slotW,
                     currentHeight: indicatorRect.height || activeRect.height,
-                    maxX: Math.max(0, barRect.width - slotW)
+                    minX: (firstRect.left - barRect.left) - firstRect.width * 0.2,
+                    maxX: (lastRect.right - barRect.left) - slotW + lastRect.width * 0.2
                 };
             }
 
@@ -5544,6 +5547,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         w: metrics.currentWidth,
                         h: metrics.currentHeight,
                         mx: metrics.maxX,
+                        nx: metrics.minX,
                         indicator: metrics.indicator,
                         moved: false,
                         onTab: !!(e.target && e.target.closest && e.target.closest('.dock-tab'))
@@ -5563,7 +5567,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     e.preventDefault();
                     var dx = e.clientX - drag.sx;
                     if (Math.abs(dx) > 2) drag.moved = true;
-                    var nx = Math.max(0, Math.min(drag.mx, drag.ix + dx));
+                    var nx = Math.max(drag.nx, Math.min(drag.mx, drag.ix + dx));
                     drag.indicator.style.transform = 'translate3d(' + nx + 'px,' + drag.iy + 'px,0)';
                     drag.cx = nx;
                 }
