@@ -6384,6 +6384,18 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             // 版本更新日志
             const changelogData = [
                 {
+                    version: 'v0.77',
+                    date: '2026-06-13',
+                    content: `
+                        <h4>版本号与更新日志同步</h4>
+                        <ul>
+                            <li>版本展示统一更新为 xtj v0.77</li>
+                            <li>更新日志补充 v0.77 版本记录</li>
+                            <li>保持当时的浅绿色 UI 基底，不引入后续蓝化样式调整</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.76',
                     date: '2026-06-12',
                     content: `
