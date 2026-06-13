@@ -3131,6 +3131,9 @@
         [data-theme="dark"] .stat-like-item,
         [data-theme="dark"] .stat-view-item,
         [data-theme="dark"] .stat-comment-item,
+        #profileActivityModal .stat-like-item,
+        #profileActivityModal .stat-view-item,
+        #profileActivityModal .stat-comment-item,
         [data-theme="dark"] .stat-empty-rich,
         [data-theme="dark"] .stat-detail-lead {
             background: rgba(30, 30, 40, 0.9);
@@ -7270,14 +7273,10 @@
 
 .pw-load-more-indicator { font-size: 14px; color: #999; }
 
-#profileActivityModal .profile-activity-title,
-#profileActivityModal .profile-activity-inline-summary,
-#profileActivityModal .profile-activity-note,
-#profileActivityModal .profile-activity-time,
-#profileActivityModal .profile-activity-kicker,
-#profileActivityModal .profile-activity-empty,
-#profileActivityModal .profile-activity-body,
-#profileActivityModal .profile-activity-body * {
+#profileActivityModal .stat-record-note,
+#profileActivityModal .stat-record-note:first-child,
+#profileActivityModal .stat-row-time,
+#profileActivityModal .profile-activity-empty {
   color: #214633 !important;
   opacity: 1 !important;
   mix-blend-mode: normal !important;
@@ -7568,6 +7567,9 @@
 #statModal .stat-like-item,
 #statModal .stat-view-item,
 #statModal .stat-comment-item,
+#profileActivityModal .stat-like-item,
+#profileActivityModal .stat-view-item,
+#profileActivityModal .stat-comment-item,
 #statModal .stat-two-col .stat-col {
   background: rgba(251, 255, 252, 0.78);
   border: 1px solid rgba(208, 232, 216, 0.72);
@@ -7971,7 +7973,10 @@
 
 #statModal .stat-like-item,
 #statModal .stat-view-item,
-#statModal .stat-comment-item {
+#statModal .stat-comment-item,
+#profileActivityModal .stat-like-item,
+#profileActivityModal .stat-view-item,
+#profileActivityModal .stat-comment-item {
   padding: 16px 16px 14px;
   border-radius: 22px;
   transition: transform 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
@@ -7979,7 +7984,10 @@
 
 #statModal .stat-like-item + .stat-like-item,
 #statModal .stat-view-item + .stat-view-item,
-#statModal .stat-comment-item + .stat-comment-item {
+#statModal .stat-comment-item + .stat-comment-item,
+#profileActivityModal .stat-like-item + .stat-like-item,
+#profileActivityModal .stat-view-item + .stat-view-item,
+#profileActivityModal .stat-comment-item + .stat-comment-item {
   margin-top: 10px;
 }
 
@@ -7993,6 +8001,9 @@
 #statModal .stat-like-item:hover,
 #statModal .stat-view-item:hover,
 #statModal .stat-comment-item:hover,
+#profileActivityModal .stat-like-item:hover,
+#profileActivityModal .stat-view-item:hover,
+#profileActivityModal .stat-comment-item:hover,
 #statModal .stat-user-group:hover,
 #statModal .stat-two-col .stat-col:hover,
 #statModal .stat-hero:hover {
@@ -8064,6 +8075,9 @@
 #statModal .stat-like-item,
 #statModal .stat-view-item,
 #statModal .stat-comment-item,
+#profileActivityModal .stat-like-item,
+#profileActivityModal .stat-view-item,
+#profileActivityModal .stat-comment-item,
 .chat-list-item {
   animation: xtjFloatIn 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: var(--xtj-enter-delay, 0ms);
@@ -8076,6 +8090,9 @@
   #statModal .stat-like-item,
   #statModal .stat-view-item,
   #statModal .stat-comment-item,
+  #profileActivityModal .stat-like-item,
+  #profileActivityModal .stat-view-item,
+  #profileActivityModal .stat-comment-item,
   .chat-list-item {
     animation: none;
   }
@@ -10066,7 +10083,8 @@ body.ios-chat-keyboard-open .chat-input-area {
 
 #statModal .stat-user-summary-card,
 #statModal .stat-row,
-#statRecordsModal .stat-row {
+#statRecordsModal .stat-row,
+#profileActivityModal .stat-row {
   width: 100%;
   border: 0 !important;
   border-bottom: 1px solid rgba(196, 224, 206, 0.72) !important;
@@ -10082,7 +10100,8 @@ body.ios-chat-keyboard-open .chat-input-area {
 
 #statModal .stat-user-summary-card:first-child,
 #statModal .stat-row:first-child,
-#statRecordsModal .stat-row:first-child {
+#statRecordsModal .stat-row:first-child,
+#profileActivityModal .stat-row:first-child {
   border-top: 1px solid rgba(196, 224, 206, 0.72) !important;
 }
 
@@ -10115,6 +10134,7 @@ body.ios-chat-keyboard-open .chat-input-area {
 #statModal .spi-thumb,
 #statModal .stat-record-thumb,
 #statRecordsModal .stat-record-thumb,
+#profileActivityModal .stat-record-thumb,
 #statModal .stat-text-thumb,
 #statRecordsModal .stat-text-thumb {
   width: 56px;
@@ -10154,7 +10174,8 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 #statModal .stat-row,
-#statRecordsModal .stat-row {
+#statRecordsModal .stat-row,
+#profileActivityModal .stat-row {
   display: grid;
   grid-template-columns: 62px minmax(0, 1fr) auto;
   align-items: center;
@@ -10169,12 +10190,14 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 #statModal .stat-row--no-media,
-#statRecordsModal .stat-row--no-media {
+#statRecordsModal .stat-row--no-media,
+#profileActivityModal .stat-row--no-media {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
 #statModal .stat-row:not([role="button"]),
-#statRecordsModal .stat-row:not([role="button"]) {
+#statRecordsModal .stat-row:not([role="button"]),
+#profileActivityModal .stat-row:not([role="button"]) {
   cursor: default;
 }
 
@@ -10186,7 +10209,8 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 #statModal .stat-row-main,
-#statRecordsModal .stat-row-main {
+#statRecordsModal .stat-row-main,
+#profileActivityModal .stat-row-main {
   min-width: 0;
 }
 
@@ -10201,7 +10225,8 @@ body.ios-chat-keyboard-open .chat-input-area {
 
 #statModal .stat-row-copy,
 #statRecordsModal .stat-row-copy,
-#statModal .stat-row-meta {
+#statModal .stat-row-meta,
+#profileActivityModal .stat-row-meta {
   margin-top: 5px;
   font-size: 12px;
   line-height: 1.5;
@@ -10476,12 +10501,14 @@ body.ios-chat-keyboard-open .chat-input-area {
   }
 
   #statModal .stat-row,
-  #statRecordsModal .stat-row {
+  #statRecordsModal .stat-row,
+  #profileActivityModal .stat-row {
     grid-template-columns: 58px minmax(0, 1fr);
   }
 
   #statModal .stat-row-side,
-  #statRecordsModal .stat-row-side {
+  #statRecordsModal .stat-row-side,
+  #profileActivityModal .stat-row-side {
     grid-column: 2;
     display: flex;
     align-items: center;
@@ -12461,11 +12488,11 @@ html.xtj-pro-active .action-btn.liked {
   gap: 14px !important;
 }
 
+#profileActivityModal .stat-record-entry,
 #profileActivityModal .profile-activity-item,
 #statModal .stat-record-entry,
 #statModal .stat-view-item,
 #statRecordsModal .stat-record-entry {
-  display: block !important;
   width: 100% !important;
   min-height: 0 !important;
   padding: 16px !important;
@@ -12475,6 +12502,7 @@ html.xtj-pro-active .action-btn.liked {
   box-shadow: 0 12px 28px rgba(44, 86, 61, 0.08) !important;
 }
 
+#profileActivityModal .stat-record-entry:last-child,
 #profileActivityModal .profile-activity-item:last-child,
 #statModal .stat-record-entry:last-child,
 #statModal .stat-view-item:last-child,
@@ -12482,6 +12510,7 @@ html.xtj-pro-active .action-btn.liked {
   border-bottom: 1px solid rgba(194, 224, 205, 0.82) !important;
 }
 
+#profileActivityModal .stat-record-entry:hover,
 #profileActivityModal .profile-activity-item:hover,
 #statModal .stat-record-entry:hover,
 #statModal .stat-view-item:hover,
@@ -12491,6 +12520,7 @@ html.xtj-pro-active .action-btn.liked {
   box-shadow: 0 16px 30px rgba(44, 86, 61, 0.1) !important;
 }
 
+#profileActivityModal .stat-record-entry .stat-row-main,
 #profileActivityModal .profile-activity-main,
 #statModal .stat-record-entry .stat-row-main,
 #statModal .stat-view-item .stat-row-main,
@@ -12500,7 +12530,7 @@ html.xtj-pro-active .action-btn.liked {
   gap: 10px !important;
 }
 
-#profileActivityModal .profile-activity-title,
+#profileActivityModal .stat-row-title,
 #statModal .stat-row-title,
 #statRecordsModal .stat-row-title {
   color: #214633 !important;
@@ -12513,9 +12543,7 @@ html.xtj-pro-active .action-btn.liked {
   filter: none !important;
 }
 
-#profileActivityModal .profile-activity-inline-summary,
-#profileActivityModal .profile-activity-body,
-#profileActivityModal .profile-activity-body * {
+#profileActivityModal .stat-row-copy .stat-record-note {
   color: #214633 !important;
   opacity: 1 !important;
   mix-blend-mode: normal !important;
@@ -12523,7 +12551,7 @@ html.xtj-pro-active .action-btn.liked {
   filter: none !important;
 }
 
-#profileActivityModal .profile-activity-body,
+#profileActivityModal .stat-row-copy,
 #statModal .stat-row-copy,
 #statRecordsModal .stat-row-copy {
   margin-top: 0 !important;
@@ -12539,7 +12567,7 @@ html.xtj-pro-active .action-btn.liked {
   word-break: break-word !important;
 }
 
-#profileActivityModal .profile-activity-note,
+#profileActivityModal .stat-record-note,
 #statModal .stat-record-note,
 #statRecordsModal .stat-record-note {
   margin: 0 !important;
@@ -12551,14 +12579,14 @@ html.xtj-pro-active .action-btn.liked {
   filter: none !important;
 }
 
-#profileActivityModal .profile-activity-note--accent,
+#profileActivityModal .stat-record-note:first-child,
 #statModal .stat-record-note:first-child,
 #statRecordsModal .stat-record-note:first-child {
   color: #1f6e4d !important;
   font-weight: 700 !important;
 }
 
-#profileActivityModal .profile-activity-media-col,
+#profileActivityModal .stat-row-media,
 #statModal .stat-row-media,
 #statRecordsModal .stat-row-media {
   margin-top: 12px !important;
@@ -12567,9 +12595,8 @@ html.xtj-pro-active .action-btn.liked {
   align-items: center !important;
 }
 
-#profileActivityModal .profile-activity-media,
-#profileActivityModal .profile-activity-video,
 #statModal .stat-record-thumb,
+#profileActivityModal .stat-record-thumb,
 #statRecordsModal .stat-record-thumb {
   width: 82px !important;
   height: 82px !important;
@@ -12577,7 +12604,7 @@ html.xtj-pro-active .action-btn.liked {
   box-shadow: 0 8px 18px rgba(34, 82, 57, 0.12) !important;
 }
 
-#profileActivityModal .profile-activity-side,
+#profileActivityModal .stat-row-side,
 #statModal .stat-record-entry .stat-row-side,
 #statModal .stat-view-item .stat-row-side,
 #statRecordsModal .stat-record-entry .stat-row-side {
@@ -12591,8 +12618,7 @@ html.xtj-pro-active .action-btn.liked {
   flex-wrap: wrap !important;
 }
 
-#profileActivityModal .profile-activity-time,
-#profileActivityModal .profile-activity-kicker,
+#profileActivityModal .stat-row-time,
 #profileActivityModal .profile-activity-empty,
 #statModal .stat-row-time,
 #statRecordsModal .stat-row-time {
@@ -12606,14 +12632,14 @@ html.xtj-pro-active .action-btn.liked {
   filter: none !important;
 }
 
-#profileActivityModal .profile-activity-actions,
 #statModal .stat-record-entry .stat-row-side .stat-record-action,
 #statModal .stat-view-item .stat-row-side .stat-record-action,
+#profileActivityModal .stat-record-entry .stat-row-side .stat-record-action,
 #statRecordsModal .stat-record-entry .stat-row-side .stat-record-action {
   width: auto !important;
 }
 
-#profileActivityModal .profile-activity-actions {
+#profileActivityModal .stat-row-side {
   display: flex !important;
   justify-content: flex-end !important;
   gap: 8px !important;
