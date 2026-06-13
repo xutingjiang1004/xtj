@@ -7270,6 +7270,48 @@
 
 .pw-load-more-indicator { font-size: 14px; color: #999; }
 
+#profileActivityModal .profile-activity-title,
+#profileActivityModal .profile-activity-inline-summary,
+#profileActivityModal .profile-activity-note,
+#profileActivityModal .profile-activity-time,
+#profileActivityModal .profile-activity-kicker,
+#profileActivityModal .profile-activity-empty,
+#profileActivityModal .profile-activity-body,
+#profileActivityModal .profile-activity-body * {
+  color: #214633 !important;
+  opacity: 1 !important;
+  mix-blend-mode: normal !important;
+  text-shadow: none !important;
+  filter: none !important;
+  -webkit-text-fill-color: #214633 !important;
+}
+
+#profileActivityModal .profile-activity-item {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(201, 225, 210, 0.82) !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.chat-input-wrap input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.chat-input-wrap input:disabled::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.chat-img-btn:disabled,
+.send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 
 
 /* ===== XTJ Magic Loading Wrapper ===== */
@@ -7398,6 +7440,71 @@
 .perf-balanced .xtj-echo-bolt.in { box-shadow: 0 0 10px rgba(255,111,141,.48), 0 0 24px rgba(255,111,141,.20) !important; }
 .perf-balanced .xtj-echo-bolt.out { box-shadow: 0 0 10px rgba(123,213,255,.48), 0 0 28px rgba(255,227,154,.18) !important; }
 .perf-balanced .xtj-echo-blade { box-shadow: 0 0 14px rgba(255,227,154,.52), 0 0 36px rgba(255,227,154,.22) !important; }
+
+.perf-balanced .post,
+.perf-balanced .stat-card,
+.perf-balanced .publish-box,
+.perf-balanced .modal-box,
+.perf-balanced .chat-bubble,
+.perf-balanced .chat-list-item,
+.perf-balanced .profile-setting-item,
+.perf-balanced .photo-card,
+.perf-balanced .heart-particle {
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08) !important;
+}
+
+.perf-balanced .publish-box::before,
+.perf-balanced .post::before,
+.perf-balanced .modal-box::before,
+.perf-balanced .photo-card::before,
+.perf-balanced .card-glow,
+.perf-balanced .blob,
+.perf-balanced .bg-orb {
+  opacity: 0.42 !important;
+  filter: none !important;
+}
+
+.perf-lite .post,
+.perf-lite .stat-card,
+.perf-lite .publish-box,
+.perf-lite .modal-box,
+.perf-lite .chat-bubble,
+.perf-lite .chat-list-item,
+.perf-lite .profile-setting-item,
+.perf-lite .photo-card {
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.07) !important;
+}
+
+.perf-lite .publish-box::before,
+.perf-lite .post::before,
+.perf-lite .modal-box::before,
+.perf-lite .photo-card::before,
+.perf-lite .card-glow,
+.perf-lite .blob,
+.perf-lite .bg-orb,
+.perf-lite .ambient-light,
+.perf-lite .soft-gradient,
+.perf-lite .liquid-bg,
+.perf-lite .glass-bg {
+  opacity: 0 !important;
+  animation: none !important;
+  filter: none !important;
+}
+
+.perf-lite .heart-particle,
+.perf-lite .xtj-echo-particle,
+.perf-lite .xtj-echo-shard,
+.perf-lite .xtj-echo-shock,
+.perf-lite .xtj-echo-blade,
+.perf-lite .xtj-echo-rune,
+.perf-lite .xtj-echo-field {
+  display: none !important;
+}
+
+.perf-balanced .heart-particle,
+.perf-balanced .xtj-echo-particle {
+  animation-duration: 0.55s !important;
+}
 
 .perf-hz-120 .post,
 .perf-hz-120 .photo-wall-item,
