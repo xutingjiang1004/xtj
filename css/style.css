@@ -11,62 +11,86 @@
             -webkit-touch-callout: none;
         }
         :root {
-            --bg-color: #eaf7ee;
-            --glass-bg: rgba(255, 255, 255, 0.18);
-            --glass-border: rgba(255, 255, 255, 0.72);
-            --glass-shadow: 0 18px 50px rgba(0, 0, 0, 0.04);
-            --glass-blur: blur(24px);
-            --button-glass-bg: rgba(255, 255, 255, 0.24);
-            --button-glass-bg-hover: rgba(255, 255, 255, 0.34);
-            --button-glass-bg-active: rgba(255, 255, 255, 0.18);
-            --button-glass-border: rgba(255, 255, 255, 0.44);
-            --button-glass-border-hover: rgba(255, 255, 255, 0.68);
-            --button-glass-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
-            --button-glass-shadow-hover: 0 14px 34px rgba(0, 0, 0, 0.12);
-            --button-glass-shadow-active: 0 6px 16px rgba(0, 0, 0, 0.08);
-            --button-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+            --xtj-bg-1: #eafaf2;
+            --xtj-bg-2: #eaf6ff;
+            --xtj-bg-3: #f7fffb;
+            --xtj-primary: #16a085;
+            --xtj-primary-soft: rgba(22, 160, 133, 0.14);
+            --xtj-blue-soft: rgba(96, 165, 250, 0.14);
+            --xtj-glass-bg: rgba(255, 255, 255, 0.46);
+            --xtj-glass-bg-strong: rgba(255, 255, 255, 0.68);
+            --xtj-glass-border: rgba(255, 255, 255, 0.72);
+            --xtj-glass-shadow: 0 16px 44px rgba(80, 140, 150, 0.10);
+            --xtj-glass-shadow-soft: 0 10px 28px rgba(80, 140, 150, 0.07);
+            --xtj-radius-card: 26px;
+            --xtj-radius-panel: 30px;
+            --xtj-radius-small: 18px;
+            --xtj-radius-pill: 999px;
+            --xtj-blur: blur(22px) saturate(160%);
+            --bg-color: var(--xtj-bg-1);
+            --glass-bg: var(--xtj-glass-bg);
+            --glass-border: var(--xtj-glass-border);
+            --glass-shadow: var(--xtj-glass-shadow);
+            --glass-blur: var(--xtj-blur);
+            --button-glass-bg: var(--xtj-glass-bg-strong);
+            --button-glass-bg-hover: rgba(255, 255, 255, 0.82);
+            --button-glass-bg-active: rgba(255, 255, 255, 0.34);
+            --button-glass-border: var(--xtj-glass-border);
+            --button-glass-border-hover: rgba(255, 255, 255, 0.86);
+            --button-glass-shadow: var(--xtj-glass-shadow-soft);
+            --button-glass-shadow-hover: 0 14px 34px rgba(84, 145, 178, 0.12);
+            --button-glass-shadow-active: 0 8px 18px rgba(84, 145, 178, 0.08);
+            --button-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.72), inset 0 -1px 0 rgba(255, 255, 255, 0.08);
             --button-glass-transition: all 0.3s cubic-bezier(0.25, 1, 0.3, 1);
-            --button-glass-blur: blur(20px) saturate(175%);
-            --button-glass-radius: 999px;
+            --button-glass-blur: var(--xtj-blur);
+            --button-glass-radius: var(--xtj-radius-pill);
             --button-icon-size: 18px;
             --button-icon-gap: 8px;
-            --primary: #059669;
+            --primary: var(--xtj-primary);
             --admin-color: #ff9f0a;
             --like-color: #ff3b60;
-            --text-main: #1d1d24;
-            --text-muted: #6b6c7a;
+            --text-main: #17313a;
+            --text-muted: #667f87;
             --card-bg: var(--glass-bg);
             --border: var(--glass-border);
             --bg: var(--bg-color);
             --text: var(--text-main);
-            --radius-sm: 16px;
-            --radius-md: 24px;
-            --radius-lg: 32px;
+            --radius-sm: var(--xtj-radius-small);
+            --radius-md: var(--xtj-radius-card);
+            --radius-lg: var(--xtj-radius-panel);
             --trans-smooth: opacity 0.32s cubic-bezier(0.25, 1, 0.3, 1), transform 0.32s cubic-bezier(0.25, 1, 0.3, 1), background 0.32s cubic-bezier(0.25, 1, 0.3, 1), border-color 0.32s cubic-bezier(0.25, 1, 0.3, 1), color 0.32s cubic-bezier(0.25, 1, 0.3, 1);
             --trans-spring: opacity 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.55s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             --trans-ppt: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-            --panel-bg: rgba(233, 248, 237, 0.96);
-            --dock-bg: rgba(223, 244, 229, 0.75);
-            --dock-border: rgba(255,255,255,0.8);
-            --dock-shadow: 0 -2px 20px rgba(0,0,0,0.06);
+            --panel-bg: rgba(248, 253, 251, 0.88);
+            --dock-bg: rgba(244, 251, 249, 0.72);
+            --dock-border: var(--xtj-glass-border);
+            --dock-shadow: 0 -2px 20px rgba(94, 150, 185, 0.08);
         }
 
         [data-theme="dark"] {
-            --text-main: #e4e4ec;
-            --text-muted: #9e9eb0;
-            --panel-bg: rgba(18,18,24,0.60);
-            --dock-bg: rgba(18,18,24,0.50);
-            --dock-border: rgba(255,255,255,0.08);
-            --dock-shadow: 0 -2px 20px rgba(0,0,0,0.3);
-            --button-glass-bg: rgba(22, 24, 36, 0.46);
-            --button-glass-bg-hover: rgba(30, 33, 48, 0.58);
-            --button-glass-bg-active: rgba(18, 20, 30, 0.42);
-            --button-glass-border: rgba(255, 255, 255, 0.12);
-            --button-glass-border-hover: rgba(255, 255, 255, 0.2);
-            --button-glass-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
-            --button-glass-shadow-hover: 0 16px 42px rgba(0, 0, 0, 0.3);
-            --button-glass-shadow-active: 0 8px 20px rgba(0, 0, 0, 0.18);
-            --button-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+            --xtj-bg-1: #0f1d24;
+            --xtj-bg-2: #10262d;
+            --xtj-bg-3: #132930;
+            --xtj-glass-bg: rgba(17, 39, 45, 0.46);
+            --xtj-glass-bg-strong: rgba(19, 47, 54, 0.68);
+            --xtj-glass-border: rgba(181, 225, 217, 0.16);
+            --xtj-glass-shadow: 0 16px 44px rgba(3, 13, 19, 0.34);
+            --xtj-glass-shadow-soft: 0 10px 28px rgba(3, 13, 19, 0.22);
+            --text-main: #e7f5f3;
+            --text-muted: #95afb5;
+            --panel-bg: rgba(15, 34, 40, 0.76);
+            --dock-bg: rgba(15, 34, 40, 0.62);
+            --dock-border: rgba(181, 225, 217, 0.14);
+            --dock-shadow: 0 -2px 20px rgba(2, 11, 15, 0.24);
+            --button-glass-bg: var(--xtj-glass-bg-strong);
+            --button-glass-bg-hover: rgba(27, 56, 63, 0.82);
+            --button-glass-bg-active: rgba(17, 39, 45, 0.52);
+            --button-glass-border: var(--xtj-glass-border);
+            --button-glass-border-hover: rgba(181, 225, 217, 0.22);
+            --button-glass-shadow: var(--xtj-glass-shadow-soft);
+            --button-glass-shadow-hover: 0 16px 42px rgba(3, 13, 19, 0.28);
+            --button-glass-shadow-active: 0 8px 20px rgba(3, 13, 19, 0.18);
+            --button-glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
         }
 
         /* ========== 黑暗模式覆盖 ========== */
@@ -12467,25 +12491,25 @@ html.xtj-pro-active .action-btn.liked {
 
 /* ===== XTJ liquid nav refresh ===== */
 :root {
-  --xtj-liquid-bg-top: #f5fbff;
-  --xtj-liquid-bg-mid: #edf9f3;
-  --xtj-liquid-bg-bottom: #ffffff;
-  --xtj-liquid-line: rgba(255, 255, 255, 0.74);
-  --xtj-liquid-shadow: 0 18px 44px rgba(90, 137, 168, 0.12);
-  --xtj-liquid-shadow-soft: 0 10px 24px rgba(84, 145, 178, 0.08);
+  --xtj-liquid-bg-top: var(--xtj-bg-1);
+  --xtj-liquid-bg-mid: var(--xtj-bg-2);
+  --xtj-liquid-bg-bottom: var(--xtj-bg-3);
+  --xtj-liquid-line: var(--xtj-glass-border);
+  --xtj-liquid-shadow: var(--xtj-glass-shadow);
+  --xtj-liquid-shadow-soft: var(--xtj-glass-shadow-soft);
   --xtj-liquid-pill-bg:
-    linear-gradient(180deg, rgba(255,255,255,0.56), rgba(255,255,255,0.26)),
-    linear-gradient(135deg, rgba(127, 210, 199, 0.12), rgba(106, 177, 255, 0.12));
-  --xtj-liquid-pill-border: rgba(255,255,255,0.7);
-  --xtj-liquid-pill-radius: 999px;
-  --xtj-liquid-panel-radius: 26px;
+    linear-gradient(180deg, rgba(255,255,255,0.62), rgba(255,255,255,0.28)),
+    linear-gradient(135deg, var(--xtj-primary-soft), var(--xtj-blue-soft));
+  --xtj-liquid-pill-border: var(--xtj-glass-border);
+  --xtj-liquid-pill-radius: var(--xtj-radius-pill);
+  --xtj-liquid-panel-radius: var(--xtj-radius-card);
 }
 
 body {
   background:
-    radial-gradient(circle at top left, rgba(110, 214, 186, 0.24), transparent 28%),
-    radial-gradient(circle at top right, rgba(113, 177, 255, 0.22), transparent 32%),
-    linear-gradient(180deg, var(--xtj-liquid-bg-top) 0%, var(--xtj-liquid-bg-mid) 54%, var(--xtj-liquid-bg-bottom) 100%);
+    radial-gradient(circle at 16% 8%, rgba(125, 211, 252, 0.22), transparent 34%),
+    radial-gradient(circle at 88% 18%, rgba(134, 239, 172, 0.20), transparent 32%),
+    linear-gradient(135deg, var(--xtj-liquid-bg-top), var(--xtj-liquid-bg-mid) 52%, var(--xtj-liquid-bg-bottom));
 }
 
 .app-container {
@@ -12641,9 +12665,9 @@ h1 {
 
 [data-theme="dark"] body {
   background:
-    radial-gradient(circle at top left, rgba(70, 137, 118, 0.22), transparent 28%),
-    radial-gradient(circle at top right, rgba(88, 130, 188, 0.22), transparent 32%),
-    linear-gradient(180deg, #111722 0%, #16202a 52%, #10151d 100%);
+    radial-gradient(circle at 16% 10%, rgba(34, 197, 154, 0.16), transparent 34%),
+    radial-gradient(circle at 84% 18%, rgba(96, 165, 250, 0.18), transparent 30%),
+    linear-gradient(135deg, var(--xtj-bg-1), var(--xtj-bg-2) 52%, var(--xtj-bg-3));
 }
 
 [data-theme="dark"] nav,
