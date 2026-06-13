@@ -12461,7 +12461,96 @@ html.xtj-pro-active .action-btn.liked {
 #profileActivityModal .profile-activity-item {
   grid-template-columns: minmax(0, 1fr) auto auto !important;
   gap: 14px !important;
-  align-items: center !important;
+  align-items: start !important;
+}
+
+#profileActivityModal .profile-activity-main {
+  min-width: 0 !important;
+}
+
+#profileActivityModal .profile-activity-body {
+  gap: 8px !important;
+}
+
+#profileActivityModal .profile-activity-media-col {
+  align-self: center !important;
+}
+
+#profileActivityModal .profile-activity-side {
+  min-width: 116px !important;
+  gap: 8px !important;
+  align-self: stretch !important;
+}
+
+#profileActivityModal .profile-activity-actions {
+  width: 100% !important;
+}
+
+#profileActivityModal .profile-activity-btn {
+  min-width: 88px !important;
+}
+
+#profileActivityModal .profile-activity-time {
+  text-align: right !important;
+}
+
+#profileActivityModal .profile-activity-item.no-media {
+  grid-template-columns: minmax(0, 1fr) auto !important;
+}
+
+@media (max-width: 560px) {
+  #profileActivityModal .profile-activity-modal-list {
+    padding: 16px 14px 18px !important;
+  }
+
+  #profileActivityModal .profile-activity-item,
+  #profileActivityModal .profile-activity-item.no-media {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px !important;
+    padding: 14px 0 !important;
+  }
+
+  #profileActivityModal .profile-activity-main,
+  #profileActivityModal .profile-activity-media-col,
+  #profileActivityModal .profile-activity-side {
+    grid-column: 1 !important;
+  }
+
+  #profileActivityModal .profile-activity-media-col {
+    justify-content: flex-start !important;
+  }
+
+  #profileActivityModal .profile-activity-media,
+  #profileActivityModal .profile-activity-video {
+    width: 64px !important;
+    height: 64px !important;
+    border-radius: 16px !important;
+  }
+
+  #profileActivityModal .profile-activity-side {
+    min-width: 0 !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 12px !important;
+  }
+
+  #profileActivityModal .profile-activity-time {
+    text-align: left !important;
+    white-space: normal !important;
+    line-height: 1.45 !important;
+  }
+
+  #profileActivityModal .profile-activity-actions {
+    width: auto !important;
+    flex: 0 0 auto !important;
+    justify-content: flex-end !important;
+  }
+
+  #profileActivityModal .profile-activity-btn {
+    min-width: 0 !important;
+    padding: 0 14px !important;
+  }
 }
 
 #profileActivityModal .profile-activity-title {
