@@ -12436,3 +12436,31 @@ html.xtj-pro-active .action-btn.liked {
   box-shadow: none !important;
   border: 0 !important;
 }
+
+/* Keep the dock visually clean in its resting state; only the indicator and
+   explicit anim-layer classes should paint a background. */
+.dock-bar .dock-tab,
+.dock-bar .dock-tab::before,
+.dock-bar .dock-tab::after,
+.dock-bar .dock-tab .dt-icon,
+.dock-bar .dock-tab .dt-icon::before,
+.dock-bar .dock-tab .dt-icon::after,
+.dock-bar .dock-tab .dt-svg,
+.dock-bar .dock-tab .anim-layer {
+  background: transparent !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+.dock-bar .dock-tab:not(.anim-post):not(.anim-chat):not(.anim-ai):not(.anim-profile) .anim-layer {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+.dock-bar .dock-tab.anim-post .anim-layer,
+.dock-bar .dock-tab.anim-chat .anim-layer,
+.dock-bar .dock-tab.anim-ai .anim-layer,
+.dock-bar .dock-tab.anim-profile .anim-layer {
+  visibility: visible !important;
+}
