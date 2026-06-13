@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -5446,8 +5446,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let lastTabTapTime = {};
             let lastTabTapCount = {};
             let isRefreshing = {};
-            let dockDragState = null;
-            let suppressDockClickUntil = 0;
             function syncDockIndicator() {
                 var dockBar = document.getElementById('dockBar');
                 var indicator = document.getElementById('dockIndicator');
@@ -5511,106 +5509,88 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 return nearest;
             }
 
-            function clearDockDragState(restoreTransition) {
-                if (!dockDragState) return;
-                var state = dockDragState;
-                dockDragState = null;
-                if (state.dockBar && state.pointerId !== null && state.pointerId !== undefined && state.dockBar.hasPointerCapture && state.dockBar.hasPointerCapture(state.pointerId)) {
-                    try { state.dockBar.releasePointerCapture(state.pointerId); } catch(e) {}
-                }
-                if (state.indicator) {
-                    state.indicator.style.transition = restoreTransition ? state.originalTransition : 'none';
-                }
-            }
-
             function installDockIndicatorDrag() {
                 var dockBar = document.getElementById('dockBar');
                 var indicator = document.getElementById('dockIndicator');
                 if (!dockBar || !indicator || dockBar.__xtjDockDragInstalled) return;
                 dockBar.__xtjDockDragInstalled = true;
 
+                var drag = null;
+                var dragHandledTs = 0;
+
                 dockBar.addEventListener('pointerdown', function(e) {
                     if (e.pointerType === 'mouse' && e.button !== 0) return;
-                    // 点击在按钮上时不拦截，让原生 click 事件正常工作
-                    if (e.target && e.target.closest && e.target.closest('.dock-tab')) return;
                     var metrics = getDockIndicatorMetrics();
                     if (!metrics) return;
                     syncDockIndicator();
                     metrics = getDockIndicatorMetrics();
                     if (!metrics) return;
-                    dockDragState = {
-                        pointerId: e.pointerId,
-                        startClientX: e.clientX,
-                        startIndicatorX: metrics.currentX,
-                        currentClientX: e.clientX,
-                        currentIndicatorX: metrics.currentX,
-                        currentIndicatorY: metrics.currentY,
-                        moved: false,
-                        downOnTab: false,
-                        dockBar: metrics.dockBar,
+                    drag = {
+                        id: e.pointerId,
+                        sx: e.clientX,
+                        ix: metrics.currentX,
+                        iy: metrics.currentY,
+                        w: metrics.currentWidth,
+                        h: metrics.currentHeight,
+                        mx: metrics.maxX,
                         indicator: metrics.indicator,
-                        originalTransition: metrics.indicator.style.transition || '',
-                        width: metrics.currentWidth,
-                        height: metrics.currentHeight,
-                        maxX: metrics.maxX
+                        moved: false,
+                        onTab: !!(e.target && e.target.closest && e.target.closest('.dock-tab'))
                     };
-                    dockDragState.indicator.style.width = dockDragState.width + 'px';
-                    dockDragState.indicator.style.height = dockDragState.height + 'px';
-                    dockDragState.indicator.style.transition = 'none';
-                    if (dockBar.setPointerCapture) {
-                        try { dockBar.setPointerCapture(e.pointerId); } catch(_) {}
-                    }
+                    drag.indicator.style.width = drag.w + 'px';
+                    drag.indicator.style.height = drag.h + 'px';
+                    drag.indicator.style.transition = 'none';
+                    drag.indicator.style.opacity = '1';
+                    drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + drag.iy + 'px,0)';
+                    document.addEventListener('pointermove', onDragMove, {passive: false});
+                    document.addEventListener('pointerup', onDragUp);
+                    document.addEventListener('pointercancel', onDragCancel);
                 });
 
-                dockBar.addEventListener('pointermove', function(e) {
-                    if (!dockDragState || e.pointerId !== dockDragState.pointerId) return;
-                    var deltaX = e.clientX - dockDragState.startClientX;
-                    dockDragState.currentClientX = e.clientX;
-                    if (Math.abs(deltaX) > 2) dockDragState.moved = true;
-                    var nextX = Math.max(0, Math.min(dockDragState.maxX, dockDragState.startIndicatorX + deltaX));
-                    dockDragState.currentIndicatorX = nextX;
-                    dockDragState.indicator.style.transition = 'none';
-                    dockDragState.indicator.style.transform = 'translate3d(' + nextX + 'px,' + dockDragState.currentIndicatorY + 'px,0)';
-                    dockDragState.indicator.style.opacity = '1';
-                });
+                function onDragMove(e) {
+                    if (!drag || e.pointerId !== drag.id) return;
+                    e.preventDefault();
+                    var dx = e.clientX - drag.sx;
+                    if (Math.abs(dx) > 2) drag.moved = true;
+                    var nx = Math.max(0, Math.min(drag.mx, drag.ix + dx));
+                    drag.indicator.style.transform = 'translate3d(' + nx + 'px,' + drag.iy + 'px,0)';
+                    drag.cx = nx;
+                }
 
-                function finishDockDrag(e, cancelled) {
-                    if (!dockDragState || e.pointerId !== dockDragState.pointerId) return;
-                    var state = dockDragState;
-                    var shouldUseClick = !state.moved && state.downOnTab && !cancelled;
-                    clearDockDragState(true);
-                    if (cancelled) {
-                        requestAnimationFrame(syncDockIndicator);
-                        return;
-                    }
-                    if (shouldUseClick) {
-                        // 直接切换标签页，不依赖 native click（pointer capture 后 e.target 变为 dockBar，需用坐标查找）
-                        var tabBtn = (e.target && e.target.closest ? e.target.closest('.dock-tab') : null) || findNearestDockTab(e.clientX);
-                        if (tabBtn) {
-                            suppressDockClickUntil = Date.now() + 320;
-                            switchDockTab(tabBtn.dataset.tab, true);
-                            requestAnimationFrame(syncDockIndicator);
+                function cleanupDrag() {
+                    document.removeEventListener('pointermove', onDragMove);
+                    document.removeEventListener('pointerup', onDragUp);
+                    document.removeEventListener('pointercancel', onDragCancel);
+                }
+
+                function onDragUp(e) {
+                    if (!drag || e.pointerId !== drag.id) return;
+                    var state = drag;
+                    drag = null;
+                    cleanupDrag();
+                    if (state.moved) {
+                        var tab = findNearestDockTab(e.clientX || state.sx);
+                        if (tab) {
+                            dragHandledTs = Date.now();
+                            switchDockTab(tab.dataset.tab, true);
                         }
-                        return;
                     }
-
-                    var targetTabEl = findNearestDockTab(e.clientX || state.currentClientX || state.startClientX);
-                    if (!targetTabEl) {
-                        requestAnimationFrame(syncDockIndicator);
-                        return;
-                    }
-                    suppressDockClickUntil = Date.now() + 320;
-                    var tabName = targetTabEl.dataset.tab;
-                    switchDockTab(tabName, true);
                     requestAnimationFrame(syncDockIndicator);
                 }
 
-                dockBar.addEventListener('pointerup', function(e) {
-                    finishDockDrag(e, false);
-                });
+                function onDragCancel(e) {
+                    if (!drag || e.pointerId !== drag.id) return;
+                    drag = null;
+                    cleanupDrag();
+                    requestAnimationFrame(syncDockIndicator);
+                }
 
-                dockBar.addEventListener('pointercancel', function(e) {
-                    finishDockDrag(e, true);
+                // 按钮点击：事件委托在 dockBar 上统一处理
+                dockBar.addEventListener('click', function(e) {
+                    var tabBtn = e.target.closest('.dock-tab');
+                    if (!tabBtn) return;
+                    if (Date.now() - dragHandledTs < 350) return;
+                    switchDockTab(tabBtn.dataset.tab);
                 });
             }
 
