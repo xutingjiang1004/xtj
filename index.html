@@ -12,7 +12,7 @@
     <link rel="dns-prefetch" href="https://cdn.jsdelivr.net" />
     <link rel="preconnect" href="https://ithowxqignlhkwaykglt.supabase.co" />
     <link rel="dns-prefetch" href="https://ithowxqignlhkwaykglt.supabase.co" />
-    <link rel="stylesheet" href="css/style.css?v=20260613_2" />
+    <link rel="stylesheet" href="css/style.css?v=20260613_3" />
     <link rel="stylesheet" href="css/loader-hotfix.css" />
     <style id="xtj-inline-hotfix-20260612">
         #profileActivityModal .profile-activity-title,
@@ -55,15 +55,15 @@
             opacity: 0;
             z-index: 0 !important;
             background:
-                linear-gradient(180deg, rgba(255,255,255,0.42), rgba(255,255,255,0.16)),
-                linear-gradient(135deg, rgba(129,212,198,0.12), rgba(117,183,255,0.14)) !important;
-            border: 1px solid rgba(255,255,255,0.58) !important;
+                linear-gradient(180deg, rgba(255,255,255,0.28), rgba(255,255,255,0.12)),
+                linear-gradient(135deg, rgba(129,212,198,0.09), rgba(117,183,255,0.1)) !important;
+            border: 1px solid rgba(255,255,255,0.46) !important;
             box-shadow:
-                0 12px 28px rgba(96, 148, 184, 0.14),
-                inset 0 1px 0 rgba(255,255,255,0.82),
-                inset 0 -10px 18px rgba(255,255,255,0.08) !important;
-            backdrop-filter: blur(26px) saturate(180%) !important;
-            -webkit-backdrop-filter: blur(26px) saturate(180%) !important;
+                0 10px 22px rgba(96, 148, 184, 0.1),
+                inset 0 1px 0 rgba(255,255,255,0.58),
+                inset 0 -8px 16px rgba(255,255,255,0.04) !important;
+            backdrop-filter: blur(20px) saturate(165%) !important;
+            -webkit-backdrop-filter: blur(20px) saturate(165%) !important;
             transition:
                 transform 0.34s cubic-bezier(0.22, 1, 0.36, 1),
                 width 0.34s cubic-bezier(0.22, 1, 0.36, 1),
@@ -97,6 +97,23 @@
         .dock-bar .dock-tab {
             position: relative;
             z-index: 1;
+        }
+
+        .dock-bar .dock-tab .dt-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 24px;
+        }
+
+        .dock-bar .dock-tab[data-tab="ai"] .dt-icon {
+            min-height: 24px;
+            transform: translateY(-1px);
+        }
+
+        .dock-bar .dock-tab[data-tab="ai"] .dt-svg {
+            width: 24px;
+            height: 24px;
         }
 
         .dock-bar .dock-tab.active {
