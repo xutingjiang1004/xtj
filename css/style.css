@@ -12645,16 +12645,6 @@ h1 {
   min-height: 24px;
 }
 
-.dock-bar .dock-tab[data-tab="ai"] .dt-icon {
-  min-height: 24px;
-  transform: translateY(-1px);
-}
-
-.dock-bar .dock-tab[data-tab="ai"] .dt-svg {
-  width: 24px;
-  height: 24px;
-}
-
 .dock-bar .dock-tab .dt-label {
   font-weight: 600;
   letter-spacing: 0;
