@@ -2076,6 +2076,7 @@
             position: fixed; bottom: 0; left: 0; right: 0;
             display: flex; justify-content: center; align-items: center;
             gap: 3px; padding: 10px 12px 14px;
+            touch-action: none;
             padding-left: calc(12px + env(safe-area-inset-left, 0px));
             padding-right: calc(12px + env(safe-area-inset-right, 0px));
             padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
@@ -12643,6 +12644,16 @@ h1 {
   align-items: center;
   justify-content: center;
   min-height: 24px;
+}
+
+.dock-bar .dock-tab[data-tab="ai"] .dt-icon {
+  min-height: 24px;
+  transform: translateY(-1px);
+}
+
+.dock-bar .dock-tab[data-tab="ai"] .dt-svg {
+  width: 24px;
+  height: 24px;
 }
 
 .dock-bar .dock-tab .dt-label {
