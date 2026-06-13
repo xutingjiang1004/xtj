@@ -12453,141 +12453,67 @@ html.xtj-pro-active .action-btn.liked {
   filter: drop-shadow(0 0 3px rgba(255,215,0,0.5));
 }
 
-/* ===== XTJ targeted profile activity + dock indicator fix ===== */
-#profileActivityModal .profile-activity-modal-list {
-  padding: 18px 20px 22px !important;
-}
-
-#profileActivityModal .profile-activity-item {
-  grid-template-columns: minmax(0, 1fr) auto auto !important;
+/* ===== XTJ record card + post detail fix ===== */
+#profileActivityModal .profile-activity-modal-list,
+#statRecordsModal .stat-records-list {
+  padding: 16px 18px 20px !important;
+  display: grid !important;
   gap: 14px !important;
-  align-items: start !important;
 }
 
-#profileActivityModal .profile-activity-main {
-  min-width: 0 !important;
-}
-
-#profileActivityModal .profile-activity-body {
-  gap: 8px !important;
-}
-
-#profileActivityModal .profile-activity-media-col {
-  align-self: center !important;
-}
-
-#profileActivityModal .profile-activity-side {
-  min-width: 116px !important;
-  gap: 8px !important;
-  align-self: stretch !important;
-}
-
-#profileActivityModal .profile-activity-actions {
+#profileActivityModal .profile-activity-item,
+#statModal .stat-record-entry,
+#statModal .stat-view-item,
+#statRecordsModal .stat-record-entry {
+  display: block !important;
   width: 100% !important;
+  min-height: 0 !important;
+  padding: 16px !important;
+  border: 1px solid rgba(194, 224, 205, 0.82) !important;
+  border-radius: 22px !important;
+  background: rgba(250, 255, 252, 0.76) !important;
+  box-shadow: 0 12px 28px rgba(44, 86, 61, 0.08) !important;
 }
 
-#profileActivityModal .profile-activity-btn {
-  min-width: 88px !important;
+#profileActivityModal .profile-activity-item:last-child,
+#statModal .stat-record-entry:last-child,
+#statModal .stat-view-item:last-child,
+#statRecordsModal .stat-record-entry:last-child {
+  border-bottom: 1px solid rgba(194, 224, 205, 0.82) !important;
 }
 
-#profileActivityModal .profile-activity-time {
-  text-align: right !important;
+#profileActivityModal .profile-activity-item:hover,
+#statModal .stat-record-entry:hover,
+#statModal .stat-view-item:hover,
+#statRecordsModal .stat-record-entry:hover {
+  transform: translateY(-1px) !important;
+  background: rgba(253, 255, 254, 0.9) !important;
+  box-shadow: 0 16px 30px rgba(44, 86, 61, 0.1) !important;
 }
 
-#profileActivityModal .profile-activity-item.no-media {
-  grid-template-columns: minmax(0, 1fr) auto !important;
+#profileActivityModal .profile-activity-main,
+#statModal .stat-record-entry .stat-row-main,
+#statModal .stat-view-item .stat-row-main,
+#statRecordsModal .stat-record-entry .stat-row-main {
+  min-width: 0 !important;
+  display: grid !important;
+  gap: 10px !important;
 }
 
-@media (max-width: 560px) {
-  #profileActivityModal .profile-activity-modal-list {
-    padding: 16px 14px 18px !important;
-  }
-
-  #profileActivityModal .profile-activity-item,
-  #profileActivityModal .profile-activity-item.no-media {
-    grid-template-columns: minmax(0, 1fr) !important;
-    gap: 10px !important;
-    padding: 14px 0 !important;
-  }
-
-  #profileActivityModal .profile-activity-main,
-  #profileActivityModal .profile-activity-media-col,
-  #profileActivityModal .profile-activity-side {
-    grid-column: 1 !important;
-  }
-
-  #profileActivityModal .profile-activity-media-col {
-    justify-content: flex-start !important;
-  }
-
-  #profileActivityModal .profile-activity-media,
-  #profileActivityModal .profile-activity-video {
-    width: 64px !important;
-    height: 64px !important;
-    border-radius: 16px !important;
-  }
-
-  #profileActivityModal .profile-activity-side {
-    min-width: 0 !important;
-    flex-direction: row !important;
-    align-items: center !important;
-    justify-content: space-between !important;
-    gap: 12px !important;
-  }
-
-  #profileActivityModal .profile-activity-time {
-    text-align: left !important;
-    white-space: normal !important;
-    line-height: 1.45 !important;
-  }
-
-  #profileActivityModal .profile-activity-actions {
-    width: auto !important;
-    flex: 0 0 auto !important;
-    justify-content: flex-end !important;
-  }
-
-  #profileActivityModal .profile-activity-btn {
-    min-width: 0 !important;
-    padding: 0 14px !important;
-  }
-}
-
-#profileActivityModal .profile-activity-title {
+#profileActivityModal .profile-activity-title,
+#statModal .stat-row-title,
+#statRecordsModal .stat-row-title {
   color: #214633 !important;
-  font-size: 14px !important;
-  font-weight: 700 !important;
+  font-size: 15px !important;
+  font-weight: 800 !important;
+  line-height: 1.55 !important;
   letter-spacing: 0 !important;
   opacity: 1 !important;
   text-shadow: none !important;
   filter: none !important;
 }
 
-#profileActivityModal .profile-activity-inline-summary {
-  color: rgba(33, 70, 51, 0.88) !important;
-  font-weight: 600 !important;
-  opacity: 1 !important;
-  text-shadow: none !important;
-  filter: none !important;
-}
-
-#profileActivityModal .profile-activity-note {
-  color: rgba(47, 86, 63, 0.86) !important;
-  font-size: 13px !important;
-  opacity: 1 !important;
-  text-shadow: none !important;
-  filter: none !important;
-}
-
-#profileActivityModal .profile-activity-time,
-#profileActivityModal .profile-activity-kicker,
-#profileActivityModal .profile-activity-empty {
-  color: rgba(53, 92, 69, 0.78) !important;
-  opacity: 1 !important;
-  text-shadow: none !important;
-  filter: none !important;
-}
-
+#profileActivityModal .profile-activity-inline-summary,
 #profileActivityModal .profile-activity-body,
 #profileActivityModal .profile-activity-body * {
   color: #214633 !important;
@@ -12597,9 +12523,205 @@ html.xtj-pro-active .action-btn.liked {
   filter: none !important;
 }
 
+#profileActivityModal .profile-activity-body,
+#statModal .stat-row-copy,
+#statRecordsModal .stat-row-copy {
+  margin-top: 0 !important;
+  display: grid !important;
+  gap: 8px !important;
+  padding: 12px 14px !important;
+  border-radius: 18px !important;
+  background: rgba(237, 248, 241, 0.9) !important;
+  border: 1px solid rgba(194, 224, 205, 0.72) !important;
+  color: rgba(39, 74, 55, 0.9) !important;
+  font-size: 13px !important;
+  line-height: 1.68 !important;
+  word-break: break-word !important;
+}
+
+#profileActivityModal .profile-activity-note,
+#statModal .stat-record-note,
+#statRecordsModal .stat-record-note {
+  margin: 0 !important;
+  color: rgba(47, 86, 63, 0.88) !important;
+  font-size: 13px !important;
+  line-height: 1.68 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+#profileActivityModal .profile-activity-note--accent,
+#statModal .stat-record-note:first-child,
+#statRecordsModal .stat-record-note:first-child {
+  color: #1f6e4d !important;
+  font-weight: 700 !important;
+}
+
+#profileActivityModal .profile-activity-media-col,
+#statModal .stat-row-media,
+#statRecordsModal .stat-row-media {
+  margin-top: 12px !important;
+  display: flex !important;
+  justify-content: flex-start !important;
+  align-items: center !important;
+}
+
 #profileActivityModal .profile-activity-media,
-#profileActivityModal .profile-activity-video {
+#profileActivityModal .profile-activity-video,
+#statModal .stat-record-thumb,
+#statRecordsModal .stat-record-thumb {
+  width: 82px !important;
+  height: 82px !important;
+  border-radius: 18px !important;
   box-shadow: 0 8px 18px rgba(34, 82, 57, 0.12) !important;
+}
+
+#profileActivityModal .profile-activity-side,
+#statModal .stat-record-entry .stat-row-side,
+#statModal .stat-view-item .stat-row-side,
+#statRecordsModal .stat-record-entry .stat-row-side {
+  margin-top: 12px !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  flex-wrap: wrap !important;
+}
+
+#profileActivityModal .profile-activity-time,
+#profileActivityModal .profile-activity-kicker,
+#profileActivityModal .profile-activity-empty,
+#statModal .stat-row-time,
+#statRecordsModal .stat-row-time {
+  color: rgba(53, 92, 69, 0.78) !important;
+  font-size: 12px !important;
+  line-height: 1.5 !important;
+  text-align: left !important;
+  white-space: normal !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+#profileActivityModal .profile-activity-actions,
+#statModal .stat-record-entry .stat-row-side .stat-record-action,
+#statModal .stat-view-item .stat-row-side .stat-record-action,
+#statRecordsModal .stat-record-entry .stat-row-side .stat-record-action {
+  width: auto !important;
+}
+
+#profileActivityModal .profile-activity-actions {
+  display: flex !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+  flex-wrap: wrap !important;
+}
+
+#profileActivityModal .profile-activity-btn,
+#statModal .stat-record-action,
+#statRecordsModal .stat-record-action {
+  min-width: 88px !important;
+  min-height: 34px !important;
+  padding: 0 14px !important;
+  border-radius: 999px !important;
+}
+
+#statModal .stat-two-col.stat-two-col--flat {
+  gap: 16px !important;
+}
+
+#statModal .stat-two-col.stat-two-col--flat .stat-col.stat-col--flat {
+  display: grid !important;
+  align-content: start !important;
+  gap: 14px !important;
+}
+
+#statModal .stat-view-item + .stat-view-item,
+#statModal .stat-record-entry + .stat-record-entry,
+#statRecordsModal .stat-record-entry + .stat-record-entry {
+  margin-top: 14px !important;
+}
+
+#postDetailModal .stat-detail-modal {
+  background: rgba(248, 253, 250, 0.96) !important;
+  border-color: rgba(198, 226, 208, 0.82) !important;
+}
+
+#postDetailModal .stat-detail-body {
+  background: transparent !important;
+}
+
+#postDetailModal .post-detail-main-card,
+#postDetailModal .post-detail-panel--stack {
+  background: rgba(250, 255, 252, 0.84) !important;
+  border-color: rgba(194, 224, 205, 0.82) !important;
+}
+
+#postDetailModal .post-detail-content,
+#postDetailModal .post-detail-mini-copy,
+#postDetailModal .post-detail-mini-name,
+#postDetailModal .post-detail-panel-title,
+#postDetailModal .pdh-name,
+#postDetailModal .post-detail-visibility {
+  color: #214633 !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+#postDetailModal .pdh-time,
+#postDetailModal .post-detail-stats,
+#postDetailModal .post-detail-mini-time {
+  color: rgba(53, 92, 69, 0.78) !important;
+  opacity: 1 !important;
+  text-shadow: none !important;
+  filter: none !important;
+}
+
+@media (max-width: 560px) {
+  #profileActivityModal .profile-activity-modal-list,
+  #statRecordsModal .stat-records-list {
+    padding: 14px 14px 18px !important;
+  }
+
+  #profileActivityModal .profile-activity-item,
+  #statModal .stat-record-entry,
+  #statModal .stat-view-item,
+  #statRecordsModal .stat-record-entry {
+    padding: 14px !important;
+    border-radius: 20px !important;
+  }
+
+  #profileActivityModal .profile-activity-media,
+  #profileActivityModal .profile-activity-video,
+  #statModal .stat-record-thumb,
+  #statRecordsModal .stat-record-thumb {
+    width: 72px !important;
+    height: 72px !important;
+    border-radius: 16px !important;
+  }
+
+  #profileActivityModal .profile-activity-side,
+  #statModal .stat-record-entry .stat-row-side,
+  #statModal .stat-view-item .stat-row-side,
+  #statRecordsModal .stat-record-entry .stat-row-side {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+  }
+
+  #profileActivityModal .profile-activity-actions,
+  #statModal .stat-record-entry .stat-row-side .stat-record-action,
+  #statModal .stat-view-item .stat-row-side .stat-record-action,
+  #statRecordsModal .stat-record-entry .stat-row-side .stat-record-action {
+    width: auto !important;
+  }
+
+  #statModal .stat-two-col.stat-two-col--flat .stat-col.stat-col--flat {
+    gap: 12px !important;
+  }
 }
 
 .dock-bar {
