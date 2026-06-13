@@ -2,9 +2,15 @@
 console.log('[XTJ] core.js loaded, starting...');
 
 
-            const SUPABASE_URL = window.XTJ_CONFIG.SUPABASE_URL;
-            const SUPABASE_ANON_KEY = window.XTJ_CONFIG.SUPABASE_ANON_KEY;
-            var API_BASE = window.XTJ_CONFIG.API_BASE;
+            var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
+                API_BASE: window.location.origin,
+                SUPABASE_URL: "https://ithowxqignlhkwaykglt.supabase.co",
+                SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0aG93eHFpZ25saGt3YXlrZ2x0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNzE1MTEsImV4cCI6MjA5Mjc0NzUxMX0.fNmh0HjNuIZaJTa56gMITwKpJMQfJ8mBN41HMhvyDDA"
+            };
+            window.XTJ_CONFIG = XTJ_RUNTIME_CONFIG;
+            const SUPABASE_URL = XTJ_RUNTIME_CONFIG.SUPABASE_URL;
+            const SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
+            var API_BASE = XTJ_RUNTIME_CONFIG.API_BASE;
             var sb;
             if (typeof window.supabase !== 'undefined') {
                 sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -4496,8 +4502,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (forceRefresh) {
                     feedPage = 0;
                     feedEndReached = false;
-                    feedNextOffset = 0;
-                    feedLoadedPages = [];
                     feedAllPosts = [];
                     feedAllComments = [];
                     feedAllLikes = [];
@@ -4505,14 +4509,20 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 bindPostFilterEvents();
                 if (!forceRefresh) {
-                    var cached = readFeedSnapshotCache();
-                    if (cached && now - cached.timestamp < CACHE_DURATION) {
-                        if (requestId !== feedLoadRequestId) return;
-                        if (hydrateFeedStateFromSnapshot(cached)) {
-                            await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
-                            setupFeedInfiniteScroll();
-                            return;
-                        }
+                    var cached = localStorage.getItem(CACHE_KEY);
+                    if (cached) {
+                        try {
+                            var parsed = JSON.parse(cached);
+                            if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION) {
+                                if (requestId !== feedLoadRequestId) return;
+                                feedAllPosts = normalizePosts(parsed.data.posts || []);
+                                feedAllComments = parsed.data.comments || [];
+                                feedAllLikes = parsed.data.likes || [];
+                                await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+                                setupFeedInfiniteScroll();
+                                return;
+                            }
+                        } catch (e) {}
                     }
                 }
                 var feed = document.getElementById("feed");
@@ -4520,17 +4530,32 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中..', '', 'feed');
                 }
                 try {
-                    if (!feedAllPosts.length) {
-                        var firstChunk = await fetchFeedPageChunk(feedNextOffset, requestId);
+                    var results = await Promise.all([
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
+                        sb.from("comments").select("*").order("created_at"),
+                        sb.from("likes").select("*")
+                    ]);
+                    var postRes = results[0];
+                    var commRes = results[1];
+                    var likeRes = results[2];
+                    if (postRes.error || commRes.error || likeRes.error) {
                         if (requestId !== feedLoadRequestId) return;
-                        if (!firstChunk) return;
-                        mergeFeedPageIntoState(firstChunk);
-                    }
-                    if (hasActiveFeedFilters()) {
-                        await ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId);
+                        var err = postRes.error || commRes.error || likeRes.error;
+                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败: ' + escapeHtml(err.message || "未知错误") + '</div>';
+                        return;
                     }
                     if (requestId !== feedLoadRequestId) return;
-                    writeFeedCacheSnapshot();
+                    feedAllPosts = normalizePosts(postRes.data || []);
+                    feedAllComments = commRes.data || [];
+                    feedAllLikes = likeRes.data || [];
+                    localStorage.setItem(CACHE_KEY, JSON.stringify({
+                        data: {
+                            posts: feedAllPosts,
+                            comments: feedAllComments,
+                            likes: feedAllLikes
+                        },
+                        timestamp: now
+                    }));
                     await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
                     setupFeedInfiniteScroll();
                 } catch (e) {
@@ -4540,70 +4565,35 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
             window.loadFeed = loadFeed;
 
-            loadMoreFeedPosts = async function() {
-                if (feedPageFetchPending) return;
+            loadMoreFeedPosts = function() {
+                if (feedEndReached) return;
                 var feed = document.getElementById("feed");
                 var startIdx = feedPage * FEED_PAGE_SIZE;
-                feedPageFetchPending = true;
-                try {
-                    if (hasActiveFeedFilters()) {
-                        await ensureFeedCoverageForVisibleSlice(startIdx + FEED_PAGE_SIZE, feedLoadRequestId);
-                    } else if (!feedEndReached && (feedAllPosts || []).length < startIdx + FEED_PAGE_SIZE) {
-                        var chunk = await fetchFeedPageChunk(feedNextOffset, feedLoadRequestId);
-                        if (chunk && chunk.posts.length) {
-                            mergeFeedPageIntoState(chunk);
-                            writeFeedCacheSnapshot();
-                        } else {
-                            feedEndReached = true;
-                        }
+                var endIdx = startIdx + FEED_PAGE_SIZE;
+                var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                if (startIdx >= filteredPosts.length) {
+                    feedEndReached = true;
+                    var noMore = document.getElementById("feedNoMore");
+                    if (!noMore) {
+                        noMore = document.createElement("div");
+                        noMore.id = "feedNoMore";
+                        noMore.className = "loading";
+                        noMore.textContent = "没有鏇村帖子";
+                        noMore.style.padding = "30px";
+                        noMore.style.textAlign = "center";
+                        feed.appendChild(noMore);
                     }
-                    var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
-                    var endIdx = startIdx + FEED_PAGE_SIZE;
-                    if (!feedEndReached && filteredPosts.length < endIdx) {
-                        await ensureFeedCoverageForVisibleSlice(endIdx, feedLoadRequestId);
-                        filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
-                    }
-                    if (startIdx >= filteredPosts.length) {
-                        if (!feedEndReached) return;
-                        var noMore = document.getElementById("feedNoMore");
-                        if (!noMore) {
-                            noMore = document.createElement("div");
-                            noMore.id = "feedNoMore";
-                            noMore.className = "loading";
-                            noMore.textContent = "没有鏇村帖子";
-                            noMore.style.padding = "30px";
-                            noMore.style.textAlign = "center";
-                            feed.appendChild(noMore);
-                        }
-                        return;
-                    }
-                    var filteredPostIds = new Set();
-                    filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
-                    var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
-                    var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
-                    appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
-                    feedPage++;
-                    if (feedEndReached && endIdx >= filteredPosts.length) {
-                        var finalNoMore = document.getElementById("feedNoMore");
-                        if (!finalNoMore) {
-                            finalNoMore = document.createElement("div");
-                            finalNoMore.id = "feedNoMore";
-                            finalNoMore.className = "loading";
-                            finalNoMore.textContent = "没有鏇村帖子";
-                            finalNoMore.style.padding = "30px";
-                            finalNoMore.style.textAlign = "center";
-                            feed.appendChild(finalNoMore);
-                        }
-                    }
-                } finally {
-                    feedPageFetchPending = false;
+                    return;
                 }
+                var filteredPostIds = new Set();
+                filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
+                var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
+                var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
+                appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
+                feedPage++;
             };
 
             appendMorePosts = function(posts, comments, likes) {
-                if (!posts || !posts.length) return;
-                var noMore = document.getElementById("feedNoMore");
-                if (noMore) noMore.remove();
                 var feed = document.getElementById("feed");
                 var maps = buildPostMaps(getRenderableComments(comments, posts), likes);
                 var postsHtml = posts.map(function(post) {
@@ -4623,8 +4613,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             renderFeedWithAvatars = function(visiblePosts, comments, likes) {
                 var feed = document.getElementById("feed");
-                var noMore = document.getElementById("feedNoMore");
-                if (noMore) noMore.remove();
                 var scopedComments = getRenderableComments(comments, visiblePosts);
                 var maps = buildPostMaps(scopedComments, likes);
                 var state = getPostSearchState();
@@ -4656,7 +4644,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 filteredPosts.forEach(function(post) { allUsers.add(post.user_name); });
                 visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
                 var firstPage = filteredPosts.slice(0, FEED_PAGE_SIZE);
-                feedPage = firstPage.length ? 1 : 0;
+                feedPage = 1;
+                feedEndReached = firstPage.length >= filteredPosts.length;
                 renderFeedWithAvatars(firstPage, visibleComments, scopedLikes);
                 renderFilterSummary(filteredPosts.length);
 
@@ -4674,6 +4663,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     });
                 });
+                setTimeout(function() { prefetchStatData(); }, 1000);
             };
             window.renderFeed = renderFeed;
 
