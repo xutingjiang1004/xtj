@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -5602,7 +5602,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             window.switchDockTab = function(tab, skipReturn) {
-                if (tab === 'chat' && !currentUser) { showToast('请先登录'); return; }
                 if (tab !== currentDockTab) {
                     try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
                     try { var am = document.getElementById('announcementModal'); if (am && am.classList.contains('active')) closeAnnouncementModal(); } catch(e) {}
@@ -5722,6 +5721,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (tab === 'posts') { if (window._rainResume) window._rainResume(); }
                 else { if (window._rainPause) window._rainPause(); }
                 if (tab === 'chat') {
+                    updateChatAuthUI();
                     if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser) {
                         document.getElementById('dockChatListView').classList.add('hidden');
                         document.getElementById('dockChatDetailView').classList.remove('hidden');
@@ -5847,6 +5847,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             async function loadDockChatList() {
                 const el = document.getElementById('dockChatList');
                 if (!el) return;
+                if (!window.currentUser) {
+                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div><div style="font-size:12px;">登录后即可查看和发送私信</div></div>';
+                    updateUnreadBadge();
+                    return;
+                }
                 if (!dockChatActiveUser) {
                     document.getElementById('dockChatDetailView').classList.add('hidden');
                     document.getElementById('dockChatListView').classList.remove('hidden');
@@ -5930,6 +5935,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             var _chatCache = {};
 
             async function loadDockChatMessages(userName, forceScroll) {
+                if (!window.currentUser) {
+                    const el = document.getElementById('dockChatMessages');
+                    if (el) el.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div></div>';
+                    return;
+                }
                 if (dockChatMsgsBusy && dockChatMsgsUser === userName) { dockChatMsgsDirty = userName; return; }
                 // 棰勯敓鑺傦拷?鎷锋潪钘夊蓟閺傜懓銇旈敓?
                 var needAvatars = [];
@@ -6043,6 +6053,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             }
 
             async function sendDockChatMessage() {
+                if (!currentUser) { showToast('请先登录'); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法发送消息"); return; }
                 const inp = document.getElementById('dockChatInput');
                 const content = inp.value.trim();
@@ -6114,6 +6125,22 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var _dcr = document.getElementById('dockCfpRemove'); if (_dcr) _dcr.addEventListener('click', clearDockChatFilePreview);
             } catch(e) {
             }
+
+            function updateChatAuthUI() {
+                var inp = document.getElementById('dockChatInput');
+                var sendBtn = document.getElementById('dockChatSendBtn');
+                var imgBtn = document.getElementById('dockChatImgBtn');
+                if (!window.currentUser) {
+                    if (inp) { inp.disabled = true; inp.placeholder = '登录后可发消息'; }
+                    if (sendBtn) sendBtn.disabled = true;
+                    if (imgBtn) imgBtn.disabled = true;
+                } else {
+                    if (inp) { inp.disabled = false; inp.placeholder = '输入消息...'; }
+                    if (sendBtn) sendBtn.disabled = false;
+                    if (imgBtn) imgBtn.disabled = false;
+                }
+            }
+            window.updateChatAuthUI = updateChatAuthUI;
 
             window.addEventListener('DOMContentLoaded', async function() {
                 // iOS 键盘与可视视口适配

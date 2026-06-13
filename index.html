@@ -165,6 +165,21 @@
             max-height: none !important;
         }
 
+        .chat-input-wrap input:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: rgba(255,255,255,0.05);
+        }
+        .chat-input-wrap input:disabled::placeholder {
+            color: rgba(255,255,255,0.35);
+        }
+        .chat-img-btn:disabled,
+        .send-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
         .dock-bar .dock-tab {
             position: relative;
             z-index: 1;

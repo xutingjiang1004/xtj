@@ -2437,7 +2437,8 @@
             border: none;
             background: transparent;
             box-shadow: none !important;
-            transition: color 0.24s ease, transform 0.24s cubic-bezier(0.16,1,0.3,1);
+            transform: none !important;
+            transition: color 0.24s ease;
         }
         .dock-tab::before,
         .dock-tab::after {
@@ -2486,7 +2487,7 @@
         }
         .dock-tab.active {
             color: #059669;
-            transform: translateY(-3px);
+            transform: none !important;
             background: transparent;
             border-color: transparent;
             box-shadow: none !important;
@@ -2502,11 +2503,7 @@
             opacity: 0;
         }
         .dock-tab.active .dt-label { font-weight: 700; }
-        .dock-tab:active { transform: scale(0.97); }
-        .dock-tab.anim-post:active,
-        .dock-tab.anim-chat:active,
-        .dock-tab.anim-ai:active,
-        .dock-tab.anim-profile:active { transform: none; }
+        .dock-tab:active { transform: none !important; }
         .dock-tab:focus,
         .dock-tab:focus-visible,
         .dock-tab:focus-within,
@@ -2524,8 +2521,28 @@
         .dock-tab::-moz-focus-inner {
             border: 0 !important;
         }
-        .dock-tab.active:active { transform: translateY(-3px) scale(0.97); }
-        .dock-tab .dt-icon { transition: none; }
+        .dock-tab.active:active { transform: none !important; }
+
+        .dock-tab .dt-icon,
+        .dock-tab .dt-label {
+            transition: transform 0.24s cubic-bezier(0.16, 1, 0.3, 1), color 0.24s ease, opacity 0.24s ease;
+            will-change: transform;
+        }
+
+        .dock-tab.active .dt-icon,
+        .dock-tab.active .dt-label {
+            transform: translateY(-3px);
+        }
+
+        .dock-tab:active .dt-icon,
+        .dock-tab:active .dt-label {
+            transform: translateY(-1px) scale(0.97);
+        }
+
+        .dock-tab.active:active .dt-icon,
+        .dock-tab.active:active .dt-label {
+            transform: translateY(-3px) scale(0.97);
+        }
         .ui-icon {
             display: inline-flex;
             align-items: center;
