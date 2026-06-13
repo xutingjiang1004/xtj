@@ -521,7 +521,7 @@
 
     <div class="dock-bar" id="dockBar">
         <div class="dock-indicator" id="dockIndicator" aria-hidden="true"></div>
-        <button class="dock-tab active" data-tab="posts">
+        <button class="dock-tab active" data-tab="posts" onclick="window.switchDockTab('posts')">
             <span class="dt-icon">
                 <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
@@ -555,7 +555,7 @@
                 </g>
             </svg>
         </button>
-        <button class="dock-tab" data-tab="chat">
+        <button class="dock-tab" data-tab="chat" onclick="window.switchDockTab('chat')">
             <span class="dt-icon">
                 <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -593,7 +593,7 @@
                 <circle class="al-dot-3" cx="49" cy="25" r="2.8" fill="currentColor" opacity="0"/>
             </svg>
         </button>
-        <button class="dock-tab" data-tab="ai">
+        <button class="dock-tab" data-tab="ai" onclick="window.switchDockTab('ai')">
             <span class="dt-icon">
                 <svg class="dt-svg" viewBox="-1 -1 26 26" width="32" height="32" fill="none">
                     <g transform="translate(12,12)">
@@ -627,7 +627,7 @@
                 </g>
             </svg>
         </button>
-        <button class="dock-tab" data-tab="profile">
+        <button class="dock-tab" data-tab="profile" onclick="window.switchDockTab('profile')">
             <span class="dt-icon">
                 <svg class="dt-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="8" r="4"/>
