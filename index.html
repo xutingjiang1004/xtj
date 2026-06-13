@@ -54,17 +54,45 @@
             pointer-events: none !important;
             opacity: 0;
             z-index: 0 !important;
+            overflow: hidden !important;
+
             background:
-                linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.15) 50%, rgba(255,255,255,0.05) 100%),
-                linear-gradient(135deg, rgba(210,230,255,0.12), rgba(200,220,250,0.06)) !important;
-            border: 1px solid rgba(255,255,255,0.50) !important;
+                radial-gradient(
+                    circle at 18% 20%,
+                    rgba(255, 255, 255, 0.92) 0%,
+                    rgba(255, 255, 255, 0.42) 23%,
+                    rgba(255, 255, 255, 0.08) 44%,
+                    transparent 62%
+                ),
+                radial-gradient(
+                    circle at 88% 78%,
+                    rgba(123, 220, 210, 0.22) 0%,
+                    rgba(123, 220, 210, 0.10) 28%,
+                    transparent 56%
+                ),
+                linear-gradient(
+                    180deg,
+                    rgba(255, 255, 255, 0.82) 0%,
+                    rgba(255, 255, 255, 0.56) 42%,
+                    rgba(242, 252, 255, 0.36) 100%
+                ) !important;
+
+            border: 1px solid rgba(255, 255, 255, 0.82) !important;
+
             box-shadow:
-                0 4px 16px rgba(0,0,0,0.06),
-                0 1px 3px rgba(0,0,0,0.04),
-                inset 0 0.5px 0 rgba(255,255,255,0.7),
-                inset 0 -0.5px 0 rgba(0,0,0,0.05) !important;
-            backdrop-filter: blur(24px) saturate(180%) !important;
-            -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+                0 18px 42px rgba(80, 140, 160, 0.18),
+                0 7px 18px rgba(80, 140, 160, 0.10),
+                0 1px 2px rgba(255, 255, 255, 0.72),
+                inset 0 1px 1px rgba(255, 255, 255, 0.96),
+                inset 0 -10px 22px rgba(90, 170, 190, 0.12),
+                inset 0 0 20px rgba(255, 255, 255, 0.44) !important;
+
+            outline: 1px solid rgba(255, 255, 255, 0.34);
+            outline-offset: -2px;
+
+            backdrop-filter: blur(24px) saturate(185%) !important;
+            -webkit-backdrop-filter: blur(24px) saturate(185%) !important;
+
             transition:
                 transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
                 width 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
@@ -76,23 +104,58 @@
         .dock-bar > .dock-indicator::after {
             content: "";
             position: absolute;
-            inset: 0;
             border-radius: inherit;
             pointer-events: none;
         }
 
         .dock-bar > .dock-indicator::before {
             inset: 1px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.46), rgba(255,255,255,0.1) 64%, rgba(255,255,255,0.2)) !important;
-            opacity: 0.82 !important;
+
+            background:
+                radial-gradient(
+                    ellipse at 12% 50%,
+                    rgba(255, 255, 255, 0.86) 0%,
+                    rgba(255, 255, 255, 0.38) 24%,
+                    rgba(255, 255, 255, 0) 52%
+                ),
+                radial-gradient(
+                    ellipse at 88% 50%,
+                    rgba(255, 255, 255, 0.78) 0%,
+                    rgba(255, 255, 255, 0.32) 26%,
+                    rgba(255, 255, 255, 0) 54%
+                ),
+                linear-gradient(
+                    180deg,
+                    rgba(255, 255, 255, 0.56) 0%,
+                    rgba(255, 255, 255, 0.10) 58%,
+                    rgba(255, 255, 255, 0.26) 100%
+                ) !important;
+
+            box-shadow:
+                inset 8px 0 14px rgba(255, 255, 255, 0.38),
+                inset -8px 0 14px rgba(255, 255, 255, 0.32),
+                inset 0 -8px 18px rgba(80, 170, 190, 0.10) !important;
+
+            opacity: 0.92 !important;
         }
 
         .dock-bar > .dock-indicator::after {
-            inset: -6px 10px auto;
-            height: 42%;
+            left: 14%;
+            right: 14%;
+            top: 7px;
+            height: 38%;
+
+            background:
+                linear-gradient(
+                    180deg,
+                    rgba(255, 255, 255, 0.86) 0%,
+                    rgba(255, 255, 255, 0.28) 48%,
+                    rgba(255, 255, 255, 0.04) 100%
+                ) !important;
+
             border-radius: 999px;
-            background: radial-gradient(circle at 50% 0%, rgba(255,255,255,0.52), rgba(255,255,255,0)) !important;
-            opacity: 0.58 !important;
+            filter: blur(0.35px);
+            opacity: 0.76 !important;
         }
 
         .dock-bar .dock-tab {
