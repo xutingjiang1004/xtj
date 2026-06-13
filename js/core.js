@@ -1786,7 +1786,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (!normalized.media_url) return '';
                 var onclick = "event.stopPropagation();openProfileActivityMedia('" + safeJsStr(String(postId || normalized.id || '')) + "')";
                 if (normalized.media_type === 'image') {
-                    return '<img class="profile-activity-media" src="' + escapeHtml(normalized.media_url) + '" alt="" loading="lazy" onclick="' + onclick + '" />';
+                    return '<img class="profile-activity-media" src="' + escapeHtml(normalized.media_url) + '" alt="" loading="lazy" decoding="async" fetchpriority="low" onclick="' + onclick + '" />';
                 }
                 if (normalized.media_type === 'video') {
                     return '<div class="profile-activity-video" onclick="' + onclick + '">视频</div>';
@@ -2465,6 +2465,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
 
             function createHeartParticles(btn) {
+                var perfProfile = window.__xtjPerfProfile || 'full';
+                if (perfProfile === 'lite') return;
                 if (typeof xtjHeartBurst === 'function') {
                     xtjHeartBurst(btn);
                 }
@@ -2472,11 +2474,12 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 const cx = rect.left + rect.width/2;
                 const cy = rect.top + rect.height/2;
                 const emojis = ["❤️","💜","💙","💚","💛","🧡"];
-                for (let i=0; i<8; i++) {
+                const burstCount = perfProfile === 'balanced' ? 4 : 8;
+                for (let i=0; i<burstCount; i++) {
                     const heart = document.createElement('div');
                     heart.className = 'heart-particle';
                     heart.textContent = emojis[Math.floor(Math.random()*emojis.length)];
-                    const angle = (Math.PI*2*i/8) + (Math.random()-0.5)*0.4;
+                    const angle = (Math.PI*2*i/burstCount) + (Math.random()-0.5)*0.4;
                     const dist1 = 30 + Math.random()*20;
                     const dist2 = 55 + Math.random()*40;
                     const dist3 = 80 + Math.random()*50;
@@ -2978,6 +2981,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let feedAllLikes = [];
             let feedScrollObserver = null;
             let feedLoadRequestId = 0;
+            let feedNextOffset = 0;
+            let feedLoadedPages = [];
+            let feedPageFetchPending = false;
             let feedVisiblePostsCache = null; // 缓存过滤后的帖子
             let feedMapsCache = null; // 缓存 buildPostMaps 结果
 
@@ -3700,7 +3706,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     </div>
                   </div>
                   <div class="content">${escapeHtml(normalized.content || "")}</div>
-                  ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none"></video>` : `<img ${mediaDataAttrs} src="${escapeHtml(normalized.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(normalized.media_url)}')">`}</div>` : ''}
+                  ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none"></video>` : `<img ${mediaDataAttrs} src="${escapeHtml(normalized.media_url)}" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer('${safeJsStr(normalized.media_url)}')">`}</div>` : ''}
                   <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${pComms.length ? `<div class="comments">${pComms.map(function(c) {
@@ -3993,16 +3999,181 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         return post && post.media_type !== '__avatar__' && post.media_type !== '__user_info__' && post.media_type !== '__photo_wall__';
                     });
                     localStorage.setItem(CACHE_KEY, JSON.stringify({
+                        version: 4,
                         data: {
                             posts: cachePosts,
                             comments: feedAllComments || [],
-                            likes: feedAllLikes || []
+                            likes: feedAllLikes || [],
+                            pages: feedLoadedPages || [],
+                            nextOffset: feedNextOffset || cachePosts.length,
+                            endReached: !!feedEndReached,
+                            pageSize: FEED_PAGE_SIZE
                         },
                         timestamp: Date.now()
                     }));
                 } catch (e) {
                     console.warn('[pin] failed to persist feed cache', e);
                 }
+            }
+
+            function getFeedRecordKey(record, fallbackParts) {
+                if (!record) return "";
+                if (record.id !== undefined && record.id !== null && record.id !== "") return String(record.id);
+                return (fallbackParts || []).map(function(part) {
+                    return String(part == null ? "" : part);
+                }).join("|");
+            }
+
+            function mergeFeedRecords(existing, incoming, keyResolver, shouldSortPosts) {
+                var map = new Map();
+                (existing || []).forEach(function(item) {
+                    if (!item) return;
+                    map.set(keyResolver(item), item);
+                });
+                (incoming || []).forEach(function(item) {
+                    if (!item) return;
+                    map.set(keyResolver(item), item);
+                });
+                var merged = Array.from(map.values());
+                return shouldSortPosts ? sortPosts(merged) : merged;
+            }
+
+            function normalizeFeedSnapshotCache(parsed) {
+                if (!parsed || !parsed.data) return null;
+                var data = parsed.data || {};
+                var posts = normalizePosts(data.posts || []);
+                var pages = Array.isArray(data.pages) ? data.pages.filter(function(page) {
+                    return page && typeof page.offset === "number";
+                }) : [];
+                if (!pages.length && posts.length) {
+                    pages = [{
+                        offset: 0,
+                        postIds: posts.slice(0, FEED_PAGE_SIZE).map(function(post) { return String(post.id); })
+                    }];
+                }
+                return {
+                    version: parsed.version || 3,
+                    timestamp: parsed.timestamp || 0,
+                    data: {
+                        posts: posts,
+                        comments: Array.isArray(data.comments) ? data.comments : [],
+                        likes: Array.isArray(data.likes) ? data.likes : [],
+                        pages: pages,
+                        nextOffset: typeof data.nextOffset === "number" ? data.nextOffset : posts.length,
+                        endReached: typeof data.endReached === "boolean" ? data.endReached : false,
+                        pageSize: data.pageSize || FEED_PAGE_SIZE
+                    }
+                };
+            }
+
+            function hydrateFeedStateFromSnapshot(snapshot) {
+                var normalized = normalizeFeedSnapshotCache(snapshot);
+                if (!normalized) return false;
+                feedAllPosts = normalized.data.posts || [];
+                feedAllComments = normalized.data.comments || [];
+                feedAllLikes = normalized.data.likes || [];
+                feedLoadedPages = normalized.data.pages || [];
+                feedNextOffset = typeof normalized.data.nextOffset === "number" ? normalized.data.nextOffset : feedAllPosts.length;
+                feedEndReached = !!normalized.data.endReached;
+                return true;
+            }
+
+            function getFeedBasePostQuery() {
+                return sb.from("posts")
+                    .select("*")
+                    .neq("media_type", AUTH_MARKER)
+                    .neq("media_type", ADMIN_AUTH_MARKER)
+                    .neq("media_type", DM_MARKER)
+                    .neq("media_type", REPORT_MARKER)
+                    .neq("media_type", "__avatar__")
+                    .neq("media_type", "__user_info__")
+                    .neq("media_type", "__photo_wall__")
+                    .neq("media_type", "__visit__")
+                    .neq("media_type", "__attack__")
+                    .neq("media_type", "__ann__")
+                    .neq("media_type", "__vip__")
+                    .neq("media_type", "__vip_order__")
+                    .order("created_at", { ascending: false });
+            }
+
+            async function fetchFeedPageChunk(offset, requestId) {
+                var start = Math.max(0, Number(offset) || 0);
+                var end = start + FEED_PAGE_SIZE - 1;
+                var postRes = await getFeedBasePostQuery().range(start, end);
+                if (requestId && requestId !== feedLoadRequestId) return null;
+                if (postRes.error) throw postRes.error;
+                var posts = normalizePosts(postRes.data || []);
+                var postIds = posts.map(function(post) { return String(post.id); }).filter(Boolean);
+                var comments = [];
+                var likes = [];
+                if (postIds.length) {
+                    var related = await Promise.all([
+                        sb.from("comments").select("*").in("post_id", postIds).order("created_at"),
+                        sb.from("likes").select("*").in("post_id", postIds)
+                    ]);
+                    if (requestId && requestId !== feedLoadRequestId) return null;
+                    if (related[0].error || related[1].error) {
+                        throw (related[0].error || related[1].error);
+                    }
+                    comments = related[0].data || [];
+                    likes = related[1].data || [];
+                }
+                return {
+                    offset: start,
+                    posts: posts,
+                    comments: comments,
+                    likes: likes,
+                    nextOffset: start + posts.length,
+                    endReached: posts.length < FEED_PAGE_SIZE,
+                    postIds: postIds
+                };
+            }
+
+            function mergeFeedPageIntoState(chunk) {
+                if (!chunk) return;
+                feedAllPosts = mergeFeedRecords(feedAllPosts, chunk.posts, function(post) {
+                    return getFeedRecordKey(post, [post && post.user_name, post && post.created_at]);
+                }, true);
+                feedAllComments = mergeFeedRecords(feedAllComments, chunk.comments, function(comment) {
+                    return getFeedRecordKey(comment, [comment && comment.post_id, comment && comment.user_name, comment && comment.created_at, comment && comment.content]);
+                });
+                feedAllLikes = mergeFeedRecords(feedAllLikes, chunk.likes, function(like) {
+                    return getFeedRecordKey(like, [like && like.post_id, like && like.user_name, like && like.created_at]);
+                });
+                var pagePostIds = chunk.postIds || [];
+                var pageExists = (feedLoadedPages || []).some(function(page) { return page && page.offset === chunk.offset; });
+                if (!pageExists) {
+                    feedLoadedPages = (feedLoadedPages || []).concat([{
+                        offset: chunk.offset,
+                        postIds: pagePostIds
+                    }]).sort(function(a, b) { return a.offset - b.offset; });
+                }
+                feedNextOffset = Math.max(feedNextOffset || 0, chunk.nextOffset || 0);
+                if (chunk.endReached) feedEndReached = true;
+            }
+
+            function hasActiveFeedFilters() {
+                var state = getPostSearchState();
+                return !!(state.keyword || state.user || state.startDate || state.endDate || state.onlyMine || (state.visibility && state.visibility !== "all"));
+            }
+
+            async function ensureFeedCoverageForVisibleSlice(minVisiblePosts, requestId) {
+                var target = Math.max(Number(minVisiblePosts) || 0, FEED_PAGE_SIZE);
+                var guard = 0;
+                while (!feedEndReached && guard < 12) {
+                    var filteredPosts = getFilteredPosts(feedAllPosts || [], feedAllComments || []);
+                    if (filteredPosts.length >= target) break;
+                    var chunk = await fetchFeedPageChunk(feedNextOffset, requestId);
+                    if (!chunk) return false;
+                    if (!chunk.posts.length) {
+                        feedEndReached = true;
+                        break;
+                    }
+                    mergeFeedPageIntoState(chunk);
+                    guard++;
+                }
+                writeFeedCacheSnapshot();
+                return true;
             }
 
             function syncPinnedPostIntoFeedState(serverPost) {
@@ -4325,6 +4496,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 if (forceRefresh) {
                     feedPage = 0;
                     feedEndReached = false;
+                    feedNextOffset = 0;
+                    feedLoadedPages = [];
                     feedAllPosts = [];
                     feedAllComments = [];
                     feedAllLikes = [];
@@ -4332,20 +4505,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 bindPostFilterEvents();
                 if (!forceRefresh) {
-                    var cached = localStorage.getItem(CACHE_KEY);
-                    if (cached) {
-                        try {
-                            var parsed = JSON.parse(cached);
-                            if (parsed && parsed.data && now - parsed.timestamp < CACHE_DURATION) {
-                                if (requestId !== feedLoadRequestId) return;
-                                feedAllPosts = normalizePosts(parsed.data.posts || []);
-                                feedAllComments = parsed.data.comments || [];
-                                feedAllLikes = parsed.data.likes || [];
-                                await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
-                                setupFeedInfiniteScroll();
-                                return;
-                            }
-                        } catch (e) {}
+                    var cached = readFeedSnapshotCache();
+                    if (cached && now - cached.timestamp < CACHE_DURATION) {
+                        if (requestId !== feedLoadRequestId) return;
+                        if (hydrateFeedStateFromSnapshot(cached)) {
+                            await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+                            setupFeedInfiniteScroll();
+                            return;
+                        }
                     }
                 }
                 var feed = document.getElementById("feed");
@@ -4353,32 +4520,17 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中..', '', 'feed');
                 }
                 try {
-                    var results = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
-                        sb.from("comments").select("*").order("created_at"),
-                        sb.from("likes").select("*")
-                    ]);
-                    var postRes = results[0];
-                    var commRes = results[1];
-                    var likeRes = results[2];
-                    if (postRes.error || commRes.error || likeRes.error) {
+                    if (!feedAllPosts.length) {
+                        var firstChunk = await fetchFeedPageChunk(feedNextOffset, requestId);
                         if (requestId !== feedLoadRequestId) return;
-                        var err = postRes.error || commRes.error || likeRes.error;
-                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败: ' + escapeHtml(err.message || "未知错误") + '</div>';
-                        return;
+                        if (!firstChunk) return;
+                        mergeFeedPageIntoState(firstChunk);
+                    }
+                    if (hasActiveFeedFilters()) {
+                        await ensureFeedCoverageForVisibleSlice(FEED_PAGE_SIZE, requestId);
                     }
                     if (requestId !== feedLoadRequestId) return;
-                    feedAllPosts = normalizePosts(postRes.data || []);
-                    feedAllComments = commRes.data || [];
-                    feedAllLikes = likeRes.data || [];
-                    localStorage.setItem(CACHE_KEY, JSON.stringify({
-                        data: {
-                            posts: feedAllPosts,
-                            comments: feedAllComments,
-                            likes: feedAllLikes
-                        },
-                        timestamp: now
-                    }));
+                    writeFeedCacheSnapshot();
                     await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
                     setupFeedInfiniteScroll();
                 } catch (e) {
@@ -4388,35 +4540,70 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             };
             window.loadFeed = loadFeed;
 
-            loadMoreFeedPosts = function() {
-                if (feedEndReached) return;
+            loadMoreFeedPosts = async function() {
+                if (feedPageFetchPending) return;
                 var feed = document.getElementById("feed");
-                var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
                 var startIdx = feedPage * FEED_PAGE_SIZE;
-                var endIdx = startIdx + FEED_PAGE_SIZE;
-                if (startIdx >= filteredPosts.length) {
-                    feedEndReached = true;
-                    var noMore = document.getElementById("feedNoMore");
-                    if (!noMore) {
-                        noMore = document.createElement("div");
-                        noMore.id = "feedNoMore";
-                        noMore.className = "loading";
-                        noMore.textContent = "没有鏇村帖子";
-                        noMore.style.padding = "30px";
-                        noMore.style.textAlign = "center";
-                        feed.appendChild(noMore);
+                feedPageFetchPending = true;
+                try {
+                    if (hasActiveFeedFilters()) {
+                        await ensureFeedCoverageForVisibleSlice(startIdx + FEED_PAGE_SIZE, feedLoadRequestId);
+                    } else if (!feedEndReached && (feedAllPosts || []).length < startIdx + FEED_PAGE_SIZE) {
+                        var chunk = await fetchFeedPageChunk(feedNextOffset, feedLoadRequestId);
+                        if (chunk && chunk.posts.length) {
+                            mergeFeedPageIntoState(chunk);
+                            writeFeedCacheSnapshot();
+                        } else {
+                            feedEndReached = true;
+                        }
                     }
-                    return;
+                    var filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                    var endIdx = startIdx + FEED_PAGE_SIZE;
+                    if (!feedEndReached && filteredPosts.length < endIdx) {
+                        await ensureFeedCoverageForVisibleSlice(endIdx, feedLoadRequestId);
+                        filteredPosts = getFilteredPosts(feedAllPosts, feedAllComments);
+                    }
+                    if (startIdx >= filteredPosts.length) {
+                        if (!feedEndReached) return;
+                        var noMore = document.getElementById("feedNoMore");
+                        if (!noMore) {
+                            noMore = document.createElement("div");
+                            noMore.id = "feedNoMore";
+                            noMore.className = "loading";
+                            noMore.textContent = "没有鏇村帖子";
+                            noMore.style.padding = "30px";
+                            noMore.style.textAlign = "center";
+                            feed.appendChild(noMore);
+                        }
+                        return;
+                    }
+                    var filteredPostIds = new Set();
+                    filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
+                    var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
+                    var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
+                    appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
+                    feedPage++;
+                    if (feedEndReached && endIdx >= filteredPosts.length) {
+                        var finalNoMore = document.getElementById("feedNoMore");
+                        if (!finalNoMore) {
+                            finalNoMore = document.createElement("div");
+                            finalNoMore.id = "feedNoMore";
+                            finalNoMore.className = "loading";
+                            finalNoMore.textContent = "没有鏇村帖子";
+                            finalNoMore.style.padding = "30px";
+                            finalNoMore.style.textAlign = "center";
+                            feed.appendChild(finalNoMore);
+                        }
+                    }
+                } finally {
+                    feedPageFetchPending = false;
                 }
-                var filteredPostIds = new Set();
-                filteredPosts.forEach(function(p) { filteredPostIds.add(String(p.id)); });
-                var scopedComments = getRenderableComments(feedAllComments, filteredPosts);
-                var scopedLikes = (feedAllLikes || []).filter(function(l) { return filteredPostIds.has(String(l.post_id)); });
-                appendMorePosts(filteredPosts.slice(startIdx, endIdx), scopedComments, scopedLikes);
-                feedPage++;
             };
 
             appendMorePosts = function(posts, comments, likes) {
+                if (!posts || !posts.length) return;
+                var noMore = document.getElementById("feedNoMore");
+                if (noMore) noMore.remove();
                 var feed = document.getElementById("feed");
                 var maps = buildPostMaps(getRenderableComments(comments, posts), likes);
                 var postsHtml = posts.map(function(post) {
@@ -4436,6 +4623,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
 
             renderFeedWithAvatars = function(visiblePosts, comments, likes) {
                 var feed = document.getElementById("feed");
+                var noMore = document.getElementById("feedNoMore");
+                if (noMore) noMore.remove();
                 var scopedComments = getRenderableComments(comments, visiblePosts);
                 var maps = buildPostMaps(scopedComments, likes);
                 var state = getPostSearchState();
@@ -4467,12 +4656,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 filteredPosts.forEach(function(post) { allUsers.add(post.user_name); });
                 visibleComments.forEach(function(comment) { allUsers.add(comment.user_name); });
                 var firstPage = filteredPosts.slice(0, FEED_PAGE_SIZE);
-                feedPage = 1;
-                feedEndReached = firstPage.length >= filteredPosts.length;
+                feedPage = firstPage.length ? 1 : 0;
                 renderFeedWithAvatars(firstPage, visibleComments, scopedLikes);
                 renderFilterSummary(filteredPosts.length);
-                
-                // 后台异步加载真实头像，不阻塞内容渲染
+
                 loadAvatarsForUsers(Array.from(allUsers)).then(function() {
                     var feedEl = document.getElementById('feed');
                     if (!feedEl) return;
@@ -4487,7 +4674,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         }
                     });
                 });
-                setTimeout(function() { prefetchStatData(); }, 1000);
             };
             window.renderFeed = renderFeed;
 
@@ -4907,7 +5093,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                         </div>
                     </div>
                     ${post.content ? `<div class="post-detail-content">${escapeHtml(post.content)}</div>` : ''}
-                    ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${escapeHtml(post.media_url)}" controls preload="none"></video>`:`<img src="${escapeHtml(post.media_url)}" onclick="openImageViewer('${safeJsStr(post.media_url)}')" loading="lazy" />`}</div>` : ''}
+                    ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${escapeHtml(post.media_url)}" controls preload="none"></video>`:`<img src="${escapeHtml(post.media_url)}" onclick="openImageViewer('${safeJsStr(post.media_url)}')" loading="lazy" decoding="async" fetchpriority="low" />`}</div>` : ''}
                     <div class="post-detail-stats">浏览 ${vc} 次 | 点赞 ${likes.length} 次 | 评论 ${comments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
@@ -6318,6 +6504,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 overlay.classList.add('active');
                 document.body.style.overflow = 'hidden';
                 showAnnouncementList();
+                if (announcements && announcements.length) {
+                    renderAnnouncementList();
+                }
                 await loadAnnouncements();
                 renderAnnouncementList();
 
@@ -7526,7 +7715,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             if (!currentUser) { showToast('请先登录'); return; }
             var overlay = document.getElementById('reportModal');
             if (!overlay) return;
-            ensureReportHistoryModal();
+            if (!window.__xtjReportModalPrimedV1) {
+                ensureReportHistoryModal();
+                bindReportViewButtons();
+                window.__xtjReportModalPrimedV1 = true;
+            }
             var triggerBtn = document.getElementById('reportRecordsToggleBtn');
             if (triggerBtn) {
                 triggerBtn.innerHTML = '📋 记录';
@@ -7550,7 +7743,6 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             overlay.classList.add('active');
             window.closeReportHistoryModal();
             syncReportModalBodyLock();
-            bindReportViewButtons();
             resetReportModalScroll();
             switchReportView('form');
             loadReportContentList();
@@ -7961,7 +8153,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var mediaHtml = normalizedPost.media_url ? (
                     normalizedPost.media_type === 'video'
                         ? '<video src="' + escapeHtml(normalizedPost.media_url) + '" controls preload="metadata" playsinline></video>'
-                        : '<img ' + detailMediaAttrs + ' src="' + escapeHtml(normalizedPost.media_url) + '" onclick="openImageViewer(\'' + safeJsStr(normalizedPost.media_url) + '\')" loading="lazy" />'
+                        : '<img ' + detailMediaAttrs + ' src="' + escapeHtml(normalizedPost.media_url) + '" onclick="openImageViewer(\'' + safeJsStr(normalizedPost.media_url) + '\')" loading="lazy" decoding="async" fetchpriority="low" />'
                 ) : '';
                 var visibilityLabel = normalizedPost.visibility === 'private' ? '私密' : '公开';
                 var contentText = String(normalizedPost.content || '').trim();
@@ -8127,7 +8319,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var clickAttr = onclick ? ' onclick="' + onclick + '"' : '';
                 var titleAttr = title ? ' title="' + escapeHtml(title) + '"' : '';
                 if (normalized.media_type === 'image') {
-                    return '<img class="' + thumbClass + '" src="' + escapeHtml(normalized.media_url) + '" alt="" loading="lazy"' + clickAttr + titleAttr + ' />';
+                    return '<img class="' + thumbClass + '" src="' + escapeHtml(normalized.media_url) + '" alt="" loading="lazy" decoding="async" fetchpriority="low"' + clickAttr + titleAttr + ' />';
                 }
                 if (normalized.media_type === 'video') {
                     return '<div class="' + thumbClass + ' ' + thumbClass + '--video"' + clickAttr + titleAttr + '>视频</div>';
@@ -8466,8 +8658,7 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var raw = localStorage.getItem(CACHE_KEY);
                     if (!raw) return null;
                     var parsed = JSON.parse(raw);
-                    if (!parsed || !parsed.data) return null;
-                    return parsed;
+                    return normalizeFeedSnapshotCache(parsed);
                 } catch (e) {
                     return null;
                 }
@@ -8685,15 +8876,14 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     } else {
                         var cachedFeed = readFeedSnapshotCache();
                         if (cachedFeed && cachedFeed.data) {
-                            usedFastSnapshot = true;
-                            feedAllPosts = normalizePosts(cachedFeed.data.posts || []);
-                            feedAllComments = cachedFeed.data.comments || [];
-                            feedAllLikes = cachedFeed.data.likes || [];
-                            await renderFeed({
-                                posts: feedAllPosts,
-                                comments: feedAllComments,
-                                likes: feedAllLikes
-                            });
+                            usedFastSnapshot = hydrateFeedStateFromSnapshot(cachedFeed);
+                            if (usedFastSnapshot) {
+                                await renderFeed({
+                                    posts: feedAllPosts,
+                                    comments: feedAllComments,
+                                    likes: feedAllLikes
+                                });
+                            }
                         }
                     }
                 }
