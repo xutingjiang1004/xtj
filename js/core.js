@@ -1831,18 +1831,19 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     var postText = normalized ? repairProfileActivityText(normalized.content || '') : '';
                     var commentText = repairProfileActivityText(item.content || '');
                     var titlePrefix = isLikes ? '点赞了这条帖子' : '评论了这条帖子';
-                    var inlineSummary = !hasMedia && summary && summary !== '无文字内容'
-                        ? '<span class="profile-activity-inline-summary">' + escapeHtml(summary) + '</span>'
-                        : '';
-                    var extraNote = '';
+                    var noteParts = [];
                     if (!isLikes && commentText) {
-                        extraNote = '<div class="profile-activity-note">我的评论：' + escapeHtml(commentText) + '</div>';
-                    } else if (hasMedia && postText) {
-                        extraNote = '<div class="profile-activity-note">' + escapeHtml(postText.length > 36 ? postText.slice(0, 36) + '...' : postText) + '</div>';
-                    } else if (!hasMedia && summary === '无文字内容') {
-                        extraNote = '<div class="profile-activity-note">原帖没有文字内容</div>';
-                    } else if (!hasMedia && summary && summary !== '无文字内容') {
-                        extraNote = '<div class="profile-activity-note">' + escapeHtml(summary) + '</div>';
+                        noteParts.push('<div class="profile-activity-note profile-activity-note--accent">我的评论：' + escapeHtml(commentText) + '</div>');
+                    }
+                    if (hasMedia && postText) {
+                        noteParts.push('<div class="profile-activity-note">原帖：' + escapeHtml(postText.length > 48 ? postText.slice(0, 48) + '...' : postText) + '</div>');
+                    } else if (summary === '无文字内容') {
+                        noteParts.push('<div class="profile-activity-note">原帖没有文字内容</div>');
+                    } else if (summary) {
+                        noteParts.push('<div class="profile-activity-note">原帖：' + escapeHtml(summary) + '</div>');
+                    }
+                    if (!noteParts.length) {
+                        noteParts.push('<div class="profile-activity-note">原帖已不可用</div>');
                     }
                     var actionHtml = isLikes
                         ? '<button type="button" class="profile-activity-btn is-danger" onclick="event.stopPropagation();unlikeFromProfile(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">取消点赞</button>'
@@ -1853,10 +1854,8 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     return [
                         '<article class="profile-activity-item' + (hasMedia ? ' has-media' : ' no-media') + (canOpenPost ? '' : ' is-disabled') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 28, 180) + 'ms;">',
                         '<div class="profile-activity-main">',
-                        '<div class="profile-activity-body">',
-                        '<div class="profile-activity-title">' + escapeHtml(titlePrefix) + inlineSummary + '</div>',
-                        extraNote,
-                        '</div>',
+                        '<div class="profile-activity-title">' + escapeHtml(titlePrefix) + '</div>',
+                        '<div class="profile-activity-body">' + noteParts.join('') + '</div>',
                         '</div>',
                         hasMedia ? '<div class="profile-activity-media-col">' + mediaHtml + '</div>' : '',
                         '<div class="profile-activity-side"><span class="profile-activity-time">' + new Date(item.created_at).toLocaleString() + '</span><div class="profile-activity-actions">' + actionHtml + '</div></div>',
@@ -8498,11 +8497,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 body.innerHTML = history.map(function(v, index) {
                     var post = postMap[String(v.post_id)] || null;
                     var detailOnclick = post ? "openStatPostDetail('" + safeJsStr(String(post.id)) + "')" : '';
-                    var mediaOnclick = post ? "openStatPostMedia('" + safeJsStr(String(post.id)) + "')" : '';
+                    var mediaOnclick = post ? "event.stopPropagation();openStatPostMedia('" + safeJsStr(String(post.id)) + "')" : '';
                     var mediaHtml = post ? statMediaThumbMarkup(post, 'stat-record-thumb', mediaOnclick, post.media_type === 'video' ? '点击查看视频' : '点击全屏预览') : '';
                     var postText = post ? statPostSummary(post, 'bracket') : (v.post_content || '（内容已不可用）');
                     return [
-                        '<article class="stat-view-item stat-row' + (mediaHtml ? '' : ' stat-row--no-media') + '" ' + (post ? 'role="button" tabindex="0" onclick="' + detailOnclick + '"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 32, 220) + 'ms;">',
+                        '<article class="stat-view-item stat-row' + (mediaHtml ? '' : ' stat-row--no-media') + '" ' + (post ? 'role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 32, 220) + 'ms;">',
                         statMediaColumnMarkup(mediaHtml),
                         '<div class="stat-row-main">',
                         '<div class="stat-row-title">' + escapeHtml(v.user_name) + ' 浏览了 ' + escapeHtml(v.post_author || '') + ' 的帖子</div>',
