@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
 
 
@@ -5446,6 +5446,13 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
             let lastTabTapTime = {};
             let lastTabTapCount = {};
             let isRefreshing = {};
+            function _dockSlotWidth() {
+                var db = document.getElementById('dockBar');
+                if (!db) return 72;
+                var tabs = db.querySelectorAll('.dock-tab');
+                if (!tabs.length) return 72;
+                return db.getBoundingClientRect().width / tabs.length;
+            }
             function syncDockIndicator() {
                 var dockBar = document.getElementById('dockBar');
                 var indicator = document.getElementById('dockIndicator');
@@ -5457,9 +5464,11 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 }
                 var barRect = dockBar.getBoundingClientRect();
                 var btnRect = activeBtn.getBoundingClientRect();
-                indicator.style.width = btnRect.width + 'px';
+                var w = _dockSlotWidth();
+                indicator.style.width = w + 'px';
                 indicator.style.height = btnRect.height + 'px';
-                indicator.style.transform = 'translate3d(' + (btnRect.left - barRect.left) + 'px,' + (btnRect.top - barRect.top) + 'px,0)';
+                var cx = btnRect.left - barRect.left + (btnRect.width - w) / 2;
+                indicator.style.transform = 'translate3d(' + cx + 'px,' + (btnRect.top - barRect.top) + 'px,0)';
                 indicator.style.opacity = '1';
             }
             window.syncDockIndicator = syncDockIndicator;
@@ -5474,9 +5483,10 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                 var indicatorRect = indicator.getBoundingClientRect();
                 var activeBtn = dockBar.querySelector('.dock-tab.active') || dockBar.querySelector('.dock-tab[data-tab="' + currentDockTab + '"]') || dockTabs[0];
                 var activeRect = activeBtn.getBoundingClientRect();
+                var slotW = _dockSlotWidth();
                 var currentX = indicatorRect.width
                     ? (indicatorRect.left - barRect.left)
-                    : (activeRect.left - barRect.left);
+                    : (activeRect.left - barRect.left + (activeRect.width - slotW) / 2);
                 return {
                     dockBar: dockBar,
                     indicator: indicator,
@@ -5484,9 +5494,9 @@ window.safeLocalStorageGetJSON = function(key, fallback) {
                     barRect: barRect,
                     currentX: currentX,
                     currentY: activeRect.top - barRect.top,
-                    currentWidth: indicatorRect.width || activeRect.width,
+                    currentWidth: slotW,
                     currentHeight: indicatorRect.height || activeRect.height,
-                    maxX: Math.max(0, barRect.width - (indicatorRect.width || activeRect.width))
+                    maxX: Math.max(0, barRect.width - slotW)
                 };
             }
 
