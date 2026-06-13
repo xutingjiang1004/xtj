@@ -55,43 +55,51 @@
             opacity: 0;
             z-index: 0 !important;
             overflow: hidden !important;
+            isolation: isolate;
 
             background:
                 radial-gradient(
-                    circle at 18% 20%,
-                    rgba(255, 255, 255, 0.92) 0%,
-                    rgba(255, 255, 255, 0.42) 23%,
-                    rgba(255, 255, 255, 0.08) 44%,
-                    transparent 62%
+                    ellipse at 50% 52%,
+                    rgba(255, 255, 255, 0.18) 0%,
+                    rgba(255, 255, 255, 0.12) 38%,
+                    rgba(255, 255, 255, 0.28) 68%,
+                    rgba(255, 255, 255, 0.48) 100%
                 ),
                 radial-gradient(
-                    circle at 88% 78%,
-                    rgba(123, 220, 210, 0.22) 0%,
-                    rgba(123, 220, 210, 0.10) 28%,
-                    transparent 56%
+                    ellipse at 18% 50%,
+                    rgba(182, 255, 236, 0.46) 0%,
+                    rgba(182, 255, 236, 0.18) 28%,
+                    rgba(182, 255, 236, 0.00) 58%
+                ),
+                radial-gradient(
+                    ellipse at 84% 48%,
+                    rgba(160, 215, 255, 0.42) 0%,
+                    rgba(160, 215, 255, 0.16) 30%,
+                    rgba(160, 215, 255, 0.00) 60%
                 ),
                 linear-gradient(
                     180deg,
-                    rgba(255, 255, 255, 0.82) 0%,
-                    rgba(255, 255, 255, 0.56) 42%,
-                    rgba(242, 252, 255, 0.36) 100%
+                    rgba(255, 255, 255, 0.42) 0%,
+                    rgba(255, 255, 255, 0.14) 44%,
+                    rgba(188, 238, 232, 0.20) 100%
                 ) !important;
 
-            border: 1px solid rgba(255, 255, 255, 0.82) !important;
+            border: 1px solid rgba(255, 255, 255, 0.58) !important;
 
             box-shadow:
-                0 18px 42px rgba(80, 140, 160, 0.18),
-                0 7px 18px rgba(80, 140, 160, 0.10),
-                0 1px 2px rgba(255, 255, 255, 0.72),
-                inset 0 1px 1px rgba(255, 255, 255, 0.96),
-                inset 0 -10px 22px rgba(90, 170, 190, 0.12),
-                inset 0 0 20px rgba(255, 255, 255, 0.44) !important;
+                0 16px 34px rgba(70, 130, 150, 0.16),
+                0 5px 12px rgba(70, 130, 150, 0.10),
+                inset 0 1px 1.5px rgba(255, 255, 255, 0.88),
+                inset 0 -1px 2px rgba(40, 110, 130, 0.12),
+                inset 10px 0 18px rgba(255, 255, 255, 0.22),
+                inset -10px 0 18px rgba(255, 255, 255, 0.18),
+                inset 0 -14px 24px rgba(80, 175, 180, 0.13) !important;
 
-            outline: 1px solid rgba(255, 255, 255, 0.34);
+            outline: 1px solid rgba(255, 255, 255, 0.24);
             outline-offset: -2px;
 
-            backdrop-filter: blur(24px) saturate(185%) !important;
-            -webkit-backdrop-filter: blur(24px) saturate(185%) !important;
+            backdrop-filter: blur(18px) saturate(210%) contrast(1.08) brightness(1.04) !important;
+            -webkit-backdrop-filter: blur(18px) saturate(210%) contrast(1.08) brightness(1.04) !important;
 
             transition:
                 transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
@@ -113,49 +121,53 @@
 
             background:
                 radial-gradient(
-                    ellipse at 12% 50%,
-                    rgba(255, 255, 255, 0.86) 0%,
-                    rgba(255, 255, 255, 0.38) 24%,
-                    rgba(255, 255, 255, 0) 52%
+                    ellipse at 8% 50%,
+                    rgba(255, 255, 255, 0.88) 0%,
+                    rgba(205, 255, 246, 0.46) 16%,
+                    rgba(205, 255, 246, 0.10) 38%,
+                    rgba(255, 255, 255, 0) 62%
                 ),
                 radial-gradient(
-                    ellipse at 88% 50%,
+                    ellipse at 94% 50%,
                     rgba(255, 255, 255, 0.78) 0%,
-                    rgba(255, 255, 255, 0.32) 26%,
-                    rgba(255, 255, 255, 0) 54%
+                    rgba(174, 220, 255, 0.42) 18%,
+                    rgba(174, 220, 255, 0.10) 40%,
+                    rgba(255, 255, 255, 0) 64%
                 ),
-                linear-gradient(
-                    180deg,
-                    rgba(255, 255, 255, 0.56) 0%,
-                    rgba(255, 255, 255, 0.10) 58%,
-                    rgba(255, 255, 255, 0.26) 100%
+                radial-gradient(
+                    ellipse at 50% 108%,
+                    rgba(76, 190, 184, 0.22) 0%,
+                    rgba(76, 190, 184, 0.10) 36%,
+                    rgba(76, 190, 184, 0) 70%
                 ) !important;
 
             box-shadow:
-                inset 8px 0 14px rgba(255, 255, 255, 0.38),
-                inset -8px 0 14px rgba(255, 255, 255, 0.32),
-                inset 0 -8px 18px rgba(80, 170, 190, 0.10) !important;
+                inset 12px 0 18px rgba(255, 255, 255, 0.34),
+                inset -12px 0 18px rgba(255, 255, 255, 0.28),
+                inset 0 8px 10px rgba(255, 255, 255, 0.24),
+                inset 0 -10px 18px rgba(54, 150, 170, 0.12) !important;
 
-            opacity: 0.92 !important;
+            mix-blend-mode: screen;
+            opacity: 0.88 !important;
         }
 
         .dock-bar > .dock-indicator::after {
-            left: 14%;
-            right: 14%;
-            top: 7px;
-            height: 38%;
+            left: 18%;
+            right: 18%;
+            top: 5px;
+            height: 24%;
 
             background:
                 linear-gradient(
                     180deg,
                     rgba(255, 255, 255, 0.86) 0%,
-                    rgba(255, 255, 255, 0.28) 48%,
-                    rgba(255, 255, 255, 0.04) 100%
+                    rgba(255, 255, 255, 0.42) 42%,
+                    rgba(255, 255, 255, 0.00) 100%
                 ) !important;
 
             border-radius: 999px;
-            filter: blur(0.35px);
-            opacity: 0.76 !important;
+            filter: blur(0.45px);
+            opacity: 0.68 !important;
         }
 
         .dock-tab[data-tab="ai"] .dt-icon .dt-svg {
