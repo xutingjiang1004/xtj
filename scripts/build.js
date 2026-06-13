@@ -9,6 +9,10 @@ const JS_FILES = [
   'js/core.js',
   'js/performance.js',
   'js/features.js',
+  'js/core-animations.js',
+  'js/ui-effects.js',
+  'js/pro-upgrade.js',
+  'js/photo-wall/upload-ui.js',
   'js/photo-wall/data.js',
   'js/photo-wall/render.js',
   'js/photo-wall/upload.js',
@@ -17,7 +21,10 @@ const JS_FILES = [
   'js/admin/admin.js'
 ];
 
-const CSS_FILE = 'css/style.css';
+const CSS_FILES = [
+  'css/style.css',
+  'css/ui-enhance.css'
+];
 
 function minifyJS(filePath) {
   const fullPath = path.resolve(ROOT, filePath);
@@ -92,6 +99,6 @@ JS_FILES.forEach(minifyJS);
 
 // Minify CSS
 console.log('\n--- Minifying CSS ---');
-minifyCSS(CSS_FILE);
+CSS_FILES.forEach(minifyCSS);
 
 console.log('\n=== Build Complete ===');
