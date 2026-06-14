@@ -947,7 +947,7 @@
         .media img { cursor: pointer; }
 
         .post-stats-text { font-size: 12px; color: var(--text-muted); margin-bottom: 12px; display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
-        .post-stats-visibility { display:inline-flex; align-items:center; justify-content:center; min-height:20px; padding:0 8px; margin-left:4px; border-radius:999px; font-size:11px; font-weight:600; border:1px solid rgba(128, 184, 148, 0.24); background:rgba(255,255,255,0.42); }
+        .post-stats-visibility { display:none !important; }
         .post-stats-visibility-public { color:#2b7a57; }
         .post-stats-visibility-private { color:#8a5a22; }
 
@@ -12542,6 +12542,7 @@ html.xtj-pro-active .action-btn.liked {
 #statRecordsModal .stat-record-entry {
   width: 100% !important;
   min-height: 0 !important;
+  display: block !important;
   padding: 16px !important;
   border: 1px solid rgba(194, 224, 205, 0.82) !important;
   border-radius: 22px !important;
@@ -12572,9 +12573,10 @@ html.xtj-pro-active .action-btn.liked {
 #statModal .stat-record-entry .stat-row-main,
 #statModal .stat-view-item .stat-row-main,
 #statRecordsModal .stat-record-entry .stat-row-main {
+  width: 100% !important;
   min-width: 0 !important;
   display: grid !important;
-  gap: 10px !important;
+  gap: 12px !important;
 }
 
 #profileActivityModal .stat-row-title,
@@ -12614,6 +12616,15 @@ html.xtj-pro-active .action-btn.liked {
   word-break: break-word !important;
 }
 
+#profileActivityModal .stat-record-summary,
+#statModal .stat-record-summary,
+#statRecordsModal .stat-record-summary {
+  color: #214633 !important;
+  font-size: 14px !important;
+  line-height: 1.68 !important;
+  font-weight: 600 !important;
+}
+
 #profileActivityModal .stat-record-note,
 #statModal .stat-record-note,
 #statRecordsModal .stat-record-note {
@@ -12626,6 +12637,13 @@ html.xtj-pro-active .action-btn.liked {
   filter: none !important;
 }
 
+#profileActivityModal .stat-record-note strong,
+#statModal .stat-record-note strong,
+#statRecordsModal .stat-record-note strong {
+  color: #1f6e4d !important;
+  font-weight: 800 !important;
+}
+
 #profileActivityModal .stat-record-note:first-child,
 #statModal .stat-record-note:first-child,
 #statRecordsModal .stat-record-note:first-child {
@@ -12636,7 +12654,6 @@ html.xtj-pro-active .action-btn.liked {
 #profileActivityModal .stat-row-media,
 #statModal .stat-row-media,
 #statRecordsModal .stat-row-media {
-  margin-top: 12px !important;
   display: flex !important;
   justify-content: flex-start !important;
   align-items: center !important;
@@ -12655,14 +12672,14 @@ html.xtj-pro-active .action-btn.liked {
 #statModal .stat-record-entry .stat-row-side,
 #statModal .stat-view-item .stat-row-side,
 #statRecordsModal .stat-record-entry .stat-row-side {
-  margin-top: 12px !important;
   min-width: 0 !important;
   width: 100% !important;
   display: flex !important;
-  align-items: center !important;
+  align-items: flex-end !important;
   justify-content: space-between !important;
   gap: 12px !important;
   flex-wrap: wrap !important;
+  padding-top: 2px !important;
 }
 
 #profileActivityModal .stat-row-time,
@@ -12679,6 +12696,16 @@ html.xtj-pro-active .action-btn.liked {
   filter: none !important;
 }
 
+#profileActivityModal .stat-row-actions,
+#statModal .stat-row-actions,
+#statRecordsModal .stat-row-actions {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+
 #statModal .stat-record-entry .stat-row-side .stat-record-action,
 #statModal .stat-view-item .stat-row-side .stat-record-action,
 #profileActivityModal .stat-record-entry .stat-row-side .stat-record-action,
@@ -12688,8 +12715,8 @@ html.xtj-pro-active .action-btn.liked {
 
 #profileActivityModal .stat-row-side {
   display: flex !important;
-  justify-content: flex-end !important;
-  gap: 8px !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
   flex-wrap: wrap !important;
 }
 
@@ -12783,6 +12810,13 @@ html.xtj-pro-active .action-btn.liked {
   #statRecordsModal .stat-record-entry .stat-row-side {
     align-items: flex-start !important;
     flex-direction: column !important;
+  }
+
+  #profileActivityModal .stat-row-actions,
+  #statModal .stat-row-actions,
+  #statRecordsModal .stat-row-actions {
+    width: 100% !important;
+    justify-content: flex-start !important;
   }
 
   #profileActivityModal .profile-activity-actions,

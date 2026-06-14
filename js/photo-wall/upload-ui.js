@@ -12,8 +12,10 @@
     postPublishing: false,
     postPreviewMode: false,
     photoWallImagePreviewMode: false,
+    photoWallVideoPreviewMode: false,
     savedPwCurrentSortedPhotos: null,
-    restoreTimer: null
+    restoreTimer: null,
+    activePhotoWallVideoItem: null
   };
 
   var TIMEOUTS = {
@@ -29,7 +31,23 @@
   var MAX_VIDEO_BYTES = 10 * 1024 * 1024;
   var SOFT_VIDEO_LIMIT_BYTES = 10 * 1024 * 1024;
   var HARD_VIDEO_LIMIT_BYTES = 200 * 1024 * 1024;
-  var VIDEO_COMPRESS_ERROR = 'Unable to compress this video to a smaller size. Please try a shorter video.';
+  var VIDEO_COMPRESS_ERROR = '这个视频暂时无法压缩到更小体积，请换一个更短或更小的视频。';
+  var VIDEO_CARD_FALLBACK_THUMB = 'data:image/svg+xml;utf8,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">' +
+      '<defs>' +
+        '<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">' +
+          '<stop offset="0%" stop-color="#edfdf6"/>' +
+          '<stop offset="55%" stop-color="#eaf6ff"/>' +
+          '<stop offset="100%" stop-color="#dff4eb"/>' +
+        '</linearGradient>' +
+      '</defs>' +
+      '<rect width="640" height="640" rx="44" fill="url(#bg)"/>' +
+      '<rect x="162" y="154" width="316" height="332" rx="38" fill="rgba(255,255,255,0.7)"/>' +
+      '<path d="M284 240L396 320L284 400Z" fill="#29a391"/>' +
+      '<rect x="40" y="40" width="112" height="42" rx="21" fill="rgba(42,88,72,0.56)"/>' +
+      '<text x="96" y="68" text-anchor="middle" font-size="28" font-family="Arial,sans-serif" font-weight="700" fill="#ffffff">视频</text>' +
+    '</svg>'
+  );
 
   function isImageFile(file) {
     return !!(file && /^image\//.test(file.type || ''));
@@ -90,7 +108,7 @@
       return true;
     }
     if (storedCount >= DAILY_LIMIT) {
-      throw new Error('Daily upload limit reached (' + DAILY_LIMIT + '). Upgrade to Pro for unlimited uploads.');
+      throw new Error('今日上传次数已达上限（' + DAILY_LIMIT + ' 次），开通 Pro 可解锁更多上传次数。');
     }
     return true;
   }
@@ -220,6 +238,11 @@
       '.btn-primary.is-loading::after{content:"";display:inline-block;width:14px;height:14px;margin-left:8px;border-radius:50%;border:2px solid rgba(255,255,255,.34);border-top-color:#fff;vertical-align:-2px;animation:xtjUploadSpin .85s linear infinite;}',
       '.pp-compact-btn,#ppCompactBtn{display:none!important;}',
       '.pp-post-mode .pp-delete-btn,.pp-post-mode #ppDeleteBtn{display:none!important;}',
+      '#photoPreviewOverlay.pp-video-mode #ppSlideTrack{display:none!important;}',
+      '#photoPreviewOverlay .pp-video-stage{display:none;align-items:center;justify-content:center;width:100%;height:100%;padding:24px;}',
+      '#photoPreviewOverlay.pp-video-mode .pp-video-stage{display:flex;}',
+      '#photoPreviewOverlay .pp-video-player{display:block;max-width:min(100%,1100px);max-height:min(82vh,100%);width:auto;height:auto;border-radius:28px;background:#071012;box-shadow:0 24px 60px rgba(10,26,28,0.28);}',
+      '#photoPreviewOverlay.pp-video-mode .pp-nav-arrow,#photoPreviewOverlay.pp-video-mode #ppZoomOutBtn,#photoPreviewOverlay.pp-video-mode #ppZoomInBtn,#photoPreviewOverlay.pp-video-mode #ppRotateBtn{display:none!important;}',
       '@keyframes xtjUploadSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}',
       '@keyframes xtjUploadFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-3px);}}',
       '@keyframes xtjUploadGlow{0%,100%{opacity:.88;}50%{opacity:1;}}',
@@ -251,13 +274,13 @@
       '      </svg>',
       '    </div>',
       '    <div class="pw-upload-progress-copy">',
-      '      <div class="pw-upload-progress-title" id="pwUploadProgressTitle">Preparing Upload</div>',
+      '      <div class="pw-upload-progress-title" id="pwUploadProgressTitle">准备上传</div>',
       '      <div class="pw-upload-progress-text" id="pwUploadProgressText">0%</div>',
-      '      <div class="pw-upload-progress-status" id="pwUploadProgressStatus">Preparing upload...</div>',
+      '      <div class="pw-upload-progress-status" id="pwUploadProgressStatus">正在整理本次上传内容...</div>',
       '    </div>',
       '  </div>',
       '  <div class="pw-upload-local-bar-wrap"><div class="pw-upload-progress-bar" id="pwUploadProgressBar" style="width:0%"></div></div>',
-      '  <div class="pw-upload-queue-head"><span>Upload Queue</span><span id="pwUploadQueueCount">0 items</span></div>',
+      '  <div class="pw-upload-queue-head"><span>媒体队列</span><span id="pwUploadQueueCount">0 项</span></div>',
       '  <div class="pw-upload-queue" id="pwUploadQueuePreview"></div>',
       '</div>'
     ].join('');
@@ -281,7 +304,7 @@
     ensureOverlayAtBody();
     overlay.style.display = 'flex';
     overlay.classList.add('upload-overlay-visible');
-    setProgress(0, 'Preparing Upload', 'Checking media and building upload queue...');
+    setProgress(0, '准备上传', '正在检查媒体并生成上传队列...');
   }
 
   function hideProgress() {
@@ -289,7 +312,7 @@
     if (!overlay) return;
     overlay.classList.remove('upload-overlay-visible');
     overlay.style.display = 'none';
-    setProgress(0, 'Preparing Upload', 'Checking media and building upload queue...');
+    setProgress(0, '准备上传', '正在检查媒体并生成上传队列...');
     revokeUrls('queueUrls');
   }
 
@@ -317,7 +340,7 @@
     node.className = className;
     if (bucketKey && Array.isArray(state[bucketKey])) state[bucketKey].push(url);
     if (isVideoFile(file)) {
-      node.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="pw-upload-media-kind">Video</span><span class="pw-upload-media-duration"></span>';
+      node.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="pw-upload-media-kind">视频</span><span class="pw-upload-media-duration"></span>';
       var mediaEl = node.querySelector('video');
       var durationEl = node.querySelector('.pw-upload-media-duration');
       if (mediaEl && durationEl) {
@@ -344,7 +367,7 @@
     if (!queue || !count) return;
     queue.innerHTML = '';
     var list = Array.prototype.slice.call(files || []);
-    count.textContent = list.length + ' items';
+    count.textContent = list.length + ' 项';
     var shown = Math.min(list.length, 5);
     for (var i = 0; i < shown; i++) {
       queue.appendChild(makeThumb(list[i], 'pw-upload-queue-thumb', '', 'queueUrls'));
@@ -370,11 +393,11 @@
     for (var i = 0; i < list.length; i++) {
       grid.appendChild(makeThumb(list[i], 'pw-upload-sheet-thumb', String(i + 1), 'photoUrls'));
     }
-    count.textContent = list.length + ' items';
-    if (title) title.textContent = 'Ready to upload';
+    count.textContent = list.length + ' 项';
+    if (title) title.textContent = '准备上传';
     meta.textContent = list.length > 1
-      ? 'Images and videos will upload in order.'
-      : 'Upload will start immediately after confirmation.';
+      ? '图片和视频会按当前顺序依次上传。'
+      : '确认后会立即开始上传。';
     sheet.classList.add('active');
     sheet.setAttribute('aria-hidden', 'false');
   }
@@ -390,7 +413,7 @@
     if (!list.length) {
       preview.style.display = 'none';
       preview.classList.remove('is-active');
-      count.textContent = 'Selected 0 items';
+      count.textContent = '已选择 0 项';
       return;
     }
     var shown = Math.min(list.length, 10);
@@ -401,7 +424,7 @@
       var thumb = document.createElement('div');
       thumb.className = 'post-media-preview-thumb';
       if (/^video\//.test(file.type)) {
-        thumb.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="post-media-preview-tag">Video</span>';
+        thumb.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="post-media-preview-tag">视频</span>';
       } else {
         thumb.innerHTML = '<img src="' + url + '" alt="' + (file.name || '') + '">';
       }
@@ -413,7 +436,7 @@
       more.textContent = '+' + (list.length - shown);
       grid.appendChild(more);
     }
-    count.textContent = 'Selected ' + list.length + ' items';
+    count.textContent = '已选择 ' + list.length + ' 项';
     preview.style.display = 'block';
     requestAnimationFrame(function() {
       preview.classList.add('is-active');
@@ -427,8 +450,8 @@
     if (btn) {
       btn.disabled = true;
       btn.classList.add('is-loading');
-      btn.dataset.xtjLabel = btn.textContent || 'Publish';
-      btn.textContent = label || 'Publishing...';
+      btn.dataset.xtjLabel = btn.textContent || '发布动态';
+      btn.textContent = label || '发布中...';
     }
   }
 
@@ -439,7 +462,7 @@
     if (btn) {
       btn.disabled = false;
       btn.classList.remove('is-loading');
-      btn.textContent = btn.dataset.xtjLabel || 'Publish';
+      btn.textContent = btn.dataset.xtjLabel || '发布动态';
     }
   }
 
@@ -630,9 +653,21 @@
       canvas.height = Math.max(1, Math.round(height * ratio));
       var ctx = canvas.getContext('2d');
       if (!ctx) throw new Error('poster_context_failed');
-      var targetTime = metadata.duration > 1 ? Math.min(metadata.duration * 0.35, metadata.duration - 0.2) : 0;
-      await waitForSeek(video, targetTime);
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      var candidates = [0];
+      if (metadata.duration > 0.12) candidates.push(Math.min(0.12, Math.max(metadata.duration - 0.04, 0)));
+      if (metadata.duration > 0.45) candidates.push(Math.min(metadata.duration * 0.08, metadata.duration - 0.12));
+      if (metadata.duration > 1) candidates.push(Math.min(metadata.duration * 0.35, metadata.duration - 0.2));
+      var drawn = false;
+      for (var i = 0; i < candidates.length; i++) {
+        try {
+          await waitForSeek(video, candidates[i]);
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          drawn = true;
+          break;
+        } catch (_) {}
+      }
+      if (!drawn) throw new Error('poster_frame_failed');
       var blob = await new Promise(function(resolve) {
         canvas.toBlob(function(nextBlob) {
           resolve(nextBlob || null);

@@ -1866,11 +1866,11 @@ window.safeLocalStorageSet = function(key, value) {
                     var commentText = repairProfileActivityText(item.content || '');
                     var noteHtml = '';
                     if (!isLikes && commentText) {
-                        noteHtml = '<div class="stat-record-note">我的评论：' + escapeHtml(commentText) + '</div>';
+                        noteHtml = '<div class="stat-record-note"><strong>我的评论：</strong>' + escapeHtml(commentText) + '</div>';
                     } else if (isLikes && post) {
                         var postText = normalized ? repairProfileActivityText(normalized.content || '') : '';
                         if (postText) {
-                            noteHtml = '<div class="stat-record-note">' + escapeHtml(postText.length > 36 ? postText.slice(0, 36) + '...' : postText) + '</div>';
+                            noteHtml = '<div class="stat-record-note"><strong>原帖内容：</strong>' + escapeHtml(postText.length > 52 ? postText.slice(0, 52) + '...' : postText) + '</div>';
                         }
                     }
                     var actionHtml = isLikes
@@ -1881,12 +1881,12 @@ window.safeLocalStorageSet = function(key, value) {
                         : '';
                     return [
                         '<article class="stat-record-entry stat-row ' + (isLikes ? 'stat-like-item' : 'stat-comment-item') + (mediaHtml ? '' : ' stat-row--no-media') + (canOpenPost ? '' : ' is-disabled') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 26, 220) + 'ms;">',
-                        (mediaHtml ? '<div class="stat-row-media">' + mediaHtml + '</div>' : ''),
                         '<div class="stat-row-main">',
-                        '<div class="stat-row-title">' + escapeHtml(currentUser.user_metadata?.full_name || currentUser.email || '我') + (isLikes ? ' 点赞了：' : ' 评论了：') + '</div>',
-                        '<div class="stat-row-copy">' + escapeHtml(summary) + noteHtml + '</div>',
+                        '<div class="stat-row-title">' + escapeHtml(currentUser.user_metadata?.full_name || currentUser.email || '我') + (isLikes ? ' 点赞了这条帖子' : ' 评论了这条帖子') + '</div>',
+                        '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(summary) + '</div>' + noteHtml + '</div>',
+                        (mediaHtml ? '<div class="stat-row-media">' + mediaHtml + '</div>' : ''),
+                        '<div class="stat-row-side"><span class="stat-row-time">' + new Date(item.created_at).toLocaleString() + '</span><div class="stat-row-actions">' + actionHtml + '</div></div>',
                         '</div>',
-                        '<div class="stat-row-side"><span class="stat-row-time">' + new Date(item.created_at).toLocaleString() + '</span>' + actionHtml + '</div>',
                         '</article>'
                     ].join('');
                 }).join('');
@@ -2580,11 +2580,83 @@ function renderProfileActivityList(kind) {
             // 用 window 挂载，确保不同 IIFE 共享
             if (typeof window.__xtjDeleteInProgress === 'undefined') window.__xtjDeleteInProgress = false;
             if (typeof window.__xtjDeleteStartTime === 'undefined') window.__xtjDeleteStartTime = 0;
+            if (!window.__xtjDeleteSession) {
+                window.__xtjDeleteSession = {
+                    timeoutId: null,
+                    postId: null,
+                    ownerKey: null,
+                    postEl: null,
+                    originalOpacity: '',
+                    originalPointerEvents: '',
+                    originalFilter: ''
+                };
+            }
+            function getDeleteSession() {
+                return window.__xtjDeleteSession;
+            }
+            function restoreDeleteTargetVisual() {
+                var session = getDeleteSession();
+                if (!session.postEl) return;
+                try { session.postEl.style.opacity = session.originalOpacity || ''; } catch (e) {}
+                try { session.postEl.style.pointerEvents = session.originalPointerEvents || ''; } catch (e) {}
+                try { session.postEl.style.filter = session.originalFilter || ''; } catch (e) {}
+                session.postEl = null;
+                session.originalOpacity = '';
+                session.originalPointerEvents = '';
+                session.originalFilter = '';
+            }
+            function resetDeleteButtonState() {
+                var btn = document.getElementById("delBtn");
+                if (!btn) return;
+                try { btn.disabled = false; } catch (e) {}
+                try { btn.textContent = "确认删除"; } catch (e) {}
+            }
+            function cleanupDeleteSession(options) {
+                var opts = options || {};
+                var session = getDeleteSession();
+                if (session.timeoutId) {
+                    clearTimeout(session.timeoutId);
+                    session.timeoutId = null;
+                }
+                if (opts.restoreVisual !== false) {
+                    restoreDeleteTargetVisual();
+                } else {
+                    session.postEl = null;
+                    session.originalOpacity = '';
+                    session.originalPointerEvents = '';
+                    session.originalFilter = '';
+                }
+                if (opts.hideModal !== false) {
+                    var modalEl = document.getElementById("delModal");
+                    if (modalEl) modalEl.classList.remove("active");
+                }
+                if (opts.resetTarget !== false) {
+                    delPostId = null;
+                    delOwnerKey = null;
+                    session.postId = null;
+                    session.ownerKey = null;
+                }
+                resetDeleteButtonState();
+                window.__xtjDeleteInProgress = false;
+                window.__xtjDeleteStartTime = 0;
+                if (opts.toast && typeof showToast === 'function') {
+                    showToast(opts.toast);
+                }
+            }
+            function findPostCardElement(postId) {
+                return document.querySelector('.post[data-post-id="' + postId + '"]');
+            }
+            function removeDeletedPostFromFeed(postId) {
+                if (!Array.isArray(feedAllPosts)) return;
+                feedAllPosts = feedAllPosts.filter(function(post) {
+                    return String(post.id) !== String(postId);
+                });
+            }
             window.openDelete = function (postId, ownerKey) {
                 // ★ 入口强制解锁：超过 12 秒仍处于 in-progress 状态，强制重置（防卡死兜底）
                 if (window.__xtjDeleteInProgress && Date.now() - window.__xtjDeleteStartTime > 12000) {
                     console.warn('[openDelete] 检测到上一次删除超时卡死，强制解锁');
-                    window.__xtjDeleteInProgress = false;
+                    cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
                 }
                 if (window.__xtjDeleteInProgress) {
                     showToast("正在删除中，请稍后..");
@@ -2597,68 +2669,62 @@ function renderProfileActivityList(kind) {
                 }
                 delPostId = postId;
                 delOwnerKey = ownerKey;
+                var session = getDeleteSession();
+                session.postId = postId;
+                session.ownerKey = ownerKey;
                 document.getElementById("delModal").classList.add("active");
             };
             document.getElementById("delBtn").onclick = async () => {
                 if (!delPostId) return;
                 // ★ 入口强制解锁（同 openDelete）
                 if (window.__xtjDeleteInProgress && Date.now() - window.__xtjDeleteStartTime > 12000) {
-                    window.__xtjDeleteInProgress = false;
+                    cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
                 }
                 if (window.__xtjDeleteInProgress) return;
                 const btn = document.getElementById("delBtn");
-                const modal = document.getElementById("delModal");
+                const session = getDeleteSession();
+                const targetPostId = String(delPostId);
+                const currentPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === targetPostId; });
+                if (!currentPost) {
+                    cleanupDeleteSession({ toast: "帖子不存在或已被删除" });
+                    if (typeof loadFeed === 'function') {
+                        try { loadFeed(true); } catch (e) {}
+                    }
+                    return;
+                }
+                if (!canDeletePost(currentPost)) {
+                    cleanupDeleteSession({ toast: "无权删除这条帖子" });
+                    return;
+                }
                 window.__xtjDeleteInProgress = true;
                 window.__xtjDeleteStartTime = Date.now();
-                const restoreBtn = function() {
-                    try { btn.disabled = false; } catch(e) {}
-                    try { btn.textContent = "确认删除"; } catch(e) {}
-                };
-                const finishAndClean = function(reason) {
-                    try { modal.classList.remove("active"); } catch(e) {}
-                    restoreBtn();
-                    finished = true;
-                    clearTimeout(timeoutId);
-                    window.__xtjDeleteInProgress = false;
-                    window.__xtjDeleteStartTime = 0;
-                    if (reason && typeof showToast === 'function') showToast(reason);
-                };
                 btn.disabled = true;
                 btn.textContent = "删除中..";
                 var finished = false;
-                var timeoutId = setTimeout(function() {
+                session.postEl = findPostCardElement(targetPostId);
+                if (session.postEl) {
+                    session.originalOpacity = session.postEl.style.opacity || '';
+                    session.originalPointerEvents = session.postEl.style.pointerEvents || '';
+                    session.originalFilter = session.postEl.style.filter || '';
+                    session.postEl.style.opacity = '0.56';
+                    session.postEl.style.pointerEvents = 'none';
+                    session.postEl.style.filter = 'grayscale(0.08)';
+                }
+                session.timeoutId = setTimeout(function() {
                     if (finished) return;
                     console.warn('[delBtn] 删除超时');
-                    finishAndClean("删除超时，帖子可能已删除，请刷新查看");
+                    finished = true;
+                    cleanupDeleteSession({ toast: "删除超时，帖子可能已删除，请刷新查看" });
                     // 超时后强制后台刷新 feed（fire-and-forget）
                     if (typeof loadFeed === 'function') {
-                        try { loadFeed(true); } catch(e) {}
+                        try { loadFeed(true); } catch (e) {}
                     }
                 }, 10000);
 
-                // 乐观移除 DOM
-                var postEl = document.querySelector('.post[data-post-id="' + delPostId + '"]');
-                if (postEl) {
-                    postEl.style.opacity = '0';
-                    postEl.style.transition = 'opacity 0.3s';
-                    setTimeout(function() { try { postEl.remove(); } catch(e) {} }, 350);
-                }
-
-                // 从 feedAllPosts 同步移除（避免 feedAllPosts 残留导致下一次渲染又出现）
-                if (Array.isArray(feedAllPosts)) {
-                    feedAllPosts = feedAllPosts.filter(function(p) { return String(p.id) !== String(delPostId); });
-                }
-
                 try {
-                    var currentPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(delPostId); });
-                    if (currentPost && !canDeletePost(currentPost)) {
-                        if (finished) return;
-                        finishAndClean("无权删除这条帖子");
-                        return;
-                    }
                     const key = isAdmin() ? delOwnerKey : deviceId;
                     const rpcPromise = sb.rpc("delete_post_with_actor", {
-                        p_post_id: delPostId,
+                        p_post_id: targetPostId,
                         p_actor_key: key
                     });
                     const rpcTimeout = new Promise(function(_, reject) {
@@ -2671,8 +2737,8 @@ function renderProfileActivityList(kind) {
                         if (finished) return;
                         if (raceErr && raceErr.message === 'rpc_timeout') {
                             console.warn('[delBtn] RPC 超时');
-                            finishAndClean("删除请求超时，请刷新查看");
-                            delPostId = null;
+                            finished = true;
+                            cleanupDeleteSession({ toast: "删除请求超时，请刷新查看" });
                             if (typeof loadFeed === 'function') { try { loadFeed(true); } catch(e) {} }
                             return;
                         }
@@ -2681,13 +2747,20 @@ function renderProfileActivityList(kind) {
                     if (finished) return;
                     const error = rpcResult && rpcResult.error;
                     if (error) {
-                        finishAndClean("删除失败: " + (error.message || "未知错误"));
-                        if (postEl) { try { postEl.style.opacity = '1'; } catch(e) {} }
+                        finished = true;
+                        cleanupDeleteSession({ toast: "删除失败: " + (error.message || "未知错误") });
                         return;
                     }
-                    closeModal("delModal");
+                    removeDeletedPostFromFeed(targetPostId);
+                    if (typeof clearFeedCache === 'function') {
+                        try { clearFeedCache(); } catch (e) {}
+                    }
+                    if (session.postEl && session.postEl.parentNode) {
+                        try { session.postEl.remove(); } catch (e) {}
+                    }
+                    finished = true;
+                    cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
                     showToast("帖子已删除");
-                    delPostId = null;
                     // 不再 await，fire-and-forget 后台刷新（用 setTimeout 0 让删除响应先回到 UI）
                     if (typeof loadFeed === 'function') {
                         try { setTimeout(function() { loadFeed(true); }, 0); } catch(e) {}
@@ -2695,15 +2768,12 @@ function renderProfileActivityList(kind) {
                 } catch (e) {
                     if (finished) return;
                     console.error('[delBtn] 删除异常:', e);
-                    finishAndClean("删除帖子失败: " + (e && e.message || "未知错误"));
-                    if (postEl) { try { postEl.style.opacity = '1'; } catch(e) {} }
-                } finally {
-                    // ★ 关键修复：finally 块**无条件**重置 deleteInProgress，确保任何路径下都能解锁
                     finished = true;
-                    clearTimeout(timeoutId);
-                    restoreBtn();
-                    window.__xtjDeleteInProgress = false;
-                    window.__xtjDeleteStartTime = 0;
+                    cleanupDeleteSession({ toast: "删除帖子失败: " + (e && e.message || "未知错误") });
+                } finally {
+                    if (!finished) {
+                        cleanupDeleteSession({ restoreVisual: true, hideModal: false, resetTarget: false });
+                    }
                 }
             };
 
@@ -2718,6 +2788,9 @@ function renderProfileActivityList(kind) {
                 var el = document.getElementById(id);
                 if (!el) return;
                 el.classList.remove("active");
+                if (id === 'delModal') {
+                    cleanupDeleteSession({ restoreVisual: true, hideModal: false, resetTarget: true });
+                }
                 if (id === 'statModal' && statPollTimer) {
                     clearInterval(statPollTimer);
                     statPollTimer = null;
@@ -3807,12 +3880,9 @@ function renderProfileActivityList(kind) {
 
             function buildPostStatsLine(post, likeCount, commentCount) {
                 var normalized = normalizePost(post);
-                var visibilityClass = normalized.visibility === "private" ? 'private' : 'public';
-                var visibilityText = normalized.visibility === "private" ? '私密' : '公开';
                 return '浏览 ' + (normalized.views || 0) +
                     ' | 点赞 ' + (likeCount || 0) +
-                    ' | 评论 ' + (commentCount || 0) +
-                    '<span class="post-stats-visibility post-stats-visibility-' + visibilityClass + '">' + visibilityText + '</span>';
+                    ' | 评论 ' + (commentCount || 0);
             }
 
             // ★ 关键修复：删除此处的 buildPostBadges 重新赋值！
@@ -8785,18 +8855,18 @@ function renderProfileActivityList(kind) {
                     : '';
                 var noteHtml = '';
                 if (!isLike && item.content) {
-                    noteHtml = '<div class="stat-record-note">我的评论：' + escapeHtml(item.content) + '</div>';
+                    noteHtml = '<div class="stat-record-note"><strong>评论内容：</strong>' + escapeHtml(item.content) + '</div>';
                 } else if (isLike && post && post.content) {
-                    noteHtml = '<div class="stat-record-note">' + escapeHtml(String(post.content).trim().slice(0, 36)) + '</div>';
+                    noteHtml = '<div class="stat-record-note"><strong>原帖内容：</strong>' + escapeHtml(String(post.content).trim().slice(0, 52)) + '</div>';
                 }
                 return [
                     '<article class="stat-record-entry stat-row ' + (isLike ? 'stat-like-item' : 'stat-comment-item') + (mediaHtml ? '' : ' stat-row--no-media') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 26, 220) + 'ms;">',
-                    statMediaColumnMarkup(mediaHtml),
                     '<div class="stat-row-main">',
-                    '<div class="stat-row-title">' + actorName + (isLike ? ' 点赞了：' : ' 评论了：') + '</div>',
-                    '<div class="stat-row-copy">' + escapeHtml(summary) + noteHtml + '</div>',
+                    '<div class="stat-row-title">' + actorName + (isLike ? ' 点赞了这条帖子' : ' 评论了这条帖子') + '</div>',
+                    '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(summary) + '</div>' + noteHtml + '</div>',
+                    statMediaColumnMarkup(mediaHtml),
+                    '<div class="stat-row-side"><span class="stat-row-time">' + timeText + '</span>' + (post ? '<div class="stat-row-actions"><button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button></div>' : '') + '</div>',
                     '</div>',
-                    '<div class="stat-row-side"><span class="stat-row-time">' + timeText + '</span>' + (post ? '<button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button>' : '') + '</div>',
                     '</article>'
                 ].join('');
             }
@@ -8841,12 +8911,12 @@ function renderProfileActivityList(kind) {
                     var postText = post ? statPostSummary(post, 'bracket') : (v.post_content || '（内容已不可用）');
                     return [
                         '<article class="stat-view-item stat-row' + (mediaHtml ? '' : ' stat-row--no-media') + '" ' + (post ? 'role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 32, 220) + 'ms;">',
-                        statMediaColumnMarkup(mediaHtml),
                         '<div class="stat-row-main">',
                         '<div class="stat-row-title">' + escapeHtml(v.user_name) + ' 浏览了 ' + escapeHtml(v.post_author || '') + ' 的帖子</div>',
-                        '<div class="stat-row-copy">' + escapeHtml(v.post_content || postText) + '</div>',
+                        '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(v.post_content || postText) + '</div></div>',
+                        statMediaColumnMarkup(mediaHtml),
+                        '<div class="stat-row-side"><span class="stat-row-time">' + new Date(v.viewed_at).toLocaleString() + '</span>' + (post ? '<div class="stat-row-actions"><button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button></div>' : '') + '</div>',
                         '</div>',
-                        '<div class="stat-row-side"><span class="stat-row-time">' + new Date(v.viewed_at).toLocaleString() + '</span>' + (post ? '<button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button>' : '') + '</div>',
                         '</article>'
                     ].join('');
                 }).join('');
