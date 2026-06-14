@@ -363,7 +363,9 @@ function verifyToken(req, res, next) {
 }
 
 // ===================== 健康检查 ======================
-app.get('/health', (_, res) => res.json({ ok: true, ts: Date.now() }));
+app.get('/health', (req, res) => {
+  res.status(200).type('text/plain').send('ok');
+});
 
 // ===================== 管理员登录 ======================
 app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
