@@ -11,6 +11,7 @@
     photoUploading: false,
     postPublishing: false,
     postPreviewMode: false,
+    photoWallImagePreviewMode: false,
     savedPwCurrentSortedPhotos: null,
     restoreTimer: null
   };
@@ -25,6 +26,56 @@
   var DAILY_LIMIT_KEY = 'xtj_photo_upload_date';
   var DAILY_COUNT_KEY = 'xtj_photo_upload_count';
   var DAILY_LIMIT = 5;
+  var MAX_VIDEO_BYTES = 5 * 1024 * 1024;
+  var VIDEO_COMPRESS_ERROR = '璇锋崲鏇寸煭鎴栨洿灏忕殑瑙嗛';
+
+  function isImageFile(file) {
+    return !!(file && /^image\//.test(file.type || ''));
+  }
+
+  function isVideoFile(file) {
+    return !!(file && /^video\//.test(file.type || ''));
+  }
+
+  function formatDuration(totalSeconds) {
+    var value = Number(totalSeconds || 0);
+    if (!Number.isFinite(value) || value <= 0) return '';
+    var rounded = Math.max(1, Math.round(value));
+    var minutes = Math.floor(rounded / 60);
+    var seconds = rounded % 60;
+    return minutes + ':' + String(seconds).padStart(2, '0');
+  }
+
+  function sanitizeBaseName(name) {
+    return String(name || 'upload').replace(/[^\w.\-]+/g, '_');
+  }
+
+  function inferExtensionFromType(type, fallback) {
+    var mime = String(type || '').toLowerCase();
+    if (mime === 'image/png') return '.png';
+    if (mime === 'image/webp') return '.webp';
+    if (mime === 'image/gif') return '.gif';
+    if (mime === 'video/mp4') return '.mp4';
+    if (mime === 'video/webm') return '.webm';
+    if (mime === 'video/ogg') return '.ogv';
+    if (mime.indexOf('jpeg') >= 0 || mime === 'image/jpg') return '.jpg';
+    return fallback || '';
+  }
+
+  function toUploadFile(blob, sourceFile, forcedType) {
+    if (!blob) return sourceFile;
+    var type = forcedType || blob.type || (sourceFile && sourceFile.type) || 'application/octet-stream';
+    var baseName = sanitizeBaseName(sourceFile && sourceFile.name ? sourceFile.name.replace(/\.[^.]+$/, '') : 'upload');
+    var fileName = baseName + inferExtensionFromType(type, sourceFile ? sourceFile.name.slice(sourceFile.name.lastIndexOf('.')) : '');
+    try {
+      return new File([blob], fileName, { type: type, lastModified: Date.now() });
+    } catch (_) {
+      blob.name = fileName;
+      blob.type = type;
+      blob.lastModified = Date.now();
+      return blob;
+    }
+  }
 
   function checkDailyUploadLimit() {
     if (typeof window.isVipUser === 'function' && window.isVipUser()) return true;
@@ -37,7 +88,7 @@
       return true;
     }
     if (storedCount >= DAILY_LIMIT) {
-      throw new Error('每日上传已达上限（' + DAILY_LIMIT + '张），开通 Pro 可享无限制上传');
+      throw new Error('Daily upload limit reached (' + DAILY_LIMIT + '). Upgrade to Pro for unlimited uploads.');
     }
     return true;
   }
@@ -147,6 +198,22 @@
       '.post-media-preview-tag{position:absolute;right:4px;bottom:4px;z-index:1;padding:1px 5px;border-radius:999px;background:rgba(31,65,47,.64);color:#fff;font-size:8px;font-weight:700;line-height:1.2;}',
       '.post-media-preview-more{display:grid;place-items:center;color:#3d6f53;font-size:12px;font-weight:800;background:linear-gradient(180deg,rgba(240,252,244,.96),rgba(227,245,234,.96));}',
       '.post-media-preview-count{margin-top:6px;font-size:11px;font-weight:700;color:rgba(61,94,75,.72);}',
+      '.pw-upload-sheet-thumb video,.pw-upload-queue-thumb video{display:block;width:100%;height:100%;object-fit:cover;}',
+      '.pw-upload-media-kind,.pw-upload-media-duration{position:absolute;z-index:1;border-radius:999px;padding:2px 6px;font-size:10px;font-weight:700;line-height:1.2;color:#fff;background:rgba(28,72,58,.58);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}',
+      '.pw-upload-media-kind{left:8px;top:8px;}',
+      '.pw-upload-media-duration{right:8px;bottom:8px;}',
+      '.xtj-photo-wall-video-overlay{position:fixed;inset:0;z-index:12200;display:flex;align-items:center;justify-content:center;padding:24px 16px;background:rgba(228,243,239,.42);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);opacity:0;pointer-events:none;transition:opacity .24s ease;}',
+      '.xtj-photo-wall-video-overlay.active{opacity:1;pointer-events:auto;}',
+      '.xtj-photo-wall-video-shell{position:relative;width:min(100%,920px);display:flex;flex-direction:column;gap:14px;padding:18px;border-radius:28px;background:rgba(255,255,255,.56);border:1px solid rgba(255,255,255,.72);box-shadow:0 18px 44px rgba(80,140,150,.14);backdrop-filter:blur(22px) saturate(160%);-webkit-backdrop-filter:blur(22px) saturate(160%);}',
+      '.xtj-photo-wall-video-stage{overflow:hidden;border-radius:22px;background:linear-gradient(180deg,rgba(233,247,244,.92),rgba(219,240,236,.9));min-height:220px;}',
+      '.xtj-photo-wall-video-stage video{display:block;width:100%;max-height:min(72vh,760px);background:transparent;}',
+      '.xtj-photo-wall-video-meta{display:flex;justify-content:space-between;gap:12px;align-items:flex-end;color:#20483b;}',
+      '.xtj-photo-wall-video-title{font-size:18px;font-weight:700;}',
+      '.xtj-photo-wall-video-subtitle{font-size:12px;color:rgba(32,72,59,.72);}',
+      '.xtj-photo-wall-video-close{position:absolute;top:14px;right:14px;width:40px;height:40px;border:0;border-radius:999px;background:rgba(255,255,255,.72);color:#21483b;font-size:28px;line-height:1;box-shadow:0 10px 24px rgba(80,140,150,.12);cursor:pointer;}',
+      '.xtj-photo-wall-video-badge,.xtj-photo-wall-video-duration{position:absolute;z-index:2;padding:2px 7px;border-radius:999px;font-size:10px;font-weight:700;line-height:1.2;color:#fff;background:rgba(27,71,57,.54);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);}',
+      '.xtj-photo-wall-video-badge{left:8px;top:8px;}',
+      '.xtj-photo-wall-video-duration{right:8px;bottom:8px;}',
       '.publish-box.is-submitting{transform:translateY(-1px);box-shadow:0 22px 46px rgba(76,149,104,.12);}',
       '.btn-primary.is-loading{position:relative;pointer-events:none;background:linear-gradient(135deg,#62b883,#8edaae)!important;color:#fff!important;box-shadow:0 12px 28px rgba(87,171,120,.24)!important;}',
       '.btn-primary.is-loading::after{content:"";display:inline-block;width:14px;height:14px;margin-left:8px;border-radius:50%;border:2px solid rgba(255,255,255,.34);border-top-color:#fff;vertical-align:-2px;animation:xtjUploadSpin .85s linear infinite;}',
@@ -183,13 +250,13 @@
       '      </svg>',
       '    </div>',
       '    <div class="pw-upload-progress-copy">',
-      '      <div class="pw-upload-progress-title" id="pwUploadProgressTitle">准备上传</div>',
+      '      <div class="pw-upload-progress-title" id="pwUploadProgressTitle">鍑嗗涓婁紶</div>',
       '      <div class="pw-upload-progress-text" id="pwUploadProgressText">0%</div>',
-      '      <div class="pw-upload-progress-status" id="pwUploadProgressStatus">正在整理本次上传内容...</div>',
+      '      <div class="pw-upload-progress-status" id="pwUploadProgressStatus">姝ｅ湪鏁寸悊鏈涓婁紶鍐呭...</div>',
       '    </div>',
       '  </div>',
       '  <div class="pw-upload-local-bar-wrap"><div class="pw-upload-progress-bar" id="pwUploadProgressBar" style="width:0%"></div></div>',
-      '  <div class="pw-upload-queue-head"><span>媒体队列</span><span id="pwUploadQueueCount">0 项</span></div>',
+      '  <div class="pw-upload-queue-head"><span>濯掍綋闃熷垪</span><span id="pwUploadQueueCount">0 椤?/span></div>',
       '  <div class="pw-upload-queue" id="pwUploadQueuePreview"></div>',
       '</div>'
     ].join('');
@@ -213,7 +280,7 @@
     ensureOverlayAtBody();
     overlay.style.display = 'flex';
     overlay.classList.add('upload-overlay-visible');
-    setProgress(0, '准备上传', '正在整理本次上传内容...');
+    setProgress(0, '鍑嗗涓婁紶', '姝ｅ湪鏁寸悊鏈涓婁紶鍐呭...');
   }
 
   function hideProgress() {
@@ -221,7 +288,7 @@
     if (!overlay) return;
     overlay.classList.remove('upload-overlay-visible');
     overlay.style.display = 'none';
-    setProgress(0, '准备上传', '正在整理本次上传内容...');
+    setProgress(0, '鍑嗗涓婁紶', '姝ｅ湪鏁寸悊鏈涓婁紶鍐呭...');
     revokeUrls('queueUrls');
   }
 
@@ -234,12 +301,32 @@
     return clone;
   }
 
+
+  function closeSheet() {
+    revokeUrls('photoUrls');
+    var sheet = byId('pwUploadSheet');
+    if (!sheet) return;
+    sheet.classList.remove('active');
+    sheet.setAttribute('aria-hidden', 'true');
+  }
+
   function makeThumb(file, className, indexLabel, bucketKey) {
     var node = document.createElement('div');
     var url = URL.createObjectURL(file);
     node.className = className;
     if (bucketKey && Array.isArray(state[bucketKey])) state[bucketKey].push(url);
-    node.innerHTML = '<img src="' + url + '" alt="' + (file.name || '') + '">';
+    if (isVideoFile(file)) {
+      node.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="pw-upload-media-kind">Video</span><span class="pw-upload-media-duration"></span>';
+      var mediaEl = node.querySelector('video');
+      var durationEl = node.querySelector('.pw-upload-media-duration');
+      if (mediaEl && durationEl) {
+        mediaEl.addEventListener('loadedmetadata', function() {
+          durationEl.textContent = formatDuration(mediaEl.duration || 0);
+        }, { once: true });
+      }
+    } else {
+      node.innerHTML = '<img src="' + url + '" alt="' + (file.name || '') + '">';
+    }
     if (indexLabel) {
       var badge = document.createElement('span');
       badge.className = 'pw-upload-sheet-index';
@@ -256,7 +343,7 @@
     if (!queue || !count) return;
     queue.innerHTML = '';
     var list = Array.prototype.slice.call(files || []);
-    count.textContent = list.length + ' 项';
+    count.textContent = list.length + ' items';
     var shown = Math.min(list.length, 5);
     for (var i = 0; i < shown; i++) {
       queue.appendChild(makeThumb(list[i], 'pw-upload-queue-thumb', '', 'queueUrls'));
@@ -275,26 +362,20 @@
     var grid = byId('pwUploadSheetGrid');
     var count = byId('pwUploadSheetCount');
     var meta = byId('pwUploadSheetMeta');
+    var title = byId('pwUploadSheetTitle');
     if (!sheet || !grid || !count || !meta) return;
     grid.innerHTML = '';
     var list = Array.prototype.slice.call(files || []);
     for (var i = 0; i < list.length; i++) {
       grid.appendChild(makeThumb(list[i], 'pw-upload-sheet-thumb', String(i + 1), 'photoUrls'));
     }
-    count.textContent = list.length + ' 张照片';
+    count.textContent = list.length + ' items';
+    if (title) title.textContent = 'Ready to upload';
     meta.textContent = list.length > 1
-      ? '本次会按顺序连续上传，你可以先确认缩略图和数量。'
-      : '确认后将立即开始上传，并显示真实进度。';
+      ? 'Images and videos will upload in order.'
+      : 'Upload will start immediately after confirmation.';
     sheet.classList.add('active');
     sheet.setAttribute('aria-hidden', 'false');
-  }
-
-  function closeSheet() {
-    revokeUrls('photoUrls');
-    var sheet = byId('pwUploadSheet');
-    if (!sheet) return;
-    sheet.classList.remove('active');
-    sheet.setAttribute('aria-hidden', 'true');
   }
 
   function setPostPreview(files) {
@@ -308,7 +389,7 @@
     if (!list.length) {
       preview.style.display = 'none';
       preview.classList.remove('is-active');
-      count.textContent = '已选择 0 个文件';
+      count.textContent = 'Selected 0 items';
       return;
     }
     var shown = Math.min(list.length, 10);
@@ -319,7 +400,7 @@
       var thumb = document.createElement('div');
       thumb.className = 'post-media-preview-thumb';
       if (/^video\//.test(file.type)) {
-        thumb.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="post-media-preview-tag">视频</span>';
+        thumb.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="post-media-preview-tag">瑙嗛</span>';
       } else {
         thumb.innerHTML = '<img src="' + url + '" alt="' + (file.name || '') + '">';
       }
@@ -331,7 +412,7 @@
       more.textContent = '+' + (list.length - shown);
       grid.appendChild(more);
     }
-    count.textContent = '已选择 ' + list.length + ' 个文件';
+    count.textContent = 'Selected ' + list.length + ' items';
     preview.style.display = 'block';
     requestAnimationFrame(function() {
       preview.classList.add('is-active');
@@ -346,7 +427,7 @@
       btn.disabled = true;
       btn.classList.add('is-loading');
       btn.dataset.xtjLabel = btn.textContent;
-      btn.textContent = label || '发布中...';
+      btn.textContent = label || '鍙戝竷涓?..';
     }
   }
 
@@ -357,7 +438,7 @@
     if (btn) {
       btn.disabled = false;
       btn.classList.remove('is-loading');
-      btn.textContent = btn.dataset.xtjLabel || '发布动态';
+      btn.textContent = btn.dataset.xtjLabel || 'Publish';
     }
   }
 
@@ -453,10 +534,275 @@
     });
   }
 
+  function readVideoMetadata(file) {
+    return new Promise(function(resolve, reject) {
+      if (!isVideoFile(file)) {
+        reject(new Error('not_video'));
+        return;
+      }
+      var url = URL.createObjectURL(file);
+      var video = document.createElement('video');
+      var cleaned = false;
+      function cleanup() {
+        if (cleaned) return;
+        cleaned = true;
+        video.pause();
+        video.removeAttribute('src');
+        video.load();
+        URL.revokeObjectURL(url);
+      }
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      video.onloadedmetadata = function() {
+        resolve({
+          width: video.videoWidth || 0,
+          height: video.videoHeight || 0,
+          duration: Number(video.duration || 0),
+          url: url,
+          video: video,
+          cleanup: cleanup
+        });
+      };
+      video.onerror = function() {
+        cleanup();
+        reject(new Error('video_metadata_failed'));
+      };
+      video.src = url;
+    });
+  }
+
+  function pickRecorderMimeType() {
+    var types = [
+      'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+      'video/webm;codecs=vp9,opus',
+      'video/webm;codecs=vp8,opus',
+      'video/webm'
+    ];
+    if (typeof MediaRecorder === 'undefined') return '';
+    for (var i = 0; i < types.length; i++) {
+      try {
+        if (MediaRecorder.isTypeSupported(types[i])) return types[i];
+      } catch (_) {}
+    }
+    return '';
+  }
+
+  function waitForSeek(video, time) {
+    return new Promise(function(resolve, reject) {
+      var done = false;
+      function finish() {
+        if (done) return;
+        done = true;
+        video.removeEventListener('seeked', onSeeked);
+        video.removeEventListener('error', onError);
+        resolve();
+      }
+      function onSeeked() { finish(); }
+      function onError() {
+        if (done) return;
+        done = true;
+        video.removeEventListener('seeked', onSeeked);
+        video.removeEventListener('error', onError);
+        reject(new Error('video_seek_failed'));
+      }
+      video.addEventListener('seeked', onSeeked, { once: true });
+      video.addEventListener('error', onError, { once: true });
+      try {
+        video.currentTime = Math.max(0, time || 0);
+      } catch (err) {
+        onError(err);
+      }
+      setTimeout(finish, 600);
+    });
+  }
+
+  async function extractVideoPoster(file) {
+    var metadata = await readVideoMetadata(file);
+    try {
+      var video = metadata.video;
+      var width = Math.max(1, metadata.width || 1);
+      var height = Math.max(1, metadata.height || 1);
+      var canvas = document.createElement('canvas');
+      var ratio = Math.min(640 / width, 640 / height, 1);
+      canvas.width = Math.max(1, Math.round(width * ratio));
+      canvas.height = Math.max(1, Math.round(height * ratio));
+      var ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('poster_context_failed');
+      var targetTime = metadata.duration > 1 ? Math.min(metadata.duration * 0.35, metadata.duration - 0.2) : 0;
+      await waitForSeek(video, targetTime);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      var blob = await new Promise(function(resolve) {
+        canvas.toBlob(function(nextBlob) {
+          resolve(nextBlob || null);
+        }, 'image/jpeg', 0.82);
+      });
+      if (!blob) throw new Error('poster_blob_failed');
+      return {
+        blob: blob,
+        duration: metadata.duration || 0,
+        width: metadata.width || 0,
+        height: metadata.height || 0
+      };
+    } finally {
+      metadata.cleanup();
+    }
+  }
+
+  function getSupportedCaptureStream(video) {
+    if (video && typeof video.captureStream === 'function') return video.captureStream();
+    if (video && typeof video.mozCaptureStream === 'function') return video.mozCaptureStream();
+    return null;
+  }
+
+  async function compressVideoAttempt(file, targetBytes, attemptIndex) {
+    if (!window.MediaRecorder) throw new Error('media_recorder_unsupported');
+    var recorderMimeType = pickRecorderMimeType();
+    if (!recorderMimeType) throw new Error('video_record_unsupported');
+    var metadata = await readVideoMetadata(file);
+    try {
+      var duration = Math.max(1, metadata.duration || 1);
+      var sourceWidth = Math.max(1, metadata.width || 1);
+      var sourceHeight = Math.max(1, metadata.height || 1);
+      var maxSide = attemptIndex > 0 ? 960 : 1280;
+      var ratio = Math.min(maxSide / sourceWidth, maxSide / sourceHeight, 1);
+      var canvas = document.createElement('canvas');
+      canvas.width = Math.max(2, Math.round(sourceWidth * ratio));
+      canvas.height = Math.max(2, Math.round(sourceHeight * ratio));
+      var ctx = canvas.getContext('2d', { alpha: false });
+      if (!ctx) throw new Error('video_canvas_failed');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      var fps = attemptIndex > 0 ? 18 : 24;
+      var canvasStream = typeof canvas.captureStream === 'function' ? canvas.captureStream(fps) : null;
+      if (!canvasStream) throw new Error('capture_stream_unsupported');
+
+      var mediaTracks = [];
+      var videoTracks = canvasStream.getVideoTracks();
+      if (videoTracks && videoTracks[0]) mediaTracks.push(videoTracks[0]);
+
+      var sourceStream = getSupportedCaptureStream(metadata.video);
+      if (sourceStream) {
+        var audioTracks = sourceStream.getAudioTracks();
+        if (audioTracks && audioTracks[0]) mediaTracks.push(audioTracks[0]);
+      }
+      var mixedStream = new MediaStream(mediaTracks);
+
+      var targetBitsPerSecond = Math.max(
+        attemptIndex > 0 ? 320000 : 520000,
+        Math.min(attemptIndex > 0 ? 1100000 : 1800000, Math.floor((targetBytes * 8 * 0.92) / duration))
+      );
+      var recorder = new MediaRecorder(mixedStream, {
+        mimeType: recorderMimeType,
+        videoBitsPerSecond: targetBitsPerSecond,
+        audioBitsPerSecond: 96000
+      });
+      var chunks = [];
+      var drawFrame;
+      var rafId = 0;
+      var stopped = false;
+      function stopDrawing() {
+        if (rafId) cancelAnimationFrame(rafId);
+        rafId = 0;
+      }
+      drawFrame = function() {
+        if (stopped) return;
+        try {
+          ctx.drawImage(metadata.video, 0, 0, canvas.width, canvas.height);
+        } catch (_) {}
+        rafId = requestAnimationFrame(drawFrame);
+      };
+
+      var recordedBlob = await new Promise(function(resolve, reject) {
+        recorder.ondataavailable = function(event) {
+          if (event.data && event.data.size) chunks.push(event.data);
+        };
+        recorder.onerror = function(event) {
+          reject(event && event.error ? event.error : new Error('video_record_failed'));
+        };
+        recorder.onstop = function() {
+          stopped = true;
+          stopDrawing();
+          resolve(new Blob(chunks, { type: recorder.mimeType || recorderMimeType || 'video/webm' }));
+        };
+        metadata.video.currentTime = 0;
+        metadata.video.muted = true;
+        metadata.video.playsInline = true;
+        var playPromise = metadata.video.play();
+        Promise.resolve(playPromise).then(function() {
+          drawFrame();
+          recorder.start(300);
+          metadata.video.onended = function() {
+            if (recorder.state !== 'inactive') recorder.stop();
+          };
+          setTimeout(function() {
+            if (recorder.state !== 'inactive') recorder.stop();
+          }, Math.ceil(duration * 1000) + 1600);
+        }).catch(function() {
+          reject(new Error('video_play_failed'));
+        });
+      });
+
+      var finalBlob = recordedBlob && recordedBlob.size ? recordedBlob : null;
+      if (!finalBlob) throw new Error('video_output_empty');
+      return {
+        blob: finalBlob,
+        duration: metadata.duration || 0,
+        width: canvas.width,
+        height: canvas.height,
+        mimeType: finalBlob.type || recorderMimeType
+      };
+    } finally {
+      metadata.cleanup();
+    }
+  }
+
+  async function compressVideoToTarget(file, targetBytes) {
+    if (!isVideoFile(file)) return { file: file, duration: 0, mimeType: file.type || '', compressed: false };
+    if (file.size <= targetBytes) {
+      var smallMeta = await readVideoMetadata(file).then(function(metadata) {
+        var data = { duration: metadata.duration || 0, width: metadata.width || 0, height: metadata.height || 0 };
+        metadata.cleanup();
+        return data;
+      }).catch(function() {
+        return { duration: 0, width: 0, height: 0 };
+      });
+      return {
+        file: file,
+        duration: smallMeta.duration || 0,
+        width: smallMeta.width || 0,
+        height: smallMeta.height || 0,
+        mimeType: file.type || '',
+        compressed: false
+      };
+    }
+    var lastError = null;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        var result = await compressVideoAttempt(file, targetBytes, attempt);
+        var uploadFile = toUploadFile(result.blob, file, result.mimeType);
+        if (uploadFile.size <= targetBytes) {
+          return {
+            file: uploadFile,
+            duration: result.duration || 0,
+            width: result.width || 0,
+            height: result.height || 0,
+            mimeType: uploadFile.type || result.mimeType || file.type || '',
+            compressed: true
+          };
+        }
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError || new Error('video_compress_failed');
+  }
+
   async function uploadPhotoWallFiles() {
-    if (!window.sb) throw new Error('Supabase 未就绪');
-    if (!window.currentUser) throw new Error('请先登录');
-    if (!state.photoFiles.length) throw new Error('请先选择照片');
+    if (!window.sb) throw new Error('Supabase not ready');
+    if (!window.currentUser) throw new Error('Please log in first');
+    if (!state.photoFiles.length) throw new Error('Please choose image or video files');
 
     checkDailyUploadLimit();
 
@@ -471,12 +817,12 @@
       var start = (i / state.photoFiles.length) * 88;
       var end = ((i + 1) / state.photoFiles.length) * 88;
       try {
-        setProgress(start, '正在处理', '第 ' + (i + 1) + '/' + state.photoFiles.length + ' 张图片');
+        setProgress(start, 'Processing', 'Item ' + (i + 1) + '/' + state.photoFiles.length);
         var compressed = await withTimeout(compressPhoto(file), TIMEOUTS.photoUpload, 'photo preprocess');
         var ext = file.type === 'image/png' ? '.png' : '.jpg';
         var name = buildSafeFileName(file, ext);
         var photoPath = 'photos/' + name;
-        setProgress(start + (end - start) * 0.28, '正在上传', '原图上传中');
+        setProgress(start + (end - start) * 0.28, 'Uploading', 'Uploading original file');
         var uploadRes = await withTimeout(window.sb.storage.from('uploads').upload(photoPath, compressed, {
           contentType: file.type || 'image/jpeg',
           cacheControl: '31536000',
@@ -485,7 +831,7 @@
         if (uploadRes.error) throw uploadRes.error;
 
         var photoUrl = window.sb.storage.from('uploads').getPublicUrl(photoPath).data.publicUrl;
-        setProgress(start + (end - start) * 0.62, '正在生成预览', '缩略图处理中');
+        setProgress(start + (end - start) * 0.62, 'Preparing preview', 'Building thumbnail');
         var thumbBlob = await withTimeout(makeThumbBlob(compressed), TIMEOUTS.photoUpload, 'thumbnail build');
         var thumbPath = 'thumbs/' + name;
         var thumbRes = await withTimeout(window.sb.storage.from('uploads').upload(thumbPath, thumbBlob, {
@@ -495,7 +841,7 @@
         }), TIMEOUTS.photoUpload, 'thumbnail upload');
         var thumbUrl = thumbRes && !thumbRes.error ? window.sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl : '';
 
-        setProgress(start + (end - start) * 0.88, '正在保存', '写入照片墙记录');
+        setProgress(start + (end - start) * 0.88, 'Saving', 'Writing photo wall record');
         var contentJson = JSON.stringify({
           type: 'photo_wall',
           thumb: thumbUrl,
@@ -537,19 +883,19 @@
     if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();
     else if (window.renderPhotoWall) await window.renderPhotoWall();
 
-    setProgress(100, failCount ? '上传完成' : '上传成功', successCount + ' 张成功，' + failCount + ' 张失败');
+    setProgress(100, failCount ? 'Upload finished' : 'Upload success', successCount + ' succeeded, ' + failCount + ' failed');
     state.photoUploading = false;
     state.photoFiles = [];
     setTimeout(function() {
       hideProgress();
-      if (successCount > 0) toast('成功上传 ' + successCount + ' 张照片');
-      if (successCount === 0 && failCount > 0) toast('上传失败，请重试');
+      if (successCount > 0) toast('Uploaded ' + successCount + ' items');
+      if (successCount === 0 && failCount > 0) toast('Upload failed, please retry');
     }, 420);
   }
 
   async function publishPost() {
     if (!window.currentUser) {
-      toast('请先登录');
+      toast('璇峰厛鐧诲綍');
       return;
     }
     if (state.postPublishing) return;
@@ -562,16 +908,16 @@
     var visibility = visibilityEl ? visibilityEl.value : 'public';
 
     if (!content && !file) {
-      toast('请输入帖子内容或选择媒体');
+      toast('Enter content or choose media');
       return;
     }
     if (content.length > 2000) {
-      toast('内容不能超过 2000 字');
+      toast('Content cannot exceed 2000 characters');
       return;
     }
 
     state.postPublishing = true;
-    beginPublishUi(file ? '上传中...' : '发布中...');
+    beginPublishUi(file ? 'Uploading...' : 'Publishing...');
     try {
       var mediaUrl = '';
       var mediaType = '';
@@ -649,12 +995,12 @@
         if (visibilityEl) visibilityEl.value = 'public';
       }
       setPostPreview([]);
-      toast(insertResult.fallback ? '发布成功，已兼容旧数据结构' : '发布成功');
+      toast(insertResult.fallback ? 'Published successfully with fallback compatibility' : 'Published successfully');
       if (insertResult.data && typeof window.xtjPrependPostToFeed === 'function') await window.xtjPrependPostToFeed(insertResult.data);
       else if (typeof window.loadFeed === 'function') await window.loadFeed(true);
     } catch (err) {
       console.error('[post-publish-ui] publish failed', err);
-      toast('发布失败: ' + (err && err.message ? err.message : '请重试'));
+      toast('Publish failed: ' + (err && err.message ? err.message : 'Please retry'));
     } finally {
       state.postPublishing = false;
       endPublishUi();
@@ -664,14 +1010,301 @@
   function handlePhotoSelection(event) {
     var files = (event && event.target && event.target.files) ? Array.prototype.slice.call(event.target.files) : [];
     var selected = files.filter(function(file) {
-      return file && /^image\//.test(file.type);
+      return file && (/^image\//.test(file.type) || /^video\//.test(file.type));
     });
     if (!selected.length) {
-      toast('请选择有效的照片文件');
+      toast('Please choose valid image or video files');
       return;
     }
     state.photoFiles = selected.slice();
     openSheet(selected);
+  }
+
+  async function preparePhotoWallMedia(file) {
+    if (isImageFile(file)) {
+      var compressedImage = await withTimeout(compressPhoto(file), TIMEOUTS.photoUpload, 'photo preprocess');
+      var imageFile = toUploadFile(compressedImage, file, (compressedImage && compressedImage.type) || file.type || 'image/jpeg');
+      var imageThumb = await withTimeout(makeThumbBlob(imageFile), TIMEOUTS.photoUpload, 'thumbnail build');
+      return {
+        mediaKind: 'image',
+        uploadFile: imageFile,
+        thumbBlob: imageThumb,
+        duration: 0,
+        mimeType: imageFile.type || file.type || 'image/jpeg',
+        originalSize: file.size || null,
+        fileSize: imageFile.size || file.size || null
+      };
+    }
+    if (isVideoFile(file)) {
+      var compressedVideo;
+      try {
+        compressedVideo = await withTimeout(compressVideoToTarget(file, MAX_VIDEO_BYTES), Math.max(TIMEOUTS.photoUpload, 70000), 'video compress');
+      } catch (_) {
+        throw new Error('鏃犳硶鍘嬪埌 5MB锛岃缂╃煭瑙嗛鎴栭檷浣庡師瑙嗛澶у皬');
+      }
+      if (!compressedVideo || !compressedVideo.file || compressedVideo.file.size > MAX_VIDEO_BYTES) {
+        throw new Error('鏃犳硶鍘嬪埌 5MB锛岃缂╃煭瑙嗛鎴栭檷浣庡師瑙嗛澶у皬');
+      }
+      var poster = await withTimeout(extractVideoPoster(compressedVideo.file), TIMEOUTS.photoUpload, 'video poster');
+      return {
+        mediaKind: 'video',
+        uploadFile: compressedVideo.file,
+        thumbBlob: poster.blob,
+        duration: compressedVideo.duration || poster.duration || 0,
+        mimeType: compressedVideo.mimeType || compressedVideo.file.type || file.type || 'video/mp4',
+        originalSize: file.size || null,
+        fileSize: compressedVideo.file.size || file.size || null
+      };
+    }
+    throw new Error('unsupported_media');
+  }
+
+  function handlePhotoSelection(event) {
+    var files = (event && event.target && event.target.files) ? Array.prototype.slice.call(event.target.files) : [];
+    var selected = files.filter(function(file) {
+      return isImageFile(file) || isVideoFile(file);
+    });
+    if (!selected.length) {
+      toast('Please choose images or videos');
+      return;
+    }
+    state.photoFiles = selected.slice();
+    openSheet(selected);
+  }
+
+  async function uploadPhotoWallFiles() {
+    if (!window.sb) throw new Error('Supabase not ready');
+    if (!window.currentUser) throw new Error('璇峰厛鐧诲綍');
+    if (!state.photoFiles.length) throw new Error('Please choose image or video files');
+
+    checkDailyUploadLimit();
+
+    state.photoUploading = true;
+    showProgress();
+    renderQueue(state.photoFiles);
+
+    var successCount = 0;
+    var failCount = 0;
+    for (var i = 0; i < state.photoFiles.length; i++) {
+      var file = state.photoFiles[i];
+      var start = (i / state.photoFiles.length) * 88;
+      var end = ((i + 1) / state.photoFiles.length) * 88;
+      try {
+        setProgress(start, 'Preparing media', 'Processing ' + (i + 1) + ' / ' + state.photoFiles.length);
+        var prepared = await preparePhotoWallMedia(file);
+        var mediaExt = inferExtensionFromType(prepared.mimeType, isVideoFile(file) ? '.mp4' : '.jpg');
+        var mediaName = buildSafeFileName(prepared.uploadFile, mediaExt);
+        var photoPath = 'photos/' + mediaName;
+        setProgress(start + (end - start) * 0.34, 'Uploading media', 'Uploading main file');
+        var uploadRes = await withTimeout(window.sb.storage.from('uploads').upload(photoPath, prepared.uploadFile, {
+          contentType: prepared.mimeType,
+          cacheControl: '31536000',
+          upsert: false
+        }), TIMEOUTS.photoUpload, 'photo upload');
+        if (uploadRes.error) throw uploadRes.error;
+
+        var photoUrl = window.sb.storage.from('uploads').getPublicUrl(photoPath).data.publicUrl;
+        var thumbUrl = '';
+        if (prepared.thumbBlob) {
+          setProgress(start + (end - start) * 0.62, 'Uploading cover', 'Generating cover');
+          var thumbFile = toUploadFile(prepared.thumbBlob, file, 'image/jpeg');
+          var thumbPath = 'thumbs/' + buildSafeFileName(thumbFile, '.jpg');
+          var thumbRes = await withTimeout(window.sb.storage.from('uploads').upload(thumbPath, thumbFile, {
+            contentType: 'image/jpeg',
+            cacheControl: '31536000',
+            upsert: false
+          }), TIMEOUTS.photoUpload, 'thumbnail upload');
+          if (thumbRes && !thumbRes.error) {
+            thumbUrl = window.sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl;
+          }
+        }
+
+        setProgress(start + (end - start) * 0.88, 'Saving entry', 'Writing photo wall record');
+        var contentJson = JSON.stringify({
+          type: 'photo_wall',
+          mediaKind: prepared.mediaKind,
+          thumb: thumbUrl,
+          fileSize: prepared.fileSize,
+          originalSize: prepared.originalSize,
+          mimeType: prepared.mimeType,
+          duration: prepared.duration || null
+        });
+        var insertRes = await withTimeout(
+          window.sb.from('posts').insert([{
+            user_name: window.currentUser,
+            content: contentJson,
+            media_url: photoUrl,
+            media_type: window.PHOTO_WALL_MARKER,
+            actor_key: window.deviceId || 'photo_wall'
+          }]).select('id,user_name,media_url,content,created_at,views,actor_key').single(),
+          TIMEOUTS.photoInsert,
+          'photo insert'
+        );
+        if (insertRes.error) throw insertRes.error;
+
+        if (window.photoWallData && window.photoWallData.unshift && typeof window.normalizePhotoWallRow === 'function') {
+          var normalized = window.normalizePhotoWallRow(insertRes.data);
+          var exists = window.photoWallData.findIndex(function(item) {
+            return String(item.id) === String(normalized.id);
+          });
+          if (exists < 0) window.photoWallData.unshift(normalized);
+        }
+        if (window.broadcastSync && insertRes.data && insertRes.data.id) {
+          window.broadcastSync('photo_added', { photoId: insertRes.data.id });
+        }
+        successCount++;
+      } catch (err) {
+        console.error('[photo-upload-ui] photo wall upload failed', err);
+        failCount++;
+      }
+    }
+
+    if (successCount > 0) incrementDailyUploadCount(successCount);
+
+    if (window.saveLocalPhotoWallData) window.saveLocalPhotoWallData();
+    if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();
+    else if (window.renderPhotoWall) await window.renderPhotoWall();
+
+    setProgress(100, failCount ? 'Upload finished' : 'Upload success', successCount + ' succeeded, ' + failCount + ' failed');
+    state.photoUploading = false;
+    state.photoFiles = [];
+    setTimeout(function() {
+      hideProgress();
+      if (successCount > 0) toast('Uploaded ' + successCount + ' items');
+      if (successCount === 0 && failCount > 0) toast('Upload failed, please retry');
+    }, 420);
+  }
+
+  async function publishPost() {
+    if (!window.currentUser) {
+      toast('璇峰厛鐧诲綍');
+      return;
+    }
+    if (state.postPublishing) return;
+
+    var postInp = byId('postInp');
+    var fileInp = byId('fileInp');
+    var visibilityEl = byId('postVisibility');
+    var content = postInp ? String(postInp.value || '').trim() : '';
+    var file = fileInp && fileInp.files ? fileInp.files[0] : null;
+    var visibility = visibilityEl ? visibilityEl.value : 'public';
+
+    if (!content && !file) {
+      toast('Enter content or choose media');
+      return;
+    }
+    if (content.length > 2000) {
+      toast('Content cannot exceed 2000 characters');
+      return;
+    }
+
+    state.postPublishing = true;
+    beginPublishUi(file ? 'Uploading...' : 'Publishing...');
+    try {
+      var mediaUrl = '';
+      var mediaType = '';
+      var uploadFile = file;
+      var uploadMimeType = file ? (file.type || '') : '';
+      var originalSize = file ? (file.size || null) : null;
+
+      if (file) {
+        if (isImageFile(file)) {
+          uploadFile = toUploadFile(await withTimeout(compressPhoto(file), Math.min(TIMEOUTS.postUpload, 24000), 'post image preprocess'), file, file.type || 'image/jpeg');
+          uploadMimeType = uploadFile.type || file.type || 'image/jpeg';
+        } else if (isVideoFile(file)) {
+          if (file.size > MAX_VIDEO_BYTES) {
+            try {
+              var compressedVideo = await withTimeout(compressVideoToTarget(file, MAX_VIDEO_BYTES), Math.max(TIMEOUTS.postUpload, 70000), 'post video compress');
+              uploadFile = compressedVideo.file;
+              uploadMimeType = compressedVideo.mimeType || uploadFile.type || file.type || 'video/mp4';
+            } catch (_) {
+              throw new Error(VIDEO_COMPRESS_ERROR);
+            }
+            if (!uploadFile || uploadFile.size > MAX_VIDEO_BYTES) {
+              throw new Error('Unable to compress to 5MB. Please use a shorter or smaller video.');
+            }
+          }
+          mediaType = 'video';
+        }
+        var path = buildSafeFileName(uploadFile, inferExtensionFromType(uploadMimeType, ''));
+        var uploadRes = await withTimeout(window.sb.storage.from('uploads').upload(path, uploadFile, {
+          contentType: uploadMimeType || (uploadFile && uploadFile.type) || file.type || 'application/octet-stream',
+          cacheControl: '31536000',
+          upsert: false
+        }), TIMEOUTS.postUpload, 'post media upload');
+        if (uploadRes.error) throw uploadRes.error;
+        mediaUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
+        mediaType = mediaType || (isVideoFile(file) ? 'video' : 'image');
+      }
+
+      var text = content.slice(0, 2000);
+      var metadata = {
+        visibility: visibility || 'public',
+        is_pinned: false,
+        pinned_at: null,
+        updated_at: null,
+        fileSize: uploadFile ? (uploadFile.size || file.size || null) : null,
+        originalSize: originalSize,
+        mimeType: file ? (uploadMimeType || file.type || '') : ''
+      };
+      var contentPayload = JSON.stringify({
+        __type: '__xtj_post_v2__',
+        text: text,
+        meta: metadata
+      });
+      var payload = {
+        user_name: window.currentUser,
+        content: contentPayload,
+        media_url: mediaUrl,
+        media_type: mediaType,
+        actor_key: window.deviceId,
+        visibility: metadata.visibility,
+        is_pinned: false,
+        pinned_at: null,
+        updated_at: null
+      };
+      var fallbackContent = contentPayload;
+      var insertResult = await withTimeout((async function() {
+        var primary = await window.sb.from('posts').insert([payload]).select('*').maybeSingle();
+        if (!primary.error) return { ok: true, fallback: false, data: primary.data || null };
+        var message = String(primary.error.message || '');
+        if (!/visibility|is_pinned|pinned_at|updated_at|column/i.test(message)) {
+          return { ok: false, error: primary.error };
+        }
+        var fallbackPayload = {
+          user_name: payload.user_name,
+          content: fallbackContent,
+          media_url: payload.media_url,
+          media_type: payload.media_type,
+          actor_key: payload.actor_key
+        };
+        var fallback = await window.sb.from('posts').insert([fallbackPayload]).select('*').maybeSingle();
+        if (fallback.error) return { ok: false, error: fallback.error };
+        return { ok: true, fallback: true, data: fallback.data || null };
+      })(), TIMEOUTS.postInsert, 'post insert');
+
+      if (!insertResult.ok) {
+        throw insertResult.error || new Error('post insert failed');
+      }
+
+      if (typeof window.clearFeedCache === 'function') window.clearFeedCache();
+      if (typeof window.resetPostComposer === 'function') window.resetPostComposer();
+      else {
+        if (postInp) postInp.value = '';
+        if (fileInp) fileInp.value = '';
+        if (visibilityEl) visibilityEl.value = 'public';
+      }
+      setPostPreview([]);
+      toast(insertResult.fallback ? 'Published successfully with fallback compatibility' : 'Published successfully');
+      if (insertResult.data && typeof window.xtjPrependPostToFeed === 'function') await window.xtjPrependPostToFeed(insertResult.data);
+      else if (typeof window.loadFeed === 'function') await window.loadFeed(true);
+    } catch (err) {
+      console.error('[post-publish-ui] publish failed', err);
+      toast('Publish failed: ' + (err && err.message ? err.message : 'Please retry'));
+    } finally {
+      state.postPublishing = false;
+      endPublishUi();
+    }
   }
 
   function attachPhotoUploadUi() {
@@ -687,7 +1320,7 @@
     }
     if (closeBtn && !closeBtn.__xtjUploadUiBound) {
       closeBtn.__xtjUploadUiBound = true;
-      closeBtn.textContent = '×';
+      closeBtn.textContent = '脳';
       closeBtn.addEventListener('click', closeSheet);
     }
     if (sheet && !sheet.__xtjUploadUiBound) {
@@ -715,7 +1348,7 @@
           state.photoUploading = false;
           hideProgress();
           console.error('[photo-upload-ui] fatal upload failure', err);
-          toast(err && err.message ? err.message : '上传失败，请重试');
+          toast(err && err.message ? err.message : 'Upload failed, please retry');
         }
       });
     }
@@ -736,6 +1369,7 @@
       state.restoreTimer = null;
     }
     state.postPreviewMode = false;
+    state.photoWallImagePreviewMode = false;
     window.pwCurrentSortedPhotos = state.savedPwCurrentSortedPhotos;
     state.savedPwCurrentSortedPhotos = null;
     var overlay = byId('photoPreviewOverlay');
@@ -746,9 +1380,9 @@
     if (typeof window.closePhotoPreview !== 'function' || window.closePhotoPreview.__xtjPostPreviewWrapped) return;
     var original = window.closePhotoPreview;
     window.closePhotoPreview = function() {
-      var wasPostMode = state.postPreviewMode;
+      var shouldRestore = state.postPreviewMode || state.photoWallImagePreviewMode;
       var result = original.apply(this, arguments);
-      if (wasPostMode) state.restoreTimer = setTimeout(restorePostPreviewMode, 260);
+      if (shouldRestore) state.restoreTimer = setTimeout(restorePostPreviewMode, 260);
       return result;
     };
     window.closePhotoPreview.__xtjPostPreviewWrapped = true;
@@ -780,7 +1414,7 @@
         id: 'post-' + postId + '-' + index,
         postId: postId,
         imageUrl: imageUrl,
-        username: (sourcePost && sourcePost.user_name) || (node.getAttribute('data-post-user') || '').trim() || '帖子图片',
+        username: (sourcePost && sourcePost.user_name) || (node.getAttribute('data-post-user') || '').trim() || '甯栧瓙鍥剧墖',
         timestamp: (sourcePost && sourcePost.created_at) || node.getAttribute('data-post-created-at') || new Date().toISOString(),
         views: sourcePost ? Number(sourcePost.views || 0) : (readNumberAttr(node, ['data-post-views']) || 0),
         fileSize: sourceMeta.fileSize != null ? (Number(sourceMeta.fileSize) || null) : readNumberAttr(node, ['data-file-size', 'data-size']),
@@ -836,6 +1470,94 @@
       var overlay = byId('photoPreviewOverlay');
       if (overlay) overlay.classList.add('pp-post-mode');
     });
+    return true;
+  }
+
+  function ensurePhotoWallVideoOverlay() {
+    var overlay = byId('xtjPhotoWallVideoOverlay');
+    if (overlay) return overlay;
+    overlay = document.createElement('div');
+    overlay.id = 'xtjPhotoWallVideoOverlay';
+    overlay.className = 'xtj-photo-wall-video-overlay';
+    overlay.innerHTML = [
+      '<div class="xtj-photo-wall-video-shell">',
+      '  <button type="button" class="xtj-photo-wall-video-close" id="xtjPhotoWallVideoClose" aria-label="Close">脳</button>',
+      '  <div class="xtj-photo-wall-video-stage">',
+      '    <video id="xtjPhotoWallVideoPlayer" controls playsinline preload="metadata"></video>',
+      '  </div>',
+      '  <div class="xtj-photo-wall-video-meta">',
+      '    <div class="xtj-photo-wall-video-title" id="xtjPhotoWallVideoTitle"></div>',
+      '    <div class="xtj-photo-wall-video-subtitle" id="xtjPhotoWallVideoSubtitle"></div>',
+      '  </div>',
+      '</div>'
+    ].join('');
+    overlay.addEventListener('click', function(event) {
+      if (event.target === overlay) closePhotoWallVideoPreview();
+    });
+    document.body.appendChild(overlay);
+    var closeBtn = byId('xtjPhotoWallVideoClose');
+    if (closeBtn) closeBtn.addEventListener('click', closePhotoWallVideoPreview);
+    return overlay;
+  }
+
+  function closePhotoWallVideoPreview() {
+    var overlay = byId('xtjPhotoWallVideoOverlay');
+    var player = byId('xtjPhotoWallVideoPlayer');
+    if (player) {
+      player.pause();
+      player.removeAttribute('src');
+      player.load();
+    }
+    if (overlay) overlay.classList.remove('active');
+    document.body.classList.remove('photo-previewing');
+  }
+
+  function openPhotoWallVideoPreview(item) {
+    if (!item || !item.imageUrl) return false;
+    var overlay = ensurePhotoWallVideoOverlay();
+    var player = byId('xtjPhotoWallVideoPlayer');
+    var title = byId('xtjPhotoWallVideoTitle');
+    var subtitle = byId('xtjPhotoWallVideoSubtitle');
+    if (!overlay || !player) return false;
+    player.poster = item.thumbUrl || item.thumb || '';
+    player.src = item.imageUrl;
+    player.load();
+    if (title) title.textContent = item.username || 'Video';
+    if (subtitle) {
+      var metaBits = [];
+      if (item.duration) metaBits.push(formatDuration(item.duration));
+      if (item.fileSize) metaBits.push(Math.round((item.fileSize || 0) / 1024 / 1024 * 10) / 10 + 'MB');
+      subtitle.textContent = metaBits.join(' 路 ');
+    }
+    overlay.classList.add('active');
+    document.body.classList.add('photo-previewing');
+    var playPromise = player.play();
+    Promise.resolve(playPromise).catch(function() {});
+    return true;
+  }
+
+  function openPhotoWallMedia(index) {
+    var sourceList = Array.isArray(window.pwCurrentSortedPhotos) && window.pwCurrentSortedPhotos.length
+      ? window.pwCurrentSortedPhotos.slice()
+      : (Array.isArray(window.photoWallData) ? window.photoWallData.slice() : []);
+    var item = sourceList[index];
+    if (!item) return false;
+    if ((item.mediaKind || '').toLowerCase() === 'video' || /^video\//.test(item.mimeType || '')) {
+      return openPhotoWallVideoPreview(item);
+    }
+    if (typeof window.openPhotoPreview !== 'function') return false;
+    var imageItems = sourceList.filter(function(entry) {
+      return !!entry && !((entry.mediaKind || '').toLowerCase() === 'video' || /^video\//.test(entry.mimeType || ''));
+    });
+    var currentIndex = imageItems.findIndex(function(entry) {
+      return entry && String(entry.id) === String(item.id);
+    });
+    if (currentIndex < 0) return false;
+    state.savedPwCurrentSortedPhotos = sourceList;
+    state.photoWallImagePreviewMode = true;
+    window.pwCurrentSortedPhotos = imageItems;
+    wrapPhotoPreviewClose();
+    window.openPhotoPreview(currentIndex, false);
     return true;
   }
 
@@ -924,7 +1646,7 @@
             if (compact && compact.parentNode) compact.parentNode.removeChild(compact);
             var rotate = byId('ppRotateBtn');
             if (rotate) {
-              rotate.title = '旋转 90 度';
+              rotate.title = 'Rotate 90 degrees';
               rotate.onclick = function() { window.ppRotatePhoto(); };
             }
           });
@@ -935,15 +1657,15 @@
 
       var rotateBtn = byId('ppRotateBtn');
       if (rotateBtn) {
-        rotateBtn.title = '旋转 90 度';
+        rotateBtn.title = 'Rotate 90 degrees';
         rotateBtn.onclick = function() { window.ppRotatePhoto(); };
       }
       var infoBtn = byId('ppInfoBtn');
-      if (infoBtn) infoBtn.title = '照片信息';
+      if (infoBtn) infoBtn.title = '鐓х墖淇℃伅';
       var compactBtn = byId('ppCompactBtn');
       if (compactBtn && compactBtn.parentNode) compactBtn.parentNode.removeChild(compactBtn);
-      if (rotateBtn) rotateBtn.title = '旋转 90 度';
-      if (infoBtn) infoBtn.title = '照片信息';
+       if (rotateBtn) rotateBtn.title = 'Rotate 90 degrees';
+      if (infoBtn) infoBtn.title = '鐓х墖淇℃伅';
 
       window.zoomIn = function() {
         mutatePreviewTransform(function(state) {
@@ -966,7 +1688,7 @@
         if (mutatePreviewTransform(function(state) {
           state.rotation = ((state.rotation || 0) + 90) % 360;
         })) {
-          toast('已旋转 90°');
+          toast('Rotated 90 degrees');
         }
       };
 
@@ -1041,6 +1763,130 @@
     installWhenReady();
   }
 
+  function enhancePhotoWallItem(item) {
+    if (!item) return item;
+    var next = item;
+    var rawContent = item.content;
+    if (rawContent && typeof rawContent === 'string') {
+      try { rawContent = JSON.parse(rawContent); } catch (_) { rawContent = null; }
+    }
+    if (rawContent && typeof rawContent === 'object') {
+      next = Object.assign({}, item, {
+        thumbUrl: item.thumbUrl || rawContent.thumb || rawContent.thumbUrl || '',
+        thumb: item.thumb || rawContent.thumb || rawContent.thumbUrl || '',
+        mediaKind: item.mediaKind || rawContent.mediaKind || (/^video\//.test(rawContent.mimeType || '') ? 'video' : 'image'),
+        mimeType: item.mimeType || rawContent.mimeType || '',
+        duration: item.duration || rawContent.duration || null,
+        originalSize: item.originalSize || rawContent.originalSize || null,
+        fileSize: item.fileSize || rawContent.fileSize || null
+      });
+    }
+    if (!next.mediaKind) {
+      next = Object.assign({}, next, {
+        mediaKind: /^video\//.test(next.mimeType || '') ? 'video' : 'image'
+      });
+    }
+    return next;
+  }
+
+  function decoratePhotoWallVideoCards() {
+    var list = Array.isArray(window.pwCurrentSortedPhotos) && window.pwCurrentSortedPhotos.length
+      ? window.pwCurrentSortedPhotos
+      : (Array.isArray(window.photoWallData) ? window.photoWallData : []);
+    var byIdMap = {};
+    for (var i = 0; i < list.length; i++) {
+      var entry = enhancePhotoWallItem(list[i]);
+      if (entry && entry.id != null) byIdMap[String(entry.id)] = entry;
+    }
+    var nodes = document.querySelectorAll('.photo-wall-item');
+    nodes.forEach(function(node) {
+      var photoId = node.getAttribute('data-photo-id');
+      var item = byIdMap[String(photoId || '')];
+      var badge = node.querySelector('.xtj-photo-wall-video-badge');
+      var duration = node.querySelector('.xtj-photo-wall-video-duration');
+      if (item && ((item.mediaKind || '').toLowerCase() === 'video' || /^video\//.test(item.mimeType || ''))) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'xtj-photo-wall-video-badge';
+          badge.textContent = 'Video';
+          node.appendChild(badge);
+        }
+        if (!duration) {
+          duration = document.createElement('span');
+          duration.className = 'xtj-photo-wall-video-duration';
+          node.appendChild(duration);
+        }
+        duration.textContent = formatDuration(item.duration || 0);
+      } else {
+        if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
+        if (duration && duration.parentNode) duration.parentNode.removeChild(duration);
+      }
+    });
+  }
+
+  function installPhotoWallMediaOverrides() {
+    if (window.__xtjPhotoWallMediaOverridesInstalled) return;
+    window.__xtjPhotoWallMediaOverridesInstalled = true;
+
+    if (!document.__xtjPhotoWallMediaClickBound) {
+      document.__xtjPhotoWallMediaClickBound = true;
+      document.addEventListener('click', function(event) {
+        var itemNode = event.target && event.target.closest ? event.target.closest('.photo-wall-item') : null;
+        if (!itemNode) return;
+        var photoId = itemNode.getAttribute('data-photo-id');
+        var list = Array.isArray(window.pwCurrentSortedPhotos) && window.pwCurrentSortedPhotos.length
+          ? window.pwCurrentSortedPhotos.slice()
+          : (Array.isArray(window.photoWallData) ? window.photoWallData.slice() : []);
+        var index = list.findIndex(function(entry) {
+          return entry && String(entry.id) === String(photoId);
+        });
+        if (index < 0) return;
+        if (openPhotoWallMedia(index)) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (typeof event.stopImmediatePropagation === 'function') event.stopImmediatePropagation();
+        }
+      }, true);
+    }
+
+    function installWhenReady() {
+      if (typeof window.normalizePhotoWallRow === 'function' && !window.normalizePhotoWallRow.__xtjMediaWrapped) {
+        var originalNormalize = window.normalizePhotoWallRow;
+        window.normalizePhotoWallRow = function() {
+          return enhancePhotoWallItem(originalNormalize.apply(this, arguments));
+        };
+        window.normalizePhotoWallRow.__xtjMediaWrapped = true;
+      }
+
+      ['renderPhotoWall', 'renderPhotoWallWithoutReload'].forEach(function(name) {
+        var fn = window[name];
+        if (typeof fn === 'function' && !fn.__xtjDecorated) {
+          var wrapped = async function() {
+            var result = await fn.apply(this, arguments);
+            requestAnimationFrame(decoratePhotoWallVideoCards);
+            return result;
+          };
+          wrapped.__xtjDecorated = true;
+          window[name] = wrapped;
+        }
+      });
+
+      if (Array.isArray(window.photoWallData) && window.photoWallData.length) {
+        window.photoWallData = window.photoWallData.map(enhancePhotoWallItem);
+      }
+      if (Array.isArray(window.pwCurrentSortedPhotos) && window.pwCurrentSortedPhotos.length) {
+        window.pwCurrentSortedPhotos = window.pwCurrentSortedPhotos.map(enhancePhotoWallItem);
+      }
+      requestAnimationFrame(decoratePhotoWallVideoCards);
+
+      if (typeof window.renderPhotoWall !== 'function' || typeof window.normalizePhotoWallRow !== 'function') {
+        setTimeout(installWhenReady, 250);
+      }
+    }
+
+    installWhenReady();
+  }
+
   function overridePublishHandler() {
     window.doPublish = publishPost;
   }
@@ -1048,7 +1894,7 @@
   function overridePhotoHandlers() {
     window.xtjUploadBtn = function() {
       if (!window.currentUser) {
-        toast('请先登录');
+        toast('Please log in first');
         return;
       }
       var input = byId('photoFileInput');
@@ -1058,6 +1904,8 @@
     };
     window.handlePhotoUpload = handlePhotoSelection;
     window.triggerPhotoUpload = uploadPhotoWallFiles;
+    window.openPhotoWallMedia = openPhotoWallMedia;
+    window.closePhotoWallVideoPreview = closePhotoWallVideoPreview;
   }
 
   function boot() {
@@ -1069,6 +1917,7 @@
     attachPostPreviewBridge();
     installPreviewControlOverrides();
     installAlbumTransitionOverrides();
+    installPhotoWallMediaOverrides();
     wrapPhotoPreviewClose();
     overridePhotoHandlers();
     overridePublishHandler();
