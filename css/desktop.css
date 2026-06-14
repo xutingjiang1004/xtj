@@ -626,4 +626,198 @@
     max-width: 760px !important;
     width: min(760px, calc(100vw - 80px)) !important;
   }
+
+  /* ==============================================================
+     P6: 全局模态框 PC 端尺寸适配
+     - 通用 modal-box：居中、加宽到合理尺寸、backdrop 加深
+     - 长内容 modal（帖子详情/用户资料/统计）：760px
+     - 中等 modal（编辑/评论/公告）：600px
+     - 短 modal（登录/注册/删除/举报）：480px
+     - 移动端 (< 1024px) 行为完全不变
+     ============================================================== */
+
+  /* 通用 modal-box 在 PC 端居中更好看 */
+  .modal-overlay {
+    padding: 24px !important;
+  }
+
+  /* 长内容 modal 760px */
+  #postDetailModal .modal-box,
+  #statModal .modal-box,
+  #profileDetailModal .modal-box,
+  #userProfileModal .modal-box,
+  #vipModal .modal-box {
+    max-width: 760px !important;
+    width: min(760px, calc(100vw - 80px)) !important;
+    max-height: min(86vh, 820px) !important;
+  }
+
+  /* 中等 modal 600px */
+  #editPostModal .modal-box,
+  #commentModal .modal-box,
+  #announcementModal .modal-box {
+    max-width: 600px !important;
+    width: min(600px, calc(100vw - 80px)) !important;
+    max-height: min(82vh, 760px) !important;
+  }
+
+  /* 短 modal 480px */
+  #loginModal .modal-box,
+  #registerModal .modal-box,
+  #delModal .modal-box,
+  #reportModal {
+    max-width: 480px !important;
+    width: min(480px, calc(100vw - 80px)) !important;
+  }
+
+  /* VIP modal 特殊：内容多，给 820px */
+  #vipModal .modal-box {
+    max-width: 820px !important;
+    width: min(820px, calc(100vw - 80px)) !important;
+  }
+
+  /* 头像上传 info modal：固定 360px */
+  #ppInfoModal {
+    max-width: 360px !important;
+  }
+
+  /* ==============================================================
+     P7: 全局 PC 端打磨
+     - 全局滚动条美化（细、圆角、暗色适配）
+     - 焦点样式（键盘 tab 可见）
+     - 暗色主题适配
+     - 字体微调
+     - iPad 横屏 1024-1280 适配
+     ============================================================== */
+
+  /* 1. 全局滚动条（PC 端） */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(120, 140, 130, 0.28);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(120, 140, 130, 0.5);
+    background-clip: padding-box;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(120, 140, 130, 0.32) transparent;
+  }
+
+  /* 2. 暗色主题滚动条 */
+  [data-theme="dark"] ::-webkit-scrollbar-thumb {
+    background: rgba(180, 200, 195, 0.22);
+    background-clip: padding-box;
+  }
+  [data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+    background: rgba(180, 200, 195, 0.4);
+    background-clip: padding-box;
+  }
+  [data-theme="dark"] * {
+    scrollbar-color: rgba(180, 200, 195, 0.28) transparent;
+  }
+
+  /* 3. 焦点样式：键盘 tab 导航可见（不能影响点击） */
+  button:focus-visible,
+  a:focus-visible,
+  [tabindex]:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  .dock-tab:focus-visible {
+    outline: 2px solid rgba(116, 180, 141, 0.7) !important;
+    outline-offset: 2px !important;
+    border-radius: 8px;
+  }
+
+  /* 4. 文本选择颜色 */
+  ::selection {
+    background: rgba(116, 180, 141, 0.32);
+    color: inherit;
+  }
+  [data-theme="dark"] ::selection {
+    background: rgba(116, 180, 141, 0.4);
+    color: inherit;
+  }
+
+  /* 5. 暗色主题下的 dock-bar 更精致 */
+  [data-theme="dark"] .dock-bar {
+    background: rgba(15, 22, 18, 0.5) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+  }
+  [data-theme="dark"] .dock-tab {
+    color: rgba(220, 230, 220, 0.85) !important;
+  }
+  [data-theme="dark"] .dock-tab:hover {
+    background: rgba(255, 255, 255, 0.06) !important;
+  }
+
+  /* 6. 暗色主题下 panel 内容区适配 */
+  [data-theme="dark"] .dock-panels {
+    background: var(--bg, #0a0e0c);
+  }
+
+  /* 7. 暗色主题下的玻璃态面板稍微亮一点（避免太黑） */
+  [data-theme="dark"] .glass {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  /* 8. PC 端 body 字体略大，行高更舒适 */
+  body {
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* 9. iPad 横屏 / 1024-1280 窄屏适配（保留 dock-bar 但更紧凑） */
+  @media (min-width: 1024px) and (max-width: 1280px) {
+    .dock-bar {
+      width: 48px !important;
+    }
+    .dock-panels {
+      margin-left: 48px !important;
+    }
+    .dock-tab {
+      width: 38px !important;
+      max-width: 38px !important;
+      min-width: 38px !important;
+      padding: 6px 0 !important;
+    }
+    .dock-tab .dt-icon {
+      width: 24px !important;
+      height: 24px !important;
+      font-size: 20px !important;
+    }
+    #panelPosts .wrap {
+      grid-template-columns: minmax(0, 1fr) 260px !important;
+    }
+    #panelAi .photo-wall-grid {
+      grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    }
+  }
+
+  /* 10. 超宽屏（> 1920px）放宽列数 */
+  @media (min-width: 1920px) {
+    #panelPosts .wrap {
+      max-width: 1400px !important;
+    }
+    #panelPosts .wrap > #feed {
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+    #panelAi .photo-wall-grid {
+      grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+    }
+  }
 }
