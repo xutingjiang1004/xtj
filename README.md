@@ -10,15 +10,11 @@
 Pro 状态 / 删除卡死 / 头像点击 三大 Bug 一次性修复
 
 - **Pro 历史帖子永久标识修复**（**根因**）：`js/core.js` 第 3798 行 `buildPostBadges = function(...) {...}` 的二次赋值把包含 Pro 标志的完整版**整个覆盖**了，导致 Pro 历史帖子公开右侧永远没有 Pro 标识。已删除该覆盖代码，恢复 `buildPostBadges` 的完整 Pro / 公开 / 置顶逻辑。
-- **删除帖子卡死彻底修复**（`js/core.js` [core.js:2579-2708](file:///c:/Users/Administrator/Desktop/%E6%9C%80%E6%96%B0index/xtj/js/core.js#L2579-L2708)）：
-  - `finally` 块**无条件**重置 `window.__xtjDeleteInProgress`，不再依赖 `finishAndClean` 内部重置。
-  - `openDelete` / `delBtn` 入口加 12s 强制解锁兜底：若上次删除卡死超过 12s，下次进入时自动重置。
-  - `loadFeed(true)` 用 `setTimeout(..., 0)` 异步触发，不阻塞删除响应。
-  - 删除按钮 onclick 用 `try { ... } catch(e) {}` 包住所有 `loadFeed` 调用，任何路径下都不会二次卡死。
-- **头像点击失效修复**（`css/desktop.css` line 229-246）：
-  - `.avatar-wrap` / `.xtj-pro-avatar-ring` / `.avatar.clickable` 全部加 `position: relative !important; z-index: 5 !important; pointer-events: auto !important; cursor: pointer !important;`。
-  - 保证 PC 端头像外圈不会被任何背景元素遮挡，点击事件正常冒泡到 `openUserProfile(username)`。
-- 升级 `index.html` 中 `desktop.css?v=20260614_15` → `desktop.css?v=20260614_16`，强制浏览器拉新。
+- **删除帖子卡死彻底修复**：
+  - 修复 1（[core.js:2579-2708](file:///c:/Users/Administrator/Desktop/%E6%9C%80%E6%96%B0index/xtj/js/core.js#L2579-L2708)）handler 加 4 层兜底：`finally` 无条件重置 `__xtjDeleteInProgress`、入口 12s 强制解锁、`loadFeed(true)` 用 `setTimeout(0)` 异步触发、所有 `loadFeed` 调用 try/catch 包裹。
+  - **修复 2（**根因**，[core.js:4855](file:///c:/Users/Administrator/Desktop/%E6%9C%80%E6%96%B0index/xtj/js/core.js#L4855-L4875) 第二个 `delBtn.onclick` 赋值）**：JS 中 `.onclick =` 重复赋值会**完全覆盖**前面的 handler，上面修复 1 加的所有保护因此**完全失效**。已删除此重复的旧版（无锁、无超时、`await loadFeed(true)` 阻塞），让 line 2602 的完整保护版真正生效。
+- **头像点击失效修复**（`css/desktop.css` line 229-246）：`.avatar-wrap` / `.xtj-pro-avatar-ring` / `.avatar.clickable` 全部 `position: relative !important; z-index: 5 !important; pointer-events: auto !important; cursor: pointer !important;`。
+- 升级 `index.html` 中 `desktop.css?v=20260614_15` → `desktop.css?v=20260614_17`、`core.js?v=20260614_7` → `core.js?v=20260614_18`，强制浏览器拉新。
 
 ### v0.73 - 2026-06-08
 全面更新 - 管理员禁言拉黑功能验证、测试数据插入、安全加固
