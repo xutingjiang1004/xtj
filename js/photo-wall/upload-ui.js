@@ -971,7 +971,7 @@
 
   async function uploadPhotoWallFiles() {
     if (!window.sb) throw new Error('Supabase not ready');
-    if (!window.currentUser) throw new Error('Please log in first');
+    if (!window.currentUser) throw new Error('请先登录');
     if (!state.photoFiles.length) throw new Error('Please choose image or video files');
 
     checkDailyUploadLimit();
@@ -1066,7 +1066,7 @@
 
   async function publishPost() {
     if (!window.currentUser) {
-      toast('Please log in first');
+      toast('请先登录');
       return;
     }
     if (state.postPublishing) return;
@@ -1088,7 +1088,7 @@
     }
 
     state.postPublishing = true;
-    beginPublishUi(file ? 'Uploading...' : 'Publishing...');
+    beginPublishUi(file ? '上传中...' : '发布中...');
     try {
       var mediaUrl = '';
       var mediaType = '';
@@ -1269,7 +1269,7 @@
 
   async function uploadPhotoWallFiles() {
     if (!window.sb) throw new Error('Supabase not ready');
-    if (!window.currentUser) throw new Error('Please log in first');
+    if (!window.currentUser) throw new Error('请先登录');
     if (!state.photoFiles.length) throw new Error('Please choose image or video files');
 
     checkDailyUploadLimit();
@@ -1371,14 +1371,14 @@
     state.photoFiles = [];
     setTimeout(function() {
       hideProgress();
-      if (successCount > 0) toast('Uploaded ' + successCount + ' items');
-      if (successCount === 0 && failCount > 0) toast(firstErrorMessage || 'Upload failed, please retry');
+      if (successCount > 0) toast('已上传 ' + successCount + ' 项');
+      if (successCount === 0 && failCount > 0) toast(firstErrorMessage || '上传失败，请重试');
     }, 420);
   }
 
   async function publishPost() {
     if (!window.currentUser) {
-      toast('Please log in first');
+      toast('请先登录');
       return;
     }
     if (state.postPublishing) return;
@@ -1400,7 +1400,7 @@
     }
 
     state.postPublishing = true;
-    beginPublishUi(file ? 'Uploading...' : 'Publishing...');
+    beginPublishUi(file ? '上传中...' : '发布中...');
     try {
       var mediaUrl = '';
       var mediaType = '';
@@ -2100,7 +2100,7 @@
   function overridePhotoHandlers() {
     window.xtjUploadBtn = function() {
       if (!window.currentUser) {
-        toast('Please log in first');
+        toast('请先登录');
         return;
       }
       var input = byId('photoFileInput');
@@ -2133,13 +2133,13 @@
         '      </svg>',
         '    </div>',
         '    <div class="pw-upload-progress-copy">',
-        '      <div class="pw-upload-progress-title" id="pwUploadProgressTitle">Preparing Upload</div>',
+        '      <div class="pw-upload-progress-title" id="pwUploadProgressTitle">准备上传</div>',
         '      <div class="pw-upload-progress-text" id="pwUploadProgressText">0%</div>',
-        '      <div class="pw-upload-progress-status" id="pwUploadProgressStatus">Checking media and building upload queue...</div>',
+        '      <div class="pw-upload-progress-status" id="pwUploadProgressStatus">正在检查媒体并建立上传队列...</div>',
         '    </div>',
         '  </div>',
         '  <div class="pw-upload-local-bar-wrap"><div class="pw-upload-progress-bar" id="pwUploadProgressBar" style="width:0%"></div></div>',
-        '  <div class="pw-upload-queue-head"><span>Upload Queue</span><span id="pwUploadQueueCount">0 items</span></div>',
+        '  <div class="pw-upload-queue-head"><span>上传队列</span><span id="pwUploadQueueCount">0 项</span></div>',
         '  <div class="pw-upload-queue" id="pwUploadQueuePreview"></div>',
         '</div>'
       ].join('');
@@ -2152,7 +2152,7 @@
       ensureOverlayAtBody();
       overlay.style.display = 'flex';
       overlay.classList.add('upload-overlay-visible');
-      setProgress(0, 'Preparing Upload', 'Checking media and building upload queue...');
+      setProgress(0, '准备上传', '正在检查媒体并建立上传队列...');
     };
 
     hideProgress = function() {
@@ -2160,7 +2160,7 @@
       if (!overlay) return;
       overlay.classList.remove('upload-overlay-visible');
       overlay.style.display = 'none';
-      setProgress(0, 'Preparing Upload', 'Checking media and building upload queue...');
+      setProgress(0, '准备上传', '正在检查媒体并建立上传队列...');
       revokeUrls('queueUrls');
     };
   }
