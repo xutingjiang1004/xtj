@@ -151,6 +151,61 @@
 
 
   /* ==============================================================
-     P2 ~ P6 保留位（待后续阶段添加）
+     P2: 帖子面板 — 内容居中多列布局
+     发布框 + 筛选 + 统计 + feed 居中（max-width: 680px），
+     类似 Twitter/X 桌面端布局。
+     ============================================================== */
+
+  /* nav 顶栏内容居中 */
+  #panelPosts > nav {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 12px 24px;
+  }
+
+  /* 主内容 wrap 居中，覆盖 inline style 的 max-width:100% */
+  #panelPosts .wrap {
+    max-width: 680px !important;
+    margin: 0 auto !important;
+    padding: 24px 0 !important;
+  }
+
+  /* 发布框 — 更大更突出 */
+  #panelPosts .publish-box {
+    padding: 28px !important;
+    border-radius: 16px !important;
+    margin-bottom: 24px !important;
+  }
+
+  #panelPosts .publish-box textarea {
+    font-size: 17px !important;
+    min-height: 100px !important;
+  }
+
+  /* 筛选栏 */
+  #panelPosts .post-filter-bar {
+    margin-bottom: 20px !important;
+  }
+
+  /* 统计卡片 — 更大间距 */
+  #panelPosts .stats {
+    gap: 16px !important;
+    margin-bottom: 20px !important;
+  }
+
+  /* stat 卡片微调 */
+  #panelPosts .stat-card {
+    padding: 16px 12px !important;
+    border-radius: 14px !important;
+  }
+
+  /* feed 列表容器 */
+  #panelPosts .feed {
+    /* feed 内部由 JS 动态生成，保持默认 */
+  }
+
+
+  /* ==============================================================
+     P3 ~ P6 保留位
      ============================================================== */
 }
