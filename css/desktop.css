@@ -211,6 +211,14 @@
     display: block !important;
   }
 
+  /* 帖子之间保持距离，避免视觉黏连 */
+  #panelPosts .wrap > #feed > .post {
+    margin-bottom: 18px !important;
+  }
+  #panelPosts .wrap > #feed > .post:last-child {
+    margin-bottom: 0 !important;
+  }
+
   /* 2.1 PC 端按钮风格：方角、不透明、纯色背景 — 跟手机圆形胶囊形成区别 */
   #panelPosts .post > .post-actions {
     display: flex !important;
@@ -495,21 +503,88 @@
     gap: 12px !important;
   }
 
-  /* 照片网格加宽：5 列，1920+ 屏幕 6 列 */
+  /* 照片网格：4 列（统一卡片大小，便于阅读） */
   #panelAi .photo-wall-grid {
     display: grid !important;
-    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
     gap: 18px !important;
   }
 
   #panelAi .photo-wall-item {
-    border-radius: 14px !important;
+    border-radius: 10px !important;
+    background: var(--panel-bg, #fafafa) !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  #panelAi .photo-wall-item::before,
+  #panelAi .photo-wall-item::after {
+    display: none !important;
+  }
+  #panelAi .photo-wall-item .pw-item-info {
+    background: transparent !important;
+    color: var(--text-main, #222) !important;
+    padding: 10px 4px 4px !important;
+    position: static !important;
+    border-radius: 0 !important;
+  }
+  #panelAi .photo-wall-item .pw-item-info .pw-item-name {
+    color: var(--text-main, #222) !important;
+  }
+  #panelAi .photo-wall-item .pw-item-info .pw-item-meta {
+    color: var(--text-muted, #777) !important;
   }
 
-  /* 超宽屏：6 列 */
+  /* 相册分组卡片（pw-album-card）— 统一简洁风格：矩形 + 封面 + 文字 */
+  #panelAi .pw-album-card {
+    background: var(--panel-bg, #fafafa) !important;
+    border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.06)) !important;
+    border-radius: 10px !important;
+    padding: 10px !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+  }
+  #panelAi .pw-album-card:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+  }
+  #panelAi .pw-album-cover {
+    border-radius: 8px !important;
+    aspect-ratio: 16 / 10 !important;
+    margin-bottom: 8px !important;
+  }
+  #panelAi .pw-album-title {
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: var(--text-main, #222) !important;
+    margin-bottom: 2px !important;
+  }
+  #panelAi .pw-album-count {
+    font-size: 12px !important;
+    color: var(--text-muted, #777) !important;
+  }
+
+  /* 暗色主题：照片墙 */
+  [data-theme="dark"] #panelAi .photo-wall-item,
+  [data-theme="dark"] #panelAi .pw-album-card {
+    background: rgba(25, 30, 38, 0.86) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+  }
+  [data-theme="dark"] #panelAi .pw-album-title,
+  [data-theme="dark"] #panelAi .photo-wall-item .pw-item-name {
+    color: #e6ebe8 !important;
+  }
+  [data-theme="dark"] #panelAi .pw-album-count,
+  [data-theme="dark"] #panelAi .photo-wall-item .pw-item-meta {
+    color: rgba(230, 235, 232, 0.55) !important;
+  }
+
+  /* 超宽屏：5 列 */
   @media (min-width: 1600px) {
     #panelAi .photo-wall-grid {
-      grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+      grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
       gap: 20px !important;
     }
   }
