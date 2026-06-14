@@ -1859,7 +1859,7 @@ window.safeLocalStorageSet = function(key, value) {
                         : '';
                     return [
                         '<article class="stat-record-entry stat-row ' + (isLikes ? 'stat-like-item' : 'stat-comment-item') + (mediaHtml ? '' : ' stat-row--no-media') + (canOpenPost ? '' : ' is-disabled') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 26, 220) + 'ms;">',
-                        statMediaColumnMarkup(mediaHtml),
+                        (mediaHtml ? '<div class="stat-row-media">' + mediaHtml + '</div>' : ''),
                         '<div class="stat-row-main">',
                         '<div class="stat-row-title">' + escapeHtml(currentUser.user_metadata?.full_name || currentUser.email || '我') + (isLikes ? ' 点赞了：' : ' 评论了：') + '</div>',
                         '<div class="stat-row-copy">' + escapeHtml(summary) + noteHtml + '</div>',
