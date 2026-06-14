@@ -2183,11 +2183,18 @@ function renderProfileActivityList(kind) {
             }
 
             window.toggleProfileActivity = function(kind) {
+                console.warn('[DEBUG-DOCK] toggleProfileActivity called:', kind, 'currentUser:', currentUser, 'activeUser:', typeof dockChatActiveUser !== 'undefined' ? dockChatActiveUser : 'n/a');
                 if (!currentUser) {
                     showToast('请先登录');
                     return;
                 }
-                renderProfileActivityModal(kind);
+                try {
+                    renderProfileActivityModal(kind);
+                    console.warn('[DEBUG-DOCK] renderProfileActivityModal ok, modal classList:', document.getElementById('profileActivityModal').className);
+                } catch(e) {
+                    console.error('[DEBUG-DOCK] renderProfileActivityModal ERROR:', e);
+                    showToast('打开记录失败：' + (e?.message || e));
+                }
             };
 
             window.closeProfileActivityModal = function() {
