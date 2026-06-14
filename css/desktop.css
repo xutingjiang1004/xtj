@@ -116,11 +116,12 @@
     transition: background 0.18s ease, transform 0.18s ease;
   }
 
-  /* active 高亮 — 替代 dock-indicator 胶囊 */
+  /* active 高亮 — 配合竖向小药丸显示，仅微调文字 */
   .dock-bar .dock-tab.active {
-    background: rgba(74, 108, 247, 0.12) !important;
-    box-shadow: inset 0 0 0 1px rgba(74, 108, 247, 0.18) !important;
     font-weight: 600;
+  }
+  .dock-bar .dock-tab.active .dt-label {
+    color: var(--accent-color, rgba(74, 108, 247, 1));
   }
 
   /* AI 按钮特殊处理 */
@@ -153,21 +154,35 @@
   }
 
   /* ==============================================================
-     6. dock-indicator — 桌面端隐藏
-     原因：indicator 的位置和滑动由 JS positionIndicator() 控制，
-     该函数基于水平布局计算 transform/width/height。
-     桌面竖排侧边栏中无法自动适配竖向滑动。
-     已用 .dock-tab.active 高亮替代（见上节）。
-     注意：desktop.css 在 index.html 中位于 inline hotfix 之后加载，
-     所以这里的 !important 可以覆盖 hotfix。
+     6. dock-indicator — 桌面端竖向小药丸
+     在竖排侧边栏中：
+     - JS 仍然在跑 positionIndicator()，但用 offsetLeft/offsetTop，
+       算出来的位置是水平 dock 的逻辑，会让 indicator 变形。
+     - 这里覆盖它的 transform / width / height，让它呈现为
+       跟随 active tab 上下移动的竖向小药丸。
+     - 同时保留 hotfix 的视觉样式（玻璃、背景、边框等）。
      ============================================================== */
-  .dock-bar > .dock-indicator,
-  .dock-indicator {
+
+  /* 6.1 基础定位：跟随 active tab，但缩小尺寸 */
+  .dock-bar > .dock-indicator {
+    width: 4px !important;
+    height: 28px !important;
+    border-radius: 999px !important;
+    left: 4px !important;
+    top: auto !important;
+    transform: translateY(0) !important;
+    transition:
+      top 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
+      transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
+      height 0.32s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
+    /* 让 indicator 定位在每个 tab 的左外侧 */
+    z-index: 2 !important;
+  }
+
+  /* 6.2 隐藏 liquid 装饰子元素，避免视觉干扰 */
+  .dock-bar > .dock-indicator .dock-liquid-lens,
+  .dock-bar > .dock-indicator .dock-liquid-shine {
     display: none !important;
-    width: 0 !important;
-    height: 0 !important;
-    opacity: 0 !important;
-    visibility: hidden !important;
   }
 
   /* ==============================================================
