@@ -158,9 +158,16 @@
      该函数基于水平布局计算 transform/width/height。
      桌面竖排侧边栏中无法自动适配竖向滑动。
      已用 .dock-tab.active 高亮替代（见上节）。
+     注意：desktop.css 在 index.html 中位于 inline hotfix 之后加载，
+     所以这里的 !important 可以覆盖 hotfix。
      ============================================================== */
-  .dock-bar > .dock-indicator {
+  .dock-bar > .dock-indicator,
+  .dock-indicator {
     display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
   }
 
   /* ==============================================================
