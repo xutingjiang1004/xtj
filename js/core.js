@@ -3656,6 +3656,9 @@ function renderProfileActivityList(kind) {
                 var normalized = normalizePost(post);
                 var bits = [];
                 bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
+                if (isVipUser() && normalized.user_name === currentUser) {
+                    bits.push('<span class="post-visibility-badge public post-pro-badge">Pro</span>');
+                }
                 if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
                 return bits.join("");
             }
@@ -3717,7 +3720,6 @@ function renderProfileActivityList(kind) {
                     <div class="post-header-main">
                       <div class="user-info">
                         <span class="user-name">${escapeHtml(normalized.user_name)}</span>
-                        ${isVipUser() && normalized.user_name === currentUser ? '<span class="xtj-vip-badge xtj-vip-enhanced"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Pro</span>' : ''}
                         <span class="post-time post-meta-line">${escapeHtml(formatPostTime(normalized))}</span>
                       </div>
                       <div class="post-badge-stack">${buildPostBadges(normalized)}</div>
