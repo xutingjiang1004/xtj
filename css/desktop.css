@@ -288,4 +288,107 @@
   #panelPosts .publish-box textarea {
     min-height: 90px !important;
   }
+
+  /* ==============================================================
+     P3: 聊天面板 — 双列布局（list 左 + detail 右）
+     关键点：
+     - .dock-chat-container 改为 grid 2 列
+     - 覆盖 .chat-view.hidden 在 PC 端不隐藏（list 与 detail 始终并排）
+       这样 JS 切换 .hidden 类不影响 PC 端的并排显示
+     - chat-header 跨 2 列，PC 端隐藏 ← 返回按钮（不需要）
+     - 移动端 (< 1024px) 行为完全不变：list 与 detail 互斥切换
+     ============================================================== */
+
+  /* 容器：grid 2 列 */
+  #panelChat .dock-chat-container {
+    display: grid !important;
+    grid-template-columns: 340px minmax(0, 1fr) !important;
+    grid-template-rows: auto minmax(0, 1fr) !important;
+    height: calc(100dvh - 48px) !important;
+    max-width: 1400px !important;
+    margin: 0 auto !important;
+    gap: 0;
+  }
+
+  /* header 跨 2 列，置顶 */
+  #panelChat .chat-header {
+    grid-column: 1 / -1 !important;
+    grid-row: 1 !important;
+    padding: 14px 24px !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+    background: var(--glass-bg, rgba(255, 255, 255, 0.6)) !important;
+    backdrop-filter: blur(10px) !important;
+    -webkit-backdrop-filter: blur(10px) !important;
+  }
+
+  /* PC 端隐藏「←」返回按钮（移动端保留） */
+  #panelChat #dockChatBackBtn {
+    display: none !important;
+  }
+
+  /* list 固定在左列，永远可见 */
+  #panelChat #dockChatListView {
+    grid-column: 1 !important;
+    grid-row: 2 !important;
+    border-right: 1px solid rgba(0, 0, 0, 0.08) !important;
+    background: rgba(255, 255, 255, 0.4) !important;
+    overflow: hidden !important;
+    min-height: 0;
+  }
+  /* 覆盖 .hidden 在 PC 端不隐藏（list 始终显示） */
+  #panelChat #dockChatListView.chat-view.hidden {
+    display: flex !important;
+  }
+  /* list 自身可滚动 */
+  #panelChat #dockChatList {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* detail 占右列，永远可见（覆盖移动端默认 hidden） */
+  #panelChat #dockChatDetailView {
+    grid-column: 2 !important;
+    grid-row: 2 !important;
+    display: flex !important;
+    min-height: 0;
+    background: var(--glass-bg, rgba(255, 255, 255, 0.35)) !important;
+  }
+  /* 覆盖 .hidden 在 PC 端不隐藏（detail 始终显示） */
+  #panelChat #dockChatDetailView.chat-view.hidden {
+    display: flex !important;
+  }
+
+  /* detail 内的消息区可滚动 */
+  #panelChat #dockChatMessages {
+    overflow-y: auto !important;
+    padding: 20px 28px !important;
+    flex: 1 !important;
+    min-height: 0;
+  }
+
+  /* 输入区贴底 */
+  #panelChat .chat-input-area {
+    padding: 12px 24px calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+    background: rgba(255, 255, 255, 0.5) !important;
+    border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
+    flex-shrink: 0;
+  }
+
+  /* 会话项在左列更紧凑 */
+  #panelChat .chat-list-item {
+    padding: 12px 18px !important;
+  }
+
+  /* 暗色主题适配 */
+  [data-theme="dark"] #panelChat #dockChatListView {
+    background: rgba(20, 22, 38, 0.4) !important;
+    border-right-color: rgba(255, 255, 255, 0.06) !important;
+  }
+  [data-theme="dark"] #panelChat .chat-header,
+  [data-theme="dark"] #panelChat .chat-input-area {
+    border-color: rgba(255, 255, 255, 0.06) !important;
+  }
+  [data-theme="dark"] #panelChat #dockChatDetailView {
+    background: rgba(20, 22, 38, 0.25) !important;
+  }
 }
