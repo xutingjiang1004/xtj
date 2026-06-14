@@ -4852,35 +4852,12 @@ function renderProfileActivityList(kind) {
             };
             window.renderFeed = renderFeed;
 
-            document.getElementById("delBtn").onclick = async function() {
-                if (!delPostId) return;
-                var btn = document.getElementById("delBtn");
-                btn.disabled = true;
-                btn.textContent = "删除中..";
-                try {
-                    var key = isAdmin() ? delOwnerKey : deviceId;
-                    var result = await sb.rpc("delete_post_with_actor", {
-                        p_post_id: delPostId,
-                        p_actor_key: key
-                    });
-                    if (result.error) {
-                        showToast("删除失败: " + result.error.message);
-                        return;
-                    }
-                    clearFeedCache();
-                    closeModal("delModal");
-                    showToast("帖子已删除");
-                    delPostId = null;
-                    await loadFeed(true);
-                    loadProfileActivity(true);
-                } catch (e) {
-                    showToast("删除帖子失败");
-                    console.error(e);
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = "确认删除";
-                }
-            };
+            // ★ 关键修复：删除此重复的 delBtn.onclick 赋值！
+            // 原因：此 handler 没有 __xtjDeleteInProgress 锁、没有 Promise.race 超时、
+            //      finally 没重置状态、await loadFeed(true) 会阻塞整个事件循环。
+            //      JS 中 .onclick 重复赋值会**覆盖**前面的 handler（line 2602 区域的完整保护版失效），
+            //      导致删除卡死、连续删除卡死。
+            // 真正生效的 handler 在 line 2602 区域（带锁 + 超时 + 乐观删除 + 入口强制解锁）。
 
             // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?668鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
             window.prefetchStatData = async function() {
