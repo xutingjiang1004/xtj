@@ -226,21 +226,23 @@
     margin-top: 10px !important;
   }
 
-  /* 2.1.5 头像点击修复：确保 .avatar.clickable 和外圈 xtj-pro-avatar-ring 不被遮挡 */
+  /* 2.1.5 头像点击修复：确保 .avatar.clickable、.avatar-wrap、xtj-pro-avatar-ring 全部可点击 */
   .avatar.clickable,
   #panelPosts .post .avatar.clickable,
   #panelAi .post .avatar.clickable,
+  .avatar-wrap,
   .xtj-pro-avatar-ring,
   .xtj-pro-avatar-ring .avatar {
     pointer-events: auto !important;
     cursor: pointer !important;
+    position: relative !important;
+    z-index: 5 !important;
   }
   .xtj-pro-avatar-ring {
     display: inline-block !important;
   }
   .xtj-pro-avatar-ring .avatar {
-    position: relative;
-    z-index: 2;
+    z-index: 6 !important;
   }
   #panelPosts .post > .post-actions .action-btn {
     border-radius: 6px !important;
