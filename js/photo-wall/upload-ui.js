@@ -1019,13 +1019,13 @@
     if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();
     else if (window.renderPhotoWall) await window.renderPhotoWall();
 
-    setProgress(100, failCount ? 'Upload finished' : 'Upload success', successCount + ' succeeded, ' + failCount + ' failed');
+    setProgress(100, failCount ? '上传完成' : '上传成功', '成功 ' + successCount + ' 个，失败 ' + failCount + ' 个');
     state.photoUploading = false;
     state.photoFiles = [];
     setTimeout(function() {
       hideProgress();
-      if (successCount > 0) toast('Uploaded ' + successCount + ' items');
-      if (successCount === 0 && failCount > 0) toast('Upload failed, please retry');
+      if (successCount > 0) toast('上传成功 ' + successCount + ' 个文件');
+      if (successCount === 0 && failCount > 0) toast('上传失败，请重试');
     }, 420);
   }
 
@@ -1131,12 +1131,12 @@
         if (visibilityEl) visibilityEl.value = 'public';
       }
       setPostPreview([]);
-      toast(insertResult.fallback ? 'Published successfully with fallback compatibility' : 'Published successfully');
+      toast(insertResult.fallback ? '发布成功（兼容模式）' : '发布成功');
       if (insertResult.data && typeof window.xtjPrependPostToFeed === 'function') await window.xtjPrependPostToFeed(insertResult.data);
       else if (typeof window.loadFeed === 'function') await window.loadFeed(true);
     } catch (err) {
       console.error('[post-publish-ui] publish failed', err);
-      toast('Publish failed: ' + (err && err.message ? err.message : 'Please retry'));
+      toast('发布失败: ' + (err && err.message ? err.message : '请重试'));
     } finally {
       state.postPublishing = false;
       endPublishUi();
@@ -1319,7 +1319,7 @@
       } catch (err) {
         console.error('[photo-upload-ui] photo wall upload failed', err);
         if (!firstErrorMessage) {
-          firstErrorMessage = err && err.message ? err.message : 'Upload failed';
+          firstErrorMessage = err && err.message ? err.message : '上传失败';
         }
         failCount++;
       }
@@ -1331,7 +1331,7 @@
     if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();
     else if (window.renderPhotoWall) await window.renderPhotoWall();
 
-    setProgress(100, failCount ? 'Upload finished' : 'Upload success', successCount + ' succeeded, ' + failCount + ' failed');
+    setProgress(100, failCount ? '上传完成' : '上传成功', '成功 ' + successCount + ' 个，失败 ' + failCount + ' 个');
     state.photoUploading = false;
     state.photoFiles = [];
     setTimeout(function() {
@@ -1466,12 +1466,12 @@
         if (visibilityEl) visibilityEl.value = 'public';
       }
       setPostPreview([]);
-      toast(insertResult.fallback ? 'Published successfully with fallback compatibility' : 'Published successfully');
+      toast(insertResult.fallback ? '发布成功（兼容模式）' : '发布成功');
       if (insertResult.data && typeof window.xtjPrependPostToFeed === 'function') await window.xtjPrependPostToFeed(insertResult.data);
       else if (typeof window.loadFeed === 'function') await window.loadFeed(true);
     } catch (err) {
       console.error('[post-publish-ui] publish failed', err);
-      toast('Publish failed: ' + (err && err.message ? err.message : 'Please retry'));
+      toast('发布失败: ' + (err && err.message ? err.message : '请重试'));
     } finally {
       state.postPublishing = false;
       endPublishUi();
@@ -1519,7 +1519,7 @@
           state.photoUploading = false;
           hideProgress();
           console.error('[photo-upload-ui] fatal upload failure', err);
-          toast(err && err.message ? err.message : 'Upload failed, please retry');
+          toast(err && err.message ? err.message : '上传失败，请重试');
         }
       });
     }

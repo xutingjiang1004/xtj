@@ -109,14 +109,18 @@
     transition: background 0.18s ease;
   }
 
-  /* hover 微亮 */
+  /* hover 微亮 + 微缩放 */
   .dock-tab:hover {
     background: rgba(128, 128, 128, 0.06) !important;
+    transform: scale(1.02);
+    transition: background 0.18s ease, transform 0.18s ease;
   }
 
-  /* active 高亮 */
-  .dock-tab.active {
-    background: rgba(128, 128, 128, 0.10) !important;
+  /* active 高亮 — 替代 dock-indicator 胶囊 */
+  .dock-bar .dock-tab.active {
+    background: rgba(74, 108, 247, 0.12) !important;
+    box-shadow: inset 0 0 0 1px rgba(74, 108, 247, 0.18) !important;
+    font-weight: 600;
   }
 
   /* AI 按钮特殊处理 */
@@ -149,12 +153,21 @@
   }
 
   /* ==============================================================
-     6. 动画层 — 在竖排侧边栏中隐藏（后续单独适配）
-     .anim-layer 的 GSAP 动画依赖水平布局的坐标，
-     暂时隐藏避免错位干扰视觉。
+     6. dock-indicator — 桌面端隐藏
+     原因：indicator 的位置和滑动由 JS positionIndicator() 控制，
+     该函数基于水平布局计算 transform/width/height。
+     桌面竖排侧边栏中无法自动适配竖向滑动。
+     已用 .dock-tab.active 高亮替代（见上节）。
      ============================================================== */
-  .dock-tab .anim-layer {
+  .dock-bar > .dock-indicator {
     display: none !important;
   }
+
+  /* ==============================================================
+     7. 动画层 — 保留点击动画
+     GSAP 动画（花朵绽放、聊天气泡、钢笔绘制）在竖排侧边栏中
+     仍然正常播放，位于各 tab 内部区域。
+     ============================================================== */
+  /* anim-layer 在桌面端保持可见（不隐藏） */
 
 }
