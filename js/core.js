@@ -6729,6 +6729,27 @@ function renderProfileActivityList(kind) {
             // 版本更新日志
             const changelogData = [
                 {
+                    version: 'v0.78',
+                    date: '2026-06-14',
+                    content: `
+                        <h4>版本与更新日志同步</h4>
+                        <ul>
+                            <li>关于页版本显示统一更新为 xtj v0.78</li>
+                            <li>站内更新日志补充 v0.78 版本记录</li>
+                            <li>仓库 CHANGELOG.md 与站内版本记录同步，避免版本信息分裂</li>
+                        </ul>
+                        <h4>文案整理</h4>
+                        <ul>
+                            <li>本次版本记录按正式发布口径重新整理，保留清晰的分节结构</li>
+                            <li>继续保留 Remade 板块，用来标记重做、重写、重构类更新</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重做了版本记录的同步方式，让关于页版本号、站内 changelog、仓库 changelog 三处保持一致</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.77',
                     date: '2026-06-13',
                     content: `
