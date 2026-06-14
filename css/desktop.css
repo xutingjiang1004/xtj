@@ -391,4 +391,161 @@
   [data-theme="dark"] #panelChat #dockChatDetailView {
     background: rgba(20, 22, 38, 0.25) !important;
   }
+
+  /* ==============================================================
+     P4: 照片墙面板 — header 横向 sticky + 网格加宽到 5-6 列
+     - 整体 max-width 1400px 居中
+     - 标题左 / 控件右，吸顶
+     - 移动端 (< 1024px) 行为完全不变
+     ============================================================== */
+
+  #panelAi .photo-wall-container {
+    max-width: 1400px !important;
+    margin: 0 auto !important;
+    padding: 24px 32px 60px !important;
+  }
+
+  /* header 横向布局：标题左、状态+控件右 */
+  #panelAi .photo-wall-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 24px !important;
+    flex-wrap: wrap !important;
+    margin-bottom: 24px !important;
+    padding: 16px 22px !important;
+    background: var(--glass-bg, rgba(255, 255, 255, 0.6)) !important;
+    border: 1px solid var(--glass-line, rgba(255, 255, 255, 0.5)) !important;
+    border-radius: 16px !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    position: sticky !important;
+    top: 16px !important;
+    z-index: 10 !important;
+  }
+
+  /* 标题在左 */
+  #panelAi .photo-wall-title {
+    flex: 1 1 auto !important;
+    min-width: 0;
+  }
+
+  /* 同步状态在中间，控件在右 */
+  #panelAi .photo-wall-sync-status {
+    flex: 0 0 auto !important;
+  }
+
+  #panelAi .photo-wall-controls {
+    flex: 0 0 auto !important;
+    gap: 12px !important;
+  }
+
+  /* 照片网格加宽：5 列，1920+ 屏幕 6 列 */
+  #panelAi .photo-wall-grid {
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    gap: 18px !important;
+  }
+
+  #panelAi .photo-wall-item {
+    border-radius: 14px !important;
+  }
+
+  /* 超宽屏：6 列 */
+  @media (min-width: 1600px) {
+    #panelAi .photo-wall-grid {
+      grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+      gap: 20px !important;
+    }
+  }
+
+  /* 上传弹窗 PC 端居中加宽 */
+  #panelAi .pw-upload-sheet {
+    align-items: center !important;
+    justify-content: center !important;
+  }
+  #panelAi .pw-upload-sheet-card {
+    max-width: 640px !important;
+    width: min(92vw, 640px) !important;
+  }
+  #panelAi .pw-upload-sheet-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  /* ==============================================================
+     P5: 我的面板 — 2 列 grid 布局
+     左侧 (340px) ：用户卡 + VIP 卡 + 设置
+     右侧 (1fr) ：活动板（点赞 + 评论 上下堆叠）
+     顶部 header 横跨两列
+     底部 totals 横跨两列
+     - 移动端 (< 1024px) 行为完全不变
+     ============================================================== */
+
+  #panelProfile .dock-profile-container {
+    max-width: 1200px !important;
+    margin: 0 auto !important;
+    padding: 24px 32px 60px !important;
+    display: grid !important;
+    grid-template-columns: 340px minmax(0, 1fr) !important;
+    grid-template-areas:
+      "header  activity"
+      "user    activity"
+      "vip     activity"
+      "settings activity"
+      "totals  totals" !important;
+    gap: 20px !important;
+    align-items: start !important;
+    height: auto !important;
+  }
+
+  /* 区域分配 */
+  #panelProfile .profile-header { grid-area: header !important; padding: 0 !important; border: 0 !important; margin: 0 0 4px !important; }
+  #panelProfile .profile-user-card { grid-area: user !important; margin-bottom: 0 !important; }
+  #panelProfile .xtj-vip-card { grid-area: vip !important; margin-bottom: 0 !important; }
+  #panelProfile .profile-settings { grid-area: settings !important; flex: 0 0 auto !important; margin-bottom: 0 !important; }
+  #panelProfile .profile-activity-board { grid-area: activity !important; display: flex !important; flex-direction: column !important; gap: 16px !important; }
+  #panelProfile .profile-totals-bar { grid-area: totals !important; margin: 8px 0 0 !important; }
+
+  /* 用户卡在 PC 端稍微精致 */
+  #panelProfile .profile-user-card {
+    padding: 18px 20px !important;
+  }
+  #panelProfile .profile-avatar {
+    width: 56px !important;
+    height: 56px !important;
+    font-size: 22px !important;
+  }
+  #panelProfile .profile-user-name { font-size: 18px !important; }
+  #panelProfile .profile-user-status { font-size: 13px !important; }
+
+  /* 活动板：两块卡片在右侧一列 */
+  #panelProfile .profile-activity-card {
+    padding: 18px 20px !important;
+  }
+  #panelProfile .profile-activity-card h4 {
+    font-size: 18px !important;
+  }
+  #panelProfile .profile-activity-count {
+    font-size: 22px !important;
+    font-weight: 700 !important;
+  }
+
+  /* 设置卡：紧凑 */
+  #panelProfile .profile-setting-item {
+    min-height: 56px !important;
+    padding: 14px 16px !important;
+  }
+  #panelProfile .profile-setting-icon {
+    width: 32px !important;
+    height: 32px !important;
+  }
+  #panelProfile .profile-setting-icon svg {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  /* VIP 卡：稍宽更突出 */
+  #panelProfile .xtj-vip-card {
+    padding: 16px 18px !important;
+  }
 }
