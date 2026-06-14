@@ -661,11 +661,10 @@
     max-height: min(82vh, 760px) !important;
   }
 
-  /* 短 modal 480px */
+  /* 短 modal 480px（注意：#reportModal 是遮罩 .report-modal-overlay，max-width 限制的是弹窗 box .report-modal，不是遮罩） */
   #loginModal .modal-box,
   #registerModal .modal-box,
-  #delModal .modal-box,
-  #reportModal {
+  #delModal .modal-box {
     max-width: 480px !important;
     width: min(480px, calc(100vw - 80px)) !important;
   }
@@ -674,6 +673,62 @@
   #vipModal .modal-box {
     max-width: 820px !important;
     width: min(820px, calc(100vw - 80px)) !important;
+  }
+
+  /* VIP modal 紧凑布局：features 2 列 + pay-btn 贴底 + body 内部滚动 */
+  #vipModal .vip-modal-body {
+    padding: 20px 24px !important;
+    overflow-y: auto !important;
+    flex: 1 !important;
+  }
+  #vipModal .vip-modal {
+    display: flex !important;
+    flex-direction: column !important;
+    max-height: min(86vh, 820px) !important;
+  }
+  /* features 改 2 列布局，6 个变 3 行 */
+  #vipModal .vip-plan-features {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px 14px !important;
+    margin-top: 16px !important;
+  }
+  #vipModal .vip-plan-feature {
+    text-align: left !important;
+    padding: 10px 12px !important;
+    border-radius: 12px !important;
+    background: rgba(255, 248, 230, 0.5) !important;
+  }
+  [data-theme="dark"] #vipModal .vip-plan-feature {
+    background: rgba(255, 255, 255, 0.05) !important;
+  }
+  /* pay-btn 在 features 之后，sticky 贴 features 底部 */
+  #vipModal .vip-pay-btn {
+    margin-top: 18px !important;
+    padding: 14px 24px !important;
+    border-radius: 999px !important;
+    font-size: 15px !important;
+    font-weight: 700 !important;
+  }
+  /* footer 永远贴 modal 底部 */
+  #vipModal .vip-modal-footer {
+    padding: 12px 24px !important;
+    border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
+    flex-shrink: 0 !important;
+  }
+  [data-theme="dark"] #vipModal .vip-modal-footer {
+    border-top-color: rgba(255, 255, 255, 0.06) !important;
+  }
+  /* VIP 标题区紧凑 */
+  #vipModal .vip-modal-head {
+    padding: 14px 20px !important;
+    flex-shrink: 0 !important;
+  }
+  #vipModal .vip-plan-card {
+    padding: 16px 18px !important;
+  }
+  #vipModal .vip-plan-amount {
+    font-size: 40px !important;
   }
 
   /* 头像上传 info modal：固定 360px */
@@ -771,6 +826,97 @@
   [data-theme="dark"] .glass {
     background: rgba(255, 255, 255, 0.04) !important;
     border-color: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  /* 7.5 暗色主题全局适配（PC 端补全：post / publish-box / stats / profile 卡 / chat / photo-wall / input / button） */
+  [data-theme="dark"] .post,
+  [data-theme="dark"] .publish-box,
+  [data-theme="dark"] .post-filter-bar,
+  [data-theme="dark"] .stats,
+  [data-theme="dark"] .profile-user-card,
+  [data-theme="dark"] .profile-activity-card,
+  [data-theme="dark"] .profile-setting-item,
+  [data-theme="dark"] .profile-totals-bar,
+  [data-theme="dark"] .xtj-vip-card,
+  [data-theme="dark"] .photo-wall-header,
+  [data-theme="dark"] .photo-wall-item,
+  [data-theme="dark"] .chat-header,
+  [data-theme="dark"] .chat-input-area,
+  [data-theme="dark"] .chat-list-item,
+  [data-theme="dark"] .profile-settings {
+    background: rgba(25, 30, 38, 0.86) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+    color: #e6ebe8 !important;
+  }
+  /* hover 状态 */
+  [data-theme="dark"] .chat-list-item:hover,
+  [data-theme="dark"] .profile-setting-item:hover,
+  [data-theme="dark"] .post:hover {
+    background: rgba(35, 42, 52, 0.92) !important;
+  }
+  /* 文字色 */
+  [data-theme="dark"] .post-text,
+  [data-theme="dark"] .content,
+  [data-theme="dark"] .profile-user-name,
+  [data-theme="dark"] .profile-user-status,
+  [data-theme="dark"] .profile-setting-text,
+  [data-theme="dark"] .profile-activity-card h4,
+  [data-theme="dark"] .profile-activity-card .stat-card span,
+  [data-theme="dark"] .profile-activity-card .stat-card b,
+  [data-theme="dark"] .stat-card .stat-label,
+  [data-theme="dark"] .stat-card b,
+  [data-theme="dark"] .vip-modal-title,
+  [data-theme="dark"] .vip-plan-name,
+  [data-theme="dark"] .vip-plan-desc,
+  [data-theme="dark"] .vip-plan-feature-text,
+  [data-theme="dark"] .vip-modal-footer-text,
+  [data-theme="dark"] .photo-wall-title,
+  [data-theme="dark"] .chat-msg,
+  [data-theme="dark"] .msg-text,
+  [data-theme="dark"] .chat-header h3,
+  [data-theme="dark"] .post-author-name {
+    color: #e6ebe8 !important;
+  }
+  /* 二级文字 / 弱化文字 */
+  [data-theme="dark"] .msg-time,
+  [data-theme="dark"] .post-time,
+  [data-theme="dark"] .profile-user-status,
+  [data-theme="dark"] .post-stat,
+  [data-theme="dark"] .stat-card .stat-label,
+  [data-theme="dark"] .vip-plan-desc,
+  [data-theme="dark"] .vip-modal-footer-text {
+    color: rgba(230, 235, 232, 0.55) !important;
+  }
+  /* 输入框 */
+  [data-theme="dark"] textarea,
+  [data-theme="dark"] input[type="text"],
+  [data-theme="dark"] input[type="search"] {
+    background: rgba(0, 0, 0, 0.32) !important;
+    color: #e6ebe8 !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+  }
+  [data-theme="dark"] textarea::placeholder,
+  [data-theme="dark"] input::placeholder {
+    color: rgba(230, 235, 232, 0.4) !important;
+  }
+  /* 按钮 */
+  [data-theme="dark"] .btn-primary,
+  [data-theme="dark"] .publish-box button,
+  [data-theme="dark"] .stat-card-toggle,
+  [data-theme="dark"] .post-action-btn,
+  [data-theme="dark"] .profile-totals-bar > * {
+    color: #e6ebe8 !important;
+  }
+  /* stats 数字 */
+  [data-theme="dark"] .stat-card b,
+  [data-theme="dark"] .profile-activity-count {
+    color: #b8e6c6 !important;
+  }
+  /* dock-panels 整体深色 */
+  [data-theme="dark"] .dock-panels,
+  [data-theme="dark"] body {
+    background: #0a0e0c !important;
+    color: #e6ebe8 !important;
   }
 
   /* 8. PC 端 body 字体略大，行高更舒适 */
