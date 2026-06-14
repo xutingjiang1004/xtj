@@ -126,15 +126,19 @@
   }
 
   /* ==============================================================
-     6. dock-indicator — 自然显示，无自定义覆盖
-     在 56px 宽的 dock 栏中，indicator 尺寸约 40×36px，
-     是一个正常大小的胶囊，会跟随 active tab 上下滑动。
-     不做任何 clip-path / backdrop-filter 覆盖，让 hotfix
-     和 style.css 的视觉效果自然呈现。
+     6. dock-indicator — 桌面端竖向胶囊
+     强制 CSS transition（!important 覆盖 JS 的 inline style），
+     让点击切换 tab 时胶囊平滑上下滑动。
      ============================================================== */
-  /* 无 indicator 覆盖 —— 让它自然显示 */
+  .dock-bar > .dock-indicator {
+    transition:
+      transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
+      width 0.28s cubic-bezier(0.25, 0.1, 0.25, 1),
+      height 0.28s cubic-bezier(0.25, 0.1, 0.25, 1),
+      opacity 0.2s ease !important;
+  }
 
-  /* 隐藏 liquid 装饰子元素（竖条中不协调） */
+  /* 隐藏 liquid 装饰子元素（竖条中视觉不协调） */
   .dock-bar > .dock-indicator .dock-liquid-lens,
   .dock-bar > .dock-indicator .dock-liquid-shine {
     display: none !important;
