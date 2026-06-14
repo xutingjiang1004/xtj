@@ -553,4 +553,77 @@
   #profileActivityModal {
     z-index: 250 !important;
   }
+
+  /* P5 加固 #2：活动记录 modal 在 PC 端加宽 + 记录卡片垂直堆叠布局
+     根因：mobile 端 stat-row 是 3 列 grid (62+1fr+auto) + align-items:center，
+     modal 宽度只有 560px 时 1fr 列被压扁，stat-row-main 内的 title+copy 上下挤在一起
+     解决：PC 端 modal 加宽到 760px，stat-row 改 flex column 让媒体/主内容/按钮垂直堆叠
+     ============================================================== */
+
+  #profileActivityModal .profile-activity-modal {
+    max-width: 760px !important;
+    width: min(760px, calc(100vw - 80px)) !important;
+    max-height: min(82vh, 800px) !important;
+  }
+
+  /* 列表区域允许充分滚动 */
+  #profileActivityModal .profile-activity-list {
+    max-height: none !important;
+  }
+
+  /* stat-row 改 flex column 布局（mobile 是 3 列 grid） */
+  #profileActivityModal .stat-row {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    padding: 14px 16px !important;
+    border-bottom: 1px solid rgba(196, 224, 206, 0.72) !important;
+  }
+  /* 媒体缩略图（独立一行，左对齐） */
+  #profileActivityModal .stat-row-media {
+    margin-top: 0 !important;
+    width: auto !important;
+    max-width: 280px !important;
+  }
+  #profileActivityModal .stat-row-media img,
+  #profileActivityModal .stat-row-media .stat-record-thumb {
+    max-width: 280px !important;
+    max-height: 180px !important;
+    object-fit: cover !important;
+    border-radius: 12px !important;
+  }
+  /* 主内容区占满宽度 */
+  #profileActivityModal .stat-row-main {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  /* 按钮单独一行，左对齐 */
+  #profileActivityModal .stat-record-action {
+    align-self: flex-start !important;
+    min-height: 32px !important;
+    padding: 6px 14px !important;
+    border-radius: 999px !important;
+    border: 1px solid rgba(122, 186, 146, 0.38) !important;
+    background: rgba(245, 253, 248, 0.72) !important;
+    color: #2f6e4d !important;
+    font-size: 12px !important;
+    cursor: pointer !important;
+    pointer-events: auto !important;
+  }
+  /* 取消点赞 / 删除评论 红色按钮 */
+  #profileActivityModal .stat-record-action.is-danger {
+    border-color: rgba(220, 132, 132, 0.5) !important;
+    background: rgba(254, 246, 246, 0.78) !important;
+    color: #b3404a !important;
+  }
+  /* 每条记录最小高度，让内容能完整显示 */
+  #profileActivityModal .stat-record-entry {
+    min-height: 96px !important;
+  }
+  /* 复制评论记录 modal（如果有）一并适配 */
+  #statRecordsModal .stat-records-modal {
+    max-width: 760px !important;
+    width: min(760px, calc(100vw - 80px)) !important;
+  }
 }
