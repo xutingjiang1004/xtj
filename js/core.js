@@ -6304,6 +6304,119 @@ function renderProfileActivityList(kind) {
 
             // 鑱婂ぉ消息閺堟勾缂撳瓨閿涘奔绨╁▎鈩冨ⅵ瀵偓缁夋帒锟??
             var _chatCache = {};
+            var _chatRenderSignature = {};
+
+            function getDockChatCacheKey(userName) {
+                return (currentUser || '') + '_' + (userName || '');
+            }
+
+            function sortDockChatMessages(msgs) {
+                return (Array.isArray(msgs) ? msgs.slice() : []).sort(function(a, b) {
+                    return new Date(a && a.created_at ? a.created_at : 0).getTime() - new Date(b && b.created_at ? b.created_at : 0).getTime();
+                });
+            }
+
+            function buildDockChatRenderSignature(msgs) {
+                return (Array.isArray(msgs) ? msgs : []).map(function(m) {
+                    return [
+                        m && m.id ? m.id : '',
+                        m && m.__tempId ? m.__tempId : '',
+                        m && m.user_name ? m.user_name : '',
+                        m && m.media_url ? m.media_url : '',
+                        m && m.content ? m.content : '',
+                        m && m.created_at ? m.created_at : '',
+                        m && m.actor_key ? m.actor_key : '',
+                        m && m.views ? m.views : 0,
+                        m && m.__optimistic ? 1 : 0
+                    ].join('~');
+                }).join('|');
+            }
+
+            function mergeDockChatMessages(userName, msgs) {
+                var cacheKey = getDockChatCacheKey(userName);
+                var optimisticMsgs = ((_chatCache[cacheKey] || []).filter(function(m) {
+                    return m && m.__optimistic;
+                }));
+                if (!optimisticMsgs.length) return sortDockChatMessages(msgs || []);
+                var merged = (msgs || []).slice();
+                optimisticMsgs.forEach(function(msg) {
+                    var exists = merged.some(function(existing) {
+                        return existing && msg && existing.id && msg.id && existing.id === msg.id;
+                    });
+                    if (!exists) merged.push(msg);
+                });
+                return sortDockChatMessages(merged);
+            }
+
+            function upsertDockChatCacheMessage(userName, message) {
+                var cacheKey = getDockChatCacheKey(userName);
+                var list = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey].slice() : [];
+                var index = list.findIndex(function(item) {
+                    if (!item) return false;
+                    if (message.__tempId && item.__tempId === message.__tempId) return true;
+                    return !!(message.id && item.id && message.id === item.id);
+                });
+                if (index >= 0) list[index] = message;
+                else list.push(message);
+                _chatCache[cacheKey] = sortDockChatMessages(list);
+                return _chatCache[cacheKey];
+            }
+
+            function replaceDockChatCacheMessage(userName, tempId, message) {
+                var cacheKey = getDockChatCacheKey(userName);
+                var list = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey].slice() : [];
+                var index = list.findIndex(function(item) {
+                    return !!(item && item.__tempId === tempId);
+                });
+                if (index < 0 && message && message.id) {
+                    index = list.findIndex(function(item) {
+                        return !!(item && item.id && item.id === message.id);
+                    });
+                }
+                if (index >= 0) list[index] = message;
+                else list.push(message);
+                _chatCache[cacheKey] = sortDockChatMessages(list);
+                return _chatCache[cacheKey];
+            }
+
+            function removeDockChatCacheMessage(userName, tempId) {
+                var cacheKey = getDockChatCacheKey(userName);
+                var list = Array.isArray(_chatCache[cacheKey]) ? _chatCache[cacheKey].slice() : [];
+                _chatCache[cacheKey] = list.filter(function(item) {
+                    return !(item && item.__tempId === tempId);
+                });
+                return _chatCache[cacheKey];
+            }
+
+            function buildDockChatBodyMarkup(message) {
+                if (message.actor_key && message.actor_key.startsWith('__dm_img__')) {
+                    var imageSrc = getMediaUrl('__dm_img__', message.actor_key.replace('__dm_img__', ''));
+                    var imageBody = '<img class="msg-img" src="' + imageSrc + '" data-full-src="' + imageSrc + '" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" />';
+                    if (message.content) imageBody += '<div class="msg-text">' + escapeHtml(message.content) + '</div>';
+                    return imageBody;
+                }
+                if (message.actor_key && message.actor_key.startsWith('__dm_vid__')) {
+                    var videoSrc = getMediaUrl('__dm_vid__', message.actor_key.replace('__dm_vid__', ''));
+                    var videoBody = '<video class="msg-img" src="' + videoSrc + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
+                    if (message.content) videoBody += '<div class="msg-text">' + escapeHtml(message.content) + '</div>';
+                    return videoBody;
+                }
+                return '<span class="msg-text">' + escapeHtml(message.content || '') + '</span>';
+            }
+
+            function buildDockChatRowMarkup(message, avatars, disableAnim) {
+                var sent = message.user_name === currentUser;
+                var avatarHtml = sent ? avatars.mine : avatars.other;
+                var readStatus = sent ? ((message.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
+                var bubbleClass = 'chat-msg ' + (sent ? 'sent' : 'received');
+                if (message.__optimistic && sent) bubbleClass += ' sent-anim';
+                else if (disableAnim) bubbleClass += ' no-anim';
+                if (message.__optimistic) bubbleClass += ' pending';
+                var tempAttr = message.__tempId ? ' data-temp-id="' + message.__tempId + '"' : '';
+                var bubble = '<div class="' + bubbleClass + '"' + tempAttr + '>' + buildDockChatBodyMarkup(message) + readStatus + '<span class="msg-time">' + formatMsgTime(message.created_at) + '</span></div>';
+                if (sent) return '<div class="chat-msg-row sent">' + bubble + '<div class="chat-msg-avatar">' + avatarHtml + '</div></div>';
+                return '<div class="chat-msg-row received"><div class="chat-msg-avatar">' + avatarHtml + '</div>' + bubble + '</div>';
+            }
 
             async function loadDockChatMessages(userName, forceScroll) {
                 if (!window.currentUser) {
@@ -6352,9 +6465,9 @@ function renderProfileActivityList(kind) {
                     } catch(e) {}
                 }
                 // 閺堝绱︾€涙ê鍘涚珛鍗虫樉锟?
-                var cacheKey = currentUser + '_' + userName;
+                var cacheKey = getDockChatCacheKey(userName);
                 if (_chatCache[cacheKey] && !forceScroll) {
-                    renderDockMessages(_chatCache[cacheKey], true);
+                    renderDockMessages(_chatCache[cacheKey], false);
                 }
                 dockChatMsgsBusy = true; dockChatMsgsUser = userName; dockChatMsgsDirty = '';
                 const el = document.getElementById('dockChatMessages');
@@ -6364,12 +6477,12 @@ function renderProfileActivityList(kind) {
                         .or(`and(user_name.eq.${window.currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${window.currentUser})`)
                         .order("created_at").limit(500);
                     if (error) throw error;
-                    _chatCache[cacheKey] = msgs || [];
+                    _chatCache[cacheKey] = mergeDockChatMessages(userName, msgs || []);
                     const toMark = (msgs || []).filter(m => m.user_name === userName && m.media_url === window.currentUser && (m.views || 0) === 0);
                     await Promise.all(toMark.map(m => sb.rpc("increment_post_views", { p_post_id: m.id }).catch(() => {})));
-                    toMark.forEach(m => { m.views = 1; });
+                    toMark.forEach(function(m) { m.views = 1; });
                     window.markMessagesRead(userName);
-                    renderDockMessages(msgs || [], forceScroll);
+                    renderDockMessages(_chatCache[cacheKey], forceScroll);
                 } catch(e) {
                     if (!_chatCache[cacheKey]) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>' + (e.message || '加载失败') + '</div></div>';
@@ -6382,52 +6495,35 @@ function renderProfileActivityList(kind) {
 
             function renderDockMessages(msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
-                if (!msgs.length) { el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>'; return; }
-                // 濡澁鎷峰ù瀣暏閹撮攱妲搁崥锕€婀敓浠嬬湅閸樺棗褰堕敓鏂ゆ嫹褰曢敍鍫㈩瀲鎼存洟鍎撮敓鏂ゆ嫹閿熸枻锟?00px鐟欏棔璐熼崷锟窖勭畽闁告ê妫楄ぐ鍫曟晸?
+                if (!el) return;
+                if (!msgs.length) {
+                    _chatRenderSignature[dockChatActiveUser || '__empty__'] = '__empty__';
+                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>';
+                    return;
+                }
+                var signatureKey = dockChatActiveUser || '__empty__';
+                var nextSignature = buildDockChatRenderSignature(msgs);
+                if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
+                    if (forceScroll) el.scrollTop = el.scrollHeight;
+                    return;
+                }
                 var isNearBottom = !el.scrollHeight || (el.scrollHeight - el.scrollTop - el.clientHeight) < 100;
                 var shouldAutoScroll = forceScroll || isNearBottom;
                 const isBulk = msgs.length > 2;
-                // 鍏堥殣钘忥拷顔愰崳顭掔礉濞撳弶鐓嬬€瑰瞼娲块幒銉ュ煂鎼存洖鍟€閿熸枻鎷风ず閿涘矂浼╅崗宥勭矤妞ゅ爼鍎达拷?鎴滅瑓閺夈儳娈戦梻顏嗗剨
-                var wasHidden = false;
-                if (shouldAutoScroll && isBulk) {
-                    el.style.visibility = 'hidden';
-                    wasHidden = true;
-                }
                 var otherUser = msgs[0] ? (msgs[0].user_name === currentUser ? msgs[0].media_url : msgs[0].user_name) : '';
                 var myAvatarHtml = avatarCache[currentUser] ? '<img src="' + avatarCache[currentUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">' : (currentUser ? currentUser[0].toUpperCase() : '?');
                 var otherAvatarHtml = avatarCache[otherUser] ? '<img src="' + avatarCache[otherUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">' : (otherUser ? otherUser[0].toUpperCase() : '?');
-                el.innerHTML = msgs.map(m => {
-                    const sent = m.user_name === currentUser;
-                    const readStatus = sent ? ((m.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
-                    let body = '';
-                    if (m.actor_key && m.actor_key.startsWith('__dm_img__')) {
-                        var imageSrc = getMediaUrl('__dm_img__', m.actor_key.replace('__dm_img__', ''));
-                        body = '<img class="msg-img" src="' + imageSrc + '" data-full-src="' + imageSrc + '" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" />';
-                        if (m.content) body += '<div class="msg-text">' + escapeHtml(m.content) + '</div>';
-                    } else if (m.actor_key && m.actor_key.startsWith('__dm_vid__')) {
-                        body = '<video class="msg-img" src="' + getMediaUrl('__dm_vid__', m.actor_key.replace('__dm_vid__', '')) + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
-                        if (m.content) body += '<div class="msg-text">' + escapeHtml(m.content) + '</div>';
-                    } else { body = '<span class="msg-text">' + escapeHtml(m.content || '') + '</span>'; }
-                    var avatarHtml = sent ? myAvatarHtml : otherAvatarHtml;
-                    var bubble = '<div class="chat-msg ' + (sent ? 'sent' : 'received') + (isBulk ? ' no-anim' : '') + '">' + body + readStatus + '<span class="msg-time">' + formatMsgTime(m.created_at) + '</span></div>';
-                    if (sent) {
-                        return '<div class="chat-msg-row sent">' + bubble + '<div class="chat-msg-avatar">' + avatarHtml + '</div></div>';
-                    } else {
-                        return '<div class="chat-msg-row received"><div class="chat-msg-avatar">' + avatarHtml + '</div>' + bubble + '</div>';
-                    }
+                el.innerHTML = msgs.map(function(m) {
+                    return buildDockChatRowMarkup(m, { mine: myAvatarHtml, other: otherAvatarHtml }, isBulk);
                 }).join('');
-                if (shouldAutoScroll) {
-                    el.scrollTop = el.scrollHeight;
-                }
-                // 濞撳弶鐓嬬€瑰本鐦敍灞炬▔缁€鍝勵啇锟?
-                if (wasHidden) {
-                    el.style.visibility = '';
-                }
+                el.dataset.chatUser = signatureKey;
+                _chatRenderSignature[signatureKey] = nextSignature;
+                if (shouldAutoScroll) el.scrollTop = el.scrollHeight;
             }
 
             function scrollDockChatBottom() {
                 const el = document.getElementById('dockChatMessages');
-                if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                if (el) el.scrollTop = el.scrollHeight;
             }
 
             async function sendDockChatMessage() {
@@ -6438,6 +6534,7 @@ function renderProfileActivityList(kind) {
                 const fileInput = document.getElementById('dockChatFileInp');
                 const file = fileInput.files[0];
                 if ((!content && !file) || !dockChatActiveUser || dockChatSending) return;
+                var targetUser = dockChatActiveUser;
                 var maxFileSize = isVipUser() ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
                 if (file && file.size > maxFileSize) { showToast("文件大小不能超过" + (isVipUser() ? "200MB" : "50MB")); return; }
                 if (file) {
@@ -6448,6 +6545,7 @@ function renderProfileActivityList(kind) {
                 dockChatSending = true; inp.value = '';
                 var capturedContent = content;
                 var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                var optimisticCreatedAt = new Date().toISOString();
                 try {
                     let actorKey = DM_MARKER;
                     if (file) {
@@ -6460,50 +6558,34 @@ function renderProfileActivityList(kind) {
                         actorKey = file.type.startsWith('video/') ? '__dm_vid__' + path : '__dm_img__' + path;
                     }
 
-                    // ===== 乐观 UI：立即把新消息插入到 DOM（不等服务器） =====
-                    // 解决两个问题：
-                    // 1) 消息不等服务器 round-trip 立即显示
-                    // 2) 单条新元素触发 sent-anim 动画，比 innerHTML 全量重写后再 add class 更顺畅
-                    try {
-                        var msgsEl = document.getElementById('dockChatMessages');
-                        if (msgsEl) {
-                            if (msgsEl.querySelector('.chat-empty')) msgsEl.innerHTML = '';
-                            var myAvatarHtml = avatarCache[currentUser]
-                                ? '<img src="' + avatarCache[currentUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">'
-                                : (currentUser ? currentUser[0].toUpperCase() : '?');
-                            var bodyHtml = '';
-                            if (actorKey && actorKey.startsWith('__dm_img__')) {
-                                var imageSrc = getMediaUrl('__dm_img__', actorKey.replace('__dm_img__', ''));
-                                bodyHtml = '<img class="msg-img" src="' + imageSrc + '" onclick="openImageViewer(this.src)" loading="lazy" />';
-                                if (capturedContent) bodyHtml += '<div class="msg-text">' + escapeHtml(capturedContent) + '</div>';
-                            } else if (actorKey && actorKey.startsWith('__dm_vid__')) {
-                                bodyHtml = '<video class="msg-img" src="' + getMediaUrl('__dm_vid__', actorKey.replace('__dm_vid__', '')) + '" controls preload="metadata" style="cursor:default;"></video>';
-                                if (capturedContent) bodyHtml += '<div class="msg-text">' + escapeHtml(capturedContent) + '</div>';
-                            } else {
-                                bodyHtml = '<span class="msg-text">' + escapeHtml(capturedContent || '') + '</span>';
-                            }
-                            var optimisticBubble = '<div class="chat-msg sent sent-anim" data-temp-id="' + tempId + '">' + bodyHtml + '<span class="msg-read-status">未读</span><span class="msg-time">' + formatMsgTime(new Date().toISOString()) + '</span></div>';
-                            var optimisticRow = '<div class="chat-msg-row sent">' + optimisticBubble + '<div class="chat-msg-avatar">' + myAvatarHtml + '</div></div>';
-                            msgsEl.insertAdjacentHTML('beforeend', optimisticRow);
-                            // 立即滚到底，不用 smooth 避免动画延迟
-                            msgsEl.scrollTop = msgsEl.scrollHeight;
-                        }
-                    } catch(_e) { /* 乐观插入失败不影响发送流程 */ }
+                    var optimisticMessage = {
+                        id: tempId,
+                        __tempId: tempId,
+                        __optimistic: true,
+                        user_name: currentUser,
+                        content: capturedContent,
+                        media_type: DM_MARKER,
+                        media_url: targetUser,
+                        actor_key: actorKey,
+                        created_at: optimisticCreatedAt,
+                        views: 0
+                    };
+                    renderDockMessages(upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
 
-                    const { error } = await sb.from("posts").insert([{ user_name: currentUser, content: capturedContent, media_type: DM_MARKER, media_url: dockChatActiveUser, actor_key: actorKey }]);
+                    const { data: insertedMessage, error } = await sb.from("posts")
+                        .insert([{ user_name: currentUser, content: capturedContent, media_type: DM_MARKER, media_url: targetUser, actor_key: actorKey }])
+                        .select("id, user_name, media_url, content, created_at, views, actor_key")
+                        .single();
                     if (error) throw error;
                     clearDockChatFilePreview(false);
-
-                    // 服务器插入成功：移除 temp-id 标记（消息保留显示，下次 fetch 时会被真实数据自然替换）
-                    var _okTempEl = document.querySelector('#dockChatMessages [data-temp-id="' + tempId + '"]');
-                    if (_okTempEl) _okTempEl.removeAttribute('data-temp-id');
+                    replaceDockChatCacheMessage(targetUser, tempId, insertedMessage || optimisticMessage);
+                    if (dockChatActiveUser === targetUser) renderDockMessages(_chatCache[getDockChatCacheKey(targetUser)] || [], true);
 
                     // 异步更新左侧会话列表预览（不阻塞 UI、不重写消息区 DOM）
                     setTimeout(function() { try { loadDockChatList(); } catch(_e) {} }, 80);
                 } catch(e) {
-                    // 失败回滚：移除乐观插入的消息
-                    var _failEl = document.querySelector('#dockChatMessages [data-temp-id="' + tempId + '"]');
-                    if (_failEl) { var _failRow = _failEl.closest('.chat-msg-row'); if (_failRow) _failRow.remove(); }
+                    removeDockChatCacheMessage(targetUser, tempId);
+                    if (dockChatActiveUser === targetUser) renderDockMessages(_chatCache[getDockChatCacheKey(targetUser)] || [], true);
                     showToast('发送失败 ' + (e?.message || e)); inp.value = capturedContent;
                 }
                 finally { dockChatSending = false; }
