@@ -151,28 +151,52 @@
 
 
   /* ==============================================================
-     P2: 帖子面板 — 2 列 feed + 右侧统计栏
-     把原本横向排列的 .stats 变成右侧 280px 竖排侧栏。
-     feed 改为 2 列网格（卡片更紧凑），整体更专业。
+     P2: 帖子面板 — 2 列布局
+     左侧 (1fr) ：publish / filter / feed（feed 内 2 列）
+     右侧 (300px) ：stats 玻璃卡片，sticky 跟随滚动
+     使用 grid-template-areas 显式命名区域，强制 stats 占右列
      ============================================================== */
 
-  /* 整体布局 */
+  /* 整体布局：2 列网格，stats 跨 3 行 */
   #panelPosts .wrap {
-    max-width: 1200px !important;
+    max-width: min(1200px, calc(100vw - 56px - 48px)) !important;
     margin: 0 auto !important;
     padding: 24px 32px 60px !important;
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) 300px !important;
-    gap: 32px !important;
+    grid-template-areas:
+      "publish stats"
+      "filter  stats"
+      "feed    stats" !important;
+    column-gap: 24px !important;
+    row-gap: 20px !important;
     align-items: start !important;
   }
 
-  /* 主列：包含发布框、筛选、feed */
-  #panelPosts .wrap > #publishBox,
-  #panelPosts .wrap > #postFilterBar,
-  #panelPosts .wrap > #feed {
-    grid-column: 1 !important;
+  /* publish / filter / feed 占左列各自一行 */
+  #panelPosts .wrap > #publishBox    { grid-area: publish !important; min-width: 0; }
+  #panelPosts .wrap > #postFilterBar { grid-area: filter  !important; min-width: 0; }
+  #panelPosts .wrap > #feed          { grid-area: feed    !important; min-width: 0; }
+
+  /* stats 强制占右列，跨 3 行，sticky 跟随滚动 */
+  #panelPosts .wrap > .stats {
+    grid-area: stats !important;
+    position: -webkit-sticky !important;
+    position: sticky !important;
+    top: 24px !important;
+    align-self: start !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 10px !important;
     min-width: 0;
+    background: var(--glass-bg, rgba(255, 255, 255, 0.6)) !important;
+    border: 1px solid var(--glass-line, rgba(255, 255, 255, 0.5)) !important;
+    border-radius: 16px !important;
+    padding: 16px !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04) !important;
+    z-index: 2;
   }
 
   /* feed 内部改为 2 列网格 */
@@ -235,32 +259,16 @@
     font-size: 12px !important;
   }
 
-  /* 右侧统计栏 */
-  #panelPosts .wrap > .stats {
-    grid-column: 2 !important;
-    grid-row: 1 / -1 !important;
-    position: sticky !important;
-    top: 24px !important;
-    display: flex !important;
-    flex-direction: column !important;
-    gap: 12px !important;
-    align-self: start !important;
-    background: var(--glass-bg, rgba(255, 255, 255, 0.6)) !important;
-    border: 1px solid var(--glass-line, rgba(255, 255, 255, 0.5)) !important;
-    border-radius: 16px !important;
-    padding: 16px !important;
-    backdrop-filter: blur(12px) !important;
-    -webkit-backdrop-filter: blur(12px) !important;
-  }
-
+  /* stat-card 紧凑排版：数字大、标签小，水平排列 */
   #panelPosts .wrap > .stats .stat-card {
     text-align: left !important;
-    padding: 14px 16px !important;
+    padding: 12px 14px !important;
     display: flex !important;
     flex-direction: row !important;
     align-items: center !important;
     justify-content: space-between !important;
     gap: 12px !important;
+    border-radius: 12px !important;
   }
 
   #panelPosts .wrap > .stats .stat-card b {
