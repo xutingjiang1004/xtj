@@ -1,25 +1,17 @@
 /* ============================================================
    desktop.css — PC 端桌面布局
    ============================================================
-   只在屏幕宽度 >= 1024px 时生效（index.html 中有 media 属性控制）。
-   移动端（< 1024px）完全不受影响。
+   只在屏幕宽度 >= 1024px 时生效。
+   移动端（< 1024px）desktop.css 完全不加载。
 
    设计原则：
    - 仅通过 CSS 调整布局，不动 HTML / JS
-   - 不覆盖现有 pointer-events，不遮挡按钮
-   - 不修改任何 id / class / data-* / 表单 / 事件绑定
+   - 不新增 pointer-events: none，不遮挡按钮
+   - 不修改 id / class / data-* / 表单 / 事件绑定
    - 不改变 Supabase / 发布 / 聊天 / 筛选 / 弹窗 / 登录
-
-   分阶段实施索引：
-   P1 — dock-bar 改为左侧竖排侧边栏
-   P2 — 帖子面板多列布局
-   P3 — 聊天面板双列布局
-   P4 — 照片墙面板宽屏优化
-   P5 — 我的面板卡片化布局
-   P6 — 模态框 / 弹窗 PC 端尺寸优化
    ============================================================ */
 
-/* ---------- P1: dock-bar → 左侧竖排侧边栏 ---------- */
+/* ---------- P1: dock-bar → 左侧窄图标栏 ---------- */
 @media (min-width: 1024px) {
 
   /* ==============================================================
@@ -31,49 +23,37 @@
   }
 
   /* ==============================================================
-     2. dock-bar — fixed 左侧竖排
-     注意：inline hotfix 已将 background/border/box-shadow/backdrop
-     设为 transparent/none !important（在 desktop.css 之后加载），
-     所以这些属性无法从此文件覆盖。
-     视觉效果由 .dock-tab 自身背景提供。
-     pointer-events: .dock-bar 为 none !important（来自 hotfix），
-     .dock-tab 为 auto !important（来自 hotfix），按钮始终可点击。
+     2. dock-bar — fixed 左侧窄图标栏（56px）
+     只显示图标按钮，底部空白区域透明「打通」。
      ============================================================== */
   .dock-bar {
     top: 0 !important;
     bottom: 0 !important;
     left: 0 !important;
     right: auto !important;
-    width: 220px !important;
+    width: 56px !important;
 
     flex-direction: column !important;
     justify-content: flex-start !important;
-    align-items: stretch !important;
+    align-items: center !important;
 
-    gap: 2px !important;
-    padding: 16px 10px !important;
-    padding-top: calc(24px + env(safe-area-inset-top, 0px)) !important;
-    padding-left: calc(10px + env(safe-area-inset-left, 0px)) !important;
-    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
-
-    /* 右侧细分割线 */
-    border-right: 1px solid rgba(128, 128, 128, 0.10) !important;
+    gap: 8px !important;
+    padding: 12px 4px !important;
+    padding-top: calc(20px + env(safe-area-inset-top, 0px)) !important;
 
     z-index: 100 !important;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: visible !important;
   }
 
   /* ==============================================================
-     3. dock-panels → 右侧面板区域偏移
-     原：flex:1 填满，dock-panel 用 position:absolute;inset:0
+     3. dock-panels — 右侧面板偏移
      ============================================================== */
   .dock-panels {
-    margin-left: 220px;
+    margin-left: 56px;
   }
 
   /* ==============================================================
-     4. dock-panel — 移除底部大 padding（bar 不在底部了）
+     4. dock-panel — 移除底部大 padding
      ============================================================== */
   .dock-panel {
     left: 0 !important;
@@ -84,117 +64,89 @@
     padding-bottom: 24px !important;
   }
 
-  /* 照片墙面板顶部特殊处理 */
   .dock-panel#panelAi {
     padding-top: 0 !important;
   }
 
   /* ==============================================================
-     5. dock-tab — 竖排侧边栏内的按钮样式
-     横向排列：icon 在左 + label 在右
+     5. dock-tab — 图标居中、紧凑
+     只显示图标，隐藏文字（悬浮时用 title 提示）
      ============================================================== */
   .dock-tab {
-    width: 100% !important;
-    max-width: none !important;
-    flex-direction: row !important;
-    justify-content: flex-start !important;
+    width: 44px !important;
+    max-width: 44px !important;
+    min-width: 44px !important;
+    flex-direction: column !important;
+    justify-content: center !important;
     align-items: center !important;
-    gap: 12px !important;
-    padding: 10px 14px !important;
-    margin: 0 !important;
+    gap: 0 !important;
+    padding: 8px 0 !important;
+    margin: 0 auto !important;
     border-radius: 12px !important;
-    font-size: 13px !important;
-
-    /* 背景过渡 */
-    transition: background 0.18s ease;
+    font-size: 0 !important;
+    transition: background 0.15s ease;
   }
 
-  /* hover 微亮 + 微缩放 */
-  .dock-tab:hover {
-    background: rgba(128, 128, 128, 0.06) !important;
-    transform: scale(1.02);
-    transition: background 0.18s ease, transform 0.18s ease;
+  /* 隐藏文字标签 */
+  .dock-tab .dt-label {
+    display: none !important;
   }
 
-  /* active 高亮 — 配合竖向小药丸显示，仅微调文字 */
-  .dock-bar .dock-tab.active {
-    font-weight: 600;
-  }
-  .dock-bar .dock-tab.active .dt-label {
-    color: var(--accent-color, rgba(74, 108, 247, 1));
-  }
-
-  /* AI 按钮特殊处理 */
+  /* AI 按钮 label 也隐藏 */
   .dock-tab[data-tab="ai"] .dt-label {
-    display: inline !important;
-    font-size: 13px !important;
+    display: none !important;
   }
 
-  /* icon 区域 */
+  /* icon 居中 */
   .dock-tab .dt-icon {
-    width: 22px;
-    height: 22px;
+    width: 28px;
+    height: 28px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 18px !important;
+    font-size: 22px !important;
   }
 
-  /* label */
-  .dock-tab .dt-label {
-    font-size: 13px !important;
-    font-weight: 500;
+  /* hover 微背景 */
+  .dock-tab:hover {
+    background: rgba(128, 128, 128, 0.08) !important;
   }
 
-  /* AI 按钮的 SVG 在侧边栏中缩小 */
+  /* active 不额外加背景（让胶囊来做） */
+  .dock-bar .dock-tab.active {
+    background: transparent !important;
+    font-weight: normal;
+  }
+
+  /* AI SVG 缩小适配 */
   .dock-tab[data-tab="ai"] .dt-icon .dt-svg {
-    width: 24px !important;
-    height: 24px !important;
+    width: 26px !important;
+    height: 26px !important;
   }
 
   /* ==============================================================
-     6. dock-indicator — 桌面端竖向小药丸
-     核心问题：JS 在 core.js:5642-5644 用 indicator.style.width/height/transform
-     直接写 inline style。inline style 优先级最高，外联 CSS !important 也无效。
-     唯一能突破 inline style 的 CSS 属性：clip-path（裁剪可视区域）。
-     思路：让 indicator 保持 JS 算的尺寸（覆盖整个 tab），
-     但用 clip-path 把它裁成左边一条细竖条。
+     6. dock-indicator — 自然显示，无自定义覆盖
+     在 56px 宽的 dock 栏中，indicator 尺寸约 40×36px，
+     是一个正常大小的胶囊，会跟随 active tab 上下滑动。
+     不做任何 clip-path / backdrop-filter 覆盖，让 hotfix
+     和 style.css 的视觉效果自然呈现。
      ============================================================== */
+  /* 无 indicator 覆盖 —— 让它自然显示 */
 
-  /* 6.0 关键：dock-bar 不裁切 indicator */
-  .dock-bar {
-    overflow: visible !important;
-  }
-
-  /* 6.1 用 clip-path 把 indicator 裁成"左边一条细竖条" */
-  /* 假设 indicator 覆盖整个 tab (width ≈ 200px, height ≈ 40px)
-     inset(0 90% 0 0) → 左边 10% 可见 = 20px 宽细条
-     配合 border-radius 看起来像小药丸 */
-  .dock-bar > .dock-indicator {
-    /* 视觉裁剪到左侧约 6px 宽 */
-    clip-path: inset(0 calc(100% - 6px) 0 0 round 999px) !important;
-    -webkit-clip-path: inset(0 calc(100% - 6px) 0 0 round 999px) !important;
-    z-index: 2 !important;
-    opacity: 1 !important;
-    visibility: visible !important;
-    /* 移除 backdrop-filter 等，clip-path 后多余效果会变怪 */
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    box-shadow: none !important;
-  }
-
-  /* 6.2 隐藏 liquid 装饰子元素 */
+  /* 隐藏 liquid 装饰子元素（竖条中不协调） */
   .dock-bar > .dock-indicator .dock-liquid-lens,
   .dock-bar > .dock-indicator .dock-liquid-shine {
     display: none !important;
   }
 
   /* ==============================================================
-     7. 动画层 — 保留点击动画
-     GSAP 动画（花朵绽放、聊天气泡、钢笔绘制）在竖排侧边栏中
-     仍然正常播放，位于各 tab 内部区域。
+     7. 动画层 — GSAP 动画保留
      ============================================================== */
-  /* anim-layer 在桌面端保持可见（不隐藏） */
+  /* 不隐藏 .anim-layer */
 
+
+  /* ==============================================================
+     P2 ~ P6 保留位（待后续阶段添加）
+     ============================================================== */
 }
