@@ -178,7 +178,8 @@ window.safeLocalStorageSet = function(key, value) {
             edited_at: null,
             fileSize: null,
             originalSize: null,
-            mimeType: ""
+            mimeType: "",
+            pro_at_post: false  // 发布时是否为 Pro 会员（冻结的 Pro 状态）
         };
         let postSearchState = {
             keyword: "",
@@ -3326,7 +3327,7 @@ function renderProfileActivityList(kind) {
                 }
             }
 
-            function getAvatarHtml(username, size = 32) {
+            function getAvatarHtml(username, post) {
                 var avatarUrl = avatarCache[username];
                 if (!avatarUrl) {
                     if (username === currentUser) {
@@ -3339,7 +3340,17 @@ function renderProfileActivityList(kind) {
                     }
                 }
                 var safeName = username.replace(/'/g, "\\'");
-                var isPro = isVipUser() && username === currentUser;
+                // Pro 外圈：优先看帖子冻结的 pro_at_post（历史 Pro 帖子永久保留 Pro 外圈）
+                // 再看当前 VIP 状态
+                var isPro = false;
+                if (post) {
+                    try {
+                        var normalizedForAvatar = normalizePost(post);
+                        var avatarMeta = normalizedForAvatar._contentMeta || {};
+                        if (avatarMeta.pro_at_post === true) isPro = true;
+                    } catch(e) {}
+                }
+                if (!isPro && isVipUser() && username === currentUser) isPro = true;
                 if (avatarUrl) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
                     var baseHtml = '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
@@ -3473,7 +3484,7 @@ function renderProfileActivityList(kind) {
                     return `
                 <div class="post glass" data-post-id="${escapeHtml(p.id)}">
                   <div class="post-header">
-                    ${getAvatarHtml(p.user_name)}
+                    ${getAvatarHtml(p.user_name, post)}
                     <div class="user-info">
                       <span class="user-name">${escapeHtml(p.user_name)}</span>
                       <span class="post-time">${new Date(p.created_at).toLocaleString()}</span>
@@ -3546,8 +3557,11 @@ function renderProfileActivityList(kind) {
             }
 
             function collectPostMetadata(visibility, overrides) {
+                // 如果当前是 Pro 会员，在帖子 metadata 里冻结 Pro 状态
+                var wasPro = (typeof isVipUser === 'function') ? isVipUser() : false;
                 return Object.assign({}, POST_META_DEFAULTS, {
-                    visibility: visibility || "public"
+                    visibility: visibility || "public",
+                    pro_at_post: wasPro
                 }, overrides || {});
             }
 
@@ -3677,7 +3691,12 @@ function renderProfileActivityList(kind) {
                 var normalized = normalizePost(post);
                 var bits = [];
                 bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
-                if (isVipUser() && normalized.user_name === currentUser) {
+                // Pro 标志：优先看帖子冻结的 pro_at_post（历史 Pro 帖子永久保留）
+                // 再看当前 Pro 状态（防止元数据丢失时仍能显示）
+                var meta = normalized._contentMeta || {};
+                var isProPost = meta.pro_at_post === true;
+                var isCurrentPro = (typeof isVipUser === 'function') && isVipUser() && normalized.user_name === currentUser;
+                if (isProPost || isCurrentPro) {
                     bits.push('<span class="post-visibility-badge public post-pro-badge">Pro</span>');
                 }
                 if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
@@ -3737,7 +3756,7 @@ function renderProfileActivityList(kind) {
                 return `
                 <div class="post glass" data-post-id="${escapeHtml(normalized.id)}">
                   <div class="post-header">
-                    ${getAvatarHtml(normalized.user_name)}
+                    ${getAvatarHtml(normalized.user_name, normalized)}
                     <div class="post-header-main">
                       <div class="user-info">
                         <span class="user-name">${escapeHtml(normalized.user_name)}</span>
