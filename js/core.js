@@ -2590,31 +2590,62 @@ function renderProfileActivityList(kind) {
             document.getElementById("delBtn").onclick = async () => {
                 if (!delPostId) return;
                 const btn = document.getElementById("delBtn");
+                const modal = document.getElementById("delModal");
+                const restoreBtn = function() {
+                    try { btn.disabled = false; } catch(e) {}
+                    try { btn.textContent = "确认删除"; } catch(e) {}
+                };
+                const closeAndRestore = function(reason) {
+                    try { modal.classList.remove("active"); } catch(e) {}
+                    restoreBtn();
+                    finished = true;
+                    if (reason && typeof showToast === 'function') showToast(reason);
+                };
                 btn.disabled = true;
                 btn.textContent = "删除中..";
                 var finished = false;
-                // 10s 超时：避免 RPC 永久挂起导致"卡主"
+                // 8s 超时：避免 RPC 永久挂起导致"卡主"
                 var timeoutId = setTimeout(function() {
                     if (finished) return;
-                    finished = true;
-                    showToast("删除超时，请重试");
-                    btn.disabled = false;
-                    btn.textContent = "确认删除";
-                }, 10000);
+                    console.warn('[delBtn] 删除超时，强制关闭 modal');
+                    closeAndRestore("删除超时，帖子可能已删除，请刷新查看");
+                    delPostId = null;
+                }, 8000);
                 try {
                     var currentPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(delPostId); });
                     if (currentPost && !canDeletePost(currentPost)) {
-                        showToast("无权删除这条帖子");
+                        if (finished) return;
+                        closeAndRestore("无权删除这条帖子");
                         return;
                     }
                     const key = isAdmin() ? delOwnerKey : deviceId;
-                    const { error } = await sb.rpc("delete_post_with_actor", {
+                    const rpcPromise = sb.rpc("delete_post_with_actor", {
                         p_post_id: delPostId,
                         p_actor_key: key
                     });
+                    // RPC 单独再包一层 6s 超时，避免 setTimeout 没被触发
+                    const rpcTimeout = new Promise(function(_, reject) {
+                        setTimeout(function() { reject(new Error('rpc_timeout')); }, 6000);
+                    });
+                    let rpcResult;
+                    try {
+                        rpcResult = await Promise.race([rpcPromise, rpcTimeout]);
+                    } catch (raceErr) {
+                        if (finished) return;
+                        if (raceErr && raceErr.message === 'rpc_timeout') {
+                            console.warn('[delBtn] RPC 超时，假设已删除');
+                            closeAndRestore("删除超时，已尝试强制刷新");
+                            delPostId = null;
+                            // 后台 fire-and-forget 刷新 feed
+                            if (typeof loadFeed === 'function') loadFeed(true);
+                            return;
+                        }
+                        throw raceErr;
+                    }
                     if (finished) return;
+                    const error = rpcResult && rpcResult.error;
                     if (error) {
-                        showToast("删除失败: " + error.message);
+                        closeAndRestore("删除失败: " + (error.message || "未知错误"));
                         return;
                     }
                     closeModal("delModal");
@@ -2623,13 +2654,12 @@ function renderProfileActivityList(kind) {
                     await loadFeed(true);
                 } catch (e) {
                     if (finished) return;
-                    showToast("删除帖子失败");
-                    console.error(e);
+                    console.error('[delBtn] 删除异常:', e);
+                    closeAndRestore("删除帖子失败: " + (e && e.message || "未知错误"));
                 } finally {
                     finished = true;
                     clearTimeout(timeoutId);
-                    btn.disabled = false;
-                    btn.textContent = "确认删除";
+                    restoreBtn();
                 }
             };
 
@@ -4608,11 +4638,21 @@ function renderProfileActivityList(kind) {
                     feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中..', '', 'feed');
                 }
                 try {
-                    var results = await Promise.all([
+                    // Supabase 查询加 12s 兜底超时，避免永久 hang
+                    const queries = [
                         sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
-                    ]);
+                    ];
+                    const fetchTimeout = new Promise(function(_, reject) { setTimeout(function() { reject(new Error('feed_fetch_timeout')); }, 12000); });
+                    var results;
+                    try {
+                        results = await Promise.race([Promise.all(queries), fetchTimeout]);
+                    } catch (fetchErr) {
+                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载超时，请刷新重试</div>';
+                        console.error('[loadFeed] 查询超时:', fetchErr);
+                        return;
+                    }
                     var postRes = results[0];
                     var commRes = results[1];
                     var likeRes = results[2];
@@ -4635,10 +4675,23 @@ function renderProfileActivityList(kind) {
                         timestamp: now
                     }));
                     // 批量预加载所有出现过的用户的 VIP 历史（用于显示历史 Pro 帖子的 Pro 标志）
+                    // 不阻塞 render：fire-and-forget + 5s 兜底超时，VIP 历史晚一点查完会触发 reRender
                     try {
                         if (typeof window.__xtjBatchLoadVipHistory === 'function') {
                             var userNames = feedAllPosts.map(function(p) { return p && p.user_name; }).filter(Boolean);
-                            await window.__xtjBatchLoadVipHistory(userNames);
+                            var vipLoadPromise = window.__xtjBatchLoadVipHistory(userNames);
+                            // 5s 兜底：超过就放行，不阻塞 renderFeed
+                            var vipLoadTimeout = new Promise(function(resolve) { setTimeout(resolve, 5000); });
+                            Promise.race([vipLoadPromise, vipLoadTimeout]).then(function() {
+                                // VIP 历史加载完后，强制 reRender 让 Pro 标志显示出来
+                                if (window.__xtjVipHistoryCache) {
+                                    try {
+                                        if (typeof renderFeed === 'function') {
+                                            renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+                                        }
+                                    } catch(e) {}
+                                }
+                            }).catch(function() {});
                         }
                     } catch (e) { console.warn('[VIP history preload]', e); }
                     await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
