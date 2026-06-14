@@ -5672,8 +5672,100 @@ function renderProfileActivityList(kind) {
                 return String(scope || "misc") + "/" + Date.now() + "_" + Math.random().toString(36).slice(2, 8) + "_" + sanitizeStorageFileName(fileName);
             }
 
+            function parseDMContentPayload(raw) {
+                if (!raw) return null;
+                if (typeof raw === 'object') return raw;
+                if (typeof raw !== 'string') return null;
+                var trimmed = raw.trim();
+                if (!trimmed || trimmed.charAt(0) !== '{') return null;
+                try {
+                    var parsed = JSON.parse(trimmed);
+                    return parsed && typeof parsed === 'object' ? parsed : null;
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function getDMMessagePayload(message) {
+                return parseDMContentPayload(message && message.content);
+            }
+
+            function getDMMessageText(message) {
+                var payload = getDMMessagePayload(message);
+                if (payload && typeof payload.text === 'string') return payload.text;
+                return typeof (message && message.content) === 'string' ? message.content : '';
+            }
+
+            function getDMMessageReadAt(message) {
+                var payload = getDMMessagePayload(message);
+                return payload && typeof payload.read_at === 'string' && payload.read_at ? payload.read_at : '';
+            }
+
+            function buildDMMessageContent(message, overrides) {
+                var payload = getDMMessagePayload(message) || {};
+                var next = Object.assign({}, payload, overrides || {});
+                var hasTextOverride = overrides && Object.prototype.hasOwnProperty.call(overrides, 'text');
+                var fallbackText = payload && typeof payload.text === 'string'
+                    ? payload.text
+                    : (typeof (message && message.content) === 'string' && !parseDMContentPayload(message.content) ? message.content : '');
+                next.type = next.type || 'dm';
+                next.text = hasTextOverride ? (overrides.text || '') : fallbackText;
+                if (!Object.prototype.hasOwnProperty.call(next, 'read_at')) next.read_at = payload.read_at || null;
+                return JSON.stringify(next);
+            }
+
+            function resolveDockChatMedia(message) {
+                if (!message) return null;
+                var payload = getDMMessagePayload(message);
+                var actorKey = String(message.actor_key || '');
+                if (payload && payload.media && payload.media.url) {
+                    return {
+                        kind: payload.media.kind || '',
+                        src: payload.media.url,
+                        fullSrc: payload.media.url
+                    };
+                }
+                if (actorKey.indexOf('__dm_img__') === 0) {
+                    var rawImage = actorKey.replace('__dm_img__', '');
+                    var imageSrc = /^https?:\/\//i.test(rawImage) ? rawImage : getMediaUrl('__dm_img__', rawImage);
+                    return { kind: 'image', src: imageSrc, fullSrc: imageSrc };
+                }
+                if (actorKey.indexOf('__dm_vid__') === 0) {
+                    var rawVideo = actorKey.replace('__dm_vid__', '');
+                    var videoSrc = /^https?:\/\//i.test(rawVideo) ? rawVideo : getMediaUrl('__dm_vid__', rawVideo);
+                    return { kind: 'video', src: videoSrc, fullSrc: videoSrc };
+                }
+                var text = getDMMessageText(message).trim();
+                if (/^https?:\/\/\S+$/i.test(text)) {
+                    if (/\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i.test(text)) {
+                        return { kind: 'image', src: text, fullSrc: text };
+                    }
+                    if (/\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(text)) {
+                        return { kind: 'video', src: text, fullSrc: text };
+                    }
+                }
+                return null;
+            }
+
+            function getDockChatMessagePreview(message) {
+                var text = getDMMessageText(message).trim();
+                if (text) return text;
+                var media = resolveDockChatMedia(message);
+                if (!media) return '新消息';
+                return media.kind === 'video' ? '[视频]' : '[图片]';
+            }
+
             window.handleDockChatImageError = function(img) {
                 if (!img || !img.parentNode) return;
+                var retryCount = parseInt(img.getAttribute('data-retry-count') || '0', 10) || 0;
+                if (retryCount < 1) {
+                    var retrySrc = img.getAttribute('data-full-src') || img.getAttribute('data-src') || img.currentSrc || img.src || "";
+                    if (retrySrc) {
+                        img.setAttribute('data-retry-count', String(retryCount + 1));
+                        img.src = retrySrc + (retrySrc.indexOf('?') >= 0 ? '&' : '?') + 'retry=' + Date.now();
+                        return;
+                    }
+                }
                 var fullSrc = img.getAttribute("data-full-src") || img.currentSrc || img.src || "";
                 var fallback = document.createElement("button");
                 fallback.type = "button";
@@ -5692,32 +5784,58 @@ function renderProfileActivityList(kind) {
             };
 
             function isMsgReadByMe(msg) {
+                if (getDMMessageReadAt(msg)) return true;
+                if (((msg && msg.views) || 0) > 0) return true;
                 var key = 'xtj_dmread_' + window.currentUser + '_' + msg.user_name;
                 return !!localStorage.getItem(key);
             }
 
-            function markMessagesRead(senderName) {
+            async function markMessagesRead(senderName, messages, pendingUpdates) {
+                if (!window.currentUser || !senderName) return;
                 var key = 'xtj_dmread_' + window.currentUser + '_' + senderName;
                 localStorage.setItem(key, new Date().toISOString());
-                window.dockChatListCacheTime = 0;
-                loadDockChatList();
-                updateUnreadBadge();
+                var updates = Array.isArray(pendingUpdates) ? pendingUpdates.slice() : [];
+                if (!updates.length && Array.isArray(messages)) {
+                    var readAt = new Date().toISOString();
+                    messages.forEach(function(m) {
+                        if (!m || m.user_name !== senderName || m.media_url !== window.currentUser || getDMMessageReadAt(m)) return;
+                        updates.push({
+                            id: m.id,
+                            content: buildDMMessageContent(m, { read_at: readAt }),
+                            views: Math.max(m.views || 0, 1)
+                        });
+                    });
+                }
+                if (updates.length) {
+                    await Promise.all(updates.map(function(update) {
+                        return sb.from('posts')
+                            .update({ content: update.content, views: update.views })
+                            .eq('id', update.id)
+                            .then(function() { return null; })
+                            .catch(function() { return null; });
+                    }));
+                }
+                scheduleDockChatListRefresh(updates.length ? 120 : 40);
             }
+            window.markMessagesRead = markMessagesRead;
 
             function subscribeToMessages() {
                 if (chatRealtime) { sb.removeChannel(chatRealtime); chatRealtime = null; }
                 chatRealtime = sb.channel('chat-dms')
-                    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, function(payload) {
-                        var m = payload.new;
+                    .on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, function(payload) {
+                        var m = payload.new || payload.old;
                         if (m.media_type !== DM_MARKER) return;
                         if (!window.currentUser) return;
-                        if (m.media_url !== window.currentUser) return;
-                        if (m.user_name === window.currentUser) return;
-                        localStorage.removeItem('xtj_dmread_' + window.currentUser + '_' + m.user_name);
-                        showNotification(m.user_name, m.content || '发送了一张图片/视频');
-                        if (typeof dockChatActiveUser !== 'undefined' && dockChatActiveUser === m.user_name) {
-                            loadDockChatMessages(m.user_name, false);
-                        } else if (typeof dockChatActiveUser === 'undefined' || !dockChatActiveUser) {
+                        if (m.user_name !== window.currentUser && m.media_url !== window.currentUser) return;
+                        var otherUser = m.user_name === window.currentUser ? m.media_url : m.user_name;
+                        if (payload.eventType === 'INSERT' && m.media_url === window.currentUser && m.user_name !== window.currentUser) {
+                            localStorage.removeItem('xtj_dmread_' + window.currentUser + '_' + m.user_name);
+                            showNotification(m.user_name, getDockChatMessagePreview(m));
+                        }
+                        window.dockChatListCacheTime = 0;
+                        if (dockChatActiveUser && dockChatActiveUser === otherUser) {
+                            loadDockChatMessages(otherUser, false);
+                        } else if (!dockChatActiveUser) {
                             window.dockChatListCacheTime = 0;
                             loadDockChatList();
                             updateUnreadBadge();
@@ -5758,9 +5876,14 @@ function renderProfileActivityList(kind) {
             }
 
             async function updateUnreadBadge() {
+                var badge = document.getElementById('navChatBadge');
+                if (!window.currentUser) {
+                    if (badge) badge.classList.remove('show');
+                    return;
+                }
                 try {
                     var result = await sb.from('posts')
-                        .select('id, user_name, created_at')
+                        .select('id, user_name, content, views, created_at')
                         .eq('media_type', DM_MARKER)
                         .eq('media_url', window.currentUser)
                         .order('created_at', { ascending: false })
@@ -5773,7 +5896,6 @@ function renderProfileActivityList(kind) {
                     (data || []).forEach(function(m) {
                         if (!window.isMsgReadByMe(m)) cnt++;
                     });
-                    var badge = document.getElementById('navChatBadge');
                     if (badge) {
                         if (cnt > 0) {
                             badge.textContent = cnt > 99 ? '99+' : cnt;
@@ -5943,6 +6065,36 @@ function renderProfileActivityList(kind) {
                 return nearest;
             }
 
+            function setPhotoWallLockedState(isLocked) {
+                var sort = document.getElementById('pwAlbumSort');
+                var toggle = document.getElementById('pwAlbumToggle');
+                var upload = document.getElementById('photoUploadBtn');
+                var sync = document.getElementById('pwSyncStatus');
+                if (sort) sort.style.display = isLocked ? 'none' : '';
+                if (toggle) toggle.style.display = isLocked ? 'none' : '';
+                if (upload) upload.style.display = isLocked ? 'none' : '';
+                if (sync) sync.style.display = isLocked ? 'none' : '';
+            }
+
+            function renderPhotoWallLockedState() {
+                var grid = document.getElementById('photoGrid');
+                var albums = document.getElementById('pwAlbumContainer');
+                if (albums) {
+                    albums.style.display = 'none';
+                    albums.innerHTML = '';
+                }
+                setPhotoWallLockedState(true);
+                if (!grid) return;
+                grid.innerHTML = [
+                    '<div class="photo-wall-empty">',
+                    '  <div class="photo-wall-empty-icon">🔒</div>',
+                    '  <div>登录后可查看照片墙内容</div>',
+                    '  <div style="font-size:12px;margin-top:8px;">可以切换到这个板块，但未登录时不会加载具体照片数据。</div>',
+                    '  <button type="button" class="photo-wall-empty-cta" onclick="openAuthModal(\'login\')">立即登录</button>',
+                    '</div>'
+                ].join('');
+            }
+
             function installDockIndicatorDrag() {
                 var dockBar = document.getElementById('dockBar');
                 var indicator = document.getElementById('dockIndicator');
@@ -6065,6 +6217,12 @@ function renderProfileActivityList(kind) {
                         lastTabTapCount[tab] = (lastTabTapCount[tab] || 0) + 1;
                         
                         if (tab === 'ai') {
+                            if (!window.currentUser) {
+                                renderPhotoWallLockedState();
+                                isRefreshing[tab] = false;
+                                window.showToast('请先登录');
+                                return;
+                            }
                             window.showToast('刷新失败');
                             ensurePhotoWallLoaded().then(function() {
                                 if (typeof window.loadPhotoWallData === 'function') {
@@ -6168,12 +6326,20 @@ function renderProfileActivityList(kind) {
                         document.getElementById('dockChatDetailView').classList.remove('hidden');
                         document.getElementById('dockChatBackBtn').style.display = 'flex';
                         document.getElementById('dockChatTitle').textContent = dockChatActiveUser;
+                        loadDockChatMessages(dockChatActiveUser, false);
                     } else {
                         loadDockChatList();
                     }
                     startDMPolling(300000);
                 }
-                if (tab === 'ai') { ensurePhotoWallLoaded().then(function() { if (typeof window.initPhotoWall === 'function') window.initPhotoWall(); }); }
+                if (tab === 'ai') {
+                    if (!window.currentUser) {
+                        renderPhotoWallLockedState();
+                    } else {
+                        setPhotoWallLockedState(false);
+                        ensurePhotoWallLoaded().then(function() { if (typeof window.initPhotoWall === 'function') window.initPhotoWall(); });
+                    }
+                }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); loadProfileActivity(false); if (typeof clearReportReplyBadge === 'function') clearReportReplyBadge(); }
             };
 
@@ -6223,9 +6389,6 @@ function renderProfileActivityList(kind) {
             // ========== Dock 闁煎崬锕ら妵?==========
             let dockChatActiveUser = null;
             let dockChatSending = false;
-            let dockChatMsgsBusy = false;
-            let dockChatMsgsDirty = '';
-            let dockChatMsgsUser = null;
             let _dockPreviewUrl = null;
 
                                                             function renderChatLoadingState(el, options) {
@@ -6238,6 +6401,7 @@ function renderProfileActivityList(kind) {
 
             function dockChatGoBack() {
                 dockChatActiveUser = null;
+                _dockChatLoadSeq += 1;
                 document.getElementById('dockChatDetailView').classList.add('hidden');
                 document.getElementById('dockChatListView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'none';
@@ -6245,6 +6409,9 @@ function renderProfileActivityList(kind) {
                 window.dockChatListCacheTime = 0;
                 loadDockChatList();
                 startDMPolling(300000);
+                if (typeof window.__xtjResetIOSChatViewport === 'function') {
+                    window.__xtjResetIOSChatViewport();
+                }
                 if (restorePostsScroll !== null) {
                     switchDockTab('posts');
                     requestAnimationFrame(() => {
@@ -6257,7 +6424,13 @@ function renderProfileActivityList(kind) {
             window.dockChatGoBack = dockChatGoBack;
 
             window.openChatList = function() { switchDockTab('chat', true); };
-            window.closeChat = function() { switchDockTab('posts'); };
+            window.closeChat = function() {
+                _dockChatLoadSeq += 1;
+                if (typeof window.__xtjResetIOSChatViewport === 'function') {
+                    window.__xtjResetIOSChatViewport();
+                }
+                switchDockTab('posts');
+            };
 
             let restorePostsScroll = null;
 
@@ -6281,7 +6454,7 @@ function renderProfileActivityList(kind) {
                 document.getElementById('dockChatBackBtn').style.display = 'flex';
                 document.getElementById('dockChatTitle').textContent = userName;
                 switchDockTab('chat', true);
-                loadDockChatMessages(userName);
+                loadDockChatMessages(userName, true);
                 startDMPolling(60000);
             };
 
@@ -6309,7 +6482,7 @@ function renderProfileActivityList(kind) {
                         variant: 'chat-list'
                     });
                     const { data: allMsgs, error } = await sb.from("posts")
-                        .select("id, user_name, media_url, content, created_at")
+                        .select("id, user_name, media_url, content, created_at, views, actor_key")
                         .eq("media_type", DM_MARKER)
                         .or(`user_name.eq.${window.currentUser},media_url.eq.${window.currentUser}`)
                         .order("created_at", { ascending: false })
@@ -6324,7 +6497,7 @@ function renderProfileActivityList(kind) {
                     allMsgs.forEach(m => {
                         const other = m.user_name === window.currentUser ? m.media_url : m.user_name;
                         if (!convMap[other] || new Date(m.created_at) > new Date(convMap[other].last_time)) {
-                            convMap[other] = { other_user: other, last_message: m.content, last_time: m.created_at, unread: 0 };
+                            convMap[other] = { other_user: other, last_message: getDockChatMessagePreview(m), last_time: m.created_at, unread: 0 };
                         }
                         if (m.media_url === window.currentUser && !window.isMsgReadByMe(m)) {
                             convMap[other].unread = Math.min((convMap[other].unread || 0) + 1, 99);
@@ -6362,7 +6535,7 @@ function renderProfileActivityList(kind) {
                         return `
                         <div class="chat-list-item" style="--xtj-enter-delay:${Math.min(index * 28, 220)}ms" onclick="openChat('${c.other_user.replace(/'/g, "\\'")}')">
                             <div class="cli-avatar">${avHtml}</div>
-                            <div class="cli-info"><div class="cli-name">${c.other_user}</div><div class="cli-preview">${c.last_message}</div></div>
+                            <div class="cli-info"><div class="cli-name">${escapeHtml(c.other_user)}</div><div class="cli-preview">${escapeHtml(c.last_message || '')}</div></div>
                             <div class="cli-right"><span class="cli-time">${formatMsgTime(c.last_time)}</span>${c.unread ? '<span class="cli-badge">' + (c.unread > 99 ? '99+' : c.unread) + '</span>' : ''}</div>
                         </div>`;
                     }).join('');
@@ -6375,9 +6548,21 @@ function renderProfileActivityList(kind) {
             // 鑱婂ぉ消息閺堟勾缂撳瓨閿涘奔绨╁▎鈩冨ⅵ瀵偓缁夋帒锟??
             var _chatCache = {};
             var _chatRenderSignature = {};
+            var _dockChatLoadSeq = 0;
+            var _dockChatListRefreshTimer = null;
 
             function getDockChatCacheKey(userName) {
                 return (currentUser || '') + '_' + (userName || '');
+            }
+
+            function scheduleDockChatListRefresh(delay) {
+                if (_dockChatListRefreshTimer) clearTimeout(_dockChatListRefreshTimer);
+                _dockChatListRefreshTimer = setTimeout(function() {
+                    _dockChatListRefreshTimer = null;
+                    window.dockChatListCacheTime = 0;
+                    loadDockChatList();
+                    updateUnreadBadge();
+                }, typeof delay === 'number' ? delay : 100);
             }
 
             function sortDockChatMessages(msgs) {
@@ -6459,25 +6644,25 @@ function renderProfileActivityList(kind) {
             }
 
             function buildDockChatBodyMarkup(message) {
-                if (message.actor_key && message.actor_key.startsWith('__dm_img__')) {
-                    var imageSrc = getMediaUrl('__dm_img__', message.actor_key.replace('__dm_img__', ''));
-                    var imageBody = '<img class="msg-img" src="' + imageSrc + '" data-full-src="' + imageSrc + '" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" />';
-                    if (message.content) imageBody += '<div class="msg-text">' + escapeHtml(message.content) + '</div>';
+                var media = resolveDockChatMedia(message);
+                var messageText = getDMMessageText(message);
+                if (media && media.kind === 'image') {
+                    var imageBody = '<img class="msg-img" src="' + media.src + '" data-src="' + media.src + '" data-full-src="' + media.fullSrc + '" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" />';
+                    if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }
-                if (message.actor_key && message.actor_key.startsWith('__dm_vid__')) {
-                    var videoSrc = getMediaUrl('__dm_vid__', message.actor_key.replace('__dm_vid__', ''));
-                    var videoBody = '<video class="msg-img" src="' + videoSrc + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
-                    if (message.content) videoBody += '<div class="msg-text">' + escapeHtml(message.content) + '</div>';
+                if (media && media.kind === 'video') {
+                    var videoBody = '<video class="msg-img" src="' + media.src + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
+                    if (messageText) videoBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return videoBody;
                 }
-                return '<span class="msg-text">' + escapeHtml(message.content || '') + '</span>';
+                return '<span class="msg-text">' + escapeHtml(messageText || '') + '</span>';
             }
 
             function buildDockChatRowMarkup(message, avatars, disableAnim) {
                 var sent = message.user_name === currentUser;
                 var avatarHtml = sent ? avatars.mine : avatars.other;
-                var readStatus = sent ? ((message.views || 0) > 0 ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
+                var readStatus = sent ? (isMsgReadByMe(message) ? '<span class="msg-read-status">已读</span>' : '<span class="msg-read-status">未读</span>') : '';
                 var bubbleClass = 'chat-msg ' + (sent ? 'sent' : 'received');
                 if (message.__optimistic && sent) bubbleClass += ' sent-anim';
                 else if (disableAnim) bubbleClass += ' no-anim';
@@ -6494,14 +6679,7 @@ function renderProfileActivityList(kind) {
                     if (el) el.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div></div>';
                     return;
                 }
-                if (dockChatMsgsBusy && dockChatMsgsUser === userName && !forceScroll) { dockChatMsgsDirty = userName; return; }
-                // 如果 forceScroll=true 且正在 fetch 同用户，等待旧 fetch 结束（避免并发）
-                if (dockChatMsgsBusy && dockChatMsgsUser === userName && forceScroll) {
-                    var _waitStart = Date.now();
-                    while (dockChatMsgsBusy && dockChatMsgsUser === userName && (Date.now() - _waitStart) < 5000) {
-                        await new Promise(function(r) { setTimeout(r, 30); });
-                    }
-                }
+                var loadSeq = ++_dockChatLoadSeq;
                 // 棰勯敓鑺傦拷?鎷锋潪钘夊蓟閺傜懓銇旈敓?
                 var needAvatars = [];
                 if (currentUser && !avatarCache[currentUser]) needAvatars.push(currentUser);
@@ -6525,6 +6703,7 @@ function renderProfileActivityList(kind) {
                         }
                     } catch(e) {}
                 }
+                if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
                 // 褰撳墠用户浼樺厛浣跨敤localStorage闂佸搫顦崯顐﹀煝婢跺瞼澶勯悗?
                 if (currentUser) {
                     try {
@@ -6537,9 +6716,8 @@ function renderProfileActivityList(kind) {
                 // 閺堝绱︾€涙ê鍘涚珛鍗虫樉锟?
                 var cacheKey = getDockChatCacheKey(userName);
                 if (_chatCache[cacheKey] && !forceScroll) {
-                    renderDockMessages(_chatCache[cacheKey], false);
+                    renderDockMessages(userName, _chatCache[cacheKey], false);
                 }
-                dockChatMsgsBusy = true; dockChatMsgsUser = userName; dockChatMsgsDirty = '';
                 const el = document.getElementById('dockChatMessages');
                 try {
                     const { data: msgs, error } = await sb.from("posts").select("id, user_name, media_url, content, created_at, views, actor_key")
@@ -6547,31 +6725,50 @@ function renderProfileActivityList(kind) {
                         .or(`and(user_name.eq.${window.currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${window.currentUser})`)
                         .order("created_at").limit(500);
                     if (error) throw error;
-                    _chatCache[cacheKey] = mergeDockChatMessages(userName, msgs || []);
-                    const toMark = (msgs || []).filter(m => m.user_name === userName && m.media_url === window.currentUser && (m.views || 0) === 0);
-                    await Promise.all(toMark.map(m => sb.rpc("increment_post_views", { p_post_id: m.id }).catch(() => {})));
-                    toMark.forEach(function(m) { m.views = 1; });
-                    window.markMessagesRead(userName);
-                    renderDockMessages(_chatCache[cacheKey], forceScroll);
+                    if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
+                    var mergedMessages = mergeDockChatMessages(userName, msgs || []);
+                    var readAt = new Date().toISOString();
+                    var pendingReadUpdates = [];
+                    mergedMessages = mergedMessages.map(function(message) {
+                        if (!message || message.user_name !== userName || message.media_url !== window.currentUser || getDMMessageReadAt(message)) {
+                            return message;
+                        }
+                        var nextContent = buildDMMessageContent(message, { read_at: readAt });
+                        pendingReadUpdates.push({
+                            id: message.id,
+                            content: nextContent,
+                            views: Math.max(message.views || 0, 1)
+                        });
+                        return Object.assign({}, message, {
+                            content: nextContent,
+                            views: Math.max(message.views || 0, 1)
+                        });
+                    });
+                    _chatCache[cacheKey] = mergedMessages;
+                    renderDockMessages(userName, mergedMessages, forceScroll);
+                    if (pendingReadUpdates.length) {
+                        window.markMessagesRead(userName, mergedMessages, pendingReadUpdates);
+                    } else {
+                        updateUnreadBadge();
+                    }
                 } catch(e) {
-                    if (!_chatCache[cacheKey]) {
+                    if (!_chatCache[cacheKey] && loadSeq === _dockChatLoadSeq && dockChatActiveUser === userName) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>' + (e.message || '加载失败') + '</div></div>';
                     }
-                } finally {
-                    dockChatMsgsBusy = false;
-                    if (dockChatMsgsDirty === userName) { dockChatMsgsDirty = ''; loadDockChatMessages(userName); }
                 }
             }
 
-            function renderDockMessages(msgs, forceScroll) {
+            function renderDockMessages(userName, msgs, forceScroll) {
                 const el = document.getElementById('dockChatMessages');
                 if (!el) return;
                 if (!msgs.length) {
-                    _chatRenderSignature[dockChatActiveUser || '__empty__'] = '__empty__';
+                    _chatRenderSignature[userName || '__empty__'] = '__empty__';
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>发送第一条消息吧</div></div>';
+                    el.dataset.chatUser = userName || '__empty__';
                     return;
                 }
-                var signatureKey = dockChatActiveUser || '__empty__';
+                if (userName && dockChatActiveUser && userName !== dockChatActiveUser) return;
+                var signatureKey = userName || '__empty__';
                 var nextSignature = buildDockChatRenderSignature(msgs);
                 if (_chatRenderSignature[signatureKey] === nextSignature && el.dataset.chatUser === signatureKey) {
                     if (forceScroll) el.scrollTop = el.scrollHeight;
@@ -6618,6 +6815,7 @@ function renderProfileActivityList(kind) {
                 var optimisticCreatedAt = new Date().toISOString();
                 try {
                     let actorKey = DM_MARKER;
+                    var mediaPayload = null;
                     if (file) {
                         const path = buildStorageUploadPath('chat', file.name);
                         await sb.storage.from("uploads").upload(path, file, {
@@ -6625,37 +6823,45 @@ function renderProfileActivityList(kind) {
                             upsert: false,
                             contentType: file.type || 'application/octet-stream'
                         });
-                        actorKey = file.type.startsWith('video/') ? '__dm_vid__' + path : '__dm_img__' + path;
+                        if (file.type.startsWith('video/')) {
+                            actorKey = '__dm_vid__' + path;
+                            mediaPayload = { kind: 'video', url: getMediaUrl('__dm_vid__', path), mimeType: file.type || '' };
+                        } else if (file.type.startsWith('image/')) {
+                            actorKey = '__dm_img__' + path;
+                            mediaPayload = { kind: 'image', url: getMediaUrl('__dm_img__', path), mimeType: file.type || '' };
+                        }
                     }
+                    var contentPayload = buildDMMessageContent({ content: capturedContent }, { text: capturedContent, read_at: null, media: mediaPayload });
 
                     var optimisticMessage = {
                         id: tempId,
                         __tempId: tempId,
                         __optimistic: true,
                         user_name: currentUser,
-                        content: capturedContent,
+                        content: contentPayload,
                         media_type: DM_MARKER,
                         media_url: targetUser,
                         actor_key: actorKey,
                         created_at: optimisticCreatedAt,
                         views: 0
                     };
-                    renderDockMessages(upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
+                    renderDockMessages(targetUser, upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
 
                     const { data: insertedMessage, error } = await sb.from("posts")
-                        .insert([{ user_name: currentUser, content: capturedContent, media_type: DM_MARKER, media_url: targetUser, actor_key: actorKey }])
+                        .insert([{ user_name: currentUser, content: contentPayload, media_type: DM_MARKER, media_url: targetUser, actor_key: actorKey }])
                         .select("id, user_name, media_url, content, created_at, views, actor_key")
                         .single();
                     if (error) throw error;
                     clearDockChatFilePreview(false);
                     replaceDockChatCacheMessage(targetUser, tempId, insertedMessage || optimisticMessage);
-                    if (dockChatActiveUser === targetUser) renderDockMessages(_chatCache[getDockChatCacheKey(targetUser)] || [], true);
-
-                    // 异步更新左侧会话列表预览（不阻塞 UI、不重写消息区 DOM）
-                    setTimeout(function() { try { loadDockChatList(); } catch(_e) {} }, 80);
+                    if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
+                    scheduleDockChatListRefresh(80);
+                    if (typeof window.__xtjRefreshIOSChatViewport === 'function') {
+                        window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
+                    }
                 } catch(e) {
                     removeDockChatCacheMessage(targetUser, tempId);
-                    if (dockChatActiveUser === targetUser) renderDockMessages(_chatCache[getDockChatCacheKey(targetUser)] || [], true);
+                    if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
                     showToast('发送失败 ' + (e?.message || e)); inp.value = capturedContent;
                 }
                 finally { dockChatSending = false; }
@@ -6728,10 +6934,38 @@ function renderProfileActivityList(kind) {
                         var keyboardGap = vv ? Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) : 0;
                         root.style.setProperty('--xtj-ios-keyboard-gap', keyboardGap + 'px');
                         var chatFocused = document.activeElement && document.activeElement.id === 'dockChatInput' && currentDockTab === 'chat';
-                        document.body.classList.toggle('ios-chat-keyboard-open', !!(chatFocused && keyboardGap > 0));
-                        if (dockBar) dockBar.style.display = hasActiveInput() ? 'none' : 'flex';
+                        var shouldCollapseDock = !!(chatFocused && keyboardGap > 0);
+                        document.body.classList.toggle('ios-chat-keyboard-open', shouldCollapseDock);
+                        if (dockBar) dockBar.style.display = shouldCollapseDock ? 'none' : '';
                         if (chatFocused) setTimeout(scrollDockChatBottom, 80);
                     }
+
+                    window.__xtjRefreshIOSChatViewport = function(options) {
+                        options = options || {};
+                        updateIOSViewport();
+                        if (options.forceScroll) {
+                            requestAnimationFrame(function() {
+                                setTimeout(scrollDockChatBottom, 60);
+                            });
+                        }
+                        if (options.preserveFocus && document.activeElement && document.activeElement.id === 'dockChatInput') {
+                            document.body.classList.add('ios-chat-keyboard-open');
+                        }
+                    };
+
+                    window.__xtjResetIOSChatViewport = function() {
+                        keyboardOpen = false;
+                        document.body.classList.remove('ios-chat-keyboard-open');
+                        root.style.setProperty('--xtj-ios-keyboard-gap', '0px');
+                        if (dockBar) dockBar.style.display = '';
+                        requestAnimationFrame(function() {
+                            updateIOSViewport();
+                            setTimeout(function() {
+                                updateIOSViewport();
+                                scrollDockChatBottom();
+                            }, 120);
+                        });
+                    };
 
                     function handleFocus(e) {
                         keyboardOpen = true;
@@ -6749,9 +6983,13 @@ function renderProfileActivityList(kind) {
                         setTimeout(function() {
                             keyboardOpen = hasActiveInput();
                             if (!keyboardOpen && !document.body.classList.contains('photo-previewing')) {
-                                document.body.classList.remove('ios-chat-keyboard-open');
+                                window.__xtjResetIOSChatViewport();
+                                return;
                             }
                             updateIOSViewport();
+                            requestAnimationFrame(function() {
+                                setTimeout(updateIOSViewport, 120);
+                            });
                         }, 80);
                     }
 
