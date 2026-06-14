@@ -127,15 +127,15 @@
 
   /* ==============================================================
      6. dock-indicator — 桌面端竖向胶囊
-     强制 CSS transition（!important 覆盖 JS 的 inline style），
-     让点击切换 tab 时胶囊平滑上下滑动。
+     设置 CSS transition 让点击切换时胶囊平滑滑动。
+     拖拽时 JS 设 transition='none' 保证即时跟手。
      ============================================================== */
   .dock-bar > .dock-indicator {
     transition:
       transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
       width 0.28s cubic-bezier(0.25, 0.1, 0.25, 1),
       height 0.28s cubic-bezier(0.25, 0.1, 0.25, 1),
-      opacity 0.2s ease !important;
+      opacity 0.2s ease;
   }
 
   /* 隐藏 liquid 装饰子元素（竖条中视觉不协调） */
