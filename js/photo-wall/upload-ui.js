@@ -26,14 +26,14 @@
   var DAILY_LIMIT_KEY = 'xtj_photo_upload_date';
   var DAILY_COUNT_KEY = 'xtj_photo_upload_count';
   var DAILY_LIMIT = 5;
-  var MAX_VIDEO_BYTES = 5 * 1024 * 1024;
-  var VIDEO_COMPRESS_ERROR = '璇锋崲鏇寸煭鎴栨洿灏忕殑瑙嗛';
+  var MAX_VIDEO_BYTES = 10 * 1024 * 1024;
+  var SOFT_VIDEO_LIMIT_BYTES = 10 * 1024 * 1024;
+  var HARD_VIDEO_LIMIT_BYTES = 200 * 1024 * 1024;
+  var VIDEO_COMPRESS_ERROR = 'Unable to compress this video to a smaller size. Please try a shorter video.';
 
   function isImageFile(file) {
     return !!(file && /^image\//.test(file.type || ''));
   }
-
-  VIDEO_COMPRESS_ERROR = 'Unable to compress video to 5MB. Please use a shorter or smaller video.';
 
   function isVideoFile(file) {
     return !!(file && /^video\//.test(file.type || ''));
@@ -196,6 +196,7 @@
       '.post-media-preview-thumb{position:relative;width:48px;height:48px;border-radius:14px;overflow:hidden;background:rgba(255,255,255,.82);border:1px solid rgba(190,224,202,.88);box-shadow:inset 0 1px 0 rgba(255,255,255,.8);}',
       '.post-media-preview-thumb img,.post-media-preview-thumb video{display:block;width:100%;height:100%;object-fit:cover;}',
       '.post-media-preview-tag{position:absolute;right:4px;bottom:4px;z-index:1;padding:1px 5px;border-radius:999px;background:rgba(31,65,47,.64);color:#fff;font-size:8px;font-weight:700;line-height:1.2;}',
+      '.post-media-preview-thumb video{width:100%;height:100%;object-fit:cover;display:block;}',
       '.post-media-preview-more{display:grid;place-items:center;color:#3d6f53;font-size:12px;font-weight:800;background:linear-gradient(180deg,rgba(240,252,244,.96),rgba(227,245,234,.96));}',
       '.post-media-preview-count{margin-top:6px;font-size:11px;font-weight:700;color:rgba(61,94,75,.72);}',
       '.pw-upload-sheet-thumb video,.pw-upload-queue-thumb video{display:block;width:100%;height:100%;object-fit:cover;}',
@@ -250,13 +251,13 @@
       '      </svg>',
       '    </div>',
       '    <div class="pw-upload-progress-copy">',
-      '      <div class="pw-upload-progress-title" id="pwUploadProgressTitle">鍑嗗涓婁紶</div>',
+      '      <div class="pw-upload-progress-title" id="pwUploadProgressTitle">Preparing Upload</div>',
       '      <div class="pw-upload-progress-text" id="pwUploadProgressText">0%</div>',
-      '      <div class="pw-upload-progress-status" id="pwUploadProgressStatus">姝ｅ湪鏁寸悊鏈涓婁紶鍐呭...</div>',
+      '      <div class="pw-upload-progress-status" id="pwUploadProgressStatus">Preparing upload...</div>',
       '    </div>',
       '  </div>',
       '  <div class="pw-upload-local-bar-wrap"><div class="pw-upload-progress-bar" id="pwUploadProgressBar" style="width:0%"></div></div>',
-      '  <div class="pw-upload-queue-head"><span>濯掍綋闃熷垪</span><span id="pwUploadQueueCount">0 椤?/span></div>',
+      '  <div class="pw-upload-queue-head"><span>Upload Queue</span><span id="pwUploadQueueCount">0 items</span></div>',
       '  <div class="pw-upload-queue" id="pwUploadQueuePreview"></div>',
       '</div>'
     ].join('');
@@ -280,7 +281,7 @@
     ensureOverlayAtBody();
     overlay.style.display = 'flex';
     overlay.classList.add('upload-overlay-visible');
-    setProgress(0, '鍑嗗涓婁紶', '姝ｅ湪鏁寸悊鏈涓婁紶鍐呭...');
+    setProgress(0, 'Preparing Upload', 'Checking media and building upload queue...');
   }
 
   function hideProgress() {
@@ -288,7 +289,7 @@
     if (!overlay) return;
     overlay.classList.remove('upload-overlay-visible');
     overlay.style.display = 'none';
-    setProgress(0, '鍑嗗涓婁紶', '姝ｅ湪鏁寸悊鏈涓婁紶鍐呭...');
+    setProgress(0, 'Preparing Upload', 'Checking media and building upload queue...');
     revokeUrls('queueUrls');
   }
 
@@ -400,7 +401,7 @@
       var thumb = document.createElement('div');
       thumb.className = 'post-media-preview-thumb';
       if (/^video\//.test(file.type)) {
-        thumb.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="post-media-preview-tag">瑙嗛</span>';
+        thumb.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="post-media-preview-tag">Video</span>';
       } else {
         thumb.innerHTML = '<img src="' + url + '" alt="' + (file.name || '') + '">';
       }
@@ -426,8 +427,8 @@
     if (btn) {
       btn.disabled = true;
       btn.classList.add('is-loading');
-      btn.dataset.xtjLabel = btn.textContent;
-      btn.textContent = label || '鍙戝竷涓?..';
+      btn.dataset.xtjLabel = btn.textContent || 'Publish';
+      btn.textContent = label || 'Publishing...';
     }
   }
 
@@ -746,10 +747,10 @@
     if (!recorderMimeType) throw new Error('video_record_unsupported');
     var metadata = await readVideoMetadata(file);
     try {
-      var duration = Math.max(1, metadata.duration || 1);
+      var duration = Math.max(1, Math.min(metadata.duration || 1, 600));
       var sourceWidth = Math.max(1, metadata.width || 1);
       var sourceHeight = Math.max(1, metadata.height || 1);
-      var maxSide = attemptIndex > 0 ? 960 : 1280;
+      var maxSide = attemptIndex > 0 ? 720 : 1080;
       var ratio = Math.min(maxSide / sourceWidth, maxSide / sourceHeight, 1);
       var canvas = document.createElement('canvas');
       canvas.width = Math.max(2, Math.round(sourceWidth * ratio));
@@ -759,7 +760,7 @@
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
 
-      var fps = attemptIndex > 0 ? 18 : 24;
+      var fps = attemptIndex > 0 ? 20 : 24;
       var canvasStream = typeof canvas.captureStream === 'function' ? canvas.captureStream(fps) : null;
       if (!canvasStream) throw new Error('capture_stream_unsupported');
 
@@ -769,90 +770,127 @@
 
       var sourceStream = getSupportedCaptureStream(metadata.video);
       if (sourceStream) {
-        var audioTracks = sourceStream.getAudioTracks();
-        if (audioTracks && audioTracks[0]) mediaTracks.push(audioTracks[0]);
+        try {
+          var audioTracks = sourceStream.getAudioTracks();
+          if (audioTracks && audioTracks[0]) mediaTracks.push(audioTracks[0]);
+        } catch (_) {}
       }
       var mixedStream = new MediaStream(mediaTracks);
 
       var targetBitsPerSecond = Math.max(
-        attemptIndex > 0 ? 320000 : 520000,
-        Math.min(attemptIndex > 0 ? 1100000 : 1800000, Math.floor((targetBytes * 8 * 0.92) / duration))
+        400000,
+        Math.min(attemptIndex > 0 ? 1200000 : 2000000, Math.floor((targetBytes * 8 * 0.9) / duration))
       );
-      var recorder = new MediaRecorder(mixedStream, {
+      var recorderOptions = {
         mimeType: recorderMimeType,
         videoBitsPerSecond: targetBitsPerSecond,
         audioBitsPerSecond: 96000
-      });
+      };
+      var recorder;
+      try {
+        recorder = new MediaRecorder(mixedStream, recorderOptions);
+      } catch (_) {
+        try {
+          recorder = new MediaRecorder(mixedStream, { mimeType: recorderMimeType });
+        } catch (_2) {
+          recorder = new MediaRecorder(mixedStream);
+        }
+      }
       var chunks = [];
-      var drawFrame;
       var rafId = 0;
       var stopped = false;
       function stopDrawing() {
         if (rafId) cancelAnimationFrame(rafId);
         rafId = 0;
       }
-      drawFrame = function() {
+      function drawFrame() {
         if (stopped) return;
         try {
           ctx.drawImage(metadata.video, 0, 0, canvas.width, canvas.height);
         } catch (_) {}
         rafId = requestAnimationFrame(drawFrame);
-      };
+      }
 
       var recordedBlob = await new Promise(function(resolve, reject) {
+        var timeoutMs = Math.min(Math.ceil(duration * 1000) + 3000, 65000);
+        var timeoutId = setTimeout(function() {
+          try { if (recorder.state !== 'inactive') recorder.stop(); } catch (_) {}
+        }, timeoutMs);
+
         recorder.ondataavailable = function(event) {
           if (event.data && event.data.size) chunks.push(event.data);
         };
         recorder.onerror = function(event) {
-          reject(event && event.error ? event.error : new Error('video_record_failed'));
+          clearTimeout(timeoutId);
+          var errMsg = (event && event.error && event.error.message) ? event.error.message : 'video_record_failed';
+          reject(new Error(errMsg));
         };
         recorder.onstop = function() {
+          clearTimeout(timeoutId);
           stopped = true;
           stopDrawing();
-          resolve(new Blob(chunks, { type: recorder.mimeType || recorderMimeType || 'video/webm' }));
+          try {
+            var blob = new Blob(chunks, { type: recorder.mimeType || recorderMimeType || 'video/webm' });
+            if (blob && blob.size) resolve(blob);
+            else reject(new Error('video_record_empty'));
+          } catch (ex) {
+            reject(ex);
+          }
         };
-        metadata.video.currentTime = 0;
+
         metadata.video.muted = true;
         metadata.video.playsInline = true;
-        var playPromise = metadata.video.play();
+        metadata.video.setAttribute('playsinline', '');
+        metadata.video.setAttribute('autoplay', '');
+        metadata.video.currentTime = 0;
+
+        var playPromise;
+        try {
+          playPromise = metadata.video.play();
+        } catch (playErr) {
+          reject(new Error('video_play_failed'));
+          return;
+        }
+
         Promise.resolve(playPromise).then(function() {
           drawFrame();
-          recorder.start(300);
-          metadata.video.onended = function() {
-            if (recorder.state !== 'inactive') recorder.stop();
-          };
-          setTimeout(function() {
-            if (recorder.state !== 'inactive') recorder.stop();
-          }, Math.ceil(duration * 1000) + 1600);
+          try {
+            recorder.start(500);
+            metadata.video.onended = function() {
+              try { if (recorder.state !== 'inactive') recorder.stop(); } catch (_) {}
+            };
+          } catch (startErr) {
+            reject(new Error('video_recorder_start_failed'));
+          }
         }).catch(function() {
           reject(new Error('video_play_failed'));
         });
       });
 
-      var finalBlob = recordedBlob && recordedBlob.size ? recordedBlob : null;
-      if (!finalBlob) throw new Error('video_output_empty');
       return {
-        blob: finalBlob,
+        blob: recordedBlob,
         duration: metadata.duration || 0,
         width: canvas.width,
         height: canvas.height,
-        mimeType: finalBlob.type || recorderMimeType
+        mimeType: recordedBlob.type || recorderMimeType
       };
     } finally {
-      metadata.cleanup();
+      try { metadata.cleanup(); } catch (_) {}
     }
   }
 
   async function compressVideoToTarget(file, targetBytes) {
     if (!isVideoFile(file)) return { file: file, duration: 0, mimeType: file.type || '', compressed: false };
+    var metaPromise = readVideoMetadata(file).then(function(metadata) {
+      var data = { duration: metadata.duration || 0, width: metadata.width || 0, height: metadata.height || 0 };
+      try { metadata.cleanup(); } catch (_) {}
+      return data;
+    }).catch(function() {
+      return { duration: 0, width: 0, height: 0 };
+    });
+
     if (file.size <= targetBytes) {
-      var smallMeta = await readVideoMetadata(file).then(function(metadata) {
-        var data = { duration: metadata.duration || 0, width: metadata.width || 0, height: metadata.height || 0 };
-        metadata.cleanup();
-        return data;
-      }).catch(function() {
-        return { duration: 0, width: 0, height: 0 };
-      });
+      var smallMeta = await metaPromise;
       return {
         file: file,
         duration: smallMeta.duration || 0,
@@ -862,12 +900,13 @@
         compressed: false
       };
     }
+
     var lastError = null;
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         var result = await compressVideoAttempt(file, targetBytes, attempt);
         var uploadFile = toUploadFile(result.blob, file, result.mimeType);
-        if (uploadFile.size <= targetBytes) {
+        if (uploadFile && uploadFile.size && uploadFile.size <= Math.max(targetBytes, file.size * 0.8)) {
           return {
             file: uploadFile,
             duration: result.duration || 0,
@@ -881,7 +920,18 @@
         lastError = err;
       }
     }
-    throw lastError || new Error('video_compress_failed');
+
+    var fallbackMeta = await metaPromise;
+    return {
+      file: file,
+      duration: fallbackMeta.duration || 0,
+      width: fallbackMeta.width || 0,
+      height: fallbackMeta.height || 0,
+      mimeType: file.type || '',
+      compressed: false,
+      skipped: true,
+      lastError: lastError && lastError.message ? lastError.message : 'compress_failed'
+    };
   }
 
   async function uploadPhotoWallFiles() {
@@ -981,7 +1031,7 @@
 
   async function publishPost() {
     if (!window.currentUser) {
-      toast('璇峰厛鐧诲綍');
+      toast('Please log in first');
       return;
     }
     if (state.postPublishing) return;
@@ -1122,25 +1172,45 @@
       };
     }
     if (isVideoFile(file)) {
+      if (file.size > HARD_VIDEO_LIMIT_BYTES) {
+        throw new Error('Video too large. Max size is 200MB.');
+      }
       var compressedVideo;
       try {
-        compressedVideo = await withTimeout(compressVideoToTarget(file, MAX_VIDEO_BYTES), Math.max(TIMEOUTS.photoUpload, 70000), 'video compress');
+        compressedVideo = await withTimeout(
+          compressVideoToTarget(file, SOFT_VIDEO_LIMIT_BYTES),
+          Math.max(TIMEOUTS.photoUpload, 70000),
+          'video compress'
+        );
       } catch (_) {
-        throw new Error('鏃犳硶鍘嬪埌 5MB锛岃缂╃煭瑙嗛鎴栭檷浣庡師瑙嗛澶у皬');
+        compressedVideo = null;
       }
-      if (!compressedVideo || !compressedVideo.file || compressedVideo.file.size > MAX_VIDEO_BYTES) {
-        throw new Error('鏃犳硶鍘嬪埌 5MB锛岃缂╃煭瑙嗛鎴栭檷浣庡師瑙嗛澶у皬');
+      if (!compressedVideo || !compressedVideo.file) {
+        compressedVideo = {
+          file: file,
+          mimeType: file.type || 'video/mp4',
+          duration: 0,
+          compressed: false
+        };
       }
-      var poster = await withTimeout(
-        buildVideoPoster(file, compressedVideo.file, compressedVideo.duration || 0),
-        TIMEOUTS.photoUpload,
-        'video poster'
-      );
+      if (compressedVideo.file.size > HARD_VIDEO_LIMIT_BYTES) {
+        throw new Error('Video too large after compression.');
+      }
+      var poster;
+      try {
+        poster = await withTimeout(
+          buildVideoPoster(file, compressedVideo.file, compressedVideo.duration || 0),
+          TIMEOUTS.photoUpload,
+          'video poster'
+        );
+      } catch (_) {
+        poster = { blob: null, duration: compressedVideo.duration || 0 };
+      }
       return {
         mediaKind: 'video',
         uploadFile: compressedVideo.file,
-        thumbBlob: poster.blob,
-        duration: compressedVideo.duration || poster.duration || 0,
+        thumbBlob: poster && poster.blob ? poster.blob : null,
+        duration: compressedVideo.duration || (poster && poster.duration) || 0,
         mimeType: compressedVideo.mimeType || compressedVideo.file.type || file.type || 'video/mp4',
         originalSize: file.size || null,
         fileSize: compressedVideo.file.size || file.size || null
@@ -1164,7 +1234,7 @@
 
   async function uploadPhotoWallFiles() {
     if (!window.sb) throw new Error('Supabase not ready');
-    if (!window.currentUser) throw new Error('璇峰厛鐧诲綍');
+    if (!window.currentUser) throw new Error('Please log in first');
     if (!state.photoFiles.length) throw new Error('Please choose image or video files');
 
     checkDailyUploadLimit();
@@ -1273,7 +1343,7 @@
 
   async function publishPost() {
     if (!window.currentUser) {
-      toast('璇峰厛鐧诲綍');
+      toast('Please log in first');
       return;
     }
     if (state.postPublishing) return;
@@ -1308,16 +1378,21 @@
           uploadFile = toUploadFile(await withTimeout(compressPhoto(file), Math.min(TIMEOUTS.postUpload, 24000), 'post image preprocess'), file, file.type || 'image/jpeg');
           uploadMimeType = uploadFile.type || file.type || 'image/jpeg';
         } else if (isVideoFile(file)) {
-          if (file.size > MAX_VIDEO_BYTES) {
+          if (file.size > HARD_VIDEO_LIMIT_BYTES) {
+            throw new Error('Video too large. Max size is 200MB.');
+          }
+          if (file.size > SOFT_VIDEO_LIMIT_BYTES) {
             try {
-              var compressedVideo = await withTimeout(compressVideoToTarget(file, MAX_VIDEO_BYTES), Math.max(TIMEOUTS.postUpload, 70000), 'post video compress');
-              uploadFile = compressedVideo.file;
-              uploadMimeType = compressedVideo.mimeType || uploadFile.type || file.type || 'video/mp4';
+              var compressedVideo = await withTimeout(
+                compressVideoToTarget(file, SOFT_VIDEO_LIMIT_BYTES),
+                Math.max(TIMEOUTS.postUpload, 70000),
+                'post video compress'
+              );
+              if (compressedVideo && compressedVideo.file && compressedVideo.file.size < file.size) {
+                uploadFile = compressedVideo.file;
+                uploadMimeType = compressedVideo.mimeType || uploadFile.type || file.type || 'video/mp4';
+              }
             } catch (_) {
-              throw new Error(VIDEO_COMPRESS_ERROR);
-            }
-            if (!uploadFile || uploadFile.size > MAX_VIDEO_BYTES) {
-              throw new Error('Unable to compress to 5MB. Please use a shorter or smaller video.');
             }
           }
           mediaType = 'video';
