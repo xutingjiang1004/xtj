@@ -1325,8 +1325,8 @@
             transition: background 0.25s cubic-bezier(0.25, 1, 0.3, 1), transform 0.25s cubic-bezier(0.25, 1, 0.3, 1); position: relative;
             border-bottom: 1px solid rgba(255,255,255,0.04);
         }
-        .chat-list-item:hover { background: rgba(255,255,255,0.12); transform: translateY(-1px) scale(1.01); }
-        .chat-list-item:active { background: rgba(255,255,255,0.18); transform: translateY(-1px) scale(1.005); }
+        .chat-list-item:hover { background: rgba(255,255,255,0.12); transform: translateY(-1px); }
+        .chat-list-item:active { background: rgba(255,255,255,0.18); transform: translateY(0); }
         .chat-list-item .cli-avatar {
             width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
             display: flex; align-items: center; justify-content: center;
@@ -1356,13 +1356,14 @@
             flex: 1; overflow-y: auto; padding: 16px 20px;
             display: flex; flex-direction: column; gap: 8px;
             -webkit-overflow-scrolling: touch;
-            scroll-behavior: smooth;
+            scroll-behavior: auto;
             overscroll-behavior: contain;
+            contain: layout paint;
         }
         .chat-msg {
             max-width: 82%; padding: 10px 16px; border-radius: 18px;
             font-size: 15px; line-height: 1.5;
-            animation: msgSlide 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            animation: msgSlide 0.2s cubic-bezier(0.22, 1, 0.36, 1);
             word-break: break-word;
             position: relative;
         }
@@ -1423,6 +1424,12 @@
         .chat-msg .msg-time {
             font-size: 10px; opacity: 0.55; margin-top: 5px; display: block;
             text-align: right;
+        }
+        .chat-msg.pending {
+            opacity: 0.92;
+        }
+        .chat-msg.pending .msg-read-status {
+            opacity: 0.72;
         }
         .chat-input-area {
             padding: 10px 0 calc(12px + env(safe-area-inset-bottom, 0px));
@@ -1519,16 +1526,16 @@
         .chat-img-btn:hover { background: rgba(255,255,255,0.92); transform: translateY(-1px); box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12); border-color: rgba(172, 211, 189, 0.95); }
         /* iMessage 风格发送动画 */
         @keyframes msgSend {
-            0%   { opacity: 0; transform: translateY(10px) scale(0.97); }
-            65%  { opacity: 1; transform: translateY(-1px) scale(1.01); }
+            0%   { opacity: 0; transform: translateY(8px) scale(0.985); }
+            65%  { opacity: 1; transform: translateY(-1px) scale(1.003); }
             100% { opacity: 1; transform: scale(1) translateY(0); }
         }
         .chat-msg.sent-anim {
-            animation: msgSend 0.28s cubic-bezier(0.16,1,0.3,1) forwards;
+            animation: msgSend 0.22s cubic-bezier(0.22, 1, 0.36, 1) forwards;
             will-change: transform, opacity;
         }
         @keyframes msgSlide {
-            0% { transform: translateY(8px) scale(0.985); opacity: 0; }
+            0% { transform: translateY(6px) scale(0.992); opacity: 0; }
             100% { transform: translateY(0) scale(1); opacity: 1; }
         }
         .msg-media-fallback {
@@ -8081,9 +8088,9 @@
 #profileActivityModal .stat-view-item,
 #profileActivityModal .stat-comment-item,
 .chat-list-item {
-  animation: xtjFloatIn 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: xtjFloatIn 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
   animation-delay: var(--xtj-enter-delay, 0ms);
-  will-change: transform, opacity;
+  will-change: auto;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -8911,15 +8918,15 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 .chat-msg {
-  animation: xtjChatMessageIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: xtjChatMessageIn 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform, opacity;
 }
 
 @keyframes xtjChatMessageIn {
   from {
     opacity: 0;
-    transform: translateY(7px) scale(0.986);
-    filter: blur(4px);
+    transform: translateY(5px) scale(0.992);
+    filter: blur(2px);
   }
   to {
     opacity: 1;
