@@ -2576,10 +2576,17 @@ function renderProfileActivityList(kind) {
                 }
             };
 
-            // ===================== 删除閻㈩垱鐗曢悺?=====================
-            var deleteInProgress = false;  // 防止并发删除
+            // ===================== 删除帖子 =====================
+            // 用 window 挂载，确保不同 IIFE 共享
+            if (typeof window.__xtjDeleteInProgress === 'undefined') window.__xtjDeleteInProgress = false;
+            if (typeof window.__xtjDeleteStartTime === 'undefined') window.__xtjDeleteStartTime = 0;
             window.openDelete = function (postId, ownerKey) {
-                if (deleteInProgress) {
+                // ★ 入口强制解锁：超过 12 秒仍处于 in-progress 状态，强制重置（防卡死兜底）
+                if (window.__xtjDeleteInProgress && Date.now() - window.__xtjDeleteStartTime > 12000) {
+                    console.warn('[openDelete] 检测到上一次删除超时卡死，强制解锁');
+                    window.__xtjDeleteInProgress = false;
+                }
+                if (window.__xtjDeleteInProgress) {
                     showToast("正在删除中，请稍后..");
                     return;
                 }
@@ -2593,10 +2600,16 @@ function renderProfileActivityList(kind) {
                 document.getElementById("delModal").classList.add("active");
             };
             document.getElementById("delBtn").onclick = async () => {
-                if (!delPostId || deleteInProgress) return;
+                if (!delPostId) return;
+                // ★ 入口强制解锁（同 openDelete）
+                if (window.__xtjDeleteInProgress && Date.now() - window.__xtjDeleteStartTime > 12000) {
+                    window.__xtjDeleteInProgress = false;
+                }
+                if (window.__xtjDeleteInProgress) return;
                 const btn = document.getElementById("delBtn");
                 const modal = document.getElementById("delModal");
-                deleteInProgress = true;
+                window.__xtjDeleteInProgress = true;
+                window.__xtjDeleteStartTime = Date.now();
                 const restoreBtn = function() {
                     try { btn.disabled = false; } catch(e) {}
                     try { btn.textContent = "确认删除"; } catch(e) {}
@@ -2606,7 +2619,8 @@ function renderProfileActivityList(kind) {
                     restoreBtn();
                     finished = true;
                     clearTimeout(timeoutId);
-                    deleteInProgress = false;
+                    window.__xtjDeleteInProgress = false;
+                    window.__xtjDeleteStartTime = 0;
                     if (reason && typeof showToast === 'function') showToast(reason);
                 };
                 btn.disabled = true;
@@ -2616,6 +2630,10 @@ function renderProfileActivityList(kind) {
                     if (finished) return;
                     console.warn('[delBtn] 删除超时');
                     finishAndClean("删除超时，帖子可能已删除，请刷新查看");
+                    // 超时后强制后台刷新 feed（fire-and-forget）
+                    if (typeof loadFeed === 'function') {
+                        try { loadFeed(true); } catch(e) {}
+                    }
                 }, 10000);
 
                 // 乐观移除 DOM
@@ -2624,6 +2642,11 @@ function renderProfileActivityList(kind) {
                     postEl.style.opacity = '0';
                     postEl.style.transition = 'opacity 0.3s';
                     setTimeout(function() { try { postEl.remove(); } catch(e) {} }, 350);
+                }
+
+                // 从 feedAllPosts 同步移除（避免 feedAllPosts 残留导致下一次渲染又出现）
+                if (Array.isArray(feedAllPosts)) {
+                    feedAllPosts = feedAllPosts.filter(function(p) { return String(p.id) !== String(delPostId); });
                 }
 
                 try {
@@ -2650,7 +2673,7 @@ function renderProfileActivityList(kind) {
                             console.warn('[delBtn] RPC 超时');
                             finishAndClean("删除请求超时，请刷新查看");
                             delPostId = null;
-                            if (typeof loadFeed === 'function') loadFeed(true);
+                            if (typeof loadFeed === 'function') { try { loadFeed(true); } catch(e) {} }
                             return;
                         }
                         throw raceErr;
@@ -2659,24 +2682,28 @@ function renderProfileActivityList(kind) {
                     const error = rpcResult && rpcResult.error;
                     if (error) {
                         finishAndClean("删除失败: " + (error.message || "未知错误"));
-                        if (postEl) { postEl.style.opacity = '1'; }
+                        if (postEl) { try { postEl.style.opacity = '1'; } catch(e) {} }
                         return;
                     }
                     closeModal("delModal");
                     showToast("帖子已删除");
                     delPostId = null;
-                    // 不再 await，fire-and-forget 后台刷新
-                    if (typeof loadFeed === 'function') loadFeed(true);
+                    // 不再 await，fire-and-forget 后台刷新（用 setTimeout 0 让删除响应先回到 UI）
+                    if (typeof loadFeed === 'function') {
+                        try { setTimeout(function() { loadFeed(true); }, 0); } catch(e) {}
+                    }
                 } catch (e) {
                     if (finished) return;
                     console.error('[delBtn] 删除异常:', e);
                     finishAndClean("删除帖子失败: " + (e && e.message || "未知错误"));
-                    if (postEl) { postEl.style.opacity = '1'; }
+                    if (postEl) { try { postEl.style.opacity = '1'; } catch(e) {} }
                 } finally {
+                    // ★ 关键修复：finally 块**无条件**重置 deleteInProgress，确保任何路径下都能解锁
                     finished = true;
                     clearTimeout(timeoutId);
                     restoreBtn();
-                    setTimeout(function() { deleteInProgress = false; }, 500);
+                    window.__xtjDeleteInProgress = false;
+                    window.__xtjDeleteStartTime = 0;
                 }
             };
 
@@ -3415,12 +3442,16 @@ function renderProfileActivityList(kind) {
                     } catch(e) {}
                 }
                 if (!isPro && isVipUser() && username === currentUser) isPro = true;
+                // ★ 关键修复：onclick 绑在外圈 div 上，内层 .avatar 继承传递
                 if (avatarUrl) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
-                    var baseHtml = '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
-                    return isPro ? '<div class="xtj-pro-avatar-ring">' + baseHtml + '</div>' : baseHtml;
+                    var innerHtml = '<div class="avatar clickable"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
+                    if (isPro) {
+                        return '<div class="xtj-pro-avatar-ring" onclick="openUserProfile(\'' + safeName + '\')">' + innerHtml + '</div>';
+                    }
+                    return '<div class="avatar-wrap" onclick="openUserProfile(\'' + safeName + '\')">' + innerHtml + '</div>';
                 } else {
-                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')">' + username[0].toUpperCase() + '</div>';
+                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')">' + (username[0] || '?').toUpperCase() + '</div>';
                 }
             }
 
@@ -3784,11 +3815,10 @@ function renderProfileActivityList(kind) {
                     '<span class="post-stats-visibility post-stats-visibility-' + visibilityClass + '">' + visibilityText + '</span>';
             }
 
-            buildPostBadges = function(post) {
-                var normalized = normalizePost(post);
-                return normalized.is_pinned ? '<span class="post-pin-badge">置顶</span>' : '';
-            };
-
+            // ★ 关键修复：删除此处的 buildPostBadges 重新赋值！
+            // 原因：上面 line 3765 定义的 buildPostBadges 已经包含 Pro 标志、公开/私密、置顶的完整逻辑。
+            //       此处重新赋值为简单版会**覆盖**上面的完整实现，导致 Pro 标志永远不显示。
+            // 置顶徽章已经在 line 3784 的 buildPostBadges 内部处理了，无需重复。
             function buildPostActionHtml(post, isLiked, canDelete) {
                 var idJs = safeJsStr(String(post.id));
                 var idHtml = escapeHtml(String(post.id));
