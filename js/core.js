@@ -5673,7 +5673,9 @@ function renderProfileActivityList(kind) {
                     currentWidth: indicatorWidth,
                     currentHeight: indicatorHeight,
                     minX: (firstRect.left - barRect.left) - firstRect.width * 0.2,
-                    maxX: (lastRect.right - barRect.left) - indicatorWidth + lastRect.width * 0.2
+                    maxX: (lastRect.right - barRect.left) - indicatorWidth + lastRect.width * 0.2,
+                    minY: (firstRect.top - barRect.top) - firstRect.height * 0.2,
+                    maxY: (lastRect.bottom - barRect.top) - indicatorHeight + lastRect.height * 0.2
                 };
             }
 
@@ -5688,6 +5690,24 @@ function renderProfileActivityList(kind) {
                     var rect = tab.getBoundingClientRect();
                     var centerX = rect.left + rect.width / 2;
                     var distance = Math.abs(clientX - centerX);
+                    if (distance < nearestDistance) {
+                        nearest = tab;
+                        nearestDistance = distance;
+                    }
+                });
+                return nearest;
+            }
+            function findNearestDockTabY(clientY) {
+                var dockBar = document.getElementById('dockBar');
+                if (!dockBar) return null;
+                var dockTabs = Array.prototype.slice.call(dockBar.querySelectorAll('.dock-tab'));
+                if (!dockTabs.length) return null;
+                var nearest = dockTabs[0];
+                var nearestDistance = Infinity;
+                dockTabs.forEach(function(tab) {
+                    var rect = tab.getBoundingClientRect();
+                    var centerY = rect.top + rect.height / 2;
+                    var distance = Math.abs(clientY - centerY);
                     if (distance < nearestDistance) {
                         nearest = tab;
                         nearestDistance = distance;
@@ -5712,18 +5732,21 @@ function renderProfileActivityList(kind) {
                     syncDockIndicator();
                     metrics = getDockIndicatorMetrics();
                     if (!metrics) return;
+                    var isVertical = getComputedStyle(dockBar).flexDirection === 'column';
                     drag = {
                         id: e.pointerId,
                         sx: e.clientX,
+                        sy: e.clientY,
                         ix: metrics.currentX,
                         iy: metrics.currentY,
                         w: metrics.currentWidth,
                         h: metrics.currentHeight,
-                        mx: metrics.maxX,
-                        nx: metrics.minX,
+                        mx: isVertical ? metrics.maxY : metrics.maxX,
+                        nx: isVertical ? metrics.minY : metrics.minX,
                         indicator: metrics.indicator,
                         moved: false,
-                        onTab: !!(e.target && e.target.closest && e.target.closest('.dock-tab'))
+                        onTab: !!(e.target && e.target.closest && e.target.closest('.dock-tab')),
+                        vertical: isVertical
                     };
                     drag.indicator.style.width = drag.w + 'px';
                     drag.indicator.style.height = drag.h + 'px';
@@ -5738,11 +5761,19 @@ function renderProfileActivityList(kind) {
                 function onDragMove(e) {
                     if (!drag || e.pointerId !== drag.id) return;
                     e.preventDefault();
-                    var dx = e.clientX - drag.sx;
-                    if (Math.abs(dx) > 2) drag.moved = true;
-                    var nx = Math.max(drag.nx, Math.min(drag.mx, drag.ix + dx));
-                    drag.indicator.style.transform = 'translate3d(' + nx + 'px,' + drag.iy + 'px,0)';
-                    drag.cx = nx;
+                    if (drag.vertical) {
+                        var dy = e.clientY - drag.sy;
+                        if (Math.abs(dy) > 2) drag.moved = true;
+                        var ny = Math.max(drag.nx, Math.min(drag.mx, drag.iy + dy));
+                        drag.indicator.style.transform = 'translate3d(' + drag.ix + 'px,' + ny + 'px,0)';
+                        drag.cy = ny;
+                    } else {
+                        var dx = e.clientX - drag.sx;
+                        if (Math.abs(dx) > 2) drag.moved = true;
+                        var nx = Math.max(drag.nx, Math.min(drag.mx, drag.ix + dx));
+                        drag.indicator.style.transform = 'translate3d(' + nx + 'px,' + drag.iy + 'px,0)';
+                        drag.cx = nx;
+                    }
                 }
 
                 function cleanupDrag() {
@@ -5757,7 +5788,9 @@ function renderProfileActivityList(kind) {
                     drag = null;
                     cleanupDrag();
                     if (state.moved) {
-                        var tab = findNearestDockTab(e.clientX || state.sx);
+                        var tab = state.vertical
+                            ? findNearestDockTabY(e.clientY || state.sy)
+                            : findNearestDockTab(e.clientX || state.sx);
                         if (tab) {
                             dragHandledTs = Date.now();
                             switchDockTab(tab.dataset.tab, true);
