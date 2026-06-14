@@ -2592,6 +2592,15 @@ function renderProfileActivityList(kind) {
                 const btn = document.getElementById("delBtn");
                 btn.disabled = true;
                 btn.textContent = "删除中..";
+                var finished = false;
+                // 10s 超时：避免 RPC 永久挂起导致"卡主"
+                var timeoutId = setTimeout(function() {
+                    if (finished) return;
+                    finished = true;
+                    showToast("删除超时，请重试");
+                    btn.disabled = false;
+                    btn.textContent = "确认删除";
+                }, 10000);
                 try {
                     var currentPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(delPostId); });
                     if (currentPost && !canDeletePost(currentPost)) {
@@ -2603,6 +2612,7 @@ function renderProfileActivityList(kind) {
                         p_post_id: delPostId,
                         p_actor_key: key
                     });
+                    if (finished) return;
                     if (error) {
                         showToast("删除失败: " + error.message);
                         return;
@@ -2612,9 +2622,12 @@ function renderProfileActivityList(kind) {
                     delPostId = null;
                     await loadFeed(true);
                 } catch (e) {
+                    if (finished) return;
                     showToast("删除帖子失败");
                     console.error(e);
                 } finally {
+                    finished = true;
+                    clearTimeout(timeoutId);
                     btn.disabled = false;
                     btn.textContent = "确认删除";
                 }
@@ -3340,14 +3353,18 @@ function renderProfileActivityList(kind) {
                     }
                 }
                 var safeName = username.replace(/'/g, "\\'");
-                // Pro 外圈：优先看帖子冻结的 pro_at_post（历史 Pro 帖子永久保留 Pro 外圈）
-                // 再看当前 VIP 状态
+                // Pro 外圈：1) 帖子冻结的 pro_at_post；2) VIP 历史（post.created_at 在某 Pro 期间内）；3) 当前 VIP 状态
                 var isPro = false;
                 if (post) {
                     try {
                         var normalizedForAvatar = normalizePost(post);
                         var avatarMeta = normalizedForAvatar._contentMeta || {};
                         if (avatarMeta.pro_at_post === true) isPro = true;
+                        if (!isPro && normalizedForAvatar.user_name && normalizedForAvatar.created_at &&
+                            typeof window.__xtjIsUserProAt === 'function' &&
+                            window.__xtjIsUserProAt(normalizedForAvatar.user_name, normalizedForAvatar.created_at)) {
+                            isPro = true;
+                        }
                     } catch(e) {}
                 }
                 if (!isPro && isVipUser() && username === currentUser) isPro = true;
@@ -3691,12 +3708,19 @@ function renderProfileActivityList(kind) {
                 var normalized = normalizePost(post);
                 var bits = [];
                 bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
-                // Pro 标志：优先看帖子冻结的 pro_at_post（历史 Pro 帖子永久保留）
+                // Pro 标志：优先看帖子冻结的 pro_at_post
+                // 再看 VIP 历史（post.created_at 是否在该用户的某个 Pro 期间内）
                 // 再看当前 Pro 状态（防止元数据丢失时仍能显示）
                 var meta = normalized._contentMeta || {};
                 var isProPost = meta.pro_at_post === true;
+                var isProByHistory = false;
+                if (!isProPost && normalized.user_name && normalized.created_at &&
+                    typeof window.__xtjIsUserProAt === 'function' &&
+                    window.__xtjIsUserProAt(normalized.user_name, normalized.created_at)) {
+                    isProByHistory = true;
+                }
                 var isCurrentPro = (typeof isVipUser === 'function') && isVipUser() && normalized.user_name === currentUser;
-                if (isProPost || isCurrentPro) {
+                if (isProPost || isProByHistory || isCurrentPro) {
                     bits.push('<span class="post-visibility-badge public post-pro-badge">Pro</span>');
                 }
                 if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
@@ -4610,6 +4634,13 @@ function renderProfileActivityList(kind) {
                         },
                         timestamp: now
                     }));
+                    // 批量预加载所有出现过的用户的 VIP 历史（用于显示历史 Pro 帖子的 Pro 标志）
+                    try {
+                        if (typeof window.__xtjBatchLoadVipHistory === 'function') {
+                            var userNames = feedAllPosts.map(function(p) { return p && p.user_name; }).filter(Boolean);
+                            await window.__xtjBatchLoadVipHistory(userNames);
+                        }
+                    } catch (e) { console.warn('[VIP history preload]', e); }
                     await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
                     setupFeedInfiniteScroll();
                 } catch (e) {
