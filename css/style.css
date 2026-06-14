@@ -12174,27 +12174,29 @@ body.ios-chat-keyboard-open .chat-input-area {
   opacity: 0.7;
 }
 
-/* VIP 已激活标识 */
+/* VIP 已激活标识（简洁简约版：透明 + 描边） */
 .xtj-vip-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 8px 2px 6px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 700;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: #fff;
-  letter-spacing: 0.03em;
+  gap: 2px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  background: transparent;
+  color: var(--pro-accent, #f59e0b);
+  border: 1px solid var(--pro-accent, #f59e0b);
+  letter-spacing: 0.04em;
   vertical-align: middle;
   margin-left: 4px;
   position: relative;
   top: -1px;
-  box-shadow: 0 2px 6px rgba(245,158,11,0.25);
+  box-shadow: none;
+  animation: none;
 }
 .xtj-vip-badge svg {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   fill: currentColor;
 }
 
@@ -12385,12 +12387,12 @@ html.xtj-pro-active .xtj-vip-card .xtj-vip-card-badge.active {
   box-shadow: 0 0 12px rgba(245,158,11,0.3);
 }
 html.xtj-pro-active .avatar-ring {
-  box-shadow: 0 0 0 2px var(--pro-accent), 0 0 12px var(--pro-glow);
-  animation: proAvatarGlow 3s ease-in-out infinite;
+  box-shadow: 0 0 0 1px var(--pro-accent);
+  animation: none;
 }
 @keyframes proAvatarGlow {
-  0%, 100% { box-shadow: 0 0 0 2px #f59e0b, 0 0 12px rgba(245,158,11,0.15); }
-  50% { box-shadow: 0 0 0 2px #fbbf24, 0 0 20px rgba(245,158,11,0.3); }
+  0%, 100% { box-shadow: 0 0 0 1px #f59e0b; }
+  50% { box-shadow: 0 0 0 1px #fbbf24; }
 }
 html.xtj-pro-active .xtj-vip-card .xtj-vip-card-sub {
   color: var(--pro-accent-light);
@@ -12403,14 +12405,20 @@ html.xtj-pro-active .profile-setting-item.pro-setting-highlight .profile-setting
   color: var(--pro-accent-light);
 }
 html.xtj-pro-active .post-vip-badge {
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: #fff;
-  box-shadow: 0 0 8px rgba(245,158,11,0.3);
-  animation: proBadgePulse 2s ease-in-out infinite;
+  background: transparent;
+  color: var(--pro-accent);
+  border: 1px solid var(--pro-accent);
+  box-shadow: none;
+  animation: none;
+  padding: 0 5px;
+  font-size: 9px;
+  font-weight: 600;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
 }
 @keyframes proBadgePulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(245,158,11,0.3); }
-  50% { box-shadow: 0 0 16px rgba(245,158,11,0.5); }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 /* ========== 取消订阅按钮 ========== */
@@ -12442,34 +12450,26 @@ html.xtj-pro-active .post-vip-badge {
   transform: scale(0.97);
 }
 
-/* ========== Pro 头像框（所有头像通用） ========== */
+/* ========== Pro 头像框（所有头像通用，简洁版：无旋转外圈） ========== */
 .xtj-pro-avatar-ring {
   position: relative;
   display: inline-flex;
 }
 .xtj-pro-avatar-ring::before {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #f59e0b, #d97706, #fbbf24, #f59e0b);
-  background-size: 200% 200%;
-  animation: proAvatarRingSpin 3s linear infinite;
-  z-index: 0;
-  pointer-events: none;
+  display: none;
 }
 .xtj-pro-avatar-ring .avatar {
   position: relative;
   z-index: 1;
 }
 .xtj-pro-avatar-ring .avatar img {
-  border: 2px solid transparent;
+  border: 1px solid var(--pro-accent, #f59e0b);
   border-radius: 50%;
+  box-shadow: none;
 }
 @keyframes proAvatarRingSpin {
-  0% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0; }
 }
 
 /* ========== Pro 点赞特效增强 ========== */
@@ -12482,14 +12482,14 @@ html.xtj-pro-active .action-btn.liked {
   text-shadow: 0 0 8px rgba(245,158,11,0.3);
 }
 
-/* ========== Pro 增强的 VIP 身份标识 ========== */
+/* ========== Pro 增强的 VIP 身份标识（已简化为与基础徽章一致） ========== */
 .xtj-vip-badge.xtj-vip-enhanced {
-  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
-  box-shadow: 0 0 12px rgba(245,158,11,0.3);
-  animation: proBadgePulse 2s ease-in-out infinite;
+  background: transparent !important;
+  box-shadow: none;
+  animation: none;
 }
 .xtj-vip-badge.xtj-vip-enhanced svg {
-  filter: drop-shadow(0 0 3px rgba(255,215,0,0.5));
+  filter: none;
 }
 
 /* ===== XTJ record card + post detail fix ===== */
