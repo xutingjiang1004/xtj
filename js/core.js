@@ -2577,7 +2577,12 @@ function renderProfileActivityList(kind) {
             };
 
             // ===================== 删除閻㈩垱鐗曢悺?=====================
+            var deleteInProgress = false;  // 防止并发删除
             window.openDelete = function (postId, ownerKey) {
+                if (deleteInProgress) {
+                    showToast("正在删除中，请稍后..");
+                    return;
+                }
                 var targetPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
                 if (targetPost && !canDeletePost(targetPost)) {
                     showToast("无权删除这条帖子");
@@ -2588,34 +2593,44 @@ function renderProfileActivityList(kind) {
                 document.getElementById("delModal").classList.add("active");
             };
             document.getElementById("delBtn").onclick = async () => {
-                if (!delPostId) return;
+                if (!delPostId || deleteInProgress) return;
                 const btn = document.getElementById("delBtn");
                 const modal = document.getElementById("delModal");
+                deleteInProgress = true;
                 const restoreBtn = function() {
                     try { btn.disabled = false; } catch(e) {}
                     try { btn.textContent = "确认删除"; } catch(e) {}
                 };
-                const closeAndRestore = function(reason) {
+                const finishAndClean = function(reason) {
                     try { modal.classList.remove("active"); } catch(e) {}
                     restoreBtn();
                     finished = true;
+                    clearTimeout(timeoutId);
+                    deleteInProgress = false;
                     if (reason && typeof showToast === 'function') showToast(reason);
                 };
                 btn.disabled = true;
                 btn.textContent = "删除中..";
                 var finished = false;
-                // 8s 超时：避免 RPC 永久挂起导致"卡主"
                 var timeoutId = setTimeout(function() {
                     if (finished) return;
-                    console.warn('[delBtn] 删除超时，强制关闭 modal');
-                    closeAndRestore("删除超时，帖子可能已删除，请刷新查看");
-                    delPostId = null;
-                }, 8000);
+                    console.warn('[delBtn] 删除超时');
+                    finishAndClean("删除超时，帖子可能已删除，请刷新查看");
+                }, 10000);
+
+                // 乐观移除 DOM
+                var postEl = document.querySelector('.post[data-post-id="' + delPostId + '"]');
+                if (postEl) {
+                    postEl.style.opacity = '0';
+                    postEl.style.transition = 'opacity 0.3s';
+                    setTimeout(function() { try { postEl.remove(); } catch(e) {} }, 350);
+                }
+
                 try {
                     var currentPost = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(delPostId); });
                     if (currentPost && !canDeletePost(currentPost)) {
                         if (finished) return;
-                        closeAndRestore("无权删除这条帖子");
+                        finishAndClean("无权删除这条帖子");
                         return;
                     }
                     const key = isAdmin() ? delOwnerKey : deviceId;
@@ -2623,9 +2638,8 @@ function renderProfileActivityList(kind) {
                         p_post_id: delPostId,
                         p_actor_key: key
                     });
-                    // RPC 单独再包一层 6s 超时，避免 setTimeout 没被触发
                     const rpcTimeout = new Promise(function(_, reject) {
-                        setTimeout(function() { reject(new Error('rpc_timeout')); }, 6000);
+                        setTimeout(function() { reject(new Error('rpc_timeout')); }, 8000);
                     });
                     let rpcResult;
                     try {
@@ -2633,10 +2647,9 @@ function renderProfileActivityList(kind) {
                     } catch (raceErr) {
                         if (finished) return;
                         if (raceErr && raceErr.message === 'rpc_timeout') {
-                            console.warn('[delBtn] RPC 超时，假设已删除');
-                            closeAndRestore("删除超时，已尝试强制刷新");
+                            console.warn('[delBtn] RPC 超时');
+                            finishAndClean("删除请求超时，请刷新查看");
                             delPostId = null;
-                            // 后台 fire-and-forget 刷新 feed
                             if (typeof loadFeed === 'function') loadFeed(true);
                             return;
                         }
@@ -2645,21 +2658,25 @@ function renderProfileActivityList(kind) {
                     if (finished) return;
                     const error = rpcResult && rpcResult.error;
                     if (error) {
-                        closeAndRestore("删除失败: " + (error.message || "未知错误"));
+                        finishAndClean("删除失败: " + (error.message || "未知错误"));
+                        if (postEl) { postEl.style.opacity = '1'; }
                         return;
                     }
                     closeModal("delModal");
                     showToast("帖子已删除");
                     delPostId = null;
-                    await loadFeed(true);
+                    // 不再 await，fire-and-forget 后台刷新
+                    if (typeof loadFeed === 'function') loadFeed(true);
                 } catch (e) {
                     if (finished) return;
                     console.error('[delBtn] 删除异常:', e);
-                    closeAndRestore("删除帖子失败: " + (e && e.message || "未知错误"));
+                    finishAndClean("删除帖子失败: " + (e && e.message || "未知错误"));
+                    if (postEl) { postEl.style.opacity = '1'; }
                 } finally {
                     finished = true;
                     clearTimeout(timeoutId);
                     restoreBtn();
+                    setTimeout(function() { deleteInProgress = false; }, 500);
                 }
             };
 
