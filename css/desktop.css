@@ -503,7 +503,7 @@
   #panelProfile .profile-user-card { grid-area: user !important; margin-bottom: 0 !important; }
   #panelProfile .xtj-vip-card { grid-area: vip !important; margin-bottom: 0 !important; }
   #panelProfile .profile-settings { grid-area: settings !important; flex: 0 0 auto !important; margin-bottom: 0 !important; }
-  #panelProfile .profile-activity-board { grid-area: activity !important; display: flex !important; flex-direction: column !important; gap: 16px !important; }
+  #panelProfile .profile-activity-board { grid-area: activity !important; }
   #panelProfile .profile-totals-bar { grid-area: totals !important; margin: 8px 0 0 !important; }
 
   /* 用户卡在 PC 端稍微精致 */
@@ -547,5 +547,10 @@
   /* VIP 卡：稍宽更突出 */
   #panelProfile .xtj-vip-card {
     padding: 16px 18px !important;
+  }
+
+  /* P5 加固：确保活动 modal 在 PC 端不被 dock-bar 遮挡 */
+  #profileActivityModal {
+    z-index: 250 !important;
   }
 }
