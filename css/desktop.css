@@ -155,31 +155,36 @@
 
   /* ==============================================================
      6. dock-indicator — 桌面端竖向小药丸
-     在竖排侧边栏中：
-     - JS 仍然在跑 positionIndicator()，但用 offsetLeft/offsetTop，
-       算出来的位置是水平 dock 的逻辑，会让 indicator 变形。
-     - 这里覆盖它的 transform / width / height，让它呈现为
-       跟随 active tab 上下移动的竖向小药丸。
-     - 同时保留 hotfix 的视觉样式（玻璃、背景、边框等）。
+     核心问题：JS 在 core.js:5642-5644 用 indicator.style.width/height/transform
+     直接写 inline style。inline style 优先级最高，外联 CSS !important 也无效。
+     唯一能突破 inline style 的 CSS 属性：clip-path（裁剪可视区域）。
+     思路：让 indicator 保持 JS 算的尺寸（覆盖整个 tab），
+     但用 clip-path 把它裁成左边一条细竖条。
      ============================================================== */
 
-  /* 6.1 基础定位：跟随 active tab，但缩小尺寸 */
-  .dock-bar > .dock-indicator {
-    width: 4px !important;
-    height: 28px !important;
-    border-radius: 999px !important;
-    left: 4px !important;
-    top: auto !important;
-    transform: translateY(0) !important;
-    transition:
-      top 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
-      transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
-      height 0.32s cubic-bezier(0.25, 0.1, 0.25, 1) !important;
-    /* 让 indicator 定位在每个 tab 的左外侧 */
-    z-index: 2 !important;
+  /* 6.0 关键：dock-bar 不裁切 indicator */
+  .dock-bar {
+    overflow: visible !important;
   }
 
-  /* 6.2 隐藏 liquid 装饰子元素，避免视觉干扰 */
+  /* 6.1 用 clip-path 把 indicator 裁成"左边一条细竖条" */
+  /* 假设 indicator 覆盖整个 tab (width ≈ 200px, height ≈ 40px)
+     inset(0 90% 0 0) → 左边 10% 可见 = 20px 宽细条
+     配合 border-radius 看起来像小药丸 */
+  .dock-bar > .dock-indicator {
+    /* 视觉裁剪到左侧约 6px 宽 */
+    clip-path: inset(0 calc(100% - 6px) 0 0 round 999px) !important;
+    -webkit-clip-path: inset(0 calc(100% - 6px) 0 0 round 999px) !important;
+    z-index: 2 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    /* 移除 backdrop-filter 等，clip-path 后多余效果会变怪 */
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+  }
+
+  /* 6.2 隐藏 liquid 装饰子元素 */
   .dock-bar > .dock-indicator .dock-liquid-lens,
   .dock-bar > .dock-indicator .dock-liquid-shine {
     display: none !important;
