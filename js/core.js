@@ -213,9 +213,22 @@ window.safeLocalStorageSet = function(key, value) {
         function isVipUser() {
             if (!currentUser) return false;
             if (currentUser === ADMIN_NAME) return true;
-            return __vipStatus.is_vip === true;
+            if (__vipStatus.is_vip !== true) return false;
+            // 双重校验：即使 is_vip 标记为 true，也要检查 expire_at 是否过期
+            var info = __vipStatus.vip_info;
+            if (info && info.expire_at) {
+                var expireTs = new Date(info.expire_at).getTime();
+                if (!isNaN(expireTs) && expireTs <= Date.now()) {
+                    __vipStatus.is_vip = false;  // 过期自动降级
+                    return false;
+                }
+            }
+            return true;
         }
-        function setVipStatus(v) { __vipStatus.is_vip = !!v; }
+        function setVipStatus(v) {
+            __vipStatus.is_vip = !!v;
+            if (!v) __vipStatus.vip_info = null;
+        }
         function getVipInfo() { return __vipStatus.vip_info; }
 
         async function updateVipStatus() {
@@ -238,8 +251,16 @@ window.safeLocalStorageSet = function(key, value) {
                 var url = API_BASE + '/api/vip/status?user_name=' + encodeURIComponent(currentUser);
                 var resp = await fetch(url);
                 var data = await resp.json();
-                __vipStatus.is_vip = data.is_vip === true;
-                __vipStatus.vip_info = data.active_vip || null;
+                var apiIsVip = data.is_vip === true;
+                // 防止 API 返回 true 但实际已过期：检查 active_vip.expire_at
+                if (apiIsVip && data.active_vip && data.active_vip.expire_at) {
+                    var apiExpireTs = new Date(data.active_vip.expire_at).getTime();
+                    if (!isNaN(apiExpireTs) && apiExpireTs <= Date.now()) {
+                        apiIsVip = false;  // API 标记 VIP 但 expire_at 已过期 → 降级
+                    }
+                }
+                __vipStatus.is_vip = apiIsVip;
+                __vipStatus.vip_info = apiIsVip ? (data.active_vip || null) : null;
                 updateVipUI();
                 if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(__vipStatus.is_vip);
                 return;
@@ -1930,7 +1951,7 @@ function renderProfileActivityList(kind) {
                     '  <div class="report-modal report-history-modal" onclick="event.stopPropagation()">',
                     '    <div class="report-modal-header">',
                     '      <div class="report-modal-header-left"><span>📋 我的举报记录</span></div>',
-                    '      <button class="btn btn-ghost" onclick="closeReportHistoryModal()" style="padding:4px 12px; font-size:16px;">✕</button>',
+                    '      <button class="report-modal-close" onclick="closeReportHistoryModal()" aria-label="关闭">✕</button>',
                     '    </div>',
                     '    <div class="report-history-body">',
                     '      <div class="report-records-list" id="reportHistoryList"><div class="report-records-empty">加载中...</div></div>',

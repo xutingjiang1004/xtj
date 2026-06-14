@@ -1116,7 +1116,7 @@
                     <button class="report-view-tab" id="reportRecordsViewBtn" onclick="switchReportView('records')" aria-selected="false">举报记录</button>
                     <button class="report-records-btn" id="reportRecordsToggleBtn" onclick="toggleReportRecords()" aria-label="打开举报记录">📋 浮动</button>
                 </div>
-                <button class="btn btn-ghost" onclick="closeReportModal()" style="padding:4px 12px; font-size:16px;">✕</button>
+                <button class="report-modal-close" onclick="closeReportModal()" aria-label="关闭">✕</button>
             </div>
             <div class="report-modal-content">
                 <!-- 举报表单 -->
@@ -1154,7 +1154,10 @@
                 </div>
                 <!-- 举报记录面板 -->
                 <div class="report-records-panel" id="reportRecordsPanel">
-                    <div class="report-records-header">📋 我的举报记录</div>
+                    <div class="report-records-header report-records-header--inline">
+                        <span>📋 我的举报记录</span>
+                        <button class="report-modal-close" onclick="closeReportModal()" aria-label="关闭">✕</button>
+                    </div>
                     <div class="report-records-list" id="reportRecordsList">
                         <div class="report-records-empty">点击上方「举报记录」查看</div>
                     </div>

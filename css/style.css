@@ -11050,8 +11050,36 @@ body.ios-chat-keyboard-open .chat-input-area {
   display: flex !important;
 }
 
-.report-records-panel > .report-records-header:not(.report-records-header--primary) {
+.report-records-panel > .report-records-header:not(.report-records-header--primary):not(.report-records-header--inline) {
   display: none !important;
+}
+
+/* 举报记录 panel 内部的头部（带 ✕ 关闭按钮）— 显示并横排 */
+.report-records-header--inline {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px;
+  padding: 14px 4px 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #244734;
+  border-bottom: 1px solid rgba(190, 224, 203, 0.4);
+  margin-bottom: 10px;
+}
+.report-records-header--inline > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.report-records-header--inline > .report-modal-close {
+  width: 32px;
+  height: 32px;
+  font-size: 18px;
+  flex: 0 0 auto;
+}
+[data-theme="dark"] .report-records-header--inline {
+  color: #6ee7b7;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
 }
 
 .report-records-header {
