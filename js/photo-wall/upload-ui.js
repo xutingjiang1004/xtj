@@ -33,6 +33,8 @@
     return !!(file && /^image\//.test(file.type || ''));
   }
 
+  VIDEO_COMPRESS_ERROR = 'Unable to compress video to 5MB. Please use a shorter or smaller video.';
+
   function isVideoFile(file) {
     return !!(file && /^video\//.test(file.type || ''));
   }
@@ -167,24 +169,22 @@
       '.pw-upload-sheet-btn:active{transform:scale(.98);}',
       '.pw-upload-sheet-btn.is-ghost{background:rgba(255,255,255,.72);color:#2f6b4c;}',
       '.pw-upload-sheet-btn.is-primary{background:linear-gradient(135deg,#62b883,#8edaae);color:#fff;box-shadow:0 12px 26px rgba(87,171,120,.24);}',
-      '.pw-upload-local-overlay{position:fixed;inset:0;z-index:12100;display:none;align-items:center;justify-content:center;padding:22px 16px;background:rgba(225,243,232,.42);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);}',
+      '.pw-upload-local-overlay{position:fixed;inset:0;z-index:12100;display:none;align-items:center;justify-content:center;padding:22px 16px;background:rgba(230,244,239,.38);backdrop-filter:blur(16px) saturate(150%);-webkit-backdrop-filter:blur(16px) saturate(150%);}',
       '.pw-upload-local-overlay.upload-overlay-visible{display:flex;}',
-      '.pw-upload-progress-container{width:min(100%,400px);display:flex;flex-direction:column;gap:14px;padding:22px 20px 18px;border-radius:28px;background:linear-gradient(180deg,rgba(248,255,250,.98),rgba(232,247,237,.98));border:1px solid rgba(191,228,204,.96);box-shadow:0 26px 72px rgba(88,139,108,.18);}',
+      '.pw-upload-progress-container{position:relative;overflow:hidden;width:min(100%,408px);display:flex;flex-direction:column;gap:14px;padding:22px 20px 18px;border-radius:30px;background:linear-gradient(180deg,rgba(250,255,253,.86),rgba(238,249,246,.92));border:1px solid rgba(255,255,255,.82);box-shadow:0 24px 58px rgba(88,139,108,.14), inset 0 1px 0 rgba(255,255,255,.74);backdrop-filter:blur(20px) saturate(150%);-webkit-backdrop-filter:blur(20px) saturate(150%);}',
+      '.pw-upload-progress-container::before{content:"";position:absolute;inset:0;pointer-events:none;background:radial-gradient(circle at 18% 10%,rgba(125,211,252,.18),transparent 34%),radial-gradient(circle at 82% 16%,rgba(134,239,172,.16),transparent 30%);}',
       '.pw-upload-progress-hero{gap:16px;}',
       '.pw-upload-progress-copy{min-width:0;flex:1;}',
-      '.pw-upload-local-spinner{position:relative;width:76px;height:76px;flex:0 0 76px;display:grid;place-items:center;}',
-      '.pw-upload-local-ring,.pw-upload-local-pulse{position:absolute;inset:0;border-radius:50%;}',
-      '.pw-upload-local-ring{border:1.5px solid rgba(110,183,139,.24);animation:xtjUploadSpin 3.2s linear infinite;}',
-      '.pw-upload-local-ring--inner{inset:10px;border-color:rgba(135,209,165,.48);animation-direction:reverse;animation-duration:2.1s;}',
-      '.pw-upload-local-pulse{inset:15px;background:radial-gradient(circle,rgba(123,214,160,.42),rgba(78,143,103,.06) 68%,transparent 72%);animation:xtjUploadPulse 2.4s ease-in-out infinite;}',
-      '.pw-upload-local-dot{position:absolute;width:7px;height:7px;border-radius:50%;background:#6bcf9a;box-shadow:0 0 12px rgba(107,207,154,.55);animation:xtjUploadOrbit 2.2s ease-in-out infinite;}',
-      '.pw-upload-local-dot.dot-a{top:6px;left:34px;}.pw-upload-local-dot.dot-b{right:10px;bottom:18px;animation-delay:.35s;}.pw-upload-local-dot.dot-c{left:10px;bottom:20px;animation-delay:.7s;}',
-      '.pw-upload-local-icon{position:relative;z-index:1;color:#3e8d61;}',
-      '.pw-upload-progress-title{font-size:15px;font-weight:800;color:#28533c;}',
-      '.pw-upload-progress-text{margin-top:5px;font-size:30px;font-weight:800;line-height:1;color:#2ca866;font-variant-numeric:tabular-nums;}',
-      '.pw-upload-progress-status{margin-top:6px;font-size:12px;line-height:1.5;}',
-      '.pw-upload-local-bar-wrap{width:100%;height:10px;border-radius:999px;background:rgba(128,184,148,.16);overflow:hidden;}',
-      '.pw-upload-progress-bar{position:relative;height:100%;border-radius:inherit;background:linear-gradient(90deg,#5fbf83,#7ed7a0 52%,#a5ebc1);background-size:200% 100%;animation:xtjUploadBarFlow 2.6s linear infinite;box-shadow:0 0 18px rgba(102,199,136,.22);}',
+      '.pw-upload-local-spinner{position:relative;width:78px;height:78px;flex:0 0 78px;display:grid;place-items:center;}',
+      '.pw-upload-liquid-shell{position:absolute;inset:0;border-radius:26px;background:linear-gradient(180deg,rgba(255,255,255,.52),rgba(255,255,255,.16));border:1px solid rgba(255,255,255,.76);box-shadow:0 14px 36px rgba(86,138,120,.12), inset 0 1px 0 rgba(255,255,255,.78), inset 0 -12px 24px rgba(82,189,161,.14);backdrop-filter:blur(16px) saturate(150%);-webkit-backdrop-filter:blur(16px) saturate(150%);animation:xtjUploadFloat 3.4s ease-in-out infinite;}',
+      '.pw-upload-liquid-glow{position:absolute;inset:10px;border-radius:20px;background:radial-gradient(circle at 30% 24%,rgba(255,255,255,.72),rgba(255,255,255,.12) 36%,transparent 58%),radial-gradient(circle at 74% 72%,rgba(96,165,250,.16),transparent 52%),radial-gradient(circle at 30% 78%,rgba(34,197,94,.16),transparent 50%);opacity:.92;animation:xtjUploadGlow 3.6s ease-in-out infinite;}',
+      '.pw-upload-liquid-core{position:absolute;inset:20px;border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.74),rgba(216,245,234,.5));box-shadow:inset 0 1px 0 rgba(255,255,255,.84);}',
+      '.pw-upload-local-icon{position:relative;z-index:1;color:#2e7f63;filter:drop-shadow(0 8px 18px rgba(90,168,145,.16));}',
+      '.pw-upload-progress-title{font-size:14px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:rgba(44,96,76,.78);}',
+      '.pw-upload-progress-text{margin-top:6px;font-size:30px;font-weight:800;line-height:1;color:#1e9f86;font-variant-numeric:tabular-nums;}',
+      '.pw-upload-progress-status{margin-top:6px;font-size:12px;line-height:1.55;color:rgba(59,97,82,.72);}',
+      '.pw-upload-local-bar-wrap{width:100%;height:10px;border-radius:999px;background:rgba(130,185,166,.14);overflow:hidden;box-shadow:inset 0 1px 2px rgba(135,181,160,.12);}',
+      '.pw-upload-progress-bar{position:relative;height:100%;border-radius:inherit;background:linear-gradient(90deg,rgba(32,197,157,.96),rgba(96,165,250,.88) 54%,rgba(167,243,208,.98));background-size:180% 100%;animation:xtjUploadBarFlow 3.4s linear infinite;box-shadow:0 8px 20px rgba(90,179,166,.18);}',
       '.pw-upload-progress-bar::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.5),transparent);animation:xtjUploadBarShine 1.6s ease-in-out infinite;}',
       '.pw-upload-queue-head{justify-content:space-between;font-size:11px;font-weight:700;letter-spacing:.04em;}',
       '.pw-upload-queue{display:flex;gap:8px;min-height:48px;}',
@@ -220,8 +220,8 @@
       '.pp-compact-btn,#ppCompactBtn{display:none!important;}',
       '.pp-post-mode .pp-delete-btn,.pp-post-mode #ppDeleteBtn{display:none!important;}',
       '@keyframes xtjUploadSpin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}',
-      '@keyframes xtjUploadPulse{0%,100%{transform:scale(.92);opacity:.62;}50%{transform:scale(1.06);opacity:1;}}',
-      '@keyframes xtjUploadOrbit{0%,100%{transform:scale(.8);opacity:.4;}50%{transform:translateY(-5px) scale(1.2);opacity:1;}}',
+      '@keyframes xtjUploadFloat{0%,100%{transform:translateY(0);}50%{transform:translateY(-3px);}}',
+      '@keyframes xtjUploadGlow{0%,100%{opacity:.88;}50%{opacity:1;}}',
       '@keyframes xtjUploadBarFlow{0%{background-position:0 50%;}100%{background-position:200% 50%;}}',
       '@keyframes xtjUploadBarShine{0%{transform:translateX(-130%);}100%{transform:translateX(130%);}}',
       '@media (max-width:520px){.pw-upload-sheet{padding-left:12px;padding-right:12px;}.pw-upload-sheet-card{padding:18px 14px 14px;border-radius:24px;}.pw-upload-sheet-grid{grid-template-columns:repeat(auto-fill,minmax(64px,1fr));}.pw-upload-sheet-footer{flex-direction:column;align-items:stretch;}.pw-upload-sheet-actions{width:100%;}.pw-upload-sheet-btn{flex:1;justify-content:center;}.pw-upload-progress-container{padding:20px 16px 16px;}}'
@@ -649,6 +649,91 @@
     }
   }
 
+  async function createVideoPosterFallback(file, duration) {
+    var width = 640;
+    var height = 640;
+    try {
+      var metadata = await readVideoMetadata(file);
+      width = Math.max(320, metadata.width || width);
+      height = Math.max(320, metadata.height || height);
+      duration = duration || metadata.duration || 0;
+      metadata.cleanup();
+    } catch (_) {}
+    var ratio = Math.min(640 / Math.max(width, 1), 640 / Math.max(height, 1), 1);
+    var canvas = document.createElement('canvas');
+    canvas.width = Math.max(220, Math.round(width * ratio));
+    canvas.height = Math.max(220, Math.round(height * ratio));
+    var ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('video_poster_fallback_failed');
+
+    var gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, '#ebfbf5');
+    gradient.addColorStop(0.55, '#eaf6ff');
+    gradient.addColorStop(1, '#d9f5ec');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    var orb = ctx.createRadialGradient(canvas.width * 0.26, canvas.height * 0.24, 0, canvas.width * 0.26, canvas.height * 0.24, canvas.width * 0.6);
+    orb.addColorStop(0, 'rgba(255,255,255,0.82)');
+    orb.addColorStop(0.4, 'rgba(255,255,255,0.24)');
+    orb.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = orb;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.52)';
+    roundRect(ctx, canvas.width * 0.22, canvas.height * 0.22, canvas.width * 0.56, canvas.height * 0.56, Math.min(canvas.width, canvas.height) * 0.1);
+    ctx.fill();
+
+    ctx.fillStyle = '#26a38a';
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.46, canvas.height * 0.39);
+    ctx.lineTo(canvas.width * 0.46, canvas.height * 0.61);
+    ctx.lineTo(canvas.width * 0.62, canvas.height * 0.5);
+    ctx.closePath();
+    ctx.fill();
+
+    if (duration) {
+      ctx.fillStyle = 'rgba(23,49,58,0.72)';
+      ctx.font = '600 24px sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText(formatDuration(duration), canvas.width - 22, canvas.height - 24);
+    }
+
+    var blob = await new Promise(function(resolve) {
+      canvas.toBlob(function(nextBlob) {
+        resolve(nextBlob || null);
+      }, 'image/jpeg', 0.84);
+    });
+    if (!blob) throw new Error('video_poster_fallback_empty');
+    return {
+      blob: blob,
+      duration: duration || 0,
+      width: width,
+      height: height
+    };
+  }
+
+  function roundRect(ctx, x, y, width, height, radius) {
+    var r = Math.max(0, Math.min(radius, Math.min(width, height) / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + width, y, x + width, y + height, r);
+    ctx.arcTo(x + width, y + height, x, y + height, r);
+    ctx.arcTo(x, y + height, x, y, r);
+    ctx.arcTo(x, y, x + width, y, r);
+    ctx.closePath();
+  }
+
+  async function buildVideoPoster(sourceFile, posterSourceFile, duration) {
+    var candidates = [posterSourceFile, sourceFile].filter(Boolean);
+    for (var i = 0; i < candidates.length; i++) {
+      try {
+        return await extractVideoPoster(candidates[i]);
+      } catch (_) {}
+    }
+    return createVideoPosterFallback(sourceFile || posterSourceFile, duration || 0);
+  }
+
   function getSupportedCaptureStream(video) {
     if (video && typeof video.captureStream === 'function') return video.captureStream();
     if (video && typeof video.mozCaptureStream === 'function') return video.mozCaptureStream();
@@ -812,6 +897,7 @@
 
     var successCount = 0;
     var failCount = 0;
+    var firstErrorMessage = '';
     for (var i = 0; i < state.photoFiles.length; i++) {
       var file = state.photoFiles[i];
       var start = (i / state.photoFiles.length) * 88;
@@ -1045,7 +1131,11 @@
       if (!compressedVideo || !compressedVideo.file || compressedVideo.file.size > MAX_VIDEO_BYTES) {
         throw new Error('鏃犳硶鍘嬪埌 5MB锛岃缂╃煭瑙嗛鎴栭檷浣庡師瑙嗛澶у皬');
       }
-      var poster = await withTimeout(extractVideoPoster(compressedVideo.file), TIMEOUTS.photoUpload, 'video poster');
+      var poster = await withTimeout(
+        buildVideoPoster(file, compressedVideo.file, compressedVideo.duration || 0),
+        TIMEOUTS.photoUpload,
+        'video poster'
+      );
       return {
         mediaKind: 'video',
         uploadFile: compressedVideo.file,
@@ -1095,12 +1185,15 @@
         var mediaExt = inferExtensionFromType(prepared.mimeType, isVideoFile(file) ? '.mp4' : '.jpg');
         var mediaName = buildSafeFileName(prepared.uploadFile, mediaExt);
         var photoPath = 'photos/' + mediaName;
+        var mediaUploadTimeout = prepared.mediaKind === 'video'
+          ? Math.max(TIMEOUTS.photoUpload, 70000)
+          : TIMEOUTS.photoUpload;
         setProgress(start + (end - start) * 0.34, 'Uploading media', 'Uploading main file');
         var uploadRes = await withTimeout(window.sb.storage.from('uploads').upload(photoPath, prepared.uploadFile, {
           contentType: prepared.mimeType,
           cacheControl: '31536000',
           upsert: false
-        }), TIMEOUTS.photoUpload, 'photo upload');
+        }), mediaUploadTimeout, 'photo upload');
         if (uploadRes.error) throw uploadRes.error;
 
         var photoUrl = window.sb.storage.from('uploads').getPublicUrl(photoPath).data.publicUrl;
@@ -1113,7 +1206,7 @@
             contentType: 'image/jpeg',
             cacheControl: '31536000',
             upsert: false
-          }), TIMEOUTS.photoUpload, 'thumbnail upload');
+          }), mediaUploadTimeout, 'thumbnail upload');
           if (thumbRes && !thumbRes.error) {
             thumbUrl = window.sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl;
           }
@@ -1155,6 +1248,9 @@
         successCount++;
       } catch (err) {
         console.error('[photo-upload-ui] photo wall upload failed', err);
+        if (!firstErrorMessage) {
+          firstErrorMessage = err && err.message ? err.message : 'Upload failed';
+        }
         failCount++;
       }
     }
@@ -1171,7 +1267,7 @@
     setTimeout(function() {
       hideProgress();
       if (successCount > 0) toast('Uploaded ' + successCount + ' items');
-      if (successCount === 0 && failCount > 0) toast('Upload failed, please retry');
+      if (successCount === 0 && failCount > 0) toast(firstErrorMessage || 'Upload failed, please retry');
     }, 420);
   }
 
@@ -1908,8 +2004,60 @@
     window.closePhotoWallVideoPreview = closePhotoWallVideoPreview;
   }
 
+  function installUploadProgressOverrides() {
+    ensureProgressMarkup = function() {
+      var overlay = byId('pwUploadProgressOverlay');
+      if (!overlay) return;
+      ensureOverlayAtBody();
+      overlay.innerHTML = [
+        '<div class="pw-upload-progress-container">',
+        '  <div class="pw-upload-progress-hero">',
+        '    <div class="pw-upload-local-spinner" aria-hidden="true">',
+        '      <div class="pw-upload-liquid-shell"></div>',
+        '      <div class="pw-upload-liquid-glow"></div>',
+        '      <div class="pw-upload-liquid-core"></div>',
+        '      <svg class="pw-upload-local-icon" viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5">',
+        '        <path d="M7 18a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 8.5a3.5 3.5 0 1 1 .5 6.96H15"></path>',
+        '        <path d="M12 11v9"></path>',
+        '        <path d="m8.5 14.5 3.5-3.5 3.5 3.5"></path>',
+        '      </svg>',
+        '    </div>',
+        '    <div class="pw-upload-progress-copy">',
+        '      <div class="pw-upload-progress-title" id="pwUploadProgressTitle">Preparing Upload</div>',
+        '      <div class="pw-upload-progress-text" id="pwUploadProgressText">0%</div>',
+        '      <div class="pw-upload-progress-status" id="pwUploadProgressStatus">Checking media and building upload queue...</div>',
+        '    </div>',
+        '  </div>',
+        '  <div class="pw-upload-local-bar-wrap"><div class="pw-upload-progress-bar" id="pwUploadProgressBar" style="width:0%"></div></div>',
+        '  <div class="pw-upload-queue-head"><span>Upload Queue</span><span id="pwUploadQueueCount">0 items</span></div>',
+        '  <div class="pw-upload-queue" id="pwUploadQueuePreview"></div>',
+        '</div>'
+      ].join('');
+    };
+
+    showProgress = function() {
+      var overlay = byId('pwUploadProgressOverlay');
+      if (!overlay) return;
+      ensureProgressMarkup();
+      ensureOverlayAtBody();
+      overlay.style.display = 'flex';
+      overlay.classList.add('upload-overlay-visible');
+      setProgress(0, 'Preparing Upload', 'Checking media and building upload queue...');
+    };
+
+    hideProgress = function() {
+      var overlay = byId('pwUploadProgressOverlay');
+      if (!overlay) return;
+      overlay.classList.remove('upload-overlay-visible');
+      overlay.style.display = 'none';
+      setProgress(0, 'Preparing Upload', 'Checking media and building upload queue...');
+      revokeUrls('queueUrls');
+    };
+  }
+
   function boot() {
     injectStyles();
+    installUploadProgressOverrides();
     ensureOverlayAtBody();
     ensureProgressMarkup();
     attachPhotoUploadUi();

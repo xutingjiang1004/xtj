@@ -1,6 +1,6 @@
 
         html, body {
-            touch-action: manipulation;
+            touch-action: pan-y;
             overscroll-behavior: none;
             width: 100%;
             max-width: 100%;
@@ -2024,13 +2024,15 @@
             max-width: 640px; margin: 0 auto;
             position: relative;
         }
-        .dock-panels { flex: 1; overflow: hidden; position: relative; }
+        .dock-panels { flex: 1; min-height: 0; overflow: hidden; position: relative; }
         .dock-panel {
             position: absolute; inset: 0;
             overflow-y: auto; overflow-x: hidden;
             scrollbar-width: none;
             -ms-overflow-style: none;
             -webkit-overflow-scrolling: touch;
+            touch-action: pan-y;
+            overscroll-behavior-y: contain;
             opacity: 0; pointer-events: none;
             transform: translate3d(0, 14px, 0) scale(0.985);
             transition: opacity 0.28s cubic-bezier(0.16,1,0.3,1), transform 0.28s cubic-bezier(0.16,1,0.3,1);
@@ -8426,17 +8428,28 @@
 
 .pw-upload-progress-container {
   position: relative;
-  width: min(100%, 390px);
+  overflow: hidden;
+  width: min(100%, 408px);
   display: flex;
   flex-direction: column;
   gap: 14px;
   padding: 20px 18px 18px;
-  border-radius: 26px;
+  border-radius: 30px;
+  background: linear-gradient(180deg, rgba(250, 255, 253, 0.86), rgba(238, 249, 246, 0.92));
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  box-shadow: 0 24px 58px rgba(88, 139, 108, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+}
+
+.pw-upload-progress-container::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
   background:
-    radial-gradient(circle at top right, rgba(112, 211, 155, 0.16), transparent 28%),
-    linear-gradient(180deg, rgba(8, 16, 14, 0.92), rgba(13, 23, 18, 0.96));
-  border: 1px solid rgba(148, 230, 186, 0.14);
-  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.28);
+    radial-gradient(circle at 18% 10%, rgba(125, 211, 252, 0.18), transparent 34%),
+    radial-gradient(circle at 82% 16%, rgba(134, 239, 172, 0.16), transparent 30%);
 }
 
 .pw-upload-progress-hero {
@@ -8450,57 +8463,50 @@
 
 .pw-upload-local-spinner {
   position: relative;
-  width: 74px;
-  height: 74px;
-  flex: 0 0 74px;
+  width: 78px;
+  height: 78px;
+  flex: 0 0 78px;
   display: grid;
   place-items: center;
 }
 
-.pw-upload-local-ring,
-.pw-upload-local-pulse {
+.pw-upload-liquid-shell {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
+  border-radius: 26px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.16));
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  box-shadow: 0 14px 36px rgba(86, 138, 120, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.78), inset 0 -12px 24px rgba(82, 189, 161, 0.14);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  animation: pwUploadFloat 3.4s ease-in-out infinite;
 }
 
-.pw-upload-local-ring {
-  border: 1.5px solid rgba(153, 246, 196, 0.2);
-  animation: pwUploadSpin 3.2s linear infinite;
-}
-
-.pw-upload-local-ring--inner {
-  inset: 9px;
-  border-color: rgba(153, 246, 196, 0.34);
-  animation-direction: reverse;
-  animation-duration: 2.1s;
-}
-
-.pw-upload-local-pulse {
-  inset: 14px;
-  background: radial-gradient(circle, rgba(95, 216, 154, 0.34), rgba(36, 74, 55, 0.04) 68%, transparent 72%);
-  animation: pwUploadPulse 2.6s ease-in-out infinite;
-}
-
-.pw-upload-local-dot {
+.pw-upload-liquid-glow {
   position: absolute;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #a7f3d0;
-  box-shadow: 0 0 12px rgba(167, 243, 208, 0.7);
-  animation: pwUploadOrbit 2.4s ease-in-out infinite;
+  inset: 10px;
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.12) 36%, transparent 58%),
+    radial-gradient(circle at 74% 72%, rgba(96, 165, 250, 0.16), transparent 52%),
+    radial-gradient(circle at 30% 78%, rgba(34, 197, 94, 0.16), transparent 50%);
+  opacity: 0.92;
+  animation: pwUploadGlow 3.6s ease-in-out infinite;
 }
 
-.pw-upload-local-dot.dot-a { top: 6px; left: 32px; }
-.pw-upload-local-dot.dot-b { right: 10px; bottom: 20px; animation-delay: 0.4s; }
-.pw-upload-local-dot.dot-c { left: 10px; bottom: 18px; animation-delay: 0.8s; }
+.pw-upload-liquid-core {
+  position: absolute;
+  inset: 20px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(216, 245, 234, 0.5));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.84);
+}
 
 .pw-upload-local-icon {
   position: relative;
   z-index: 1;
-  color: rgba(225, 255, 240, 0.92);
-  filter: drop-shadow(0 10px 22px rgba(76, 210, 145, 0.22));
+  color: #2e7f63;
+  filter: drop-shadow(0 8px 18px rgba(90, 168, 145, 0.16));
 }
 
 @keyframes pwUploadSpin {
@@ -8508,52 +8514,55 @@
   to { transform: rotate(360deg); }
 }
 
-@keyframes pwUploadPulse {
-  0%, 100% { transform: scale(0.92); opacity: 0.62; }
-  50% { transform: scale(1.06); opacity: 1; }
+@keyframes pwUploadFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
 }
 
-@keyframes pwUploadOrbit {
-  0%, 100% { transform: scale(0.8); opacity: 0.4; }
-  50% { transform: translateY(-5px) scale(1.2); opacity: 1; }
+@keyframes pwUploadGlow {
+  0%, 100% { opacity: 0.88; }
+  50% { opacity: 1; }
 }
 
 .pw-upload-progress-title {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
-  color: rgba(244, 255, 247, 0.96);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(44, 96, 76, 0.78);
 }
 
 .pw-upload-progress-text {
   margin-top: 6px;
-  font-size: 26px;
+  font-size: 30px;
   font-weight: 800;
-  color: #86efac;
+  color: #1e9f86;
   font-variant-numeric: tabular-nums;
 }
 
 .pw-upload-progress-status {
-  margin-top: 4px;
+  margin-top: 6px;
   font-size: 12px;
-  line-height: 1.5;
-  color: rgba(214, 237, 223, 0.72);
+  line-height: 1.55;
+  color: rgba(59, 97, 82, 0.72);
 }
 
 .pw-upload-local-bar-wrap {
   width: 100%;
-  height: 8px;
+  height: 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(130, 185, 166, 0.14);
   overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(135, 181, 160, 0.12);
 }
 
 .pw-upload-progress-bar {
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #2bb673, #6fdfb0 52%, #9ff2ce);
-  background-size: 200% 100%;
-  animation: pwUploadBarFlow 2.6s linear infinite;
-  box-shadow: 0 0 18px rgba(75, 208, 141, 0.24);
+  background: linear-gradient(90deg, rgba(32, 197, 157, 0.96), rgba(96, 165, 250, 0.88) 54%, rgba(167, 243, 208, 0.98));
+  background-size: 180% 100%;
+  animation: pwUploadBarFlow 3.4s linear infinite;
+  box-shadow: 0 8px 20px rgba(90, 179, 166, 0.18);
 }
 
 .pw-upload-progress-bar::after {
