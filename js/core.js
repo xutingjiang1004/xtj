@@ -6154,7 +6154,14 @@ function renderProfileActivityList(kind) {
                     if (el) el.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div></div>';
                     return;
                 }
-                if (dockChatMsgsBusy && dockChatMsgsUser === userName) { dockChatMsgsDirty = userName; return; }
+                if (dockChatMsgsBusy && dockChatMsgsUser === userName && !forceScroll) { dockChatMsgsDirty = userName; return; }
+                // 如果 forceScroll=true 且正在 fetch 同用户，等待旧 fetch 结束（避免并发）
+                if (dockChatMsgsBusy && dockChatMsgsUser === userName && forceScroll) {
+                    var _waitStart = Date.now();
+                    while (dockChatMsgsBusy && dockChatMsgsUser === userName && (Date.now() - _waitStart) < 5000) {
+                        await new Promise(function(r) { setTimeout(r, 30); });
+                    }
+                }
                 // 棰勯敓鑺傦拷?鎷锋潪钘夊蓟閺傜懓銇旈敓?
                 var needAvatars = [];
                 if (currentUser && !avatarCache[currentUser]) needAvatars.push(currentUser);
@@ -6282,6 +6289,8 @@ function renderProfileActivityList(kind) {
                     if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
                 }
                 dockChatSending = true; inp.value = '';
+                var capturedContent = content;
+                var tempId = 'temp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
                 try {
                     let actorKey = DM_MARKER;
                     if (file) {
@@ -6293,22 +6302,53 @@ function renderProfileActivityList(kind) {
                         });
                         actorKey = file.type.startsWith('video/') ? '__dm_vid__' + path : '__dm_img__' + path;
                     }
-                    const { error } = await sb.from("posts").insert([{ user_name: currentUser, content: content, media_type: DM_MARKER, media_url: dockChatActiveUser, actor_key: actorKey }]);
+
+                    // ===== 乐观 UI：立即把新消息插入到 DOM（不等服务器） =====
+                    // 解决两个问题：
+                    // 1) 消息不等服务器 round-trip 立即显示
+                    // 2) 单条新元素触发 sent-anim 动画，比 innerHTML 全量重写后再 add class 更顺畅
+                    try {
+                        var msgsEl = document.getElementById('dockChatMessages');
+                        if (msgsEl) {
+                            if (msgsEl.querySelector('.chat-empty')) msgsEl.innerHTML = '';
+                            var myAvatarHtml = avatarCache[currentUser]
+                                ? '<img src="' + avatarCache[currentUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">'
+                                : (currentUser ? currentUser[0].toUpperCase() : '?');
+                            var bodyHtml = '';
+                            if (actorKey && actorKey.startsWith('__dm_img__')) {
+                                var imageSrc = getMediaUrl('__dm_img__', actorKey.replace('__dm_img__', ''));
+                                bodyHtml = '<img class="msg-img" src="' + imageSrc + '" onclick="openImageViewer(this.src)" loading="lazy" />';
+                                if (capturedContent) bodyHtml += '<div class="msg-text">' + escapeHtml(capturedContent) + '</div>';
+                            } else if (actorKey && actorKey.startsWith('__dm_vid__')) {
+                                bodyHtml = '<video class="msg-img" src="' + getMediaUrl('__dm_vid__', actorKey.replace('__dm_vid__', '')) + '" controls preload="metadata" style="cursor:default;"></video>';
+                                if (capturedContent) bodyHtml += '<div class="msg-text">' + escapeHtml(capturedContent) + '</div>';
+                            } else {
+                                bodyHtml = '<span class="msg-text">' + escapeHtml(capturedContent || '') + '</span>';
+                            }
+                            var optimisticBubble = '<div class="chat-msg sent sent-anim" data-temp-id="' + tempId + '">' + bodyHtml + '<span class="msg-read-status">未读</span><span class="msg-time">' + formatMsgTime(new Date().toISOString()) + '</span></div>';
+                            var optimisticRow = '<div class="chat-msg-row sent">' + optimisticBubble + '<div class="chat-msg-avatar">' + myAvatarHtml + '</div></div>';
+                            msgsEl.insertAdjacentHTML('beforeend', optimisticRow);
+                            // 立即滚到底，不用 smooth 避免动画延迟
+                            msgsEl.scrollTop = msgsEl.scrollHeight;
+                        }
+                    } catch(_e) { /* 乐观插入失败不影响发送流程 */ }
+
+                    const { error } = await sb.from("posts").insert([{ user_name: currentUser, content: capturedContent, media_type: DM_MARKER, media_url: dockChatActiveUser, actor_key: actorKey }]);
                     if (error) throw error;
                     clearDockChatFilePreview(false);
-                    await loadDockChatMessages(dockChatActiveUser, true);
-                    const msgs = document.getElementById('dockChatMessages');
-                    if (msgs) {
-                        msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
-                        const lastMsg = msgs.lastElementChild && msgs.lastElementChild.querySelector ? msgs.lastElementChild.querySelector('.chat-msg') : null;
-                        if (lastMsg) {
-                            lastMsg.classList.add('sent-anim');
-                            setTimeout(function() {
-                                msgs.scrollTo({ top: msgs.scrollHeight, behavior: 'smooth' });
-                            }, 200);
-                        }
-                    }
-                } catch(e) { showToast('发送失败 ' + (e?.message || e)); inp.value = content; }
+
+                    // 服务器插入成功：移除 temp-id 标记（消息保留显示，下次 fetch 时会被真实数据自然替换）
+                    var _okTempEl = document.querySelector('#dockChatMessages [data-temp-id="' + tempId + '"]');
+                    if (_okTempEl) _okTempEl.removeAttribute('data-temp-id');
+
+                    // 异步更新左侧会话列表预览（不阻塞 UI、不重写消息区 DOM）
+                    setTimeout(function() { try { loadDockChatList(); } catch(_e) {} }, 80);
+                } catch(e) {
+                    // 失败回滚：移除乐观插入的消息
+                    var _failEl = document.querySelector('#dockChatMessages [data-temp-id="' + tempId + '"]');
+                    if (_failEl) { var _failRow = _failEl.closest('.chat-msg-row'); if (_failRow) _failRow.remove(); }
+                    showToast('发送失败 ' + (e?.message || e)); inp.value = capturedContent;
+                }
                 finally { dockChatSending = false; }
             }
 
