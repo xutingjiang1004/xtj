@@ -151,21 +151,73 @@
 
 
   /* ==============================================================
-     P2: 帖子面板 — 主区居中
-     style.css 已有 .wrap { max-width: 640px; margin: 24px auto 80px }
-     在桌面端只需要把 max-width 调到 720 让阅读更宽。
-     不动 nav（它有自己的 flex 布局和 hotfix 样式）。
+     P2: 帖子面板 — 中间 feed + 右侧统计栏
+     把原本横向排列的 .stats 变成右侧 280px 竖排侧栏。
+     feed 居中 720px。
      ============================================================== */
 
+  /* 整体布局：让 wrap 用 grid 重组 */
   #panelPosts .wrap {
-    max-width: 720px !important;
+    max-width: 1080px !important;
+    margin: 0 auto !important;
+    padding: 24px 24px 60px !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) 280px !important;
+    gap: 32px !important;
+    align-items: start !important;
   }
 
-  /* 内部发布框 / 筛选 / 统计 / feed 由 style.css 自带样式处理 */
-  /* 这里只做轻量增强 */
+  /* 主列：包含发布框、筛选、feed */
+  /* 通过 :nth-child 选择器难以指定主列，用 order 替代 */
+  #panelPosts .wrap > #publishBox,
+  #panelPosts .wrap > #postFilterBar,
+  #panelPosts .wrap > #feed {
+    grid-column: 1 !important;
+    min-width: 0;
+  }
+
+  #panelPosts .wrap > .stats {
+    grid-column: 2 !important;
+    grid-row: 1 / -1 !important;       /* 占满右侧所有行 */
+    position: sticky !important;
+    top: 24px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    align-self: start !important;
+    background: var(--glass-bg, rgba(255, 255, 255, 0.6)) !important;
+    border: 1px solid var(--glass-line, rgba(255, 255, 255, 0.5)) !important;
+    border-radius: 16px !important;
+    padding: 16px !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+  }
+
+  #panelPosts .wrap > .stats .stat-card {
+    text-align: left !important;
+    padding: 14px 16px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 12px !important;
+  }
+
+  #panelPosts .wrap > .stats .stat-card b {
+    font-size: 22px !important;
+    order: 2 !important;
+  }
+
+  #panelPosts .wrap > .stats .stat-card span {
+    order: 1 !important;
+    font-size: 13px !important;
+  }
+
+  /* 发布框 */
   #panelPosts .publish-box {
     padding: 24px !important;
   }
+
   #panelPosts .publish-box textarea {
     min-height: 90px !important;
   }
