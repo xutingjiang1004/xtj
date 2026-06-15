@@ -7,9 +7,6 @@ const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { AlipaySdk } = require('alipay-sdk');
 
-const __filename = module.filename || '';
-const __dirname = __dirname || path.dirname(process.argv[1]);
-
 const app = express();
 
 // 信任反向代理（Render 会设置 X-Forwarded-For）
