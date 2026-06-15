@@ -4,6 +4,7 @@
   "description": "- 修复经典的闭包陷阱（closure-in-loop bug）：`pwObserveLazyImages` 中 `loadedFn` 事件处理器因 `var` 共享同一 `img` 引用，导致只有最后一张图片完成加载过渡，其余图片永久停留在 `opacity: 0`\r - 使用 IIFE 包裹 `loadedFn`，确保每个图片元素绑定独立的闭包引用，所有封面正确显示\r - 增加 `data-src` 空值保护，防止 URL 为 `undefined` 导致图片加载失败\r - 图片 URL 增加 HTML 转义处理，防止特殊字符破坏 HTML 结构",
   "main": "_fix.js",
   "scripts": {
+    "start": "node render-api/server.js",
     "build": "node scripts/build.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
