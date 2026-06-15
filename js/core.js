@@ -440,9 +440,26 @@ window.safeLocalStorageSet = function(key, value) {
                         resolve();
                         return;
                     }
+                    var existing = document.querySelector('script[src="' + scripts[idx] + '"]');
+                    if (existing) {
+                        if (existing.dataset.xtjLoaded === '1') {
+                            loadNext(idx + 1);
+                            return;
+                        }
+                        existing.addEventListener('load', function onLoad() {
+                            existing.removeEventListener('load', onLoad);
+                            existing.dataset.xtjLoaded = '1';
+                            loadNext(idx + 1);
+                        });
+                        existing.addEventListener('error', function onError() {
+                            existing.removeEventListener('error', onError);
+                            reject(new Error('Failed to load ' + scripts[idx]));
+                        });
+                        return;
+                    }
                     var s = document.createElement('script');
                     s.src = scripts[idx];
-                    s.onload = function() { loadNext(idx + 1); };
+                    s.onload = function() { s.dataset.xtjLoaded = '1'; loadNext(idx + 1); };
                     s.onerror = function() { reject(new Error('Failed to load ' + scripts[idx])); };
                     document.body.appendChild(s);
                 }
@@ -6319,6 +6336,9 @@ function renderProfileActivityList(kind) {
                 // 锟叫伙拷鍒版柊tab
                 lastTabTapTime[tab] = now;
                 lastTabTapCount[tab] = 1;
+                if (currentDockTab === 'ai' && tab !== 'ai' && typeof window.cleanupPhotoWallTransientState === 'function') {
+                    window.cleanupPhotoWallTransientState();
+                }
                 currentDockTab = tab;
                 localStorage.setItem('xtj_current_tab', tab);
                 document.querySelectorAll('.dock-panel').forEach(p => p.classList.remove('active'));
