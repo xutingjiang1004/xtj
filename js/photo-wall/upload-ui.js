@@ -108,12 +108,9 @@
   }
 
   function supportsBrowserVideoCompression() {
-    var probeVideo = document.createElement('video');
     var probeCanvas = document.createElement('canvas');
     return !!(
       window.MediaRecorder &&
-      typeof probeVideo.play === 'function' &&
-      (typeof probeVideo.captureStream === 'function' || typeof probeVideo.mozCaptureStream === 'function') &&
       typeof probeCanvas.captureStream === 'function'
     );
   }
@@ -151,7 +148,7 @@
       case 'browser_unsupported':
         return '当前浏览器不支持网页端视频压缩，请换 Chrome/Edge 或先手动压缩。';
       case 'video_decode_failed':
-        return '当前视频无法在浏览器中解码，请换一个视频格式后重试。';
+        return '当前视频无法在浏览器中解码，请使用 H.264 (MP4) 格式或换一个更短的视频后重试。';
       case 'compression_timeout':
         return '视频压缩超时，请换更短的视频后重试。';
       case 'still_over_limit':
@@ -1041,6 +1038,20 @@
     try {
       metadata = await readVideoMetadata(file);
     } catch (_) {
+      if (file.size <= targetBytes) {
+        return {
+          success: true,
+          file: file,
+          originalSize: file.size || 0,
+          finalSize: file.size || 0,
+          mimeType: file.type || '',
+          duration: 0,
+          width: 0,
+          height: 0,
+          compressed: false,
+          attempts: []
+        };
+      }
       return {
         success: false,
         file: null,
