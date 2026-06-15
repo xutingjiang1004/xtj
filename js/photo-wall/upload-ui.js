@@ -1656,22 +1656,10 @@
     }
     if (!stage.__xtjVideoPreviewInteractionBound) {
       stage.__xtjVideoPreviewInteractionBound = true;
-      [
-        'pointerdown',
-        'pointermove',
-        'pointerup',
-        'pointercancel',
-        'mousedown',
-        'mouseup',
-        'click',
-        'dblclick',
-        'touchstart',
-        'touchmove',
-        'touchend'
-      ].forEach(function(type) {
-        stage.addEventListener(type, function(event) {
-          event.stopPropagation();
-        });
+      // 仅阻止 click 冒泡，防止点击视频导致 overlay 关闭
+      // 不拦截 pointer/touch/mouse 事件，确保浏览器原生视频控件正常工作
+      stage.addEventListener('click', function(event) {
+        event.stopPropagation();
       });
     }
     return stage;
