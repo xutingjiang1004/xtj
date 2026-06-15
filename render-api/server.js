@@ -1,15 +1,14 @@
 // xtj Admin API service for Render deployment.
-import express from 'express';
-import cors from 'cors';
-import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { createClient } from '@supabase/supabase-js';
-import { AlipaySdk } from 'alipay-sdk';
+const express = require('express');
+const cors = require('cors');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
+const { AlipaySdk } = require('alipay-sdk');
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __filename = module.filename || '';
+const __dirname = __dirname || path.dirname(process.argv[1]);
 
 const app = express();
 
