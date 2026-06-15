@@ -56,3 +56,22 @@ ALTER TABLE blacklist ENABLE ROW LEVEL SECURITY;
 -- SELECT count(*) FROM bans;
 -- SELECT count(*) FROM mutes;
 -- SELECT count(*) FROM blacklist;
+
+-- ============================================================
+-- H3: 修复 posts 表 DELETE/UPDATE — 照片墙删除不同步
+-- 问题：anon_update_posts 和 anon_delete_posts 都是
+--       USING (false)，导致照片墙删除请求被 RLS 全部拦截。
+--       结果：前端只删本地缓存，数据库没变，其他设备看不到删除。
+-- 修复：允许 anon 对 __photo_wall__ 类型的帖子执行
+--       UPDATE（软删除标记）和 DELETE（硬删除）。
+-- ============================================================
+DROP POLICY IF EXISTS "anon_update_posts" ON posts;
+CREATE POLICY "anon_update_posts" ON posts
+  FOR UPDATE
+  USING (media_type = '__photo_wall__')
+  WITH CHECK (media_type = '__photo_wall__');
+
+DROP POLICY IF EXISTS "anon_delete_posts" ON posts;
+CREATE POLICY "anon_delete_posts" ON posts
+  FOR DELETE
+  USING (media_type = '__photo_wall__');
