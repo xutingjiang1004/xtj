@@ -2342,6 +2342,23 @@ function renderProfileActivityList(kind) {
                 }
             };
 
+            var __xtjDeferredWarmupQueued = false;
+            function queueDeferredStartupTasks() {
+                if (!currentUser || __xtjDeferredWarmupQueued) return;
+                __xtjDeferredWarmupQueued = true;
+                setTimeout(function() {
+                    Promise.resolve().then(function() { return saveUserInfo(currentUser, false); }).catch(function() {});
+                    try { loadDockChatList(); } catch(_) {}
+                    try { updateUnreadBadge(); } catch(_) {}
+                    try { loadAnnouncements(); } catch(_) {}
+                    try { startRestrictionPolling(); } catch(_) {}
+                    try { subscribeToMessages(); } catch(_) {}
+                    try { startDMPolling(); } catch(_) {}
+                    try { subscribeToAnnouncements(); } catch(_) {}
+                    try { startReportReplyPolling(); } catch(_) {}
+                }, 90);
+            }
+
             async function initUI() {
                 var unauthUI = document.getElementById("unauthUI");
                 var authUI = document.getElementById("authUI");
@@ -2372,11 +2389,9 @@ function renderProfileActivityList(kind) {
                     loadUserAvatar();
                     loadProfileActivity(true);
                     
-                    // 閿熸枻鎷烽敓鏂ゆ嫹閺堚偓杩戠櫥褰曟椂闂达紙椤甸潰姣忥拷顐奸敓鏂ゆ嫹闁棄鍩涢弬甯礉韫囧懘銆廰wait纭繚鍐欏叆??
-                    await saveUserInfo(currentUser, false);
-                    
-                    try { startRestrictionPolling(); subscribeToMessages(); startDMPolling(); updateUnreadBadge(); loadAnnouncements(); subscribeToAnnouncements(); startReportReplyPolling(); } catch(e) {}
+                    queueDeferredStartupTasks();
                 } else {
+                    __xtjDeferredWarmupQueued = false;
                     unauthUI.style.display = "flex";
                     authUI.style.display = "none";
                     annBtnWrapper.style.display = "none";
@@ -3716,12 +3731,12 @@ function renderProfileActivityList(kind) {
                     if (cached) {
                         try {
                             const parsed = JSON.parse(cached);
-                            if (parsed?.data && Date.now()-parsed.timestamp < CACHE_DURATION) { await renderFeed(parsed.data); loadFeed(true); if (currentUser) loadDockChatList(); return; }
+                            if (parsed?.data && Date.now()-parsed.timestamp < CACHE_DURATION) { await renderFeed(parsed.data); loadFeed(true); queueDeferredStartupTasks(); return; }
                         } catch(e){}
                     }
                 }
                 await loadFeed(false);
-                if (currentUser) loadDockChatList();
+                queueDeferredStartupTasks();
             }
 
             function collectPostMetadata(visibility, overrides) {
@@ -7018,7 +7033,8 @@ function renderProfileActivityList(kind) {
                 // window.addEventListener('resize', adjustIOSHeight);
                 // window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
 
-                await initUI(); initialLoad();
+                await initUI();
+                requestAnimationFrame(function() { initialLoad(); });
                 // 记录访问（用户+IP）
                 if (currentUser) logUserVisitToApi(currentUser);
                 logIpVisitToSupabase();
@@ -8239,38 +8255,52 @@ function renderProfileActivityList(kind) {
 
         function getReportViewNodes() {
             return {
-                formBtn: document.getElementById('reportViewFormBtn'),
-                recordsBtn: document.getElementById('reportRecordsViewBtn'),
-                formPanel: document.getElementById('reportModalFormBody'),
-                recordsPanel: document.getElementById('reportRecordsPanel')
+                formPanel: document.getElementById('reportModalFormBody')
             };
-        }
-
-        function bindReportViewButtons() {
-            var nodes = getReportViewNodes();
-            if (nodes.formBtn) {
-                nodes.formBtn.onclick = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    window.switchReportView('form');
-                };
-            }
-            if (nodes.recordsBtn) {
-                nodes.recordsBtn.onclick = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    window.switchReportView('records');
-                };
-            }
         }
 
         function resetReportModalScroll() {
             var scroller = document.querySelector('#reportModal .report-modal-content');
             if (scroller) scroller.scrollTop = 0;
+        }
+
+        function normalizeReportModalStructure() {
+            var overlay = document.getElementById('reportModal');
+            if (!overlay || overlay.dataset.normalized === '1') return;
+            var headerLeft = overlay.querySelector('.report-modal-header-left');
+            if (headerLeft) {
+                headerLeft.innerHTML = '<span>举报</span><button class="report-records-btn" id="reportRecordsToggleBtn" onclick="toggleReportRecords()" aria-label="打开举报记录">举报记录</button>';
+            }
+            var closeBtn = overlay.querySelector('.report-modal-close');
+            if (closeBtn) {
+                closeBtn.setAttribute('aria-label', '关闭');
+                closeBtn.textContent = '✕';
+            }
+            var recordsPanel = document.getElementById('reportRecordsPanel');
+            if (recordsPanel && recordsPanel.parentNode) {
+                recordsPanel.parentNode.removeChild(recordsPanel);
+            }
+            var labels = overlay.querySelectorAll('.report-field > label');
+            if (labels[0]) labels[0].textContent = '选择举报类型';
+            if (labels[1]) labels[1].textContent = '选择要举报的内容';
+            if (labels[2]) labels[2].textContent = '举报原因';
+            var typeButtons = overlay.querySelectorAll('.report-type-tab');
+            if (typeButtons[0]) typeButtons[0].textContent = '帖子';
+            if (typeButtons[1]) typeButtons[1].textContent = '照片墙';
+            var reasonMap = ['垃圾广告', '色情低俗', '人身攻击', '虚假信息', '侵权内容', '违规内容'];
+            overlay.querySelectorAll('.report-reason-btn').forEach(function(btn, index) {
+                var label = reasonMap[index];
+                if (!label) return;
+                btn.dataset.reason = label;
+                btn.textContent = label;
+            });
+            var customReason = document.getElementById('reportCustomReason');
+            if (customReason) customReason.setAttribute('placeholder', '补充说明（选填）');
+            var submitBtn = document.getElementById('reportSubmitBtn');
+            if (submitBtn) submitBtn.textContent = '提交举报';
+            var loadingNode = document.querySelector('#reportContentList .report-loading');
+            if (loadingNode) loadingNode.textContent = '加载中...';
+            overlay.dataset.normalized = '1';
         }
 
         function getReportSelectedItem() {
@@ -8297,6 +8327,11 @@ function renderProfileActivityList(kind) {
             }
         }
 
+        function getReportTextThumbLabel(userName) {
+            var name = String(userName || '匿名').trim();
+            return escapeHtml(name.length > 4 ? name.slice(0, 4) : name);
+        }
+
         function buildReportSelectedPreview(item) {
             if (!item) {
                 return '<div class="report-selected-empty">还没有选择举报对象，请先从上方列表中选择一条内容。</div>';
@@ -8304,6 +8339,17 @@ function renderProfileActivityList(kind) {
             var itemType = item.type === 'photo' ? '照片墙' : '帖子';
             var userName = escapeHtml(item.user_name || _reportTargetUser || '未知');
             var text = escapeHtml(item.text || (item.thumb ? '已选择图片内容' : '已选择内容'));
+            var isTextOnly = !item.thumb && item.type !== 'photo';
+            if (isTextOnly) {
+                return [
+                    '<div class="report-selected-top report-selected-top--text">',
+                    '<span class="report-selected-name-badge">' + getReportTextThumbLabel(item.user_name) + '</span>',
+                    '<span class="report-selected-user">' + userName + '</span>',
+                    '<span class="report-selected-chip">' + escapeHtml(itemType) + '</span>',
+                    '</div>',
+                    '<div class="report-selected-text">' + text + '</div>'
+                ].join('');
+            }
             return [
                 '<div class="report-selected-top">',
                 '<span class="report-selected-chip">' + escapeHtml(itemType) + '</span>',
@@ -8322,44 +8368,28 @@ function renderProfileActivityList(kind) {
         }
 
         window.switchReportView = async function(view) {
-            var nextView = view === 'records' ? 'records' : 'form';
-            _reportView = nextView;
+            if (view === 'records') {
+                _reportView = 'records';
+                await window.toggleReportRecords();
+                return;
+            }
+            _reportView = 'form';
             var nodes = getReportViewNodes();
-            if (nodes.formBtn) {
-                nodes.formBtn.classList.toggle('active', nextView === 'form');
-                nodes.formBtn.setAttribute('aria-selected', nextView === 'form' ? 'true' : 'false');
-            }
-            if (nodes.recordsBtn) {
-                nodes.recordsBtn.classList.toggle('active', nextView === 'records');
-                nodes.recordsBtn.setAttribute('aria-selected', nextView === 'records' ? 'true' : 'false');
-            }
             if (nodes.formPanel) {
-                nodes.formPanel.classList.toggle('active', nextView === 'form');
-                nodes.formPanel.setAttribute('aria-hidden', nextView === 'form' ? 'false' : 'true');
-            }
-            if (nodes.recordsPanel) {
-                nodes.recordsPanel.classList.toggle('active', nextView === 'records');
-                nodes.recordsPanel.setAttribute('aria-hidden', nextView === 'records' ? 'false' : 'true');
+                nodes.formPanel.classList.add('active');
+                nodes.formPanel.setAttribute('aria-hidden', 'false');
             }
             resetReportModalScroll();
-            if (nextView === 'records') {
-                await loadMyReportRecords();
-            }
         };
 
         window.openReportModal = function() {
             if (!currentUser) { showToast('请先登录'); return; }
             var overlay = document.getElementById('reportModal');
             if (!overlay) return;
+            normalizeReportModalStructure();
             if (!window.__xtjReportModalPrimedV1) {
                 ensureReportHistoryModal();
-                bindReportViewButtons();
                 window.__xtjReportModalPrimedV1 = true;
-            }
-            var triggerBtn = document.getElementById('reportRecordsToggleBtn');
-            if (triggerBtn) {
-                triggerBtn.innerHTML = '📋 记录';
-                triggerBtn.setAttribute('aria-label', '打开举报记录');
             }
             _reportType = 'post';
             _reportView = 'form';
@@ -8380,7 +8410,11 @@ function renderProfileActivityList(kind) {
             window.closeReportHistoryModal();
             syncReportModalBodyLock();
             resetReportModalScroll();
-            switchReportView('form');
+            var formBody = document.getElementById('reportModalFormBody');
+            if (formBody) {
+                formBody.classList.add('active');
+                formBody.setAttribute('aria-hidden', 'false');
+            }
             loadReportContentList();
             var dialog = document.getElementById('reportModalDialog');
             if (dialog && typeof dialog.focus === 'function') {
@@ -8409,6 +8443,40 @@ function renderProfileActivityList(kind) {
             updateReportSelectedPreview();
             loadReportContentList();
         };
+
+        function resolveReportPhotoWallItem(post) {
+            if (!post) return null;
+            var parsed = {};
+            try { parsed = post.content ? JSON.parse(post.content) : {}; } catch(_) {}
+            if (post.media_url === '__deleted__' || parsed.__pw_del__ === true) {
+                return null;
+            }
+            var normalized = null;
+            if (typeof window.normalizePhotoWallRow === 'function') {
+                try { normalized = window.normalizePhotoWallRow(post); } catch(_) {}
+            }
+            var thumb = '';
+            if (normalized) {
+                thumb = normalized.thumbUrl || normalized.thumb || normalized.imageUrl || '';
+            }
+            if (!thumb) {
+                thumb = parsed.thumb || parsed.thumbUrl || parsed.url || parsed.image_url || post.media_url || '';
+            }
+            if (!thumb || thumb === '__deleted__') {
+                return null;
+            }
+            var text = parsed.caption || parsed.title || parsed.content || '';
+            if (text.length > 72) text = text.substring(0, 72) + '...';
+            return {
+                id: post.id,
+                user_name: post.user_name,
+                text: text || (normalized && normalized.mediaKind === 'video' ? '(视频)' : '(照片)'),
+                thumb: thumb,
+                type: 'photo',
+                created_at: post.created_at,
+                kindLabel: normalized && normalized.mediaKind === 'video' ? '照片墙视频' : '照片墙'
+            };
+        }
 
         function loadReportContentList() {
             var container = document.getElementById('reportContentList');
@@ -8468,25 +8536,7 @@ function renderProfileActivityList(kind) {
                         .order('created_at', { ascending: false })
                         .limit(200)
                         .then(function(res) {
-                            _reportContentData = (res.data || []).map(function(p) {
-                                var thumb = p.media_url || '';
-                                var txt = p.content || '';
-                                try {
-                                    var j = JSON.parse(txt);
-                                    txt = j.caption || j.title || j.content || '';
-                                    if (!thumb) thumb = j.thumb || j.url || j.image_url || '';
-                                } catch(e) {}
-                                if (txt.length > 72) txt = txt.substring(0, 72) + '...';
-                                return {
-                                    id: p.id,
-                                    user_name: p.user_name,
-                                    text: txt || '(照片)',
-                                    thumb: thumb,
-                                    type: 'photo',
-                                    created_at: p.created_at,
-                                    kindLabel: '照片墙'
-                                };
-                            }).filter(function(item) { return item.thumb || item.text; });
+                            _reportContentData = (res.data || []).map(resolveReportPhotoWallItem).filter(Boolean);
                             renderReportContentList(container);
                         }).catch(function() {
                             container.innerHTML = '<div class="report-loading">加载失败，请重试</div>';
@@ -8505,12 +8555,13 @@ function renderProfileActivityList(kind) {
             var h = '';
             _reportContentData.forEach(function(item) {
                 var selected = _reportSelectedId === item.id ? ' selected' : '';
+                var isTextOnly = !item.thumb && item.type !== 'photo';
                 var thumbHtml = item.thumb
-                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="">'
-                    : '<div class="rc-thumb" style="display:flex;align-items:center;justify-content:center;font-size:18px;">📄</div>';
-                h += '<div class="report-content-item' + selected + '" data-id="' + escapeHtml(item.id) + '" data-user="' + escapeHtml(item.user_name) + '" onclick="selectReportContent(this)">';
+                    ? '<img class="rc-thumb" src="' + escapeHtml(item.thumb) + '" alt="" loading="lazy" onerror="var card=this.closest(&quot;.report-content-item&quot;); if(card){card.remove();}">'
+                    : '<div class="rc-thumb rc-thumb--text" aria-hidden="true"><span>' + getReportTextThumbLabel(item.user_name) + '</span></div>';
+                h += '<div class="report-content-item' + selected + (isTextOnly ? ' report-content-item--text' : '') + '" data-id="' + escapeHtml(item.id) + '" data-user="' + escapeHtml(item.user_name) + '" onclick="selectReportContent(this)">';
                 h += thumbHtml;
-                h += '<div class="rc-info">';
+                h += '<div class="rc-info' + (isTextOnly ? ' rc-info--text' : '') + '">';
                 h += '<div class="rc-meta"><div class="rc-user">' + escapeHtml(item.user_name) + '</div><span class="rc-type">' + escapeHtml(item.kindLabel || (item.type === 'photo' ? '照片墙' : '帖子')) + '</span>' + (item.created_at ? '<span class="rc-time">' + escapeHtml(formatReportDate(item.created_at)) + '</span>' : '') + '</div>';
                 h += '<div class="rc-text">' + escapeHtml(item.text || (item.thumb ? '图片内容' : '无文字内容')) + '</div>';
                 h += '</div></div>';
@@ -9523,7 +9574,7 @@ function renderProfileActivityList(kind) {
                         }
                     }
                 }
-                if (currentUser) loadDockChatList();
+                queueDeferredStartupTasks();
                 if (!usedFastSnapshot || skipCache) {
                     return originalInitialLoad.call(this, skipCache);
                 }

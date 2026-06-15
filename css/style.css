@@ -1028,11 +1028,11 @@
             display: flex; justify-content: space-between; align-items: center; gap: 8px;
             transition: var(--trans-smooth);
         }
-        .modal-overlay {
+.modal-overlay {
             position: fixed; inset: 0; background: rgba(0,0,0,0.4);
             display: flex; align-items: center; justify-content: center; z-index: 100;
             opacity: 0; pointer-events: none;
-            transition: opacity 0.5s cubic-bezier(0.16,1,0.3,1);
+            transition: opacity 0.16s ease;
             will-change: opacity;
         }
         .modal-overlay.active { opacity: 1; pointer-events: all; }
@@ -1041,11 +1041,11 @@
             background: rgba(255,255,255,0.3);
             border: 1px solid rgba(255,255,255,0.4);
             box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-            transform: translateY(35px) scale(0.96); opacity: 0; transition: var(--trans-ppt);
+            transform: translateY(8px); opacity: 0; transition: transform 0.18s ease, opacity 0.18s ease;
             contain: layout paint style;
             will-change: transform, opacity;
         }
-        .modal-overlay.active .modal-box { transform: translateY(0) scale(1); opacity: 1; }
+        .modal-overlay.active .modal-box { transform: translateY(0); opacity: 1; }
         .post-edit-modal {
             width: min(520px, calc(100vw - 32px));
             max-width: 520px;
@@ -3323,8 +3323,8 @@
             will-change: transform, opacity;
         }
         @keyframes modalPop {
-            0% { opacity: 0; transform: scale(0.9) translateY(10px); }
-            100% { opacity: 1; transform: scale(1) translateY(0); }
+            0% { opacity: 0; transform: translateY(8px); }
+            100% { opacity: 1; transform: translateY(0); }
         }
 
         .announcement-header {
@@ -11016,6 +11016,25 @@ body.ios-chat-keyboard-open .chat-input-area {
   text-transform: uppercase;
 }
 
+.report-selected-top--text {
+  align-items: center;
+}
+
+.report-selected-name-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #1e7c58;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
 .report-selected-user {
   color: #24533a;
   font-size: 13px;
@@ -11769,6 +11788,8 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 .report-modal-body {
+  display: flex !important;
+  flex-direction: column !important;
   gap: 10px !important;
 }
 
@@ -11809,6 +11830,8 @@ body.ios-chat-keyboard-open .chat-input-area {
 }
 
 .report-content-item {
+  display: flex !important;
+  align-items: flex-start !important;
   padding: 13px 14px !important;
 }
 
@@ -11819,6 +11842,44 @@ body.ios-chat-keyboard-open .chat-input-area {
 .report-content-item.selected {
   background: rgba(222, 244, 230, 0.88) !important;
   box-shadow: inset 2px 0 0 rgba(21, 145, 92, 0.84) !important;
+}
+
+.report-content-item--text {
+  gap: 14px !important;
+}
+
+.report-content-item .rc-thumb {
+  object-fit: cover;
+}
+
+.report-content-item .rc-thumb--text {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 8px !important;
+  text-align: center !important;
+  color: #1e7c58 !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.01em !important;
+  line-height: 1.2 !important;
+  background: linear-gradient(135deg, rgba(222, 246, 231, 0.96), rgba(245, 252, 248, 0.98)) !important;
+}
+
+.report-content-item .rc-thumb--text span {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.report-content-item .rc-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.report-content-item .rc-info--text .rc-meta {
+  justify-content: space-between;
 }
 
 .report-reason-grid {
@@ -11948,6 +12009,12 @@ body.ios-chat-keyboard-open .chat-input-area {
 [data-theme="dark"] .report-record-reply {
   background: rgba(31, 57, 43, 0.92) !important;
   border-color: rgba(86, 126, 103, 0.48) !important;
+}
+
+[data-theme="dark"] .report-content-item .rc-thumb--text,
+[data-theme="dark"] .report-selected-name-badge {
+  background: rgba(31, 57, 43, 0.92) !important;
+  color: #9bdcb6 !important;
 }
 
 /* ==================== VIP 会员系统 ==================== */
