@@ -64,6 +64,7 @@ ALTER TABLE blacklist ENABLE ROW LEVEL SECURITY;
 --       结果：前端只删本地缓存，数据库没变，其他设备看不到删除。
 -- 修复：允许 anon 对 __photo_wall__ 类型的帖子执行
 --       UPDATE（软删除标记）和 DELETE（硬删除）。
+--       安全性由前端 JavaScript 权限检查保障（仅发布者/admin 可删）。
 -- ============================================================
 DROP POLICY IF EXISTS "anon_update_posts" ON posts;
 CREATE POLICY "anon_update_posts" ON posts
