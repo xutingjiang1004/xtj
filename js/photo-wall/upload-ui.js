@@ -960,12 +960,13 @@
 
     var fallbackMeta = await metaPromise;
     return {
-      file: file,
+      file: null,
       duration: fallbackMeta.duration || 0,
       width: fallbackMeta.width || 0,
       height: fallbackMeta.height || 0,
       mimeType: file.type || '',
       compressed: false,
+      failed: true,
       skipped: true,
       lastError: lastError && lastError.message ? lastError.message : 'compress_failed'
     };
@@ -1222,16 +1223,14 @@
       } catch (_) {
         compressedVideo = null;
       }
-      if (!compressedVideo || !compressedVideo.file) {
-        compressedVideo = {
-          file: file,
-          mimeType: file.type || 'video/mp4',
-          duration: 0,
-          compressed: false
-        };
+      if (!compressedVideo || !compressedVideo.file || compressedVideo.failed) {
+        throw new Error('无法压到 10MB，请缩短视频或降低原视频大小');
       }
       if (compressedVideo.file.size > HARD_VIDEO_LIMIT_BYTES) {
         throw new Error('Video too large after compression.');
+      }
+      if (compressedVideo.file.size > SOFT_VIDEO_LIMIT_BYTES) {
+        throw new Error('无法压到 10MB，请缩短视频或降低原视频大小');
       }
       var poster;
       try {
@@ -1419,18 +1418,16 @@
             throw new Error('Video too large. Max size is 200MB.');
           }
           if (file.size > SOFT_VIDEO_LIMIT_BYTES) {
-            try {
-              var compressedVideo = await withTimeout(
-                compressVideoToTarget(file, SOFT_VIDEO_LIMIT_BYTES),
-                Math.max(TIMEOUTS.postUpload, 70000),
-                'post video compress'
-              );
-              if (compressedVideo && compressedVideo.file && compressedVideo.file.size < file.size) {
-                uploadFile = compressedVideo.file;
-                uploadMimeType = compressedVideo.mimeType || uploadFile.type || file.type || 'video/mp4';
-              }
-            } catch (_) {
+            var compressedVideo = await withTimeout(
+              compressVideoToTarget(file, SOFT_VIDEO_LIMIT_BYTES),
+              Math.max(TIMEOUTS.postUpload, 70000),
+              'post video compress'
+            );
+            if (!compressedVideo || !compressedVideo.file || compressedVideo.failed || compressedVideo.file.size > SOFT_VIDEO_LIMIT_BYTES) {
+              throw new Error('无法压到 10MB，请缩短视频或降低原视频大小');
             }
+            uploadFile = compressedVideo.file;
+            uploadMimeType = compressedVideo.mimeType || uploadFile.type || file.type || 'video/mp4';
           }
           mediaType = 'video';
         }
@@ -1882,7 +1879,7 @@
       var metaBits = [];
       if (item.duration) metaBits.push(formatDuration(item.duration));
       if (item.fileSize) metaBits.push(Math.round((item.fileSize || 0) / 1024 / 1024 * 10) / 10 + 'MB');
-      subtitle.textContent = metaBits.join(' 路 ');
+      subtitle.textContent = metaBits.join(' · ');
     }
     overlay.classList.add('active');
     document.body.classList.add('photo-previewing');
@@ -2182,7 +2179,7 @@
         if (!badge) {
           badge = document.createElement('span');
           badge.className = 'xtj-photo-wall-video-badge';
-          badge.textContent = 'Video';
+          badge.textContent = '视频';
           node.appendChild(badge);
         }
         if (!duration) {
