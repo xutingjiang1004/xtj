@@ -209,7 +209,7 @@ app.use((req, res, next) => {
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
   res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' https://ithowxqignlhkwaykglt.supabase.co https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; media-src 'self' https:; connect-src 'self' https://ithowxqignlhkwaykglt.supabase.co wss://ithowxqignlhkwaykglt.supabase.co; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
   next();
@@ -528,9 +528,20 @@ app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
 // ===================== 用户照片删除 API（使用 service_role 绕过 RLS） ======================
 app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
   try {
-    const { photoId, username } = req.body;
+    const { photoId, username, password_hash } = req.body;
     if (!photoId) return res.status(400).json({ error: '缺少照片ID' });
     if (!username) return res.status(400).json({ error: '缺少用户名' });
+    if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
+
+    // 验证密码 hash
+    const { data: authRec } = await supabase.from('posts')
+      .select('media_url')
+      .eq('user_name', username)
+      .eq('media_type', AUTH_MARKER)
+      .maybeSingle();
+    if (!authRec || authRec.media_url !== password_hash) {
+      return res.status(403).json({ error: '身份验证失败' });
+    }
 
     const { data: photo } = await supabase.from('posts')
       .select('user_name')
@@ -917,7 +928,7 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
 });
 
 // 用户提交举报
-app.post('/api/report', rateLimit(60000, 10), async (req, res) => {
+app.post('/api/report', rateLimit(60000, 5), async (req, res) => {
   const { reporter_name, target_type, target_id, target_user, report_category, report_reason } = req.body;
   if (!reporter_name || !target_type || !target_id || !report_category) {
     return res.status(400).json({ error: '缺少必要参数' });
@@ -957,17 +968,21 @@ app.post('/api/report', rateLimit(60000, 10), async (req, res) => {
 });
 
 // 用户查看自己的举报
-app.get('/api/my-reports', rateLimit(60000, 20), function(req, res, next) {
-  // 需要 Authorization: Bearer <API_SECRET> 验证
-  const auth = req.headers.authorization || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-  if (!token || token !== API_SECRET) {
-    return res.status(401).json({ error: '未授权访问' });
-  }
-  next();
-}, async (req, res) => {
+app.get('/api/my-reports', rateLimit(60000, 20), async (req, res) => {
   const userName = req.query.user_name;
+  const password_hash = req.query.password_hash;
   if (!userName) return res.status(400).json({ error: '缺少用户名' });
+  if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
+
+  // 验证密码 hash
+  const { data: authRec } = await supabase.from('posts')
+    .select('media_url')
+    .eq('user_name', userName)
+    .eq('media_type', AUTH_MARKER)
+    .maybeSingle();
+  if (!authRec || authRec.media_url !== password_hash) {
+    return res.status(403).json({ error: '身份验证失败' });
+  }
   const { data, error } = await supabase.from('posts')
     .select('*')
     .eq('media_type', REPORT_MARKER)
@@ -1298,9 +1313,20 @@ app.post('/admin/stats/refresh', verifyToken, (req, res) => {
 const USER_VISIT_MARKER = '__user_visit__';
 app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
   try {
-    const { user_name } = req.body;
+    const { user_name, password_hash } = req.body;
     const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
     if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
+
+    // 验证密码 hash
+    if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
+    const { data: authRec } = await supabase.from('posts')
+      .select('media_url')
+      .eq('user_name', userNameVal)
+      .eq('media_type', AUTH_MARKER)
+      .maybeSingle();
+    if (!authRec || authRec.media_url !== password_hash) {
+      return res.status(403).json({ error: '身份验证失败' });
+    }
 
     const today = new Date().toISOString().slice(0, 10);
     const now = new Date().toISOString();
