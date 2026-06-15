@@ -1576,6 +1576,8 @@
     state.postPreviewMode = false;
     state.photoWallImagePreviewMode = false;
     state.photoWallVideoPreviewMode = false;
+    state.activePhotoWallVideoItem = null;
+    state.activePhotoWallVideoSourceList = null;
     window.pwCurrentSortedPhotos = state.savedPwCurrentSortedPhotos;
     state.savedPwCurrentSortedPhotos = null;
     var overlay = byId('photoPreviewOverlay');
@@ -1724,7 +1726,165 @@
       if (wrapper && wrapper.parentNode) wrapper.parentNode.insertBefore(stage, wrapper.nextSibling);
       else overlay.appendChild(stage);
     }
+    if (!stage.__xtjVideoPreviewInteractionBound) {
+      stage.__xtjVideoPreviewInteractionBound = true;
+      [
+        'pointerdown',
+        'pointermove',
+        'pointerup',
+        'pointercancel',
+        'mousedown',
+        'mouseup',
+        'click',
+        'dblclick',
+        'touchstart',
+        'touchmove',
+        'touchend'
+      ].forEach(function(type) {
+        stage.addEventListener(type, function(event) {
+          event.stopPropagation();
+        }, true);
+      });
+    }
     return stage;
+  }
+
+  function isUnifiedPhotoWallVideoPreviewActive() {
+    var overlay = byId('photoPreviewOverlay');
+    return !!(overlay && overlay.classList.contains('pp-video-mode') && state.photoWallVideoPreviewMode && state.activePhotoWallVideoItem);
+  }
+
+  function formatPreviewFileSize(bytes) {
+    var size = Number(bytes || 0);
+    if (!size || size < 0) return '--';
+    if (size >= 1024 * 1024) return (size / 1024 / 1024).toFixed(2) + ' MB';
+    if (size >= 1024) return (size / 1024).toFixed(1) + ' KB';
+    return size + ' B';
+  }
+
+  function escapePreviewText(value) {
+    if (window.escapeHtml) return window.escapeHtml(String(value == null ? '' : value));
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function buildPreviewInfoRow(label, value) {
+    return '<div class="pp-info-row"><span class="pp-info-label">' + escapePreviewText(label) + '</span><span class="pp-info-value">' + escapePreviewText(value) + '</span></div>';
+  }
+
+  function ensurePhotoPreviewInfoModal() {
+    var modal = byId('ppInfoModal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.id = 'ppInfoModal';
+    modal.className = 'pp-info-modal';
+    modal.innerHTML = '<div class="pp-info-modal-content"><div class="pp-info-modal-header"><span class="pp-info-modal-title">媒体详情</span><button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button></div><div class="pp-info-modal-body" id="ppInfoModalBody"></div></div>';
+    modal.addEventListener('click', function(event) {
+      if (event.target === modal && typeof window.closePhotoInfo === 'function') window.closePhotoInfo();
+    });
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  function showActiveVideoPreviewInfo(item) {
+    if (!item) return;
+    var modal = ensurePhotoPreviewInfoModal();
+    var title = modal.querySelector('.pp-info-modal-title');
+    var body = byId('ppInfoModalBody');
+    if (title) title.textContent = '视频详情';
+    if (body) {
+      var stamp = item.timestamp ? new Date(item.timestamp) : null;
+      var html = '';
+      html += '<div class="pp-info-section"><div class="pp-info-section-title">视频信息</div>';
+      html += buildPreviewInfoRow('作者', item.username || '未知用户');
+      html += buildPreviewInfoRow('时间', stamp && !isNaN(stamp.getTime()) ? stamp.toLocaleString('zh-CN') : '--');
+      html += buildPreviewInfoRow('浏览', Number(item.views || 0));
+      html += buildPreviewInfoRow('时长', item.duration ? formatDuration(item.duration) : '--');
+      html += '</div><div class="pp-info-divider"></div><div class="pp-info-section"><div class="pp-info-section-title">文件信息</div>';
+      html += buildPreviewInfoRow('大小', formatPreviewFileSize(item.fileSize));
+      if (item.originalSize && Number(item.originalSize || 0) > Number(item.fileSize || 0)) {
+        html += buildPreviewInfoRow('原始大小', formatPreviewFileSize(item.originalSize));
+      }
+      if (item.mimeType) html += buildPreviewInfoRow('格式', item.mimeType);
+      html += '</div>';
+      body.innerHTML = html;
+    }
+    modal.classList.remove('closing');
+    modal.style.display = 'flex';
+    requestAnimationFrame(function() {
+      modal.classList.add('active');
+    });
+  }
+
+  async function shareActiveVideoPreviewItem(item) {
+    if (!item || !item.imageUrl) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: (item.username || 'xtj') + ' 的视频',
+          text: '分享一条照片墙视频',
+          url: item.imageUrl
+        });
+        return;
+      }
+    } catch (_) {}
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(item.imageUrl);
+        toast('视频链接已复制');
+        return;
+      }
+    } catch (_) {}
+    toast('分享失败，请重试');
+  }
+
+  async function deleteActiveVideoPreviewItem(item) {
+    if (!item) return;
+    var canDelete = window.currentUser === 'xxz' || window.currentUser === item.username;
+    if (!canDelete) {
+      toast('仅上传者可删除');
+      return;
+    }
+    async function confirmDelete() {
+      var deleteBtn = byId('ppDeleteBtn');
+      if (deleteBtn) deleteBtn.disabled = true;
+      try {
+        var result = window.deletePhotoWallPhoto
+          ? await window.deletePhotoWallPhoto(item, { render: false })
+          : { ok: false };
+        if (!result || !result.ok) {
+          toast('删除失败');
+          return;
+        }
+        if (Array.isArray(window.photoWallData)) {
+          window.photoWallData = window.photoWallData.filter(function(entry) {
+            return String(entry && entry.id) !== String(item.id);
+          });
+        }
+        if (Array.isArray(state.savedPwCurrentSortedPhotos)) {
+          state.savedPwCurrentSortedPhotos = state.savedPwCurrentSortedPhotos.filter(function(entry) {
+            return String(entry && entry.id) !== String(item.id);
+          });
+        }
+        state.activePhotoWallVideoItem = null;
+        state.activePhotoWallVideoSourceList = null;
+        if (typeof window.closePhotoPreview === 'function') window.closePhotoPreview();
+        if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();
+        else if (window.renderPhotoWall) await window.renderPhotoWall();
+        toast('已删除');
+      } finally {
+        if (deleteBtn) deleteBtn.disabled = false;
+      }
+    }
+    if (window.showConfirm) {
+      window.showConfirm('删除视频', '确定删除这条视频吗？', '确认删除', confirmDelete);
+      return;
+    }
+    if (window.confirm('确定删除这条视频吗？')) await confirmDelete();
   }
 
   function syncPhotoPreviewHeader(item) {
@@ -1836,6 +1996,8 @@
       var stage = ensurePhotoPreviewVideoStage();
       var player = byId('ppVideoPlayer');
       if (!overlay || !stage || !player) return;
+      state.activePhotoWallVideoItem = item;
+      state.activePhotoWallVideoSourceList = Array.isArray(sourceList) ? sourceList.slice() : [];
       overlay.classList.add('pp-video-mode');
       player.poster = posterSrc;
       player.src = item.imageUrl;
@@ -2059,6 +2221,10 @@
       if (typeof window.showPhotoInfo === 'function' && !window.showPhotoInfo.__xtjFileSizeWrapped) {
         var originalShowPhotoInfo = window.showPhotoInfo;
         var wrappedShowPhotoInfo = async function() {
+          if (isUnifiedPhotoWallVideoPreviewActive()) {
+            showActiveVideoPreviewInfo(state.activePhotoWallVideoItem);
+            return;
+          }
           var current = window.photoPreviewCurrent || null;
           if (current && !current.fileSize && current.imageUrl) {
             try {
@@ -2073,6 +2239,30 @@
         };
         wrappedShowPhotoInfo.__xtjFileSizeWrapped = true;
         window.showPhotoInfo = wrappedShowPhotoInfo;
+      }
+
+      if (typeof window.shareCurrentPhoto === 'function' && !window.shareCurrentPhoto.__xtjVideoAwareWrapped) {
+        var originalShareCurrentPhoto = window.shareCurrentPhoto;
+        var wrappedShareCurrentPhoto = function() {
+          if (isUnifiedPhotoWallVideoPreviewActive()) {
+            return shareActiveVideoPreviewItem(state.activePhotoWallVideoItem);
+          }
+          return originalShareCurrentPhoto.apply(this, arguments);
+        };
+        wrappedShareCurrentPhoto.__xtjVideoAwareWrapped = true;
+        window.shareCurrentPhoto = wrappedShareCurrentPhoto;
+      }
+
+      if (typeof window.deletePhotoFromPreview === 'function' && !window.deletePhotoFromPreview.__xtjVideoAwareWrapped) {
+        var originalDeletePhotoFromPreview = window.deletePhotoFromPreview;
+        var wrappedDeletePhotoFromPreview = function() {
+          if (isUnifiedPhotoWallVideoPreviewActive()) {
+            return deleteActiveVideoPreviewItem(state.activePhotoWallVideoItem);
+          }
+          return originalDeletePhotoFromPreview.apply(this, arguments);
+        };
+        wrappedDeletePhotoFromPreview.__xtjVideoAwareWrapped = true;
+        window.deletePhotoFromPreview = wrappedDeletePhotoFromPreview;
       }
     }
 
