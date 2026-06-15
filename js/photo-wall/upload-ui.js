@@ -17,7 +17,11 @@
     savedPwCurrentSortedPhotos: null,
     activePhotoWallVideoSourceList: null,
     restoreTimer: null,
-    activePhotoWallVideoItem: null
+    activePhotoWallVideoItem: null,
+    photoWallRenderSeq: 0,
+    photoWallDecorateRaf: 0,
+    photoWallViewSwitchTimer: null,
+    photoWallLoadTimer: null
   };
   var videoPosterDataUrlCache = Object.create(null);
   var videoPosterPromiseCache = Object.create(null);
@@ -35,6 +39,8 @@
   var MAX_VIDEO_BYTES = 10 * 1024 * 1024;
   var SOFT_VIDEO_LIMIT_BYTES = 10 * 1024 * 1024;
   var HARD_VIDEO_LIMIT_BYTES = 200 * 1024 * 1024;
+  var VIDEO_COMPRESS_BASE_TIMEOUT = 45000;
+  var VIDEO_COMPRESS_MAX_TIMEOUT = 180000;
   var VIDEO_COMPRESS_ERROR = '这个视频暂时无法压缩到更小体积，请换一个更短或更小的视频。';
   var VIDEO_CARD_FALLBACK_THUMB = 'data:image/svg+xml;utf8,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">' +
@@ -98,6 +104,60 @@
       blob.type = type;
       blob.lastModified = Date.now();
       return blob;
+    }
+  }
+
+  function supportsBrowserVideoCompression() {
+    var probeVideo = document.createElement('video');
+    var probeCanvas = document.createElement('canvas');
+    return !!(
+      window.MediaRecorder &&
+      typeof probeVideo.play === 'function' &&
+      (typeof probeVideo.captureStream === 'function' || typeof probeVideo.mozCaptureStream === 'function') &&
+      typeof probeCanvas.captureStream === 'function'
+    );
+  }
+
+  function getVideoCompressionProfiles(sourceWidth, sourceHeight) {
+    var longest = Math.max(Number(sourceWidth || 0), Number(sourceHeight || 0), 1);
+    return [
+      { label: 'source', maxSide: Math.min(longest, 1280), fps: 30, maxVideoBps: 2600000, minVideoBps: 700000, audioBps: 112000 },
+      { label: '720p', maxSide: 720, fps: 30, maxVideoBps: 1600000, minVideoBps: 480000, audioBps: 96000 },
+      { label: '540p', maxSide: 540, fps: 30, maxVideoBps: 1050000, minVideoBps: 360000, audioBps: 80000 },
+      { label: '360p', maxSide: 360, fps: 24, maxVideoBps: 700000, minVideoBps: 220000, audioBps: 64000 }
+    ];
+  }
+
+  function getVideoCompressionTimeoutMs(durationSeconds) {
+    var seconds = Math.max(0, Number(durationSeconds || 0));
+    return Math.min(VIDEO_COMPRESS_MAX_TIMEOUT, Math.max(VIDEO_COMPRESS_BASE_TIMEOUT, 30000 + Math.round(seconds * 3500)));
+  }
+
+  function normalizeCompressionErrorReason(reason) {
+    var text = String(reason || '').trim();
+    if (!text) return 'compress_failed';
+    if (/too large|hard_limit/i.test(text)) return 'video_too_large';
+    if (/unsupported/i.test(text) || /capture_stream|media_recorder|video_record/i.test(text)) return 'browser_unsupported';
+    if (/metadata|decode|play_failed|not_video/i.test(text)) return 'video_decode_failed';
+    if (/timed out|timeout/i.test(text)) return 'compression_timeout';
+    if (/still_over_limit|over_limit/i.test(text)) return 'still_over_limit';
+    return text;
+  }
+
+  function getCompressionFailureMessage(reason) {
+    switch (normalizeCompressionErrorReason(reason)) {
+      case 'video_too_large':
+        return '视频超过 200MB 上限，请换更小的视频。';
+      case 'browser_unsupported':
+        return '当前浏览器不支持网页端视频压缩，请换 Chrome/Edge 或先手动压缩。';
+      case 'video_decode_failed':
+        return '当前视频无法在浏览器中解码，请换一个视频格式后重试。';
+      case 'compression_timeout':
+        return '视频压缩超时，请换更短的视频后重试。';
+      case 'still_over_limit':
+        return '压缩后仍超过 10MB，请缩短视频或降低原视频清晰度。';
+      default:
+        return '视频压缩失败，请换更短或更小的视频后重试。';
     }
   }
 
@@ -780,16 +840,17 @@
     return null;
   }
 
-  async function compressVideoAttempt(file, targetBytes, attemptIndex) {
+  async function compressVideoAttempt(file, targetBytes, profile, metadata) {
     if (!window.MediaRecorder) throw new Error('media_recorder_unsupported');
     var recorderMimeType = pickRecorderMimeType();
     if (!recorderMimeType) throw new Error('video_record_unsupported');
-    var metadata = await readVideoMetadata(file);
+    var ownMetadata = !metadata;
+    metadata = metadata || await readVideoMetadata(file);
     try {
-      var duration = Math.max(1, Math.min(metadata.duration || 1, 600));
+      var duration = Math.max(1, Math.min(metadata.duration || 1, 900));
       var sourceWidth = Math.max(1, metadata.width || 1);
       var sourceHeight = Math.max(1, metadata.height || 1);
-      var maxSide = attemptIndex > 0 ? 720 : 1080;
+      var maxSide = Math.max(240, Number(profile && profile.maxSide) || Math.max(sourceWidth, sourceHeight));
       var ratio = Math.min(maxSide / sourceWidth, maxSide / sourceHeight, 1);
       var canvas = document.createElement('canvas');
       canvas.width = Math.max(2, Math.round(sourceWidth * ratio));
@@ -799,7 +860,7 @@
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
 
-      var fps = attemptIndex > 0 ? 20 : 24;
+      var fps = Math.max(12, Math.min(30, Number(profile && profile.fps) || 24));
       var canvasStream = typeof canvas.captureStream === 'function' ? canvas.captureStream(fps) : null;
       if (!canvasStream) throw new Error('capture_stream_unsupported');
 
@@ -816,14 +877,16 @@
       }
       var mixedStream = new MediaStream(mediaTracks);
 
+      var profileAudioBps = Math.max(48000, Number(profile && profile.audioBps) || 96000);
+      var computedVideoBps = Math.floor((targetBytes * 8 * 0.88) / duration) - profileAudioBps;
       var targetBitsPerSecond = Math.max(
-        400000,
-        Math.min(attemptIndex > 0 ? 1200000 : 2000000, Math.floor((targetBytes * 8 * 0.9) / duration))
+        Number(profile && profile.minVideoBps) || 220000,
+        Math.min(Number(profile && profile.maxVideoBps) || 1400000, computedVideoBps)
       );
       var recorderOptions = {
         mimeType: recorderMimeType,
         videoBitsPerSecond: targetBitsPerSecond,
-        audioBitsPerSecond: 96000
+        audioBitsPerSecond: profileAudioBps
       };
       var recorder;
       try {
@@ -851,21 +914,27 @@
       }
 
       var recordedBlob = await new Promise(function(resolve, reject) {
-        var timeoutMs = Math.min(Math.ceil(duration * 1000) + 3000, 65000);
-        var timeoutId = setTimeout(function() {
+        var timeoutId = null;
+        function fail(err) {
+          if (timeoutId) clearTimeout(timeoutId);
+          stopped = true;
+          stopDrawing();
+          reject(err instanceof Error ? err : new Error(String(err || 'video_record_failed')));
+        }
+        timeoutId = setTimeout(function() {
           try { if (recorder.state !== 'inactive') recorder.stop(); } catch (_) {}
-        }, timeoutMs);
+          fail(new Error('compression_timeout'));
+        }, getVideoCompressionTimeoutMs(duration));
 
         recorder.ondataavailable = function(event) {
           if (event.data && event.data.size) chunks.push(event.data);
         };
         recorder.onerror = function(event) {
-          clearTimeout(timeoutId);
           var errMsg = (event && event.error && event.error.message) ? event.error.message : 'video_record_failed';
-          reject(new Error(errMsg));
+          fail(new Error(errMsg));
         };
         recorder.onstop = function() {
-          clearTimeout(timeoutId);
+          if (timeoutId) clearTimeout(timeoutId);
           stopped = true;
           stopDrawing();
           try {
@@ -886,8 +955,8 @@
         var playPromise;
         try {
           playPromise = metadata.video.play();
-        } catch (playErr) {
-          reject(new Error('video_play_failed'));
+        } catch (_) {
+          fail(new Error('video_play_failed'));
           return;
         }
 
@@ -898,302 +967,168 @@
             metadata.video.onended = function() {
               try { if (recorder.state !== 'inactive') recorder.stop(); } catch (_) {}
             };
-          } catch (startErr) {
-            reject(new Error('video_recorder_start_failed'));
+          } catch (_) {
+            fail(new Error('video_recorder_start_failed'));
           }
         }).catch(function() {
-          reject(new Error('video_play_failed'));
+          fail(new Error('video_play_failed'));
         });
       });
 
       return {
+        success: true,
         blob: recordedBlob,
         duration: metadata.duration || 0,
         width: canvas.width,
         height: canvas.height,
-        mimeType: recordedBlob.type || recorderMimeType
+        mimeType: recordedBlob.type || recorderMimeType,
+        profile: profile && profile.label ? profile.label : 'custom'
       };
     } finally {
-      try { metadata.cleanup(); } catch (_) {}
+      if (ownMetadata) {
+        try { metadata.cleanup(); } catch (_) {}
+      }
     }
   }
 
   async function compressVideoToTarget(file, targetBytes) {
-    if (!isVideoFile(file)) return { file: file, duration: 0, mimeType: file.type || '', compressed: false };
-    var metaPromise = readVideoMetadata(file).then(function(metadata) {
-      var data = { duration: metadata.duration || 0, width: metadata.width || 0, height: metadata.height || 0 };
-      try { metadata.cleanup(); } catch (_) {}
-      return data;
-    }).catch(function() {
-      return { duration: 0, width: 0, height: 0 };
-    });
-
-    if (file.size <= targetBytes) {
-      var smallMeta = await metaPromise;
+    if (!isVideoFile(file)) {
       return {
+        success: true,
         file: file,
-        duration: smallMeta.duration || 0,
-        width: smallMeta.width || 0,
-        height: smallMeta.height || 0,
+        originalSize: file && file.size ? file.size : 0,
+        finalSize: file && file.size ? file.size : 0,
+        mimeType: file && file.type ? file.type : '',
+        duration: 0,
+        width: 0,
+        height: 0,
+        compressed: false,
+        attempts: []
+      };
+    }
+    if (file.size > HARD_VIDEO_LIMIT_BYTES) {
+      return {
+        success: false,
+        file: null,
+        originalSize: file.size || 0,
+        finalSize: 0,
         mimeType: file.type || '',
-        compressed: false
+        duration: 0,
+        width: 0,
+        height: 0,
+        compressed: false,
+        errorReason: 'video_too_large',
+        attempts: []
+      };
+    }
+    if (!supportsBrowserVideoCompression() && file.size > targetBytes) {
+      return {
+        success: false,
+        file: null,
+        originalSize: file.size || 0,
+        finalSize: 0,
+        mimeType: file.type || '',
+        duration: 0,
+        width: 0,
+        height: 0,
+        compressed: false,
+        errorReason: 'browser_unsupported',
+        attempts: []
       };
     }
 
-    var lastError = null;
-    for (var attempt = 0; attempt < 2; attempt++) {
-      try {
-        var result = await compressVideoAttempt(file, targetBytes, attempt);
-        var uploadFile = toUploadFile(result.blob, file, result.mimeType);
-        if (uploadFile && uploadFile.size && uploadFile.size <= Math.max(targetBytes, file.size * 0.8)) {
-          return {
-            file: uploadFile,
-            duration: result.duration || 0,
-            width: result.width || 0,
-            height: result.height || 0,
-            mimeType: uploadFile.type || result.mimeType || file.type || '',
-            compressed: true
-          };
-        }
-      } catch (err) {
-        lastError = err;
-      }
-    }
-
-    var fallbackMeta = await metaPromise;
-    return {
-      file: null,
-      duration: fallbackMeta.duration || 0,
-      width: fallbackMeta.width || 0,
-      height: fallbackMeta.height || 0,
-      mimeType: file.type || '',
-      compressed: false,
-      failed: true,
-      skipped: true,
-      lastError: lastError && lastError.message ? lastError.message : 'compress_failed'
-    };
-  }
-
-  async function uploadPhotoWallFilesLegacyRetired() {
-    if (!window.sb) throw new Error('Supabase not ready');
-    if (!window.currentUser) throw new Error('请先登录');
-    if (!state.photoFiles.length) throw new Error('Please choose image or video files');
-
-    checkDailyUploadLimit();
-
-    state.photoUploading = true;
-    showProgress();
-    renderQueue(state.photoFiles);
-
-    var successCount = 0;
-    var failCount = 0;
-    var firstErrorMessage = '';
-    for (var i = 0; i < state.photoFiles.length; i++) {
-      var file = state.photoFiles[i];
-      var start = (i / state.photoFiles.length) * 88;
-      var end = ((i + 1) / state.photoFiles.length) * 88;
-      try {
-        setProgress(start, 'Processing', 'Item ' + (i + 1) + '/' + state.photoFiles.length);
-        var compressed = await withTimeout(compressPhoto(file), TIMEOUTS.photoUpload, 'photo preprocess');
-        var ext = file.type === 'image/png' ? '.png' : '.jpg';
-        var name = buildSafeFileName(file, ext);
-        var photoPath = 'photos/' + name;
-        setProgress(start + (end - start) * 0.28, 'Uploading', 'Uploading original file');
-        var uploadRes = await withTimeout(window.sb.storage.from('uploads').upload(photoPath, compressed, {
-          contentType: file.type || 'image/jpeg',
-          cacheControl: '31536000',
-          upsert: false
-        }), TIMEOUTS.photoUpload, 'photo upload');
-        if (uploadRes.error) throw uploadRes.error;
-
-        var photoUrl = window.sb.storage.from('uploads').getPublicUrl(photoPath).data.publicUrl;
-        setProgress(start + (end - start) * 0.62, 'Preparing preview', 'Building thumbnail');
-        var thumbBlob = await withTimeout(makeThumbBlob(compressed), TIMEOUTS.photoUpload, 'thumbnail build');
-        var thumbPath = 'thumbs/' + name;
-        var thumbRes = await withTimeout(window.sb.storage.from('uploads').upload(thumbPath, thumbBlob, {
-          contentType: 'image/jpeg',
-          cacheControl: '31536000',
-          upsert: false
-        }), TIMEOUTS.photoUpload, 'thumbnail upload');
-        var thumbUrl = thumbRes && !thumbRes.error ? window.sb.storage.from('uploads').getPublicUrl(thumbPath).data.publicUrl : '';
-
-        setProgress(start + (end - start) * 0.88, 'Saving', 'Writing photo wall record');
-        var contentJson = JSON.stringify({
-          type: 'photo_wall',
-          thumb: thumbUrl,
-          fileSize: compressed && compressed.size ? compressed.size : (file.size || null)
-        });
-        var insertRes = await withTimeout(
-          window.sb.from('posts').insert([{
-            user_name: window.currentUser,
-            content: contentJson,
-            media_url: photoUrl,
-            media_type: window.PHOTO_WALL_MARKER,
-            actor_key: window.deviceId || 'photo_wall'
-          }]).select('id,user_name,media_url,content,created_at,views,actor_key').single(),
-          TIMEOUTS.photoInsert,
-          'photo insert'
-        );
-        if (insertRes.error) throw insertRes.error;
-
-        if (window.photoWallData && window.photoWallData.unshift && typeof window.normalizePhotoWallRow === 'function') {
-          var normalized = window.normalizePhotoWallRow(insertRes.data);
-          var exists = window.photoWallData.findIndex(function(item) {
-            return String(item.id) === String(normalized.id);
-          });
-          if (exists < 0) window.photoWallData.unshift(normalized);
-        }
-        if (window.broadcastSync && insertRes.data && insertRes.data.id) {
-          window.broadcastSync('photo_added', { photoId: insertRes.data.id });
-        }
-        successCount++;
-      } catch (err) {
-        console.error('[photo-upload-ui] photo wall upload failed', err);
-        failCount++;
-      }
-    }
-
-    if (successCount > 0) incrementDailyUploadCount(successCount);
-
-    if (window.saveLocalPhotoWallData) window.saveLocalPhotoWallData();
-    if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();
-    else if (window.renderPhotoWall) await window.renderPhotoWall();
-
-    setProgress(100, failCount ? '上传完成' : '上传成功', '成功 ' + successCount + ' 个，失败 ' + failCount + ' 个');
-    state.photoUploading = false;
-    state.photoFiles = [];
-    setTimeout(function() {
-      hideProgress();
-      if (successCount > 0) toast('上传成功 ' + successCount + ' 个文件');
-      if (successCount === 0 && failCount > 0) toast('上传失败，请重试');
-    }, 420);
-  }
-
-  async function publishPostLegacyRetired() {
-    if (!window.currentUser) {
-      toast('请先登录');
-      return;
-    }
-    if (state.postPublishing) return;
-
-    var postInp = byId('postInp');
-    var fileInp = byId('fileInp');
-    var visibilityEl = byId('postVisibility');
-    var content = postInp ? String(postInp.value || '').trim() : '';
-    var file = fileInp && fileInp.files ? fileInp.files[0] : null;
-    var visibility = visibilityEl ? visibilityEl.value : 'public';
-
-    if (!content && !file) {
-      toast('Enter content or choose media');
-      return;
-    }
-    if (content.length > 2000) {
-      toast('Content cannot exceed 2000 characters');
-      return;
-    }
-
-    state.postPublishing = true;
-    beginPublishUi(file ? '上传中...' : '发布中...');
+    var metadata;
     try {
-      var mediaUrl = '';
-      var mediaType = '';
-      var uploadFile = file;
-      if (file) {
-        if (/^image\//.test(file.type || '')) {
-          uploadFile = await withTimeout(compressPhoto(file), Math.min(TIMEOUTS.postUpload, 24000), 'post image preprocess');
-        }
-        var path = buildSafeFileName(file, '');
-        var uploadRes = await withTimeout(window.sb.storage.from('uploads').upload(path, uploadFile, {
-          contentType: (uploadFile && uploadFile.type) || file.type || 'application/octet-stream',
-          cacheControl: '31536000',
-          upsert: false
-        }), TIMEOUTS.postUpload, 'post media upload');
-        if (uploadRes.error) throw uploadRes.error;
-        mediaUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
-        mediaType = /^video\//.test(file.type) ? 'video' : 'image';
-      }
+      metadata = await readVideoMetadata(file);
+    } catch (_) {
+      return {
+        success: false,
+        file: null,
+        originalSize: file.size || 0,
+        finalSize: 0,
+        mimeType: file.type || '',
+        duration: 0,
+        width: 0,
+        height: 0,
+        compressed: false,
+        errorReason: 'video_decode_failed',
+        attempts: []
+      };
+    }
 
-      var text = content.slice(0, 2000);
-      var metadata = {
-        visibility: visibility || 'public',
-        is_pinned: false,
-        pinned_at: null,
-        updated_at: null,
-        fileSize: uploadFile ? (uploadFile.size || file.size || null) : null,
-        originalSize: file ? (file.size || null) : null,
-        mimeType: file ? (file.type || '') : ''
-      };
-      var contentPayload = JSON.stringify({
-        __type: '__xtj_post_v2__',
-        text: text,
-        meta: metadata
-      });
-      var payload = {
-        user_name: window.currentUser,
-        content: contentPayload,
-        media_url: mediaUrl,
-        media_type: mediaType,
-        actor_key: window.deviceId,
-        visibility: metadata.visibility,
-        is_pinned: false,
-        pinned_at: null,
-        updated_at: null
-      };
-      var fallbackContent = contentPayload;
-      var insertResult = await withTimeout((async function() {
-        var primary = await window.sb.from('posts').insert([payload]).select('*').maybeSingle();
-        if (!primary.error) return { ok: true, fallback: false, data: primary.data || null };
-        var message = String(primary.error.message || '');
-        if (!/visibility|is_pinned|pinned_at|updated_at|column/i.test(message)) {
-          return { ok: false, error: primary.error };
-        }
-        var fallbackPayload = {
-          user_name: payload.user_name,
-          content: fallbackContent,
-          media_url: payload.media_url,
-          media_type: payload.media_type,
-          actor_key: payload.actor_key
+    try {
+      if (file.size <= targetBytes) {
+        return {
+          success: true,
+          file: file,
+          originalSize: file.size || 0,
+          finalSize: file.size || 0,
+          mimeType: file.type || '',
+          duration: metadata.duration || 0,
+          width: metadata.width || 0,
+          height: metadata.height || 0,
+          compressed: false,
+          attempts: []
         };
-        var fallback = await window.sb.from('posts').insert([fallbackPayload]).select('*').maybeSingle();
-        if (fallback.error) return { ok: false, error: fallback.error };
-        return { ok: true, fallback: true, data: fallback.data || null };
-      })(), TIMEOUTS.postInsert, 'post insert');
-
-      if (!insertResult.ok) {
-        throw insertResult.error || new Error('post insert failed');
       }
 
-      if (typeof window.clearFeedCache === 'function') window.clearFeedCache();
-      if (typeof window.resetPostComposer === 'function') window.resetPostComposer();
-      else {
-        if (postInp) postInp.value = '';
-        if (fileInp) fileInp.value = '';
-        if (visibilityEl) visibilityEl.value = 'public';
+      var attempts = [];
+      var profiles = getVideoCompressionProfiles(metadata.width, metadata.height);
+      var lastReason = 'compress_failed';
+      for (var i = 0; i < profiles.length; i++) {
+        var profile = profiles[i];
+        try {
+          var result = await compressVideoAttempt(file, targetBytes, profile, metadata);
+          var uploadFile = toUploadFile(result.blob, file, result.mimeType);
+          var finalSize = uploadFile && uploadFile.size ? uploadFile.size : 0;
+          attempts.push({
+            profile: profile.label,
+            success: !!(uploadFile && finalSize),
+            finalSize: finalSize,
+            mimeType: uploadFile && uploadFile.type ? uploadFile.type : (result.mimeType || file.type || '')
+          });
+          if (uploadFile && finalSize && finalSize <= targetBytes) {
+            return {
+              success: true,
+              file: uploadFile,
+              originalSize: file.size || 0,
+              finalSize: finalSize,
+              mimeType: uploadFile.type || result.mimeType || file.type || '',
+              duration: result.duration || metadata.duration || 0,
+              width: result.width || metadata.width || 0,
+              height: result.height || metadata.height || 0,
+              compressed: true,
+              attempts: attempts
+            };
+          }
+          lastReason = 'still_over_limit';
+        } catch (err) {
+          lastReason = normalizeCompressionErrorReason(err && err.message ? err.message : err);
+          attempts.push({
+            profile: profile.label,
+            success: false,
+            errorReason: lastReason
+          });
+          if (lastReason === 'browser_unsupported' || lastReason === 'video_decode_failed') break;
+        }
       }
-      setPostPreview([]);
-      toast(insertResult.fallback ? '发布成功（兼容模式）' : '发布成功');
-      if (insertResult.data && typeof window.xtjPrependPostToFeed === 'function') await window.xtjPrependPostToFeed(insertResult.data);
-      else if (typeof window.loadFeed === 'function') await window.loadFeed(true);
-    } catch (err) {
-      console.error('[post-publish-ui] publish failed', err);
-      toast('发布失败: ' + (err && err.message ? err.message : '请重试'));
+
+      return {
+        success: false,
+        file: null,
+        originalSize: file.size || 0,
+        finalSize: 0,
+        mimeType: file.type || '',
+        duration: metadata.duration || 0,
+        width: metadata.width || 0,
+        height: metadata.height || 0,
+        compressed: false,
+        errorReason: lastReason || 'compress_failed',
+        attempts: attempts
+      };
     } finally {
-      state.postPublishing = false;
-      endPublishUi();
+      try { metadata.cleanup(); } catch (_) {}
     }
-  }
-
-  function handlePhotoSelectionLegacyRetired(event) {
-    var files = (event && event.target && event.target.files) ? Array.prototype.slice.call(event.target.files) : [];
-    var selected = files.filter(function(file) {
-      return file && (/^image\//.test(file.type) || /^video\//.test(file.type));
-    });
-    if (!selected.length) {
-      toast('Please choose valid image or video files');
-      return;
-    }
-    state.photoFiles = selected.slice();
-    openSheet(selected);
   }
 
   async function preparePhotoWallMedia(file) {
@@ -1212,27 +1147,16 @@
       };
     }
     if (isVideoFile(file)) {
-      if (file.size > HARD_VIDEO_LIMIT_BYTES) {
-        throw new Error('Video too large. Max size is 200MB.');
+      var compressedVideo = await withTimeout(
+        compressVideoToTarget(file, SOFT_VIDEO_LIMIT_BYTES),
+        getVideoCompressionTimeoutMs(Math.max(20, Number((file.size || 0) / 1024 / 1024) * 2)),
+        'video compress'
+      );
+      if (!compressedVideo || !compressedVideo.success || !compressedVideo.file) {
+        throw new Error(getCompressionFailureMessage(compressedVideo && compressedVideo.errorReason));
       }
-      var compressedVideo;
-      try {
-        compressedVideo = await withTimeout(
-          compressVideoToTarget(file, SOFT_VIDEO_LIMIT_BYTES),
-          Math.max(TIMEOUTS.photoUpload, 70000),
-          'video compress'
-        );
-      } catch (_) {
-        compressedVideo = null;
-      }
-      if (!compressedVideo || !compressedVideo.file || compressedVideo.failed) {
-        throw new Error('无法压到 10MB，请缩短视频或降低原视频大小');
-      }
-      if (compressedVideo.file.size > HARD_VIDEO_LIMIT_BYTES) {
-        throw new Error('Video too large after compression.');
-      }
-      if (compressedVideo.file.size > SOFT_VIDEO_LIMIT_BYTES) {
-        throw new Error('无法压到 10MB，请缩短视频或降低原视频大小');
+      if (compressedVideo.finalSize > SOFT_VIDEO_LIMIT_BYTES) {
+        throw new Error(getCompressionFailureMessage('still_over_limit'));
       }
       var poster;
       try {
@@ -1250,8 +1174,8 @@
         thumbBlob: poster && poster.blob ? poster.blob : null,
         duration: compressedVideo.duration || (poster && poster.duration) || 0,
         mimeType: compressedVideo.mimeType || compressedVideo.file.type || file.type || 'video/mp4',
-        originalSize: file.size || null,
-        fileSize: compressedVideo.file.size || file.size || null
+        originalSize: compressedVideo.originalSize || file.size || null,
+        fileSize: compressedVideo.finalSize || compressedVideo.file.size || file.size || null
       };
     }
     throw new Error('unsupported_media');
@@ -1417,20 +1341,18 @@
           uploadFile = toUploadFile(await withTimeout(compressPhoto(file), Math.min(TIMEOUTS.postUpload, 24000), 'post image preprocess'), file, file.type || 'image/jpeg');
           uploadMimeType = uploadFile.type || file.type || 'image/jpeg';
         } else if (isVideoFile(file)) {
-          if (file.size > HARD_VIDEO_LIMIT_BYTES) {
-            throw new Error('Video too large. Max size is 200MB.');
-          }
           if (file.size > SOFT_VIDEO_LIMIT_BYTES) {
             var compressedVideo = await withTimeout(
               compressVideoToTarget(file, SOFT_VIDEO_LIMIT_BYTES),
-              Math.max(TIMEOUTS.postUpload, 70000),
+              getVideoCompressionTimeoutMs(Math.max(20, Number((file.size || 0) / 1024 / 1024) * 2)),
               'post video compress'
             );
-            if (!compressedVideo || !compressedVideo.file || compressedVideo.failed || compressedVideo.file.size > SOFT_VIDEO_LIMIT_BYTES) {
-              throw new Error('无法压到 10MB，请缩短视频或降低原视频大小');
+            if (!compressedVideo || !compressedVideo.success || !compressedVideo.file || compressedVideo.finalSize > SOFT_VIDEO_LIMIT_BYTES) {
+              throw new Error(getCompressionFailureMessage(compressedVideo && compressedVideo.errorReason));
             }
             uploadFile = compressedVideo.file;
             uploadMimeType = compressedVideo.mimeType || uploadFile.type || file.type || 'video/mp4';
+            originalSize = compressedVideo.originalSize || file.size || null;
           }
           mediaType = 'video';
         }
@@ -2419,6 +2341,54 @@
     });
   }
 
+  function nextPhotoWallRenderSeq() {
+    state.photoWallRenderSeq = (state.photoWallRenderSeq || 0) + 1;
+    return state.photoWallRenderSeq;
+  }
+
+  function schedulePhotoWallDecorate(seq) {
+    if (state.photoWallDecorateRaf) cancelAnimationFrame(state.photoWallDecorateRaf);
+    state.photoWallDecorateRaf = requestAnimationFrame(function() {
+      state.photoWallDecorateRaf = 0;
+      if (seq && seq !== state.photoWallRenderSeq) return;
+      decoratePhotoWallVideoCards();
+    });
+  }
+
+  function cleanupPhotoWallTransientState() {
+    if (state.photoWallDecorateRaf) {
+      cancelAnimationFrame(state.photoWallDecorateRaf);
+      state.photoWallDecorateRaf = 0;
+    }
+    if (state.photoWallViewSwitchTimer) {
+      clearTimeout(state.photoWallViewSwitchTimer);
+      state.photoWallViewSwitchTimer = null;
+    }
+    if (state.photoWallLoadTimer) {
+      clearTimeout(state.photoWallLoadTimer);
+      state.photoWallLoadTimer = null;
+    }
+    var player = byId('ppVideoPlayer');
+    if (player) {
+      try { player.pause(); } catch (_) {}
+      player.removeAttribute('src');
+      try { player.load(); } catch (_) {}
+    }
+    var overlay = byId('photoPreviewOverlay');
+    if (overlay && overlay.classList.contains('pp-video-mode') && typeof window.closePhotoPreview === 'function') {
+      state.allowVideoPreviewClose = true;
+      window.closePhotoPreview();
+    }
+    if (typeof window.closePhotoInfo === 'function') {
+      try { window.closePhotoInfo(); } catch (_) {}
+    }
+    state.photoWallImagePreviewMode = false;
+    state.photoWallVideoPreviewMode = false;
+    state.activePhotoWallVideoItem = null;
+    state.activePhotoWallVideoSourceList = null;
+    document.body.classList.remove('photo-previewing');
+  }
+
   function installPhotoWallMediaOverrides() {
     if (window.__xtjPhotoWallMediaOverridesInstalled) return;
     window.__xtjPhotoWallMediaOverridesInstalled = true;
@@ -2457,8 +2427,9 @@
         var fn = window[name];
         if (typeof fn === 'function' && !fn.__xtjDecorated) {
           var wrapped = async function() {
+            var seq = nextPhotoWallRenderSeq();
             var result = await fn.apply(this, arguments);
-            requestAnimationFrame(decoratePhotoWallVideoCards);
+            schedulePhotoWallDecorate(seq);
             return result;
           };
           wrapped.__xtjDecorated = true;
@@ -2472,9 +2443,79 @@
       if (Array.isArray(window.pwCurrentSortedPhotos) && window.pwCurrentSortedPhotos.length) {
         window.pwCurrentSortedPhotos = window.pwCurrentSortedPhotos.map(enhancePhotoWallItem);
       }
-      requestAnimationFrame(decoratePhotoWallVideoCards);
+      schedulePhotoWallDecorate(nextPhotoWallRenderSeq());
 
       if (typeof window.renderPhotoWall !== 'function' || typeof window.normalizePhotoWallRow !== 'function') {
+        setTimeout(installWhenReady, 250);
+      }
+    }
+
+    installWhenReady();
+  }
+
+  function installPhotoWallStabilityGuards() {
+    if (window.__xtjPhotoWallStabilityGuardsInstalled) return;
+    window.__xtjPhotoWallStabilityGuardsInstalled = true;
+    window.cleanupPhotoWallTransientState = cleanupPhotoWallTransientState;
+
+    function debounceWrap(name, delay) {
+      var fn = window[name];
+      if (typeof fn !== 'function' || fn.__xtjDebounced) return;
+      var wrapped = function() {
+        var args = arguments;
+        var ctx = this;
+        if (state.photoWallViewSwitchTimer) clearTimeout(state.photoWallViewSwitchTimer);
+        return new Promise(function(resolve, reject) {
+          state.photoWallViewSwitchTimer = setTimeout(function() {
+            state.photoWallViewSwitchTimer = null;
+            Promise.resolve(fn.apply(ctx, args)).then(resolve, reject);
+          }, delay);
+        });
+      };
+      wrapped.__xtjDebounced = true;
+      window[name] = wrapped;
+    }
+
+    function singleFlightWrap(name) {
+      var fn = window[name];
+      if (typeof fn !== 'function' || fn.__xtjSingleFlight) return;
+      var running = false;
+      var pending = null;
+      var wrapped = async function() {
+        var ctx = this;
+        var args = Array.prototype.slice.call(arguments);
+        if (running) {
+          pending = { ctx: ctx, args: args };
+          return null;
+        }
+        running = true;
+        try {
+          return await fn.apply(ctx, args);
+        } finally {
+          running = false;
+          if (pending) {
+            var next = pending;
+            pending = null;
+            Promise.resolve(wrapped.apply(next.ctx, next.args)).catch(function() {});
+          }
+        }
+      };
+      wrapped.__xtjSingleFlight = true;
+      window[name] = wrapped;
+    }
+
+    function installWhenReady() {
+      ['toggleAlbumView', 'openPhotoAlbumGroup', 'switchPhotoWallView'].forEach(function(name) {
+        debounceWrap(name, 140);
+      });
+      ['loadPhotoWallData', 'loadMorePhotos', 'renderPhotoWall', 'renderPhotoWallWithoutReload'].forEach(function(name) {
+        singleFlightWrap(name);
+      });
+      if (
+        typeof window.toggleAlbumView !== 'function' ||
+        typeof window.loadPhotoWallData !== 'function' ||
+        typeof window.renderPhotoWall !== 'function'
+      ) {
         setTimeout(installWhenReady, 250);
       }
     }
@@ -2565,6 +2606,7 @@
     installPreviewControlOverrides();
     installAlbumTransitionOverrides();
     installPhotoWallMediaOverrides();
+    installPhotoWallStabilityGuards();
     wrapPhotoPreviewClose();
     overridePhotoHandlers();
     overridePublishHandler();
