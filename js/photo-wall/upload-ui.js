@@ -109,9 +109,11 @@
 
   function supportsBrowserVideoCompression() {
     var probeCanvas = document.createElement('canvas');
+    var probeVideo = document.createElement('video');
     return !!(
       window.MediaRecorder &&
-      typeof probeCanvas.captureStream === 'function'
+      (typeof probeCanvas.captureStream === 'function' ||
+       typeof probeVideo.captureStream === 'function')
     );
   }
 
@@ -858,12 +860,21 @@
       ctx.imageSmoothingQuality = 'high';
 
       var fps = Math.max(12, Math.min(30, Number(profile && profile.fps) || 24));
-      var canvasStream = typeof canvas.captureStream === 'function' ? canvas.captureStream(fps) : null;
-      if (!canvasStream) throw new Error('capture_stream_unsupported');
+      var hasCanvasStream = typeof canvas.captureStream === 'function';
+      var canvasStream = hasCanvasStream ? canvas.captureStream(fps) : null;
+      var isSafariMode = !hasCanvasStream;
 
       var mediaTracks = [];
-      var videoTracks = canvasStream.getVideoTracks();
-      if (videoTracks && videoTracks[0]) mediaTracks.push(videoTracks[0]);
+      if (canvasStream) {
+        var videoTracks = canvasStream.getVideoTracks();
+        if (videoTracks && videoTracks[0]) mediaTracks.push(videoTracks[0]);
+      } else {
+        // Safari: 直接用 video 元素原生流，不经过 canvas
+        var vidStream = getSupportedCaptureStream(metadata.video);
+        if (!vidStream) throw new Error('capture_stream_unsupported');
+        var vidVideoTracks = vidStream.getVideoTracks();
+        if (vidVideoTracks && vidVideoTracks[0]) mediaTracks.push(vidVideoTracks[0]);
+      }
 
       var sourceStream = getSupportedCaptureStream(metadata.video);
       if (sourceStream) {
@@ -904,9 +915,11 @@
       }
       function drawFrame() {
         if (stopped) return;
-        try {
-          ctx.drawImage(metadata.video, 0, 0, canvas.width, canvas.height);
-        } catch (_) {}
+        if (!isSafariMode) {
+          try {
+            ctx.drawImage(metadata.video, 0, 0, canvas.width, canvas.height);
+          } catch (_) {}
+        }
         rafId = requestAnimationFrame(drawFrame);
       }
 
