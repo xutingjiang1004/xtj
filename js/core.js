@@ -1951,7 +1951,7 @@ function renderProfileActivityList(kind) {
                     '<div class="report-modal-overlay report-history-overlay" id="reportHistoryModal" onclick="if(event.target===this)closeReportHistoryModal()">',
                     '  <div class="report-modal report-history-modal" onclick="event.stopPropagation()">',
                     '    <div class="report-modal-header">',
-                    '      <div class="report-modal-header-left"><span>📋 我的举报记录</span></div>',
+                    '      <div class="report-modal-header-left"><span>举报记录</span></div>',
                     '      <button class="report-modal-close" onclick="closeReportHistoryModal()" aria-label="关闭">✕</button>',
                     '    </div>',
                     '    <div class="report-history-body">',
@@ -5660,7 +5660,7 @@ function renderProfileActivityList(kind) {
                 var hhmm = pad(d.getHours()) + ':' + pad(d.getMinutes());
                 if (d.toDateString() === now.toDateString()) return hhmm;
                 var yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
-                if (d.toDateString() === yesterday.toDateString()) return '鏄ㄥぉ ' + hhmm;
+                if (d.toDateString() === yesterday.toDateString()) return '昨天 ' + hhmm;
                 return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hhmm;
             }
 
@@ -6489,13 +6489,15 @@ function renderProfileActivityList(kind) {
                 }
                 if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
                 window.dockChatListCacheTime = Date.now();
-                el.innerHTML = window.xtjMagicLoadingHtml('加载中...', '正在取回最近消息', 'chat-list');
+                var hadRenderedList = !!el.children.length;
                 try {
-                    renderChatLoadingState(el, {
-                        title: '加载中...',
-                        subtitle: '正在取回最近消息',
-                        variant: 'chat-list'
-                    });
+                    if (!hadRenderedList) {
+                        renderChatLoadingState(el, {
+                            title: '加载中...',
+                            subtitle: '正在取回最近消息',
+                            variant: 'chat-list'
+                        });
+                    }
                     const { data: allMsgs, error } = await sb.from("posts")
                         .select("id, user_name, media_url, content, created_at, views, actor_key")
                         .eq("media_type", DM_MARKER)
@@ -6543,6 +6545,13 @@ function renderProfileActivityList(kind) {
                             } catch(e) {}
                         }
                     }
+                    var nextListSignature = convs.map(function(c) {
+                        return [c.other_user, c.last_message || '', c.last_time || '', c.unread || 0].join('~');
+                    }).join('|');
+                    if (_dockChatListRenderSignature === nextListSignature && hadRenderedList) {
+                        updateUnreadBadge();
+                        return;
+                    }
                     el.innerHTML = convs.map(function(c, index) {
                         var avHtml = avatarCache[c.other_user]
                             ? '<img src="' + avatarCache[c.other_user] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">'
@@ -6554,6 +6563,7 @@ function renderProfileActivityList(kind) {
                             <div class="cli-right"><span class="cli-time">${formatMsgTime(c.last_time)}</span>${c.unread ? '<span class="cli-badge">' + (c.unread > 99 ? '99+' : c.unread) + '</span>' : ''}</div>
                         </div>`;
                     }).join('');
+                    _dockChatListRenderSignature = nextListSignature;
                     updateUnreadBadge();
                 } catch(e) {
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">!</div><div>' + (e.message || '加载失败') + '</div></div>';
@@ -6565,6 +6575,7 @@ function renderProfileActivityList(kind) {
             var _chatRenderSignature = {};
             var _dockChatLoadSeq = 0;
             var _dockChatListRefreshTimer = null;
+            var _dockChatListRenderSignature = '';
 
             function getDockChatCacheKey(userName) {
                 return (currentUser || '') + '_' + (userName || '');
@@ -7034,6 +7045,7 @@ function renderProfileActivityList(kind) {
                 // window.addEventListener('orientationchange', function() { setTimeout(adjustIOSHeight, 150); });
 
                 await initUI();
+                normalizeReportModalStructure();
                 requestAnimationFrame(function() { initialLoad(); });
                 // 记录访问（用户+IP）
                 if (currentUser) logUserVisitToApi(currentUser);
