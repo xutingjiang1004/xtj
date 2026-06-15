@@ -11748,6 +11748,12 @@ body.ios-chat-keyboard-open .chat-input-area {
   letter-spacing: -0.02em !important;
 }
 
+#reportViewFormBtn,
+#reportRecordsViewBtn,
+#reportRecordsPanel {
+  display: none !important;
+}
+
 .report-records-btn {
   min-width: 0 !important;
   height: 34px !important;
