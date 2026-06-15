@@ -3529,7 +3529,6 @@ function renderProfileActivityList(kind) {
                         }
                     } catch(e) {}
                 }
-                if (!isPro && isVipUser() && username === currentUser) isPro = true;
                 // ★ 关键修复：onclick 绑在外圈 div 上，内层 .avatar 继承传递
                 if (avatarUrl) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
@@ -3885,8 +3884,7 @@ function renderProfileActivityList(kind) {
                     window.__xtjIsUserProAt(normalized.user_name, normalized.created_at)) {
                     isProByHistory = true;
                 }
-                var isCurrentPro = (typeof isVipUser === 'function') && isVipUser() && normalized.user_name === currentUser;
-                if (isProPost || isProByHistory || isCurrentPro) {
+                if (isProPost || isProByHistory) {
                     bits.push('<span class="post-visibility-badge public post-pro-badge">Pro</span>');
                 }
                 if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
@@ -7445,6 +7443,33 @@ function renderProfileActivityList(kind) {
             // 版本更新日志
             const changelogData = [
                 {
+                    version: 'v0.79',
+                    date: '2026-06-15',
+                    content: `
+                        <h4>新增</h4>
+                        <ul>
+                            <li>帖子视频与照片墙视频统一按 10MB 规则处理，超过阈值会先尝试浏览器端压缩</li>
+                            <li>照片墙老视频补上运行时首帧封面兜底，避免无 thumb 时直接露出空白块</li>
+                        </ul>
+                        <h4>修复</h4>
+                        <ul>
+                            <li>修复非 Pro 用户帖子误显示 Pro 标记的问题，渲染只认发帖冻结状态与历史有效期</li>
+                            <li>修复举报弹层文字帖重复显示作者名与“文字帖”标签挡内容的问题</li>
+                            <li>修复照片墙视频点击入口与全屏预览链路不一致的问题</li>
+                        </ul>
+                        <h4>优化</h4>
+                        <ul>
+                            <li>视频大小信息统一优先展示最终上传大小 fileSize，并保留 originalSize 供详情查看</li>
+                            <li>举报弹层顶部收敛为单标题 + 图标按钮，减少重复入口</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重做举报弹层文字帖卡片骨架与记录入口样式，统一成更简洁的内容优先结构</li>
+                            <li>重做 v0.79 版本同步链路，关于页、站内 changelog、仓库 CHANGELOG.md 三处统一</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.78',
                     date: '2026-06-14',
                     content: `
@@ -8344,12 +8369,12 @@ function renderProfileActivityList(kind) {
             if (scroller) scroller.scrollTop = 0;
         }
 
-        function normalizeReportModalStructure() {
-            var overlay = document.getElementById('reportModal');
-            if (!overlay || overlay.dataset.normalized === '1') return;
+            function normalizeReportModalStructure() {
+                var overlay = document.getElementById('reportModal');
+                if (!overlay || overlay.dataset.normalized === '1') return;
             var headerLeft = overlay.querySelector('.report-modal-header-left');
             if (headerLeft) {
-                headerLeft.innerHTML = '<span>举报</span><button class="report-records-btn" id="reportRecordsToggleBtn" onclick="toggleReportRecords()" aria-label="打开举报记录">举报记录</button>';
+                headerLeft.innerHTML = '<span>举报</span><button class="report-records-btn report-records-btn--icon" id="reportRecordsToggleBtn" onclick="toggleReportRecords()" aria-label="打开举报记录"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h10"></path><path d="M8 12h10"></path><path d="M8 18h10"></path><path d="M4 6h.01"></path><path d="M4 12h.01"></path><path d="M4 18h.01"></path></svg></span></button>';
             }
             var closeBtn = overlay.querySelector('.report-modal-close');
             if (closeBtn) {
@@ -8424,8 +8449,7 @@ function renderProfileActivityList(kind) {
                 return [
                     '<div class="report-selected-top report-selected-top--text">',
                     '<span class="report-selected-name-badge">' + getReportTextThumbLabel(item.user_name) + '</span>',
-                    '<span class="report-selected-user">' + userName + '</span>',
-                    '<span class="report-selected-chip">' + escapeHtml(itemType) + '</span>',
+                    item.created_at ? '<span class="report-selected-time">' + escapeHtml(formatReportDate(item.created_at)) + '</span>' : '',
                     '</div>',
                     '<div class="report-selected-text">' + text + '</div>'
                 ].join('');
@@ -8644,7 +8668,11 @@ function renderProfileActivityList(kind) {
                 h += '<div class="report-content-item' + selected + (isTextOnly ? ' report-content-item--text' : '') + '" data-id="' + escapeHtml(item.id) + '" data-user="' + escapeHtml(item.user_name) + '" onclick="selectReportContent(this)">';
                 h += thumbHtml;
                 h += '<div class="rc-info' + (isTextOnly ? ' rc-info--text' : '') + '">';
-                h += '<div class="rc-meta"><div class="rc-user">' + escapeHtml(item.user_name) + '</div><span class="rc-type">' + escapeHtml(item.kindLabel || (item.type === 'photo' ? '照片墙' : '帖子')) + '</span>' + (item.created_at ? '<span class="rc-time">' + escapeHtml(formatReportDate(item.created_at)) + '</span>' : '') + '</div>';
+                if (isTextOnly) {
+                    h += '<div class="rc-meta rc-meta--text">' + (item.created_at ? '<span class="rc-time">' + escapeHtml(formatReportDate(item.created_at)) + '</span>' : '') + '</div>';
+                } else {
+                    h += '<div class="rc-meta"><div class="rc-user">' + escapeHtml(item.user_name) + '</div><span class="rc-type">' + escapeHtml(item.kindLabel || (item.type === 'photo' ? '照片墙' : '帖子')) + '</span>' + (item.created_at ? '<span class="rc-time">' + escapeHtml(formatReportDate(item.created_at)) + '</span>' : '') + '</div>';
+                }
                 h += '<div class="rc-text">' + escapeHtml(item.text || (item.thumb ? '图片内容' : '无文字内容')) + '</div>';
                 h += '</div></div>';
             });
