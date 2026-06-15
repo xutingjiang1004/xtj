@@ -5659,8 +5659,6 @@ function renderProfileActivityList(kind) {
                 var pad = function(n) { return String(n).padStart(2, '0'); };
                 var hhmm = pad(d.getHours()) + ':' + pad(d.getMinutes());
                 if (d.toDateString() === now.toDateString()) return hhmm;
-                var yesterday = new Date(now); yesterday.setDate(yesterday.getDate() - 1);
-                if (d.toDateString() === yesterday.toDateString()) return '昨天 ' + hhmm;
                 return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hhmm;
             }
 
@@ -6545,25 +6543,7 @@ function renderProfileActivityList(kind) {
                             } catch(e) {}
                         }
                     }
-                    var nextListSignature = convs.map(function(c) {
-                        return [c.other_user, c.last_message || '', c.last_time || '', c.unread || 0].join('~');
-                    }).join('|');
-                    if (_dockChatListRenderSignature === nextListSignature && hadRenderedList) {
-                        updateUnreadBadge();
-                        return;
-                    }
-                    el.innerHTML = convs.map(function(c, index) {
-                        var avHtml = avatarCache[c.other_user]
-                            ? '<img src="' + avatarCache[c.other_user] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">'
-                            : c.other_user[0].toUpperCase();
-                        return `
-                        <div class="chat-list-item" style="--xtj-enter-delay:${Math.min(index * 28, 220)}ms" onclick="openChat('${c.other_user.replace(/'/g, "\\'")}')">
-                            <div class="cli-avatar">${avHtml}</div>
-                            <div class="cli-info"><div class="cli-name">${escapeHtml(c.other_user)}</div><div class="cli-preview">${escapeHtml(c.last_message || '')}</div></div>
-                            <div class="cli-right"><span class="cli-time">${formatMsgTime(c.last_time)}</span>${c.unread ? '<span class="cli-badge">' + (c.unread > 99 ? '99+' : c.unread) + '</span>' : ''}</div>
-                        </div>`;
-                    }).join('');
-                    _dockChatListRenderSignature = nextListSignature;
+                    renderDockChatConversationList(el, convs);
                     updateUnreadBadge();
                 } catch(e) {
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">!</div><div>' + (e.message || '加载失败') + '</div></div>';
@@ -6579,6 +6559,92 @@ function renderProfileActivityList(kind) {
 
             function getDockChatCacheKey(userName) {
                 return (currentUser || '') + '_' + (userName || '');
+            }
+
+            function buildDockChatConversationSignature(conversation) {
+                return [
+                    conversation && conversation.other_user ? conversation.other_user : '',
+                    conversation && conversation.last_message ? conversation.last_message : '',
+                    conversation && conversation.last_time ? conversation.last_time : '',
+                    conversation && conversation.unread ? conversation.unread : 0
+                ].join('~');
+            }
+
+            function getDockChatConversationAvatarHtml(userName) {
+                if (avatarCache[userName]) {
+                    return '<img src="' + avatarCache[userName] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                }
+                return userName ? userName[0].toUpperCase() : '?';
+            }
+
+            function buildDockChatListItemMarkup(conversation, index) {
+                var safeUser = String(conversation.other_user || '').replace(/'/g, "\\'");
+                var signature = buildDockChatConversationSignature(conversation);
+                return [
+                    '<div class="chat-list-item" data-chat-user="', escapeHtml(conversation.other_user), '" data-signature="', escapeHtml(signature),
+                    '" data-last-time="', escapeHtml(conversation.last_time || ''), '" style="--xtj-enter-delay:', String(Math.min((index || 0) * 28, 220)),
+                    'ms" onclick="openChat(\'', safeUser, '\')">',
+                    '<div class="cli-avatar">', getDockChatConversationAvatarHtml(conversation.other_user), '</div>',
+                    '<div class="cli-info"><div class="cli-name">', escapeHtml(conversation.other_user), '</div><div class="cli-preview">', escapeHtml(conversation.last_message || ''), '</div></div>',
+                    '<div class="cli-right"><span class="cli-time">', formatMsgTime(conversation.last_time), '</span>', conversation.unread ? '<span class="cli-badge">' + (conversation.unread > 99 ? '99+' : conversation.unread) + '</span>' : '', '</div>',
+                    '</div>'
+                ].join('');
+            }
+
+            function renderDockChatConversationList(el, convs) {
+                if (!el) return '';
+                var nextListSignature = convs.map(buildDockChatConversationSignature).join('|');
+                var hadRenderedList = !!el.children.length;
+                if (_dockChatListRenderSignature === nextListSignature && hadRenderedList) {
+                    return nextListSignature;
+                }
+                var existingMap = {};
+                Array.prototype.forEach.call(el.querySelectorAll('.chat-list-item[data-chat-user]'), function(node) {
+                    existingMap[node.getAttribute('data-chat-user')] = node;
+                });
+                var fragment = document.createDocumentFragment();
+                convs.forEach(function(conversation, index) {
+                    var userName = conversation.other_user;
+                    var signature = buildDockChatConversationSignature(conversation);
+                    var row = existingMap[userName];
+                    if (row && row.getAttribute('data-signature') === signature) {
+                        row.style.setProperty('--xtj-enter-delay', String(Math.min(index * 28, 220)) + 'ms');
+                        fragment.appendChild(row);
+                        return;
+                    }
+                    var template = document.createElement('template');
+                    template.innerHTML = buildDockChatListItemMarkup(conversation, index).trim();
+                    row = template.content.firstElementChild;
+                    fragment.appendChild(row);
+                });
+                el.replaceChildren(fragment);
+                _dockChatListRenderSignature = nextListSignature;
+                return nextListSignature;
+            }
+
+            function applyDockChatConversationPreview(otherUser, message, unreadCount) {
+                var el = document.getElementById('dockChatList');
+                if (!el || !otherUser || !message) return;
+                var convs = [{
+                    other_user: otherUser,
+                    last_message: getDockChatMessagePreview(message),
+                    last_time: message.created_at || new Date().toISOString(),
+                    unread: typeof unreadCount === 'number' ? unreadCount : 0
+                }];
+                Array.prototype.forEach.call(el.querySelectorAll('.chat-list-item[data-chat-user]'), function(node) {
+                    var userName = node.getAttribute('data-chat-user');
+                    if (!userName || userName === otherUser) return;
+                    var previewNode = node.querySelector('.cli-preview');
+                    var timeNode = node.querySelector('.cli-time');
+                    var badgeNode = node.querySelector('.cli-badge');
+                    convs.push({
+                        other_user: userName,
+                        last_message: previewNode ? previewNode.textContent : '',
+                        last_time: node.getAttribute('data-last-time') || (timeNode ? timeNode.textContent : ''),
+                        unread: badgeNode ? parseInt(badgeNode.textContent, 10) || 0 : 0
+                    });
+                });
+                renderDockChatConversationList(el, convs);
             }
 
             function scheduleDockChatListRefresh(delay) {
@@ -6872,6 +6938,7 @@ function renderProfileActivityList(kind) {
                         views: 0
                     };
                     renderDockMessages(targetUser, upsertDockChatCacheMessage(targetUser, optimisticMessage), true);
+                    applyDockChatConversationPreview(targetUser, optimisticMessage, 0);
 
                     const { data: insertedMessage, error } = await sb.from("posts")
                         .insert([{ user_name: currentUser, content: contentPayload, media_type: DM_MARKER, media_url: targetUser, actor_key: actorKey }])
@@ -6881,7 +6948,8 @@ function renderProfileActivityList(kind) {
                     clearDockChatFilePreview(false);
                     replaceDockChatCacheMessage(targetUser, tempId, insertedMessage || optimisticMessage);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
-                    scheduleDockChatListRefresh(80);
+                    applyDockChatConversationPreview(targetUser, insertedMessage || optimisticMessage, 0);
+                    scheduleDockChatListRefresh(320);
                     if (typeof window.__xtjRefreshIOSChatViewport === 'function') {
                         window.__xtjRefreshIOSChatViewport({ preserveFocus: true, forceScroll: true });
                     }
@@ -8521,16 +8589,18 @@ function renderProfileActivityList(kind) {
                                     var j = JSON.parse(txt);
                                     txt = j.content || j.title || j.caption || j.text || (typeof j === 'object' ? '' : txt) || '';
                                 } catch(e) {}
-                                if (!txt && p.media_url) txt = '(图片)';
+                                var mediaType = String(p.media_type || '').toLowerCase();
+                                var hasRenderableThumb = !!p.media_url && /^(https?:|data:|blob:)/i.test(String(p.media_url || ''));
+                                if (!txt && hasRenderableThumb) txt = mediaType === 'video' ? '(视频)' : '(图片)';
                                 if (txt.length > 72) txt = txt.substring(0, 72) + '...';
                                 return {
                                     id: p.id,
                                     user_name: p.user_name,
                                     text: txt,
-                                    thumb: p.media_url || '',
+                                    thumb: hasRenderableThumb ? p.media_url : '',
                                     type: 'post',
                                     created_at: p.created_at,
-                                    kindLabel: p.media_url ? (p.media_type === 'video' ? '视频帖' : '图片帖') : '文字帖'
+                                    kindLabel: hasRenderableThumb ? (mediaType === 'video' ? '视频帖' : '图片帖') : '文字帖'
                                 };
                             }).filter(function(item) { return item.text || item.thumb; });
                             renderReportContentList(container);
