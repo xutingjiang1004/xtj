@@ -17,6 +17,8 @@
     restoreTimer: null,
     activePhotoWallVideoItem: null
   };
+  var videoPosterDataUrlCache = Object.create(null);
+  var videoPosterPromiseCache = Object.create(null);
 
   var TIMEOUTS = {
     photoUpload: 45000,
@@ -1576,17 +1578,24 @@
     }
     state.postPreviewMode = false;
     state.photoWallImagePreviewMode = false;
+    state.photoWallVideoPreviewMode = false;
     window.pwCurrentSortedPhotos = state.savedPwCurrentSortedPhotos;
     state.savedPwCurrentSortedPhotos = null;
     var overlay = byId('photoPreviewOverlay');
-    if (overlay) overlay.classList.remove('pp-post-mode');
+    if (overlay) overlay.classList.remove('pp-post-mode', 'pp-video-mode');
+    var player = byId('ppVideoPlayer');
+    if (player) {
+      player.pause();
+      player.removeAttribute('src');
+      player.load();
+    }
   }
 
   function wrapPhotoPreviewClose() {
     if (typeof window.closePhotoPreview !== 'function' || window.closePhotoPreview.__xtjPostPreviewWrapped) return;
     var original = window.closePhotoPreview;
     window.closePhotoPreview = function() {
-      var shouldRestore = state.postPreviewMode || state.photoWallImagePreviewMode;
+      var shouldRestore = state.postPreviewMode || state.photoWallImagePreviewMode || state.photoWallVideoPreviewMode;
       var result = original.apply(this, arguments);
       if (shouldRestore) state.restoreTimer = setTimeout(restorePostPreviewMode, 260);
       return result;
@@ -1706,7 +1715,147 @@
     return overlay;
   }
 
+  function ensurePhotoPreviewVideoStage() {
+    var overlay = byId('photoPreviewOverlay');
+    if (!overlay) return null;
+    var stage = overlay.querySelector('.pp-video-stage');
+    if (!stage) {
+      stage = document.createElement('div');
+      stage.className = 'pp-video-stage';
+      stage.innerHTML = '<video id="ppVideoPlayer" class="pp-video-player" controls playsinline preload="metadata"></video>';
+      var wrapper = byId('ppImageWrapper');
+      if (wrapper && wrapper.parentNode) wrapper.parentNode.insertBefore(stage, wrapper.nextSibling);
+      else overlay.appendChild(stage);
+    }
+    return stage;
+  }
+
+  function syncPhotoPreviewHeader(item) {
+    if (!item) return;
+    var userEl = byId('photoPreviewUser');
+    var timeEl = byId('photoPreviewTime');
+    var viewsEl = byId('photoPreviewViewsCount');
+    if (userEl) userEl.textContent = item.username || '未知用户';
+    if (timeEl) {
+      var stamp = item.timestamp ? new Date(item.timestamp) : null;
+      timeEl.textContent = stamp && !isNaN(stamp.getTime()) ? stamp.toLocaleString('zh-CN') : '';
+    }
+    if (viewsEl) viewsEl.textContent = Number(item.views || 0);
+    window.photoPreviewCurrent = item;
+  }
+
+  function captureVideoPosterFromUrl(url) {
+    if (!url) return Promise.resolve('');
+    if (videoPosterDataUrlCache[url]) return Promise.resolve(videoPosterDataUrlCache[url]);
+    if (videoPosterPromiseCache[url]) return videoPosterPromiseCache[url];
+    videoPosterPromiseCache[url] = new Promise(function(resolve) {
+      var video = document.createElement('video');
+      var canvas = document.createElement('canvas');
+      var cleaned = false;
+      function cleanup() {
+        if (cleaned) return;
+        cleaned = true;
+        video.pause();
+        video.removeAttribute('src');
+        try { video.load(); } catch (_) {}
+      }
+      function finish(result) {
+        cleanup();
+        if (result) videoPosterDataUrlCache[url] = result;
+        delete videoPosterPromiseCache[url];
+        resolve(result || '');
+      }
+      function tryFrame(secondsList, index) {
+        if (index >= secondsList.length) {
+          finish('');
+          return;
+        }
+        var target = secondsList[index];
+        var completed = false;
+        function drawNow() {
+          if (completed) return;
+          completed = true;
+          try {
+            var width = Math.max(1, video.videoWidth || 1);
+            var height = Math.max(1, video.videoHeight || 1);
+            var ratio = Math.min(640 / width, 640 / height, 1);
+            canvas.width = Math.max(1, Math.round(width * ratio));
+            canvas.height = Math.max(1, Math.round(height * ratio));
+            var ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error('poster_context_failed');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            finish(canvas.toDataURL('image/jpeg', 0.82));
+          } catch (_) {
+            tryFrame(secondsList, index + 1);
+          }
+        }
+        function onError() {
+          video.removeEventListener('seeked', drawNow);
+          tryFrame(secondsList, index + 1);
+        }
+        video.addEventListener('seeked', drawNow, { once: true });
+        video.addEventListener('error', onError, { once: true });
+        try {
+          video.currentTime = Math.max(0, target || 0);
+        } catch (_) {
+          onError();
+        }
+        setTimeout(drawNow, 320);
+      }
+      video.crossOrigin = 'anonymous';
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      video.onloadedmetadata = function() {
+        var duration = Number(video.duration || 0);
+        var candidates = [0];
+        if (duration > 0.08) candidates.push(Math.min(0.08, Math.max(duration - 0.02, 0)));
+        if (duration > 0.35) candidates.push(Math.min(duration * 0.1, duration - 0.08));
+        tryFrame(candidates, 0);
+      };
+      video.onerror = function() { finish(''); };
+      video.src = url;
+    });
+    return videoPosterPromiseCache[url];
+  }
+
+  function openUnifiedPhotoWallVideoPreview(item, sourceList) {
+    if (!item || !item.imageUrl || typeof window.openPhotoPreview !== 'function') return false;
+    var baseOpen = window.__xtjBaseOpenPhotoPreview || window.openPhotoPreview;
+    var posterSrc = item.thumbUrl || item.thumb || VIDEO_CARD_FALLBACK_THUMB;
+    var stubItem = Object.assign({}, item, {
+      imageUrl: posterSrc,
+      thumbUrl: posterSrc,
+      thumb: posterSrc,
+      __xtjVideoPosterStub: true
+    });
+    state.savedPwCurrentSortedPhotos = Array.isArray(sourceList) ? sourceList.slice() : (Array.isArray(window.pwCurrentSortedPhotos) ? window.pwCurrentSortedPhotos.slice() : []);
+    state.photoWallVideoPreviewMode = true;
+    window.pwCurrentSortedPhotos = [stubItem];
+    wrapPhotoPreviewClose();
+    baseOpen.call(window, 0, false);
+    requestAnimationFrame(function() {
+      var overlay = byId('photoPreviewOverlay');
+      var stage = ensurePhotoPreviewVideoStage();
+      var player = byId('ppVideoPlayer');
+      if (!overlay || !stage || !player) return;
+      overlay.classList.add('pp-video-mode');
+      player.poster = posterSrc;
+      player.src = item.imageUrl;
+      player.load();
+      syncPhotoPreviewHeader(item);
+      Promise.resolve(player.play()).catch(function() {});
+    });
+    return true;
+  }
+
   function closePhotoWallVideoPreview() {
+    var unifiedPlayer = byId('ppVideoPlayer');
+    var unifiedOverlay = byId('photoPreviewOverlay');
+    if (unifiedPlayer && unifiedOverlay && unifiedOverlay.classList.contains('pp-video-mode') && typeof window.closePhotoPreview === 'function') {
+      window.closePhotoPreview();
+      return;
+    }
     var overlay = byId('xtjPhotoWallVideoOverlay');
     var player = byId('xtjPhotoWallVideoPlayer');
     if (player) {
@@ -1749,6 +1898,9 @@
     var item = sourceList[index];
     if (!item) return false;
     if ((item.mediaKind || '').toLowerCase() === 'video' || /^video\//.test(item.mimeType || '')) {
+      if (typeof window.openPhotoPreview === 'function') {
+        return openUnifiedPhotoWallVideoPreview(item, sourceList);
+      }
       return openPhotoWallVideoPreview(item);
     }
     if (typeof window.openPhotoPreview !== 'function') return false;
@@ -1831,7 +1983,16 @@
 
       if (!window.openPhotoPreview.__xtjPreviewCleanupWrapped) {
         var originalOpenPhotoPreview = window.openPhotoPreview;
+        window.__xtjBaseOpenPhotoPreview = originalOpenPhotoPreview;
         window.openPhotoPreview = function() {
+          var list = Array.isArray(window.pwCurrentSortedPhotos) && window.pwCurrentSortedPhotos.length
+            ? window.pwCurrentSortedPhotos
+            : (Array.isArray(window.photoWallData) ? window.photoWallData : []);
+          var index = Number(arguments[0] || 0);
+          var candidate = enhancePhotoWallItem(list[index]);
+          if (candidate && !candidate.__xtjVideoPosterStub && ((candidate.mediaKind || '').toLowerCase() === 'video' || /^video\//.test(candidate.mimeType || ''))) {
+            return openUnifiedPhotoWallVideoPreview(candidate, list);
+          }
           var result = originalOpenPhotoPreview.apply(this, arguments);
           requestAnimationFrame(function() {
             var toolbar = byId('ppPreviewToolbar') || document.querySelector('#photoPreviewOverlay .pp-preview-toolbar');
@@ -1992,6 +2153,12 @@
         mediaKind: /^video\//.test(next.mimeType || '') ? 'video' : 'image'
       });
     }
+    if ((next.mediaKind || '').toLowerCase() === 'video' && !next.thumbUrl) {
+      next = Object.assign({}, next, {
+        thumbUrl: next.thumb || VIDEO_CARD_FALLBACK_THUMB,
+        thumb: next.thumb || VIDEO_CARD_FALLBACK_THUMB
+      });
+    }
     return next;
   }
 
@@ -2011,6 +2178,7 @@
       var badge = node.querySelector('.xtj-photo-wall-video-badge');
       var duration = node.querySelector('.xtj-photo-wall-video-duration');
       if (item && ((item.mediaKind || '').toLowerCase() === 'video' || /^video\//.test(item.mimeType || ''))) {
+        var cardImg = node.querySelector('img');
         if (!badge) {
           badge = document.createElement('span');
           badge.className = 'xtj-photo-wall-video-badge';
@@ -2023,6 +2191,20 @@
           node.appendChild(duration);
         }
         duration.textContent = formatDuration(item.duration || 0);
+        if (cardImg && (!item.thumbUrl || item.thumbUrl === VIDEO_CARD_FALLBACK_THUMB) && item.imageUrl && !node.dataset.xtjPosterPending) {
+          node.dataset.xtjPosterPending = '1';
+          captureVideoPosterFromUrl(item.imageUrl).then(function(dataUrl) {
+            if (!dataUrl) return;
+            item.thumbUrl = dataUrl;
+            item.thumb = dataUrl;
+            if (cardImg) {
+              cardImg.src = dataUrl;
+              cardImg.setAttribute('data-src', dataUrl);
+            }
+          }).finally(function() {
+            delete node.dataset.xtjPosterPending;
+          });
+        }
       } else {
         if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
         if (duration && duration.parentNode) duration.parentNode.removeChild(duration);
