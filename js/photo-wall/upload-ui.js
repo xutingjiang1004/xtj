@@ -13,7 +13,9 @@
     postPreviewMode: false,
     photoWallImagePreviewMode: false,
     photoWallVideoPreviewMode: false,
+    allowVideoPreviewClose: false,
     savedPwCurrentSortedPhotos: null,
+    activePhotoWallVideoSourceList: null,
     restoreTimer: null,
     activePhotoWallVideoItem: null
   };
@@ -972,7 +974,7 @@
     };
   }
 
-  async function uploadPhotoWallFiles() {
+  async function uploadPhotoWallFilesLegacyRetired() {
     if (!window.sb) throw new Error('Supabase not ready');
     if (!window.currentUser) throw new Error('请先登录');
     if (!state.photoFiles.length) throw new Error('Please choose image or video files');
@@ -1067,7 +1069,7 @@
     }, 420);
   }
 
-  async function publishPost() {
+  async function publishPostLegacyRetired() {
     if (!window.currentUser) {
       toast('请先登录');
       return;
@@ -1181,7 +1183,7 @@
     }
   }
 
-  function handlePhotoSelection(event) {
+  function handlePhotoSelectionLegacyRetired(event) {
     var files = (event && event.target && event.target.files) ? Array.prototype.slice.call(event.target.files) : [];
     var selected = files.filter(function(file) {
       return file && (/^image\//.test(file.type) || /^video\//.test(file.type));
@@ -1281,6 +1283,7 @@
 
     var successCount = 0;
     var failCount = 0;
+    var firstErrorMessage = '';
     for (var i = 0; i < state.photoFiles.length; i++) {
       var file = state.photoFiles[i];
       var start = (i / state.photoFiles.length) * 88;
@@ -1576,6 +1579,7 @@
     state.postPreviewMode = false;
     state.photoWallImagePreviewMode = false;
     state.photoWallVideoPreviewMode = false;
+    state.allowVideoPreviewClose = false;
     state.activePhotoWallVideoItem = null;
     state.activePhotoWallVideoSourceList = null;
     window.pwCurrentSortedPhotos = state.savedPwCurrentSortedPhotos;
@@ -1594,8 +1598,10 @@
     if (typeof window.closePhotoPreview !== 'function' || window.closePhotoPreview.__xtjPostPreviewWrapped) return;
     var original = window.closePhotoPreview;
     window.closePhotoPreview = function() {
+      if (state.photoWallVideoPreviewMode && !state.allowVideoPreviewClose) return false;
       var shouldRestore = state.postPreviewMode || state.photoWallImagePreviewMode || state.photoWallVideoPreviewMode;
       var result = original.apply(this, arguments);
+      state.allowVideoPreviewClose = false;
       if (shouldRestore) state.restoreTimer = setTimeout(restorePostPreviewMode, 260);
       return result;
     };
@@ -1743,7 +1749,7 @@
       ].forEach(function(type) {
         stage.addEventListener(type, function(event) {
           event.stopPropagation();
-        }, true);
+        });
       });
     }
     return stage;
@@ -1872,6 +1878,7 @@
         }
         state.activePhotoWallVideoItem = null;
         state.activePhotoWallVideoSourceList = null;
+        state.allowVideoPreviewClose = true;
         if (typeof window.closePhotoPreview === 'function') window.closePhotoPreview();
         if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();
         else if (window.renderPhotoWall) await window.renderPhotoWall();
@@ -1988,6 +1995,7 @@
     });
     state.savedPwCurrentSortedPhotos = Array.isArray(sourceList) ? sourceList.slice() : (Array.isArray(window.pwCurrentSortedPhotos) ? window.pwCurrentSortedPhotos.slice() : []);
     state.photoWallVideoPreviewMode = true;
+    state.allowVideoPreviewClose = false;
     window.pwCurrentSortedPhotos = [stubItem];
     wrapPhotoPreviewClose();
     baseOpen.call(window, 0, false);
@@ -1995,10 +2003,21 @@
       var overlay = byId('photoPreviewOverlay');
       var stage = ensurePhotoPreviewVideoStage();
       var player = byId('ppVideoPlayer');
+      var closeBtn = overlay ? overlay.querySelector('.photo-preview-close') : null;
       if (!overlay || !stage || !player) return;
       state.activePhotoWallVideoItem = item;
       state.activePhotoWallVideoSourceList = Array.isArray(sourceList) ? sourceList.slice() : [];
       overlay.classList.add('pp-video-mode');
+      if (closeBtn) {
+        closeBtn.onclick = function(event) {
+          if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+          state.allowVideoPreviewClose = true;
+          return window.closePhotoPreview();
+        };
+      }
       player.poster = posterSrc;
       player.src = item.imageUrl;
       player.load();
@@ -2012,6 +2031,7 @@
     var unifiedPlayer = byId('ppVideoPlayer');
     var unifiedOverlay = byId('photoPreviewOverlay');
     if (unifiedPlayer && unifiedOverlay && unifiedOverlay.classList.contains('pp-video-mode') && typeof window.closePhotoPreview === 'function') {
+      state.allowVideoPreviewClose = true;
       window.closePhotoPreview();
       return;
     }
