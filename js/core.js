@@ -1,6 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// Spring loader CSS is now in style.css - old CSS removed
 console.log('[XTJ] core.js loaded, starting...');
-
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -63,7 +61,7 @@ window.safeLocalStorageSet = function(key, value) {
                     fetch(API_BASE + '/api/log-user-visit', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_name: userName })
+                        body: JSON.stringify({ user_name: userName, password_hash: localStorage.getItem("xtj_pw_hash") || "" })
                     }).catch(function(){});
                 } catch(e) {}
             } else if (sb && !_visitLoggedToday) {
@@ -1191,6 +1189,7 @@ window.safeLocalStorageSet = function(key, value) {
                             btn.disabled = false; btn.textContent = "登录";
                             return;
                         }
+                        localStorage.setItem("xtj_pw_hash", authRec.media_url);
                     }
 
                     currentUser = name;
@@ -1258,6 +1257,7 @@ window.safeLocalStorageSet = function(key, value) {
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
+                    localStorage.setItem("xtj_pw_hash", pwHash);
                     showToast("注册成功，欢迎你！" + name);
                     closeModal('registerModal');
                     
