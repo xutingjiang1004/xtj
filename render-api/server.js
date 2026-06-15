@@ -524,28 +524,44 @@ app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
 // ===================== 用户照片删除 API（使用 service_role 绕过 RLS） ======================
 app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
   try {
-    const { photoId, username, password_hash } = req.body;
+    const { photoId, username, password_hash, currentUser } = req.body;
     if (!photoId) return res.status(400).json({ error: '缺少照片ID' });
     if (!username) return res.status(400).json({ error: '缺少用户名' });
     if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
 
-    // 验证密码 hash
-    const { data: authRec } = await supabase.from('posts')
-      .select('media_url')
-      .eq('user_name', username)
-      .eq('media_type', AUTH_MARKER)
-      .maybeSingle();
-    if (!authRec || authRec.media_url !== password_hash) {
-      return res.status(403).json({ error: '身份验证失败' });
+    // 判断是否为管理员（xxz）执行删除
+    const isAdmin = currentUser === ADMIN_USERNAME;
+
+    if (isAdmin) {
+      // 管理员：验证管理员身份标记
+      const { data: adminAuth } = await supabase.from('posts')
+        .select('media_url')
+        .eq('user_name', ADMIN_USERNAME)
+        .eq('media_type', ADMIN_AUTH_MARKER)
+        .maybeSingle();
+      if (!adminAuth || adminAuth.media_url !== password_hash) {
+        return res.status(403).json({ error: '管理员身份验证失败' });
+      }
+      // 管理员可删除任意照片，跳过所有者校验
+    } else {
+      // 普通用户：验证用户身份标记
+      const { data: authRec } = await supabase.from('posts')
+        .select('media_url')
+        .eq('user_name', username)
+        .eq('media_type', AUTH_MARKER)
+        .maybeSingle();
+      if (!authRec || authRec.media_url !== password_hash) {
+        return res.status(403).json({ error: '身份验证失败' });
+      }
+
+      const { data: photo } = await supabase.from('posts')
+        .select('user_name')
+        .eq('id', photoId)
+        .maybeSingle();
+
+      if (!photo) return res.status(404).json({ error: '照片不存在' });
+      if (photo.user_name !== username) return res.status(403).json({ error: '无权删除此照片' });
     }
-
-    const { data: photo } = await supabase.from('posts')
-      .select('user_name')
-      .eq('id', photoId)
-      .maybeSingle();
-
-    if (!photo) return res.status(404).json({ error: '照片不存在' });
-    if (photo.user_name !== username) return res.status(403).json({ error: '无权删除此照片' });
 
     const { error } = await supabase.from('posts').delete().eq('id', photoId);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
