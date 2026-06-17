@@ -108,13 +108,13 @@
   }
 
   function supportsBrowserVideoCompression() {
+    if (!window.MediaRecorder) return false;
+    if (typeof MediaRecorder.isTypeSupported !== 'function') return false;
     var probeCanvas = document.createElement('canvas');
     var probeVideo = document.createElement('video');
-    return !!(
-      window.MediaRecorder &&
-      (typeof probeCanvas.captureStream === 'function' ||
-       typeof probeVideo.captureStream === 'function')
-    );
+    var hasCanvasStream = typeof probeCanvas.captureStream === 'function';
+    var hasVideoStream = typeof probeVideo.captureStream === 'function' || typeof probeVideo.mozCaptureStream === 'function';
+    return hasCanvasStream || hasVideoStream;
   }
 
   function getVideoCompressionProfiles(sourceWidth, sourceHeight) {
@@ -302,7 +302,8 @@
       '.pp-compact-btn,#ppCompactBtn{display:none!important;}',
       '.pp-post-mode .pp-delete-btn,.pp-post-mode #ppDeleteBtn{display:none!important;}',
       '#photoPreviewOverlay.pp-video-mode #ppSlideTrack{display:none!important;}',
-      '#photoPreviewOverlay .pp-video-stage{display:none;align-items:center;justify-content:center;width:100%;height:100%;padding:24px;}',
+      '#photoPreviewOverlay.pp-video-mode #ppImageWrapper{display:none!important;}',
+      '#photoPreviewOverlay .pp-video-stage{display:none;align-items:center;justify-content:center;width:100%;height:100%;padding:24px;z-index:2;position:relative;}',
       '#photoPreviewOverlay.pp-video-mode .pp-video-stage{display:flex;}',
       '#photoPreviewOverlay .pp-video-player{display:block;max-width:min(100%,1100px);max-height:min(82vh,100%);width:auto;height:auto;border-radius:28px;background:#071012;box-shadow:0 24px 60px rgba(10,26,28,0.28);}',
       '#photoPreviewOverlay.pp-video-mode .pp-nav-arrow,#photoPreviewOverlay.pp-video-mode #ppZoomOutBtn,#photoPreviewOverlay.pp-video-mode #ppZoomInBtn,#photoPreviewOverlay.pp-video-mode #ppRotateBtn{display:none!important;}',
