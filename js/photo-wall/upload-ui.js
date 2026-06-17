@@ -631,9 +631,13 @@
       var url = URL.createObjectURL(file);
       var video = document.createElement('video');
       var cleaned = false;
+      var timeoutId = null;
       function cleanup() {
         if (cleaned) return;
         cleaned = true;
+        if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+        video.onloadedmetadata = null;
+        video.onerror = null;
         video.pause();
         video.removeAttribute('src');
         video.load();
@@ -643,6 +647,7 @@
       video.muted = true;
       video.playsInline = true;
       video.onloadedmetadata = function() {
+        if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
         resolve({
           width: video.videoWidth || 0,
           height: video.videoHeight || 0,
@@ -657,6 +662,13 @@
         reject(new Error('video_metadata_failed'));
       };
       video.src = url;
+      // 10秒超时保护，防止视频加载卡死
+      timeoutId = setTimeout(function() {
+        if (!cleaned) {
+          cleanup();
+          reject(new Error('video_metadata_timeout'));
+        }
+      }, 10000);
     });
   }
 
