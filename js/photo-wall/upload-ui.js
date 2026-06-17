@@ -1064,7 +1064,9 @@
     try {
       metadata = await readVideoMetadata(file);
     } catch (_) {
-      if (file.size <= targetBytes) {
+      // 读不到元数据不一定是视频损坏，可能是浏览器慢/超时/格式检测异常
+      // 只要文件在硬限制内，直接上传原文件（不压缩）
+      if (file.size <= HARD_VIDEO_LIMIT_BYTES) {
         return {
           success: true,
           file: file,
@@ -1075,6 +1077,7 @@
           width: 0,
           height: 0,
           compressed: false,
+          warning: 'metadata_unavailable',
           attempts: []
         };
       }
@@ -1192,7 +1195,7 @@
       if (!compressedVideo || !compressedVideo.success || !compressedVideo.file) {
         throw new Error(getCompressionFailureMessage(compressedVideo && compressedVideo.errorReason));
       }
-      if (compressedVideo.finalSize > SOFT_VIDEO_LIMIT_BYTES) {
+      if (compressedVideo.finalSize > SOFT_VIDEO_LIMIT_BYTES && compressedVideo.compressed) {
         throw new Error(getCompressionFailureMessage('still_over_limit'));
       }
       var poster;
