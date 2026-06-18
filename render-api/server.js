@@ -563,7 +563,19 @@ app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
       if (photo.user_name !== username) return res.status(403).json({ error: '无权删除此照片' });
     }
 
-    const { error } = await supabase.from('posts').delete().eq('id', photoId);
+    const deletedPayload = {
+      __pw_del__: true,
+      deleted_at: new Date().toISOString(),
+      deleted_by: currentUser || username || '',
+      orig: username || ''
+    };
+    const { error } = await supabase
+      .from('posts')
+      .update({
+        media_url: '__deleted__',
+        content: JSON.stringify(deletedPayload)
+      })
+      .eq('id', photoId);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
 
     return res.json({ ok: true });
