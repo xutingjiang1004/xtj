@@ -1585,7 +1585,7 @@
     }
 
     async function renderPhotosTab(el) {
-        if (!photosAdminData.length) { await loadPhotosAdminData(); }
+        await loadPhotosAdminData();
         var active = photosAdminData.filter(function(p){ return !p.is_deleted; });
         var deleted = photosAdminData.filter(function(p){ return p.is_deleted; });
         var h = '<div class="stats-row">';
@@ -1602,7 +1602,8 @@
                 var extra = {};
                 try { extra = JSON.parse(p.content || '{}'); } catch(e) {}
                 var thumbUrl = extra.thumb || p.media_url || '';
-                var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + escapeHtml(thumbUrl) + '\', \'' + escapeHtml(p.user_name || '') + '\', \'' + escapeHtml(p.created_at || '') + '\')" title="点击预览大图">' : '-';
+                var fullUrl = p.media_url || extra.thumb || '';
+                var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + escapeHtml(fullUrl) + '\', \'' + escapeHtml(p.user_name || '') + '\', \'' + escapeHtml(p.created_at || '') + '\')" title="点击预览大图">' : '-';
                 var statusBadge = p.is_deleted
                     ? '<span style="background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">已删除</span>'
                     : '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">正常</span>';
