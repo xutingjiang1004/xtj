@@ -8626,6 +8626,35 @@
   100% { transform: translateX(130%); }
 }
 
+/* ===== 上传 Spinner + 进度条 ===== */
+@keyframes pwSpinRing {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes pwPulseFade {
+  0% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+.pw-upload-progress-bar-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(130, 185, 166, 0.14);
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(135, 181, 160, 0.12);
+}
+
+.pw-upload-progress-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(32, 197, 157, 0.96), rgba(96, 165, 250, 0.88));
+  background-size: 180% 100%;
+  transition: width 0.3s ease;
+  box-shadow: 0 2px 8px rgba(90, 179, 166, 0.2);
+}
+
 .pw-upload-queue-head {
   justify-content: space-between;
   font-size: 11px;
