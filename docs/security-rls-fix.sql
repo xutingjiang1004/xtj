@@ -76,3 +76,55 @@ DROP POLICY IF EXISTS "anon_delete_posts" ON posts;
 CREATE POLICY "anon_delete_posts" ON posts
   FOR DELETE
   USING (media_type = '__photo_wall__');
+
+-- ============================================================
+-- H4: 创建 delete_photo_wall_post RPC（安全删除 + Storage 路径返回）
+-- 用途：前端调用此 RPC 硬删除照片，同时返回 media_url 供
+--       Storage 清理。权限由 p_username / p_is_admin 参数控制。
+-- ============================================================
+CREATE OR REPLACE FUNCTION delete_photo_wall_post(p_post_id bigint, p_username text, p_is_admin boolean)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+    v_user_name text;
+    v_media_url text;
+BEGIN
+    SELECT user_name, media_url INTO v_user_name, v_media_url
+    FROM posts
+    WHERE id = p_post_id AND media_type = '__photo_wall__';
+
+    IF NOT FOUND THEN
+        RETURN json_build_object('ok', false, 'error', 'not_found');
+    END IF;
+
+    -- 权限校验：admin 或发布者本人
+    IF p_is_admin OR (p_username IS NOT NULL AND p_username <> '' AND v_user_name = p_username) THEN
+        DELETE FROM posts WHERE id = p_post_id;
+        RETURN json_build_object('ok', true, 'data', json_build_object('media_url', v_media_url));
+    ELSE
+        RETURN json_build_object('ok', false, 'error', 'unauthorized');
+    END IF;
+END;
+$$;
+
+-- ============================================================
+-- H5: 修复 Realtime 广播 — 照片墙删除跨设备同步
+-- 问题：posts 表默认 REPLICA IDENTITY 只发送主键，不包含
+--       media_type 和 media_url，导致其他设备的 Realtime
+--       订阅无法正确过滤和响应删除事件。
+-- 修复：改为 FULL，让 Realtime 发送完整行数据。
+-- ============================================================
+ALTER TABLE posts REPLICA IDENTITY FULL;
+
+-- ============================================================
+-- H6: 允许 anon 删除 Storage 中的照片文件
+-- 用途：照片删除时前端调用 storage.from('uploads').remove()
+--       清理对应的图片/视频文件。
+-- ============================================================
+DROP POLICY IF EXISTS "anon_delete_uploads" ON storage.objects;
+CREATE POLICY "anon_delete_uploads" ON storage.objects
+  FOR DELETE
+  USING (bucket_id = 'uploads' AND name LIKE 'photos/%');
