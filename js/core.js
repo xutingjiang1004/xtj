@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -561,6 +561,7 @@ window.safeLocalStorageSet = function(key, value) {
             return !p.user_name && !!deviceId && !!p.actor_key && p.actor_key === deviceId;
         }
         window.canDeletePost = canDeletePost;
+        window.isAdmin = isAdmin;
 
         function normalizePosts(posts) {
             return (posts || []).map(normalizePost);
