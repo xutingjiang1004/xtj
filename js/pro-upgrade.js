@@ -1,4 +1,4 @@
-(function() {
+﻿(function() {
   'use strict';
   if (window.__xtjProUpgradeLoaded) return;
   window.__xtjProUpgradeLoaded = true;
@@ -101,7 +101,7 @@
       activated_at: now.toISOString()
     });
 
-    console.log('[Pro] VIP activated locally for', userName);
+    // console.log('[Pro] VIP activated locally for', userName);
     return vipInfo;
   };
 
@@ -360,5 +360,5 @@
     return !!(local && local.is_active);
   };
 
-  console.log('[Pro] Upgrade module loaded');
+  // console.log('[Pro] Upgrade module loaded');
 })();
