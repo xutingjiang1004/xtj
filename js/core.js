@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -1998,6 +1998,7 @@ function renderProfileActivityList(kind) {
 
             // ===================== 举报弹窗内的举报记录 =====================
             window.toggleReportRecords = async function() {
+                if (typeof clearReportReplyBadge === 'function') clearReportReplyBadge();
                 ensureReportHistoryModal();
                 var modal = document.getElementById('reportHistoryModal');
                 if (!modal) return;
@@ -5945,38 +5946,67 @@ function renderProfileActivityList(kind) {
 
             // ===================== 举报回复通知检测 =====================
             var reportReplyPollTimer = null;
-            var REPORT_REPLY_POLL_INTERVAL = 60000; // 60秒
+            var REPORT_REPLY_POLL_INTERVAL = 30000; // 30秒
 
             async function checkReportReplies() {
                 if (!window.currentUser) return;
                 try {
-                    var lastCheck = parseInt(localStorage.getItem('xtj_report_reply_check') || '0', 10);
-                    var res = await sb.from('posts')
-                        .select('id, content, created_at')
-                        .eq('user_name', window.currentUser)
-                        .eq('media_type', REPORT_MARKER)
-                        .order('created_at', { ascending: false })
-                        .limit(160);
-                    if (res && res.error) return;
-                    var newReplies = 0;
-                    (res.data || []).forEach(function(p) {
+                    // 兼容新旧API：优先用后端通知API，降级到本地检测
+                    var unread = 0;
+                    if (typeof API_BASE !== 'undefined' && API_BASE) {
                         try {
-                            var c = JSON.parse(p.content || '{}');
-                            if (c.admin_response && c.response_at) {
-                                var responseTime = new Date(c.response_at).getTime();
-                                if (responseTime > lastCheck) {
-                                    newReplies++;
-                                }
+                            var notifRes = await fetch(API_BASE + '/api/report/notifications?user=' + encodeURIComponent(window.currentUser));
+                            if (notifRes.ok) {
+                                var notifData = await notifRes.json();
+                                unread = notifData.unread || 0;
                             }
                         } catch(e) {}
-                    });
-                    var badge = document.getElementById('navReportBadge');
-                    if (badge) {
-                        if (newReplies > 0) {
-                            badge.textContent = newReplies > 99 ? '99+' : newReplies;
-                            badge.classList.add('show');
+                    }
+                    if (!unread) {
+                        // 降级：本地检测旧版 admin_response（兼容旧逻辑）
+                        var lastCheck = parseInt(localStorage.getItem('xtj_report_reply_check') || '0', 10);
+                        var res = await sb.from('posts')
+                            .select('id, content, created_at')
+                            .eq('user_name', window.currentUser)
+                            .eq('media_type', REPORT_MARKER)
+                            .order('created_at', { ascending: false })
+                            .limit(160);
+                        if (res && res.error) return;
+                        (res.data || []).forEach(function(p) {
+                            try {
+                                var c = JSON.parse(p.content || '{}');
+                                // 检查通知数组
+                                if (Array.isArray(c.notifications)) {
+                                    unread += c.notifications.filter(function(n) { return !n.is_read; }).length;
+                                }
+                                // 兼容旧版 admin_response
+                                if (c.admin_response && c.response_at) {
+                                    var responseTime = new Date(c.response_at).getTime();
+                                    if (responseTime > lastCheck) unread++;
+                                }
+                            } catch(e) {}
+                        });
+                    }
+                    // 更新举报按钮红点
+                    var reportBadge = document.getElementById('reportBtnBadge');
+                    if (reportBadge) {
+                        if (unread > 0) {
+                            reportBadge.textContent = unread > 99 ? '99+' : unread;
+                            reportBadge.style.display = '';
+                            reportBadge.classList.add('show');
                         } else {
-                            badge.classList.remove('show');
+                            reportBadge.classList.remove('show');
+                            reportBadge.style.display = 'none';
+                        }
+                    }
+                    // 同时更新 dock 导航红点
+                    var navBadge = document.getElementById('navReportBadge');
+                    if (navBadge) {
+                        if (unread > 0) {
+                            navBadge.textContent = unread > 99 ? '99+' : unread;
+                            navBadge.classList.add('show');
+                        } else {
+                            navBadge.classList.remove('show');
                         }
                     }
                 } catch(e) {}
@@ -5996,6 +6026,20 @@ function renderProfileActivityList(kind) {
                 if (badge) {
                     badge.classList.remove('show');
                     badge.textContent = '0';
+                }
+                var reportBadge = document.getElementById('reportBtnBadge');
+                if (reportBadge) {
+                    reportBadge.classList.remove('show');
+                    reportBadge.style.display = 'none';
+                    reportBadge.textContent = '0';
+                }
+                // 标记服务器端通知为已读
+                if (typeof API_BASE !== 'undefined' && API_BASE && window.currentUser) {
+                    fetch(API_BASE + '/api/report/notifications/mark-read', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user: window.currentUser })
+                    }).catch(function(){});
                 }
                 // 立即重新检测以更新角标
                 setTimeout(checkReportReplies, 200);
@@ -8516,6 +8560,7 @@ function renderProfileActivityList(kind) {
 
         window.openReportModal = function() {
             if (!currentUser) { showToast('请先登录'); return; }
+            if (typeof clearReportReplyBadge === 'function') clearReportReplyBadge();
             var overlay = document.getElementById('reportModal');
             if (!overlay) return;
             normalizeReportModalStructure();
