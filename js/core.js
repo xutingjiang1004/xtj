@@ -45,6 +45,7 @@ window.safeLocalStorageSet = function(key, value) {
 };
 
             const ADMIN_NAME = "xxz";
+            const ADMIN_TOKEN_KEY = "xtj_admin_token";
             const AVATAR_CACHE_KEY = "xtj_avatars";
             let avatarCache = {};
 
@@ -1188,6 +1189,9 @@ window.safeLocalStorageSet = function(key, value) {
                                 btn.disabled = false; btn.textContent = "登录";
                                 return;
                             }
+                            if (loginRes.token) {
+                                localStorage.setItem(ADMIN_TOKEN_KEY, loginRes.token);
+                            }
                         } catch (apiErr) {
                             showToast("管理员登录失败: 无法连接后端 API");
                             btn.disabled = false; btn.textContent = "登录";
@@ -1207,6 +1211,7 @@ window.safeLocalStorageSet = function(key, value) {
                             return;
                         }
                         localStorage.setItem("xtj_pw_hash", authRec.media_url);
+                        localStorage.removeItem(ADMIN_TOKEN_KEY);
                     }
 
                     currentUser = name;
@@ -1719,6 +1724,8 @@ window.safeLocalStorageSet = function(key, value) {
                 currentUser = "";
                 window.currentUser = currentUser;
                 localStorage.removeItem("xtj_user");
+                localStorage.removeItem("xtj_pw_hash");
+                localStorage.removeItem(ADMIN_TOKEN_KEY);
                 localStorage.removeItem(CACHE_KEY);
                 document.getElementById("loginNickInp").value = "";
                 document.getElementById("loginPwInp").value = "";
