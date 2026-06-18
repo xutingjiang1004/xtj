@@ -415,14 +415,15 @@ app.post('/admin/logout', verifyToken, (req, res) => {
 // ===================== 数据加载（只读，但需要认证） ======================
 app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
   try {
-    const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes] = await Promise.all([
+    const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes, annRes] = await Promise.all([
       supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500),
       supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500),
       supabase.from('mutes').select('*').order('created_at', { ascending: false }).limit(500),
-      supabase.from('blacklist').select('*').order('created_at', { ascending: false }).limit(500)
+      supabase.from('blacklist').select('*').order('created_at', { ascending: false }).limit(500),
+      supabase.from('posts').select('*').eq('media_type', '__ann__').order('created_at', { ascending: false }).limit(500)
     ]);
     
     return res.json({
@@ -432,7 +433,8 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
       reports: reportRes.data || [],
       bans: banRes.data || [],
       mutes: muteRes.data || [],
-      blacklist: blacklistRes.data || []
+      blacklist: blacklistRes.data || [],
+      announcements: annRes.data || []
     });
   } catch (e) {
     console.error('[API] 数据加载失败:', e.message);
