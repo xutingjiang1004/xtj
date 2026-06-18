@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -2055,7 +2055,7 @@ function renderProfileActivityList(kind) {
                     }
                     var triggerBtn = document.getElementById('reportRecordsToggleBtn');
                     if (triggerBtn) {
-                        triggerBtn.innerHTML = '📋 记录';
+                        triggerBtn.textContent = '举报记录';
                         triggerBtn.setAttribute('aria-label', '打开举报记录');
                     }
                     list.innerHTML = records.map(function(r) {
@@ -7198,37 +7198,133 @@ function renderProfileActivityList(kind) {
             // ========== 主题切换 ==========
             const htmlEl = document.documentElement;
             const themeBtn = document.getElementById('themeToggle');
-            function applyTheme(isDark) {
+            const THEME_STORAGE_KEY = 'xtj-theme';
+            let themeToggleAnimating = false;
+
+            function setThemeState(isDark) {
                 if (isDark) {
                     htmlEl.setAttribute('data-theme', 'dark');
                     if (themeBtn) {
                         themeBtn.setAttribute('aria-label', '切换到浅色模式');
                         themeBtn.setAttribute('title', '切换到浅色模式');
                     }
-                    localStorage.setItem('xtj-theme', 'dark');
+                    localStorage.setItem(THEME_STORAGE_KEY, 'dark');
                 } else {
                     htmlEl.removeAttribute('data-theme');
                     if (themeBtn) {
                         themeBtn.setAttribute('aria-label', '切换到深色模式');
                         themeBtn.setAttribute('title', '切换到深色模式');
                     }
-                    localStorage.setItem('xtj-theme', 'light');
+                    localStorage.setItem(THEME_STORAGE_KEY, 'light');
                 }
             }
+
+            function setThemeRevealVars(originEl) {
+                var source = originEl || themeBtn;
+                var rect = source && typeof source.getBoundingClientRect === 'function'
+                    ? source.getBoundingClientRect()
+                    : { left: window.innerWidth / 2, top: 44, width: 0, height: 0 };
+                var x = rect.left + (rect.width / 2);
+                var y = rect.top + (rect.height / 2);
+                var maxX = Math.max(x, window.innerWidth - x);
+                var maxY = Math.max(y, window.innerHeight - y);
+                var radius = Math.ceil(Math.hypot(maxX, maxY)) + 48;
+                htmlEl.style.setProperty('--theme-reveal-x', x + 'px');
+                htmlEl.style.setProperty('--theme-reveal-y', y + 'px');
+                htmlEl.style.setProperty('--theme-reveal-radius', radius + 'px');
+                return { x: x, y: y, radius: radius };
+            }
+
+            function clearThemeRevealVars() {
+                htmlEl.style.removeProperty('--theme-reveal-x');
+                htmlEl.style.removeProperty('--theme-reveal-y');
+                htmlEl.style.removeProperty('--theme-reveal-radius');
+            }
+
+            function getThemeSplashBackground(isDark) {
+                return isDark
+                    ? 'linear-gradient(180deg, rgba(17,17,24,0.98), rgba(23,24,33,0.98) 56%, rgba(31,33,44,0.98))'
+                    : 'linear-gradient(180deg, rgba(234,250,242,0.98), rgba(234,246,255,0.98) 52%, rgba(247,255,251,0.98))';
+            }
+
+            function finishThemeToggle() {
+                themeToggleAnimating = false;
+                htmlEl.removeAttribute('data-theme-animating');
+                htmlEl.removeAttribute('data-theme-transition');
+                if (themeBtn) themeBtn.disabled = false;
+                clearThemeRevealVars();
+            }
+
+            function playThemeFallback(nextIsDark, originEl) {
+                var reveal = setThemeRevealVars(originEl);
+                var overlay = document.createElement('div');
+                overlay.className = 'theme-splash-overlay';
+                overlay.style.setProperty('--theme-reveal-x', reveal.x + 'px');
+                overlay.style.setProperty('--theme-reveal-y', reveal.y + 'px');
+                overlay.style.setProperty('--theme-reveal-radius', reveal.radius + 'px');
+                overlay.style.background = getThemeSplashBackground(nextIsDark);
+                document.body.appendChild(overlay);
+                requestAnimationFrame(function() {
+                    requestAnimationFrame(function() {
+                        overlay.classList.add('is-active');
+                    });
+                });
+                window.setTimeout(function() {
+                    setThemeState(nextIsDark);
+                }, 240);
+                window.setTimeout(function() {
+                    overlay.classList.add('is-settle');
+                }, 430);
+                window.setTimeout(function() {
+                    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                    finishThemeToggle();
+                }, 720);
+            }
+
+            function animateThemeToggle(nextIsDark, originEl) {
+                if (themeToggleAnimating) return;
+                var prefersReducedMotion = false;
+                try {
+                    prefersReducedMotion = !!window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                } catch (_) {}
+                if (prefersReducedMotion) {
+                    setThemeState(nextIsDark);
+                    return;
+                }
+
+                themeToggleAnimating = true;
+                htmlEl.setAttribute('data-theme-animating', '1');
+                htmlEl.setAttribute('data-theme-transition', nextIsDark ? 'dark' : 'light');
+                if (themeBtn) themeBtn.disabled = true;
+                setThemeRevealVars(originEl);
+
+                if (typeof document.startViewTransition === 'function') {
+                    try {
+                        var transition = document.startViewTransition(function() {
+                            setThemeState(nextIsDark);
+                        });
+                        transition.finished.finally(finishThemeToggle);
+                        return;
+                    } catch (_) {}
+                }
+
+                playThemeFallback(nextIsDark, originEl);
+            }
+
             if (themeBtn) {
                 themeBtn.addEventListener('click', function() {
                     const isDark = htmlEl.getAttribute('data-theme') === 'dark';
-                    applyTheme(!isDark);
+                    animateThemeToggle(!isDark, themeBtn);
                 });
             }
             // 鍒濓拷顫愰崠鏍﹀瘜妫版﹫绱伴敓鏂ゆ嫹閿熸枻锟?localStorage锛屽叾锟斤紕閮寸紒鐔蜂焊閿?
-            const savedTheme = localStorage.getItem('xtj-theme');
+            const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
             if (savedTheme === 'dark') {
-                applyTheme(true);
+                setThemeState(true);
             } else if (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                applyTheme(true);
+                setThemeState(true);
             } else {
-                applyTheme(false);
+                setThemeState(false);
             }
 
             // ========== 鍏憡系?==========
@@ -8446,7 +8542,7 @@ function renderProfileActivityList(kind) {
                 if (!overlay || overlay.dataset.normalized === '1') return;
             var headerLeft = overlay.querySelector('.report-modal-header-left');
             if (headerLeft) {
-                headerLeft.innerHTML = '<span>举报</span><button class="report-records-btn report-records-btn--icon" id="reportRecordsToggleBtn" onclick="toggleReportRecords()" aria-label="打开举报记录"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h10"></path><path d="M8 12h10"></path><path d="M8 18h10"></path><path d="M4 6h.01"></path><path d="M4 12h.01"></path><path d="M4 18h.01"></path></svg></span></button>';
+                headerLeft.innerHTML = '<span>举报</span><button class="report-records-btn" id="reportRecordsToggleBtn" onclick="toggleReportRecords()" aria-label="打开举报记录">举报记录</button>';
             }
             var closeBtn = overlay.querySelector('.report-modal-close');
             if (closeBtn) {
