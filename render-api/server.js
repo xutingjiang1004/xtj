@@ -531,6 +531,72 @@ app.delete('/admin/comment/:id', verifyToken, async (req, res) => {
   return res.json({ ok: true, data });
 });
 
+// ===================== 举报通知辅助函数 ======================
+async function addReportNotification(reportId, action, message) {
+  try {
+    const { data: post } = await supabase.from('posts').select('content').eq('id', reportId).maybeSingle();
+    if (!post) return;
+    var c = {};
+    try { c = JSON.parse(post.content || '{}'); } catch(e) {}
+    if (!Array.isArray(c.notifications)) c.notifications = [];
+    c.notifications.push({
+      action: action,
+      message: message,
+      is_read: false,
+      created_at: new Date().toISOString()
+    });
+    await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', reportId);
+  } catch(e) { console.warn('[notif] 通知写入失败:', e.message); }
+}
+
+// ===================== 举报通知查询 API ======================
+app.get('/api/report/notifications', async (req, res) => {
+  const { user } = req.query;
+  if (!user) return res.status(400).json({ error: '缺少用户名' });
+  try {
+    const { data, error } = await supabase.from('posts')
+      .select('id, content')
+      .eq('user_name', user)
+      .eq('media_type', '__report__')
+      .order('created_at', { ascending: false })
+      .limit(160);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    var unread = 0;
+    (data || []).forEach(function(p) {
+      try {
+        var c = JSON.parse(p.content || '{}');
+        if (Array.isArray(c.notifications)) {
+          unread += c.notifications.filter(function(n) { return !n.is_read; }).length;
+        }
+      } catch(e) {}
+    });
+    return res.json({ unread: unread });
+  } catch(e) { return res.status(500).json({ error: '查询失败' }); }
+});
+
+app.post('/api/report/notifications/mark-read', async (req, res) => {
+  const { user } = req.body;
+  if (!user) return res.status(400).json({ error: '缺少用户名' });
+  try {
+    const { data, error } = await supabase.from('posts')
+      .select('id, content')
+      .eq('user_name', user)
+      .eq('media_type', '__report__');
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    for (var i = 0; i < (data || []).length; i++) {
+      var p = data[i];
+      try {
+        var c = JSON.parse(p.content || '{}');
+        if (Array.isArray(c.notifications) && c.notifications.some(function(n) { return !n.is_read; })) {
+          c.notifications.forEach(function(n) { n.is_read = true; });
+          await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', p.id);
+        }
+      } catch(e) {}
+    }
+    return res.json({ ok: true });
+  } catch(e) { return res.status(500).json({ error: '操作失败' }); }
+});
+
 // ===================== 照片管理 ======================
 app.get('/admin/photos', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('posts')
@@ -606,21 +672,23 @@ app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
       if (photo.user_name !== username) return res.status(403).json({ error: '无权删除此照片' });
     }
 
-    const deletedPayload = {
-      __pw_del__: true,
-      deleted_at: new Date().toISOString(),
-      deleted_by: currentUser || username || '',
-      orig: username || ''
-    };
-    const { error } = await supabase
-      .from('posts')
-      .update({
-        is_deleted: true,
-        deleted_at: new Date().toISOString(),
-        deleted_by: currentUser || username || '',
-        content: JSON.stringify(deletedPayload)
-      })
-      .eq('id', photoId);
+    // 硬删除：获取 media_url 后从 Storage 和 DB 双清
+    const { data: photo } = await supabase.from('posts')
+      .select('media_url')
+      .eq('id', photoId)
+      .maybeSingle();
+    var storagePath = null;
+    if (photo && photo.media_url) {
+      try {
+        var parsed = new URL(photo.media_url);
+        var match = parsed.pathname.match(/\/object\/public\/uploads\/(.*)$/) || parsed.pathname.match(/\/uploads\/(.*)$/);
+        storagePath = match && match[1] ? decodeURIComponent(match[1]) : null;
+      } catch(_) {}
+    }
+    if (storagePath) {
+      try { await supabase.storage.from('uploads').remove([storagePath]); } catch(_) {}
+    }
+    const { error } = await supabase.from('posts').delete().eq('id', photoId);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
 
     return res.json({ ok: true });
@@ -861,6 +929,8 @@ app.put('/admin/report/:id', verifyToken, async (req, res) => {
   c.reviewed_by = ADMIN_USERNAME;
   const { error } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
+  var notifMsg = status === 'actioned' ? '管理员已将你的举报标记为已处理' : (status === 'dismissed' ? '管理员已驳回你的举报' : '管理员已审核你的举报');
+  addReportNotification(id, status, notifMsg).catch(function(){});
   return res.json({ ok: true });
 });
 
@@ -888,6 +958,7 @@ app.put('/admin/report/:id/respond', verifyToken, async (req, res) => {
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   // 向举报人发送 DM 通知
   sendAdminDm(post.user_name, '[举报回复] ' + responseVal);
+  addReportNotification(id, 'replied', '管理员已回复你的举报').catch(function(){});
   return res.json({ ok: true });
 });
 
@@ -920,6 +991,7 @@ app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
   const { error: updErr } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
   if (updErr) return res.status(400).json({ error: sanitizeError(updErr) });
   sendAdminDm(reportPost.user_name, '[举报处理] ' + adminMsg);
+  addReportNotification(id, 'content_deleted', '管理员已删除被举报内容').catch(function(){});
   return res.json({ ok: true });
 });
 
@@ -955,6 +1027,7 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
       const { error: updErr1 } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
       if (updErr1) return res.status(400).json({ error: sanitizeError(updErr1) });
       sendAdminDm(reportPost.user_name, '[举报处理] 该用户已被封禁');
+      addReportNotification(id, 'user_banned', '管理员已将举报用户封禁').catch(function(){});
       return res.json({ ok: true, message: '该用户已被封禁，举报已标记为已处理' });
     }
     const { error: updBanErr } = await supabase.from('bans').update({
@@ -993,6 +1066,7 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
   const { error: finalUpdErr } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
   if (finalUpdErr) return res.status(400).json({ error: sanitizeError(finalUpdErr) });
   sendAdminDm(reportPost.user_name, '[举报处理] ' + banMsg);
+  addReportNotification(id, 'user_banned', '管理员已将举报用户封禁').catch(function(){});
   return res.json({ ok: true });
 });
 
