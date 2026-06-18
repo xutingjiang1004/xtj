@@ -1,0 +1,3 @@
+[WARN] SUPABASE_SERVICE_KEY not set. Using configured ANON KEY as fallback.
+[WARN] ADMIN_PASSWORD is not configured.
+[FATAL] No Supabase key available. Server will not start.
