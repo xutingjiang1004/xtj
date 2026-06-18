@@ -20,12 +20,16 @@
   }
 
   function getCurrentUser(){
-    return window.currentUser || (function(){ try { return localStorage.getItem('xtj_user') || ''; } catch (_) { return ''; } })();
+    return window.currentUser || (function(){
+      try { return localStorage.getItem('xtj_user') || ''; }
+      catch (_) { return ''; }
+    })();
   }
 
   function isImage(file){ return !!(file && /^image\//i.test(file.type || '')); }
   function isVideo(file){ return !!(file && /^video\//i.test(file.type || '')); }
   function isMedia(file){ return isImage(file) || isVideo(file); }
+  function isPhotoWallImage(file){ return isImage(file); }
 
   function safeFileName(file, fallbackExt){
     var name = String(file && file.name || 'media');
@@ -50,12 +54,28 @@
     return '';
   }
 
+  function escapeText(value){
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function revoke(listName){
     var list = state[listName];
     if (!Array.isArray(list)) return;
     while (list.length) {
       try { URL.revokeObjectURL(list.pop()); } catch (_) {}
     }
+  }
+
+  function closeSheet(){
+    var sheet = byId('pwUploadSheet');
+    if (!sheet) return;
+    sheet.classList.remove('active');
+    sheet.setAttribute('aria-hidden', 'true');
   }
 
   function openSheet(files){
@@ -75,26 +95,14 @@
       state.photoUrls.push(url);
       var item = document.createElement('div');
       item.className = 'pw-upload-sheet-thumb';
-      if (isVideo(file)) {
-        item.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="pw-upload-media-kind">视频</span>';
-      } else {
-        item.innerHTML = '<img src="' + url + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">';
-      }
+      item.innerHTML = '<img src="' + url + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">';
       grid.appendChild(item);
     });
     if (title) title.textContent = '选择完成，准备上传';
-    if (meta) meta.textContent = '已选择 ' + files.length + ' 个文件，确认后开始上传。';
-    if (count) count.textContent = files.length + ' 项媒体';
+    if (meta) meta.textContent = '已选择 ' + files.length + ' 张照片，确认后开始上传。';
+    if (count) count.textContent = files.length + ' 张照片';
     sheet.classList.add('active');
     sheet.setAttribute('aria-hidden', 'false');
-  }
-
-  function closeSheet(){
-    var sheet = byId('pwUploadSheet');
-    if (sheet) {
-      sheet.classList.remove('active');
-      sheet.setAttribute('aria-hidden', 'true');
-    }
   }
 
   function setProgress(text){
@@ -111,21 +119,12 @@
     overlay.innerHTML = '<div class="pw-upload-progress-container"><div class="pw-upload-progress-title">照片墙上传</div><div class="pw-upload-progress-status">' + escapeText(text) + '</div></div>';
   }
 
-  function escapeText(value){
-    return String(value == null ? '' : value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
   function handlePhotoSelection(event){
     var input = event && event.target;
     var files = input && input.files ? Array.prototype.slice.call(input.files) : [];
-    var selected = files.filter(isMedia);
+    var selected = files.filter(isPhotoWallImage);
     if (!selected.length) {
-      toast('请选择图片或视频');
+      toast('请选择照片');
       return;
     }
     state.photoFiles = selected;
@@ -134,9 +133,9 @@
 
   async function uploadOnePhotoWallFile(file, index, total){
     var user = getCurrentUser();
-    var kind = isVideo(file) ? 'video' : 'image';
+    if (!isPhotoWallImage(file)) throw new Error('请选择图片');
     var path = 'photos/' + safeFileName(file, inferExt(file));
-    var type = file.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg');
+    var type = isImage(file) && file.type ? file.type : 'image/jpeg';
     setProgress('正在上传 ' + (index + 1) + ' / ' + total);
     var upload = await window.sb.storage.from('uploads').upload(path, file, {
       contentType: type,
@@ -147,7 +146,7 @@
     var publicUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
     var content = JSON.stringify({
       type: 'photo_wall',
-      mediaKind: kind,
+      mediaKind: 'image',
       thumb: '',
       fileSize: file.size || null,
       originalSize: file.size || null,
@@ -170,7 +169,7 @@
     var user = getCurrentUser();
     if (!user) { toast('请先登录'); return; }
     if (!window.sb) { toast('Supabase 未加载，请刷新页面'); return; }
-    if (!state.photoFiles.length) { toast('请选择图片或视频'); return; }
+    if (!state.photoFiles.length) { toast('请选择照片'); return; }
     state.uploading = true;
     closeSheet();
     var ok = 0;
@@ -198,7 +197,8 @@
       if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData(true);
       if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
       else if (typeof window.renderPhotoWall === 'function') await window.renderPhotoWall();
-      toast(ok ? ('已上传 ' + ok + ' 项' + (fail ? '，失败 ' + fail + ' 项' : '')) : (firstError || '上传失败'));
+      if (ok) toast('已上传 ' + ok + ' 张照片' + (fail ? '，失败 ' + fail + ' 张' : ''));
+      else toast(firstError || '上传失败');
     } finally {
       setProgress('');
       state.uploading = false;
@@ -215,6 +215,10 @@
     var reselectBtn = byId('pwUploadReselectBtn');
     var startBtn = byId('pwStartUploadBtn');
     var sheet = byId('pwUploadSheet');
+    if (input) {
+      input.setAttribute('accept', 'image/*');
+      input.multiple = true;
+    }
     if (input && !input.__xtjUploadBound) {
       input.__xtjUploadBound = true;
       input.addEventListener('change', handlePhotoSelection);
@@ -226,11 +230,18 @@
     }
     if (sheet && !sheet.__xtjUploadBound) {
       sheet.__xtjUploadBound = true;
-      sheet.addEventListener('click', function(event){ if (event.target === sheet) closeSheet(); });
+      sheet.addEventListener('click', function(event){
+        if (event.target === sheet) closeSheet();
+      });
     }
     if (reselectBtn && !reselectBtn.__xtjUploadBound) {
       reselectBtn.__xtjUploadBound = true;
-      reselectBtn.addEventListener('click', function(){ if (input) { input.value = ''; input.click(); } });
+      reselectBtn.addEventListener('click', function(){
+        if (!input) return;
+        input.setAttribute('accept', 'image/*');
+        input.value = '';
+        input.click();
+      });
     }
     if (startBtn && !startBtn.__xtjUploadBound) {
       startBtn.__xtjUploadBound = true;
@@ -248,6 +259,7 @@
       toast('上传控件未加载，请刷新页面');
       return;
     }
+    input.setAttribute('accept', 'image/*');
     input.value = '';
     input.click();
   }
@@ -298,7 +310,9 @@
       state.postPreviewUrls.push(url);
       var node = document.createElement('div');
       node.className = 'post-media-preview-thumb';
-      node.innerHTML = isVideo(file) ? '<video src="' + url + '" muted playsinline></video><span class="post-media-preview-tag">视频</span>' : '<img src="' + url + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">';
+      node.innerHTML = isVideo(file)
+        ? '<video src="' + url + '" muted playsinline></video><span class="post-media-preview-tag">视频</span>'
+        : '<img src="' + url + '" alt="" style="width:100%;height:100%;object-fit:cover;display:block;">';
       grid.appendChild(node);
     });
     if (count) count.textContent = '已选择 ' + list.length + ' 个文件';
@@ -320,11 +334,20 @@
     state.postPublishing = true;
     var btn = byId('pubBtn');
     var oldText = btn ? btn.textContent : '';
-    if (btn) { btn.disabled = true; btn.textContent = file ? '上传中...' : '发布中...'; }
+    if (btn) btn.disabled = true;
+    if (btn) btn.textContent = file ? '上传中...' : '发布中...';
     try {
       var media = { url:'', mediaType:'', mimeType:'', size:null };
       if (file) media = await uploadPostMedia(file);
-      var meta = { visibility: visibility || 'public', is_pinned:false, pinned_at:null, updated_at:null, fileSize: media.size, originalSize: media.size, mimeType: media.mimeType || '' };
+      var meta = {
+        visibility: visibility || 'public',
+        is_pinned: false,
+        pinned_at: null,
+        updated_at: null,
+        fileSize: media.size,
+        originalSize: media.size,
+        mimeType: media.mimeType || ''
+      };
       var content = JSON.stringify({ __type:'__xtj_post_v2__', text:text, meta:meta });
       var payload = {
         user_name: user,
@@ -360,7 +383,8 @@
       toast('发布失败：' + (err && err.message ? err.message : '请重试'));
     } finally {
       state.postPublishing = false;
-      if (btn) { btn.disabled = false; btn.textContent = oldText || '发布动态'; }
+      if (btn) btn.disabled = false;
+      if (btn) btn.textContent = oldText || '发布动态';
     }
   }
 
@@ -377,9 +401,9 @@
     attachPostPreview();
   }
 
-  window.attachPhotoUploadUi = attachPhotoUploadUi;
   window.xtjUploadBtn = triggerPhotoUpload;
   window.triggerPhotoUpload = triggerPhotoUpload;
+  window.attachPhotoUploadUi = attachPhotoUploadUi;
   window.handlePhotoUpload = handlePhotoSelection;
   window.triggerPhotoWallUpload = uploadPhotoWallFiles;
   window.doPublish = publishPost;
