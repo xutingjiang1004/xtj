@@ -1111,3 +1111,79 @@
     }
   }
 }
+
+/* ========== Final Desktop Dark Override ========== */
+[data-theme="dark"] .glass,
+[data-theme="dark"] .post,
+[data-theme="dark"] .publish-box,
+[data-theme="dark"] .post-filter-bar,
+[data-theme="dark"] .stats,
+[data-theme="dark"] .profile-user-card,
+[data-theme="dark"] .profile-activity-card,
+[data-theme="dark"] .profile-setting-item,
+[data-theme="dark"] .profile-totals-bar,
+[data-theme="dark"] .xtj-vip-card,
+[data-theme="dark"] .photo-wall-header,
+[data-theme="dark"] .photo-wall-item,
+[data-theme="dark"] .chat-header,
+[data-theme="dark"] .chat-input-area,
+[data-theme="dark"] .chat-list-item,
+[data-theme="dark"] .profile-settings,
+[data-theme="dark"] .dock-panels {
+  background: rgba(23, 24, 33, 0.88) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.28) !important;
+  color: #f3f4f8 !important;
+}
+
+[data-theme="dark"] .chat-list-item:hover,
+[data-theme="dark"] .profile-setting-item:hover,
+[data-theme="dark"] .post:hover,
+[data-theme="dark"] .profile-user-card:hover {
+  background: rgba(34, 34, 48, 0.96) !important;
+}
+
+[data-theme="dark"] .post-text,
+[data-theme="dark"] .content,
+[data-theme="dark"] .profile-user-name,
+[data-theme="dark"] .profile-user-status,
+[data-theme="dark"] .profile-setting-text,
+[data-theme="dark"] .profile-activity-card h4,
+[data-theme="dark"] .profile-activity-card .stat-card span,
+[data-theme="dark"] .profile-activity-card .stat-card b,
+[data-theme="dark"] .stat-card .stat-label,
+[data-theme="dark"] .stat-card b,
+[data-theme="dark"] .vip-modal-title,
+[data-theme="dark"] .vip-plan-name,
+[data-theme="dark"] .vip-plan-desc,
+[data-theme="dark"] .vip-plan-feature-text,
+[data-theme="dark"] .vip-modal-footer-text,
+[data-theme="dark"] .photo-wall-title,
+[data-theme="dark"] .chat-msg,
+[data-theme="dark"] .msg-text,
+[data-theme="dark"] .chat-header h3,
+[data-theme="dark"] .post-author-name {
+  color: #f3f4f8 !important;
+}
+
+[data-theme="dark"] .msg-time,
+[data-theme="dark"] .post-time,
+[data-theme="dark"] .post-stat,
+[data-theme="dark"] .stat-card .stat-label,
+[data-theme="dark"] .vip-plan-desc,
+[data-theme="dark"] .vip-modal-footer-text {
+  color: #a0a6b4 !important;
+}
+
+[data-theme="dark"] textarea,
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="search"] {
+  background: rgba(14, 14, 22, 0.88) !important;
+  color: #f3f4f8 !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+[data-theme="dark"] textarea::placeholder,
+[data-theme="dark"] input::placeholder {
+  color: rgba(160, 166, 180, 0.72) !important;
+}
