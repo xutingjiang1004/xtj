@@ -874,7 +874,23 @@
         });
     };
 
-    function renderPostsTab(el) {
+    async function renderPostsTab(el) {
+        // 每次切到帖子管理时自动刷新数据
+        if (API_BASE && getToken()) {
+            try {
+                var apiData = await apiCall('GET', '/admin/data');
+                var postData = apiData.posts || [];
+                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
+                annList = apiData.announcements || [];
+                allLikes = apiData.likes || [];
+                allComments = apiData.comments || [];
+                reportsData = apiData.reports || [];
+                updateReportBadge();
+                bansData = apiData.bans || [];
+                mutesData = apiData.mutes || [];
+                blacklistData = apiData.blacklist || [];
+            } catch(e) {}
+        }
         var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__' && p.media_type !== REPORT_MARKER; });
         var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
         h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
@@ -887,13 +903,21 @@
         }
         if (!filtered.length) { h += '<div class="empty">无匹配帖子</div>'; }
         else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>内容</th><th>浏览</th><th>时间</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>内容</th><th>附件</th><th>浏览</th><th>时间</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(p) {
                 var displayText = getDisplayContent(p.content);
-                var content = (displayText || '').slice(0, 50);
-                if (displayText && displayText.length > 50) content += '...';
+                var content = (displayText || '').slice(0, 60);
+                if (displayText && displayText.length > 60) content += '...';
+                // 图片预览
+                var imgHtml = '';
+                if (p.media_url && p.media_url.indexOf('http') === 0) {
+                    imgHtml = '<img src="' + escapeHtml(p.media_url) + '" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\'' + escapeHtml(p.media_url) + '\',\'' + escapeHtml(p.user_name || '') + '\',\'' + escapeHtml(p.created_at || '') + '\')" title="点击预览大图">';
+                } else if (p.media_url) {
+                    imgHtml = '📎';
+                }
                 h += '<tr><td>' + escapeHtml(p.user_name || '') + '</td>';
-                h += '<td>' + escapeHtml(content) + (p.media_url ? ' 📎' : '') + '</td>';
+                h += '<td>' + escapeHtml(content) + '</td>';
+                h += '<td>' + (imgHtml || '-') + '</td>';
                 h += '<td>' + (p.views || 0) + '</td>';
                 h += '<td>' + formatTime(p.created_at) + '</td>';
                 h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + p.id + '\')">删除</button></td></tr>';
@@ -904,7 +928,11 @@
         el.innerHTML = h;
     }
 
-    function renderLikesTab(el) {
+    async function renderLikesTab(el) {
+        // 自动刷新
+        if (API_BASE && getToken()) {
+            try { var apiData = await apiCall('GET', '/admin/data'); allLikes = apiData.likes || []; allPosts = (apiData.posts || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER; }); } catch(e) {}
+        }
         var h = '<div class="card"><h3>点赞记录（' + allLikes.length + '条）</h3>';
         if (!allLikes.length) { h += '<div class="empty">暂无点赞数据</div>'; }
         else {
@@ -927,7 +955,11 @@
         el.innerHTML = h;
     }
 
-    function renderCommentsTab(el) {
+    async function renderCommentsTab(el) {
+        // 自动刷新
+        if (API_BASE && getToken()) {
+            try { var apiData = await apiCall('GET', '/admin/data'); allComments = apiData.comments || []; } catch(e) {}
+        }
         var h = '<div class="card"><h3>评论记录（' + allComments.length + '条）</h3>';
         if (!allComments.length) { h += '<div class="empty">暂无评论数据</div>'; }
         else {
@@ -1596,14 +1628,10 @@
 
     async function renderPhotosTab(el) {
         await loadPhotosAdminData();
-        var active = photosAdminData.filter(function(p){ return !p.is_deleted; });
-        var deleted = photosAdminData.filter(function(p){ return p.is_deleted; });
         var h = '<div class="stats-row">';
-        h += '<div class="stat-box"><div class="val">' + active.length + '</div><div class="lbl">有效照片</div></div>';
-        h += '<div class="stat-box"><div class="val">' + deleted.length + '</div><div class="lbl">已删除</div></div>';
         h += '<div class="stat-box"><div class="val">' + photosAdminData.length + '</div><div class="lbl">总照片数</div></div>';
         h += '</div>';
-        h += '<div class="card"><h3>照片管理 ' + (deleted.length ? '<span style="font-size:12px;color:#f59e0b;font-weight:400;">（含' + deleted.length + '张已删除）</span>' : '') + '</h3>';
+        h += '<div class="card"><h3>照片管理</h3>';
         if (!photosAdminData.length) {
             h += '<div class="empty">暂无照片数据</div>';
         } else {
