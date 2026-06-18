@@ -439,6 +439,10 @@
     window.switchTab = function(tab) {
         currentTab = tab;
         saveCurrentTab();
+        if (tab === 'reports') {
+            var badge = document.getElementById('reportBadge');
+            if (badge) badge.style.display = 'none';
+        }
         ['ann','users','posts','likes','comments'].forEach(function(t) {
             document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.remove('active');
             document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn').classList.remove('active');
@@ -2073,6 +2077,10 @@
     window.switchTab = function(tab) {
         currentTab = tab;
         saveCurrentTab();
+        if (tab === 'reports') {
+            var badge = document.getElementById('reportBadge');
+            if (badge) badge.style.display = 'none';
+        }
         ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos','stats'].forEach(function(t) {
             var panel = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
             var btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn');
@@ -2432,6 +2440,11 @@
         var allTabs = ['ann','stats','users','posts','likes','comments','reports','bans','mutes','photos'];
         currentTab = normalized;
         localStorage.setItem('admin_tab', normalized);
+        // 切换到举报管理时清除红点
+        if (normalized === 'reports') {
+            var badge = document.getElementById('reportBadge');
+            if (badge) badge.style.display = 'none';
+        }
         allTabs.forEach(function(t) {
             var panel = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
             var btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn');
