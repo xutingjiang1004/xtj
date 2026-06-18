@@ -1586,25 +1586,41 @@
 
     async function renderPhotosTab(el) {
         if (!photosAdminData.length) { await loadPhotosAdminData(); }
+        var active = photosAdminData.filter(function(p){ return !p.is_deleted; });
+        var deleted = photosAdminData.filter(function(p){ return p.is_deleted; });
         var h = '<div class="stats-row">';
+        h += '<div class="stat-box"><div class="val">' + active.length + '</div><div class="lbl">有效照片</div></div>';
+        h += '<div class="stat-box"><div class="val">' + deleted.length + '</div><div class="lbl">已删除</div></div>';
         h += '<div class="stat-box"><div class="val">' + photosAdminData.length + '</div><div class="lbl">总照片数</div></div>';
         h += '</div>';
-        h += '<div class="card"><h3>照片管理</h3>';
+        h += '<div class="card"><h3>照片管理 ' + (deleted.length ? '<span style="font-size:12px;color:#f59e0b;font-weight:400;">（含' + deleted.length + '张已删除）</span>' : '') + '</h3>';
         if (!photosAdminData.length) {
             h += '<div class="empty">暂无照片数据</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>缩略图</th><th>用户</th><th>大小</th><th>浏览</th><th>上传时间</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>缩略图</th><th>用户</th><th>状态</th><th>大小</th><th>浏览</th><th>上传时间</th><th>删除时间</th><th>操作</th></tr></thead><tbody>';
             photosAdminData.forEach(function(p) {
                 var extra = {};
                 try { extra = JSON.parse(p.content || '{}'); } catch(e) {}
                 var thumbUrl = extra.thumb || p.media_url || '';
-                var thumbHtml = thumbUrl ? '<img src="' + thumbUrl + '" style="width:40px;height:40px;object-fit:cover;border-radius:4px;" loading="lazy">' : '-';
+                var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + escapeHtml(thumbUrl) + '\', \'' + escapeHtml(p.user_name || '') + '\', \'' + escapeHtml(p.created_at || '') + '\')" title="点击预览大图">' : '-';
+                var statusBadge = p.is_deleted
+                    ? '<span style="background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">已删除</span>'
+                    : '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">正常</span>';
+                var deletedTime = p.deleted_at ? formatTime(p.deleted_at) : '-';
+                var actions = '';
+                if (p.is_deleted) {
+                    actions += '<button class="btn-sm" onclick="restoreAdminPhoto(\'' + p.id + '\')" style="background:#10b981;color:#fff;margin-right:4px;">恢复</button>';
+                } else {
+                    actions += '<button class="btn-sm del" onclick="deleteAdminPhoto(\'' + p.id + '\', \'' + (p.actor_key || '') + '\')">删除</button>';
+                }
                 h += '<tr><td>' + thumbHtml + '</td>';
                 h += '<td>' + escapeHtml(p.user_name || '') + '</td>';
+                h += '<td>' + statusBadge + '</td>';
                 h += '<td>' + (extra.fileSize ? (extra.fileSize / 1024).toFixed(0) + 'KB' : '-') + '</td>';
                 h += '<td>' + (p.views || 0) + '</td>';
                 h += '<td>' + formatTime(p.created_at) + '</td>';
-                h += '<td><button class="btn-sm del" onclick="deleteAdminPhoto(\'' + p.id + '\', \'' + (p.actor_key || '') + '\')">删除</button></td></tr>';
+                h += '<td>' + deletedTime + '</td>';
+                h += '<td>' + actions + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -1612,8 +1628,38 @@
         el.innerHTML = h;
     }
 
+    window.previewAdminPhoto = function(url, username, time) {
+        var modal = document.getElementById('photoPreviewModal');
+        var img = document.getElementById('photoPreviewImg');
+        var info = document.getElementById('photoPreviewInfo');
+        if (!modal || !img) return;
+        img.src = url;
+        img.alt = username + ' - ' + time;
+        info.textContent = '用户: ' + (username || '未知') + ' | 时间: ' + (time || '未知');
+        modal.style.display = 'flex';
+    };
+
+    window.closePhotoPreview = function() {
+        var modal = document.getElementById('photoPreviewModal');
+        if (modal) {
+            modal.style.display = 'none';
+            document.getElementById('photoPreviewImg').src = '';
+        }
+    };
+
+    window.restoreAdminPhoto = function(id) {
+        showConfirm('恢复照片', '确认恢复此照片？恢复后将在前端照片墙重新可见。', '确认恢复', async function() {
+            try {
+                await apiCall('POST', '/admin/photo/restore/' + id);
+                await loadPhotosAdminData();
+                renderTab('photos');
+                showToast('照片已恢复', 'success');
+            } catch(e) { showToast('恢复失败: ' + e.message, 'error'); }
+        });
+    };
+
     window.deleteAdminPhoto = function(id, actorKey) {
-        showConfirm('删除照片', '确认删除此照片？此操作不可恢复。', '确认删除', async function() {
+        showConfirm('删除照片', '确认删除此照片？照片数据将被保留，管理端仍可查看，但前端用户不可见。', '确认删除', async function() {
             try {
                 await apiCall('DELETE', '/admin/photo/' + id);
                 await loadPhotosAdminData();
