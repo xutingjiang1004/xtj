@@ -1628,10 +1628,7 @@
 
     async function renderPhotosTab(el) {
         await loadPhotosAdminData();
-        var h = '<div class="stats-row">';
-        h += '<div class="stat-box"><div class="val">' + photosAdminData.length + '</div><div class="lbl">总照片数</div></div>';
-        h += '</div>';
-        h += '<div class="card"><h3>照片管理</h3>';
+        var h = '<div class="card"><h3>照片管理（数量：' + photosAdminData.length + '）</h3>';
         if (!photosAdminData.length) {
             h += '<div class="empty">暂无照片数据</div>';
         } else {
