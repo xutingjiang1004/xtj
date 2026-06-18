@@ -8279,9 +8279,9 @@
   inset: 0;
   z-index: 11520;
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: center;
-  padding: 20px 16px calc(26px + env(safe-area-inset-bottom, 0px));
+  padding: calc(26px + env(safe-area-inset-top, 44px)) 16px 20px;
   background: rgba(11, 20, 17, 0.16);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -8308,7 +8308,7 @@
     linear-gradient(180deg, rgba(249, 255, 250, 0.98), rgba(232, 247, 237, 0.98));
   border: 1px solid rgba(196, 231, 209, 0.92);
   box-shadow: 0 24px 60px rgba(48, 88, 63, 0.18);
-  transform: translateY(18px) scale(0.98);
+  transform: translateY(-18px) scale(0.98);
   transition: transform 0.28s cubic-bezier(.16,1,.3,1);
 }
 
@@ -8463,10 +8463,16 @@
 }
 
 .pw-upload-local-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 11530;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 18px 16px;
+  background: rgba(11, 20, 17, 0.18);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 .pw-upload-progress-container {
