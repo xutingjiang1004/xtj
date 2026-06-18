@@ -1,8 +1,0 @@
-[SUPABASE] Service key loaded
-[CONFIG] ALLOWED_ORIGINS not set, will auto-detect from request origin
-[Alipay] Using local test mode (no Alipay)
-[xtj-admin-api] running on port 3000
-[xtj-admin-api] password configured: yes
-[xtj-admin-api] supabase key type: service_role
-[xtj-admin-api] allowed origins: 
-[xtj-admin-api] vip local test mode: enabled
