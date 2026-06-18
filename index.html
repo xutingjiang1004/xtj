@@ -837,31 +837,31 @@
     </div>
 
     <!-- ========== 模态框(保留) ========== -->
-    <div class="modal-overlay" id="commentModal">
-        <div class="modal-box glass">
-            <h3 style="margin-top:0;">发表评论</h3>
-            <textarea id="commInp" placeholder="写下你的想法..." style="width:100%; min-height:80px; border:none; background:transparent; resize:none; font-size:16px; outline:none;"></textarea>
-            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top:16px;">
+    <div class="modal-overlay post-action-modal" id="commentModal" onclick="if(event.target===this)closeModal('commentModal')">
+        <div class="modal-box glass post-action-box post-comment-modal" onclick="event.stopPropagation()">
+            <h3 class="post-action-title">发表评论</h3>
+            <textarea id="commInp" class="post-comment-textarea" placeholder="写下你的想法..."></textarea>
+            <div class="post-action-actions">
                 <button class="btn btn-ghost" onclick="closeModal('commentModal')">取消</button>
                 <button class="btn btn-primary" id="commBtn">发布评论</button>
             </div>
         </div>
     </div>
 
-    <div class="modal-overlay" id="delModal">
-        <div class="modal-box glass" style="text-align: center;">
-            <h3 style="margin-top:0;">确认删除帖子？</h3>
-            <p style="color: var(--text-muted); margin-bottom:20px;">删除后无法恢复</p>
-            <div style="display: flex; gap: 10px;">
-                <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('delModal')">取消</button>
-                <button class="btn btn-primary" style="flex:1; background:linear-gradient(135deg, #ff3b60, #ff6b8b); box-shadow:0 4px 12px rgba(255,59,96,0.3);" id="delBtn">确认删除</button>
+    <div class="modal-overlay post-action-modal" id="delModal" onclick="if(event.target===this)closeModal('delModal')">
+        <div class="modal-box glass post-action-box post-delete-modal" onclick="event.stopPropagation()">
+            <h3 class="post-action-title post-delete-title">确认删除帖子？</h3>
+            <p class="post-delete-message">删除后无法恢复</p>
+            <div class="post-action-actions post-delete-actions">
+                <button class="btn btn-ghost post-delete-cancel" onclick="closeModal('delModal')">取消</button>
+                <button class="btn btn-primary post-delete-confirm" id="delBtn">确认删除</button>
             </div>
         </div>
     </div>
 
-    <div class="modal-overlay" id="editPostModal" onclick="if(event.target===this)closeModal('editPostModal')">
-        <div class="modal-box glass post-edit-modal">
-            <h3 style="margin-top:0;">编辑帖子</h3>
+    <div class="modal-overlay post-action-modal" id="editPostModal" onclick="if(event.target===this)closeModal('editPostModal')">
+        <div class="modal-box glass post-action-box post-edit-modal" onclick="event.stopPropagation()">
+            <h3 class="post-action-title">编辑帖子</h3>
             <textarea id="editPostInp" class="post-edit-textarea" placeholder="修改帖子内容..."></textarea>
             <div class="post-edit-controls">
                 <label class="post-compose-label">可见范围</label>
