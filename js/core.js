@@ -430,7 +430,8 @@ window.safeLocalStorageSet = function(key, value) {
             var scripts = [
                 'js/photo-wall/data.min.js?v=20260618_2',
                 'js/photo-wall/render.min.js?v=20260618_2',
-                'js/photo-wall/preview.min.js?v=20260618_2',
+                'js/photo-wall/preview.min.js?v=20260618_3',
+                'js/photo-wall/preview-hotfix.js?v=20260618_1',
                 'js/photo-wall/photo-wall.min.js?v=20260618_2'
             ];
             _photoWallLoading = new Promise(function(resolve, reject) {
@@ -1838,10 +1839,17 @@ window.safeLocalStorageSet = function(key, value) {
                 return Array.isArray(items) ? items.slice() : [];
             }
 
-            function profileActivitySummary(post) {
+            function buildProfileActivityExcerpt(value, maxLength) {
+                var text = repairProfileActivityText(value || '');
+                var limit = Math.max(32, Number(maxLength) || 120);
+                if (!text) return '';
+                return text.length > limit ? text.slice(0, limit) + '...' : text;
+            }
+
+            function profileActivitySummary(post, maxLength) {
                 var normalized = normalizePost(post || {});
-                var text = repairProfileActivityText(normalized.content || '');
-                if (text) return text.length > 28 ? text.slice(0, 28) + '...' : text;
+                var text = buildProfileActivityExcerpt(normalized.content || '', maxLength || 120);
+                if (text) return text;
                 if (normalized.media_type === 'video') return '视频动态';
                 if (normalized.media_type === 'image') return '图片动态';
                 return '无文字内容';
@@ -1886,17 +1894,12 @@ window.safeLocalStorageSet = function(key, value) {
                     var normalized = normalizePost(post || {});
                     var mediaHtml = post ? profileActivityMedia(post, item.post_id) : '';
                     var openPostOnclick = "openProfileActivityPost('" + safeJsStr(String(item.post_id)) + "')";
-                    var summary = post ? profileActivitySummary(post) : '（帖子已删除）';
+                    var summary = post ? profileActivitySummary(post, isLikes ? 140 : 120) : '帖子已删除或不可查看';
                     var canOpenPost = !!(post && item.post_id);
-                    var commentText = repairProfileActivityText(item.content || '');
-                    var noteHtml = '';
+                    var commentText = buildProfileActivityExcerpt(item.content || '', 140);
+                    var commentNoteHtml = '';
                     if (!isLikes && commentText) {
-                        noteHtml = '<div class="stat-record-note"><strong>我的评论：</strong>' + escapeHtml(commentText) + '</div>';
-                    } else if (isLikes && post) {
-                        var postText = normalized ? repairProfileActivityText(normalized.content || '') : '';
-                        if (postText) {
-                            noteHtml = '<div class="stat-record-note"><strong>原帖内容：</strong>' + escapeHtml(postText.length > 52 ? postText.slice(0, 52) + '...' : postText) + '</div>';
-                        }
+                        commentNoteHtml = '<div class="stat-record-note"><strong>我的评论：</strong>' + escapeHtml(commentText) + '</div>';
                     }
                     var actionHtml = isLikes
                         ? '<button type="button" class="stat-record-action is-danger" onclick="event.stopPropagation();unlikeFromProfile(\'' + safeJsStr(String(item.id || '')) + '\', \'' + safeJsStr(String(item.post_id)) + '\', this)">取消点赞</button>'
@@ -1904,14 +1907,25 @@ window.safeLocalStorageSet = function(key, value) {
                     var cardAttrs = canOpenPost
                         ? ' role="button" tabindex="0" onclick="' + openPostOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + openPostOnclick + '}"'
                         : '';
+                    var titleText = escapeHtml(currentUser.user_metadata?.full_name || currentUser.email || '我') + (isLikes ? ' 点赞了这条帖子' : ' 评论了这条帖子');
+                    var metaHtml = [
+                        '<div class="profile-activity-record__meta">',
+                        '<span class="profile-activity-record__time">' + new Date(item.created_at).toLocaleString() + '</span>',
+                        canOpenPost ? '<span class="profile-activity-record__hint">点击查看详情</span>' : '<span class="profile-activity-record__hint is-muted">当前不可查看详情</span>',
+                        '</div>'
+                    ].join('');
                     return [
-                        '<article class="stat-record-entry stat-row ' + (isLikes ? 'stat-like-item' : 'stat-comment-item') + (mediaHtml ? '' : ' stat-row--no-media') + (canOpenPost ? '' : ' is-disabled') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 26, 220) + 'ms;">',
-                        '<div class="stat-row-main">',
-                        '<div class="stat-row-title">' + escapeHtml(currentUser.user_metadata?.full_name || currentUser.email || '我') + (isLikes ? ' 点赞了这条帖子' : ' 评论了这条帖子') + '</div>',
-                        '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(summary) + '</div>' + noteHtml + '</div>',
-                        (mediaHtml ? '<div class="stat-row-media">' + mediaHtml + '</div>' : ''),
-                        '<div class="stat-row-side"><span class="stat-row-time">' + new Date(item.created_at).toLocaleString() + '</span><div class="stat-row-actions">' + actionHtml + '</div></div>',
+                        '<article class="stat-record-entry stat-row profile-activity-record ' + (isLikes ? 'profile-activity-record--like' : 'profile-activity-record--comment') + (mediaHtml ? '' : ' stat-row--no-media') + (canOpenPost ? '' : ' is-disabled') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 26, 220) + 'ms;">',
+                        '<div class="profile-activity-record__main">',
+                        '<div class="profile-activity-record__header">',
+                        '<div class="profile-activity-record__title">' + titleText + '</div>',
+                        metaHtml,
                         '</div>',
+                        '<div class="profile-activity-record__summary">' + escapeHtml(summary) + '</div>',
+                        commentNoteHtml,
+                        '</div>',
+                        mediaHtml ? '<div class="profile-activity-record__media">' + mediaHtml + '</div>' : '',
+                        '<div class="profile-activity-record__actions">' + actionHtml + '</div>',
                         '</article>'
                     ].join('');
                 }).join('');
@@ -2849,6 +2863,7 @@ function renderProfileActivityList(kind) {
             let ivPanStartX = 0, ivPanStartY = 0;
             let ivStartTx = 0, ivStartTy = 0;
             let ivStartScale = 1;
+            let ivPinchAnchorX = 0, ivPinchAnchorY = 0;
             let ivLastTapTime = 0;
             let ivDoubleTapTimer = null;
             let ivHintTimer = null;
@@ -2876,6 +2891,23 @@ function renderProfileActivityList(kind) {
                 } else {
                     img.style.transform = '';
                     img.style.webkitTransform = '';
+                }
+            }
+
+            function ivZoomAt(clientX, clientY, nextScale) {
+                const oldScale = ivZoomState.scale || 1;
+                const x = clientX == null ? window.innerWidth / 2 : clientX;
+                const y = clientY == null ? window.innerHeight / 2 : clientY;
+                const anchorX = (x - window.innerWidth / 2 - ivZoomState.tx) / oldScale;
+                const anchorY = (y - window.innerHeight / 2 - ivZoomState.ty) / oldScale;
+                ivZoomState.scale = Math.max(1, Math.min(6, nextScale));
+                ivZoomState.tx = x - window.innerWidth / 2 - anchorX * ivZoomState.scale;
+                ivZoomState.ty = y - window.innerHeight / 2 - anchorY * ivZoomState.scale;
+                if (ivZoomState.scale <= 1.01) {
+                    ivResetZoom(false);
+                } else {
+                    ivApplyTransform();
+                    ivShowHint();
                 }
             }
 
@@ -2945,6 +2977,10 @@ function renderProfileActivityList(kind) {
                     ivStartTx = ivZoomState.tx;
                     ivStartTy = ivZoomState.ty;
                     ivStartScale = ivZoomState.scale;
+                    const cx = (t[0].clientX + t[1].clientX) / 2;
+                    const cy = (t[0].clientY + t[1].clientY) / 2;
+                    ivPinchAnchorX = (cx - window.innerWidth / 2 - ivStartTx) / ivStartScale;
+                    ivPinchAnchorY = (cy - window.innerHeight / 2 - ivStartTy) / ivStartScale;
                     ivImgEl.classList.add('instant');
                 } else if (e.touches.length === 1) {
                     const now = Date.now();
@@ -2954,11 +2990,7 @@ function renderProfileActivityList(kind) {
                         if (ivZoomState.scale > 1.5) {
                             ivResetZoom(false);
                         } else {
-                            ivZoomState.scale = 2.5;
-                            ivZoomState.tx = 0;
-                            ivZoomState.ty = 0;
-                            ivApplyTransform();
-                            ivShowHint();
+                            ivZoomAt(e.touches[0].clientX, e.touches[0].clientY, 2.5);
                         }
                         return;
                     }
@@ -2985,10 +3017,9 @@ function renderProfileActivityList(kind) {
                     const newScale = Math.max(1, Math.min(6, ivStartScale * totalRatio));
                     const cx = (t[0].clientX + t[1].clientX) / 2;
                     const cy = (t[0].clientY + t[1].clientY) / 2;
-                    const zoomRatio = ivStartScale > 0 ? newScale / ivStartScale : 1;
-                    ivZoomState.tx = cx - zoomRatio * (cx - ivStartTx);
-                    ivZoomState.ty = cy - zoomRatio * (cy - ivStartTy);
                     ivZoomState.scale = newScale;
+                    ivZoomState.tx = cx - window.innerWidth / 2 - ivPinchAnchorX * newScale;
+                    ivZoomState.ty = cy - window.innerHeight / 2 - ivPinchAnchorY * newScale;
                     ivApplyTransform();
                     ivShowHint();
                 } else if (ivIsPanning && e.touches.length === 1) {
@@ -6252,7 +6283,7 @@ function renderProfileActivityList(kind) {
                             : findNearestDockTab(e.clientX || state.sx);
                         if (tab) {
                             dragHandledTs = Date.now();
-                            switchDockTab(tab.dataset.tab, true);
+                            switchDockTab(tab.dataset.tab, true, { animate: true, source: 'dock-drag' });
                         }
                     }
                     requestAnimationFrame(syncDockIndicator);
@@ -6270,11 +6301,13 @@ function renderProfileActivityList(kind) {
                     var tabBtn = e.target.closest('.dock-tab');
                     if (!tabBtn) return;
                     if (Date.now() - dragHandledTs < 350) return;
-                    switchDockTab(tabBtn.dataset.tab);
+                    switchDockTab(tabBtn.dataset.tab, false, { animate: true, source: 'dock-click' });
                 });
             }
 
-            window.switchDockTab = function(tab, skipReturn) {
+            window.switchDockTab = function(tab, skipReturn, options) {
+                options = options || {};
+                var shouldAnimateTab = options.animate === true;
                 if (tab !== currentDockTab) {
                     try { var imv = document.getElementById('imgViewer'); if (imv && imv.classList.contains('active')) closeImageViewer(); } catch(e) {}
                     try { var am = document.getElementById('announcementModal'); if (am && am.classList.contains('active')) closeAnnouncementModal(); } catch(e) {}
@@ -6282,9 +6315,10 @@ function renderProfileActivityList(kind) {
                     try { var cm = document.getElementById('commentModal'); if (cm && cm.classList.contains('active')) closeModal('commentModal'); } catch(e) {}
                     document.body.style.overflow = '';
                 }
-                // 鍏堬拷袝鍙戠偣鍑诲姩鐢伙紙鍗充娇宸茬粡锟姐劌缍嬮崜宄礱b涔燂拷顩﹂幘顓熸杹锟?
-                var btn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
-                if (btn) triggerTabAnimation(btn, tab);
+                if (shouldAnimateTab) {
+                    var btn = document.querySelector('.dock-tab[data-tab="' + tab + '"]');
+                    if (btn) triggerTabAnimation(btn, tab);
+                }
                 const now = Date.now();
                 
                 // 濡澁鎷烽弻銉︽Ц閸氾附妲搁崣灞藉毊鍒烽敓鏂ゆ嫹锟?00ms鍐呭啀锟斤紕鍋ｉ崙璇叉倱娑擃澁鎷穞ab锟?
@@ -7258,27 +7292,37 @@ function renderProfileActivityList(kind) {
             function playThemeFallback(nextIsDark, originEl) {
                 var reveal = setThemeRevealVars(originEl);
                 var overlay = document.createElement('div');
-                overlay.className = 'theme-splash-overlay';
+                overlay.className = 'theme-splash-overlay' + (nextIsDark ? '' : ' is-reverse is-active');
                 overlay.style.setProperty('--theme-reveal-x', reveal.x + 'px');
                 overlay.style.setProperty('--theme-reveal-y', reveal.y + 'px');
                 overlay.style.setProperty('--theme-reveal-radius', reveal.radius + 'px');
-                overlay.style.background = getThemeSplashBackground(nextIsDark);
+                overlay.style.background = getThemeSplashBackground(true);
                 document.body.appendChild(overlay);
-                requestAnimationFrame(function() {
+                if (!nextIsDark) {
+                    setThemeState(false);
                     requestAnimationFrame(function() {
-                        overlay.classList.add('is-active');
+                        requestAnimationFrame(function() {
+                            overlay.classList.add('is-conceal');
+                        });
                     });
-                });
-                window.setTimeout(function() {
-                    setThemeState(nextIsDark);
-                }, 240);
+                } else {
+                    requestAnimationFrame(function() {
+                        requestAnimationFrame(function() {
+                            overlay.classList.add('is-active');
+                        });
+                    });
+                    window.setTimeout(function() {
+                        setThemeState(nextIsDark);
+                    }, 190);
+                    window.setTimeout(function() {
+                        overlay.classList.add('is-settle');
+                    }, 360);
+                }
                 window.setTimeout(function() {
                     overlay.classList.add('is-settle');
-                }, 430);
-                window.setTimeout(function() {
                     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
                     finishThemeToggle();
-                }, 720);
+                }, 560);
             }
 
             function animateThemeToggle(nextIsDark, originEl) {
