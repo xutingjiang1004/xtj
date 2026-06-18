@@ -4,16 +4,27 @@
 -- ============================================================
 
 -- ============================================================
--- H1: 修复 posts 表 RLS — 私密帖子泄露
+-- H1: 修复 posts 表 RLS — 私密帖子泄露 + 软删除过滤
 -- 问题：anon_select_posts 策略只过滤 media_type，没有过滤
---       visibility='private'，导致所有用户的私密帖子全网可读。
--- 修复：在 USING 条件中增加 visibility 过滤。
---       如果 visibility 列不存在则自动创建。
+--       visibility='private' 和 is_deleted，导致私密帖子和
+--       已删照片对全网可见。
+-- 修复：加 visibility 列（不存在则创建）+ is_deleted 列 +
+--       deleted_at 列。RLS 同时过滤私密帖子和已删照片。
+--       admin 走 server.js service_role 不受 RLS 限制。
 -- ============================================================
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='visibility') THEN
     ALTER TABLE posts ADD COLUMN visibility text DEFAULT 'public';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='is_deleted') THEN
+    ALTER TABLE posts ADD COLUMN is_deleted boolean DEFAULT false;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='deleted_at') THEN
+    ALTER TABLE posts ADD COLUMN deleted_at timestamptz;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='deleted_by') THEN
+    ALTER TABLE posts ADD COLUMN deleted_by text;
   END IF;
 END $$;
 
@@ -28,6 +39,9 @@ CREATE POLICY "anon_select_posts" ON posts
     AND (
       visibility = 'public'
       OR visibility IS NULL
+    )
+    AND (
+      is_deleted IS NOT TRUE
     )
   );
 
@@ -66,13 +80,13 @@ ALTER TABLE blacklist ENABLE ROW LEVEL SECURITY;
 -- SELECT count(*) FROM blacklist;
 
 -- ============================================================
--- H3: 修复 posts 表 DELETE/UPDATE — 照片墙删除不同步
--- 问题：anon_update_posts 和 anon_delete_posts 都是
---       USING (false)，导致照片墙删除请求被 RLS 全部拦截。
---       结果：前端只删本地缓存，数据库没变，其他设备看不到删除。
--- 修复：允许 anon 对 __photo_wall__ 类型的帖子执行
---       UPDATE（软删除标记）和 DELETE（硬删除）。
---       安全性由前端 JavaScript 权限检查保障（仅发布者/admin 可删）。
+-- H3: 修复 posts 表 UPDATE — 软删除（保留 media_url）
+-- 问题：anon_update_posts 是 USING (false)，导致照片墙
+--       软删除请求（UPDATE is_deleted=true）被 RLS 拦截。
+-- 修复：允许 anon 对 __photo_wall__ 类型帖子执行 UPDATE
+--       （前端只改 is_deleted=true，不改 media_url）。
+--       安全性由前端 JS + RPC 双重校验。
+-- 注意：已移除 anon DELETE 策略——不允许硬删除。
 -- ============================================================
 DROP POLICY IF EXISTS "anon_update_posts" ON posts;
 CREATE POLICY "anon_update_posts" ON posts
@@ -81,14 +95,12 @@ CREATE POLICY "anon_update_posts" ON posts
   WITH CHECK (media_type = '__photo_wall__');
 
 DROP POLICY IF EXISTS "anon_delete_posts" ON posts;
-CREATE POLICY "anon_delete_posts" ON posts
-  FOR DELETE
-  USING (media_type = '__photo_wall__');
 
 -- ============================================================
--- H4: 创建 delete_photo_wall_post RPC（安全删除 + Storage 路径返回）
--- 用途：前端调用此 RPC 硬删除照片，同时返回 media_url 供
---       Storage 清理。权限由 p_username / p_is_admin 参数控制。
+-- H4: 创建 delete_photo_wall_post RPC（安全软删除）
+-- 用途：前端调用此 RPC 软删除照片（设置 is_deleted=true），
+--       保留 media_url 供管理端查看缩略图。
+--       权限由 p_username / p_is_admin 参数控制。
 -- ============================================================
 CREATE OR REPLACE FUNCTION delete_photo_wall_post(p_post_id bigint, p_username text, p_is_admin boolean)
 RETURNS json
@@ -110,10 +122,27 @@ BEGIN
 
     -- 权限校验：admin 或发布者本人
     IF p_is_admin OR (p_username IS NOT NULL AND p_username <> '' AND v_user_name = p_username) THEN
-        DELETE FROM posts WHERE id = p_post_id;
+        UPDATE posts SET is_deleted = true, deleted_at = NOW(), deleted_by = p_username WHERE id = p_post_id;
         RETURN json_build_object('ok', true, 'data', json_build_object('media_url', v_media_url));
     ELSE
         RETURN json_build_object('ok', false, 'error', 'unauthorized');
+    END IF;
+END;
+$$;
+
+-- 恢复照片 RPC
+CREATE OR REPLACE FUNCTION restore_photo_wall_post(p_post_id bigint, p_admin_user text)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+    UPDATE posts SET is_deleted = false, deleted_at = NULL, deleted_by = NULL WHERE id = p_post_id AND media_type = '__photo_wall__';
+    IF FOUND THEN
+        RETURN json_build_object('ok', true);
+    ELSE
+        RETURN json_build_object('ok', false, 'error', 'not_found');
     END IF;
 END;
 $$;
@@ -128,9 +157,9 @@ $$;
 ALTER TABLE posts REPLICA IDENTITY FULL;
 
 -- ============================================================
--- H6: 允许 anon 删除 Storage 中的照片文件
--- 用途：照片删除时前端调用 storage.from('uploads').remove()
---       清理对应的图片/视频文件。
+-- H6: 允许 anon 删除 Storage 中的照片文件（保留，供管理端清理用）
+-- 用途：管理端调用 storage.from('uploads').remove() 清理
+--       过期或废弃的图片文件。前端软删除不会触发 Storage 清理。
 -- ============================================================
 DROP POLICY IF EXISTS "anon_delete_uploads" ON storage.objects;
 CREATE POLICY "anon_delete_uploads" ON storage.objects
