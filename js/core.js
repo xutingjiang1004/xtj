@@ -2593,11 +2593,107 @@ function renderProfileActivityList(kind) {
             }
 
             // ===================== 閻犲洤瀚?=====================
+            const POST_ACTION_MODAL_IDS = ['commentModal', 'editPostModal', 'delModal'];
+
+            function resetCommentModalState() {
+                var input = document.getElementById("commInp");
+                var btn = document.getElementById("commBtn");
+                activePostId = null;
+                if (input) input.value = "";
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = "发布评论";
+                }
+            }
+
+            function resetEditModalState() {
+                var btn = document.getElementById("saveEditPostBtn");
+                var visWrap = document.getElementById("editPostVisibility");
+                editPostId = null;
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = "保存修改";
+                    btn.classList.remove("is-submitting");
+                    btn.classList.remove("is-success");
+                }
+                if (visWrap) {
+                    visWrap.classList.remove("is-switching");
+                    visWrap.classList.remove("is-saved");
+                }
+            }
+
+            function clearPostActionConfirmOverlay() {
+                var overlay = document.getElementById('ppConfirmOverlay');
+                var okBtn = document.getElementById('ppConfirmOkBtn');
+                if (!overlay) return;
+                if (overlay._closeTimer) {
+                    clearTimeout(overlay._closeTimer);
+                    overlay._closeTimer = null;
+                }
+                overlay.classList.remove('active');
+                overlay.classList.remove('closing');
+                overlay.style.opacity = '';
+                overlay.style.transition = '';
+                overlay.style.pointerEvents = '';
+                overlay._ppDeleteOrigin = null;
+                window._confirmCallback = null;
+                if (okBtn) okBtn.disabled = false;
+                var dialog = overlay.querySelector('.pp-confirm-dialog');
+                if (dialog) {
+                    dialog.style.transition = '';
+                    dialog.style.transform = '';
+                    dialog.style.opacity = '';
+                    dialog.style.transformOrigin = '';
+                }
+            }
+
+            function isPostActionModalId(id) {
+                return POST_ACTION_MODAL_IDS.indexOf(String(id || '')) !== -1;
+            }
+
+            function forceClosePostActionModal(id) {
+                var el = document.getElementById(id);
+                if (el) {
+                    el.classList.remove("active");
+                    el.classList.remove("closing");
+                    el.style.display = '';
+                    el.style.pointerEvents = '';
+                }
+                if (id === 'commentModal') {
+                    resetCommentModalState();
+                } else if (id === 'editPostModal') {
+                    resetEditModalState();
+                } else if (id === 'delModal') {
+                    cleanupDeleteSession({ restoreVisual: true, hideModal: false, resetTarget: true });
+                }
+            }
+
+            function closeOtherPostActionModals(exceptId) {
+                POST_ACTION_MODAL_IDS.forEach(function(id) {
+                    if (id !== exceptId) forceClosePostActionModal(id);
+                });
+                clearPostActionConfirmOverlay();
+            }
+
+            function resetPostActionModals() {
+                closeOtherPostActionModals('');
+            }
+
             window.openComment = function (postId) {
                 if (!currentUser) { showToast("请先登录"); return; }
+                if (window.__xtjDeleteInProgress) {
+                    if (Date.now() - window.__xtjDeleteStartTime > 12000) {
+                        cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
+                    } else {
+                        showToast("正在删除中，请稍后..");
+                        return;
+                    }
+                }
+                closeOtherPostActionModals('commentModal');
                 activePostId = postId;
-                document.getElementById("commInp").value = "";
-                document.getElementById("commentModal").classList.add("active");
+                var input = document.getElementById("commInp");
+                if (input) input.value = "";
+                openModal("commentModal");
                 setTimeout(() => document.getElementById("commInp").focus(), 100);
             };
             document.getElementById("commBtn").onclick = async () => {
@@ -2727,7 +2823,8 @@ function renderProfileActivityList(kind) {
                 var session = getDeleteSession();
                 session.postId = postId;
                 session.ownerKey = ownerKey;
-                document.getElementById("delModal").classList.add("active");
+                closeOtherPostActionModals('delModal');
+                openModal("delModal");
             };
             document.getElementById("delBtn").onclick = async () => {
                 if (!delPostId) return;
@@ -2835,6 +2932,9 @@ function renderProfileActivityList(kind) {
             window.openModal = function (id) {
                 var el = document.getElementById(id);
                 if (!el) return;
+                if (isPostActionModalId(id)) {
+                    closeOtherPostActionModals(id);
+                }
                 el.style.display = '';
                 el.classList.add("active");
             };
@@ -2842,18 +2942,17 @@ function renderProfileActivityList(kind) {
             window.closeModal = function (id) {
                 var el = document.getElementById(id);
                 if (!el) return;
-                el.classList.remove("active");
-                if (id === 'delModal') {
-                    cleanupDeleteSession({ restoreVisual: true, hideModal: false, resetTarget: true });
+                if (isPostActionModalId(id)) {
+                    forceClosePostActionModal(id);
+                } else {
+                    el.classList.remove("active");
                 }
                 if (id === 'statModal' && statPollTimer) {
                     clearInterval(statPollTimer);
                     statPollTimer = null;
                 }
-                if (id === 'editPostModal') {
-                    editPostId = null;
-                }
             };
+            resetPostActionModals();
 
             // ===================== 图片锟姐儳婀咃拷?=====================
             const ivZoomState = { scale: 1, tx: 0, ty: 0 };
@@ -4102,6 +4201,14 @@ function renderProfileActivityList(kind) {
             };
 
             window.openEditPost = function(postId) {
+                if (window.__xtjDeleteInProgress) {
+                    if (Date.now() - window.__xtjDeleteStartTime > 12000) {
+                        cleanupDeleteSession({ restoreVisual: true, hideModal: true, resetTarget: true });
+                    } else {
+                        showToast("正在删除中，请稍后..");
+                        return;
+                    }
+                }
                 var target = normalizePosts(feedAllPosts).find(function(post) { return String(post.id) === String(postId); });
                 if (!target || !canEditPost(target)) {
                     showToast("无权编辑这条帖子");
