@@ -343,6 +343,12 @@
         }
     };
 
+    window.confirmLogout = function() {
+        showConfirm('退出管理后台', '确定要退出当前管理账号吗？', '确定退出', function() {
+            window.doAdminLogout();
+        });
+    };
+
     window.doAdminLogout = function() {
         if (API_BASE && getToken()) {
             fetch(API_BASE + '/admin/logout', {

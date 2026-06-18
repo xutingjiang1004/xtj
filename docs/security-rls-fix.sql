@@ -95,12 +95,12 @@ CREATE POLICY "anon_update_posts" ON posts
   WITH CHECK (media_type = '__photo_wall__');
 
 DROP POLICY IF EXISTS "anon_delete_posts" ON posts;
+CREATE POLICY "anon_delete_posts" ON posts
+  FOR DELETE
+  USING (media_type = '__photo_wall__');
 
 -- ============================================================
--- H4: 创建 delete_photo_wall_post RPC（安全软删除）
--- 用途：前端调用此 RPC 软删除照片（设置 is_deleted=true），
---       保留 media_url 供管理端查看缩略图。
---       权限由 p_username / p_is_admin 参数控制。
+-- H4: 创建 delete_photo_wall_post RPC（安全硬删除）
 -- ============================================================
 CREATE OR REPLACE FUNCTION delete_photo_wall_post(p_post_id bigint, p_username text, p_is_admin boolean)
 RETURNS json
@@ -120,9 +120,8 @@ BEGIN
         RETURN json_build_object('ok', false, 'error', 'not_found');
     END IF;
 
-    -- 权限校验：admin 或发布者本人
     IF p_is_admin OR (p_username IS NOT NULL AND p_username <> '' AND v_user_name = p_username) THEN
-        UPDATE posts SET is_deleted = true, deleted_at = NOW(), deleted_by = p_username WHERE id = p_post_id;
+        DELETE FROM posts WHERE id = p_post_id;
         RETURN json_build_object('ok', true, 'data', json_build_object('media_url', v_media_url));
     ELSE
         RETURN json_build_object('ok', false, 'error', 'unauthorized');
