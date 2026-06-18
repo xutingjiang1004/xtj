@@ -506,7 +506,7 @@ app.delete('/admin/comment/:id', verifyToken, async (req, res) => {
 // ===================== 照片管理 ======================
 app.get('/admin/photos', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('posts')
-    .select('id, user_name, content, media_url, actor_key, created_at')
+    .select('id, user_name, content, media_url, actor_key, created_at, views, is_deleted, deleted_at, deleted_by')
     .eq('media_type', '__photo_wall__')
     .order('created_at', { ascending: false })
     .limit(500);
@@ -516,7 +516,22 @@ app.get('/admin/photos', verifyToken, async (req, res) => {
 
 app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
   const { id } = req.params;
-  const { error } = await supabase.from('posts').delete().eq('id', id);
+  const { error } = await supabase.from('posts').update({
+    is_deleted: true,
+    deleted_at: new Date().toISOString(),
+    deleted_by: 'admin'
+  }).eq('id', id).eq('media_type', '__photo_wall__');
+  if (error) return res.status(400).json({ error: sanitizeError(error) });
+  return res.json({ ok: true });
+});
+
+app.post('/admin/photo/restore/:id', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabase.from('posts').update({
+    is_deleted: false,
+    deleted_at: null,
+    deleted_by: null
+  }).eq('id', id).eq('media_type', '__photo_wall__');
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true });
 });
@@ -572,7 +587,9 @@ app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
     const { error } = await supabase
       .from('posts')
       .update({
-        media_url: '__deleted__',
+        is_deleted: true,
+        deleted_at: new Date().toISOString(),
+        deleted_by: currentUser || username || '',
         content: JSON.stringify(deletedPayload)
       })
       .eq('id', photoId);
