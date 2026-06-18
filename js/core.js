@@ -6251,7 +6251,7 @@ function renderProfileActivityList(kind) {
                                 window.showToast('请先登录');
                                 return;
                             }
-                            window.showToast('刷新失败');
+                            window.showToast('正在刷新...');
                             ensurePhotoWallLoaded().then(function() {
                                 if (typeof window.loadPhotoWallData === 'function') {
                                     return window.loadPhotoWallData(true).then(function() {
