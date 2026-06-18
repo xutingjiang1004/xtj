@@ -413,7 +413,7 @@
         }, { once: true });
       }
     } else {
-      node.innerHTML = '<img src="' + url + '" alt="' + (file.name || '') + '">';
+      node.innerHTML = '<img src="' + url + '" alt="' + escapePreviewText(file.name || '') + '">';
     }
     if (indexLabel) {
       var badge = document.createElement('span');
@@ -490,7 +490,7 @@
       if (/^video\//.test(file.type)) {
         thumb.innerHTML = '<video src="' + url + '" muted playsinline preload="metadata"></video><span class="post-media-preview-tag">视频</span>';
       } else {
-        thumb.innerHTML = '<img src="' + url + '" alt="' + (file.name || '') + '">';
+        thumb.innerHTML = '<img src="' + url + '" alt="' + escapePreviewText(file.name || '') + '">';
       }
       grid.appendChild(thumb);
     }
@@ -1346,7 +1346,7 @@
 
     if (successCount > 0) incrementDailyUploadCount(successCount);
 
-    if (window.saveLocalPhotoWallData) window.saveLocalPhotoWallData();
+    try { localStorage.removeItem('xtj_photos_sync'); } catch (_) {}\n    if (window.saveLocalPhotoWallData) window.saveLocalPhotoWallData();
     if (window.renderPhotoWallWithoutReload) window.renderPhotoWallWithoutReload();
     else if (window.renderPhotoWall) await window.renderPhotoWall();
 
@@ -1930,7 +1930,7 @@
         } catch (_) {
           onError();
         }
-        setTimeout(drawNow, 320);
+        setTimeout(drawNow, 3000);
       }
       video.crossOrigin = 'anonymous';
       video.preload = 'metadata';

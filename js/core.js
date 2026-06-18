@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -2257,7 +2257,7 @@ function renderProfileActivityList(kind) {
                 }
                 if (post.media_type === 'image' && post.media_url && typeof window.openImageViewer === 'function') {
                     window.closeProfileActivityModal();
-                    window.openImageViewer(sanitizeUrl(post.media_url) || post.media_url);
+                    window.openImageViewer(sanitizeUrl(post.media_url));
                     return;
                 }
                 window.closeProfileActivityModal();
@@ -3258,7 +3258,7 @@ function renderProfileActivityList(kind) {
                     ]);
                     if (postRes.error || commRes.error || likeRes.error) {
                         const errMsg = (postRes.error || commRes.error || likeRes.error).message || '数据加载失败';
-                        feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败: ${errMsg}</div>`;
+                        feed.innerHTML = `<div class="loading" style="color:#ff3b60;">加载失败: ${escapeHtml(errMsg)}</div>`;
                         return;
                     }
                     const data = { posts: postRes.data || [], comments: commRes.data || [], likes: likeRes.data || [] };
@@ -8819,7 +8819,7 @@ function renderProfileActivityList(kind) {
                 if (missing.length) {
                     console.error('[XTJ] Missing functions:', missing.join(', '));
                 } else {
-                    console.log('[XTJ] All key functions loaded OK');
+                    // console.log('[XTJ] All key functions loaded OK');
                 }
             }
             if (document.readyState === 'complete' || document.readyState === 'interactive') {

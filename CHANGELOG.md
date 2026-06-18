@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿# 更新日志
+﻿﻿﻿﻿﻿﻿﻿﻿# 更新日志
 
 ## v0.79 - 2026-06-15
 视频压缩、照片墙视频预览、Pro 标记与举报弹层统一修复
@@ -222,5 +222,36 @@
 - 淇缂栬緫甯栧瓙鏃跺叕寮€/绉佸瘑涓嶇湡姝ｇ敓鏁堢殑闂銆?
 - 淇甯栧瓙缃《鍔熻兘涓嶇敓鏁堢殑闂銆?
 
+## v0.80 - 全面更新 & Remade
 
+照片墙加载性能、视频封面预览、安全审计与前端代码清理综合更新
 
+### 新增
+- 照片墙每次加载照片量从 20 张提升至 60 张，首次进入即可看到更多历史内容
+- 视频卡片新增 .pw-video-badge / .xtj-photo-wall-video-badge / .xtj-photo-wall-video-duration 视觉样式
+- 导出 window.normalizePhotoWallRow，上传完成后新内容立即可见
+- 为 index.html 补充 meta description SEO 元描述标签
+- 为 admin.html 的 Supabase CDN 脚本添加 defer 属性
+- 将 ui-enhance.css 移到 head 中加载（原在 body 底部）
+
+### 修复
+- 照片墙分页：禁用 30 秒缓存绕过，每次加载从 Supabase 获取最新数据
+- 视频封面预览：首帧提取超时从 320ms 提升至 3000ms
+- XSS 安全（3处修复）：upload-ui.js file.name 转义，core.js sanitizeUrl 回退移除，core.js errMsg 转义
+- 信息泄露：注释掉 core.js 和 pro-upgrade.js 中的生产环境 console.log
+- CSS 兼容性：为 backdrop-filter 添加 -webkit- 前缀（iOS Safari < 16.4）
+- 文件编码：清理 index.html 中重复的 UTF-8 BOM（30 字节冗余标记）
+
+### 优化
+- 照片墙数据加载从 20 条/页提升到 60 条/页
+- CSS 缓存版本号更新为 v=20260618
+
+### 清理
+- 删除未引用的死文件：css/style.min.css、css/ui-enhance.min.css
+- 移除 print() 调试语句泄漏
+
+### Remade
+- 照片墙数据链路：缓存优先 + 20 条分页 -> 始终实时 + 60 条批量
+- 视频封面提取：上传缩略图 + 运行时首帧兜底双层保障
+- 上传后同步：normalizePhotoWallRow 即时追加 + 缓存清理 + 强制重取
+- 安全审计 Remade：全站 XSS 入口点审计，4 处修复
