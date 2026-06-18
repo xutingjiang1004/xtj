@@ -105,7 +105,7 @@
     sheet.setAttribute('aria-hidden', 'false');
   }
 
-  function setProgress(text){
+  function setProgress(text, pct){
     var overlay = byId('pwUploadProgressOverlay');
     if (!overlay) return;
     if (!text) {
@@ -114,9 +114,22 @@
       overlay.innerHTML = '';
       return;
     }
+    var barHtml = '';
+    if (typeof pct === 'number' && pct >= 0 && pct <= 100) {
+      barHtml = '<div class="pw-upload-progress-bar-track"><div class="pw-upload-progress-bar-fill" style="width:' + Math.round(pct) + '%"></div></div>';
+    }
     overlay.style.display = 'flex';
     overlay.classList.add('upload-overlay-visible');
-    overlay.innerHTML = '<div class="pw-upload-progress-container"><div class="pw-upload-progress-title">照片墙上传</div><div class="pw-upload-progress-status">' + escapeText(text) + '</div></div>';
+    overlay.innerHTML = '<div class="pw-upload-progress-container">'
+      + '<div class="pw-upload-progress-hero" style="display:flex;align-items:center;justify-content:center;gap:10px;">'
+      + '<div class="pw-spinner-ring" style="width:44px;height:44px;border:3.5px solid rgba(88,139,108,0.12);border-top-color:rgba(88,139,108,0.65);border-radius:50%;animation:pwSpinRing 0.75s linear infinite;"></div>'
+      + '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(88,139,108,0.5)" stroke-width="2.2" stroke-linecap="round" style="flex-shrink:0;animation:pwPulseFade 1.2s ease-in-out infinite alternate;">'
+      + '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>'
+      + '</svg>'
+      + '</div>'
+      + '<div class="pw-upload-progress-text">' + (text || '') + '</div>'
+      + barHtml
+      + '</div>';
   }
 
   function handlePhotoSelection(event){
@@ -142,7 +155,10 @@
       cacheControl: '31536000',
       upsert: false
     });
-    if (upload.error) throw upload.error;
+    if (upload.error) {
+      console.error('[photo-upload] Storage upload error', upload.error);
+      throw upload.error;
+    }
     var publicUrl = window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
     var content = JSON.stringify({
       type: 'photo_wall',
@@ -153,14 +169,19 @@
       mimeType: type,
       duration: null
     });
-    var insert = await window.sb.from('posts').insert([{
+    var insertPayload = {
       user_name: user,
       content: content,
       media_url: publicUrl,
       media_type: window.PHOTO_WALL_MARKER || MARKER,
       actor_key: window.deviceId || ('photo_' + Date.now())
-    }]).select('id,user_name,media_url,content,created_at,views,actor_key').maybeSingle();
-    if (insert.error) throw insert.error;
+    };
+    var insert = await window.sb.from('posts').insert([insertPayload])
+      .select('id,user_name,media_url,content,created_at,views,actor_key').maybeSingle();
+    if (insert.error) {
+      console.error('[photo-upload] DB insert error', insert.error, 'payload keys:', Object.keys(insertPayload));
+      throw insert.error;
+    }
     return insert.data;
   }
 
@@ -178,8 +199,12 @@
     try {
       for (var i = 0; i < state.photoFiles.length; i++) {
         try {
+          var pct = state.photoFiles.length > 1 ? Math.round((i / state.photoFiles.length) * 100) : 0;
+          setProgress('正在上传 ' + (i + 1) + ' / ' + state.photoFiles.length, pct);
           var row = await uploadOnePhotoWallFile(state.photoFiles[i], i, state.photoFiles.length);
           ok += 1;
+          // 上传成功更新进度
+          setProgress('已上传 ' + ok + ' / ' + state.photoFiles.length, Math.round((ok / state.photoFiles.length) * 100));
           if (row && typeof window.normalizePhotoWallRow === 'function') {
             var item = window.normalizePhotoWallRow(row);
             if (item && item.imageUrl) {

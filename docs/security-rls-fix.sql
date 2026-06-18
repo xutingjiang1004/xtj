@@ -7,8 +7,16 @@
 -- H1: 修复 posts 表 RLS — 私密帖子泄露
 -- 问题：anon_select_posts 策略只过滤 media_type，没有过滤
 --       visibility='private'，导致所有用户的私密帖子全网可读。
--- 修复：在 USING 条件中增加 visibility 过滤
+-- 修复：在 USING 条件中增加 visibility 过滤。
+--       如果 visibility 列不存在则自动创建。
 -- ============================================================
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='posts' AND column_name='visibility') THEN
+    ALTER TABLE posts ADD COLUMN visibility text DEFAULT 'public';
+  END IF;
+END $$;
+
 DROP POLICY IF EXISTS "anon_select_posts" ON posts;
 CREATE POLICY "anon_select_posts" ON posts
   FOR SELECT

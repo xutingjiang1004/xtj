@@ -140,7 +140,7 @@
     .stat-box.danger .val { color: var(--danger); }
     .stat-box.warn .val { color: #f59e0b; }
 
-    /* 骨架屏脉冲动�?*/
+    /* 骨架屏脉冲动画 */
     @keyframes skeletonPulse {
         0% { opacity: 0.3; }
         50% { opacity: 0.6; }
@@ -492,7 +492,7 @@
         .toast-item { max-width: 280px; font-size: 13px; padding: 10px 18px; }
     }
 
-    /* ===== 新用户列表美化样�?===== */
+    /* ===== 新用户列表美化样式 ===== */
     .user-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -886,7 +886,7 @@
         color: var(--text-muted);
     }
 
-    /* 空状�?*/
+    /* 空状态 */
     .empty-state {
         text-align: center;
         padding: 40px 20px;
@@ -895,7 +895,7 @@
     .empty-state .icon { font-size: 40px; margin-bottom: 8px; opacity: 0.5; }
     .empty-state .text { font-size: 13px; }
 
-    /* 用户选择器美�?*/
+    /* 用户选择器美化 */
     .admin-user-picker-modern {
         min-width: 220px;
     }
@@ -1163,10 +1163,10 @@
 <div class="login-wrap" id="loginWrap">
     <div class="login-card">
         <h1>🔐 xtj 管理后台</h1>
-        <p>仅限管理员登�?/p>
+        <p>仅限管理员登录</p>
         <form onsubmit="doAdminLogin();return false">
-            <input id="loginName" placeholder="管理员账�? autocomplete="off" />
-            <input id="loginPw" type="password" placeholder="管理员密�? />
+            <input id="loginName" placeholder="管理员账号" autocomplete="off" />
+            <input id="loginPw" type="password" placeholder="管理员密码" />
             <button type="submit">登录后台</button>
         </form>
         <div class="login-err" id="loginErr"></div>
@@ -1186,10 +1186,10 @@
             <button id="tabReportsBtn" onclick="switchTab('reports')" style="position:relative;overflow:visible">🚨 举报管理<span id="reportBadge" class="notif-badge" style="display:none">0</span></button>
             <button id="tabBansBtn" onclick="switchTab('bans')">🔒 拉黑封禁</button>
             <button id="tabMutesBtn" onclick="switchTab('mutes')">🤐 禁言管理</button>
-            <button id="tabBlacklistBtn" onclick="switchTab('blacklist')">🚫 黑名�?/button>
+            <button id="tabBlacklistBtn" onclick="switchTab('blacklist')">🚫 黑名单</button>
             <button id="tabPhotosBtn" onclick="switchTab('photos')">📷 照片管理</button>
             <button onclick="toggleTheme()" title="切换主题">🌓</button>
-            <button class="danger" onclick="doAdminLogout()">退�?/button>
+            <button class="danger" onclick="doAdminLogout()">退出</button>
         </div>
     </div>
     <div class="dash-content">
