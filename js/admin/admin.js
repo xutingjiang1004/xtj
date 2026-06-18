@@ -382,7 +382,7 @@
             var apiData = await apiCall('GET', '/admin/data');
             var postData = apiData.posts || [];
             allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
-            annList = postData.filter(function(p) { return p.media_type === ANN_MARKER; });
+            annList = apiData.announcements || [];
             allLikes = apiData.likes || [];
             allComments = apiData.comments || [];
             reportsData = apiData.reports || [];
@@ -2324,24 +2324,11 @@
 
     renderUsersTab = function(el) {
         var h = '<div class="stats-row">';
-        h += '<div class="stat-box"><div class="val">' + allUsers.length + '</div><div class="lbl">注册用户总数</div></div>';
+        h += '<div class="stat-box"><div class="val">' + allUsers.length + '</div><div class="lbl">注册用户</div></div>';
         h += '<div class="stat-box"><div class="val">' + allPosts.length + '</div><div class="lbl">帖子总数</div></div>';
         h += '<div class="stat-box"><div class="val">' + allLikes.length + '</div><div class="lbl">点赞总数</div></div>';
         h += '<div class="stat-box"><div class="val">' + allComments.length + '</div><div class="lbl">评论总数</div></div>';
         h += '</div>';
-        h += '<div class="filter-bar">';
-        h += '<div class="search-wrap"><span class="search-icon">搜</span><input id="userSearchInp" placeholder="搜索用户名..." oninput="searchUserInp()" value="' + escapeHtml(searchUser) + '"></div>';
-        h += '<div class="filter-chips">';
-        h += '<span class="filter-chip' + (userFilterStatus === 'all' ? ' active' : '') + '" onclick="userFilterStatus=\'all\';renderTab(\'users\')">全部</span>';
-        h += '<span class="filter-chip' + (userFilterStatus === 'admin' ? ' active' : '') + '" onclick="userFilterStatus=\'admin\';renderTab(\'users\')">管理员</span>';
-        h += '<span class="filter-chip' + (userFilterStatus === 'banned' ? ' active active-del' : '') + '" onclick="userFilterStatus=\'banned\';renderTab(\'users\')">封禁中</span>';
-        h += '<span class="filter-chip' + (userFilterStatus === 'muted' ? ' active active-warn' : '') + '" onclick="userFilterStatus=\'muted\';renderTab(\'users\')">禁言中</span>';
-        h += '</div>';
-        h += '<select onchange="userSortBy=this.value;renderTab(\'users\')">';
-        h += '<option value="reg"' + (userSortBy === 'reg' ? ' selected' : '') + '>按注册时间</option>';
-        h += '<option value="login"' + (userSortBy === 'login' ? ' selected' : '') + '>按最近登录</option>';
-        h += '<option value="posts"' + (userSortBy === 'posts' ? ' selected' : '') + '>按帖子数</option>';
-        h += '</select></div>';
 
         var filtered = allUsers.slice();
         if (searchUser) {
@@ -2361,29 +2348,34 @@
             return (b.info && b.info.reg_time ? new Date(b.info.reg_time).getTime() : 0) - (a.info && a.info.reg_time ? new Date(a.info.reg_time).getTime() : 0);
         });
 
-        h += '<div class="card"><h3>用户列表 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + filtered.length + ' 位用户</span></h3>';
-        if (!filtered.length) {
-            h += '<div class="empty">没有匹配用户</div>';
-        } else {
-            h += '<div class="admin-stack-list">';
+        h += '<div class="card"><h3>用户列表（' + filtered.length + '位）</h3>';
+        h += '<div class="search-bar"><input id="userSearchInp" placeholder="搜索用户名..." oninput="searchUserInp()" value="' + escapeHtml(searchUser) + '" /></div>';
+        h += '<div class="filter-chips" style="margin-bottom:10px;">';
+        h += '<span class="filter-chip' + (userFilterStatus === 'all' ? ' active' : '') + '" onclick="userFilterStatus=\'all\';renderTab(\'users\')">全部</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'admin' ? ' active' : '') + '" onclick="userFilterStatus=\'admin\';renderTab(\'users\')">管理员</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'banned' ? ' active active-del' : '') + '" onclick="userFilterStatus=\'banned\';renderTab(\'users\')">封禁中</span>';
+        h += '<span class="filter-chip' + (userFilterStatus === 'muted' ? ' active active-warn' : '') + '" onclick="userFilterStatus=\'muted\';renderTab(\'users\')">禁言中</span>';
+        h += '</div>';
+        if (!filtered.length) { h += '<div class="empty">没有匹配用户</div>'; }
+        else {
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>帖子</th><th>点赞</th><th>评论</th><th>注册时间</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(u) {
                 var stats = getUserActivityStats(u.name);
                 var flags = getUserStateFlags(u.name);
+                var statusBadge = flags.isAdmin
+                    ? '<span class="badge badge-green">管理员</span>'
+                    : (flags.isBanned
+                        ? '<span class="badge badge-red">封禁中</span>'
+                        : (flags.isMuted
+                            ? '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">禁言中</span>'
+                            : '<span class="badge badge-green">正常</span>'));
                 var safeName = u.name.replace(/'/g, "\\'");
                 var actions = flags.isAdmin
-                    ? '<span style="color:var(--text-muted);font-size:12px;">管理员不可操作</span>'
+                    ? '-'
                     : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button>';
-                h += buildAdminStackItemV2({
-                    itemClass: (flags.isBanned ? 'is-banned ' : '') + (flags.isMuted ? 'is-muted ' : '') + (flags.isAdmin ? 'is-admin' : ''),
-                    title: escapeHtml(u.name),
-                    tags: '<div class="user-tags">' + window.buildUserTagMarkup(flags) + '</div>',
-                    metrics: '<span>帖子 ' + stats.posts + '</span><span>点赞 ' + stats.likes + '</span><span>评论 ' + stats.comments + '</span>',
-                    meta: '<span>注册时间：' + escapeHtml(u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-') + '</span><span>最近登录：' + escapeHtml(u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-') + '</span>',
-                    badge: flags.isBanned ? '<span class="badge badge-red">封禁中</span>' : (flags.isMuted ? '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">禁言中</span>' : '<span class="badge badge-green">正常</span>'),
-                    actions: actions
-                });
+                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + statusBadge + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + escapeHtml(u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-') + '</td><td>' + actions + '</td></tr>';
             });
-            h += '</div>';
+            h += '</tbody></table></div>';
         }
         h += '</div>';
         el.innerHTML = h;
@@ -2396,8 +2388,18 @@
         h += '<div class="stat-box"><div class="val">' + bansData.length + '</div><div class="lbl">总封禁记录</div></div>';
         h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前封禁</div></div>';
         h += '</div>';
-        h += '<div class="card"><h3>快速封禁用户</h3>' + buildAdminActionToolbar('banUserName', 'banDuration', 'banReason', '封禁时长', '封禁原因', '输入封禁原因') + buildAdminActionUserCards('ban') + '</div>';
-        h += '<div class="card"><h3>封禁记录</h3>' + buildAdminModerationRecordListV2('ban', bansData) + '</div>';
+        h += '<div class="card"><h3>封禁记录（' + bansData.length + '条）</h3>';
+        if (!bansData.length) { h += '<div class="empty">暂无封禁记录</div>'; }
+        else {
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>操作人</th><th>封禁时间</th><th>到期时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            bansData.forEach(function(b) {
+                var statusBadge = b.is_active ? '<span class="badge badge-red">封禁中</span>' : '<span class="badge badge-green">已解除</span>';
+                var liftInfo = !b.is_active && b.lifted_at ? formatTime(b.lifted_at) : '-';
+                h += '<tr><td><strong>' + escapeHtml(b.user_name) + '</strong></td><td>' + (b.ban_type === 'permanent' ? '永久' : formatDuration(b.ban_duration_hours || 0)) + '</td><td style="max-width:150px;">' + escapeHtml(b.ban_reason || '-') + '</td><td>' + escapeHtml(b.banned_by || '-') + '</td><td>' + formatTime(b.banned_at) + '</td><td>' + (b.expires_at ? formatTime(b.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (b.is_active ? '<button class="btn-sm del" onclick="liftBan(\'' + b.id + '\')">解除</button>' : liftInfo) + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
         el.innerHTML = h;
     };
 
@@ -2408,8 +2410,18 @@
         h += '<div class="stat-box"><div class="val">' + mutesData.length + '</div><div class="lbl">总禁言记录</div></div>';
         h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + active + '</div><div class="lbl">当前禁言</div></div>';
         h += '</div>';
-        h += '<div class="card"><h3>快速禁言用户</h3>' + buildAdminActionToolbar('muteUserName', 'muteDuration', 'muteReason', '禁言时长', '禁言原因', '输入禁言原因') + buildAdminActionUserCards('mute') + '</div>';
-        h += '<div class="card"><h3>禁言记录</h3>' + buildAdminModerationRecordListV2('mute', mutesData) + '</div>';
+        h += '<div class="card"><h3>禁言记录（' + mutesData.length + '条）</h3>';
+        if (!mutesData.length) { h += '<div class="empty">暂无禁言记录</div>'; }
+        else {
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>时长</th><th>原因</th><th>操作人</th><th>开始时间</th><th>到期时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            mutesData.forEach(function(m) {
+                var statusBadge = m.is_active ? '<span class="badge badge-red">禁言中</span>' : '<span class="badge badge-green">已解除</span>';
+                var liftInfo = !m.is_active && m.lifted_at ? formatTime(m.lifted_at) : '-';
+                h += '<tr><td><strong>' + escapeHtml(m.user_name) + '</strong></td><td>' + ((m.duration_hours || 0) > 0 ? formatDuration(m.duration_hours) : '永久') + '</td><td style="max-width:150px;">' + escapeHtml(m.reason || '-') + '</td><td>' + escapeHtml(m.muted_by || '-') + '</td><td>' + formatTime(m.created_at) + '</td><td>' + (m.expires_at ? formatTime(m.expires_at) : '永久') + '</td><td>' + statusBadge + '</td><td>' + (m.is_active ? '<button class="btn-sm" onclick="liftMute(\'' + m.id + '\')">解除</button>' : liftInfo) + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
         el.innerHTML = h;
     };
 
@@ -2469,7 +2481,7 @@
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
                 allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
-                annList = postData.filter(function(p) { return p.media_type === ANN_MARKER; });
+                annList = apiData.announcements || [];
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
                 reportsData = apiData.reports || [];
