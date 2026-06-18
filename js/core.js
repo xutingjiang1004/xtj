@@ -427,10 +427,10 @@ window.safeLocalStorageSet = function(key, value) {
             if (_photoWallLoaded) return Promise.resolve();
             if (_photoWallLoading) return _photoWallLoading;
             var scripts = [
-                'js/photo-wall/data.min.js',
-                'js/photo-wall/render.min.js',
-                'js/photo-wall/preview.min.js',
-                'js/photo-wall/photo-wall.min.js'
+                'js/photo-wall/data.min.js?v=20260618_1',
+                'js/photo-wall/render.min.js?v=20260618_1',
+                'js/photo-wall/preview.min.js?v=20260618_1',
+                'js/photo-wall/photo-wall.min.js?v=20260618_1'
             ];
             _photoWallLoading = new Promise(function(resolve, reject) {
                 function loadNext(idx) {
