@@ -412,9 +412,35 @@ app.post('/admin/logout', verifyToken, (req, res) => {
   return res.json({ ok: true });
 });
 
+// ===================== 自动过期函数 ======================
+async function autoExpireOverdueRecords() {
+  const now = new Date().toISOString();
+  try {
+    // 自动解除过期的封禁
+    await supabase.from('bans').update({
+      is_active: false, lifted_at: now, lifted_by: 'system'
+    }).eq('is_active', true).lt('expires_at', now).not('expires_at', 'is', null);
+
+    // 自动解除过期的禁言
+    await supabase.from('mutes').update({
+      is_active: false, lifted_at: now, lifted_by: 'system'
+    }).eq('is_active', true).lt('expires_at', now).not('expires_at', 'is', null);
+
+    // 自动解除过期的黑名单
+    await supabase.from('blacklist').update({
+      is_active: false, lifted_at: now, lifted_by: 'system'
+    }).eq('is_active', true).lt('expires_at', now).not('expires_at', 'is', null);
+  } catch (e) {
+    console.warn('[auto-expire] 检查失败:', e.message);
+  }
+}
+
 // ===================== 数据加载（只读，但需要认证） ======================
 app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
   try {
+    // 每次加载管理后台数据时，先检查并自动解除过期记录
+    autoExpireOverdueRecords().catch(function() {});
+
     const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes, annRes] = await Promise.all([
       supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
