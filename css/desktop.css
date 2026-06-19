@@ -413,7 +413,11 @@
     grid-column: 1 !important;
     grid-row: 2 !important;
     border-right: 1px solid rgba(0, 0, 0, 0.08) !important;
-    background: rgba(255, 255, 255, 0.4) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     overflow: hidden !important;
     min-height: 0;
   }
@@ -425,6 +429,9 @@
   #panelChat #dockChatList {
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
+    background: transparent !important;
+    box-shadow: none !important;
+    filter: none !important;
   }
 
   /* detail 占右列，永远可见（覆盖移动端默认 hidden） */
@@ -459,11 +466,18 @@
   /* 会话项在左列更紧凑 */
   #panelChat .chat-list-item {
     padding: 12px 18px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    filter: none !important;
   }
 
   /* 暗色主题适配 */
   [data-theme="dark"] #panelChat #dockChatListView {
-    background: rgba(20, 22, 38, 0.4) !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    filter: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
     border-right-color: rgba(255, 255, 255, 0.06) !important;
   }
   [data-theme="dark"] #panelChat .chat-header,
@@ -1264,4 +1278,15 @@
   [data-theme="dark"] .chat-list-item:hover {
     background: rgba(255, 255, 255, 0.035) !important;
   }
+}
+
+/* ========== Final Chat List Flat Override ========== */
+#panelChat #dockChatListView,
+#panelChat #dockChatList,
+#panelChat .chat-list-item {
+  background: transparent !important;
+  box-shadow: none !important;
+  filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
