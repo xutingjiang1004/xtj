@@ -392,7 +392,6 @@
             annList = apiData.announcements || [];
             allLikes = apiData.likes || [];
             allComments = apiData.comments || [];
-            reportsData = apiData.reports || [];
             updateReportBadge();
             bansData = apiData.bans || [];
             mutesData = apiData.mutes || [];
@@ -479,6 +478,30 @@
             }
         } catch(e) {}
         return content;
+    }
+
+    function getAdminPostSummary(post) {
+        var mediaType = String(post && post.media_type || '').toLowerCase();
+        var hasImage = mediaType.indexOf('image') === 0 && !!(post && post.media_url);
+        var rawContent = post && typeof post.content === 'string' ? post.content : '';
+        var displayText = getDisplayContent(rawContent);
+        var trimmedText = String(displayText || '').trim();
+        try {
+            var parsed = JSON.parse(rawContent || '{}');
+            if (parsed && typeof parsed === 'object' && parsed.__type === '__xtj_post_v2__') {
+                var parsedText = String(parsed.text || parsed.content || parsed.title || '').trim();
+                return {
+                    text: parsedText,
+                    hasImage: hasImage,
+                    isStructured: true
+                };
+            }
+        } catch(e) {}
+        return {
+            text: trimmedText,
+            hasImage: hasImage,
+            isStructured: false
+        };
     }
 
     function formatTime(d) {
@@ -885,7 +908,6 @@
                 annList = apiData.announcements || [];
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
-                reportsData = apiData.reports || [];
                 updateReportBadge();
                 bansData = apiData.bans || [];
                 mutesData = apiData.mutes || [];
@@ -906,9 +928,9 @@
         else {
             h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>内容</th><th>附件</th><th>浏览</th><th>时间</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(p) {
-                var displayText = getDisplayContent(p.content);
-                var content = (displayText || '').slice(0, 60);
-                if (displayText && displayText.length > 60) content += '...';
+                var summary = getAdminPostSummary(p);
+                var content = summary.hasImage && !summary.text ? '' : String(summary.text || '').slice(0, 60);
+                if (summary.text && summary.text.length > 60) content += '...';
                 // 图片预览
                 var imgHtml = '';
                 if (p.media_url && p.media_url.indexOf('http') === 0) {
@@ -2530,7 +2552,6 @@
                 annList = apiData.announcements || [];
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
-                reportsData = apiData.reports || [];
                 updateReportBadge();
                 bansData = apiData.bans || [];
                 mutesData = apiData.mutes || [];
@@ -2563,6 +2584,312 @@
             else { window.renderTab(currentTab); }
         } catch(e) {
             showToast('数据加载失败，请刷新重试', 'error');
+        }
+    };
+    function buildAdminMediaThumb(post, username, createdAt) {
+        if (!post || !post.media_url) return '-';
+        if (String(post.media_url).indexOf('http') === 0) {
+            return '<img src="' + escapeHtml(post.media_url) + '" style="width:48px;height:48px;object-fit:cover;border-radius:6px;cursor:pointer;" onclick="previewAdminPhoto(\'' + escapeHtml(post.media_url) + '\',\'' + escapeHtml(username || post.user_name || '') + '\',\'' + escapeHtml(createdAt || post.created_at || '') + '\')" title="点击预览大图">';
+        }
+        return '📎';
+    }
+
+    renderPostsTab = async function(el) {
+        if (API_BASE && getToken()) {
+            try {
+                var apiData = await apiCall('GET', '/admin/data');
+                allPosts = (apiData.posts || []).filter(function(p) {
+                    return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER;
+                });
+                allLikes = apiData.likes || [];
+                allComments = apiData.comments || [];
+                updateReportBadge();
+                bansData = apiData.bans || [];
+                mutesData = apiData.mutes || [];
+                blacklistData = apiData.blacklist || [];
+            } catch(e) {}
+        }
+        var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__' && p.media_type !== REPORT_MARKER; });
+        var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
+        h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
+        var filtered = visiblePosts;
+        if (searchPost) {
+            var q = searchPost.toLowerCase();
+            filtered = visiblePosts.filter(function(p) {
+                return (p.user_name || '').toLowerCase().includes(q) || (p.content || '').toLowerCase().includes(q);
+            });
+        }
+        if (!filtered.length) {
+            h += '<div class="empty">无匹配帖子</div>';
+        } else {
+            h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>内容</th><th>附件</th><th>浏览</th><th>时间</th><th>操作</th></tr></thead><tbody>';
+            filtered.forEach(function(p) {
+                var summary = getAdminPostSummary(p);
+                var content = summary.hasImage && !summary.text ? '' : String(summary.text || '').slice(0, 60);
+                if (summary.text && summary.text.length > 60) content += '...';
+                h += '<tr><td>' + escapeHtml(p.user_name || '') + '</td>';
+                h += '<td>' + escapeHtml(content) + '</td>';
+                h += '<td>' + buildAdminMediaThumb(p) + '</td>';
+                h += '<td>' + (p.views || 0) + '</td>';
+                h += '<td>' + formatTime(p.created_at) + '</td>';
+                h += '<td><button class="btn-sm del" onclick="deleteAdminPost(\'' + p.id + '\')">删除</button></td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    };
+
+    renderLikesTab = async function(el) {
+        if (API_BASE && getToken()) {
+            try {
+                var apiData = await apiCall('GET', '/admin/data');
+                allLikes = apiData.likes || [];
+                allPosts = (apiData.posts || []).filter(function(p) {
+                    return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER;
+                });
+            } catch(e) {}
+        }
+        var h = '<div class="card"><h3>点赞记录（' + allLikes.length + '条）</h3>';
+        if (!allLikes.length) {
+            h += '<div class="empty">暂无点赞数据</div>';
+        } else {
+            h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>帖子作者</th><th>帖子内容</th><th>附件</th><th>时间</th></tr></thead><tbody>';
+            allLikes.slice(0, 500).forEach(function(l) {
+                var post = allPosts.find(function(p) { return p.id === l.post_id; });
+                var summary = post ? getAdminPostSummary(post) : { text: '(已删除)', hasImage: false };
+                var postContent = summary.hasImage && !summary.text ? '' : String(summary.text || '').slice(0, 30);
+                if (summary.text && summary.text.length > 30) postContent += '...';
+                h += '<tr><td>' + escapeHtml(l.user_name || '') + '</td>';
+                h += '<td>' + escapeHtml((post && post.user_name) || '') + '</td>';
+                h += '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(postContent) + '</td>';
+                h += '<td>' + (post ? buildAdminMediaThumb(post) : '-') + '</td>';
+                h += '<td>' + formatTime(l.created_at) + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+            if (allLikes.length > 500) h += '<div class="empty">仅显示最近500条记录</div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    };
+
+    loadReportsData = async function() {
+        try {
+            var data = await apiCall('GET', '/admin/reports');
+            reportsData = Array.isArray(data.data) ? data.data : [];
+        } catch(e) {
+            reportsData = [];
+        }
+        updateReportBadge();
+    };
+
+    renderReportsTab = async function(el) {
+        await loadReportsData();
+        var pending = reportsData.filter(function(r) { return r.status === 'pending'; }).length;
+        var h = '<div class="stats-row">';
+        h += '<div class="stat-box"><div class="val">' + reportsData.length + '</div><div class="lbl">总举报数</div></div>';
+        h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + pending + '</div><div class="lbl">待处理</div></div>';
+        h += '<div class="stat-box"><div class="val" style="color:var(--primary)">' + reportsData.filter(function(r) { return r.status === 'actioned'; }).length + '</div><div class="lbl">已处理</div></div>';
+        h += '</div>';
+        h += '<div class="card"><h3>举报管理</h3>';
+        if (!reportsData.length) {
+            h += '<div class="empty">暂无举报</div>';
+        } else {
+            h += '<div class="table-wrap"><table><thead><tr><th>举报人</th><th>类型</th><th>被举报人</th><th>分类</th><th>原因</th><th>时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            reportsData.forEach(function(r) {
+                var statusBadge = r.status === 'pending' ? '<span class="badge badge-red">待处理</span>' :
+                    r.status === 'reviewed' ? '<span class="badge badge-green">已审核</span>' :
+                    r.status === 'dismissed' ? '<span class="badge" style="background:rgba(128,128,128,0.15);color:var(--text-muted)">已驳回</span>' :
+                    '<span class="badge badge-green">已处理</span>';
+                var typeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
+                h += '<tr><td>' + escapeHtml(r.reporter_name || '-') + '</td>';
+                h += '<td>' + escapeHtml(typeLabel) + '</td>';
+                h += '<td><strong>' + escapeHtml(r.target_user || '-') + '</strong></td>';
+                h += '<td>' + escapeHtml(r.report_category || '-') + '</td>';
+                h += '<td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(r.report_reason || '-') + '</td>';
+                h += '<td>' + formatTime(r.created_at) + '</td>';
+                h += '<td>' + statusBadge + '</td>';
+                h += '<td style="white-space:nowrap;">';
+                if (r.status === 'pending') {
+                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + r.id + '\')">处理</button> ';
+                    h += '<button class="btn-sm" onclick="dismissReport(\'' + r.id + '\')">驳回</button>';
+                } else {
+                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + r.id + '\')">详情</button>';
+                }
+                h += '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    };
+
+    loadUserVisitStats = async function(el) {
+        var container = document.createElement('div');
+        container.id = 'userVisitStatsCard';
+        container.className = 'card';
+        container.innerHTML = '<h3>用户访问明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">加载中...</span></h3><div class="loading">加载用户访问数据中...</div>';
+        var placeholder = document.getElementById('userVisitStatsContainer');
+        if (placeholder) placeholder.replaceWith(container);
+        else el.appendChild(container);
+        try {
+            var userData;
+            if (API_BASE && getToken()) {
+                userData = await apiCall('GET', '/admin/stats/users');
+            }
+            if (!userData || !userData.users) {
+                container.innerHTML = '<h3>用户访问明细</h3><div class="empty">暂无用户访问数据</div>';
+                return;
+            }
+            var users = userData.users;
+            var totalUsers = userData.total || 0;
+            var h = '<h3>用户访问明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + totalUsers + ' 个用户</span></h3>';
+            if (users.length === 0) {
+                h += '<div class="empty">暂无用户访问数据</div>';
+            } else {
+                h += '<div class="table-wrap"><table><thead><tr><th>用户</th><th>总访问次数</th><th>今日访问</th><th>最近登录</th><th>注册时间</th></tr></thead><tbody>';
+                var today = new Date().toISOString().slice(0, 10);
+                users.forEach(function(u) {
+                    var todayVisits = u.daily_visits && u.daily_visits[today] ? u.daily_visits[today] : 0;
+                    var lastLogin = u.last_login || u.last_visit || '';
+                    var regTime = u.reg_time || '';
+                    h += '<tr><td><strong>' + escapeHtml(u.user_name) + '</strong></td>';
+                    h += '<td><span style="color:var(--primary);font-weight:600;">' + u.total_visits + '</span></td>';
+                    h += '<td>' + (todayVisits > 0 ? '<span style="color:#059669;font-weight:600;">' + todayVisits + '</span>' : '0') + '</td>';
+                    h += '<td style="font-size:11px;color:var(--text-muted);">' + (lastLogin ? formatTime(lastLogin) : '--') + '</td>';
+                    h += '<td style="font-size:11px;color:var(--text-muted);">' + (regTime ? formatTime(regTime) : '--') + '</td></tr>';
+                });
+                h += '</tbody></table></div>';
+            }
+            container.innerHTML = h;
+        } catch(e) {
+            container.innerHTML = '<h3>用户访问明细</h3><div class="empty">用户访问数据加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    };
+
+    renderStatsTab = async function(el) {
+        var skeletonHtml = '<div class="card"><div class="date-filter-row"><div class="skeleton-pulse" style="height:36px;width:100%;background:rgba(255,255,255,0.05);border-radius:12px;"></div></div></div>';
+        skeletonHtml += '<div class="stats-row">';
+        ['用户数量', '帖子数量', '评论数量', '点赞数量', '照片数量', '访问总次数', '被攻击次数', 'API防火墙拦截'].forEach(function(l) {
+            skeletonHtml += '<div class="stat-box skeleton-pulse"><div class="val" style="height:28px;width:60%;background:rgba(255,255,255,0.08);border-radius:6px;">&nbsp;</div><div class="lbl">' + l + '</div></div>';
+        });
+        skeletonHtml += '</div>';
+        skeletonHtml += '<div class="card"><h3>用户访问明细</h3><div class="skeleton-pulse" style="height:100px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
+        skeletonHtml += '<div class="card"><h3>每日数据明细</h3><div class="skeleton-pulse" style="height:120px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
+        skeletonHtml += '<div class="card"><h3>每日数据趋势</h3><div class="skeleton-pulse" style="height:120px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
+        skeletonHtml += '<div class="card"><h3>攻击类型分布</h3><div class="skeleton-pulse" style="height:80px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
+        skeletonHtml += '<div class="card"><h3>被攻击详情</h3><div class="skeleton-pulse" style="height:80px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
+        skeletonHtml += '<div class="card"><h3>API防火墙拦截详情</h3><div class="skeleton-pulse" style="height:80px;background:rgba(255,255,255,0.05);border-radius:12px;margin:12px 0;"></div></div>';
+        el.innerHTML = skeletonHtml;
+        try {
+            var summary, dailyData;
+            if (API_BASE && getToken()) {
+                var dailyQuery = '/admin/stats/daily';
+                var summaryQuery = '/admin/stats';
+                if (window.statsDateStart) dailyQuery += '?start=' + window.statsDateStart;
+                if (window.statsDateEnd) dailyQuery += (window.statsDateStart ? '&' : '?') + 'end=' + window.statsDateEnd;
+                if (window.statsDateStart || window.statsDateEnd) {
+                    summaryQuery += '?';
+                    if (window.statsDateStart) summaryQuery += 'start=' + window.statsDateStart;
+                    if (window.statsDateEnd) summaryQuery += (window.statsDateStart ? '&' : '') + 'end=' + window.statsDateEnd;
+                }
+                summary = await apiCall('GET', summaryQuery);
+                dailyData = await apiCall('GET', dailyQuery);
+            }
+            if (!summary) {
+                el.innerHTML = '<div class="empty-state"><div class="icon">📳</div><div class="text">统计数据加载失败：无法连接后端 API</div></div>';
+                return;
+            }
+            var daily = (dailyData && dailyData.daily) || [];
+            var h = '<div class="card"><div class="date-filter-row">';
+            h += '<span style="font-weight:600;font-size:14px;">日期筛选：</span>';
+            h += '<input type="date" id="statsDateStart" value="' + escapeHtml(window.statsDateStart) + '" onchange="window.statsDateStart=this.value;renderTab(\'stats\')" title="开始日期">';
+            h += '<span style="color:var(--text-muted);">至</span>';
+            h += '<input type="date" id="statsDateEnd" value="' + escapeHtml(window.statsDateEnd) + '" onchange="window.statsDateEnd=this.value;renderTab(\'stats\')" title="结束日期">';
+            if (window.statsDateStart || window.statsDateEnd) h += '<button onclick="window.statsDateStart=\'\';window.statsDateEnd=\'\';renderTab(\'stats\')">清除筛选</button>';
+            if (API_BASE && getToken()) h += '<button class="btn-sm primary" style="margin-left:auto;" onclick="apiCall(\'POST\',\'/admin/stats/refresh\').then(function(){renderTab(\'stats\');}).catch(function(){})">刷新缓存</button>';
+            h += '</div></div>';
+            h += '<div class="stats-row">';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_users || 0) + '</div><div class="lbl">用户数量</div></div>';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_posts || 0) + '</div><div class="lbl">帖子数量</div></div>';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_comments || 0) + '</div><div class="lbl">评论数量</div></div>';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_likes || 0) + '</div><div class="lbl">点赞数量</div></div>';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_photos || 0) + '</div><div class="lbl">照片数量</div></div>';
+            h += '<div class="stat-box"><div class="val">' + (summary.total_visits || 0) + '</div><div class="lbl">访问总次数</div></div>';
+            h += '<div class="stat-box danger"><div class="val">' + (summary.total_attacks || 0) + '</div><div class="lbl">被攻击次数</div></div>';
+            h += '<div class="stat-box warn"><div class="val">' + (summary.firewall_intercepts || 0) + '</div><div class="lbl">API防火墙拦截</div></div>';
+            h += '</div>';
+            h += '<div id="userVisitStatsContainer"></div>';
+            if (daily.length > 0) {
+                h += '<div class="card"><h3>每日数据明细 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + daily.length + ' 天</span></h3>';
+                h += '<div class="table-wrap"><table><thead><tr><th>日期</th><th>访问</th><th>攻击</th><th>帖子</th><th>评论</th><th>点赞</th><th>新用户</th></tr></thead><tbody>';
+                daily.slice().reverse().forEach(function(d) {
+                    var total = (d.visits || 0) + (d.attacks || 0) + (d.posts || 0) + (d.comments || 0) + (d.likes || 0) + (d.new_users || 0);
+                    if (total === 0) return;
+                    h += '<tr><td><strong>' + escapeHtml(d.date) + '</strong></td>';
+                    h += '<td' + (d.visits ? '' : ' class="zero-val"') + '>' + (d.visits || '') + '</td>';
+                    h += '<td' + (d.attacks ? '' : ' class="zero-val"') + ' style="color:' + (d.attacks > 0 ? 'var(--danger)' : 'var(--text-muted)') + ';">' + (d.attacks || '') + '</td>';
+                    h += '<td' + (d.posts ? '' : ' class="zero-val"') + '>' + (d.posts || '') + '</td>';
+                    h += '<td' + (d.comments ? '' : ' class="zero-val"') + '>' + (d.comments || '') + '</td>';
+                    h += '<td' + (d.likes ? '' : ' class="zero-val"') + '>' + (d.likes || '') + '</td>';
+                    h += '<td' + (d.new_users ? '' : ' class="zero-val"') + '>' + (d.new_users || '') + '</td></tr><tr class="divider-row"><td colspan="7"></td></tr>';
+                });
+                h += '</tbody></table></div></div>';
+            }
+            var modes = [
+                { key: 'visits', label: '访问量', color: '#059669' },
+                { key: 'attacks', label: '攻击量', color: '#ff3b60' },
+                { key: 'posts', label: '发帖量', color: '#3b82f6' },
+                { key: 'comments', label: '评论量', color: '#f59e0b' },
+                { key: 'likes', label: '点赞量', color: '#ec4899' },
+                { key: 'new_users', label: '新用户', color: '#8b5cf6' }
+            ];
+            h += '<div class="card"><h3>每日数据趋势</h3><div class="filter-chips" style="margin-bottom:12px;">';
+            modes.forEach(function(m) {
+                h += '<span class="filter-chip' + (window.statsChartMode === m.key ? ' active' : '') + '" onclick="window.statsChartMode=\'' + m.key + '\';renderTab(\'stats\')" style="cursor:pointer;">' + m.label + '</span>';
+            });
+            h += '</div>';
+            if (daily.length === 0) {
+                h += '<div class="empty" style="padding:24px;text-align:center;color:var(--text-muted);">暂无每日数据，刷新页面后开始记录访问</div>';
+            } else {
+                var maxVal = 1;
+                daily.forEach(function(d) { maxVal = Math.max(maxVal, d[window.statsChartMode] || 0); });
+                var activeMode = modes.find(function(m) { return m.key === window.statsChartMode; }) || modes[0];
+                var chartData = daily.length > 30 ? daily.slice(-30) : daily;
+                h += '<div class="chart-legend"><span><span class="dot" style="background:' + activeMode.color + ';"></span>' + activeMode.label + '</span><span style="color:var(--text-muted);font-size:11px;">最高 ' + maxVal + '</span><span style="color:var(--text-muted);font-size:11px;">共 ' + daily.length + ' 天</span></div>';
+                h += '<div class="chart-bar-row">';
+                chartData.forEach(function(d) {
+                    var v = d[window.statsChartMode] || 0;
+                    var heightPct = Math.max(4, Math.round((v / maxVal) * 100));
+                    h += '<div class="chart-bar" style="height:' + heightPct + '%;background:' + activeMode.color + ';" title="' + escapeHtml(d.date) + ': ' + v + '"><span class="bar-tip">' + v + '</span></div>';
+                });
+                h += '</div><div class="chart-bar-labels">';
+                var labelStep = chartData.length > 18 ? 2 : 1;
+                chartData.forEach(function(d, index) {
+                    var shortDate = d.date ? d.date.slice(5) : '';
+                    h += '<div class="chart-bar-label">' + ((index % labelStep === 0 || index === chartData.length - 1) ? escapeHtml(shortDate) : '') + '</div>';
+                });
+                h += '</div>';
+            }
+            h += '</div>';
+            if (summary.attack_types && Object.keys(summary.attack_types).length > 0) {
+                h += '<div class="card"><h3>攻击类型分布</h3><div style="display:flex;flex-direction:column;gap:8px;">';
+                var attackEntries = Object.entries(summary.attack_types).sort(function(a, b) { return b[1] - a[1]; });
+                var attackMax = attackEntries[0] ? attackEntries[0][1] : 1;
+                attackEntries.forEach(function(entry) {
+                    var pct = Math.round((entry[1] / attackMax) * 100);
+                    h += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;"><span style="width:120px;text-align:right;color:var(--text-muted);">' + escapeHtml(entry[0]) + '</span><div style="flex:1;height:18px;background:rgba(255,59,96,0.1);border-radius:9px;overflow:hidden;"><div style="height:100%;width:' + pct + '%;background:linear-gradient(90deg, #ff3b60, #fb7185);border-radius:9px;transition:width 0.5s ease;"></div></div><span style="width:40px;font-weight:600;">' + entry[1] + '</span></div>';
+                });
+                h += '</div></div>';
+            }
+            h += '<div id="attackDetailsContainer"></div><div id="firewallDetailsContainer"></div>';
+            if (summary.cached_at) h += '<div style="text-align:center;font-size:11px;color:var(--text-muted);padding:8px;">数据缓存时间: ' + formatTime(summary.cached_at) + '（每60秒刷新）</div>';
+            el.innerHTML = h;
+            loadUserVisitStats(el);
+            loadAttackDetails(el);
+            loadFirewallDetails(el);
+        } catch(e) {
+            el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">统计数据加载失败: ' + escapeHtml(e.message) + '</div></div>';
         }
     };
 })();

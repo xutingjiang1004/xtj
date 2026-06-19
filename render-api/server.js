@@ -897,29 +897,85 @@ app.put('/admin/blacklist/:id/lift', verifyToken, async (req, res) => {
   return res.json({ ok: true });
 });
 
+function firstNonEmptyValue() {
+  for (let i = 0; i < arguments.length; i++) {
+    const value = arguments[i];
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function parseReportRecordContent(rawContent) {
+  let parsed = {};
+  try { parsed = JSON.parse(rawContent || '{}'); } catch(e) {}
+  const targetTypeRaw = firstNonEmptyValue(parsed.target_type, parsed.type, parsed.report_type, parsed.targetKind);
+  return {
+    target_type: targetTypeRaw === 'photo_wall' ? 'photo' : (targetTypeRaw || 'post'),
+    target_id: firstNonEmptyValue(parsed.target_id, parsed.post_id, parsed.photo_id, parsed.report_target_id, parsed.target_post_id),
+    target_user: firstNonEmptyValue(parsed.target_user, parsed.target_username, parsed.reported_user, parsed.reported_username, parsed.post_user),
+    report_category: firstNonEmptyValue(parsed.report_category, parsed.category, parsed.reason_type, parsed.report_type_name),
+    report_reason: firstNonEmptyValue(parsed.report_reason, parsed.reason, parsed.detail, parsed.description),
+    status: firstNonEmptyValue(parsed.status, parsed.review_status) || 'pending',
+    admin_response: firstNonEmptyValue(parsed.admin_response, parsed.response_text) || null,
+    reviewed_at: firstNonEmptyValue(parsed.reviewed_at, parsed.handled_at, parsed.updated_at) || null,
+    reviewed_by: firstNonEmptyValue(parsed.reviewed_by, parsed.handled_by, parsed.admin_name) || null,
+    response_at: firstNonEmptyValue(parsed.response_at, parsed.reply_at) || null
+  };
+}
+
 // ===================== 举报管理 ======================
 app.get('/admin/reports', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
+
   const reports = (data || []).map(function(p) {
-      var c = {};
-      try { c = JSON.parse(p.content || '{}'); } catch(e) {}
+      const normalized = parseReportRecordContent(p.content);
       return {
           id: p.id,
           created_at: p.created_at,
-          reporter_name: p.user_name,
-          target_type: c.target_type || 'post',
-          target_id: c.target_id || '',
-          target_user: c.target_user || '',
-          report_category: c.report_category || '',
-          report_reason: c.report_reason || '',
-          status: c.status || 'pending',
-          admin_response: c.admin_response || null,
-          reviewed_at: c.reviewed_at || null,
-          reviewed_by: c.reviewed_by || null,
-          response_at: c.response_at || null
+          reporter_name: firstNonEmptyValue(p.user_name, normalized.reporter_name) || '-',
+          target_type: normalized.target_type || 'post',
+          target_id: normalized.target_id || '',
+          target_user: normalized.target_user || '',
+          report_category: normalized.report_category || '-',
+          report_reason: normalized.report_reason || '-',
+          status: normalized.status || 'pending',
+          admin_response: normalized.admin_response,
+          reviewed_at: normalized.reviewed_at,
+          reviewed_by: normalized.reviewed_by,
+          response_at: normalized.response_at
       };
   });
+
+  const missingTargetIds = Array.from(new Set(reports.filter(function(r) {
+    return !r.target_user && r.target_id;
+  }).map(function(r) {
+    return r.target_id;
+  })));
+
+  if (missingTargetIds.length) {
+    const { data: targetPosts } = await supabase.from('posts').select('id, user_name').in('id', missingTargetIds);
+    const targetUserMap = {};
+    (targetPosts || []).forEach(function(post) {
+      if (post && post.id && post.user_name && !targetUserMap[post.id]) {
+        targetUserMap[post.id] = post.user_name;
+      }
+    });
+    reports.forEach(function(report) {
+      if (!report.target_user) {
+        report.target_user = targetUserMap[report.target_id] || '-';
+      }
+    });
+  }
+
+  reports.forEach(function(report) {
+    if (!report.target_user) report.target_user = '-';
+    if (!report.report_category) report.report_category = '-';
+    if (!report.report_reason) report.report_reason = '-';
+  });
+
   return res.json({ data: reports });
 });
 
