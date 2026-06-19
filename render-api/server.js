@@ -925,6 +925,25 @@ function parseReportRecordContent(rawContent) {
   };
 }
 
+function formatAdminReportReason(category, reason) {
+  const normalizedCategory = firstNonEmptyValue(category);
+  const normalizedReason = firstNonEmptyValue(reason);
+  if (!normalizedReason) return normalizedCategory || '-';
+  if (!normalizedCategory) return normalizedReason;
+  const cleanCategory = normalizedCategory.replace(/[：:]+$/, '');
+  const otherLabels = ['其他', 'other', 'others'];
+  const isOther = otherLabels.includes(cleanCategory.toLowerCase ? cleanCategory.toLowerCase() : cleanCategory);
+  const prefixedReason = normalizedReason
+    .replace(/^其他[：:\-\s]*/i, '')
+    .replace(/^other[：:\-\s]*/i, '')
+    .trim();
+  if (isOther) {
+    return prefixedReason ? ('其他-' + prefixedReason) : '其他';
+  }
+  if (normalizedReason === normalizedCategory) return normalizedReason;
+  return normalizedReason;
+}
+
 // ===================== 举报管理 ======================
 app.get('/admin/reports', verifyToken, async (req, res) => {
   const { data, error } = await supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500);
@@ -940,7 +959,7 @@ app.get('/admin/reports', verifyToken, async (req, res) => {
           target_id: normalized.target_id || '',
           target_user: normalized.target_user || '',
           report_category: normalized.report_category || '-',
-          report_reason: normalized.report_reason || '-',
+          report_reason: formatAdminReportReason(normalized.report_category, normalized.report_reason),
           status: normalized.status || 'pending',
           admin_response: normalized.admin_response,
           reviewed_at: normalized.reviewed_at,
@@ -973,7 +992,7 @@ app.get('/admin/reports', verifyToken, async (req, res) => {
   reports.forEach(function(report) {
     if (!report.target_user) report.target_user = '-';
     if (!report.report_category) report.report_category = '-';
-    if (!report.report_reason) report.report_reason = '-';
+    report.report_reason = formatAdminReportReason(report.report_category, report.report_reason);
   });
 
   return res.json({ data: reports });
