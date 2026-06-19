@@ -77,6 +77,8 @@ const AUTH_MARKER = '__auth__';
 const VISIT_MARKER = '__visit__';
 const ATTACK_MARKER = '__attack__';
 const ADMIN_AUTH_MARKER = '__admin_auth__';
+const USER_INFO_MARKER = '__user_info__';
+const USER_VISIT_MARKER = '__user_visit__';
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
 let statsCache = { data: null, ts: 0, pending: null };
@@ -126,6 +128,133 @@ function shouldCountVisit(ip) {
     keysToDelete.forEach(function(k) { visitCache.delete(k); });
   }
   return true;
+}
+
+const ADMIN_STATS_PAGE_SIZE = 1000;
+
+function safeJsonParse(input) {
+  try {
+    const parsed = JSON.parse(input || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function toTimeMs(value) {
+  if (!value) return NaN;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+function pickEarlierIso(currentValue, candidateValue) {
+  const currentMs = toTimeMs(currentValue);
+  const candidateMs = toTimeMs(candidateValue);
+  if (!Number.isFinite(candidateMs)) return currentValue || null;
+  if (!Number.isFinite(currentMs) || candidateMs < currentMs) return candidateValue;
+  return currentValue || null;
+}
+
+function pickLaterIso(currentValue, candidateValue) {
+  const currentMs = toTimeMs(currentValue);
+  const candidateMs = toTimeMs(candidateValue);
+  if (!Number.isFinite(candidateMs)) return currentValue || null;
+  if (!Number.isFinite(currentMs) || candidateMs > currentMs) return candidateValue;
+  return currentValue || null;
+}
+
+function getUtcDateKey(value) {
+  if (!value) return '';
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const ms = toTimeMs(value);
+  if (!Number.isFinite(ms)) {
+    return typeof value === 'string' ? value.slice(0, 10) : '';
+  }
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+async function fetchAllPostsByMediaType(mediaType, selectFields) {
+  let from = 0;
+  let results = [];
+  while (true) {
+    const { data, error } = await supabase.from('posts')
+      .select(selectFields)
+      .eq('media_type', mediaType)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + ADMIN_STATS_PAGE_SIZE - 1);
+    if (error) throw error;
+    const chunk = data || [];
+    results = results.concat(chunk);
+    if (chunk.length < ADMIN_STATS_PAGE_SIZE) break;
+    from += ADMIN_STATS_PAGE_SIZE;
+  }
+  return results;
+}
+
+function buildAuthUserMap(authRows) {
+  const authMap = {};
+  (authRows || []).forEach(row => {
+    const userName = String(row && row.user_name || '').trim();
+    if (!userName) return;
+    const createdAt = row.created_at || null;
+    if (!authMap[userName]) {
+      authMap[userName] = { user_name: userName, auth_created_at: createdAt };
+      return;
+    }
+    authMap[userName].auth_created_at = pickEarlierIso(authMap[userName].auth_created_at, createdAt);
+  });
+  return authMap;
+}
+
+function buildUserInfoMap(userInfoRows) {
+  const userInfoMap = {};
+  (userInfoRows || []).forEach(row => {
+    const userName = String(row && row.user_name || '').trim();
+    if (!userName) return;
+    const info = safeJsonParse(row.content);
+    if (!userInfoMap[userName]) {
+      userInfoMap[userName] = {
+        reg_time: info.reg_time || null,
+        last_login: info.last_login || null,
+        last_visit: info.last_visit || null
+      };
+      return;
+    }
+    userInfoMap[userName].reg_time = pickEarlierIso(userInfoMap[userName].reg_time, info.reg_time);
+    userInfoMap[userName].last_login = pickLaterIso(userInfoMap[userName].last_login, info.last_login);
+    userInfoMap[userName].last_visit = pickLaterIso(userInfoMap[userName].last_visit, info.last_visit);
+  });
+  return userInfoMap;
+}
+
+function buildUserVisitMap(visitRows) {
+  const userVisitMap = {};
+  (visitRows || []).forEach(row => {
+    const userName = String(row && row.user_name || '').trim();
+    if (!userName) return;
+    if (!userVisitMap[userName]) {
+      userVisitMap[userName] = { total_visits: 0, daily_visits: {}, last_visit: null };
+    }
+    userVisitMap[userName].total_visits += 1;
+    const content = safeJsonParse(row.content);
+    const visitDateKey = getUtcDateKey(row.media_url || content.date || row.created_at);
+    if (visitDateKey) {
+      userVisitMap[userName].daily_visits[visitDateKey] = (userVisitMap[userName].daily_visits[visitDateKey] || 0) + 1;
+    }
+    userVisitMap[userName].last_visit = pickLaterIso(userVisitMap[userName].last_visit, row.created_at || null);
+  });
+  return userVisitMap;
+}
+
+function buildRegisteredUsersByDate(authMap) {
+  const dateMap = {};
+  Object.keys(authMap || {}).forEach(userName => {
+    const authCreatedAt = authMap[userName] && authMap[userName].auth_created_at;
+    const dateKey = getUtcDateKey(authCreatedAt);
+    if (dateKey) dateMap[dateKey] = (dateMap[dateKey] || 0) + 1;
+  });
+  return dateMap;
 }
 
 function sanitizeError(err) {
@@ -1443,18 +1572,18 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
       return q;
     }
 
-    const [visitsRes, attacksRes, postsRes, commentsRes, likesRes, usersRes] = await Promise.all([
+    const [visitsRes, attacksRes, postsRes, commentsRes, likesRes, authRows] = await Promise.all([
       buildQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
       buildQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
       buildQuery('posts', 'id, created_at', null, null, 'created_at')
-        .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
+        .neq('media_type', '__avatar__').neq('media_type', USER_INFO_MARKER)
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
         .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER)
         .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', ADMIN_AUTH_MARKER)
-        .neq('media_type', '__user_visit__'),
+        .neq('media_type', USER_VISIT_MARKER),
       buildQuery('comments', 'id, created_at', null, null, 'created_at'),
       buildQuery('likes', 'id, created_at', null, null, 'created_at'),
-      buildQuery('posts', 'id, created_at', 'media_type', AUTH_MARKER, 'created_at'),
+      fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at'),
     ]);
 
     // 辅助函数：按天聚合
@@ -1496,7 +1625,7 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
     const dailyPostsMap = aggregateByDate(postsRes.data || [], 'created_at');
     const dailyCommentsMap = aggregateByDate(commentsRes.data || [], 'created_at');
     const dailyLikesMap = aggregateByDate(likesRes.data || [], 'created_at');
-    const dailyUsersMap = aggregateByDate(usersRes.data || [], 'created_at');
+    const dailyUsersMap = buildRegisteredUsersByDate(buildAuthUserMap(authRows));
 
     // 合并所有日期
     var allDates = {};
@@ -1540,7 +1669,6 @@ app.post('/admin/stats/refresh', verifyToken, (req, res) => {
 });
 
 // ===================== 用户访问日志（前端调用） =====================
-const USER_VISIT_MARKER = '__user_visit__';
 app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
   try {
     const { user_name, password_hash } = req.body;
@@ -1594,78 +1722,43 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
 // ===================== 用户访问统计（管理员） =====================
 app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    // 获取所有用户访问记录
-    const { data: visits } = await supabase.from('posts')
-      .select('user_name, content, media_url, created_at')
-      .eq('media_type', USER_VISIT_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(10000);
+    const [authRows, userInfoRows, visitRows] = await Promise.all([
+      fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at'),
+      fetchAllPostsByMediaType(USER_INFO_MARKER, 'user_name, content, created_at'),
+      fetchAllPostsByMediaType(USER_VISIT_MARKER, 'user_name, content, media_url, created_at')
+    ]);
 
-    // 获取所有用户信息（含 last_login）
-    const { data: userInfos } = await supabase.from('posts')
-      .select('user_name, content')
-      .eq('media_type', '__user_info__')
-      .limit(5000);
+    const authMap = buildAuthUserMap(authRows);
+    const userInfoMap = buildUserInfoMap(userInfoRows);
+    const userVisitMap = buildUserVisitMap(visitRows);
+    const allUserNames = new Set([
+      ...Object.keys(authMap),
+      ...Object.keys(userInfoMap),
+      ...Object.keys(userVisitMap)
+    ]);
 
-    // 按用户聚合访问数据
-    const userVisitMap = {};
-    (visits || []).forEach(v => {
-      const name = v.user_name;
-      if (!name) return;
-      if (!userVisitMap[name]) {
-        userVisitMap[name] = { total: 0, daily: {}, last_visit: '' };
-      }
-      userVisitMap[name].total++;
-
-      var d = v.media_url || '';
-      if (!d) { try { var c = JSON.parse(v.content || '{}'); d = c.date || ''; } catch(e) {} }
-      if (d) {
-        userVisitMap[name].daily[d] = (userVisitMap[name].daily[d] || 0) + 1;
-      }
-
-      var visitTime = v.created_at || '';
-      if (visitTime && visitTime > userVisitMap[name].last_visit) {
-        userVisitMap[name].last_visit = visitTime;
-      }
-    });
-
-    // 构建用户信息映射（保留最早的 reg_time，覆盖最新的 last_login / last_visit）
-    const userInfoMap = {};
-    (userInfos || []).forEach(ui => {
-      try {
-        var info = JSON.parse(ui.content || '{}');
-        if (userInfoMap[ui.user_name]) {
-          if (info.last_login && (!userInfoMap[ui.user_name].last_login || info.last_login > userInfoMap[ui.user_name].last_login)) {
-            userInfoMap[ui.user_name].last_login = info.last_login;
-          }
-          if (info.last_visit && (!userInfoMap[ui.user_name].last_visit || info.last_visit > userInfoMap[ui.user_name].last_visit)) {
-            userInfoMap[ui.user_name].last_visit = info.last_visit;
-          }
-          if (info.reg_time && (!userInfoMap[ui.user_name].reg_time || info.reg_time < userInfoMap[ui.user_name].reg_time)) {
-            userInfoMap[ui.user_name].reg_time = info.reg_time;
-          }
-        } else {
-          userInfoMap[ui.user_name] = info;
-        }
-      } catch(e) {}
-    });
-
-    // 生成结果列表
-    const result = Object.keys(userVisitMap).map(name => {
-      const v = userVisitMap[name];
-      const info = userInfoMap[name] || {};
+    const result = Array.from(allUserNames).map(userName => {
+      const authInfo = authMap[userName] || {};
+      const info = userInfoMap[userName] || {};
+      const visitInfo = userVisitMap[userName] || { total_visits: 0, daily_visits: {}, last_visit: null };
       return {
-        user_name: name,
-        total_visits: v.total,
-        daily_visits: v.daily,
-        last_visit: v.last_visit || info.last_visit || info.last_login || null,
+        user_name: userName,
+        total_visits: visitInfo.total_visits || 0,
+        daily_visits: visitInfo.daily_visits || {},
+        last_visit: visitInfo.last_visit || info.last_visit || info.last_login || authInfo.auth_created_at || null,
         last_login: info.last_login || null,
-        reg_time: info.reg_time || null
+        reg_time: info.reg_time || authInfo.auth_created_at || null,
+        auth_created_at: authInfo.auth_created_at || null
       };
     });
 
-    // 按总访问次数降序排列
-    result.sort((a, b) => b.total_visits - a.total_visits);
+    result.sort((a, b) => {
+      if ((b.total_visits || 0) !== (a.total_visits || 0)) return (b.total_visits || 0) - (a.total_visits || 0);
+      const ta = toTimeMs(a.last_visit || a.last_login || a.auth_created_at);
+      const tb = toTimeMs(b.last_visit || b.last_login || b.auth_created_at);
+      if ((Number.isFinite(tb) ? tb : 0) !== (Number.isFinite(ta) ? ta : 0)) return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+      return String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-CN');
+    });
 
     return res.json({ users: result, total: result.length });
   } catch(e) {
