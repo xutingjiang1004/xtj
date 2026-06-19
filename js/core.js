@@ -7503,6 +7503,8 @@ function renderProfileActivityList(kind) {
             const themeBtn = document.getElementById('themeToggle');
             const THEME_STORAGE_KEY = 'xtj-theme';
             let themeToggleAnimating = false;
+            let themeSplashOverlay = null;
+            let themeSplashCleanupTimer = 0;
 
             function setThemeState(isDark) {
                 if (isDark) {
@@ -7550,7 +7552,34 @@ function renderProfileActivityList(kind) {
                     : '#eef8f2';
             }
 
+            function isIOSWebKitThemePath() {
+                try {
+                    var ua = navigator.userAgent || '';
+                    return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                } catch (_) {
+                    return false;
+                }
+            }
+
+            function shouldUseThemeFallback(nextIsDark) {
+                if (!nextIsDark) return true;
+                if (isIOSWebKitThemePath()) return true;
+                return !supportsThemeViewTransition();
+            }
+
+            function clearThemeSplashOverlay() {
+                if (themeSplashCleanupTimer) {
+                    window.clearTimeout(themeSplashCleanupTimer);
+                    themeSplashCleanupTimer = 0;
+                }
+                if (themeSplashOverlay && themeSplashOverlay.parentNode) {
+                    themeSplashOverlay.parentNode.removeChild(themeSplashOverlay);
+                }
+                themeSplashOverlay = null;
+            }
+
             function finishThemeToggle() {
+                clearThemeSplashOverlay();
                 themeToggleAnimating = false;
                 htmlEl.removeAttribute('data-theme-animating');
                 htmlEl.removeAttribute('data-theme-transition');
@@ -7569,35 +7598,35 @@ function renderProfileActivityList(kind) {
             function playThemeFallback(nextIsDark, originEl) {
                 var reveal = setThemeRevealVars(originEl);
                 var overlay = document.createElement('div');
-                overlay.className = 'theme-splash-overlay' + (nextIsDark ? '' : ' is-reverse is-active');
+                var disc = document.createElement('div');
+                var nextBg = getThemeSplashBackground(nextIsDark);
+                var currentBg = getThemeSplashBackground(!nextIsDark);
+                var diameter = reveal.radius * 2;
+                overlay.className = 'theme-splash-overlay' + (nextIsDark ? ' is-expand' : ' is-conceal');
                 overlay.style.setProperty('--theme-reveal-x', reveal.x + 'px');
                 overlay.style.setProperty('--theme-reveal-y', reveal.y + 'px');
                 overlay.style.setProperty('--theme-reveal-radius', reveal.radius + 'px');
-                overlay.style.left = '0';
-                overlay.style.top = '0';
-                overlay.style.width = '100vw';
-                overlay.style.height = '100vh';
-                overlay.style.background = getThemeSplashBackground(nextIsDark);
+                overlay.style.background = nextIsDark ? currentBg : 'transparent';
+                disc.className = 'theme-splash-disc';
+                disc.style.left = (reveal.x - reveal.radius) + 'px';
+                disc.style.top = (reveal.y - reveal.radius) + 'px';
+                disc.style.width = diameter + 'px';
+                disc.style.height = diameter + 'px';
+                disc.style.background = nextIsDark ? nextBg : currentBg;
+                overlay.appendChild(disc);
+                clearThemeSplashOverlay();
+                themeSplashOverlay = overlay;
                 document.body.appendChild(overlay);
                 setThemeState(nextIsDark);
-                if (!nextIsDark) {
-                    overlay.offsetHeight;
+                overlay.offsetHeight;
+                requestAnimationFrame(function() {
                     requestAnimationFrame(function() {
-                        requestAnimationFrame(function() {
-                            overlay.classList.add('is-conceal');
-                        });
+                        overlay.classList.add('is-active');
                     });
-                } else {
-                    requestAnimationFrame(function() {
-                        requestAnimationFrame(function() {
-                            overlay.classList.add('is-active');
-                        });
-                    });
-                }
-                window.setTimeout(function() {
-                    if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                });
+                themeSplashCleanupTimer = window.setTimeout(function() {
                     finishThemeToggle();
-                }, 260);
+                }, 230);
             }
 
             function animateThemeToggle(nextIsDark, originEl) {
@@ -7616,7 +7645,7 @@ function renderProfileActivityList(kind) {
                 htmlEl.setAttribute('data-theme-transition', nextIsDark ? 'dark' : 'light');
                 if (themeBtn) themeBtn.disabled = true;
                 setThemeRevealVars(originEl);
-                if (nextIsDark && supportsThemeViewTransition()) {
+                if (!shouldUseThemeFallback(nextIsDark)) {
                     try {
                         var transition = document.startViewTransition(function() {
                             setThemeState(nextIsDark);
