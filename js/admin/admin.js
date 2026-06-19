@@ -202,6 +202,7 @@
             } catch (e) {}
         }
         if (!res.ok) throw new Error(data.error || '请求失败 (' + res.status + ')');
+        if (hasApiToken()) saveSession();
         return data;
     }
 
@@ -1094,7 +1095,7 @@
             document.documentElement.setAttribute('data-theme', 'dark');
         }
 
-        if (hasSession() && hasApiToken()) {
+        if (hasApiToken()) {
             try {
                 await apiCall('GET', '/admin/verify');
                 initAdminClient();
