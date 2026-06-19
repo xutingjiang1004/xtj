@@ -819,8 +819,8 @@
         <button class="pp-delete-btn" id="ppDeleteBtn" title="删除" style="display:none;" onclick="window.deleteCurrentPhoto()"><span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path><path d="m19 6-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg></span></button>
         
         <!-- 照片信息弹窗 -->
-        <div class="pp-info-modal" id="ppInfoModal" style="display:none;">
-            <div class="pp-info-modal-content">
+        <div class="pp-info-modal" id="ppInfoModal" style="display:none;" onclick="if(event.target===this)window.closePhotoInfo()">
+            <div class="pp-info-modal-content" onclick="event.stopPropagation()">
                 <div class="pp-info-modal-header">
                     <span class="pp-info-modal-title">照片详情</span>
                     <button class="pp-info-modal-close" onclick="window.closePhotoInfo()">&times;</button>

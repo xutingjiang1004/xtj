@@ -1246,4 +1246,23 @@
     border-color: rgba(255, 255, 255, 0.1) !important;
     color: #f5f6fb !important;
   }
+
+  [data-theme="dark"] .dock-chat-container,
+  [data-theme="dark"] .chat-list,
+  [data-theme="dark"] .chat-messages,
+  [data-theme="dark"] .chat-header,
+  [data-theme="dark"] .chat-input-area,
+  [data-theme="dark"] .chat-list-item {
+    background: #0f1016 !important;
+    box-shadow: none !important;
+  }
+
+  [data-theme="dark"] .chat-list-item {
+    border-top: 1px solid rgba(255, 255, 255, 0.07) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
+  }
+
+  [data-theme="dark"] .chat-list-item:hover {
+    background: rgba(255, 255, 255, 0.035) !important;
+  }
 }
