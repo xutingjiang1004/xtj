@@ -13516,6 +13516,21 @@ html[data-theme-animating="1"] .theme-toggle-core {
   animation: none !important;
 }
 
+html[data-theme-animating="1"] .glass,
+html[data-theme-animating="1"] .publish-box,
+html[data-theme-animating="1"] .post,
+html[data-theme-animating="1"] .stat-card,
+html[data-theme-animating="1"] .chat-panel,
+html[data-theme-animating="1"] .chat-entry-bar,
+html[data-theme-animating="1"] .photo-wall-header,
+html[data-theme-animating="1"] .profile-user-card,
+html[data-theme-animating="1"] .toast,
+html[data-theme-animating="1"] .dock-bar {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  filter: none !important;
+}
+
 html[data-theme-animating="1"]::view-transition-old(root),
 html[data-theme-animating="1"]::view-transition-new(root) {
   mix-blend-mode: normal;
@@ -13523,21 +13538,19 @@ html[data-theme-animating="1"]::view-transition-new(root) {
 
 html[data-theme-transition="dark"]::view-transition-new(root) {
   clip-path: circle(0 at var(--theme-reveal-x) var(--theme-reveal-y));
-  animation: xtjThemeReveal 210ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: xtjThemeReveal 190ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 html[data-theme-transition="dark"]::view-transition-old(root) {
-  animation: xtjThemeFade 210ms linear forwards;
+  animation: xtjThemeFade 190ms linear forwards;
 }
 
 html[data-theme-transition="light"]::view-transition-new(root) {
-  opacity: 0.96;
-  animation: xtjThemeLightUnderlay 210ms ease-out forwards;
+  animation: none;
 }
 
 html[data-theme-transition="light"]::view-transition-old(root) {
-  clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y));
-  animation: xtjThemeConceal 210ms cubic-bezier(0.55, 0, 0.1, 1) forwards;
+  animation: none;
 }
 
 .theme-splash-overlay {
@@ -13545,33 +13558,37 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   inset: 0;
   z-index: 2147483646;
   pointer-events: none;
+  overflow: hidden;
   opacity: 1;
-  clip-path: circle(0 at var(--theme-reveal-x) var(--theme-reveal-y));
-  transition:
-    clip-path 210ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 90ms ease;
-  will-change: clip-path, opacity;
+  contain: strict;
   transform: translateZ(0);
-  contain: layout paint style;
+  isolation: isolate;
 }
 
-.theme-splash-overlay.is-active {
-  clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y));
+.theme-splash-disc {
+  position: absolute;
+  border-radius: 50%;
+  transform: translateZ(0) scale(1);
+  transform-origin: 50% 50%;
+  will-change: transform;
+  transition: transform 190ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.theme-splash-overlay.is-settle {
-  opacity: 0;
+.theme-splash-overlay.is-expand .theme-splash-disc {
+  transform: translateZ(0) scale(0.001);
 }
 
-.theme-splash-overlay.is-reverse {
-  clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y));
-  transition:
-    clip-path 200ms cubic-bezier(0.55, 0, 0.1, 1),
-    opacity 90ms ease;
+.theme-splash-overlay.is-expand.is-active .theme-splash-disc {
+  transform: translateZ(0) scale(1);
 }
 
-.theme-splash-overlay.is-reverse.is-conceal {
-  clip-path: circle(0 at var(--theme-reveal-x) var(--theme-reveal-y));
+.theme-splash-overlay.is-conceal .theme-splash-disc {
+  transform: translateZ(0) scale(1);
+  transition-timing-function: cubic-bezier(0.55, 0, 0.1, 1);
+}
+
+.theme-splash-overlay.is-conceal.is-active .theme-splash-disc {
+  transform: translateZ(0) scale(0.001);
 }
 
 @keyframes xtjThemeReveal {
@@ -13588,25 +13605,7 @@ html[data-theme-transition="light"]::view-transition-old(root) {
     opacity: 1;
   }
   to {
-    opacity: 0.975;
-  }
-}
-
-@keyframes xtjThemeLightUnderlay {
-  from {
-    opacity: 0.96;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes xtjThemeConceal {
-  from {
-    clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y));
-  }
-  to {
-    clip-path: circle(0 at var(--theme-reveal-x) var(--theme-reveal-y));
+    opacity: 0.988;
   }
 }
 
