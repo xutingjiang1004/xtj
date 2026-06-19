@@ -18,7 +18,16 @@ app.disable('x-powered-by');
 // ===================== 配置 =====================
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const API_SECRET = process.env.API_SECRET || crypto.randomBytes(32).toString('hex');
+const API_SECRET = process.env.API_SECRET || crypto
+  .createHash('sha256')
+  .update([
+    'xtj-admin-fallback-secret',
+    process.env.ADMIN_USERNAME || 'xxz',
+    process.env.ADMIN_PASSWORD || '',
+    process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '',
+    process.env.SUPABASE_URL || 'https://ithowxqignlhkwaykglt.supabase.co'
+  ].join('|'))
+  .digest('hex');
 const TOKEN_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ithowxqignlhkwaykglt.supabase.co';
 // SUPABASE SERVICE_KEY 优先，回退到 ANON KEY（本地开发/演示模式）
@@ -42,6 +51,9 @@ if (ALLOWED_ORIGINS.length === 0) {
 
 if (!ADMIN_PASSWORD) {
   console.warn('[WARN] ADMIN_PASSWORD is not configured.');
+}
+if (!process.env.API_SECRET) {
+  console.warn('[WARN] API_SECRET not set. Using deterministic fallback secret; set API_SECRET in Render for stronger isolation.');
 }
 if (!SUPABASE_SERVICE_KEY) {
   console.error('[FATAL] No Supabase key available. Server will not start.');

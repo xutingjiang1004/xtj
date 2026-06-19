@@ -7478,6 +7478,29 @@ function renderProfileActivityList(kind) {
                 setThemeState(false);
             }
 
+            function applyPerformanceMode() {
+                var perfClasses = ['perf-lite', 'perf-balanced'];
+                htmlEl.classList.remove.apply(htmlEl.classList, perfClasses);
+                var prefersReducedMotion = false;
+                try {
+                    prefersReducedMotion = !!window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                } catch (_) {}
+                var memory = Number(navigator.deviceMemory || 0);
+                var cores = Number(navigator.hardwareConcurrency || 0);
+                var touchPoints = Number(navigator.maxTouchPoints || 0);
+                var smallScreen = Math.min(window.innerWidth || 0, window.screen && window.screen.width ? window.screen.width : window.innerWidth || 0) <= 1024;
+                var mode = '';
+                if (prefersReducedMotion || (memory && memory <= 4) || (cores && cores <= 4)) {
+                    mode = 'perf-lite';
+                } else if (smallScreen || touchPoints > 0 || (memory && memory <= 8) || (cores && cores <= 8)) {
+                    mode = 'perf-balanced';
+                }
+                if (mode) htmlEl.classList.add(mode);
+            }
+
+            applyPerformanceMode();
+            window.addEventListener('resize', applyPerformanceMode, { passive: true });
+
             // ========== 鍏憡系?==========
             const ANN_MARKER = '__ann__';
             const ANN_READ_KEY = 'xtj_ann_read';
