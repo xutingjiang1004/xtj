@@ -143,11 +143,28 @@ window.safeLocalStorageSet = function(key, value) {
         let activePostId = null;
         const viewTracked = new Set();
         let postVisibilityObserver = null;
+        let postDwellObserver = null;
+        const postDwellTimers = new Map();
+        const POST_DWELL_THRESHOLD = 0.5;
+        const POST_DWELL_DELAY = 1200;
         function primePostReveal(nodes) {
             Array.from(nodes || []).forEach(function(post, index) {
                 if (!post || post.classList.contains('visible')) return;
                 post.style.setProperty('--post-enter-delay', Math.min(index, 5) * 42 + 'ms');
             });
+        }
+        function clearPostDwellTimer(postId) {
+            if (!postId || !postDwellTimers.has(postId)) return;
+            clearTimeout(postDwellTimers.get(postId));
+            postDwellTimers.delete(postId);
+        }
+        function schedulePostDwellTracking(postId) {
+            if (!postId || postDwellTimers.has(postId) || !canTrackViewNow(postId)) return;
+            var timerId = setTimeout(function() {
+                postDwellTimers.delete(postId);
+                trackView(postId);
+            }, POST_DWELL_DELAY);
+            postDwellTimers.set(postId, timerId);
         }
         function getPostVisibilityObserver() {
             if (!postVisibilityObserver) {
@@ -164,6 +181,37 @@ window.safeLocalStorageSet = function(key, value) {
                 }
             }
             return postVisibilityObserver;
+        }
+        function getPostDwellObserver() {
+            if (!postDwellObserver) {
+                try {
+                    postDwellObserver = new IntersectionObserver(function(entries) {
+                        entries.forEach(function(entry) {
+                            var target = entry && entry.target;
+                            var postId = target ? String(target.getAttribute('data-post-id') || '').trim() : '';
+                            if (!postId) return;
+                            if (entry.isIntersecting && entry.intersectionRatio >= POST_DWELL_THRESHOLD) {
+                                schedulePostDwellTracking(postId);
+                            } else {
+                                clearPostDwellTimer(postId);
+                            }
+                        });
+                    }, { threshold: [0, POST_DWELL_THRESHOLD, 1] });
+                } catch (_) {
+                    postDwellObserver = {
+                        observe: function() {},
+                        unobserve: function() {}
+                    };
+                }
+            }
+            return postDwellObserver;
+        }
+        function observePostViewportState(nodes) {
+            Array.from(nodes || []).forEach(function(post) {
+                if (!post) return;
+                getPostVisibilityObserver().observe(post);
+                getPostDwellObserver().observe(post);
+            });
         }
         const CACHE_KEY = "xtj_feed_cache_v3";
         const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
@@ -3652,7 +3700,7 @@ function renderProfileActivityList(kind) {
                 
                 // 娑撶儤鏌婂笘瀛愬ǎ璇插閿熸枻鎷烽敓鏂ゆ嫹閸斻劎鏁鹃敓妗旇鎷烽敍鍫濐槻閻劌鍙忕仦顫嫹閯勯敓钘夋珤閿?
                 const newPosts = feed.querySelectorAll('.post:not(.visible)');
-                newPosts.forEach(p => getPostVisibilityObserver().observe(p));
+                observePostViewportState(newPosts);
                 
                 // 更新缁熻
                 updateFeedStats();
@@ -3965,7 +4013,7 @@ function renderProfileActivityList(kind) {
             function initPostScrollAnimation() {
                 var posts = document.querySelectorAll('.post');
                 primePostReveal(posts);
-                posts.forEach(p => getPostVisibilityObserver().observe(p));
+                observePostViewportState(posts);
             }
 
             let _cachedSPosts = null, _cachedSViews = null, _cachedSLikes = null;
@@ -5148,7 +5196,7 @@ function renderProfileActivityList(kind) {
                 }
                 var newPosts = feed.querySelectorAll(".post:not(.visible)");
                 primePostReveal(newPosts);
-                newPosts.forEach(function(p) { getPostVisibilityObserver().observe(p); });
+                observePostViewportState(newPosts);
                 updateFeedStats();
             };
 
@@ -6924,7 +6972,7 @@ function renderProfileActivityList(kind) {
                 var signature = buildDockChatConversationSignature(conversation);
                 return [
                     '<div class="chat-list-item" data-chat-user="', escapeHtml(conversation.other_user), '" data-signature="', escapeHtml(signature),
-                    '" data-last-time="', escapeHtml(conversation.last_time || ''), '" style="--xtj-enter-delay:', String(Math.min((index || 0) * 28, 220)),
+                    '" data-last-time="', escapeHtml(conversation.last_time || ''), '" style="--xtj-enter-delay:', String(Math.min((index || 0) * 12, 48)),
                     'ms" onclick="openChat(\'', safeUser, '\')">',
                     '<div class="cli-avatar">', getDockChatConversationAvatarHtml(conversation.other_user), '</div>',
                     '<div class="cli-info"><div class="cli-name">', escapeHtml(conversation.other_user), '</div><div class="cli-preview">', escapeHtml(conversation.last_message || ''), '</div></div>',
@@ -6950,7 +6998,7 @@ function renderProfileActivityList(kind) {
                     var signature = buildDockChatConversationSignature(conversation);
                     var row = existingMap[userName];
                     if (row && row.getAttribute('data-signature') === signature) {
-                        row.style.setProperty('--xtj-enter-delay', String(Math.min(index * 28, 220)) + 'ms');
+                        row.style.setProperty('--xtj-enter-delay', String(Math.min(index * 12, 48)) + 'ms');
                         fragment.appendChild(row);
                         return;
                     }
@@ -7125,8 +7173,8 @@ function renderProfileActivityList(kind) {
                 }
                 // 閺堝绱︾€涙ê鍘涚珛鍗虫樉锟?
                 var cacheKey = getDockChatCacheKey(userName);
-                if (_chatCache[cacheKey] && !forceScroll) {
-                    renderDockMessages(userName, _chatCache[cacheKey], false);
+                if (_chatCache[cacheKey] && _chatCache[cacheKey].length) {
+                    renderDockMessages(userName, _chatCache[cacheKey], !!forceScroll);
                 }
                 hydrateDockChatAvatars([currentUser, userName], function(changed) {
                     if (!changed || loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
@@ -7498,8 +7546,8 @@ function renderProfileActivityList(kind) {
 
             function getThemeSplashBackground(isDark) {
                 return isDark
-                    ? 'linear-gradient(180deg, rgba(15,16,22,0.985), rgba(18,19,27,0.985) 58%, rgba(22,24,34,0.985))'
-                    : 'linear-gradient(180deg, rgba(236,247,241,0.985), rgba(234,246,255,0.985) 52%, rgba(247,255,251,0.985))';
+                    ? '#12131a'
+                    : '#eef8f2';
             }
 
             function finishThemeToggle() {
@@ -7521,11 +7569,11 @@ function renderProfileActivityList(kind) {
                 overlay.style.top = '0';
                 overlay.style.width = '100vw';
                 overlay.style.height = '100vh';
-                overlay.style.background = getThemeSplashBackground(nextIsDark || htmlEl.getAttribute('data-theme') === 'dark');
+                overlay.style.background = getThemeSplashBackground(nextIsDark);
                 document.body.appendChild(overlay);
+                setThemeState(nextIsDark);
                 if (!nextIsDark) {
                     overlay.offsetHeight;
-                    setThemeState(false);
                     requestAnimationFrame(function() {
                         requestAnimationFrame(function() {
                             overlay.classList.add('is-conceal');
@@ -7537,14 +7585,11 @@ function renderProfileActivityList(kind) {
                             overlay.classList.add('is-active');
                         });
                     });
-                    window.setTimeout(function() {
-                        setThemeState(nextIsDark);
-                    }, 88);
                 }
                 window.setTimeout(function() {
                     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
                     finishThemeToggle();
-                }, 280);
+                }, 260);
             }
 
             function animateThemeToggle(nextIsDark, originEl) {
@@ -7563,7 +7608,15 @@ function renderProfileActivityList(kind) {
                 htmlEl.setAttribute('data-theme-transition', nextIsDark ? 'dark' : 'light');
                 if (themeBtn) themeBtn.disabled = true;
                 setThemeRevealVars(originEl);
-
+                if (document.startViewTransition) {
+                    try {
+                        var transition = document.startViewTransition(function() {
+                            setThemeState(nextIsDark);
+                        });
+                        transition.finished.finally(finishThemeToggle);
+                        return;
+                    } catch (_) {}
+                }
                 playThemeFallback(nextIsDark, originEl);
             }
 
@@ -9726,11 +9779,9 @@ function renderProfileActivityList(kind) {
                 var noteHtml = '';
                 if (!isLike && item.content) {
                     noteHtml = '<div class="stat-record-note"><strong>评论内容：</strong>' + escapeHtml(item.content) + '</div>';
-                } else if (isLike && post && post.content) {
-                    noteHtml = '<div class="stat-record-note"><strong>原帖内容：</strong>' + escapeHtml(String(post.content).trim().slice(0, 52)) + '</div>';
                 }
                 return [
-                    '<article class="stat-record-entry stat-row ' + (isLike ? 'stat-like-item' : 'stat-comment-item') + (mediaHtml ? '' : ' stat-row--no-media') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 26, 220) + 'ms;">',
+                    '<article class="stat-record-entry stat-row ' + (isLike ? 'stat-like-item' : 'stat-comment-item') + (mediaHtml ? '' : ' stat-row--no-media') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 12, 48) + 'ms;">',
                     '<div class="stat-row-main">',
                     '<div class="stat-row-title">' + actorName + (isLike ? ' 点赞了这条帖子' : ' 评论了这条帖子') + '</div>',
                     '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(summary) + '</div>' + noteHtml + '</div>',
@@ -9780,7 +9831,7 @@ function renderProfileActivityList(kind) {
                     var mediaHtml = post ? statMediaThumbMarkup(post, 'stat-record-thumb', mediaOnclick, post.media_type === 'video' ? '点击查看视频' : '点击全屏预览') : '';
                     var postText = post ? statPostSummary(post, 'bracket') : (v.post_content || '（内容已不可用）');
                     return [
-                        '<article class="stat-view-item stat-row' + (mediaHtml ? '' : ' stat-row--no-media') + '" ' + (post ? 'role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 32, 220) + 'ms;">',
+                        '<article class="stat-view-item stat-row' + (mediaHtml ? '' : ' stat-row--no-media') + '" ' + (post ? 'role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 12, 48) + 'ms;">',
                         '<div class="stat-row-main">',
                         '<div class="stat-row-title">' + escapeHtml(v.user_name) + ' 浏览了 ' + escapeHtml(v.post_author || '') + ' 的帖子</div>',
                         '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(v.post_content || postText) + '</div></div>',

@@ -12743,7 +12743,8 @@ html.xtj-pro-active .action-btn.liked {
   border: 1px solid rgba(194, 224, 205, 0.82) !important;
   border-radius: 22px !important;
   background: rgba(250, 255, 252, 0.76) !important;
-  box-shadow: 0 12px 28px rgba(44, 86, 61, 0.08) !important;
+  box-shadow: none !important;
+  transition: background 0.16s ease, border-color 0.16s ease, opacity 0.16s ease !important;
 }
 
 #profileActivityModal .stat-record-entry:last-child,
@@ -12759,9 +12760,9 @@ html.xtj-pro-active .action-btn.liked {
 #statModal .stat-record-entry:hover,
 #statModal .stat-view-item:hover,
 #statRecordsModal .stat-record-entry:hover {
-  transform: translateY(-1px) !important;
+  transform: none !important;
   background: rgba(253, 255, 254, 0.9) !important;
-  box-shadow: 0 16px 30px rgba(44, 86, 61, 0.1) !important;
+  box-shadow: none !important;
 }
 
 #profileActivityModal .stat-record-entry .stat-row-main,
@@ -12810,6 +12811,28 @@ html.xtj-pro-active .action-btn.liked {
   font-size: 13px !important;
   line-height: 1.68 !important;
   word-break: break-word !important;
+}
+
+#statModal .stat-detail-modal,
+#postDetailModal .post-detail-modal,
+#profileActivityModal .profile-activity-modal,
+#statRecordsModal .stat-records-modal {
+  transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease, border-color 0.18s ease !important;
+  box-shadow: 0 14px 28px rgba(31, 61, 44, 0.10) !important;
+}
+
+#statModal .stat-detail-modal,
+#postDetailModal .post-detail-modal {
+  backdrop-filter: blur(10px) saturate(108%) !important;
+  -webkit-backdrop-filter: blur(10px) saturate(108%) !important;
+}
+
+html[data-theme-animating="1"] .post,
+html[data-theme-animating="1"] .publish-box,
+html[data-theme-animating="1"] .stat-card,
+html[data-theme-animating="1"] .chat-list-item,
+html[data-theme-animating="1"] .glass {
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, opacity 0.18s ease !important;
 }
 
 #profileActivityModal .stat-record-summary,
@@ -13503,17 +13526,16 @@ html[data-theme-animating="1"] .theme-toggle-core {
 
 html[data-theme-animating="1"]::view-transition-old(root),
 html[data-theme-animating="1"]::view-transition-new(root) {
-  animation: none;
   mix-blend-mode: normal;
 }
 
 html[data-theme-transition="dark"]::view-transition-new(root) {
   clip-path: circle(0 at var(--theme-reveal-x) var(--theme-reveal-y));
-  animation: xtjThemeReveal 520ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: xtjThemeReveal 240ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 html[data-theme-transition="dark"]::view-transition-old(root) {
-  animation: xtjThemeFade 520ms ease forwards;
+  animation: none !important;
 }
 
 html[data-theme-transition="light"]::view-transition-new(root) {
@@ -13522,7 +13544,7 @@ html[data-theme-transition="light"]::view-transition-new(root) {
 
 html[data-theme-transition="light"]::view-transition-old(root) {
   clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y));
-  animation: xtjThemeConceal 520ms cubic-bezier(0.55, 0, 0.1, 1) forwards;
+  animation: xtjThemeConceal 240ms cubic-bezier(0.55, 0, 0.1, 1) forwards;
 }
 
 .theme-splash-overlay {
@@ -13533,8 +13555,8 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   opacity: 1;
   clip-path: circle(0 at var(--theme-reveal-x) var(--theme-reveal-y));
   transition:
-    clip-path 280ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 120ms ease;
+    clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 100ms ease;
   will-change: clip-path, opacity;
   transform: translateZ(0);
 }
@@ -13550,8 +13572,8 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 .theme-splash-overlay.is-reverse {
   clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y));
   transition:
-    clip-path 240ms cubic-bezier(0.55, 0, 0.1, 1),
-    opacity 120ms ease;
+    clip-path 220ms cubic-bezier(0.55, 0, 0.1, 1),
+    opacity 100ms ease;
 }
 
 .theme-splash-overlay.is-reverse.is-conceal {
