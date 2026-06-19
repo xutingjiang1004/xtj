@@ -2892,4 +2892,103 @@
             el.innerHTML = '<div class="empty-state"><div class="icon">⚠️</div><div class="text">统计数据加载失败: ' + escapeHtml(e.message) + '</div></div>';
         }
     };
+
+    function getAdminReportDisplayReason(report) {
+        var reason = String(report && report.report_reason || '').trim();
+        var category = String(report && report.report_category || '').trim();
+        if (reason) return reason;
+        if (category) return category;
+        return '-';
+    }
+
+    renderReportsTab = async function(el) {
+        await loadReportsData();
+        var pending = reportsData.filter(function(r) { return r.status === 'pending'; }).length;
+        var h = '<div class="stats-row">';
+        h += '<div class="stat-box"><div class="val">' + reportsData.length + '</div><div class="lbl">总举报数</div></div>';
+        h += '<div class="stat-box"><div class="val" style="color:var(--danger)">' + pending + '</div><div class="lbl">待处理</div></div>';
+        h += '<div class="stat-box"><div class="val" style="color:var(--primary)">' + reportsData.filter(function(r) { return r.status === 'actioned'; }).length + '</div><div class="lbl">已处理</div></div>';
+        h += '</div>';
+        h += '<div class="card"><h3>举报管理</h3>';
+        if (!reportsData.length) {
+            h += '<div class="empty">暂无举报</div>';
+        } else {
+            h += '<div class="table-wrap"><table><thead><tr><th>举报人</th><th>类型</th><th>被举报人</th><th>原因</th><th>时间</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+            reportsData.forEach(function(r) {
+                var statusBadge = r.status === 'pending' ? '<span class="badge badge-red">待处理</span>' :
+                    r.status === 'reviewed' ? '<span class="badge badge-green">已审核</span>' :
+                    r.status === 'dismissed' ? '<span class="badge" style="background:rgba(128,128,128,0.15);color:var(--text-muted)">已驳回</span>' :
+                    '<span class="badge badge-green">已处理</span>';
+                var typeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
+                h += '<tr><td>' + escapeHtml(r.reporter_name || '-') + '</td>';
+                h += '<td>' + escapeHtml(typeLabel) + '</td>';
+                h += '<td><strong>' + escapeHtml(r.target_user || '-') + '</strong></td>';
+                h += '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(getAdminReportDisplayReason(r)) + '</td>';
+                h += '<td>' + formatTime(r.created_at) + '</td>';
+                h += '<td>' + statusBadge + '</td>';
+                h += '<td style="white-space:nowrap;">';
+                if (r.status === 'pending') {
+                    h += '<button class="btn-sm primary" onclick="handleReportDetail(\'' + r.id + '\')">处理</button> ';
+                    h += '<button class="btn-sm" onclick="dismissReport(\'' + r.id + '\')">驳回</button>';
+                } else {
+                    h += '<button class="btn-sm" onclick="handleReportDetail(\'' + r.id + '\')">详情</button>';
+                }
+                h += '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    };
+
+    window.handleReportDetail = function(id) {
+        var r = reportsData.find(function(x) { return x.id === id; });
+        if (!r) return;
+        var modal = document.createElement('div');
+        modal.className = 'report-detail-modal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+
+        var box = document.createElement('div');
+        box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:560px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.onclick = function(e) { e.stopPropagation(); };
+
+        var typeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
+        var statusLabel = r.status === 'pending' ? '待处理' : r.status === 'actioned' ? '已处理' : r.status === 'dismissed' ? '已驳回' : r.status;
+
+        var html = '<h3 style="margin:0 0 16px;">举报详情</h3>';
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:16px;">';
+        html += '<div><strong>举报人：</strong>' + escapeHtml(r.reporter_name || '-') + '</div>';
+        html += '<div><strong>被举报人：</strong>' + escapeHtml(r.target_user || '-') + '</div>';
+        html += '<div><strong>类型：</strong>' + escapeHtml(typeLabel) + '</div>';
+        html += '<div><strong>状态：</strong>' + escapeHtml(statusLabel) + '</div>';
+        html += '<div><strong>时间：</strong>' + formatTime(r.created_at) + '</div>';
+        html += '</div>';
+        html += '<div style="margin-bottom:12px;"><strong>目标ID：</strong><code>' + escapeHtml(r.target_id || '-') + '</code></div>';
+        html += '<div style="margin-bottom:12px;padding:10px;background:rgba(0,0,0,0.05);border-radius:8px;"><strong>举报原因：</strong>' + escapeHtml(getAdminReportDisplayReason(r)) + '</div>';
+        if (r.admin_response) {
+            html += '<div style="margin-bottom:12px;padding:10px;background:rgba(5,150,105,0.08);border-radius:8px;"><strong>管理员回复：</strong>' + escapeHtml(r.admin_response) + '</div>';
+        }
+        if (r.reviewed_by) {
+            html += '<div style="margin-bottom:12px;font-size:12px;color:var(--text-muted);">处理人：' + escapeHtml(r.reviewed_by) + ' · 处理时间：' + formatTime(r.reviewed_at) + '</div>';
+        }
+        html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">';
+        if (r.status === 'pending') {
+            html += '<button class="btn-sm primary" onclick="doDeleteReportPost(\'' + r.id + '\')">删除内容</button>';
+            html += '<button class="btn-sm" style="background:rgba(255,59,96,0.1);color:#ff3b60;border:1px solid rgba(255,59,96,0.3);" onclick="doBanReportUser(\'' + r.id + '\')">封禁用户</button>';
+            html += '<button class="btn-sm" onclick="doMarkReportActioned(\'' + r.id + '\')">标记已处理</button>';
+        }
+        html += '<button class="btn-sm" style="margin-left:auto;" onclick="this.closest(\'.report-detail-modal\').remove()">关闭</button>';
+        html += '</div>';
+        if (r.status === 'pending') {
+            html += '<div style="border-top:1px solid rgba(0,0,0,0.1);padding-top:12px;margin-top:8px;">';
+            html += '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px;">回复举报人（选填）</label>';
+            html += '<textarea id="reportResponse_' + r.id + '" rows="2" style="width:100%;padding:8px;border-radius:8px;border:1px solid rgba(0,0,0,0.2);font-size:13px;resize:vertical;font-family:inherit;" placeholder="输入回复内容..."></textarea>';
+            html += '<button class="btn-sm primary" style="margin-top:8px;" onclick="doRespondReport(\'' + r.id + '\')">回复并处理</button>';
+            html += '</div>';
+        }
+        box.innerHTML = html;
+        modal.appendChild(box);
+        document.body.appendChild(modal);
+    };
 })();

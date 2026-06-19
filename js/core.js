@@ -7498,8 +7498,8 @@ function renderProfileActivityList(kind) {
 
             function getThemeSplashBackground(isDark) {
                 return isDark
-                    ? 'linear-gradient(180deg, rgba(17,17,24,0.98), rgba(23,24,33,0.98) 56%, rgba(31,33,44,0.98))'
-                    : 'linear-gradient(180deg, rgba(234,250,242,0.98), rgba(234,246,255,0.98) 52%, rgba(247,255,251,0.98))';
+                    ? 'linear-gradient(180deg, rgba(15,16,22,0.985), rgba(18,19,27,0.985) 58%, rgba(22,24,34,0.985))'
+                    : 'linear-gradient(180deg, rgba(236,247,241,0.985), rgba(234,246,255,0.985) 52%, rgba(247,255,251,0.985))';
             }
 
             function finishThemeToggle() {
@@ -7517,7 +7517,11 @@ function renderProfileActivityList(kind) {
                 overlay.style.setProperty('--theme-reveal-x', reveal.x + 'px');
                 overlay.style.setProperty('--theme-reveal-y', reveal.y + 'px');
                 overlay.style.setProperty('--theme-reveal-radius', reveal.radius + 'px');
-                overlay.style.background = getThemeSplashBackground(true);
+                overlay.style.left = '0';
+                overlay.style.top = '0';
+                overlay.style.width = '100vw';
+                overlay.style.height = '100vh';
+                overlay.style.background = getThemeSplashBackground(nextIsDark || htmlEl.getAttribute('data-theme') === 'dark');
                 document.body.appendChild(overlay);
                 if (!nextIsDark) {
                     overlay.offsetHeight;
@@ -7535,16 +7539,12 @@ function renderProfileActivityList(kind) {
                     });
                     window.setTimeout(function() {
                         setThemeState(nextIsDark);
-                    }, 165);
-                    window.setTimeout(function() {
-                        overlay.classList.add('is-settle');
-                    }, 300);
+                    }, 88);
                 }
                 window.setTimeout(function() {
-                    overlay.classList.add('is-settle');
                     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
                     finishThemeToggle();
-                }, 460);
+                }, 280);
             }
 
             function animateThemeToggle(nextIsDark, originEl) {
