@@ -1651,34 +1651,28 @@
 
     async function renderPhotosTab(el) {
         await loadPhotosAdminData();
-        var h = '<div class="card"><h3>照片管理（数量：' + photosAdminData.length + '）</h3>';
+        var h = '<div class="card"><h3>????????' + photosAdminData.length + '?</h3>';
         if (!photosAdminData.length) {
-            h += '<div class="empty">暂无照片数据</div>';
+            h += '<div class="empty">??????</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>缩略图</th><th>用户</th><th>状态</th><th>大小</th><th>浏览</th><th>上传时间</th><th>删除时间</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>???</th><th>??</th><th>??</th><th>??</th><th>????</th><th>??</th></tr></thead><tbody>';
             photosAdminData.forEach(function(p) {
                 var extra = {};
                 try { extra = JSON.parse(p.content || '{}'); } catch(e) {}
                 var thumbUrl = extra.thumb || p.media_url || '';
                 var fullUrl = p.media_url || extra.thumb || '';
-                var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + escapeHtml(fullUrl) + '\', \'' + escapeHtml(p.user_name || '') + '\', \'' + escapeHtml(p.created_at || '') + '\')" title="点击预览大图">' : '-';
-                var statusBadge = p.is_deleted
-                    ? '<span style="background:#fee2e2;color:#b91c1c;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">已删除</span>'
-                    : '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;">正常</span>';
-                var deletedTime = p.deleted_at ? formatTime(p.deleted_at) : '-';
+                var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + escapeHtml(fullUrl) + '\', \'' + escapeHtml(p.user_name || '') + '\', \'' + escapeHtml(p.created_at || '') + '\')" title="??????">' : '-';
                 var actions = '';
                 if (p.is_deleted) {
-                    actions += '<button class="btn-sm" onclick="restoreAdminPhoto(\'' + p.id + '\')" style="background:#10b981;color:#fff;margin-right:4px;">恢复</button>';
+                    actions += '<button class="btn-sm" onclick="restoreAdminPhoto(\'' + p.id + '\')" style="background:#10b981;color:#fff;margin-right:4px;">??</button>';
                 } else {
-                    actions += '<button class="btn-sm del" onclick="deleteAdminPhoto(\'' + p.id + '\', \'' + (p.actor_key || '') + '\')">删除</button>';
+                    actions += '<button class="btn-sm del" onclick="deleteAdminPhoto(\'' + p.id + '\', \'' + (p.actor_key || '') + '\')">??</button>';
                 }
                 h += '<tr><td>' + thumbHtml + '</td>';
                 h += '<td>' + escapeHtml(p.user_name || '') + '</td>';
-                h += '<td>' + statusBadge + '</td>';
                 h += '<td>' + (extra.fileSize ? (extra.fileSize / 1024).toFixed(0) + 'KB' : '-') + '</td>';
                 h += '<td>' + (p.views || 0) + '</td>';
                 h += '<td>' + formatTime(p.created_at) + '</td>';
-                h += '<td>' + deletedTime + '</td>';
                 h += '<td>' + actions + '</td></tr>';
             });
             h += '</tbody></table></div>';
