@@ -1258,7 +1258,6 @@
   }
 
   [data-theme="dark"] .chat-list-item {
-    border-top: 1px solid rgba(255, 255, 255, 0.07) !important;
     border-bottom: 1px solid rgba(255, 255, 255, 0.07) !important;
   }
 
