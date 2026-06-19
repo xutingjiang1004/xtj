@@ -2278,9 +2278,23 @@ function renderProfileActivityList(kind) {
                     openPostDetail(postId);
                     return;
                 }
-                if (post.media_type === 'image' && post.media_url && typeof window.openImageViewer === 'function') {
+                if (post.media_type === 'image' && post.media_url && typeof window.openPhotoPreview === 'function') {
                     window.closeProfileActivityModal();
-                    window.openImageViewer(sanitizeUrl(post.media_url));
+                    openPostImagePreview(sanitizeUrl(post.media_url), {
+                        getAttribute: function(name) {
+                            var normalized = normalizePost(post);
+                            if (name === 'data-post-id') return String(normalized.id || '');
+                            if (name === 'data-post-user') return String(normalized.user_name || '');
+                            if (name === 'data-post-created-at') return String(normalized.created_at || '');
+                            if (name === 'data-post-views') return String(normalized.views || 0);
+                            if (name === 'data-file-size') return String((normalized._contentMeta && normalized._contentMeta.fileSize) || '');
+                            if (name === 'data-original-size') return String((normalized._contentMeta && normalized._contentMeta.originalSize) || '');
+                            if (name === 'data-actor-key') return String(normalized.actor_key || '');
+                            if (name === 'data-can-delete') return canDeletePost(normalized) ? '1' : '0';
+                            if (name === 'src') return sanitizeUrl(normalized.media_url || '');
+                            return '';
+                        }
+                    });
                     return;
                 }
                 window.closeProfileActivityModal();
@@ -3017,7 +3031,83 @@ function renderProfileActivityList(kind) {
                 ivHintTimer = setTimeout(() => h.classList.remove('show'), 2000);
             }
 
-            window.openImageViewer = function (src) {
+            function buildPostPreviewItemFromTrigger(src, triggerEl) {
+                var el = triggerEl && triggerEl.getAttribute ? triggerEl : null;
+                if (!el) return null;
+                var postId = String(el.getAttribute('data-post-id') || '').trim();
+                if (!postId) return null;
+                var userName = String(el.getAttribute('data-post-user') || '').trim();
+                var createdAt = String(el.getAttribute('data-post-created-at') || '').trim();
+                var views = Number(el.getAttribute('data-post-views') || 0) || 0;
+                var fileSize = Number(el.getAttribute('data-file-size') || 0) || null;
+                var originalSize = Number(el.getAttribute('data-original-size') || 0) || null;
+                return {
+                    id: 'post_' + postId,
+                    imageUrl: sanitizeUrl(src || el.getAttribute('src') || ''),
+                    thumbUrl: sanitizeUrl(src || el.getAttribute('src') || ''),
+                    username: userName || '',
+                    timestamp: createdAt || '',
+                    views: views,
+                    fileSize: fileSize,
+                    originalSize: originalSize,
+                    __xtjSource: 'post',
+                    __xtjPostId: postId,
+                    __xtjActorKey: String(el.getAttribute('data-actor-key') || ''),
+                    __xtjCanDelete: String(el.getAttribute('data-can-delete') || '') === '1'
+                };
+            }
+
+            function syncPostPhotoPreviewChrome(photo) {
+                var overlay = document.getElementById('photoPreviewOverlay');
+                if (!overlay) return;
+                var isPostPhoto = !!(photo && photo.__xtjSource === 'post');
+                overlay.classList.toggle('pp-post-mode', isPostPhoto);
+                var prevBtn = document.getElementById('ppPrevBtn');
+                var nextBtn = document.getElementById('ppNextBtn');
+                if (prevBtn) prevBtn.style.display = isPostPhoto ? 'none' : '';
+                if (nextBtn) nextBtn.style.display = isPostPhoto ? 'none' : '';
+                var deleteBtn = document.getElementById('ppDeleteBtn');
+                if (deleteBtn && isPostPhoto) {
+                    deleteBtn.style.display = photo.__xtjCanDelete ? 'flex' : 'none';
+                    deleteBtn.title = '删除帖子';
+                }
+            }
+
+            function ensurePhotoPreviewContextHooks() {
+                if (window.__xtjPhotoPreviewContextHooked) return;
+                if (typeof window.closePhotoPreview !== 'function') return;
+                var originalClosePhotoPreview = window.closePhotoPreview;
+                window.closePhotoPreview = function() {
+                    var overlay = document.getElementById('photoPreviewOverlay');
+                    if (overlay) overlay.classList.remove('pp-post-mode');
+                    window.__xtjPhotoPreviewContext = null;
+                    return originalClosePhotoPreview.apply(this, arguments);
+                };
+                window.__xtjPhotoPreviewContextHooked = true;
+            }
+
+            function openPostImagePreview(src, triggerEl) {
+                var photo = buildPostPreviewItemFromTrigger(src, triggerEl);
+                if (!photo || !photo.imageUrl || typeof window.openPhotoPreview !== 'function') return false;
+                ensurePhotoPreviewContextHooks();
+                window.__xtjPhotoPreviewContext = {
+                    kind: 'post',
+                    postId: photo.__xtjPostId,
+                    actorKey: photo.__xtjActorKey || '',
+                    canDelete: !!photo.__xtjCanDelete
+                };
+                window.pwCurrentSortedPhotos = [photo];
+                window.photoWallData = [photo];
+                window.openPhotoPreview(0, [photo]);
+                window.photoPreviewCurrent = photo;
+                setTimeout(function() {
+                    syncPostPhotoPreviewChrome(photo);
+                }, 30);
+                return true;
+            }
+
+            window.openImageViewer = function (src, triggerEl) {
+                if (openPostImagePreview(src, triggerEl)) return;
                 const viewer = document.getElementById('imgViewer');
                 const img = document.getElementById('ivImg');
                 const wrapper = document.getElementById('ivWrapper');
@@ -3038,6 +3128,25 @@ function renderProfileActivityList(kind) {
                 wrapper.classList.remove('open-anim');
                 viewer.classList.remove('active');
                 document.body.style.overflow = '';
+            };
+
+            window.deleteCurrentPhoto = function() {
+                var ctx = window.__xtjPhotoPreviewContext || null;
+                var current = window.photoPreviewCurrent || null;
+                if (ctx && ctx.kind === 'post' && current && current.__xtjSource === 'post') {
+                    if (!ctx.canDelete) {
+                        showToast('仅发布者可删除');
+                        return;
+                    }
+                    if (typeof window.closePhotoPreview === 'function') window.closePhotoPreview();
+                    setTimeout(function() {
+                        openDelete(ctx.postId, ctx.actorKey || '');
+                    }, 60);
+                    return;
+                }
+                if (typeof window.deletePhotoFromPreview === 'function') {
+                    window.deletePhotoFromPreview();
+                }
             };
 
             document.addEventListener('keydown', function (e) {
@@ -3511,7 +3620,7 @@ function renderProfileActivityList(kind) {
                     </div>
                   </div>
                   <div class="content">${escapeHtml(p.content)}</div>
-                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none" playsinline></video>`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}')">`}</div>`:''}
+                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none" playsinline></video>`:`<img data-post-id="${escapeHtml(p.id)}" data-post-user="${escapeHtml(p.user_name || '')}" data-post-created-at="${escapeHtml(p.created_at || '')}" data-post-views="${escapeHtml(String(p.views || 0))}" data-actor-key="${escapeHtml(String(p.actor_key || ''))}" data-can-delete="${canDelPost ? '1' : '0'}" src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}', this)">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'❤️':'点赞'}</button>
@@ -3829,7 +3938,7 @@ function renderProfileActivityList(kind) {
                     </div>
                   </div>
                   <div class="content">${escapeHtml(p.content)}</div>
-                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none" playsinline></video>`:`<img src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}')">`}</div>`:''}
+                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none" playsinline></video>`:`<img data-post-id="${escapeHtml(p.id)}" data-post-user="${escapeHtml(p.user_name || '')}" data-post-created-at="${escapeHtml(p.created_at || '')}" data-post-views="${escapeHtml(String(p.views || 0))}" data-actor-key="${escapeHtml(String(p.actor_key || ''))}" data-can-delete="${canDelPost ? '1' : '0'}" src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}', this)">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
                     <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'❤️':'点赞'}</button>
@@ -4106,7 +4215,7 @@ function renderProfileActivityList(kind) {
                     </div>
                   </div>
                   <div class="content">${escapeHtml(normalized.content || "")}</div>
-                  ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none" playsinline></video>` : `<img ${mediaDataAttrs} src="${escapeHtml(normalized.media_url)}" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer('${safeJsStr(normalized.media_url)}')">`}</div>` : ''}
+                  ${normalized.media_url ? `<div class="media">${normalized.media_type === 'video' ? `<video src="${escapeHtml(normalized.media_url)}" controls preload="none" playsinline></video>` : `<img ${mediaDataAttrs} data-actor-key="${escapeHtml(String(normalized.actor_key || ''))}" data-can-delete="${canDelete ? '1' : '0'}" src="${escapeHtml(normalized.media_url)}" loading="lazy" decoding="async" fetchpriority="low" onclick="openImageViewer('${safeJsStr(normalized.media_url)}', this)">`}</div>` : ''}
                   <div class="post-stats-text">${buildPostStatsLine(normalized, pLikes.length, pComms.length)}</div>
                   <div class="actions">${buildPostActionHtml(normalized, isLiked, canDelete)}</div>
                   ${pComms.length ? `<div class="comments">${pComms.map(function(c) {
@@ -5492,7 +5601,7 @@ function renderProfileActivityList(kind) {
                         </div>
                     </div>
                     ${post.content ? `<div class="post-detail-content">${escapeHtml(post.content)}</div>` : ''}
-                    ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${escapeHtml(post.media_url)}" controls preload="none" playsinline></video>`:`<img src="${escapeHtml(post.media_url)}" onclick="openImageViewer('${safeJsStr(post.media_url)}')" loading="lazy" decoding="async" fetchpriority="low" />`}</div>` : ''}
+                    ${post.media_url ? `<div class="post-detail-media">${post.media_type==='video'?`<video src="${escapeHtml(post.media_url)}" controls preload="none" playsinline></video>`:`<img data-post-id="${escapeHtml(post.id)}" data-post-user="${escapeHtml(post.user_name || '')}" data-post-created-at="${escapeHtml(post.created_at || '')}" data-post-views="${escapeHtml(String(vc || 0))}" data-actor-key="${escapeHtml(String(post.actor_key || ''))}" data-can-delete="${canDeletePost(post) ? '1' : '0'}" src="${escapeHtml(post.media_url)}" onclick="openImageViewer('${safeJsStr(post.media_url)}', this)" loading="lazy" decoding="async" fetchpriority="low" />`}</div>` : ''}
                     <div class="post-detail-stats">浏览 ${vc} 次 | 点赞 ${likes.length} 次 | 评论 ${comments.length}</div>
                     <div class="stat-two-col">
                         <div class="stat-col">
@@ -6050,6 +6159,17 @@ function renderProfileActivityList(kind) {
                 if (dmpollTimer) { clearInterval(dmpollTimer); dmpollTimer = null; dmpollInterval = null; }
             }
 
+            function setUnreadBadgeCount(cnt) {
+                var badge = document.getElementById('navChatBadge');
+                if (!badge) return;
+                if (cnt > 0) {
+                    badge.textContent = cnt > 99 ? '99+' : cnt;
+                    badge.classList.add('show');
+                } else {
+                    badge.classList.remove('show');
+                }
+            }
+
             async function updateUnreadBadge() {
                 var badge = document.getElementById('navChatBadge');
                 if (!window.currentUser) {
@@ -6062,7 +6182,7 @@ function renderProfileActivityList(kind) {
                         .eq('media_type', DM_MARKER)
                         .eq('media_url', window.currentUser)
                         .order('created_at', { ascending: false })
-                        .limit(200);
+                        .limit(120);
 
                     var data = result.data;
                     var error = result.error;
@@ -6071,14 +6191,7 @@ function renderProfileActivityList(kind) {
                     (data || []).forEach(function(m) {
                         if (!window.isMsgReadByMe(m)) cnt++;
                     });
-                    if (badge) {
-                        if (cnt > 0) {
-                            badge.textContent = cnt > 99 ? '99+' : cnt;
-                            badge.classList.add('show');
-                        } else {
-                            badge.classList.remove('show');
-                        }
-                    }
+                    setUnreadBadgeCount(cnt);
                 } catch(e) {}
             }
 
@@ -6687,7 +6800,7 @@ function renderProfileActivityList(kind) {
                 if (!el) return;
                 if (!window.currentUser) {
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div><div style="font-size:12px;">登录后即可查看和发送私信</div></div>';
-                    updateUnreadBadge();
+                    setUnreadBadgeCount(0);
                     return;
                 }
                 if (!dockChatActiveUser) {
@@ -6712,11 +6825,11 @@ function renderProfileActivityList(kind) {
                         .eq("media_type", DM_MARKER)
                         .or(`user_name.eq.${window.currentUser},media_url.eq.${window.currentUser}`)
                         .order("created_at", { ascending: false })
-                        .limit(200);
+                        .limit(120);
                     if (error) throw error;
                     if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像就可以开始聊天</div></div>';
-                        updateUnreadBadge();
+                        setUnreadBadgeCount(0);
                         return;
                     }
                     const convMap = {};
@@ -6730,35 +6843,53 @@ function renderProfileActivityList(kind) {
                         }
                     });
                     const convs = Object.values(convMap).sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
-                    // 棰勯敓鑺傦拷?鎷锋潪鍊熶喊婢垛晛鍨悰銊ャ仈锟?
-                    var chatUsers = convs.map(function(c) { return c.other_user; });
-                    if (chatUsers.length > 0) {
-                        var uncachedUsers = chatUsers.filter(function(u) { return !avatarCache[u]; });
-                        if (uncachedUsers.length > 0) {
-                            try {
-                                var avatarRes = await sb.from("posts")
-                                    .select("user_name, media_url")
-                                    .eq("media_type", "__avatar__")
-                                    .eq("actor_key", "__avatar__")
-                                    .in("user_name", uncachedUsers)
-                                    .order("created_at", { ascending: false });
-                                if (avatarRes.data) {
-                                    var seen = {};
-                                    avatarRes.data.forEach(function(a) {
-                                        if (a.media_url && !seen[a.user_name]) {
-                                            seen[a.user_name] = true;
-                                            avatarCache[a.user_name] = a.media_url;
-                                        }
-                                    });
-                                }
-                            } catch(e) {}
-                        }
-                    }
+                    setUnreadBadgeCount(convs.reduce(function(total, item) {
+                        return total + (item && item.unread ? item.unread : 0);
+                    }, 0));
                     renderDockChatConversationList(el, convs);
-                    updateUnreadBadge();
+                    hydrateDockChatAvatars(convs.map(function(c) { return c.other_user; }), function(changed) {
+                        if (!changed) return;
+                        var currentList = document.getElementById('dockChatList');
+                        if (!currentList || dockChatActiveUser) return;
+                        renderDockChatConversationList(currentList, convs);
+                    });
                 } catch(e) {
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">!</div><div>' + (e.message || '加载失败') + '</div></div>';
                 }
+            }
+
+            function hydrateDockChatAvatars(userNames, onReady) {
+                var users = Array.from(new Set((Array.isArray(userNames) ? userNames : []).filter(function(name) {
+                    return !!name && !avatarCache[name];
+                })));
+                if (!users.length) {
+                    if (typeof onReady === 'function') onReady(false);
+                    return Promise.resolve(false);
+                }
+                return sb.from("posts")
+                    .select("user_name, media_url")
+                    .eq("media_type", "__avatar__")
+                    .eq("actor_key", "__avatar__")
+                    .in("user_name", users)
+                    .order("created_at", { ascending: false })
+                    .then(function(result) {
+                        var changed = false;
+                        var seen = {};
+                        (result && result.data ? result.data : []).forEach(function(row) {
+                            if (!row || !row.user_name || !row.media_url || seen[row.user_name]) return;
+                            seen[row.user_name] = true;
+                            if (avatarCache[row.user_name] !== row.media_url) {
+                                avatarCache[row.user_name] = row.media_url;
+                                changed = true;
+                            }
+                        });
+                        if (typeof onReady === 'function') onReady(changed);
+                        return changed;
+                    })
+                    .catch(function() {
+                        if (typeof onReady === 'function') onReady(false);
+                        return false;
+                    });
             }
 
             // 鑱婂ぉ消息閺堟勾缂撳瓨閿涘奔绨╁▎鈩冨ⅵ瀵偓缁夋帒锟??
@@ -6983,30 +7114,6 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 var loadSeq = ++_dockChatLoadSeq;
-                // 棰勯敓鑺傦拷?鎷锋潪钘夊蓟閺傜懓銇旈敓?
-                var needAvatars = [];
-                if (currentUser && !avatarCache[currentUser]) needAvatars.push(currentUser);
-                if (userName && !avatarCache[userName]) needAvatars.push(userName);
-                if (needAvatars.length > 0) {
-                    try {
-                        var avatarRes = await sb.from("posts")
-                            .select("user_name, media_url")
-                            .eq("media_type", "__avatar__")
-                            .eq("actor_key", "__avatar__")
-                            .in("user_name", needAvatars)
-                            .order("created_at", { ascending: false });
-                        if (avatarRes.data) {
-                            var seenAv = {};
-                            avatarRes.data.forEach(function(a) {
-                                if (a.media_url && !seenAv[a.user_name]) {
-                                    seenAv[a.user_name] = true;
-                                    avatarCache[a.user_name] = a.media_url;
-                                }
-                            });
-                        }
-                    } catch(e) {}
-                }
-                if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
                 // 褰撳墠用户浼樺厛浣跨敤localStorage闂佸搫顦崯顐﹀煝婢跺瞼澶勯悗?
                 if (currentUser) {
                     try {
@@ -7021,12 +7128,19 @@ function renderProfileActivityList(kind) {
                 if (_chatCache[cacheKey] && !forceScroll) {
                     renderDockMessages(userName, _chatCache[cacheKey], false);
                 }
+                hydrateDockChatAvatars([currentUser, userName], function(changed) {
+                    if (!changed || loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
+                    var cachedMessages = _chatCache[cacheKey];
+                    if (cachedMessages && cachedMessages.length) {
+                        renderDockMessages(userName, cachedMessages, false);
+                    }
+                });
                 const el = document.getElementById('dockChatMessages');
                 try {
                     const { data: msgs, error } = await sb.from("posts").select("id, user_name, media_url, content, created_at, views, actor_key")
                         .eq("media_type", DM_MARKER)
                         .or(`and(user_name.eq.${window.currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${window.currentUser})`)
-                        .order("created_at").limit(500);
+                        .order("created_at").limit(180);
                     if (error) throw error;
                     if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
                     var mergedMessages = mergeDockChatMessages(userName, msgs || []);
@@ -7406,6 +7520,7 @@ function renderProfileActivityList(kind) {
                 overlay.style.background = getThemeSplashBackground(true);
                 document.body.appendChild(overlay);
                 if (!nextIsDark) {
+                    overlay.offsetHeight;
                     setThemeState(false);
                     requestAnimationFrame(function() {
                         requestAnimationFrame(function() {
@@ -7420,16 +7535,16 @@ function renderProfileActivityList(kind) {
                     });
                     window.setTimeout(function() {
                         setThemeState(nextIsDark);
-                    }, 190);
+                    }, 165);
                     window.setTimeout(function() {
                         overlay.classList.add('is-settle');
-                    }, 360);
+                    }, 300);
                 }
                 window.setTimeout(function() {
                     overlay.classList.add('is-settle');
                     if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
                     finishThemeToggle();
-                }, 560);
+                }, 460);
             }
 
             function animateThemeToggle(nextIsDark, originEl) {
@@ -7448,16 +7563,6 @@ function renderProfileActivityList(kind) {
                 htmlEl.setAttribute('data-theme-transition', nextIsDark ? 'dark' : 'light');
                 if (themeBtn) themeBtn.disabled = true;
                 setThemeRevealVars(originEl);
-
-                if (typeof document.startViewTransition === 'function') {
-                    try {
-                        var transition = document.startViewTransition(function() {
-                            setThemeState(nextIsDark);
-                        });
-                        transition.finished.finally(finishThemeToggle);
-                        return;
-                    } catch (_) {}
-                }
 
                 playThemeFallback(nextIsDark, originEl);
             }
@@ -9293,7 +9398,7 @@ function renderProfileActivityList(kind) {
                 var mediaHtml = normalizedPost.media_url ? (
                     normalizedPost.media_type === 'video'
                         ? '<video src="' + escapeHtml(normalizedPost.media_url) + '" controls preload="metadata" playsinline></video>'
-                        : '<img ' + detailMediaAttrs + ' src="' + escapeHtml(normalizedPost.media_url) + '" onclick="openImageViewer(\'' + safeJsStr(normalizedPost.media_url) + '\')" loading="lazy" decoding="async" fetchpriority="low" />'
+                        : '<img ' + detailMediaAttrs + ' data-actor-key="' + escapeHtml(String(normalizedPost.actor_key || "")) + '" data-can-delete="' + (canDeletePost(normalizedPost) ? '1' : '0') + '" src="' + escapeHtml(normalizedPost.media_url) + '" onclick="openImageViewer(\'' + safeJsStr(normalizedPost.media_url) + '\', this)" loading="lazy" decoding="async" fetchpriority="low" />'
                 ) : '';
                 var visibilityLabel = normalizedPost.visibility === 'private' ? '私密' : '公开';
                 var contentText = String(normalizedPost.content || '').trim();
@@ -9485,8 +9590,31 @@ function renderProfileActivityList(kind) {
                     window.openPostDetail(postId);
                     return;
                 }
-                if (post.media_type === 'image' && post.media_url && typeof window.openImageViewer === 'function') {
-                    window.openImageViewer(post.media_url);
+                if (post.media_type === 'image' && post.media_url && typeof window.openPhotoPreview === 'function') {
+                    var statPreviewPhoto = {
+                        id: 'post_' + String(post.id || ''),
+                        imageUrl: sanitizeUrl(post.media_url),
+                        thumbUrl: sanitizeUrl(post.media_url),
+                        username: String(post.user_name || ''),
+                        timestamp: String(post.created_at || ''),
+                        views: Number(post.views || 0) || 0,
+                        fileSize: ((normalizePost(post)._contentMeta || {}).fileSize) || null,
+                        originalSize: ((normalizePost(post)._contentMeta || {}).originalSize) || null,
+                        __xtjSource: 'post',
+                        __xtjPostId: String(post.id || ''),
+                        __xtjActorKey: String(post.actor_key || ''),
+                        __xtjCanDelete: !!canDeletePost(post)
+                    };
+                    window.__xtjPhotoPreviewContext = {
+                        kind: 'post',
+                        postId: statPreviewPhoto.__xtjPostId,
+                        actorKey: statPreviewPhoto.__xtjActorKey,
+                        canDelete: statPreviewPhoto.__xtjCanDelete
+                    };
+                    window.openPhotoPreview(0, [statPreviewPhoto]);
+                    setTimeout(function() {
+                        syncPostPhotoPreviewChrome(statPreviewPhoto);
+                    }, 30);
                     return;
                 }
                 window.openPostDetail(post.id);
