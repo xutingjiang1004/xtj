@@ -77,6 +77,7 @@ const AUTH_MARKER = '__auth__';
 const VISIT_MARKER = '__visit__';
 const ATTACK_MARKER = '__attack__';
 const ADMIN_AUTH_MARKER = '__admin_auth__';
+const ADMIN_META_MARKER = '__admin_meta__';
 const USER_INFO_MARKER = '__user_info__';
 const USER_VISIT_MARKER = '__user_visit__';
 
@@ -255,6 +256,57 @@ function buildRegisteredUsersByDate(authMap) {
     if (dateKey) dateMap[dateKey] = (dateMap[dateKey] || 0) + 1;
   });
   return dateMap;
+}
+
+async function getAdminMetaRecord() {
+  const { data, error } = await supabase.from('posts')
+    .select('id, content, created_at')
+    .eq('media_type', ADMIN_META_MARKER)
+    .eq('user_name', ADMIN_USERNAME)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  return data && data.length ? data[0] : null;
+}
+
+async function saveAdminMetaFields(fields) {
+  const existing = await getAdminMetaRecord();
+  const nextContent = Object.assign({}, safeJsonParse(existing && existing.content), fields || {});
+  if (existing && existing.id) {
+    const { error } = await supabase.from('posts')
+      .update({ content: JSON.stringify(nextContent) })
+      .eq('id', existing.id);
+    if (error) throw error;
+    return { id: existing.id, content: nextContent };
+  }
+  const { data, error } = await supabase.from('posts').insert([{
+    user_name: ADMIN_USERNAME,
+    content: JSON.stringify(nextContent),
+    media_type: ADMIN_META_MARKER,
+    actor_key: ADMIN_META_MARKER
+  }]).select('id, content').limit(1);
+  if (error) throw error;
+  return data && data.length ? data[0] : { id: null, content: nextContent };
+}
+
+function buildUnreadRegisterAlertPayload(authMap, baselineIso) {
+  const baselineMs = toTimeMs(baselineIso);
+  const unreadUsers = Object.keys(authMap || {}).map(userName => {
+    return {
+      user_name: userName,
+      register_time: authMap[userName] && authMap[userName].auth_created_at || null
+    };
+  }).filter(entry => {
+    const registerMs = toTimeMs(entry.register_time);
+    return Number.isFinite(registerMs) && Number.isFinite(baselineMs) && registerMs > baselineMs;
+  }).sort((a, b) => {
+    return (toTimeMs(b.register_time) || 0) - (toTimeMs(a.register_time) || 0);
+  });
+  return {
+    unread_count: unreadUsers.length,
+    latest_register_at: unreadUsers.length ? unreadUsers[0].register_time : null,
+    users: unreadUsers
+  };
 }
 
 function sanitizeError(err) {
@@ -583,7 +635,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
     autoExpireOverdueRecords().catch(function() {});
 
     const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes, annRes] = await Promise.all([
-      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').order('created_at', { ascending: false }).limit(5000),
+      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500),
@@ -1430,7 +1482,7 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
         .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
         .neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__')
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
-        .neq('media_type', AUTH_MARKER).neq('media_type', ADMIN_AUTH_MARKER)
+        .neq('media_type', AUTH_MARKER).neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER)
         .neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER)
         .neq('media_type', '__user_visit__'),
       buildSummaryQuery('posts', 'user_name, created_at', 'media_type', AUTH_MARKER, 'created_at'),
@@ -1580,7 +1632,7 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
         .neq('media_type', '__avatar__').neq('media_type', USER_INFO_MARKER)
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
         .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER)
-        .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', ADMIN_AUTH_MARKER)
+        .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER)
         .neq('media_type', USER_VISIT_MARKER),
       buildQuery('comments', 'id, created_at', null, null, 'created_at'),
       buildQuery('likes', 'id, created_at', null, null, 'created_at'),
@@ -1765,6 +1817,42 @@ app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res
   } catch(e) {
     console.error('[API] 用户访问统计失败:', e.message);
     return res.status(500).json({ error: '用户访问统计加载失败' });
+  }
+});
+
+app.get('/admin/users/register-alerts', verifyToken, rateLimit(60000, 20), async (req, res) => {
+  try {
+    const [metaRecord, authRows] = await Promise.all([
+      getAdminMetaRecord(),
+      fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at')
+    ]);
+    const meta = safeJsonParse(metaRecord && metaRecord.content);
+    const lastSeenAt = meta.last_seen_register_alert_at || null;
+    const fallbackBaselineIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const baselineIso = Number.isFinite(toTimeMs(lastSeenAt)) ? lastSeenAt : fallbackBaselineIso;
+    const authMap = buildAuthUserMap(authRows);
+    const payload = buildUnreadRegisterAlertPayload(authMap, baselineIso);
+    return res.json({
+      ok: true,
+      unread_count: payload.unread_count,
+      last_seen_at: lastSeenAt,
+      latest_register_at: payload.latest_register_at,
+      users: payload.users
+    });
+  } catch (e) {
+    console.error('[API] 新用户注册提醒加载失败:', e.message);
+    return res.status(500).json({ error: '新用户注册提醒加载失败' });
+  }
+});
+
+app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20), async (req, res) => {
+  try {
+    const nowIso = new Date().toISOString();
+    await saveAdminMetaFields({ last_seen_register_alert_at: nowIso });
+    return res.json({ ok: true, last_seen_at: nowIso });
+  } catch (e) {
+    console.error('[API] 新用户注册提醒已读写入失败:', e.message);
+    return res.status(500).json({ error: '新用户注册提醒已读写入失败' });
   }
 });
 
