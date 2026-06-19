@@ -103,6 +103,117 @@
     var userSortBy = 'reg';
     var confirmCallback = null;
     var currentTab = 'ann';
+    var registerAlertState = {
+        data: null,
+        pollTimer: null,
+        pollInFlight: false,
+        readInFlight: false
+    };
+
+    function ensureRegisterAlertBadge() {
+        var btn = document.getElementById('tabUsersBtn');
+        if (!btn) return null;
+        btn.style.position = 'relative';
+        btn.style.overflow = 'visible';
+        var badge = document.getElementById('registerAlertBadge');
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.id = 'registerAlertBadge';
+            badge.className = 'notif-badge';
+            badge.style.display = 'none';
+            btn.appendChild(badge);
+        }
+        return badge;
+    }
+
+    function renderRegisterAlertBadge(unreadCount) {
+        var badge = ensureRegisterAlertBadge();
+        if (!badge) return;
+        var count = Number(unreadCount || 0);
+        if (count > 0) {
+            badge.textContent = count > 99 ? '99+' : String(count);
+            badge.style.display = '';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+
+    function clearRegisterAlertBadge() {
+        renderRegisterAlertBadge(0);
+    }
+
+    async function fetchRegisterAlerts() {
+        if (!API_BASE || !getToken()) return null;
+        try {
+            return await apiCall('GET', '/admin/users/register-alerts');
+        } catch (e) {
+            console.warn('[admin] 新用户注册提醒加载失败:', e.message);
+            return null;
+        }
+    }
+
+    async function markRegisterAlertsRead() {
+        if (!API_BASE || !getToken() || registerAlertState.readInFlight) return false;
+        registerAlertState.readInFlight = true;
+        try {
+            var res = await apiCall('POST', '/admin/users/register-alerts/read');
+            registerAlertState.data = {
+                ok: true,
+                unread_count: 0,
+                last_seen_at: (res && res.last_seen_at) || new Date().toISOString(),
+                latest_register_at: null,
+                users: []
+            };
+            clearRegisterAlertBadge();
+            return true;
+        } catch (e) {
+            console.warn('[admin] 新用户注册提醒已读写入失败:', e.message);
+            return false;
+        } finally {
+            registerAlertState.readInFlight = false;
+        }
+    }
+
+    async function refreshRegisterAlerts() {
+        if (registerAlertState.pollInFlight) return;
+        registerAlertState.pollInFlight = true;
+        try {
+            var data = await fetchRegisterAlerts();
+            if (!data || data.ok !== true) return;
+            registerAlertState.data = data;
+            var unreadCount = Number(data.unread_count || 0);
+            if (currentTab === 'users' && unreadCount > 0) {
+                var didRead = await markRegisterAlertsRead();
+                if (!didRead) renderRegisterAlertBadge(unreadCount);
+                return;
+            }
+            renderRegisterAlertBadge(unreadCount);
+        } finally {
+            registerAlertState.pollInFlight = false;
+        }
+    }
+
+    function startRegisterAlertPolling() {
+        ensureRegisterAlertBadge();
+        if (registerAlertState.pollTimer) {
+            clearInterval(registerAlertState.pollTimer);
+        }
+        refreshRegisterAlerts();
+        registerAlertState.pollTimer = setInterval(function() {
+            refreshRegisterAlerts();
+        }, 60000);
+    }
+
+    function stopRegisterAlertPolling() {
+        if (registerAlertState.pollTimer) {
+            clearInterval(registerAlertState.pollTimer);
+            registerAlertState.pollTimer = null;
+        }
+        registerAlertState.pollInFlight = false;
+        registerAlertState.readInFlight = false;
+        registerAlertState.data = null;
+        clearRegisterAlertBadge();
+    }
 
     (function installAdminButtonMotion() {
         if (window.__xtjAdminButtonMotionV1) return;
@@ -270,6 +381,7 @@
         document.getElementById('loginWrap').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         saveSession();
+        ensureRegisterAlertBadge();
         startSessionTimeoutMonitor(); // 启动30分钟无操作自动登出
         
         var savedTab = localStorage.getItem(TAB_KEY);
@@ -290,6 +402,7 @@
         } else {
             await loadAllData();
         }
+        startRegisterAlertPolling();
 
         // 启动举报轮询（每 30 秒检查新举报）
         setInterval(async function() {
@@ -357,6 +470,7 @@
                 headers: { 'Authorization': 'Bearer ' + getToken() }
             }).catch(function() {});
         }
+        stopRegisterAlertPolling();
         allPosts = []; allLikes = []; allComments = []; allUsers = [];
         annList = [];
         clearSession();
@@ -442,7 +556,7 @@
         }
     }
 
-    window.switchTab = function(tab) {
+    window.switchTab = async function(tab) {
         currentTab = tab;
         saveCurrentTab();
         if (tab === 'reports') {
@@ -1671,7 +1785,7 @@
                 }
                 h += '<tr><td>' + thumbHtml + '</td>';
                 h += '<td>' + escapeHtml(p.user_name || '') + '</td>';
-                h += '<td>' + (extra.fileSize ? (extra.fileSize / 1024).toFixed(0) + 'KB' : '-') + '</td>';
+                h += '<td>' + (extra.fileSize ? (extra.fileSize / (1024 * 1024)).toFixed(2) + 'MB' : '-') + '</td>';
                 h += '<td>' + (p.views || 0) + '</td>';
                 h += '<td>' + formatTime(p.created_at) + '</td>';
                 h += '<td>' + actions + '</td></tr>';
@@ -2498,11 +2612,14 @@
     };
 
     var _origSwitchTabV2 = window.switchTab;
-    window.switchTab = function(tab) {
+    window.switchTab = async function(tab) {
         var normalized = tab === 'blacklist' ? 'bans' : tab;
         var allTabs = ['ann','stats','users','posts','likes','comments','reports','bans','mutes','photos'];
         currentTab = normalized;
         localStorage.setItem('admin_tab', normalized);
+        if (normalized === 'users') {
+            await markRegisterAlertsRead();
+        }
         // 切换到举报管理时清除红点
         if (normalized === 'reports') {
             var badge = document.getElementById('reportBadge');
