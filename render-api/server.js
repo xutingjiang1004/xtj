@@ -1425,7 +1425,7 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
     if (!startDate && !endDate) {
       statsCache.pending = true;  // 简单锁标志
     }
-    const [postsRes, usersRes, visitsRes, attacksRes, likesRes, commentsRes, photosRes] = await Promise.all([
+    const [postsRes, authRowsRes, visitsRes, attacksRes, likesRes, commentsRes, photosRes] = await Promise.all([
       buildSummaryQuery('posts', 'id, media_type, content, created_at', null, null, 'created_at')
         .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
         .neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__')
@@ -1433,7 +1433,7 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
         .neq('media_type', AUTH_MARKER).neq('media_type', ADMIN_AUTH_MARKER)
         .neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER)
         .neq('media_type', '__user_visit__'),
-      buildSummaryQuery('posts', 'id', 'media_type', AUTH_MARKER, 'created_at'),
+      buildSummaryQuery('posts', 'user_name, created_at', 'media_type', AUTH_MARKER, 'created_at'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
       supabase.from('likes').select('id'),
@@ -1447,7 +1447,8 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
       }
       return true;
     });
-    const users = usersRes.data || [];
+    const authRows = authRowsRes.data || [];
+    const authUserMap = buildAuthUserMap(authRows);
     const visits = visitsRes.data || [];
     const attacks = attacksRes.data || [];
     const likes = likesRes.data || [];
@@ -1481,7 +1482,7 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
     var firewallIntercepts = (attackTypes['CORS'] || 0) + (attackTypes['CSRF'] || 0);
 
     const result = {
-      total_users: users.length,
+      total_users: Object.keys(authUserMap).length,
       total_posts: posts.length,
       total_comments: comments.length,
       total_likes: likes.length,
