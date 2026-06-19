@@ -1651,22 +1651,23 @@
 
     async function renderPhotosTab(el) {
         await loadPhotosAdminData();
-        var h = '<div class="card"><h3>????????' + photosAdminData.length + '?</h3>';
+        var h = '<div class="card"><h3>\u7167\u7247\u7ba1\u7406\uff08\u6570\u91cf\uff1a' + photosAdminData.length + '\uff09</h3>';
         if (!photosAdminData.length) {
-            h += '<div class="empty">??????</div>';
+            h += '<div class="empty">\u6682\u65e0\u7167\u7247\u6570\u636e</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>???</th><th>??</th><th>??</th><th>??</th><th>????</th><th>??</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>\u7f29\u7565\u56fe</th><th>\u7528\u6237</th><th>\u5927\u5c0f</th><th>\u6d4f\u89c8</th><th>\u4e0a\u4f20\u65f6\u95f4</th><th>\u64cd\u4f5c</th></tr></thead><tbody>';
             photosAdminData.forEach(function(p) {
                 var extra = {};
                 try { extra = JSON.parse(p.content || '{}'); } catch(e) {}
                 var thumbUrl = extra.thumb || p.media_url || '';
                 var fullUrl = p.media_url || extra.thumb || '';
-                var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + escapeHtml(fullUrl) + '\', \'' + escapeHtml(p.user_name || '') + '\', \'' + escapeHtml(p.created_at || '') + '\')" title="??????">' : '-';
+                var previewUrl = fullUrl || thumbUrl;
+                var thumbHtml = thumbUrl ? '<img src="' + escapeHtml(thumbUrl) + '" style="width:44px;height:44px;object-fit:cover;border-radius:6px;cursor:pointer;" loading="lazy" onclick="previewAdminPhoto(\'' + escapeHtml(previewUrl) + '\', \'' + escapeHtml(thumbUrl) + '\', \'' + escapeHtml(p.user_name || '') + '\', \'' + escapeHtml(p.created_at || '') + '\')" title="\u70b9\u51fb\u9884\u89c8\u5927\u56fe">' : '-';
                 var actions = '';
                 if (p.is_deleted) {
-                    actions += '<button class="btn-sm" onclick="restoreAdminPhoto(\'' + p.id + '\')" style="background:#10b981;color:#fff;margin-right:4px;">??</button>';
+                    actions += '<button class="btn-sm" onclick="restoreAdminPhoto(\'' + p.id + '\')" style="background:#10b981;color:#fff;margin-right:4px;">\u6062\u590d</button>';
                 } else {
-                    actions += '<button class="btn-sm del" onclick="deleteAdminPhoto(\'' + p.id + '\', \'' + (p.actor_key || '') + '\')">??</button>';
+                    actions += '<button class="btn-sm del" onclick="deleteAdminPhoto(\'' + p.id + '\', \'' + (p.actor_key || '') + '\')">\u5220\u9664</button>';
                 }
                 h += '<tr><td>' + thumbHtml + '</td>';
                 h += '<td>' + escapeHtml(p.user_name || '') + '</td>';
@@ -1681,12 +1682,26 @@
         el.innerHTML = h;
     }
 
-    window.previewAdminPhoto = function(url, username, time) {
+    window.previewAdminPhoto = function(url, fallbackUrl, username, time) {
         var modal = document.getElementById('photoPreviewModal');
         var img = document.getElementById('photoPreviewImg');
         var info = document.getElementById('photoPreviewInfo');
         if (!modal || !img) return;
-        img.src = url;
+        if (typeof time === 'undefined') {
+            time = username;
+            username = fallbackUrl;
+            fallbackUrl = '';
+        }
+        img.onerror = function() {
+            if (fallbackUrl && img.src !== fallbackUrl) {
+                img.onerror = null;
+                img.src = fallbackUrl;
+                return;
+            }
+            img.onerror = null;
+            img.removeAttribute('src');
+        };
+        img.src = url || fallbackUrl || '';
         img.alt = username + ' - ' + time;
         info.textContent = '用户: ' + (username || '未知') + ' | 时间: ' + (time || '未知');
         modal.style.display = 'flex';
