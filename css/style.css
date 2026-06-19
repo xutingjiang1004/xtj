@@ -12827,14 +12827,6 @@ html.xtj-pro-active .action-btn.liked {
   -webkit-backdrop-filter: blur(10px) saturate(108%) !important;
 }
 
-html[data-theme-animating="1"] .post,
-html[data-theme-animating="1"] .publish-box,
-html[data-theme-animating="1"] .stat-card,
-html[data-theme-animating="1"] .chat-list-item,
-html[data-theme-animating="1"] .glass {
-  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, opacity 0.18s ease !important;
-}
-
 #profileActivityModal .stat-record-summary,
 #statModal .stat-record-summary,
 #statRecordsModal .stat-record-summary {
@@ -13531,20 +13523,21 @@ html[data-theme-animating="1"]::view-transition-new(root) {
 
 html[data-theme-transition="dark"]::view-transition-new(root) {
   clip-path: circle(0 at var(--theme-reveal-x) var(--theme-reveal-y));
-  animation: xtjThemeReveal 240ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: xtjThemeReveal 210ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 html[data-theme-transition="dark"]::view-transition-old(root) {
-  animation: none !important;
+  animation: xtjThemeFade 210ms linear forwards;
 }
 
 html[data-theme-transition="light"]::view-transition-new(root) {
-  animation: none !important;
+  opacity: 0.96;
+  animation: xtjThemeLightUnderlay 210ms ease-out forwards;
 }
 
 html[data-theme-transition="light"]::view-transition-old(root) {
   clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y));
-  animation: xtjThemeConceal 240ms cubic-bezier(0.55, 0, 0.1, 1) forwards;
+  animation: xtjThemeConceal 210ms cubic-bezier(0.55, 0, 0.1, 1) forwards;
 }
 
 .theme-splash-overlay {
@@ -13555,10 +13548,11 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   opacity: 1;
   clip-path: circle(0 at var(--theme-reveal-x) var(--theme-reveal-y));
   transition:
-    clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 100ms ease;
+    clip-path 210ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 90ms ease;
   will-change: clip-path, opacity;
   transform: translateZ(0);
+  contain: layout paint style;
 }
 
 .theme-splash-overlay.is-active {
@@ -13572,8 +13566,8 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 .theme-splash-overlay.is-reverse {
   clip-path: circle(var(--theme-reveal-radius) at var(--theme-reveal-x) var(--theme-reveal-y));
   transition:
-    clip-path 220ms cubic-bezier(0.55, 0, 0.1, 1),
-    opacity 100ms ease;
+    clip-path 200ms cubic-bezier(0.55, 0, 0.1, 1),
+    opacity 90ms ease;
 }
 
 .theme-splash-overlay.is-reverse.is-conceal {
@@ -13594,7 +13588,16 @@ html[data-theme-transition="light"]::view-transition-old(root) {
     opacity: 1;
   }
   to {
-    opacity: 0.9;
+    opacity: 0.975;
+  }
+}
+
+@keyframes xtjThemeLightUnderlay {
+  from {
+    opacity: 0.96;
+  }
+  to {
+    opacity: 1;
   }
 }
 

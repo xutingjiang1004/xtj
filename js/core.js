@@ -7558,6 +7558,14 @@ function renderProfileActivityList(kind) {
                 clearThemeRevealVars();
             }
 
+            function supportsThemeViewTransition() {
+                try {
+                    return !!(document.startViewTransition && window.CSS && CSS.supports && CSS.supports('view-transition-name: root'));
+                } catch (_) {
+                    return !!document.startViewTransition;
+                }
+            }
+
             function playThemeFallback(nextIsDark, originEl) {
                 var reveal = setThemeRevealVars(originEl);
                 var overlay = document.createElement('div');
@@ -7608,7 +7616,7 @@ function renderProfileActivityList(kind) {
                 htmlEl.setAttribute('data-theme-transition', nextIsDark ? 'dark' : 'light');
                 if (themeBtn) themeBtn.disabled = true;
                 setThemeRevealVars(originEl);
-                if (document.startViewTransition) {
+                if (nextIsDark && supportsThemeViewTransition()) {
                     try {
                         var transition = document.startViewTransition(function() {
                             setThemeState(nextIsDark);
