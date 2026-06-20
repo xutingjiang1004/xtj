@@ -3147,8 +3147,6 @@ function renderProfileActivityList(kind) {
                     actorKey: photo.__xtjActorKey || '',
                     canDelete: !!photo.__xtjCanDelete
                 };
-                window.pwCurrentSortedPhotos = [photo];
-                window.photoWallData = [photo];
                 window.openPhotoPreview(0, [photo]);
                 window.photoPreviewCurrent = photo;
                 setTimeout(function() {

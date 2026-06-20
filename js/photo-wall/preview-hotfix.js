@@ -70,6 +70,9 @@
   }
 
   function photoList() {
+    if (Array.isArray(window.__xtjPreviewExplicitPhotos) && window.__xtjPreviewExplicitPhotos.length) {
+      return window.__xtjPreviewExplicitPhotos;
+    }
     if (Array.isArray(window.pwCurrentSortedPhotos) && window.pwCurrentSortedPhotos.length) {
       return window.pwCurrentSortedPhotos;
     }
@@ -636,7 +639,37 @@
     if (typeof original.openPhotoPreview !== 'function') return;
     if (window.openPhotoPreview && window.openPhotoPreview.__xtjHotfixWrapped) return;
     window.openPhotoPreview = function () {
-      var result = withPreviewGuardDisabled(original.openPhotoPreview, this, arguments);
+      var explicitPhotos = null;
+      if (Array.isArray(arguments[1])) {
+        explicitPhotos = arguments[1].slice();
+      } else if (arguments[1] && Array.isArray(arguments[1].photos)) {
+        explicitPhotos = arguments[1].photos.slice();
+      }
+      var result;
+      if (explicitPhotos && explicitPhotos.length) {
+        var prevSorted = window.pwCurrentSortedPhotos;
+        var prevWall = window.photoWallData;
+        window.__xtjPreviewExplicitPhotos = explicitPhotos.slice();
+        window.pwCurrentSortedPhotos = explicitPhotos.slice();
+        window.photoWallData = explicitPhotos.slice();
+        try {
+          result = withPreviewGuardDisabled(original.openPhotoPreview, this, [arguments[0]]);
+        } finally {
+          if (typeof prevSorted === 'undefined') {
+            delete window.pwCurrentSortedPhotos;
+          } else {
+            window.pwCurrentSortedPhotos = prevSorted;
+          }
+          if (typeof prevWall === 'undefined') {
+            delete window.photoWallData;
+          } else {
+            window.photoWallData = prevWall;
+          }
+        }
+      } else {
+        delete window.__xtjPreviewExplicitPhotos;
+        result = withPreviewGuardDisabled(original.openPhotoPreview, this, arguments);
+      }
       requestAnimationFrame(function () {
         requestAnimationFrame(afterOpen);
       });
@@ -647,6 +680,7 @@
 
   window.closePhotoPreview = function () {
     resetGestureState();
+    delete window.__xtjPreviewExplicitPhotos;
     return withPreviewGuardDisabled(original.closePhotoPreview, this, arguments);
   };
 
