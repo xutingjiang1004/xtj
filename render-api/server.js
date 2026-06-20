@@ -248,6 +248,42 @@ function buildUserVisitMap(visitRows) {
   return userVisitMap;
 }
 
+function getEffectiveRegTime(authInfo, userInfo) {
+  return authInfo && authInfo.auth_created_at || userInfo && userInfo.reg_time || null;
+}
+
+function buildAdminUsersPayload(authRows, userInfoRows) {
+  const authMap = buildAuthUserMap(authRows);
+  const userInfoMap = buildUserInfoMap(userInfoRows);
+  const allUserNames = new Set([
+    ...Object.keys(authMap),
+    ...Object.keys(userInfoMap)
+  ]);
+
+  return Array.from(allUserNames).map(userName => {
+    const authInfo = authMap[userName] || {};
+    const info = userInfoMap[userName] || {};
+    const effectiveRegTime = getEffectiveRegTime(authInfo, info);
+    return {
+      user_name: userName,
+      created_at: effectiveRegTime,
+      content: JSON.stringify({
+        reg_time: effectiveRegTime,
+        auth_created_at: authInfo.auth_created_at || null,
+        last_login: info.last_login || null,
+        last_visit: info.last_visit || null
+      })
+    };
+  }).sort((a, b) => {
+    const ta = toTimeMs(a.created_at);
+    const tb = toTimeMs(b.created_at);
+    if ((Number.isFinite(tb) ? tb : 0) !== (Number.isFinite(ta) ? ta : 0)) {
+      return (Number.isFinite(tb) ? tb : 0) - (Number.isFinite(ta) ? ta : 0);
+    }
+    return String(a.user_name || '').localeCompare(String(b.user_name || ''), 'zh-CN');
+  });
+}
+
 function buildRegisteredUsersByDate(authMap) {
   const dateMap = {};
   Object.keys(authMap || {}).forEach(userName => {
@@ -1425,13 +1461,15 @@ app.get('/api/my-reports', rateLimit(60000, 20), async (req, res) => {
 
 // ===================== 用户数据（只读） ======================
 app.get('/admin/users', verifyToken, async (req, res) => {
-  const { data, error } = await supabase.from('posts')
-    .select('user_name, content, created_at')
-    .eq('media_type', '__user_info__')
-    .order('created_at', { ascending: false })
-    .limit(5000);
-  if (error) return res.status(400).json({ error: sanitizeError(error) });
-  return res.json({ data });
+  try {
+    const [authRows, userInfoRows] = await Promise.all([
+      fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at'),
+      fetchAllPostsByMediaType(USER_INFO_MARKER, 'user_name, content, created_at')
+    ]);
+    return res.json({ data: buildAdminUsersPayload(authRows, userInfoRows) });
+  } catch (error) {
+    return res.status(400).json({ error: sanitizeError(error) });
+  }
 });
 
 // ===================== 数据统计 API =====================
@@ -1794,13 +1832,14 @@ app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res
       const authInfo = authMap[userName] || {};
       const info = userInfoMap[userName] || {};
       const visitInfo = userVisitMap[userName] || { total_visits: 0, daily_visits: {}, last_visit: null };
+      const effectiveRegTime = getEffectiveRegTime(authInfo, info);
       return {
         user_name: userName,
         total_visits: visitInfo.total_visits || 0,
         daily_visits: visitInfo.daily_visits || {},
         last_visit: visitInfo.last_visit || info.last_visit || info.last_login || authInfo.auth_created_at || null,
         last_login: info.last_login || null,
-        reg_time: info.reg_time || authInfo.auth_created_at || null,
+        reg_time: effectiveRegTime,
         auth_created_at: authInfo.auth_created_at || null
       };
     });
