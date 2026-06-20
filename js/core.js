@@ -478,8 +478,8 @@ window.safeLocalStorageSet = function(key, value) {
             var scripts = [
                 'js/photo-wall/data.min.js?v=20260618_2',
                 'js/photo-wall/render.min.js?v=20260618_2',
-                'js/photo-wall/preview.min.js?v=20260618_3',
-                'js/photo-wall/preview-hotfix.js?v=20260618_1',
+                'js/photo-wall/preview.min.js?v=20260620_2',
+                'js/photo-wall/preview-hotfix.js?v=20260620_2',
                 'js/photo-wall/photo-wall.min.js?v=20260618_2'
             ];
             _photoWallLoading = new Promise(function(resolve, reject) {

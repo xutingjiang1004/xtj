@@ -7,6 +7,8 @@
   var original = {
     openPhotoPreview: window.openPhotoPreview,
     closePhotoPreview: window.closePhotoPreview,
+    prevPhoto: window.ppPrevPhoto,
+    nextPhoto: window.ppNextPhoto,
     shareCurrentPhoto: window.shareCurrentPhoto,
     deletePhotoFromPreview: window.deletePhotoFromPreview,
     deleteCurrentPhoto: window.deleteCurrentPhoto,
@@ -254,6 +256,17 @@
     state.ty = 0;
     applyImageTransform(animate);
     syncTrackTransform(0, animate);
+  }
+
+  function resetPreviewStateForChange(animate) {
+    resetGestureState();
+    state.scale = 1;
+    state.tx = 0;
+    state.ty = 0;
+    state.rotation = 0;
+    clearDismissVisual(!!animate);
+    syncTrackTransform(0, !!animate);
+    applyImageTransform(!!animate);
   }
 
   function reboundScaleIfNeeded(animate) {
@@ -786,7 +799,32 @@
         }
       } else {
         delete window.__xtjPreviewExplicitPhotos;
-        result = withPreviewGuardDisabled(original.openPhotoPreview, this, arguments);
+        if (typeof window.getCurrentRenderablePhotoWallPhotos === 'function') {
+          explicitPhotos = window.getCurrentRenderablePhotoWallPhotos();
+        }
+        if (explicitPhotos && explicitPhotos.length) {
+          var fallbackSorted = window.pwCurrentSortedPhotos;
+          var fallbackWall = window.photoWallData;
+          window.__xtjPreviewExplicitPhotos = explicitPhotos.slice();
+          window.pwCurrentSortedPhotos = explicitPhotos.slice();
+          window.photoWallData = explicitPhotos.slice();
+          try {
+            result = withPreviewGuardDisabled(original.openPhotoPreview, this, [arguments[0]]);
+          } finally {
+            if (typeof fallbackSorted === 'undefined') {
+              delete window.pwCurrentSortedPhotos;
+            } else {
+              window.pwCurrentSortedPhotos = fallbackSorted;
+            }
+            if (typeof fallbackWall === 'undefined') {
+              delete window.photoWallData;
+            } else {
+              window.photoWallData = fallbackWall;
+            }
+          }
+        } else {
+          result = withPreviewGuardDisabled(original.openPhotoPreview, this, arguments);
+        }
       }
       requestAnimationFrame(function () {
         requestAnimationFrame(afterOpen);
@@ -815,11 +853,43 @@
   };
 
   window.deletePhotoFromPreview = function () {
-    return withPreviewGuardDisabled(original.deletePhotoFromPreview, this, arguments);
+    resetPreviewStateForChange(false);
+    var result = withPreviewGuardDisabled(original.deletePhotoFromPreview, this, arguments);
+    window.setTimeout(function () {
+      var root = overlay();
+      if (root && root.classList.contains('active')) {
+        resetPreviewStateForChange(false);
+      }
+    }, 360);
+    return result;
   };
 
   window.deleteCurrentPhoto = function () {
     return window.deletePhotoFromPreview.apply(this, arguments);
+  };
+
+  window.ppPrevPhoto = function () {
+    resetPreviewStateForChange(false);
+    var result = withPreviewGuardDisabled(original.prevPhoto, this, arguments);
+    window.setTimeout(function () {
+      var root = overlay();
+      if (root && root.classList.contains('active')) {
+        resetPreviewStateForChange(false);
+      }
+    }, 360);
+    return result;
+  };
+
+  window.ppNextPhoto = function () {
+    resetPreviewStateForChange(false);
+    var result = withPreviewGuardDisabled(original.nextPhoto, this, arguments);
+    window.setTimeout(function () {
+      var root = overlay();
+      if (root && root.classList.contains('active')) {
+        resetPreviewStateForChange(false);
+      }
+    }, 360);
+    return result;
   };
 
   window.zoomIn = function () {
