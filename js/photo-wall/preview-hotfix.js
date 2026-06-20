@@ -388,6 +388,7 @@
   function handleGestureEnd(point) {
     var dx = point.x - state.startX;
     var dy = point.y - state.startY;
+    var gestureDistance = Math.abs(dx) + Math.abs(dy);
 
     if (state.mode === 'pinch') {
       state.suppressTapUntil = Date.now() + 350;
@@ -405,8 +406,8 @@
 
     if (state.mode === 'swipe-or-dismiss') {
       if (state.dragAxis === 'dismiss') {
+        state.suppressTapUntil = Date.now() + 350;
         if (dy > 140) {
-          state.suppressTapUntil = Date.now() + 350;
           window.closePhotoPreview();
         } else {
           clearDismissVisual(true);
@@ -417,8 +418,8 @@
       }
 
       if (state.dragAxis === 'swipe') {
+        state.suppressTapUntil = Date.now() + 350;
         if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)) {
-          state.suppressTapUntil = Date.now() + 350;
           if (dx < 0 && typeof window.ppNextPhoto === 'function') {
             window.ppNextPhoto();
           } else if (dx > 0 && typeof window.ppPrevPhoto === 'function') {
@@ -435,11 +436,17 @@
 
       syncTrackTransform(0, true);
       clearDismissVisual(true);
+      if (gestureDistance > 8) {
+        state.suppressTapUntil = Date.now() + 350;
+      }
       if (!state.moved) handleTap(point);
       state.mode = 'idle';
       return;
     }
 
+    if (gestureDistance > 8) {
+      state.suppressTapUntil = Date.now() + 350;
+    }
     if (!state.moved) {
       handleTap(point);
     }
