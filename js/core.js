@@ -7550,6 +7550,7 @@ function renderProfileActivityList(kind) {
             });
 
             // ========== 主题切换 ==========
+            if (!window.__xtjThemeControllerV2) {
             const htmlEl = document.documentElement;
             const themeBtn = document.getElementById('themeToggle');
             const THEME_STORAGE_KEY = 'xtj-theme';
@@ -7722,6 +7723,7 @@ function renderProfileActivityList(kind) {
                 setThemeState(true);
             } else {
                 setThemeState(false);
+            }
             }
 
             function applyPerformanceMode() {

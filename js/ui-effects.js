@@ -16,8 +16,9 @@
   document.addEventListener('click', function (e) {
     var target = e.target;
     if (isDockTab(target)) return;
+    if (target.closest('#themeToggle, .theme-toggle-btn')) return;
 
-    var btn = target.closest('.btn, .af-btn, .send-btn, .photo-wall-upload-btn, .theme-toggle-btn, .publish-btn, .filter-btn, .view-all-btn, .load-more-btn, .report-submit-btn, .auth-btn, .profile-action-btn, .post-action-btn, .chat-action-btn, .announcement-btn, .close-modal-btn, .modal-close-btn');
+    var btn = target.closest('.btn, .af-btn, .send-btn, .photo-wall-upload-btn, .publish-btn, .filter-btn, .view-all-btn, .load-more-btn, .report-submit-btn, .auth-btn, .profile-action-btn, .post-action-btn, .chat-action-btn, .announcement-btn, .close-modal-btn, .modal-close-btn');
     if (!btn) return;
 
     var rect = btn.getBoundingClientRect();
@@ -152,18 +153,6 @@
       }
     }
   });
-
-  /* ==========================================================
-     7. Theme Toggle Button Enhancement
-     ========================================================== */
-  document.addEventListener('click', function (e) {
-    var toggle = e.target.closest('#themeToggle, .theme-toggle-btn');
-    if (!toggle || isDockTab(e.target)) return;
-    var orb = toggle.querySelector('.theme-toggle-orb');
-    if (orb) {
-      orb.style.transition = 'transform 0.4s cubic-bezier(0.18, 1.3, 0.28, 1), background 0.4s ease';
-    }
-  }, true);
 
   /* ==========================================================
      8. Expose API
