@@ -644,25 +644,9 @@
   }
 
   function fetchPhotoFileSize(photo) {
-    if (!photo || photo.fileSize || !photo.imageUrl) return Promise.resolve(photo ? photo.fileSize : null);
-    if (photoSizeCache[photo.imageUrl]) {
-      photo.fileSize = photoSizeCache[photo.imageUrl];
-      return Promise.resolve(photo.fileSize);
-    }
-    return fetch(photo.imageUrl, { cache: 'force-cache' })
-      .then(function (response) {
-        if (!response || !response.ok) return null;
-        return response.blob();
-      })
-      .then(function (blob) {
-        if (!blob || !blob.size) return null;
-        photoSizeCache[photo.imageUrl] = blob.size;
-        photo.fileSize = blob.size;
-        return blob.size;
-      })
-      .catch(function () {
-        return null;
-      });
+    if (!photo) return Promise.resolve(null);
+    if (photo.fileSize) return Promise.resolve(photo.fileSize);
+    return Promise.resolve(null);
   }
 
   function bindInfoModal() {
@@ -773,7 +757,7 @@
       content.style.transform = 'translate3d(0,0,0) scale(1)';
       content.style.opacity = '1';
     });
-    if (!photo.fileSize && photo.imageUrl) {
+    if (!photo.fileSize) {
       fetchPhotoFileSize(photo).then(function (size) {
         if (!size) return;
         if (!state.infoOpen || activePhoto() !== photo) return;

@@ -10,6 +10,7 @@
   var switchTimer = 0;
   var clearSwitchingTimer = 0;
   var themeBtn = null;
+  var profileThemeToggle = null;
 
   function getSystemTheme() {
     try {
@@ -45,19 +46,25 @@
     } catch (_) {}
   }
 
-  function syncButton(theme) {
+  function syncControls(theme) {
     if (!themeBtn) themeBtn = document.getElementById('themeToggle');
-    if (!themeBtn) return;
     var isDark = theme === 'dark';
-    themeBtn.classList.toggle('is-dark', isDark);
-    themeBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
-    themeBtn.setAttribute('aria-label', isDark ? '切换浅色模式' : '切换深色模式');
-    themeBtn.setAttribute('title', isDark ? '切换浅色模式' : '切换深色模式');
+    if (themeBtn) {
+      themeBtn.classList.toggle('is-dark', isDark);
+      themeBtn.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+      themeBtn.setAttribute('aria-label', isDark ? '切换浅色模式' : '切换深色模式');
+      themeBtn.setAttribute('title', isDark ? '切换浅色模式' : '切换深色模式');
+    }
+    if (!profileThemeToggle) profileThemeToggle = document.getElementById('profileThemeToggle');
+    if (profileThemeToggle) {
+      profileThemeToggle.checked = isDark;
+      profileThemeToggle.setAttribute('aria-checked', isDark ? 'true' : 'false');
+    }
   }
 
   function applyTheme(theme) {
     htmlEl.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
-    syncButton(theme);
+    syncControls(theme);
   }
 
   function clearThemeSwitching() {
@@ -120,12 +127,20 @@
 
   function bindThemeToggle() {
     if (!themeBtn) themeBtn = document.getElementById('themeToggle');
-    if (!themeBtn || themeBtn.dataset.xtjThemeBound === '1') return;
-    themeBtn.dataset.xtjThemeBound = '1';
-    themeBtn.addEventListener('click', function (event) {
-      event.preventDefault();
-      switchTheme();
-    });
+    if (themeBtn && themeBtn.dataset.xtjThemeBound !== '1') {
+      themeBtn.dataset.xtjThemeBound = '1';
+      themeBtn.addEventListener('click', function (event) {
+        event.preventDefault();
+        switchTheme();
+      });
+    }
+    if (!profileThemeToggle) profileThemeToggle = document.getElementById('profileThemeToggle');
+    if (profileThemeToggle && profileThemeToggle.dataset.xtjThemeBound !== '1') {
+      profileThemeToggle.dataset.xtjThemeBound = '1';
+      profileThemeToggle.addEventListener('change', function () {
+        setTheme(this.checked ? 'dark' : 'light');
+      });
+    }
   }
 
   function initThemeController() {
