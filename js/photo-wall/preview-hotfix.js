@@ -492,12 +492,14 @@
 
   function installTouchFix() {
     var wrap = wrapper();
-    if (!wrap || wrap.__xtjPreviewTouchFixInstalled) return;
-    wrap.__xtjPreviewTouchFixInstalled = true;
+    var root = overlay();
+    var surface = root || wrap;
+    if (!wrap || !surface || surface.__xtjPreviewTouchFixInstalled) return;
+    surface.__xtjPreviewTouchFixInstalled = true;
 
-    var existingCleanup = overlay() && overlay()._cleanupPreview;
-    if (overlay()) {
-      overlay()._cleanupPreview = function () {
+    var existingCleanup = root && root._cleanupPreview;
+    if (root) {
+      root._cleanupPreview = function () {
         if (typeof existingCleanup === 'function') existingCleanup();
         resetGestureState();
         state.scale = 1;
@@ -509,7 +511,7 @@
       };
     }
 
-    wrap.addEventListener('pointerdown', function (event) {
+    surface.addEventListener('pointerdown', function (event) {
       if (!isTouchPointer(event) || isControl(event.target)) return;
       state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
       state.moved = false;
@@ -523,14 +525,14 @@
       }
 
       try {
-        wrap.setPointerCapture(event.pointerId);
+        surface.setPointerCapture(event.pointerId);
       } catch (_) {}
 
       event.preventDefault();
       event.stopImmediatePropagation();
     }, true);
 
-    wrap.addEventListener('pointermove', function (event) {
+    surface.addEventListener('pointermove', function (event) {
       if (!isTouchPointer(event) || !state.pointers.has(event.pointerId) || isControl(event.target)) return;
       state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
 
@@ -553,7 +555,7 @@
       if (!isTouchPointer(event) || !state.pointers.has(event.pointerId)) return;
       state.pointers.delete(event.pointerId);
       try {
-        wrap.releasePointerCapture(event.pointerId);
+        surface.releasePointerCapture(event.pointerId);
       } catch (_) {}
 
       if (state.mode === 'pinch') {
@@ -586,8 +588,8 @@
       event.stopImmediatePropagation();
     }
 
-    wrap.addEventListener('pointerup', finishPointer, true);
-    wrap.addEventListener('pointercancel', function (event) {
+    surface.addEventListener('pointerup', finishPointer, true);
+    surface.addEventListener('pointercancel', function (event) {
       if (!isTouchPointer(event)) return;
       resetGestureState();
       clearDismissVisual(true);
@@ -596,14 +598,15 @@
       event.stopImmediatePropagation();
     }, true);
 
-    wrap.addEventListener('click', function (event) {
+    surface.addEventListener('click', function (event) {
+      if (!isTouchPointer(event) && event.pointerType && event.pointerType !== 'touch') return;
       if (Date.now() < state.suppressTapUntil && !isControl(event.target)) {
         event.preventDefault();
         event.stopImmediatePropagation();
       }
     }, true);
 
-    wrap.addEventListener('dblclick', function (event) {
+    surface.addEventListener('dblclick', function (event) {
       if (!isControl(event.target)) {
         event.preventDefault();
         event.stopImmediatePropagation();
