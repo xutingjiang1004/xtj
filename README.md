@@ -84,6 +84,8 @@ npm start
 - 照片墙移动端全屏预览手势修复：
   - 双指 pinch / 单指 pan / 左右切图 / 下滑关闭互斥
   - pinch 后不会再立刻被单击逻辑缩回原图
+  - pinch 结束后松开一根手指会重建 pan 起点，不再突然跳回旧坐标
+  - 预览层补齐移动端 `touch-action` / `overscroll-behavior` / `user-select` 保护样式
 
 ### v0.80
 
