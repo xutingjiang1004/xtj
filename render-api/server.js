@@ -249,7 +249,7 @@ function buildUserVisitMap(visitRows) {
 }
 
 function getEffectiveRegTime(authInfo, userInfo) {
-  return authInfo && authInfo.auth_created_at || userInfo && userInfo.reg_time || null;
+  return userInfo && userInfo.reg_time || authInfo && authInfo.auth_created_at || null;
 }
 
 function buildAdminUsersPayload(authRows, userInfoRows) {
