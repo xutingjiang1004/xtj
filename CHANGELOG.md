@@ -14,12 +14,14 @@
 - 修复 `/admin/stats` 顶部 `total_users` 被重复 `__auth__` 记录放大的问题
 - 修复照片墙全屏预览在 iPhone / iPad / 移动端双指缩放乱飞、跳变、松手回弹的问题
 - 修复 pinch 结束后误触发单击 / 双击缩放，导致图片被立刻缩回原图的问题
+- 修复 pinch 结束后松开一根手指继续拖图时沿用旧起点，导致图片突然跳回旧坐标的问题
 
 ### 优化
 - 照片墙移动端预览手势统一收口为单一状态机：`idle / pinch / pan / swipe-or-dismiss`
 - pinch 结束后保留 `scale > 1.01` 的缩放状态，不再用过高阈值强制重置
 - 为 `#photoPreviewOverlay / #ppImageWrapper / #ppSlideTrack / #photoPreviewImage` 补齐移动端 `touch-action`、`overscroll-behavior`、`user-select` 保护样式
 - 后台注册提醒默认只统计最近 24 小时未读注册，避免首次进入后台时把历史用户全部算作提醒
+- pinch 结束后增加至少 `350ms` 的 tap / doubleTap 屏蔽窗口，避免合成点击再次抢走缩放状态
 
 ### 清理
 - `__admin_meta__` 记录已从后台普通帖子查询、统计查询、每日统计查询中排除，不再污染业务数据
@@ -27,7 +29,8 @@
 ### Remade
 - 重做后台用户统计口径：`__auth__`、`__user_info__`、`__user_visit__` 三类数据统一聚合，注册数、用户总数、访问明细三处对齐
 - 重做后台新用户提醒链路：不建新表，直接复用 `posts` 中的 `__admin_meta__` 保存已读时间
-- 重做照片墙移动端预览热修复策略：以 `preview-hotfix.js` 为主接管移动端触摸手势，避免与 `preview.min.js` 双重争抢 `transform`
+- 重做照片墙移动端预览热修复策略：以 `preview-hotfix.js` 为主接管移动端触摸手势，统一 hotfix 标记并避免与 `preview.min.js` 双重争抢 `transform`
+- 重做 pinch -> pan 的交接逻辑：双指结束后立即以剩余手指重建拖拽起点，缩放与拖动不再互相打架
 
 ## v0.80 - 2026-06-18
 照片墙加载性能、实时展示、安全收口与站点整理
