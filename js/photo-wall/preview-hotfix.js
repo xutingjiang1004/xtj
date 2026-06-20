@@ -1,26 +1,37 @@
-// Photo preview stability patches kept outside the compressed preview bundle.
 (function () {
-  if (window.__xtjPreviewHotfixV1) return;
+  var HOTFIX_MARKER = '__xtjPhotoPreviewHotfixInstalled';
+  if (window[HOTFIX_MARKER]) return;
+  window[HOTFIX_MARKER] = true;
   window.__xtjPreviewHotfixV1 = true;
+
+  var original = {
+    openPhotoPreview: window.openPhotoPreview,
+    closePhotoPreview: window.closePhotoPreview,
+    shareCurrentPhoto: window.shareCurrentPhoto,
+    deletePhotoFromPreview: window.deletePhotoFromPreview,
+    deleteCurrentPhoto: window.deleteCurrentPhoto,
+    rotatePhoto: window.ppRotatePhoto
+  };
 
   var state = {
     scale: 1,
     tx: 0,
     ty: 0,
     rotation: 0,
+    mode: 'idle',
+    dragAxis: '',
     pointers: new Map(),
-    mode: '',
     startX: 0,
     startY: 0,
     startTx: 0,
     startTy: 0,
     startScale: 1,
-    pinchDist: 0,
-    pinchAx: 0,
-    pinchAy: 0,
-    moved: false,
-    lastTap: 0,
-    tapTimer: null
+    pinchStartDistance: 0,
+    pinchAnchorX: 0,
+    pinchAnchorY: 0,
+    lastTapAt: 0,
+    suppressTapUntil: 0,
+    moved: false
   };
 
   function installFinalStyle() {
@@ -28,6 +39,8 @@
     var style = document.createElement('style');
     style.id = 'xtjPreviewHotfixStyle';
     style.textContent = [
+      '#photoPreviewOverlay,#photoPreviewOverlay *{ -webkit-tap-highlight-color: transparent; }',
+      '#photoPreviewOverlay,#ppImageWrapper,#ppSlideTrack,#photoPreviewImage{touch-action:none!important;user-select:none!important;-webkit-user-select:none!important;-webkit-user-drag:none!important;overscroll-behavior:contain!important;}',
       '#photoPreviewOverlay #ppCompactBtn,#photoPreviewOverlay .pp-compact-btn{display:none!important;visibility:hidden!important;pointer-events:none!important}',
       '#photoPreviewOverlay .pp-zoom-btn,#photoPreviewOverlay .pp-info-btn,#photoPreviewOverlay .pp-share-btn,#photoPreviewOverlay .pp-rotate-btn,#photoPreviewOverlay .pp-delete-btn{width:42px!important;height:42px!important;min-width:42px!important;min-height:42px!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:0!important;line-height:0!important}',
       '#photoPreviewOverlay .pp-zoom-btn .ui-icon,#photoPreviewOverlay .pp-info-btn .ui-icon,#photoPreviewOverlay .pp-share-btn .ui-icon,#photoPreviewOverlay .pp-rotate-btn .ui-icon,#photoPreviewOverlay .pp-delete-btn .ui-icon{display:flex!important;align-items:center!important;justify-content:center!important;width:20px!important;height:20px!important;line-height:0!important}',
@@ -37,35 +50,162 @@
     document.head.appendChild(style);
   }
 
-  function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-  }
-
   function overlay() {
     return document.getElementById('photoPreviewOverlay');
   }
 
-  function image() {
+  function wrapper() {
+    return document.getElementById('ppImageWrapper');
+  }
+
+  function slideTrack() {
+    return document.getElementById('ppSlideTrack');
+  }
+
+  function previewImage() {
     return document.getElementById('photoPreviewImage');
   }
 
-  function wrapper() {
-    return document.getElementById('ppImageWrapper') || (overlay() && overlay().querySelector('.photo-preview-image-wrapper'));
+  function photoList() {
+    if (Array.isArray(window.pwCurrentSortedPhotos) && window.pwCurrentSortedPhotos.length) {
+      return window.pwCurrentSortedPhotos;
+    }
+    if (Array.isArray(window.photoWallData) && window.photoWallData.length) {
+      return window.photoWallData;
+    }
+    return [];
+  }
+
+  function activePhoto() {
+    return window.photoPreviewCurrent || null;
+  }
+
+  function currentPhotoIndex() {
+    var current = activePhoto();
+    var list = photoList();
+    if (!current || !list.length) return -1;
+    var currentId = current.id == null ? '' : String(current.id);
+    var currentUrl = String(current.imageUrl || '');
+    for (var idx = 0; idx < list.length; idx++) {
+      var item = list[idx] || {};
+      if ((item.id != null && String(item.id) === currentId) || String(item.imageUrl || '') === currentUrl) {
+        return idx;
+      }
+    }
+    return -1;
+  }
+
+  function viewportWidth() {
+    var wrap = wrapper();
+    return wrap && wrap.clientWidth ? wrap.clientWidth : window.innerWidth;
+  }
+
+  function viewportHeight() {
+    var wrap = wrapper();
+    return wrap && wrap.clientHeight ? wrap.clientHeight : window.innerHeight;
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
   }
 
   function isControl(target) {
-    return !!(target && target.closest && target.closest('button,.pp-info-modal,.pp-info-modal-content,.pp-download-confirm-overlay,.pp-download-confirm-content'));
+    return !!(target && target.closest && target.closest(
+      '.photo-preview-close,' +
+      '.pp-nav-arrow,' +
+      '.pp-zoom-btn,' +
+      '.pp-info-btn,' +
+      '.pp-share-btn,' +
+      '.pp-rotate-btn,' +
+      '.pp-delete-btn,' +
+      '.pp-info-modal,' +
+      '.pp-info-modal-content,' +
+      '.pp-download-confirm-overlay,' +
+      '.pp-download-confirm-content'
+    ));
   }
 
-  function transformString() {
+  function isTouchPointer(event) {
+    return event && event.pointerType === 'touch';
+  }
+
+  function withPreviewGuardDisabled(fn, ctx, args) {
+    if (typeof fn !== 'function') return;
+    var prevHotfix = window.__xtjPhotoPreviewHotfixInstalled;
+    var prevLegacy = window.__xtjPreviewHotfixV1;
+    window.__xtjPhotoPreviewHotfixInstalled = false;
+    window.__xtjPreviewHotfixV1 = prevLegacy;
+    try {
+      return fn.apply(ctx || window, args || []);
+    } finally {
+      window.__xtjPhotoPreviewHotfixInstalled = prevHotfix;
+      window.__xtjPreviewHotfixV1 = prevLegacy;
+    }
+  }
+
+  function resetGestureState() {
+    state.mode = 'idle';
+    state.dragAxis = '';
+    state.pointers.clear();
+    state.startX = 0;
+    state.startY = 0;
+    state.startTx = state.tx;
+    state.startTy = state.ty;
+    state.startScale = state.scale;
+    state.pinchStartDistance = 0;
+    state.pinchAnchorX = 0;
+    state.pinchAnchorY = 0;
+    state.moved = false;
+  }
+
+  function centerTrackOffset(extraX) {
+    return -viewportWidth() + (extraX || 0);
+  }
+
+  function syncTrackTransform(extraX, animate) {
+    var track = slideTrack();
+    if (!track) return;
+    track.style.transition = animate ? 'transform 220ms cubic-bezier(.16,1,.3,1)' : 'none';
+    track.style.transform = 'translate3d(' + centerTrackOffset(extraX) + 'px,0,0)';
+    if (animate) {
+      window.setTimeout(function () {
+        if (track) track.style.transition = '';
+      }, 240);
+    }
+  }
+
+  function clearDismissVisual(animate) {
+    var root = overlay();
+    var img = previewImage();
+    if (root) {
+      root.style.transition = animate ? 'opacity 220ms cubic-bezier(.16,1,.3,1)' : '';
+      root.style.opacity = '';
+      if (animate) {
+        window.setTimeout(function () {
+          if (root) root.style.transition = '';
+        }, 240);
+      }
+    }
+    if (img) {
+      img.style.transition = animate ? 'transform 220ms cubic-bezier(.16,1,.3,1)' : 'none';
+      applyImageTransform(false);
+      if (animate) {
+        window.setTimeout(function () {
+          if (img) img.style.transition = '';
+        }, 240);
+      }
+    }
+  }
+
+  function currentTransform() {
     return 'translate3d(' + state.tx + 'px,' + state.ty + 'px,0) scale(' + state.scale + ') rotate(' + state.rotation + 'deg)';
   }
 
-  function applyTransform(animate) {
-    var img = image();
+  function applyImageTransform(animate) {
+    var img = previewImage();
     if (!img) return;
     img.style.transition = animate ? 'transform 220ms cubic-bezier(.16,1,.3,1)' : 'none';
-    img.style.transform = transformString();
+    img.style.transform = currentTransform();
     img.classList.toggle('zoomed', state.scale > 1.01);
     if (animate) {
       window.setTimeout(function () {
@@ -74,183 +214,365 @@
     }
   }
 
-  function resetTransform(animate) {
+  function resetImageTransform(animate) {
     state.scale = 1;
     state.tx = 0;
     state.ty = 0;
-    applyTransform(animate);
+    applyImageTransform(animate);
+    syncTrackTransform(0, animate);
+  }
+
+  function reboundScaleIfNeeded(animate) {
+    if (state.scale < 1) {
+      resetImageTransform(animate);
+      return;
+    }
+    if (state.scale <= 1.01) {
+      resetImageTransform(animate);
+      return;
+    }
+    applyImageTransform(animate);
   }
 
   function zoomAt(clientX, clientY, nextScale, animate) {
-    var oldScale = state.scale || 1;
-    var x = clientX == null ? window.innerWidth / 2 : clientX;
-    var y = clientY == null ? window.innerHeight / 2 : clientY;
-    var anchorX = (x - window.innerWidth / 2 - state.tx) / oldScale;
-    var anchorY = (y - window.innerHeight / 2 - state.ty) / oldScale;
+    var oldScale = Math.max(state.scale || 1, 0.0001);
+    var width = viewportWidth();
+    var height = viewportHeight();
+    var pointX = clientX == null ? width / 2 : clientX;
+    var pointY = clientY == null ? height / 2 : clientY;
+    var anchorX = (pointX - width / 2 - state.tx) / oldScale;
+    var anchorY = (pointY - height / 2 - state.ty) / oldScale;
     state.scale = clamp(nextScale, 1, 5);
-    state.tx = x - window.innerWidth / 2 - anchorX * state.scale;
-    state.ty = y - window.innerHeight / 2 - anchorY * state.scale;
-    if (state.scale <= 1.01) resetTransform(animate);
-    else applyTransform(animate);
+    state.tx = pointX - width / 2 - anchorX * state.scale;
+    state.ty = pointY - height / 2 - anchorY * state.scale;
+    reboundScaleIfNeeded(animate);
+  }
+
+  function beginPanFromPoint(point) {
+    state.mode = 'pan';
+    state.dragAxis = '';
+    state.startX = point.x;
+    state.startY = point.y;
+    state.startTx = state.tx;
+    state.startTy = state.ty;
+    state.moved = false;
+  }
+
+  function beginSwipeOrDismiss(point) {
+    state.mode = 'swipe-or-dismiss';
+    state.dragAxis = '';
+    state.startX = point.x;
+    state.startY = point.y;
+    state.startTx = 0;
+    state.startTy = 0;
+    state.moved = false;
+    syncTrackTransform(0, false);
+    clearDismissVisual(false);
+  }
+
+  function refreshSinglePointerStart() {
+    var remaining = Array.from(state.pointers.values())[0];
+    if (!remaining) return;
+    if (state.scale > 1.01) {
+      beginPanFromPoint(remaining);
+    } else {
+      beginSwipeOrDismiss(remaining);
+    }
+  }
+
+  function beginPinch() {
+    var points = Array.from(state.pointers.values());
+    if (points.length < 2) return;
+    var width = viewportWidth();
+    var height = viewportHeight();
+    var centerX = (points[0].x + points[1].x) / 2;
+    var centerY = (points[0].y + points[1].y) / 2;
+    var distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) || 1;
+    state.mode = 'pinch';
+    state.dragAxis = '';
+    state.startScale = Math.max(state.scale || 1, 1);
+    state.pinchStartDistance = distance;
+    state.pinchAnchorX = (centerX - width / 2 - state.tx) / state.startScale;
+    state.pinchAnchorY = (centerY - height / 2 - state.ty) / state.startScale;
+    state.moved = true;
+    state.suppressTapUntil = Date.now() + 350;
+    clearDismissVisual(false);
+  }
+
+  function updatePinch() {
+    var points = Array.from(state.pointers.values());
+    if (points.length < 2 || state.mode !== 'pinch') return;
+    var width = viewportWidth();
+    var height = viewportHeight();
+    var centerX = (points[0].x + points[1].x) / 2;
+    var centerY = (points[0].y + points[1].y) / 2;
+    var distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y) || 1;
+    var rawScale = state.startScale * (distance / Math.max(state.pinchStartDistance, 1));
+    state.scale = clamp(rawScale, 0.85, 5);
+    state.tx = centerX - width / 2 - state.pinchAnchorX * state.scale;
+    state.ty = centerY - height / 2 - state.pinchAnchorY * state.scale;
+    applyImageTransform(false);
+  }
+
+  function updatePan(point) {
+    state.tx = state.startTx + (point.x - state.startX);
+    state.ty = state.startTy + (point.y - state.startY);
+    if (Math.abs(point.x - state.startX) + Math.abs(point.y - state.startY) > 8) {
+      state.moved = true;
+    }
+    applyImageTransform(false);
+  }
+
+  function updateSwipeOrDismiss(point) {
+    var dx = point.x - state.startX;
+    var dy = point.y - state.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 8) {
+      state.moved = true;
+    }
+    if (!state.dragAxis) {
+      if (Math.abs(dy) > Math.abs(dx) + 6 && dy > 0) {
+        state.dragAxis = 'dismiss';
+      } else if (Math.abs(dx) > Math.abs(dy) + 6) {
+        state.dragAxis = 'swipe';
+      } else {
+        return;
+      }
+    }
+
+    if (state.dragAxis === 'dismiss') {
+      var root = overlay();
+      var img = previewImage();
+      var opacity = Math.max(0.35, 1 - dy / viewportHeight());
+      var scale = Math.max(0.82, 1 - dy / 900);
+      if (root) {
+        root.style.transition = 'none';
+        root.style.opacity = String(opacity);
+      }
+      if (img) {
+        img.style.transition = 'none';
+        img.style.transform = 'translate3d(0,' + dy + 'px,0) scale(' + scale + ') rotate(' + state.rotation + 'deg)';
+      }
+      return;
+    }
+
+    if (state.dragAxis === 'swipe') {
+      var currentIndex = currentPhotoIndex();
+      var currentData = photoList();
+      var extraX = dx;
+      if (currentIndex === 0 && dx > 0) extraX = dx * 0.35;
+      if (currentIndex === currentData.length - 1 && dx < 0) extraX = dx * 0.35;
+      syncTrackTransform(extraX, false);
+    }
+  }
+
+  function toggleZoomAt(point) {
+    var nextScale = state.scale > 1.01 ? 1 : 2;
+    zoomAt(point.x, point.y, nextScale, true);
+  }
+
+  function handleTap(point) {
+    var now = Date.now();
+    if (now < state.suppressTapUntil) return;
+    if (now - state.lastTapAt < 280) {
+      state.lastTapAt = 0;
+      state.suppressTapUntil = now + 350;
+      toggleZoomAt(point);
+      return;
+    }
+    state.lastTapAt = now;
+  }
+
+  function handleGestureEnd(point) {
+    var dx = point.x - state.startX;
+    var dy = point.y - state.startY;
+
+    if (state.mode === 'pinch') {
+      state.suppressTapUntil = Date.now() + 350;
+      reboundScaleIfNeeded(true);
+      state.mode = 'idle';
+      return;
+    }
+
+    if (state.mode === 'pan') {
+      state.suppressTapUntil = Date.now() + 350;
+      reboundScaleIfNeeded(true);
+      state.mode = 'idle';
+      return;
+    }
+
+    if (state.mode === 'swipe-or-dismiss') {
+      if (state.dragAxis === 'dismiss') {
+        if (dy > 140) {
+          state.suppressTapUntil = Date.now() + 350;
+          window.closePhotoPreview();
+        } else {
+          clearDismissVisual(true);
+          syncTrackTransform(0, true);
+        }
+        state.mode = 'idle';
+        return;
+      }
+
+      if (state.dragAxis === 'swipe') {
+        if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)) {
+          state.suppressTapUntil = Date.now() + 350;
+          if (dx < 0 && typeof window.ppNextPhoto === 'function') {
+            window.ppNextPhoto();
+          } else if (dx > 0 && typeof window.ppPrevPhoto === 'function') {
+            window.ppPrevPhoto();
+          } else {
+            syncTrackTransform(0, true);
+          }
+        } else {
+          syncTrackTransform(0, true);
+        }
+        state.mode = 'idle';
+        return;
+      }
+
+      syncTrackTransform(0, true);
+      clearDismissVisual(true);
+      if (!state.moved) handleTap(point);
+      state.mode = 'idle';
+      return;
+    }
+
+    if (!state.moved) {
+      handleTap(point);
+    }
+    state.mode = 'idle';
   }
 
   function cleanupLegacyControls(root) {
     root = root || overlay();
     if (!root) return;
-    root.querySelectorAll('#ppCompactBtn,.pp-compact-btn').forEach(function (btn) {
-      btn.remove();
+    root.querySelectorAll('#ppCompactBtn,.pp-compact-btn').forEach(function (button) {
+      button.remove();
     });
-    if (!root.querySelector('#ppZoomOutBtn')) {
-      var zoomOut = document.createElement('button');
-      zoomOut.className = 'pp-zoom-btn pp-zoom-out';
-      zoomOut.id = 'ppZoomOutBtn';
-      zoomOut.title = '缩小';
-      zoomOut.type = 'button';
-      zoomOut.onclick = function () { window.zoomOut(); };
-      zoomOut.innerHTML = '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"></path></svg></span>';
-      root.insertBefore(zoomOut, root.querySelector('#ppInfoBtn') || null);
-    }
-    if (!root.querySelector('#ppZoomInBtn')) {
-      var zoomIn = document.createElement('button');
-      zoomIn.className = 'pp-zoom-btn pp-zoom-in';
-      zoomIn.id = 'ppZoomInBtn';
-      zoomIn.title = '放大';
-      zoomIn.type = 'button';
-      zoomIn.onclick = function () { window.zoomIn(); };
-      zoomIn.innerHTML = '<span class="ui-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg></span>';
-      root.insertBefore(zoomIn, root.querySelector('#ppInfoBtn') || null);
-    }
     var rotateSvg = root.querySelector('#ppRotateBtn svg');
     if (rotateSvg) {
       rotateSvg.innerHTML = '<path d="M20 11a8 8 0 1 0 2.35 5.65"></path><path d="M20 4v7h-7"></path>';
     }
   }
 
-  function installTouchFix(root) {
+  function installTouchFix() {
     var wrap = wrapper();
-    if (!root || !wrap || wrap.__xtjPreviewTouchFix) return;
-    wrap.__xtjPreviewTouchFix = true;
+    if (!wrap || wrap.__xtjPreviewTouchFixInstalled) return;
+    wrap.__xtjPreviewTouchFixInstalled = true;
+
+    var existingCleanup = overlay() && overlay()._cleanupPreview;
+    if (overlay()) {
+      overlay()._cleanupPreview = function () {
+        if (typeof existingCleanup === 'function') existingCleanup();
+        resetGestureState();
+        state.scale = 1;
+        state.tx = 0;
+        state.ty = 0;
+        state.rotation = 0;
+        clearDismissVisual(false);
+        syncTrackTransform(0, false);
+      };
+    }
 
     wrap.addEventListener('pointerdown', function (event) {
-      if (event.pointerType !== 'touch' || isControl(event.target)) return;
+      if (!isTouchPointer(event) || isControl(event.target)) return;
       state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      state.startX = event.clientX;
-      state.startY = event.clientY;
-      state.startTx = state.tx;
-      state.startTy = state.ty;
-      state.startScale = state.scale;
       state.moved = false;
-      if (state.tapTimer) {
-        clearTimeout(state.tapTimer);
-        state.tapTimer = null;
-      }
-      if (state.pointers.size === 2) {
-        var pts = Array.from(state.pointers.values());
-        var cx = (pts[0].x + pts[1].x) / 2;
-        var cy = (pts[0].y + pts[1].y) / 2;
-        state.mode = 'pinch';
-        state.pinchDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
-        state.pinchAx = (cx - window.innerWidth / 2 - state.tx) / state.scale;
-        state.pinchAy = (cy - window.innerHeight / 2 - state.ty) / state.scale;
+
+      if (state.pointers.size >= 2) {
+        beginPinch();
+      } else if (state.scale > 1.01) {
+        beginPanFromPoint({ x: event.clientX, y: event.clientY });
       } else {
-        state.mode = state.scale > 1.01 ? 'pan' : 'base';
+        beginSwipeOrDismiss({ x: event.clientX, y: event.clientY });
       }
-      try { wrap.setPointerCapture(event.pointerId); } catch (_) {}
+
+      try {
+        wrap.setPointerCapture(event.pointerId);
+      } catch (_) {}
+
       event.preventDefault();
       event.stopImmediatePropagation();
     }, true);
 
     wrap.addEventListener('pointermove', function (event) {
-      if (event.pointerType !== 'touch' || !state.pointers.has(event.pointerId)) return;
+      if (!isTouchPointer(event) || !state.pointers.has(event.pointerId) || isControl(event.target)) return;
       state.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      var dx = event.clientX - state.startX;
-      var dy = event.clientY - state.startY;
-      if (Math.abs(dx) + Math.abs(dy) > 10) state.moved = true;
 
-      if (state.pointers.size === 2 && state.mode === 'pinch') {
-        var pts = Array.from(state.pointers.values());
-        var dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) || 1;
-        var cx = (pts[0].x + pts[1].x) / 2;
-        var cy = (pts[0].y + pts[1].y) / 2;
-        state.scale = clamp(state.startScale * (dist / state.pinchDist), 1, 5);
-        state.tx = cx - window.innerWidth / 2 - state.pinchAx * state.scale;
-        state.ty = cy - window.innerHeight / 2 - state.pinchAy * state.scale;
-        applyTransform(false);
-      } else if (state.scale > 1.01) {
-        state.mode = 'pan';
-        state.tx = state.startTx + dx;
-        state.ty = state.startTy + dy;
-        applyTransform(false);
-      } else if (dy > 0 && Math.abs(dy) > Math.abs(dx)) {
-        state.mode = 'dismiss';
-        var img = image();
-        var root = overlay();
-        if (root) root.style.opacity = String(Math.max(0.35, 1 - dy / window.innerHeight));
-        if (img) {
-          img.style.transition = 'none';
-          img.style.transform = 'translate3d(0,' + dy + 'px,0) scale(' + Math.max(0.78, 1 - dy / 900) + ') rotate(' + state.rotation + 'deg)';
-        }
+      if (state.pointers.size >= 2) {
+        if (state.mode !== 'pinch') beginPinch();
+        updatePinch();
+      } else if (state.mode === 'pinch') {
+        refreshSinglePointerStart();
+      } else if (state.scale > 1.01 || state.mode === 'pan') {
+        updatePan({ x: event.clientX, y: event.clientY });
       } else {
-        state.mode = 'swipe';
+        updateSwipeOrDismiss({ x: event.clientX, y: event.clientY });
       }
+
       event.preventDefault();
       event.stopImmediatePropagation();
     }, true);
 
-    function endPointer(event) {
-      if (event.pointerType !== 'touch' || !state.pointers.has(event.pointerId)) return;
+    function finishPointer(event) {
+      if (!isTouchPointer(event) || !state.pointers.has(event.pointerId)) return;
       state.pointers.delete(event.pointerId);
-      try { wrap.releasePointerCapture(event.pointerId); } catch (_) {}
+      try {
+        wrap.releasePointerCapture(event.pointerId);
+      } catch (_) {}
 
-      if (state.pointers.size > 0) {
-        state.mode = state.scale > 1.01 ? 'pan' : 'base';
+      if (state.mode === 'pinch') {
+        if (state.pointers.size >= 2) {
+          beginPinch();
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
+        if (state.pointers.size === 1) {
+          state.suppressTapUntil = Date.now() + 350;
+          refreshSinglePointerStart();
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
+      } else if (state.pointers.size === 1 && (state.mode === 'pan' || state.mode === 'swipe-or-dismiss')) {
+        refreshSinglePointerStart();
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      } else if (state.pointers.size > 0) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
         return;
       }
 
-      var dx = event.clientX - state.startX;
-      var dy = event.clientY - state.startY;
-      var root = overlay();
-      if (root) {
-        root.style.transition = '';
-        root.style.opacity = '';
-      }
-
-      if (state.mode === 'pinch') {
-        if (state.scale <= 1.04) resetTransform(true);
-        else applyTransform(true);
-      } else if (state.mode === 'pan') {
-        applyTransform(true);
-      } else if (state.mode === 'dismiss' && dy > 140) {
-        window.closePhotoPreview && window.closePhotoPreview();
-      } else if (state.mode === 'dismiss') {
-        resetTransform(true);
-      } else if (state.mode === 'swipe' && Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy)) {
-        if (dx < 0 && window.ppNextPhoto) window.ppNextPhoto();
-        if (dx > 0 && window.ppPrevPhoto) window.ppPrevPhoto();
-      } else if (!state.moved) {
-        var now = Date.now();
-        if (now - state.lastTap < 300) {
-          state.lastTap = 0;
-          zoomAt(event.clientX, event.clientY, state.scale > 1.01 ? 1 : 2, true);
-        } else {
-          state.lastTap = now;
-          state.tapTimer = window.setTimeout(function () {
-            state.tapTimer = null;
-          }, 320);
-        }
-      }
-      state.mode = '';
+      handleGestureEnd({ x: event.clientX, y: event.clientY });
       event.preventDefault();
       event.stopImmediatePropagation();
     }
 
-    wrap.addEventListener('pointerup', endPointer, true);
+    wrap.addEventListener('pointerup', finishPointer, true);
     wrap.addEventListener('pointercancel', function (event) {
-      if (event.pointerType !== 'touch') return;
-      state.pointers.clear();
-      state.mode = '';
-      applyTransform(true);
+      if (!isTouchPointer(event)) return;
+      resetGestureState();
+      clearDismissVisual(true);
+      reboundScaleIfNeeded(true);
+      event.preventDefault();
       event.stopImmediatePropagation();
+    }, true);
+
+    wrap.addEventListener('click', function (event) {
+      if (Date.now() < state.suppressTapUntil && !isControl(event.target)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    }, true);
+
+    wrap.addEventListener('dblclick', function (event) {
+      if (!isControl(event.target)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
     }, true);
   }
 
@@ -259,16 +581,23 @@
     state.tx = 0;
     state.ty = 0;
     state.rotation = 0;
+    state.mode = 'idle';
+    state.dragAxis = '';
+    state.pointers.clear();
+    state.lastTapAt = 0;
+    state.suppressTapUntil = 0;
     cleanupLegacyControls();
-    installTouchFix(overlay());
-    applyTransform(false);
+    installTouchFix();
+    applyImageTransform(false);
+    syncTrackTransform(0, false);
+    clearDismissVisual(false);
   }
 
   function wrapOpenPreview() {
-    if (typeof window.openPhotoPreview !== 'function' || window.openPhotoPreview.__xtjHotfixWrapped) return;
-    var originalOpen = window.openPhotoPreview;
+    if (typeof original.openPhotoPreview !== 'function') return;
+    if (window.openPhotoPreview && window.openPhotoPreview.__xtjHotfixWrapped) return;
     window.openPhotoPreview = function () {
-      var result = originalOpen.apply(this, arguments);
+      var result = withPreviewGuardDisabled(original.openPhotoPreview, this, arguments);
       requestAnimationFrame(function () {
         requestAnimationFrame(afterOpen);
       });
@@ -277,30 +606,60 @@
     window.openPhotoPreview.__xtjHotfixWrapped = true;
   }
 
+  window.closePhotoPreview = function () {
+    resetGestureState();
+    return withPreviewGuardDisabled(original.closePhotoPreview, this, arguments);
+  };
+
+  window.shareCurrentPhoto = function () {
+    return withPreviewGuardDisabled(original.shareCurrentPhoto, this, arguments);
+  };
+
+  window.deletePhotoFromPreview = function () {
+    return withPreviewGuardDisabled(original.deletePhotoFromPreview, this, arguments);
+  };
+
+  window.deleteCurrentPhoto = function () {
+    return window.deletePhotoFromPreview.apply(this, arguments);
+  };
+
   window.zoomIn = function () {
-    zoomAt(window.innerWidth / 2, window.innerHeight / 2, state.scale >= 1.01 ? state.scale + 0.5 : 2, true);
+    state.suppressTapUntil = Date.now() + 350;
+    zoomAt(viewportWidth() / 2, viewportHeight() / 2, state.scale > 1.01 ? state.scale + 0.5 : 2, true);
   };
 
   window.zoomOut = function () {
-    if (state.scale <= 1.25) resetTransform(true);
-    else zoomAt(window.innerWidth / 2, window.innerHeight / 2, state.scale - 0.5, true);
+    state.suppressTapUntil = Date.now() + 350;
+    if (state.scale <= 1.25) {
+      resetImageTransform(true);
+      return;
+    }
+    zoomAt(viewportWidth() / 2, viewportHeight() / 2, state.scale - 0.5, true);
   };
 
   window.ppRotatePhoto = function () {
     state.rotation = (state.rotation + 90) % 360;
-    applyTransform(true);
-    if (window.showToast) window.showToast('已旋转 ' + state.rotation + '°');
+    applyImageTransform(true);
+    if (window.showToast) {
+      window.showToast('已旋转 ' + state.rotation + '°');
+    }
   };
+
+  if (typeof original.rotatePhoto === 'function' && !window.ppRotatePhoto) {
+    window.ppRotatePhoto = original.rotatePhoto;
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () {
       installFinalStyle();
       cleanupLegacyControls();
       wrapOpenPreview();
+      installTouchFix();
     });
   } else {
     installFinalStyle();
     cleanupLegacyControls();
     wrapOpenPreview();
+    installTouchFix();
   }
 })();

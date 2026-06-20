@@ -7980,6 +7980,61 @@ function renderProfileActivityList(kind) {
             // 版本更新日志
             const changelogData = [
                 {
+                    version: 'v0.81',
+                    date: '2026-06-20',
+                    content: `
+                        <h4>新增</h4>
+                        <ul>
+                            <li>后台新增“新用户注册提醒”，只统计 <code>__auth__</code> 注册记录，并在“用户数据”入口显示红点数字</li>
+                            <li>新增 <code>/admin/users/register-alerts</code> 和 <code>/admin/users/register-alerts/read</code> 两个后台接口</li>
+                        </ul>
+                        <h4>修复</h4>
+                        <ul>
+                            <li>修复后台用户统计口径不一致：<code>/admin/stats/users</code> 现在统一聚合 <code>__auth__</code>、<code>__user_info__</code>、<code>__user_visit__</code></li>
+                            <li>修复 <code>/admin/stats/daily</code> 中 <code>new_users</code> 被重复注册记录放大的问题，改为按用户名去重后只认最早注册时间</li>
+                            <li>修复 <code>/admin/stats</code> 顶部 <code>total_users</code> 被重复 <code>__auth__</code> 记录放大的问题</li>
+                            <li>修复照片墙全屏预览在 iPhone / iPad 上双指缩放乱飞、松手跳变、误触单击缩放的问题</li>
+                        </ul>
+                        <h4>优化</h4>
+                        <ul>
+                            <li>照片墙移动端预览手势统一为单一状态机，pinch / pan / swipe / dismiss 明确互斥</li>
+                            <li>后台首次打开注册提醒时默认只统计最近 24 小时新注册用户，避免历史数据一次性冲上红点</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重做后台注册用户统计链路，让注册数、用户总数、访问明细三处统一按用户名去重</li>
+                            <li>重做照片墙移动端预览热修复策略，改为由 <code>preview-hotfix.js</code> 统一接管移动端触摸手势</li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.80',
+                    date: '2026-06-18',
+                    content: `
+                        <h4>新增</h4>
+                        <ul>
+                            <li>照片墙单次加载数量从 20 提升到 60，首次进入即可看到更多历史内容</li>
+                            <li>导出 <code>window.normalizePhotoWallRow</code>，上传完成后新照片可以即时插入当前列表</li>
+                        </ul>
+                        <h4>修复</h4>
+                        <ul>
+                            <li>修复照片墙仍命中旧缓存导致只显示陈旧数据的问题</li>
+                            <li>修复老视频无 thumb 时直接显示空白块的问题，补上运行时首帧封面兜底</li>
+                            <li>修复多处前端 XSS 风险、调试输出残留与重复 BOM 问题</li>
+                        </ul>
+                        <h4>优化</h4>
+                        <ul>
+                            <li>将 <code>admin.html</code> 的 Supabase CDN 脚本改为 defer，减少阻塞</li>
+                            <li>将 <code>ui-enhance.css</code> 提前到 head 加载，减少样式闪动</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重做照片墙数据链路，从缓存优先收口为实时读取 + 更大首屏批量</li>
+                            <li>重做上传后同步链路，标准化数据、即时插入、清缓存、强制重取统一到一条路径</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.79',
                     date: '2026-06-15',
                     content: `
