@@ -1,59 +1,135 @@
 # XTJ
 
-当前前端版本：`v0.74`
+当前版本：`v0.81`
 
-这是一个以帖子流、照片墙、聊天、公告、统计和后台管理为核心的前端项目，当前仓库同时包含用户端页面和管理后台页面。
+XTJ 是一个前后端同仓库项目，包含前台主站与后台管理两部分。前台以帖子流、照片墙、聊天、公告、互动记录为核心；后台覆盖用户、帖子、点赞、评论、举报、封禁、照片管理与数据统计。
 
-## 当前版本
-
-### v0.74 - 2026-06-14
-Pro 状态 / 删除卡死 / 头像点击 三大 Bug 一次性修复
-
-- **Pro 历史帖子永久标识修复**（**根因**）：`js/core.js` 第 3798 行 `buildPostBadges = function(...) {...}` 的二次赋值把包含 Pro 标志的完整版**整个覆盖**了，导致 Pro 历史帖子公开右侧永远没有 Pro 标识。已删除该覆盖代码，恢复 `buildPostBadges` 的完整 Pro / 公开 / 置顶逻辑。
-- **删除帖子卡死彻底修复**：
-  - 修复 1（[core.js:2579-2708](file:///c:/Users/Administrator/Desktop/%E6%9C%80%E6%96%B0index/xtj/js/core.js#L2579-L2708)）handler 加 4 层兜底：`finally` 无条件重置 `__xtjDeleteInProgress`、入口 12s 强制解锁、`loadFeed(true)` 用 `setTimeout(0)` 异步触发、所有 `loadFeed` 调用 try/catch 包裹。
-  - **修复 2（**根因**，[core.js:4855](file:///c:/Users/Administrator/Desktop/%E6%9C%80%E6%96%B0index/xtj/js/core.js#L4855-L4875) 第二个 `delBtn.onclick` 赋值）**：JS 中 `.onclick =` 重复赋值会**完全覆盖**前面的 handler，上面修复 1 加的所有保护因此**完全失效**。已删除此重复的旧版（无锁、无超时、`await loadFeed(true)` 阻塞），让 line 2602 的完整保护版真正生效。
-- **头像点击失效修复**（`css/desktop.css` line 229-246）：`.avatar-wrap` / `.xtj-pro-avatar-ring` / `.avatar.clickable` 全部 `position: relative !important; z-index: 5 !important; pointer-events: auto !important; cursor: pointer !important;`。
-- 升级 `index.html` 中 `desktop.css?v=20260614_15` → `desktop.css?v=20260614_17`、`core.js?v=20260614_7` → `core.js?v=20260614_18`，强制浏览器拉新。
-
-### v0.73 - 2026-06-08
-全面更新 - 管理员禁言拉黑功能验证、测试数据插入、安全加固
-
-- 管理员后台禁言拉黑功能完整验证：用户数据页、拉黑封禁页、禁言管理页均可正常显示
-- 插入三条测试禁言记录验证全链路（API → 数据库 → 前端渲染）功能正常
-- 测试覆盖：真实用户（11、徐廷江）24小时 & 永久禁言，前端状态徽章和筛选均正确展示
-- 修复管理员后台"用户数据-禁言拉黑"显示空白的问题诊断：确认是数据库无活跃记录导致的正常空状态
-- 优化管理员后台数据加载策略：标签页切换时按需自动拉取最新 bans/mutes/blacklist 数据
-- 通过 Supabase service_role key 验证 RLS 策略配置正确，JWT 鉴权、速率限制、输入校验三层防护全部生效
-
-## 主要页面
+## 项目结构
 
 - `index.html`
-  - 用户端首页、帖子流、照片墙、聊天、统计、我的页面、公告、举报弹层。
+  前台主站入口。
 - `admin.html`
-  - 后台管理入口，包含用户、帖子、举报、封禁、禁言、黑名单、照片管理。
+  后台管理入口。
+- `js/core.js`
+  前台主逻辑，包括帖子、聊天、主题切换、站内更新日志、照片墙懒加载入口等。
+- `js/photo-wall/`
+  照片墙模块，当前活跃链路主要包括：
+  - `data.min.js`
+  - `render.min.js`
+  - `preview.min.js`
+  - `preview-hotfix.js`
+  - `photo-wall.min.js`
+- `js/admin/admin.js`
+  后台管理前端逻辑。
+- `render-api/server.js`
+  后端 API 与 Render 部署入口。
+- `render.yaml`
+  Render Web Service 部署配置。
+- `scripts/build.js`
+  前端压缩构建脚本。
+- `CHANGELOG.md`
+  仓库版本更新日志。
 
-## 关键目录
+## 启动与构建
 
-- `css/`
-  - 站点样式文件。
-- `js/`
-  - 用户端核心逻辑和后台管理逻辑。
-- `render-api/`
-  - 后端服务相关代码。
-- `scripts/`
-  - 构建脚本。
+根目录可用脚本：
 
-## 常用文件
+```bash
+npm install
+npm run build
+npm start
+```
 
-- [index.html](C:/Users/Administrator/Desktop/最新index/xtj/index.html)
-- [admin.html](C:/Users/Administrator/Desktop/最新index/xtj/admin.html)
-- [js/core.js](C:/Users/Administrator/Desktop/最新index/xtj/js/core.js)
-- [js/admin/admin.js](C:/Users/Administrator/Desktop/最新index/xtj/js/admin/admin.js)
-- [CHANGELOG.md](C:/Users/Administrator/Desktop/最新index/xtj/CHANGELOG.md)
+说明：
 
-## 开发说明
+- `npm start`
+  直接启动 `render-api/server.js`
+- `npm run build`
+  执行 `scripts/build.js`，用于压缩 CSS / JS
 
-- 用户端"关于"当前显示版本号：`xtj v0.73`
-- 管理后台脚本缓存版本已同步到 `v0.73`
-- 详细历史改动请查看 [CHANGELOG.md](C:/Users/Administrator/Desktop/最新index/xtj/CHANGELOG.md)
+`render-api/package.json` 还保留了后端单独启动脚本：
+
+```bash
+cd render-api
+npm install
+npm start
+```
+
+## Render 部署
+
+当前 Render 部署入口由 [render.yaml](/C:/Users/Administrator/Desktop/最新index/xtj/render.yaml:1) 定义：
+
+- 服务类型：`web`
+- 运行时：`node`
+- 构建命令：`npm install`
+- 启动命令：`node --env-file=render-api/.env render-api/server.js`
+
+这意味着 Render 线上实际走的是：
+
+- 前端静态资源：仓库根目录
+- 后端入口：`render-api/server.js`
+
+## 最近重点更新
+
+### v0.81
+
+- 后台用户统计口径统一：
+  - `/admin/stats/users` 现在合并 `__auth__`、`__user_info__`、`__user_visit__`
+  - `/admin/stats/daily` 的 `new_users` 改为按 `user_name` 去重后统计最早注册时间
+  - `/admin/stats` 的 `total_users` 改为按注册用户名去重
+- 后台新增“新用户注册提醒”：
+  - `GET /admin/users/register-alerts`
+  - `POST /admin/users/register-alerts/read`
+  - “用户数据”按钮支持红点数字提醒
+- 照片墙移动端全屏预览手势修复：
+  - 双指 pinch / 单指 pan / 左右切图 / 下滑关闭互斥
+  - pinch 后不会再立刻被单击逻辑缩回原图
+
+### v0.80
+
+- 照片墙首屏加载数量提升到 60
+- 上传后即时追加与实时重取链路收口
+- 多处 XSS 与前端调试残留清理
+
+## 当前维护注意点
+
+- 照片墙预览当前缺少未压缩源文件 `js/photo-wall/preview.js`，仓库内只有：
+  - `preview.min.js`
+  - `preview-hotfix.js`
+- `npm run build` 目前会跳过若干缺失源文件，例如：
+  - `js/photo-wall/preview.js`
+  - `js/photo-wall/data.js`
+  - `js/photo-wall/render.js`
+  - `js/photo-wall/upload.js`
+  - `js/photo-wall/photo-wall.js`
+
+这表示：
+
+- 现阶段照片墙预览问题优先通过 `preview-hotfix.js` 做热修复更稳
+- 如果后续要彻底重建照片墙构建链，应该先补齐这些源文件，再统一收口 minified 产物
+
+## 环境与配置注意
+
+- 项目使用 Supabase。
+- Render 部署依赖 `render-api/.env` 中的后端环境变量。
+- `render.yaml` 中要求手动配置的关键变量包括：
+  - `ADMIN_PASSWORD`
+  - `SUPABASE_SERVICE_KEY`
+  - `API_SECRET`
+  - `SUPABASE_URL`
+  - `ADMIN_USERNAME`
+
+额外提醒：
+
+- `API_SECRET` 如果在部署更新后被重置，会导致后台登录态失效。
+- 当前仓库存在 `render-api/.env` 与支付密钥文件，发布前应确认是否符合你的实际安全策略。
+
+## 文档同步约定
+
+每次发版建议至少同步这三处：
+
+1. `CHANGELOG.md`
+2. `index.html` 中关于页版本号
+3. `js/core.js` 中站内 changelog 数据
+
+这样可以避免“仓库版本、站内版本、关于页版本”再次分裂。
