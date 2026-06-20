@@ -528,11 +528,9 @@
             var userInfoMap = {};
             userInfoList.forEach(function(ui) {
                 try {
-                    if (!userInfoMap[ui.user_name]) {
-                        var info = JSON.parse(ui.content);
-                        userInfoMap[ui.user_name] = info;
-                        userMap[ui.user_name] = true;
-                    }
+                    var info = JSON.parse(ui.content || '{}');
+                    userInfoMap[ui.user_name] = mergeAdminUserInfo(userInfoMap[ui.user_name], info);
+                    userMap[ui.user_name] = true;
                 } catch(e) {}
             });
             
@@ -621,6 +619,39 @@
     function formatTime(d) {
         if (!d) return '';
         return new Date(d).toLocaleString();
+    }
+
+    function toAdminTimeMs(value) {
+        var time = value ? new Date(value).getTime() : NaN;
+        return Number.isFinite(time) ? time : 0;
+    }
+
+    function pickEarlierAdminIso(a, b) {
+        if (!a) return b || null;
+        if (!b) return a || null;
+        return toAdminTimeMs(a) <= toAdminTimeMs(b) ? a : b;
+    }
+
+    function pickLaterAdminIso(a, b) {
+        if (!a) return b || null;
+        if (!b) return a || null;
+        return toAdminTimeMs(a) >= toAdminTimeMs(b) ? a : b;
+    }
+
+    function getAdminUserEffectiveRegTime(info) {
+        if (!info) return '';
+        return info.auth_created_at || info.reg_time || '';
+    }
+
+    function mergeAdminUserInfo(base, next) {
+        var left = base || {};
+        var right = next || {};
+        return {
+            reg_time: pickEarlierAdminIso(left.reg_time, right.reg_time),
+            auth_created_at: pickEarlierAdminIso(left.auth_created_at, right.auth_created_at),
+            last_login: pickLaterAdminIso(left.last_login, right.last_login),
+            last_visit: pickLaterAdminIso(left.last_visit, right.last_visit)
+        };
     }
 
     function getSelectableAdminUsers() {
@@ -794,7 +825,7 @@
                 '<div class="user-card-stats"><div class="user-stat-item"><div class="num">' + stats.posts + '</div><div class="lbl">帖子</div></div><div class="user-stat-item"><div class="num">' + stats.likes + '</div><div class="lbl">点赞</div></div><div class="user-stat-item"><div class="num">' + stats.comments + '</div><div class="lbl">评论</div></div></div>',
                 '<div class="user-card-meta">',
                 '<div class="meta-row"><span class="label">最近登录</span><span class="value">' + escapeHtml((info.last_login || info.last_visit) ? formatTime(info.last_login || info.last_visit) : '-') + '</span></div>',
-                '<div class="meta-row"><span class="label">注册时间</span><span class="value">' + escapeHtml(info.reg_time ? formatTime(info.reg_time) : '-') + '</span></div>',
+                '<div class="meta-row"><span class="label">注册时间</span><span class="value">' + escapeHtml(getAdminUserEffectiveRegTime(info) ? formatTime(getAdminUserEffectiveRegTime(info)) : '-') + '</span></div>',
                 '<div class="meta-row"><span class="label">当前状态</span><span class="value">' + escapeHtml(activeRecord ? activeText : '可执行操作') + '</span></div>',
                 '</div>',
                 '<div class="user-card-actions">',
@@ -922,13 +953,9 @@
                 return pb - pa;
             }
             if (userSortBy === 'login') {
-                var la = a.info && (a.info.last_login || a.info.last_visit) ? new Date(a.info.last_login || a.info.last_visit).getTime() : 0;
-                var lb = b.info && (b.info.last_login || b.info.last_visit) ? new Date(b.info.last_login || b.info.last_visit).getTime() : 0;
-                return lb - la;
+                return toAdminTimeMs(b.info && (b.info.last_login || b.info.last_visit)) - toAdminTimeMs(a.info && (a.info.last_login || a.info.last_visit));
             }
-            var ra = a.info && a.info.reg_time ? new Date(a.info.reg_time).getTime() : 0;
-            var rb = b.info && b.info.reg_time ? new Date(b.info.reg_time).getTime() : 0;
-            return rb - ra;
+            return toAdminTimeMs(getAdminUserEffectiveRegTime(b.info)) - toAdminTimeMs(getAdminUserEffectiveRegTime(a.info));
         });
 
         h += '<div class="card"><h3>用户列表 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + filtered.length + ' 位用户</span></h3>';
@@ -940,7 +967,7 @@
                 var pc = allPosts.filter(function(p) { return p.user_name === u.name; }).length;
                 var lc = allLikes.filter(function(l) { return l.user_name === u.name; }).length;
                 var cc = allComments.filter(function(c) { return c.user_name === u.name; }).length;
-                var regTime = u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-';
+                var regTime = getAdminUserEffectiveRegTime(u.info) ? formatTime(getAdminUserEffectiveRegTime(u.info)) : '-';
                 var lastLogin = u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-';
                 var isAdmin = u.name === ADMIN;
                 var isBanned = bansData.some(function(b) { return b.user_name === u.name && b.is_active; });
@@ -2348,9 +2375,9 @@
         filtered.sort(function(a, b) {
             if (userSortBy === 'posts') return getUserActivityStats(b.name).posts - getUserActivityStats(a.name).posts;
             if (userSortBy === 'login') {
-                return ((b.info && (b.info.last_login || b.info.last_visit)) ? new Date(b.info.last_login || b.info.last_visit).getTime() : 0) - ((a.info && (a.info.last_login || a.info.last_visit)) ? new Date(a.info.last_login || a.info.last_visit).getTime() : 0);
+                return toAdminTimeMs(b.info && (b.info.last_login || b.info.last_visit)) - toAdminTimeMs(a.info && (a.info.last_login || a.info.last_visit));
             }
-            return (b.info && b.info.reg_time ? new Date(b.info.reg_time).getTime() : 0) - (a.info && a.info.reg_time ? new Date(a.info.reg_time).getTime() : 0);
+            return toAdminTimeMs(getAdminUserEffectiveRegTime(b.info)) - toAdminTimeMs(getAdminUserEffectiveRegTime(a.info));
         });
 
         h += '<div class="card"><h3>用户列表 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + filtered.length + ' 位用户</span></h3>';
@@ -2362,7 +2389,7 @@
                 var stats = getUserActivityStats(u.name);
                 var flags = getUserStateFlags(u.name);
                 var safeName = u.name.replace(/'/g, "\\'");
-                var regTime = u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-';
+                var regTime = getAdminUserEffectiveRegTime(u.info) ? formatTime(getAdminUserEffectiveRegTime(u.info)) : '-';
                 var lastLogin = u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-';
                 h += '<div class="user-card' + (flags.isBanned ? ' is-banned' : '') + (flags.isMuted ? ' is-muted' : '') + (flags.isAdmin ? ' is-admin' : '') + '">';
                 h += '<div class="user-card-head"><div class="user-avatar' + (flags.isAdmin ? ' admin-avatar' : (flags.isBanned ? ' banned-avatar' : (flags.isMuted ? ' muted-avatar' : ''))) + '">' + escapeHtml((u.name || '?').slice(0, 1).toUpperCase()) + '</div><div class="user-card-name"><strong>' + escapeHtml(u.name) + '</strong><div class="user-tags">' + buildUserTagMarkup(flags) + '</div></div></div>';
@@ -2530,8 +2557,8 @@
         }
         filtered.sort(function(a, b) {
             if (userSortBy === 'posts') return getUserActivityStats(b.name).posts - getUserActivityStats(a.name).posts;
-            if (userSortBy === 'login') return ((b.info && (b.info.last_login || b.info.last_visit)) ? new Date(b.info.last_login || b.info.last_visit).getTime() : 0) - ((a.info && (a.info.last_login || a.info.last_visit)) ? new Date(a.info.last_login || a.info.last_visit).getTime() : 0);
-            return (b.info && b.info.reg_time ? new Date(b.info.reg_time).getTime() : 0) - (a.info && a.info.reg_time ? new Date(a.info.reg_time).getTime() : 0);
+            if (userSortBy === 'login') return toAdminTimeMs(b.info && (b.info.last_login || b.info.last_visit)) - toAdminTimeMs(a.info && (a.info.last_login || a.info.last_visit));
+            return toAdminTimeMs(getAdminUserEffectiveRegTime(b.info)) - toAdminTimeMs(getAdminUserEffectiveRegTime(a.info));
         });
 
         h += '<div class="card"><h3>用户列表（' + filtered.length + '位）</h3>';
@@ -2559,7 +2586,8 @@
                 var actions = flags.isAdmin
                     ? '-'
                     : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button>';
-                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + statusBadge + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + escapeHtml(u.info && u.info.reg_time ? formatTime(u.info.reg_time) : '-') + '</td><td>' + actions + '</td></tr>';
+                var regTime = getAdminUserEffectiveRegTime(u.info);
+                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + statusBadge + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + actions + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -2696,7 +2724,11 @@
 
             var userInfoMap = {};
             userInfoList.forEach(function(ui) {
-                try { if (!userInfoMap[ui.user_name]) { var info = JSON.parse(ui.content); userInfoMap[ui.user_name] = info; userMap[ui.user_name] = true; } } catch(e) {}
+                try {
+                    var info = JSON.parse(ui.content || '{}');
+                    userInfoMap[ui.user_name] = mergeAdminUserInfo(userInfoMap[ui.user_name], info);
+                    userMap[ui.user_name] = true;
+                } catch(e) {}
             });
 
             allUsers = Object.keys(userMap).sort().map(function(u) {
