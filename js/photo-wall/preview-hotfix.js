@@ -52,6 +52,8 @@
     infoOpen: false
   };
 
+  var photoSizeCache = Object.create(null);
+
   function overlay() {
     return document.getElementById('photoPreviewOverlay');
   }
@@ -168,6 +170,25 @@
 
   function activePhoto() {
     return window.photoPreviewCurrent || null;
+  }
+
+  function photoUsername(photo) {
+    if (!photo) return '';
+    return String(photo.username || photo.user_name || photo.userName || '').trim();
+  }
+
+  function syncPreviewMeta(photo) {
+    photo = photo || activePhoto();
+    var userEl = document.getElementById('photoPreviewUser');
+    var timeEl = document.getElementById('photoPreviewTime');
+    var viewsEl = document.getElementById('photoPreviewViewsCount');
+    if (userEl) userEl.textContent = photo ? (photoUsername(photo) || '未知用户') : '';
+    if (timeEl) {
+      timeEl.textContent = photo && photo.timestamp
+        ? new Date(photo.timestamp).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+        : '';
+    }
+    if (viewsEl) viewsEl.textContent = photo && photo.views != null ? String(photo.views) : '0';
   }
 
   function currentPhotoIndex() {
@@ -599,7 +620,7 @@
   function buildPhotoInfoHtml(photo) {
     if (!photo) return '<div class="pp-info-section"><div class="pp-info-section-title">照片信息</div>' + infoRow('状态', '暂无数据') + '</div>';
     var parts = [];
-    parts.push(infoRow('作者', photo.username || '未知用户'));
+    parts.push(infoRow('作者', photoUsername(photo) || '未知用户'));
     parts.push(infoRow('时间', photo.timestamp ? new Date(photo.timestamp).toLocaleString('zh-CN') : '--'));
     parts.push(infoRow('浏览', photo.views == null ? 0 : photo.views));
     parts.push(infoRow('大小', formatFileSize(photo.fileSize)));
@@ -622,6 +643,28 @@
     return html;
   }
 
+  function fetchPhotoFileSize(photo) {
+    if (!photo || photo.fileSize || !photo.imageUrl) return Promise.resolve(photo ? photo.fileSize : null);
+    if (photoSizeCache[photo.imageUrl]) {
+      photo.fileSize = photoSizeCache[photo.imageUrl];
+      return Promise.resolve(photo.fileSize);
+    }
+    return fetch(photo.imageUrl, { cache: 'force-cache' })
+      .then(function (response) {
+        if (!response || !response.ok) return null;
+        return response.blob();
+      })
+      .then(function (blob) {
+        if (!blob || !blob.size) return null;
+        photoSizeCache[photo.imageUrl] = blob.size;
+        photo.fileSize = blob.size;
+        return blob.size;
+      })
+      .catch(function () {
+        return null;
+      });
+  }
+
   function bindInfoModal() {
     var modal = infoModal();
     if (!modal || modal.__xtjInfoBound) return;
@@ -634,6 +677,16 @@
         window.closePhotoInfo();
       }
     }, true);
+    var closeBtn = modal.querySelector('.pp-info-modal-close');
+    if (closeBtn && !closeBtn.__xtjInfoCloseBound) {
+      closeBtn.__xtjInfoCloseBound = true;
+      closeBtn.addEventListener('click', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        window.closePhotoInfo();
+      }, true);
+    }
     var content = modal.querySelector('.pp-info-modal-content');
     if (content) {
       content.addEventListener('click', function (event) {
@@ -673,6 +726,14 @@
     modal.classList.add('active');
     state.infoOpen = true;
     if (root) root.classList.add('pp-info-open');
+    if (!photo.fileSize && photo.imageUrl) {
+      fetchPhotoFileSize(photo).then(function (size) {
+        if (!size) return;
+        if (!state.infoOpen || activePhoto() !== photo) return;
+        var latestBody = infoBody();
+        if (latestBody) latestBody.innerHTML = buildPhotoInfoHtml(photo);
+      });
+    }
   }
 
   function forceClosePhotoPreview() {
@@ -788,6 +849,14 @@
     var surface = root || wrapper();
     if (!root || !surface || surface.__xtjUnifiedPreviewHandlersInstalled) return;
     surface.__xtjUnifiedPreviewHandlersInstalled = true;
+
+    ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach(function (type) {
+      surface.addEventListener(type, function (event) {
+        if (isControl(event.target)) return;
+        if (type !== 'touchstart') event.preventDefault();
+        event.stopImmediatePropagation();
+      }, { capture: true, passive: false });
+    });
 
     surface.addEventListener('pointerdown', function (event) {
       if (isControl(event.target)) return;
@@ -984,6 +1053,7 @@
     bindInfoButton();
     bindInfoModal();
     installUnifiedPointerHandlers();
+    syncPreviewMeta(activePhoto());
     applyImageTransform(false);
     syncTrackTransform(0, false);
     clearDismissVisual(false);
@@ -1056,6 +1126,7 @@
         if (root && root.classList.contains('active')) {
           resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });
           afterOpen();
+          syncPreviewMeta(activePhoto());
         }
       }, 360);
       return result;
