@@ -44,6 +44,41 @@ window.safeLocalStorageSet = function(key, value) {
     } catch(e) {}
 };
 
+function xtjLoadingEscapeHtml(str) {
+    return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+function buildXtjLoadingHtmlFallback(title, subtitle, type) {
+    var safeTitle = xtjLoadingEscapeHtml(title || '加载中..');
+    var safeSubtitle = subtitle ? xtjLoadingEscapeHtml(subtitle) : '';
+    return '<div class="xtj-magic-loading loading" style="display:flex;align-items:center;justify-content:center;min-height:160px;padding:24px;text-align:center;color:var(--text-muted);">'
+        + '<div><div style="font-size:28px;line-height:1;margin-bottom:10px;">!</div>'
+        + '<div>' + safeTitle + '</div>'
+        + (safeSubtitle ? '<div style="font-size:12px;margin-top:6px;opacity:.7;">' + safeSubtitle + '</div>' : '')
+        + '</div></div>';
+}
+function getXtjLoadingHtml(title, subtitle, type) {
+    var loader = window.xtjMagicLoadingHtml;
+    if (typeof loader === 'function' && loader !== window.__xtjFallbackLoadingHtml) {
+        try {
+            return loader(title, subtitle, type);
+        } catch (_) {}
+    }
+    return buildXtjLoadingHtmlFallback(title, subtitle, type);
+}
+window.buildXtjLoadingHtmlFallback = buildXtjLoadingHtmlFallback;
+window.getXtjLoadingHtml = getXtjLoadingHtml;
+if (typeof window.xtjMagicLoadingHtml !== 'function') {
+    window.__xtjFallbackLoadingHtml = function(title, subtitle, type) {
+        return buildXtjLoadingHtmlFallback(title, subtitle, type);
+    };
+    window.xtjMagicLoadingHtml = window.__xtjFallbackLoadingHtml;
+}
+
             const ADMIN_NAME = "xxz";
             const ADMIN_TOKEN_KEY = "xtj_admin_token";
             const AVATAR_CACHE_KEY = "xtj_avatars";
@@ -3595,7 +3630,7 @@ function renderProfileActivityList(kind) {
                     }
                 }
                 const feed = document.getElementById("feed");
-                if (!forceRefresh) feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中..', '', 'feed');
+                if (!forceRefresh) feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }).limit(500),
@@ -4344,8 +4379,8 @@ function renderProfileActivityList(kind) {
                 feedPage = 0;
                 feedEndReached = false;
                 var feed = document.getElementById("feed");
-                if (feed && window.xtjMagicLoadingHtml) {
-                    feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中..', '', 'feed');
+                if (feed) {
+                    feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
                 }
                 renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
             };
@@ -5137,7 +5172,7 @@ function renderProfileActivityList(kind) {
                 }
                 var feed = document.getElementById("feed");
                 if (!forceRefresh && feed) {
-                    feed.innerHTML = window.xtjMagicLoadingHtml('内容加载中..', '', 'feed');
+                    feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
                 }
                 try {
                     // Supabase 查询加 12s 兜底超时，避免永久 hang
@@ -5380,7 +5415,7 @@ function renderProfileActivityList(kind) {
                     return;
                 }
 
-                document.getElementById('statModalBody').innerHTML = window.xtjMagicLoadingHtml('加载中..', '加载中..', 'feed');
+                document.getElementById('statModalBody').innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
 
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
@@ -5660,7 +5695,7 @@ function renderProfileActivityList(kind) {
 
             window.openPostDetail = async function(postId) {
                 document.getElementById('postDetailTitle').textContent = '帖子详情';
-                document.getElementById('postDetailBody').innerHTML = window.xtjMagicLoadingHtml('加载中..', '加载中..', 'feed');
+                document.getElementById('postDetailBody').innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
                 document.getElementById('postDetailModal').classList.add('active');
 
                 try {
@@ -6832,7 +6867,7 @@ function renderProfileActivityList(kind) {
                 var title = options && options.title ? options.title : '加载中..';
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
-                el.innerHTML = window.xtjMagicLoadingHtml(title, subtitle, variant);
+                el.innerHTML = getXtjLoadingHtml(title, subtitle, variant);
             }
 
             function dockChatGoBack() {
@@ -6879,7 +6914,7 @@ function renderProfileActivityList(kind) {
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
-                document.getElementById('dockChatMessages').innerHTML = window.xtjMagicLoadingHtml('加载中..', '正在打开聊天通道', 'chat-detail');
+                document.getElementById('dockChatMessages').innerHTML = getXtjLoadingHtml('加载中..', '正在打开聊天通道', 'chat-detail');
                 renderChatLoadingState(document.getElementById('dockChatMessages'), {
                     title: '加载中..',
                     subtitle: '正在打开聊天通道',
@@ -10035,7 +10070,7 @@ function renderProfileActivityList(kind) {
                 var body = document.getElementById('postDetailBody');
                 var modal = document.getElementById('postDetailModal');
                 if (title) title.textContent = '帖子详情';
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载中..', '加载中..', 'feed');
+                if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
                 if (modal) modal.classList.add('active');
 
                 try {
@@ -10086,7 +10121,7 @@ function renderProfileActivityList(kind) {
                     return;
                 }
 
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载中..', '加载中..', 'feed');
+                if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
                         sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
@@ -10194,7 +10229,7 @@ function renderProfileActivityList(kind) {
                 var subtitle = options && options.subtitle ? options.subtitle : '';
                 var variant = options && options.variant ? String(options.variant) : '';
                 el.classList.add('xtj-chat-photo-loading');
-                el.innerHTML = window.__xtjSharedPhotoLoaderHtml || window.xtjMagicLoadingHtml(title, subtitle, variant.indexOf('chat') === -1 ? 'chat-list' : variant);
+                el.innerHTML = window.__xtjSharedPhotoLoaderHtml || getXtjLoadingHtml(title, subtitle, variant.indexOf('chat') === -1 ? 'chat-list' : variant);
             };
 
             (function installChatPhotoLoaderFinal() {
@@ -10318,7 +10353,7 @@ function renderProfileActivityList(kind) {
                     return;
                 }
 
-                if (body) body.innerHTML = window.xtjMagicLoadingHtml('加载中..', '加载中..', 'feed');
+                if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
                 var snapshot = await fetchStatSnapshotWithTimeout(5000);
                 if (snapshot) {
                     applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
