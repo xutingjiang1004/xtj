@@ -3141,6 +3141,9 @@ function renderProfileActivityList(kind) {
                 var photo = buildPostPreviewItemFromTrigger(src, triggerEl);
                 if (!photo || !photo.imageUrl || typeof window.openPhotoPreview !== 'function') return false;
                 ensurePhotoPreviewContextHooks();
+                if (typeof window.closeImageViewer === 'function') {
+                    try { window.closeImageViewer(); } catch (e) {}
+                }
                 window.__xtjPhotoPreviewContext = {
                     kind: 'post',
                     postId: photo.__xtjPostId,
@@ -3160,6 +3163,11 @@ function renderProfileActivityList(kind) {
                 if (typeof window.openPhotoPreview !== 'function' && typeof ensurePhotoWallLoaded === 'function') {
                     ensurePhotoWallLoaded().then(function() {
                         if (!openPostImagePreview(src, triggerEl)) {
+                            if (typeof window.forceClosePhotoPreview === 'function') {
+                                try { window.forceClosePhotoPreview(); } catch (e) {}
+                            } else if (typeof window.closePhotoPreview === 'function') {
+                                try { window.closePhotoPreview(); } catch (e) {}
+                            }
                             const viewer = document.getElementById('imgViewer');
                             const img = document.getElementById('ivImg');
                             const wrapper = document.getElementById('ivWrapper');
@@ -3173,6 +3181,11 @@ function renderProfileActivityList(kind) {
                             document.body.style.overflow = 'hidden';
                         }
                     }).catch(function() {
+                        if (typeof window.forceClosePhotoPreview === 'function') {
+                            try { window.forceClosePhotoPreview(); } catch (e) {}
+                        } else if (typeof window.closePhotoPreview === 'function') {
+                            try { window.closePhotoPreview(); } catch (e) {}
+                        }
                         const viewer = document.getElementById('imgViewer');
                         const img = document.getElementById('ivImg');
                         const wrapper = document.getElementById('ivWrapper');
@@ -3188,6 +3201,11 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 if (openPostImagePreview(src, triggerEl)) return;
+                if (typeof window.forceClosePhotoPreview === 'function') {
+                    try { window.forceClosePhotoPreview(); } catch (e) {}
+                } else if (typeof window.closePhotoPreview === 'function') {
+                    try { window.closePhotoPreview(); } catch (e) {}
+                }
                 const viewer = document.getElementById('imgViewer');
                 const img = document.getElementById('ivImg');
                 const wrapper = document.getElementById('ivWrapper');
