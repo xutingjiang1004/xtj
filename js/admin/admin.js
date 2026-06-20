@@ -640,7 +640,7 @@
 
     function getAdminUserEffectiveRegTime(info) {
         if (!info) return '';
-        return info.auth_created_at || info.reg_time || '';
+        return info.reg_time || info.auth_created_at || '';
     }
 
     function mergeAdminUserInfo(base, next) {
