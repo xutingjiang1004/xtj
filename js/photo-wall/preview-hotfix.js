@@ -112,9 +112,8 @@
       '#photoPreviewOverlay .pp-zoom-btn .ui-icon,#photoPreviewOverlay .pp-info-btn .ui-icon,#photoPreviewOverlay .pp-share-btn .ui-icon,#photoPreviewOverlay .pp-rotate-btn .ui-icon,#photoPreviewOverlay .pp-delete-btn .ui-icon{display:flex!important;align-items:center!important;justify-content:center!important;width:20px!important;height:20px!important;line-height:0!important;margin:0!important;transform:none!important;}',
       '#photoPreviewOverlay .pp-zoom-btn svg,#photoPreviewOverlay .pp-info-btn svg,#photoPreviewOverlay .pp-share-btn svg,#photoPreviewOverlay .pp-rotate-btn svg,#photoPreviewOverlay .pp-delete-btn svg{display:block!important;width:20px!important;height:20px!important;margin:auto!important;overflow:visible!important;transform:none!important;transform-origin:center!important;}',
       '#photoPreviewOverlay .pp-rotate-btn svg g{transform:none!important;}',
-      '#photoPreviewOverlay .pp-info-modal{z-index:48!important;display:none;position:absolute;inset:0;background:rgba(4,8,16,.48)!important;backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important;align-items:center;justify-content:center;padding:24px;}',
-      '#photoPreviewOverlay .pp-info-modal.active{display:flex!important;}',
-      '#photoPreviewOverlay .pp-info-modal-content{pointer-events:auto!important;max-width:min(92vw,460px)!important;max-height:min(82vh,720px)!important;overflow:auto!important;}',
+      '#photoPreviewOverlay .pp-info-modal{z-index:48!important;}',
+      '#photoPreviewOverlay .pp-info-modal-content{pointer-events:auto!important;}',
       '@media (max-width:480px){#photoPreviewOverlay .pp-preview-toolbar{gap:8px!important;padding:7px 8px!important;bottom:calc(14px + env(safe-area-inset-bottom,0px))!important;}#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn{width:38px!important;height:38px!important;min-width:38px!important;min-height:38px!important;}}'
     ].join('');
     document.head.appendChild(style);
@@ -148,6 +147,7 @@
       '.pp-share-btn,' +
       '.pp-rotate-btn,' +
       '.pp-delete-btn,' +
+      '.pp-info-modal-close,' +
       '.pp-info-modal,' +
       '.pp-info-modal-content,' +
       '.pp-download-confirm-overlay,' +
@@ -680,6 +680,11 @@
     var closeBtn = modal.querySelector('.pp-info-modal-close');
     if (closeBtn && !closeBtn.__xtjInfoCloseBound) {
       closeBtn.__xtjInfoCloseBound = true;
+      closeBtn.addEventListener('pointerdown', function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+      }, true);
       closeBtn.addEventListener('click', function (event) {
         event.preventDefault();
         event.stopPropagation();
@@ -706,12 +711,35 @@
     state.infoOpen = false;
     if (root) root.classList.remove('pp-info-open');
     if (!modal) return;
-    modal.classList.remove('active', 'closing');
-    modal.style.display = 'none';
-    if (!silent) {
-      var body = infoBody();
-      if (body) body.innerHTML = '';
+    if (modal.__xtjInfoCloseTimer) {
+      clearTimeout(modal.__xtjInfoCloseTimer);
+      modal.__xtjInfoCloseTimer = 0;
     }
+    var content = modal.querySelector('.pp-info-modal-content');
+    var body = infoBody();
+    modal.classList.remove('active');
+    modal.classList.add('closing');
+    modal.style.pointerEvents = 'none';
+    if (!content) {
+      modal.style.display = 'none';
+      modal.classList.remove('closing');
+      modal.style.pointerEvents = '';
+      if (!silent && body) body.innerHTML = '';
+      return;
+    }
+    content.style.transition = 'transform 220ms cubic-bezier(.55,0,.85,.4), opacity 180ms ease';
+    content.style.transform = 'translate3d(0,14px,0) scale(.94)';
+    content.style.opacity = '0';
+    modal.__xtjInfoCloseTimer = window.setTimeout(function () {
+      modal.__xtjInfoCloseTimer = 0;
+      modal.style.display = 'none';
+      modal.classList.remove('closing');
+      modal.style.pointerEvents = '';
+      content.style.transition = '';
+      content.style.transform = '';
+      content.style.opacity = '';
+      if (!silent && body) body.innerHTML = '';
+    }, 240);
   }
 
   function showPhotoInfoInternal() {
@@ -721,11 +749,30 @@
     var root = overlay();
     if (!modal || !body || !photo) return;
     bindInfoModal();
+    if (modal.__xtjInfoCloseTimer) {
+      clearTimeout(modal.__xtjInfoCloseTimer);
+      modal.__xtjInfoCloseTimer = 0;
+    }
+    var content = modal.querySelector('.pp-info-modal-content');
     body.innerHTML = buildPhotoInfoHtml(photo);
+    modal.classList.remove('closing');
     modal.style.display = 'flex';
-    modal.classList.add('active');
+    modal.style.pointerEvents = 'auto';
     state.infoOpen = true;
     if (root) root.classList.add('pp-info-open');
+    if (content) {
+      content.style.transition = 'none';
+      content.style.transform = 'translate3d(0,18px,0) scale(.94)';
+      content.style.opacity = '0';
+      void content.offsetHeight;
+    }
+    requestAnimationFrame(function () {
+      modal.classList.add('active');
+      if (!content) return;
+      content.style.transition = 'transform 280ms cubic-bezier(.16,1,.3,1), opacity 220ms ease';
+      content.style.transform = 'translate3d(0,0,0) scale(1)';
+      content.style.opacity = '1';
+    });
     if (!photo.fileSize && photo.imageUrl) {
       fetchPhotoFileSize(photo).then(function (size) {
         if (!size) return;
@@ -849,14 +896,6 @@
     var surface = root || wrapper();
     if (!root || !surface || surface.__xtjUnifiedPreviewHandlersInstalled) return;
     surface.__xtjUnifiedPreviewHandlersInstalled = true;
-
-    ['touchstart', 'touchmove', 'touchend', 'touchcancel'].forEach(function (type) {
-      surface.addEventListener(type, function (event) {
-        if (isControl(event.target)) return;
-        if (type !== 'touchstart') event.preventDefault();
-        event.stopImmediatePropagation();
-      }, { capture: true, passive: false });
-    });
 
     surface.addEventListener('pointerdown', function (event) {
       if (isControl(event.target)) return;
