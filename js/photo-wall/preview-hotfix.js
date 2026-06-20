@@ -31,7 +31,9 @@
     pinchAnchorY: 0,
     lastTapAt: 0,
     suppressTapUntil: 0,
-    moved: false
+    moved: false,
+    closeFallbackTimer: 0,
+    forceClosing: false
   };
 
   function installFinalStyle() {
@@ -42,10 +44,17 @@
       '#photoPreviewOverlay,#photoPreviewOverlay *{ -webkit-tap-highlight-color: transparent; }',
       '#photoPreviewOverlay,#ppImageWrapper,#ppSlideTrack,#photoPreviewImage{touch-action:none!important;user-select:none!important;-webkit-user-select:none!important;-webkit-user-drag:none!important;overscroll-behavior:contain!important;}',
       '#photoPreviewOverlay #ppCompactBtn,#photoPreviewOverlay .pp-compact-btn{display:none!important;visibility:hidden!important;pointer-events:none!important}',
-      '#photoPreviewOverlay .pp-preview-toolbar{position:absolute!important;left:50%!important;bottom:calc(18px + env(safe-area-inset-bottom,0px))!important;z-index:18!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:10px!important;padding:8px 10px!important;border-radius:999px!important;background:rgba(12,18,28,.34)!important;border:1px solid rgba(255,255,255,.12)!important;box-shadow:0 10px 34px rgba(0,0,0,.18)!important;backdrop-filter:blur(16px) saturate(130%)!important;-webkit-backdrop-filter:blur(16px) saturate(130%)!important;transform:translate3d(-50%,10px,0)!important;opacity:0!important;transition:opacity .24s ease,transform .24s cubic-bezier(.16,1,.3,1)!important;}',
+      '#photoPreviewOverlay .photo-preview-close{pointer-events:auto!important;z-index:42!important;display:grid!important;place-items:center!important;left:auto!important;right:calc(12px + env(safe-area-inset-right,0px))!important;top:calc(16px + env(safe-area-inset-top,0px))!important;bottom:auto!important;margin:0!important;transform:translateY(-10px)!important;}',
+      '#photoPreviewOverlay .photo-preview-close .ui-icon{display:flex!important;align-items:center!important;justify-content:center!important;width:20px!important;height:20px!important;line-height:0!important;}',
+      '#photoPreviewOverlay .photo-preview-close svg{display:block!important;width:20px!important;height:20px!important;margin:auto!important;overflow:visible!important;transform:none!important;}',
+      '#photoPreviewOverlay .pp-preview-toolbar{position:absolute!important;left:50%!important;bottom:calc(18px + env(safe-area-inset-bottom,0px))!important;z-index:22!important;display:flex!important;align-items:center!important;justify-content:center!important;gap:10px!important;padding:8px 10px!important;border-radius:999px!important;background:rgba(12,18,28,.34)!important;border:1px solid rgba(255,255,255,.12)!important;box-shadow:0 10px 34px rgba(0,0,0,.18)!important;backdrop-filter:blur(16px) saturate(130%)!important;-webkit-backdrop-filter:blur(16px) saturate(130%)!important;transform:translate3d(-50%,10px,0)!important;opacity:0!important;transition:opacity .24s ease,transform .24s cubic-bezier(.16,1,.3,1)!important;}',
       '#photoPreviewOverlay.active .pp-preview-toolbar{opacity:1!important;transform:translate3d(-50%,0,0)!important;}',
-      '#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn{position:relative!important;inset:auto!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;width:42px!important;height:42px!important;min-width:42px!important;min-height:42px!important;display:flex!important;align-items:center!important;justify-content:center!important;padding:0!important;margin:0!important;line-height:0!important;opacity:1!important;transform:none!important;border-radius:999px!important;box-shadow:none!important}',
-      '#photoPreviewOverlay .pp-zoom-btn .ui-icon,#photoPreviewOverlay .pp-info-btn .ui-icon,#photoPreviewOverlay .pp-share-btn .ui-icon,#photoPreviewOverlay .pp-rotate-btn .ui-icon,#photoPreviewOverlay .pp-delete-btn .ui-icon{display:flex!important;align-items:center!important;justify-content:center!important;width:20px!important;height:20px!important;line-height:0!important}',
+      '#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn{position:relative!important;inset:auto!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;width:42px!important;height:42px!important;min-width:42px!important;min-height:42px!important;display:grid!important;place-items:center!important;padding:0!important;margin:0!important;line-height:0!important;opacity:1!important;transform:none!important;border-radius:999px!important;box-shadow:none!important;background:rgba(255,255,255,.055)!important;color:rgba(255,255,255,.86)!important;border:1px solid rgba(255,255,255,.11)!important;outline:none!important;appearance:none!important;-webkit-appearance:none!important;}',
+      '#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn:hover,#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn:hover,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn:hover,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn:hover,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn:hover{background:rgba(255,255,255,.09)!important;color:rgba(255,255,255,.94)!important;border-color:rgba(255,255,255,.15)!important;box-shadow:none!important;}',
+      '#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn:active,#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn:active,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn:active,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn:active,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn:active{background:rgba(255,255,255,.11)!important;color:rgba(255,255,255,.94)!important;border-color:rgba(255,255,255,.16)!important;box-shadow:none!important;transform:none!important;}',
+      '#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn:focus,#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn:focus,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn:focus,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn:focus,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn:focus{background:rgba(255,255,255,.055)!important;color:rgba(255,255,255,.86)!important;border-color:rgba(255,255,255,.11)!important;box-shadow:none!important;outline:none!important;}',
+      '#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn:focus-visible,#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn:focus-visible,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn:focus-visible,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn:focus-visible,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn:focus-visible{box-shadow:0 0 0 1px rgba(255,255,255,.32),0 0 0 4px rgba(255,255,255,.08)!important;outline:none!important;}',
+      '#photoPreviewOverlay .pp-zoom-btn .ui-icon,#photoPreviewOverlay .pp-info-btn .ui-icon,#photoPreviewOverlay .pp-share-btn .ui-icon,#photoPreviewOverlay .pp-rotate-btn .ui-icon,#photoPreviewOverlay .pp-delete-btn .ui-icon{display:flex!important;align-items:center!important;justify-content:center!important;width:20px!important;height:20px!important;line-height:0!important;margin:0!important;transform:none!important;}',
       '#photoPreviewOverlay .pp-zoom-btn svg,#photoPreviewOverlay .pp-info-btn svg,#photoPreviewOverlay .pp-share-btn svg,#photoPreviewOverlay .pp-rotate-btn svg,#photoPreviewOverlay .pp-delete-btn svg{display:block!important;width:20px!important;height:20px!important;margin:auto!important;overflow:visible!important;transform:none!important;transform-origin:center!important}',
       '#photoPreviewOverlay .pp-rotate-btn svg g{transform:none!important}',
       '@media (max-width:480px){#photoPreviewOverlay .pp-preview-toolbar{gap:8px!important;padding:7px 8px!important;bottom:calc(14px + env(safe-area-inset-bottom,0px))!important;}#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn{width:38px!important;height:38px!important;min-width:38px!important;min-height:38px!important;}}'
@@ -149,7 +158,26 @@
     }
   }
 
+  function clearCloseFallbackTimer() {
+    if (state.closeFallbackTimer) {
+      clearTimeout(state.closeFallbackTimer);
+      state.closeFallbackTimer = 0;
+    }
+  }
+
+  function scheduleCloseFallback(delay) {
+    clearCloseFallbackTimer();
+    state.closeFallbackTimer = window.setTimeout(function () {
+      state.closeFallbackTimer = 0;
+      var root = overlay();
+      if (root && root.classList.contains('active')) {
+        forceClosePhotoPreview();
+      }
+    }, delay || 150);
+  }
+
   function resetGestureState() {
+    clearCloseFallbackTimer();
     state.mode = 'idle';
     state.dragAxis = '';
     state.pointers.clear();
@@ -468,6 +496,94 @@
     }
   }
 
+  function forceClosePhotoPreview() {
+    var root = overlay();
+    if (state.forceClosing) return;
+    state.forceClosing = true;
+    clearCloseFallbackTimer();
+    try {
+      delete window.__xtjPreviewExplicitPhotos;
+      window.__xtjPhotoPreviewContext = null;
+      resetGestureState();
+      state.scale = 1;
+      state.tx = 0;
+      state.ty = 0;
+      state.rotation = 0;
+
+      if (root && typeof root._cleanupPreview === 'function' && !root.__xtjCleanupRunning) {
+        root.__xtjCleanupRunning = true;
+        try {
+          root._cleanupPreview();
+        } catch (_) {}
+        root.__xtjCleanupRunning = false;
+      }
+
+      if (root) {
+        root.classList.remove('active', 'closing', 'pp-closing', 'pp-hotfix-closing', 'pp-hotfix-basic-close', 'pp-post-mode');
+        root.style.opacity = '';
+        root.style.transition = '';
+        root.style.pointerEvents = '';
+        root.style.transform = '';
+      }
+
+      var img = previewImage();
+      if (img) {
+        img.style.transform = '';
+        img.style.transition = '';
+        img.style.opacity = '';
+        img.style.borderRadius = '';
+        img.style.transformOrigin = '';
+        img.classList.remove('zoomed', 'pp-placeholder');
+      }
+
+      var track = slideTrack();
+      if (track) {
+        track.style.transition = '';
+        track.style.transform = '';
+      }
+
+      var wrap = wrapper();
+      if (wrap) {
+        wrap.style.transition = '';
+        wrap.style.transform = '';
+      }
+
+      if (root && root._openOriginImg) {
+        root._openOriginImg.style.transition = '';
+        root._openOriginImg.style.opacity = '';
+      }
+
+      document.body.classList.remove('photo-previewing');
+      document.body.style.overflow = '';
+    } finally {
+      state.forceClosing = false;
+    }
+  }
+
+  function bindCloseButton(root) {
+    root = root || overlay();
+    if (!root) return;
+    var closeBtn = root.querySelector('.photo-preview-close');
+    if (!closeBtn || closeBtn.__xtjCloseBound) return;
+    closeBtn.__xtjCloseBound = true;
+    closeBtn.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (typeof window.closePhotoPreview === 'function') {
+        window.closePhotoPreview();
+      } else {
+        forceClosePhotoPreview();
+      }
+      window.setTimeout(function () {
+        var currentOverlay = overlay();
+        if (currentOverlay && currentOverlay.classList.contains('active')) {
+          forceClosePhotoPreview();
+        }
+      }, 150);
+    }, true);
+  }
+
   function ensurePreviewToolbar(root) {
     root = root || overlay();
     if (!root) return null;
@@ -618,6 +734,7 @@
   }
 
   function afterOpen() {
+    clearCloseFallbackTimer();
     state.scale = 1;
     state.tx = 0;
     state.ty = 0;
@@ -629,6 +746,7 @@
     state.suppressTapUntil = 0;
     cleanupLegacyControls();
     ensurePreviewToolbar();
+    bindCloseButton();
     installTouchFix();
     applyImageTransform(false);
     syncTrackTransform(0, false);
@@ -681,7 +799,15 @@
   window.closePhotoPreview = function () {
     resetGestureState();
     delete window.__xtjPreviewExplicitPhotos;
-    return withPreviewGuardDisabled(original.closePhotoPreview, this, arguments);
+    window.__xtjPhotoPreviewContext = null;
+    var result;
+    if (typeof original.closePhotoPreview === 'function') {
+      result = withPreviewGuardDisabled(original.closePhotoPreview, this, arguments);
+      scheduleCloseFallback(150);
+      return result;
+    }
+    forceClosePhotoPreview();
+    return result;
   };
 
   window.shareCurrentPhoto = function () {
@@ -726,6 +852,7 @@
     document.addEventListener('DOMContentLoaded', function () {
       installFinalStyle();
       cleanupLegacyControls();
+      bindCloseButton();
       wrapOpenPreview();
       installTouchFix();
     });
@@ -733,6 +860,7 @@
     installFinalStyle();
     cleanupLegacyControls();
     ensurePreviewToolbar();
+    bindCloseButton();
     wrapOpenPreview();
     installTouchFix();
   }
