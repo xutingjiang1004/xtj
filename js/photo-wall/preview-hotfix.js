@@ -45,6 +45,7 @@
     lastTapAt: 0,
     lastTapX: 0,
     lastTapY: 0,
+    ignoreNativeDblClickUntil: 0,
     suppressTapUntil: 0,
     closeFallbackTimer: 0,
     forceClosing: false,
@@ -360,6 +361,9 @@
   function toggleZoomAt(point) {
     var nextScale = state.scale > 1.01 ? 1 : 2;
     zoomAt(point.x, point.y, nextScale, true);
+    state.lastTapAt = 0;
+    state.lastTapX = 0;
+    state.lastTapY = 0;
     state.suppressTapUntil = Date.now() + 350;
   }
 
@@ -367,6 +371,7 @@
     var now = Date.now();
     if (now < state.suppressTapUntil) return;
     if (now - state.lastTapAt < 280 && Math.abs(point.x - state.lastTapX) < 24 && Math.abs(point.y - state.lastTapY) < 24) {
+      state.ignoreNativeDblClickUntil = now + 520;
       state.lastTapAt = 0;
       toggleZoomAt(point);
       return;
@@ -1029,6 +1034,11 @@
 
     surface.addEventListener('dblclick', function (event) {
       if (isControl(event.target) || isModalOpen()) return;
+      if (Date.now() < state.ignoreNativeDblClickUntil) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
       event.preventDefault();
       event.stopImmediatePropagation();
       toggleZoomAt({ x: event.clientX, y: event.clientY });
@@ -1069,6 +1079,7 @@
     state.lastTapAt = 0;
     state.lastTapX = 0;
     state.lastTapY = 0;
+    state.ignoreNativeDblClickUntil = 0;
     clearInteractionState();
     cleanupLegacyControls();
     ensurePreviewToolbar();
