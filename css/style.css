@@ -14377,3 +14377,247 @@ html[data-theme-transition="light"]::view-transition-old(root) {
     padding-top: 0 !important;
   }
 }
+
+#statModal .stat-user-group {
+  border: 1px solid rgba(167, 214, 184, 0.45) !important;
+  border-radius: 20px !important;
+  background: rgba(255, 255, 255, 0.58) !important;
+  padding: 16px !important;
+  margin-bottom: 14px !important;
+  overflow: hidden !important;
+}
+
+#statModal .stat-user-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  padding: 0 0 12px !important;
+  border-bottom: 1px solid rgba(150, 190, 165, 0.32) !important;
+  background: transparent !important;
+}
+
+#statModal .suh-left {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  min-width: 0 !important;
+}
+
+#statModal .suh-avatar {
+  width: 42px !important;
+  height: 42px !important;
+  border-radius: 50% !important;
+  display: grid !important;
+  place-items: center !important;
+  font-weight: 800 !important;
+  background: rgba(104, 190, 139, 0.82) !important;
+  color: #fff !important;
+  flex: 0 0 auto !important;
+}
+
+#statModal .suh-name {
+  font-weight: 800 !important;
+  color: var(--text-primary) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#statModal .suh-count {
+  flex: 0 0 auto !important;
+  padding: 6px 12px !important;
+  border-radius: 999px !important;
+  background: rgba(214, 241, 223, 0.85) !important;
+  color: #1d6b43 !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+  white-space: nowrap !important;
+}
+
+#statModal .stat-user-posts,
+#statModal .stat-stack {
+  display: flex !important;
+  flex-direction: column !important;
+  padding-top: 10px !important;
+}
+
+#statModal .stat-post-item {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 14px 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(150, 190, 165, 0.28) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  cursor: pointer !important;
+}
+
+#statModal .stat-post-item:last-child {
+  border-bottom: 0 !important;
+}
+
+#statModal .stat-post-item--no-thumb {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+#statModal .spi-main {
+  min-width: 0 !important;
+}
+
+#statModal .spi-content {
+  display: block !important;
+  font-size: 15px !important;
+  font-weight: 750 !important;
+  line-height: 1.45 !important;
+  color: var(--text-primary) !important;
+  word-break: break-word !important;
+  white-space: normal !important;
+}
+
+#statModal .spi-time {
+  display: block !important;
+  margin-top: 5px !important;
+  font-size: 12px !important;
+  color: var(--text-muted) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  width: auto !important;
+}
+
+#statModal .spi-thumb,
+#statModal .spi-thumb--video {
+  width: 68px !important;
+  height: 68px !important;
+  border-radius: 14px !important;
+  object-fit: cover !important;
+  flex: 0 0 auto !important;
+}
+
+#statModal .spi-thumb--video {
+  display: grid !important;
+  place-items: center !important;
+  background: rgba(20, 40, 32, 0.12) !important;
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+}
+
+#statModal .stat-record-card {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 14px 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(150, 190, 165, 0.28) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  cursor: pointer !important;
+}
+
+#statModal .stat-record-card:last-child {
+  border-bottom: 0 !important;
+}
+
+#statModal .stat-record-card--no-thumb {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+#statModal .src-main {
+  min-width: 0 !important;
+}
+
+#statModal .src-title {
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  color: var(--text-primary) !important;
+  line-height: 1.45 !important;
+}
+
+#statModal .src-summary {
+  margin-top: 4px !important;
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+  color: rgba(33, 70, 51, 0.92) !important;
+  word-break: break-word !important;
+}
+
+#statModal .src-note {
+  margin-top: 6px !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+  color: rgba(44, 79, 58, 0.84) !important;
+  word-break: break-word !important;
+}
+
+#statModal .src-time {
+  display: block !important;
+  margin-top: 6px !important;
+  font-size: 12px !important;
+  color: var(--text-muted) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+#statModal .stat-record-thumb,
+#statModal .stat-record-thumb--video {
+  width: 68px !important;
+  height: 68px !important;
+  border-radius: 14px !important;
+  object-fit: cover !important;
+  flex: 0 0 auto !important;
+}
+
+#statModal .stat-record-thumb--video {
+  display: grid !important;
+  place-items: center !important;
+  background: rgba(20, 40, 32, 0.12) !important;
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  font-weight: 800 !important;
+}
+
+@media (max-width: 640px) {
+  #statModal .stat-user-group {
+    padding: 14px !important;
+    border-radius: 18px !important;
+  }
+
+  #statModal .stat-post-item {
+    grid-template-columns: minmax(0, 1fr) 58px !important;
+    gap: 10px !important;
+  }
+
+  #statModal .stat-post-item--no-thumb {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #statModal .stat-record-card {
+    grid-template-columns: minmax(0, 1fr) 58px !important;
+    gap: 10px !important;
+  }
+
+  #statModal .stat-record-card--no-thumb {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  #statModal .spi-thumb,
+  #statModal .spi-thumb--video,
+  #statModal .stat-record-thumb,
+  #statModal .stat-record-thumb--video {
+    width: 58px !important;
+    height: 58px !important;
+    border-radius: 12px !important;
+  }
+
+  #statModal .spi-time,
+  #statModal .src-time {
+    white-space: nowrap !important;
+    width: auto !important;
+  }
+}
