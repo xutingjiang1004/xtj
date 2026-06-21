@@ -2541,7 +2541,7 @@ function renderProfileActivityList(kind) {
                     authUI.style.display = "flex";
                     annBtnWrapper.style.display = "block";
                     if (reportBtnWrapper) reportBtnWrapper.style.display = "block";
-                    bindHeaderActionButtons();
+                    if (typeof window.bindHeaderActionButtons === 'function') window.bindHeaderActionButtons();
                     document.getElementById("myName").textContent = currentUser;
                     var avatar = document.getElementById("myAvatar");
                     avatar.textContent = currentUser[0].toUpperCase();
@@ -10155,6 +10155,368 @@ function renderProfileActivityList(kind) {
                 }
             };
 
+        })();
+
+        (function installEmergencyActionRescue() {
+            if (window.__xtjEmergencyActionRescueV1) return;
+            window.__xtjEmergencyActionRescueV1 = true;
+
+            function setBodyLockFromVisibleModals() {
+                var activeIds = ['announcementModal', 'reportModal', 'reportHistoryModal', 'statModal'];
+                var hasActive = activeIds.some(function(id) {
+                    var el = document.getElementById(id);
+                    return !!(el && el.classList.contains('active'));
+                });
+                document.body.style.overflow = hasActive ? 'hidden' : '';
+            }
+
+            function getSimpleStatPostMap() {
+                var map = {};
+                (Array.isArray(statAllPosts) ? statAllPosts : []).forEach(function(post) {
+                    if (post && post.id != null) map[String(post.id)] = normalizePost(post);
+                });
+                return map;
+            }
+
+            function simplePostSummary(post) {
+                var normalized = normalizePost(post || {});
+                var text = String(normalized.content || '').trim();
+                if (text) return text.length > 48 ? text.slice(0, 48) + '...' : text;
+                if (normalized.media_type === 'video') return '视频动态';
+                if (normalized.media_type === 'image') return '图片动态';
+                return '无文字内容';
+            }
+
+            function simpleStatPostRow(post, index) {
+                var normalized = normalizePost(post || {});
+                var detailOnclick = "openStatPostDetail('" + safeJsStr(String(normalized.id || '')) + "')";
+                return [
+                    '<article class="stat-post-item stat-row" role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}" style="--xtj-enter-delay:' + Math.min((index || 0) * 20, 180) + 'ms;">',
+                    '<div class="stat-row-main">',
+                    '<div class="stat-row-title">' + escapeHtml(simplePostSummary(normalized)) + '</div>',
+                    '<div class="stat-row-meta"><span>' + escapeHtml(String(normalized.user_name || '')) + '</span><span>' + escapeHtml(new Date(normalized.created_at || Date.now()).toLocaleString()) + '</span></div>',
+                    '</div>',
+                    '</article>'
+                ].join('');
+            }
+
+            renderPostStats = window.renderPostStats = function() {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var userMap = {};
+                (Array.isArray(statAllPosts) ? statAllPosts : []).forEach(function(post) {
+                    if (!post || !post.user_name) return;
+                    if (!userMap[post.user_name]) userMap[post.user_name] = [];
+                    userMap[post.user_name].push(post);
+                });
+                var entries = Object.keys(userMap).map(function(name) {
+                    return [name, sortPosts(userMap[name] || [])];
+                }).sort(function(a, b) {
+                    return b[1].length - a[1].length;
+                });
+                if (!entries.length) {
+                    body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无动态记录</div>';
+                    return;
+                }
+                body.innerHTML = entries.map(function(entry) {
+                    var name = entry[0];
+                    var posts = entry[1];
+                    return [
+                        '<section class="stat-user-group">',
+                        '<div class="stat-user-header"><div class="suh-left"><div class="suh-avatar">' + escapeHtml(String(name).slice(0, 1).toUpperCase()) + '</div><span class="suh-name">' + escapeHtml(name) + '</span></div><span class="suh-count">' + posts.length + ' 条</span></div>',
+                        '<div class="stat-user-posts">' + posts.slice(0, 3).map(function(post, index) { return simpleStatPostRow(post, index); }).join('') + '</div>',
+                        (posts.length > 3 ? '<div style="padding-top:8px;"><button type="button" class="stat-view-btn" onclick="loadUserAllPosts(\'' + safeJsStr(name) + '\')">查看全部 ' + posts.length + ' 条</button></div>' : ''),
+                        '</section>'
+                    ].join('');
+                }).join('');
+            };
+
+            window.loadUserAllPosts = function(userName) {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var userPosts = sortPosts((Array.isArray(statAllPosts) ? statAllPosts : []).filter(function(post) {
+                    return post && post.user_name === userName;
+                }));
+                body.innerHTML = [
+                    '<div class="stat-history-head"><button type="button" class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">返回总动态</button></div>',
+                    '<div class="stat-stack">' + userPosts.map(function(post, index) { return simpleStatPostRow(post, index); }).join('') + '</div>'
+                ].join('');
+            };
+
+            renderViewStats = window.renderViewStats = function() {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var history = typeof getViewHistory === 'function' ? getViewHistory() : [];
+                if (!history.length) {
+                    body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无浏览记录</div>';
+                    return;
+                }
+                var postMap = getSimpleStatPostMap();
+                body.innerHTML = history.map(function(item, index) {
+                    var post = postMap[String(item.post_id)] || null;
+                    var detailOnclick = post ? "openStatPostDetail('" + safeJsStr(String(post.id)) + "')" : '';
+                    return [
+                        '<article class="stat-view-item stat-row' + (post ? '' : ' stat-row--no-media') + '"' + (post ? ' role="button" tabindex="0" onclick="' + detailOnclick + '"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 16, 160) + 'ms;">',
+                        '<div class="stat-row-main">',
+                        '<div class="stat-row-title">' + escapeHtml(String(item.user_name || '')) + ' 浏览了 ' + escapeHtml(String(item.post_author || '')) + ' 的帖子</div>',
+                        '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(String(item.post_content || (post ? simplePostSummary(post) : '无内容'))) + '</div></div>',
+                        '<div class="stat-row-side"><span class="stat-row-time">' + escapeHtml(new Date(item.viewed_at || Date.now()).toLocaleString()) + '</span></div>',
+                        '</div>',
+                        '</article>'
+                    ].join('');
+                }).join('');
+            };
+
+            renderLikeStats = window.renderLikeStats = function() {
+                var body = document.getElementById('statModalBody');
+                if (!body) return;
+                var postMap = getSimpleStatPostMap();
+                function renderRecord(kind, item, index) {
+                    var post = postMap[String(item.post_id)] || null;
+                    var detailOnclick = post ? "openStatPostDetail('" + safeJsStr(String(post.id)) + "')" : '';
+                    return [
+                        '<article class="stat-record-entry stat-row ' + (kind === 'likes' ? 'stat-like-item' : 'stat-comment-item') + '"' + (post ? ' role="button" tabindex="0" onclick="' + detailOnclick + '"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 14, 160) + 'ms;">',
+                        '<div class="stat-row-main">',
+                        '<div class="stat-row-title">' + escapeHtml(String(item.user_name || '匿名用户')) + (kind === 'likes' ? ' 点赞了这条帖子' : ' 评论了这条帖子') + '</div>',
+                        '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(post ? simplePostSummary(post) : '（帖子已删除）') + '</div>' + (kind === 'comments' ? '<div class="stat-record-note">' + escapeHtml(String(item.content || '')) + '</div>' : '') + '</div>',
+                        '<div class="stat-row-side"><span class="stat-row-time">' + escapeHtml(new Date(item.created_at || Date.now()).toLocaleString()) + '</span></div>',
+                        '</div>',
+                        '</article>'
+                    ].join('');
+                }
+                var likesHtml = statAllLikes.length
+                    ? statAllLikes.map(function(item, index) { return renderRecord('likes', item, index); }).join('')
+                    : '<div class="stat-empty" style="padding:12px 0;">暂无点赞记录</div>';
+                var commentsHtml = statAllComments.length
+                    ? statAllComments.slice().reverse().map(function(item, index) { return renderRecord('comments', item, index); }).join('')
+                    : '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
+                body.innerHTML = '<div class="stat-two-col stat-two-col--flat"><section class="stat-col stat-col--flat"><div class="stat-col-title">点赞记录</div>' + likesHtml + '</section><section class="stat-col stat-col--flat"><div class="stat-col-title">评论记录</div>' + commentsHtml + '</section></div>';
+            };
+
+            function applySimpleStatSnapshot(snapshot) {
+                if (!snapshot) return;
+                var posts = Array.isArray(snapshot.posts) ? snapshot.posts : [];
+                var comments = Array.isArray(snapshot.comments) ? snapshot.comments : [];
+                var likes = Array.isArray(snapshot.likes) ? snapshot.likes : [];
+                var visiblePosts = normalizePosts(posts).filter(function(p) {
+                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p);
+                });
+                var visiblePostIds = new Set(visiblePosts.map(function(post) { return String(post.id); }));
+                statAllPosts = visiblePosts;
+                statAllComments = comments.filter(function(item) { return item && visiblePostIds.has(String(item.post_id)); });
+                statAllLikes = likes.filter(function(item) { return item && visiblePostIds.has(String(item.post_id)); });
+                statCacheTime = Date.now();
+            }
+
+            async function fetchSimpleStatSnapshot() {
+                var result = await Promise.all([
+                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
+                    sb.from("comments").select("*").order("created_at"),
+                    sb.from("likes").select("*").order("created_at", { ascending: false })
+                ]);
+                return {
+                    posts: result[0].data || [],
+                    comments: result[1].data || [],
+                    likes: result[2].data || []
+                };
+            }
+
+            refreshStatModal = window.refreshStatModal = function() {
+                var modal = document.getElementById('statModal');
+                if (!modal || !modal.classList.contains('active') || !statCurrentType) return;
+                renderStatByType(statCurrentType);
+            };
+
+            window.openStatDetail = async function(type) {
+                var modal = document.getElementById('statModal');
+                var title = document.getElementById('statModalTitle');
+                var body = document.getElementById('statModalBody');
+                if (!modal || !body) return;
+                statCurrentType = type;
+                window.__xtjStatRequestId = (window.__xtjStatRequestId || 0) + 1;
+                var requestId = window.__xtjStatRequestId;
+                if (title) {
+                    title.textContent = type === 'posts' ? '总动态' : (type === 'views' ? '总浏览' : '点赞和评论');
+                }
+                modal.classList.add('active');
+                setBodyLockFromVisibleModals();
+                body.innerHTML = getXtjLoadingHtml('加载中..', '', 'feed');
+                try {
+                    if (Array.isArray(feedAllPosts) && feedAllPosts.length) {
+                        applySimpleStatSnapshot({
+                            posts: feedAllPosts,
+                            comments: feedAllComments || [],
+                            likes: feedAllLikes || []
+                        });
+                    } else if (!(Array.isArray(statAllPosts) && statAllPosts.length)) {
+                        var snapshot = await fetchSimpleStatSnapshot();
+                        if (requestId !== window.__xtjStatRequestId) return;
+                        applySimpleStatSnapshot(snapshot);
+                    }
+                    if (requestId !== window.__xtjStatRequestId) return;
+                    renderStatByType(type);
+                } catch (e) {
+                    if (requestId !== window.__xtjStatRequestId) return;
+                    body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">加载失败，请重试</div>';
+                    console.error('openStatDetail rescue error:', e);
+                }
+            };
+
+            window.openAnnouncementModal = function() {
+                var overlay = document.getElementById('announcementModal');
+                if (!overlay) return;
+                var listContainer = document.getElementById('announcementListContainer');
+                var detail = document.getElementById('announcementDetail');
+                var adminArea = document.getElementById('announcementAdminArea');
+                var list = document.getElementById('announcementList');
+                overlay.classList.add('active');
+                if (listContainer) listContainer.style.display = 'block';
+                if (detail) {
+                    detail.classList.remove('active');
+                    detail.style.display = 'none';
+                }
+                if (adminArea) adminArea.style.display = isAdmin() ? 'block' : 'none';
+                if (list && !list.innerHTML.trim()) {
+                    list.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无公告</div>';
+                }
+                try {
+                    if (typeof loadAnnouncements === 'function') {
+                        Promise.resolve(loadAnnouncements()).then(function() {
+                            if (typeof renderAnnouncementList === 'function') {
+                                renderAnnouncementList();
+                            } else if (list && !list.innerHTML.trim()) {
+                                list.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无公告</div>';
+                            }
+                        }).catch(function() {
+                            if (list && !list.innerHTML.trim()) {
+                                list.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无公告</div>';
+                            }
+                        });
+                    }
+                } catch (_) {}
+                setBodyLockFromVisibleModals();
+            };
+
+            window.closeAnnouncementModal = function() {
+                var overlay = document.getElementById('announcementModal');
+                if (!overlay) return;
+                overlay.classList.remove('active');
+                setBodyLockFromVisibleModals();
+            };
+
+            window.switchReportView = typeof window.switchReportView === 'function' ? window.switchReportView : function(view) {
+                var formBody = document.getElementById('reportModalFormBody');
+                var recordsPanel = document.getElementById('reportRecordsPanel');
+                if (formBody) formBody.style.display = view === 'records' ? 'none' : 'block';
+                if (recordsPanel) recordsPanel.style.display = view === 'records' ? 'block' : 'none';
+            };
+
+            window.switchReportType = typeof window.switchReportType === 'function' ? window.switchReportType : function(type) {
+                _reportType = type || 'post';
+            };
+
+            window.toggleReportRecords = typeof window.toggleReportRecords === 'function' ? window.toggleReportRecords : function() {
+                if (typeof window.switchReportView === 'function') window.switchReportView('records');
+            };
+
+            window.selectReportReason = typeof window.selectReportReason === 'function' ? window.selectReportReason : function(btn) {
+                document.querySelectorAll('.report-reason-btn').forEach(function(node) { node.classList.remove('selected'); });
+                if (btn) btn.classList.add('selected');
+                _reportSelectedReason = btn ? String(btn.dataset.reason || btn.textContent || '') : null;
+                var submitBtn = document.getElementById('reportSubmitBtn');
+                if (submitBtn) submitBtn.disabled = false;
+            };
+
+            window.submitReport = typeof window.submitReport === 'function' ? window.submitReport : function() {
+                showToast('举报功能暂不可用，请稍后重试');
+            };
+
+            window.openReportModal = function() {
+                if (!currentUser) { showToast('请先登录'); return; }
+                var overlay = document.getElementById('reportModal');
+                if (!overlay) return;
+                _reportType = 'post';
+                _reportView = 'form';
+                _reportSelectedId = null;
+                _reportSelectedReason = null;
+                _reportTargetUser = null;
+                _reportContentData = [];
+                overlay.classList.add('active');
+                var formBody = document.getElementById('reportModalFormBody');
+                var recordsPanel = document.getElementById('reportRecordsPanel');
+                if (formBody) formBody.style.display = 'block';
+                if (recordsPanel) recordsPanel.style.display = 'none';
+                document.querySelectorAll('.report-type-tab').forEach(function(node) {
+                    node.classList.toggle('active', node.dataset.type === 'post');
+                });
+                document.querySelectorAll('.report-reason-btn').forEach(function(node) {
+                    node.classList.remove('selected');
+                });
+                var reportError = document.getElementById('reportError');
+                if (reportError) {
+                    reportError.style.display = 'none';
+                    reportError.textContent = '';
+                }
+                var list = document.getElementById('reportContentList');
+                if (list) {
+                    list.innerHTML = '<div class="report-loading">加载中...</div>';
+                }
+                try {
+                    if (typeof loadReportContentList === 'function') {
+                        Promise.resolve(loadReportContentList()).catch(function() {
+                            if (list) list.innerHTML = '<div class="report-loading">加载失败，请稍后重试</div>';
+                        });
+                    } else if (list) {
+                        list.innerHTML = '<div class="report-loading">加载失败，请稍后重试</div>';
+                    }
+                } catch (_) {
+                    if (list) list.innerHTML = '<div class="report-loading">加载失败，请稍后重试</div>';
+                }
+                setBodyLockFromVisibleModals();
+            };
+
+            window.closeReportModal = function() {
+                var overlay = document.getElementById('reportModal');
+                if (!overlay) return;
+                overlay.classList.remove('active');
+                setBodyLockFromVisibleModals();
+            };
+
+            window.bindHeaderActionButtons = function() {
+                if (window.__xtjHeaderActionsBound) return;
+                window.__xtjHeaderActionsBound = true;
+                var annBtn = document.getElementById('announcementBtn');
+                if (annBtn) {
+                    annBtn.onclick = null;
+                    annBtn.addEventListener('click', function(event) {
+                        event.preventDefault();
+                        window.openAnnouncementModal();
+                    });
+                }
+                var reportBtn = document.getElementById('reportBtn');
+                if (reportBtn) {
+                    reportBtn.onclick = null;
+                    reportBtn.addEventListener('click', function(event) {
+                        event.preventDefault();
+                        window.openReportModal();
+                    });
+                }
+            };
+
+            document.addEventListener('DOMContentLoaded', function() {
+                if (typeof window.bindHeaderActionButtons === 'function') window.bindHeaderActionButtons();
+            });
+            if (typeof window.bindHeaderActionButtons === 'function') window.bindHeaderActionButtons();
+
+            var originalCloseModal = window.closeModal;
+            window.closeModal = function(id) {
+                if (typeof originalCloseModal === 'function') {
+                    originalCloseModal(id);
+                }
+                if (id === 'statModal') {
+                    setBodyLockFromVisibleModals();
+                }
+            };
         })();
 
         (function installFinalUiAndDataOverrides() {
