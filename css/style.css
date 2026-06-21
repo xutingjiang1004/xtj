@@ -14527,41 +14527,71 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   grid-template-columns: minmax(0, 1fr) !important;
 }
 
-#statModal .src-main {
+#statModal .stat-record-main {
   min-width: 0 !important;
 }
 
-#statModal .src-title {
-  font-size: 14px !important;
+#statModal .stat-record-title {
+  font-size: 15px !important;
   font-weight: 800 !important;
   color: var(--text-primary) !important;
   line-height: 1.45 !important;
-}
-
-#statModal .src-summary {
-  margin-top: 4px !important;
-  font-size: 14px !important;
-  line-height: 1.5 !important;
-  color: rgba(33, 70, 51, 0.92) !important;
   word-break: break-word !important;
 }
 
-#statModal .src-note {
-  margin-top: 6px !important;
+#statModal .stat-record-copy {
+  margin-top: 4px !important;
   font-size: 13px !important;
   line-height: 1.5 !important;
-  color: rgba(44, 79, 58, 0.84) !important;
+  color: var(--text-muted) !important;
   word-break: break-word !important;
 }
 
-#statModal .src-time {
-  display: block !important;
+#statModal .stat-record-note {
   margin-top: 6px !important;
+  padding: 8px 10px !important;
+  border-radius: 12px !important;
+  background: rgba(232, 248, 238, 0.72) !important;
+  color: rgba(30, 70, 48, 0.9) !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+  word-break: break-word !important;
+}
+
+#statModal .stat-record-meta {
+  display: block !important;
+  margin-top: 5px !important;
   font-size: 12px !important;
   color: var(--text-muted) !important;
   white-space: nowrap !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
+}
+
+#statModal .stat-section-title {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  margin: 0 0 10px !important;
+  font-size: 15px !important;
+  font-weight: 800 !important;
+  color: var(--text-primary) !important;
+  padding: 0 !important;
+}
+
+#statModal .stat-two-col {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 16px !important;
+}
+
+#statModal .stat-col {
+  min-width: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 #statModal .stat-record-thumb,
@@ -14616,8 +14646,12 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   }
 
   #statModal .spi-time,
-  #statModal .src-time {
+  #statModal .stat-record-meta {
     white-space: nowrap !important;
     width: auto !important;
+  }
+
+  #statModal .stat-two-col {
+    grid-template-columns: 1fr !important;
   }
 }
