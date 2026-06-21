@@ -2628,35 +2628,132 @@ function renderProfileActivityList(kind) {
             };
 
             // ===================== 点赞 =====================
+            function getCurrentLikeIdentityValues() {
+                var values = [];
+                if (deviceId) values.push(String(deviceId));
+                if (currentUser) values.push(String(currentUser));
+                return Array.from(new Set(values.filter(Boolean)));
+            }
+
+            function makeLikeLookupKeys(postId, actorKey, userName) {
+                var pid = String(postId || '');
+                var keys = [];
+                if (actorKey) keys.push(pid + '|' + String(actorKey));
+                if (userName) keys.push(pid + '|' + String(userName));
+                return Array.from(new Set(keys));
+            }
+
+            function isLikeOwnedByCurrentUser(like, postId) {
+                if (!like) return false;
+                if (postId != null && String(like.post_id || '') !== String(postId)) return false;
+                if (currentUser && String(like.user_name || '') === String(currentUser)) return true;
+                var actor = String(like.actor_key || '');
+                if (!actor) return false;
+                return getCurrentLikeIdentityValues().indexOf(actor) >= 0;
+            }
+
+            function isPostLikedByCurrentUser(likeUserMap, postId) {
+                var keys = makeLikeLookupKeys(postId, deviceId, currentUser);
+                for (var i = 0; i < keys.length; i++) {
+                    if (likeUserMap && likeUserMap[keys[i]]) return true;
+                }
+                return false;
+            }
+
+            function setLikeButtonState(btn, liked) {
+                if (!btn) return;
+                btn.classList.toggle('liked', !!liked);
+                btn.textContent = liked ? '已赞' : '点赞';
+                btn.setAttribute('aria-pressed', liked ? 'true' : 'false');
+            }
+
+            function persistFeedLikesCache() {
+                try {
+                    var raw = localStorage.getItem(CACHE_KEY);
+                    if (!raw) return;
+                    var parsed = JSON.parse(raw);
+                    if (!parsed || typeof parsed !== 'object') return;
+                    if (!parsed.data || typeof parsed.data !== 'object') parsed.data = {};
+                    parsed.data.likes = Array.isArray(feedAllLikes) ? feedAllLikes : [];
+                    parsed.timestamp = Date.now();
+                    localStorage.setItem(CACHE_KEY, JSON.stringify(parsed));
+                } catch (e) {}
+            }
+
+            function updateLikeStatsText(statsEl, liked) {
+                if (!statsEl) return;
+                var text = statsEl.textContent || '';
+                var match = text.match(/点赞 (\d+)/);
+                if (!match) return;
+                var current = parseInt(match[1], 10) || 0;
+                var next = liked ? current + 1 : Math.max(0, current - 1);
+                statsEl.textContent = text.replace(/点赞 \d+/, '点赞 ' + next);
+            }
+
+            function updatePostLikeUi(postId, liked, likeRecord) {
+                var pid = String(postId || '');
+                if (!Array.isArray(feedAllLikes)) feedAllLikes = [];
+                feedAllLikes = feedAllLikes.filter(function(item) {
+                    return !isLikeOwnedByCurrentUser(item, pid);
+                });
+                if (liked) {
+                    feedAllLikes.push(likeRecord || {
+                        post_id: pid,
+                        user_name: currentUser,
+                        actor_key: deviceId
+                    });
+                }
+                persistFeedLikesCache();
+
+                document.querySelectorAll('.post[data-post-id]').forEach(function(postEl) {
+                    if (String(postEl.getAttribute('data-post-id') || '') !== pid) return;
+                    var likeBtn = postEl.querySelector('.actions .action-btn');
+                    var statsEl = postEl.querySelector('.post-stats-text');
+                    setLikeButtonState(likeBtn, liked);
+                    updateLikeStatsText(statsEl, liked);
+                });
+            }
+
             window.toggleLike = async function (btn, postId) {
                 if (!currentUser) { showToast("请先登录"); return; }
                 if (isUserMuted()) { showToast("您已被禁言，无法互动"); return; }
-                const isLiked = btn.classList.contains("liked");
-                const statsText = btn.closest('.post').querySelector('.post-stats-text');
-
-                if (isLiked) {
-                    btn.classList.remove("liked");
-                } else {
-                    btn.classList.add("liked");
-                    createHeartParticles(btn);
-                }
-                btn.textContent = isLiked ? "❤️ 已赞" : "❤️ 点赞";
+                if (!btn || btn.dataset.likePending === '1') return;
+                var wasLiked = btn.classList.contains("liked");
+                btn.dataset.likePending = '1';
+                btn.disabled = true;
 
                 try {
-                    if (isLiked) {
-                        await sb.from("likes").delete().eq("post_id", postId).eq("actor_key", deviceId);
+                    if (wasLiked) {
+                        var deleteQuery = sb.from("likes").delete().eq("post_id", postId);
+                        var currentIds = getCurrentLikeIdentityValues();
+                        var orParts = [];
+                        if (currentUser) orParts.push('user_name.eq.' + currentUser);
+                        currentIds.forEach(function(value) {
+                            orParts.push('actor_key.eq.' + value);
+                        });
+                        if (orParts.length) {
+                            await deleteQuery.or(orParts.join(','));
+                        } else {
+                            await deleteQuery.eq("actor_key", deviceId);
+                        }
+                        updatePostLikeUi(postId, false);
                     } else {
-                        await sb.from("likes").insert([{ post_id: postId, user_name: currentUser, actor_key: deviceId }]);
-                    }
-                    const match = statsText.textContent.match(/点赞 (\d+)/);
-                    if (match) {
-                        const num = parseInt(match[1]);
-                        statsText.innerHTML = statsText.innerHTML.replace(/点赞 \d+/, `点赞 ${isLiked ? num-1 : num+1}`);
+                        var likeRecord = { post_id: postId, user_name: currentUser, actor_key: deviceId };
+                        await sb.from("likes").insert([likeRecord]);
+                        updatePostLikeUi(postId, true, likeRecord);
+                        createHeartParticles(btn);
                     }
                     updateFeedStats();
                     refreshStatModal();
                     loadProfileActivity(true);
-                } catch (e) { console.error(e); }
+                } catch (e) {
+                    console.error(e);
+                    updatePostLikeUi(postId, wasLiked);
+                } finally {
+                    setLikeButtonState(btn, btn.classList.contains('liked'));
+                    btn.disabled = false;
+                    delete btn.dataset.likePending;
+                }
             };
 
             function createHeartParticles(btn) {
@@ -3741,7 +3838,7 @@ function renderProfileActivityList(kind) {
                 const postsHtml = posts.map(p => {
                     const pLikes = likeMap[p.id] || [];
                     const pComms = commentMap[p.id] || [];
-                    const isLiked = likeUserMap[p.id + '|' + deviceId];
+                    const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
                     const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
                     return `
                 <div class="post glass" data-post-id="${escapeHtml(p.id)}">
@@ -3756,7 +3853,7 @@ function renderProfileActivityList(kind) {
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none" playsinline></video>`:`<img data-post-id="${escapeHtml(p.id)}" data-post-user="${escapeHtml(p.user_name || '')}" data-post-created-at="${escapeHtml(p.created_at || '')}" data-post-views="${escapeHtml(String(p.views || 0))}" data-actor-key="${escapeHtml(String(p.actor_key || ''))}" data-can-delete="${canDelPost ? '1' : '0'}" src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}', this)">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'❤️':'点赞'}</button>
+                    <button class="action-btn ${isLiked?'liked':''}" aria-pressed="${isLiked ? 'true' : 'false'}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'已赞':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">评论</button>
                     ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
@@ -3851,7 +3948,9 @@ function renderProfileActivityList(kind) {
                 likes.forEach(l => {
                     if (!likeMap[l.post_id]) likeMap[l.post_id] = [];
                     likeMap[l.post_id].push(l);
-                    likeUserMap[l.post_id + '|' + l.actor_key] = true;
+                    makeLikeLookupKeys(l.post_id, l.actor_key, l.user_name).forEach(function(key) {
+                        likeUserMap[key] = true;
+                    });
                 });
 
                 return { commentMap, likeMap, likeUserMap };
@@ -4059,7 +4158,7 @@ function renderProfileActivityList(kind) {
                 feed.innerHTML = visiblePosts.length ? visiblePosts.map(function(post) {
                     const pLikes = likeMap[p.id] || [];
                     const pComms = commentMap[p.id] || [];
-                    const isLiked = likeUserMap[p.id + '|' + deviceId];
+                    const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
                     const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
                     return `
                 <div class="post glass" data-post-id="${escapeHtml(p.id)}">
@@ -4074,7 +4173,7 @@ function renderProfileActivityList(kind) {
                   ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none" playsinline></video>`:`<img data-post-id="${escapeHtml(p.id)}" data-post-user="${escapeHtml(p.user_name || '')}" data-post-created-at="${escapeHtml(p.created_at || '')}" data-post-views="${escapeHtml(String(p.views || 0))}" data-actor-key="${escapeHtml(String(p.actor_key || ''))}" data-can-delete="${canDelPost ? '1' : '0'}" src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}', this)">`}</div>`:''}
                   <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
                   <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'❤️':'点赞'}</button>
+                    <button class="action-btn ${isLiked?'liked':''}" aria-pressed="${isLiked ? 'true' : 'false'}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'已赞':'点赞'}</button>
                     <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">评论</button>
                     ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
                     ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
@@ -4324,7 +4423,7 @@ function renderProfileActivityList(kind) {
                 var normalized = normalizePost(post);
                 var pLikes = likeMap[normalized.id] || [];
                 var pComms = commentMap[normalized.id] || [];
-                var isLiked = likeUserMap[normalized.id + '|' + deviceId];
+                var isLiked = isPostLikedByCurrentUser(likeUserMap, normalized.id);
                 var canDelete = canDeletePost(normalized);
                 var mediaDataAttrs = [
                     'data-post-id="' + escapeHtml(String(normalized.id)) + '"',

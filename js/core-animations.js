@@ -69,15 +69,17 @@
 
   window.createHeartParticles = function () {};
 
-  window.toggleLike = function (btn, postId) {
+  window.toggleLike = async function (btn, postId) {
     if (!window.currentUser) { if (window.showToast) window.showToast('请先登录'); return; }
     var wasLiked = btn.classList.contains('liked');
-    _origToggleLike(btn, postId);
-    if (wasLiked || !btn.classList.contains('liked') || !hasGSAP()) return;
+    var result = await _origToggleLike(btn, postId);
+    var isLikedNow = btn.classList.contains('liked');
+    if (wasLiked || !isLikedNow || !hasGSAP()) return result;
     var tl = gsap.timeline();
     tl.to(btn, { scale: 1.35, duration: 0.1, ease: 'power2.out' });
     tl.to(btn, { scale: 1, duration: 0.4, ease: 'elastic.out(1, 0.35)' });
     spawnLikeBurst(btn);
+    return result;
   };
 
   function spawnLikeBurst(btn) {
