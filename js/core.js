@@ -10485,6 +10485,7 @@ function renderProfileActivityList(kind) {
 
             window.openStatDetail = async function(type) {
                 statCurrentType = type;
+                var requestId = ++statOpenSeq;
                 var titles = {
                     posts: '总动态 - 按用户分组',
                     views: '总浏览 - 浏览记录',
@@ -10494,7 +10495,7 @@ function renderProfileActivityList(kind) {
                 var body = document.getElementById('statModalBody');
                 var modal = document.getElementById('statModal');
                 if (title) title.textContent = titles[type] || '统计详情';
-                if (modal) modal.classList.add('active');
+                if (modal && !modal.classList.contains('active')) modal.classList.add('active');
                 // 全面清除GSAP残留在弹窗上的内联样式，并杀死正在运行的GSAP动画
                 var box = modal ? modal.querySelector('.stat-detail-modal') : null;
                 if (box) {
@@ -10537,6 +10538,7 @@ function renderProfileActivityList(kind) {
                 var snapshot = await ensureStatDataLoaded(true);
                 if (requestId !== statOpenSeq) return;
                 if (snapshot) {
+                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
                     renderStatByType(type);
                 } else if (body) {
                     body.innerHTML = '<div class="stat-empty">暂无记录</div>';
