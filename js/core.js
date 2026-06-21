@@ -6808,7 +6808,24 @@ function renderProfileActivityList(kind) {
                         renderPhotoWallLockedState();
                     } else {
                         setPhotoWallLockedState(false);
-                        ensurePhotoWallLoaded().then(function() { if (typeof window.initPhotoWall === 'function') window.initPhotoWall(); });
+                        ensurePhotoWallLoaded().then(async function() {
+                            if (typeof window.initPhotoWall === 'function') {
+                                await window.initPhotoWall();
+                            }
+                            var grid = document.getElementById('photoGrid');
+                            var hasRenderedPhotos = !!(grid && grid.querySelector('.photo-wall-item'));
+                            var hasPhotoData = Array.isArray(window.photoWallData) && window.photoWallData.length > 0;
+                            if ((!hasRenderedPhotos || !hasPhotoData) && typeof window.loadPhotoWallData === 'function') {
+                                await window.loadPhotoWallData();
+                                if (typeof window.renderPhotoWall === 'function') {
+                                    await window.renderPhotoWall();
+                                } else if (typeof window.renderPhotoWallWithoutReload === 'function') {
+                                    window.renderPhotoWallWithoutReload();
+                                }
+                            }
+                        }).catch(function(err) {
+                            console.warn('[photo-wall] initial open render fallback failed', err);
+                        });
                     }
                 }
                 if (tab === 'profile') { syncProfileUser(); if (currentUser) loadUserAvatar(); loadProfileActivity(false); if (typeof clearReportReplyBadge === 'function') clearReportReplyBadge(); }
