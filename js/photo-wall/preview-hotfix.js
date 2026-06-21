@@ -391,6 +391,16 @@
     state.moved = false;
   }
 
+  function beginPanOrTap(point) {
+    state.mode = 'pan-or-tap';
+    state.dragAxis = '';
+    state.startX = point.x;
+    state.startY = point.y;
+    state.startTx = state.tx;
+    state.startTy = state.ty;
+    state.moved = false;
+  }
+
   function beginSwipeDismiss(point) {
     state.mode = 'swipe-dismiss';
     state.dragAxis = '';
@@ -456,6 +466,15 @@
     applyImageTransform(false);
   }
 
+  function updatePanOrTapCandidate(point) {
+    var dx = point.x - state.startX;
+    var dy = point.y - state.startY;
+    if (Math.abs(dx) + Math.abs(dy) <= 8) return;
+    state.moved = true;
+    state.mode = 'pan';
+    updatePan(point);
+  }
+
   function updateSwipeDismiss(point) {
     var dx = point.x - state.startX;
     var dy = point.y - state.startY;
@@ -511,6 +530,16 @@
     if (state.mode === 'pan') {
       state.suppressTapUntil = Date.now() + 350;
       reboundScaleIfNeeded(true);
+      clearInteractionState();
+      return;
+    }
+
+    if (state.mode === 'pan-or-tap') {
+      if (!state.moved) {
+        maybeHandleTouchDoubleTap(point);
+      } else {
+        reboundScaleIfNeeded(true);
+      }
       clearInteractionState();
       return;
     }
@@ -907,7 +936,7 @@
         if (state.pointers.size >= 2) {
           beginPinch();
         } else if (state.scale > 1.01) {
-          beginPan({ x: event.clientX, y: event.clientY });
+          beginPanOrTap({ x: event.clientX, y: event.clientY });
         } else {
           beginSwipeDismiss({ x: event.clientX, y: event.clientY });
         }
@@ -943,6 +972,8 @@
           updatePinch();
         } else if (state.mode === 'pinch') {
           refreshSinglePointerStart();
+        } else if (state.mode === 'pan-or-tap') {
+          updatePanOrTapCandidate({ x: event.clientX, y: event.clientY });
         } else if (state.scale > 1.01 || state.mode === 'pan') {
           updatePan({ x: event.clientX, y: event.clientY });
         } else {
@@ -982,7 +1013,7 @@
             event.stopImmediatePropagation();
             return;
           }
-        } else if (state.pointers.size === 1 && (state.mode === 'pan' || state.mode === 'swipe-dismiss')) {
+        } else if (state.pointers.size === 1 && (state.mode === 'pan' || state.mode === 'pan-or-tap' || state.mode === 'swipe-dismiss')) {
           state.suppressTapUntil = Date.now() + 350;
           refreshSinglePointerStart();
           event.preventDefault();
@@ -1108,7 +1139,26 @@
     return Array.isArray(list) && list.length ? list.slice() : null;
   }
 
-  function openWithExplicitPhotos(index, photos) {
+  function openWithExplicitPhotos(index, photos, options) {
+    var originEl = options && options.originEl && options.originEl.getBoundingClientRect
+      ? options.originEl
+      : null;
+    var originRect = null;
+    if (originEl) {
+      try {
+        var rect = originEl.getBoundingClientRect();
+        if (rect && rect.width > 0 && rect.height > 0) {
+          originRect = {
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            right: rect.right,
+            bottom: rect.bottom
+          };
+        }
+      } catch (_) {}
+    }
     var prevSorted = window.pwCurrentSortedPhotos;
     var prevWall = window.photoWallData;
     window.__xtjPreviewExplicitPhotos = photos.slice();
@@ -1117,6 +1167,13 @@
     try {
       return withPreviewGuardDisabled(original.openPhotoPreview, window, [index]);
     } finally {
+      var root = overlay();
+      if (root && originEl && originRect) {
+        root._xtjOriginImg = originEl;
+        root._xtjOriginRect = originRect;
+        root._openOriginImg = originEl;
+        root._openOrigin = originRect;
+      }
       if (typeof prevSorted === 'undefined') delete window.pwCurrentSortedPhotos;
       else window.pwCurrentSortedPhotos = prevSorted;
       if (typeof prevWall === 'undefined') delete window.photoWallData;
@@ -1140,7 +1197,7 @@
       var safeIndex = Number(index || 0);
       if (safeIndex < 0) safeIndex = 0;
       if (safeIndex >= explicitPhotos.length) safeIndex = explicitPhotos.length - 1;
-      var result = openWithExplicitPhotos(safeIndex, explicitPhotos);
+      var result = openWithExplicitPhotos(safeIndex, explicitPhotos, options || null);
       requestAnimationFrame(function () {
         requestAnimationFrame(afterOpen);
       });

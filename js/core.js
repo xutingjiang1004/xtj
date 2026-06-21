@@ -3185,7 +3185,7 @@ function renderProfileActivityList(kind) {
                     actorKey: photo.__xtjActorKey || '',
                     canDelete: !!photo.__xtjCanDelete
                 };
-                window.openPhotoPreview(0, [photo]);
+                window.openPhotoPreview(0, { photos: [photo], originEl: triggerEl && triggerEl.getBoundingClientRect ? triggerEl : null });
                 window.photoPreviewCurrent = photo;
                 setTimeout(function() {
                     syncPostPhotoPreviewChrome(photo);
@@ -6560,6 +6560,38 @@ function renderProfileActivityList(kind) {
                 ].join('');
             }
 
+            async function ensurePhotoWallVisibleContent(options) {
+                var opts = options || {};
+                await ensurePhotoWallLoaded();
+                if (typeof window.initPhotoWall === 'function') {
+                    await window.initPhotoWall();
+                }
+                var grid = document.getElementById('photoGrid');
+                if (!grid) return;
+                var hasRenderedPhotos = !!grid.querySelector('.photo-wall-item');
+                var hasSkeleton = !!grid.querySelector('.pw-skeleton');
+                var hasEmptyState = !!grid.querySelector('.photo-wall-empty');
+                var hasPhotoData = Array.isArray(window.photoWallData) && window.photoWallData.length > 0;
+                if (opts.forceReload || !hasRenderedPhotos || hasSkeleton || (!hasPhotoData && !hasEmptyState)) {
+                    if (typeof window.loadPhotoWallData === 'function') {
+                        await window.loadPhotoWallData(true);
+                    }
+                    if (typeof window.renderPhotoWall === 'function') {
+                        await window.renderPhotoWall();
+                    } else if (typeof window.renderPhotoWallWithoutReload === 'function') {
+                        window.renderPhotoWallWithoutReload();
+                    }
+                    grid = document.getElementById('photoGrid');
+                    hasRenderedPhotos = !!(grid && grid.querySelector('.photo-wall-item'));
+                    hasSkeleton = !!(grid && grid.querySelector('.pw-skeleton'));
+                    hasEmptyState = !!(grid && grid.querySelector('.photo-wall-empty'));
+                    hasPhotoData = Array.isArray(window.photoWallData) && window.photoWallData.length > 0;
+                }
+                if (grid && !hasRenderedPhotos && !hasSkeleton && !hasEmptyState && !hasPhotoData) {
+                    grid.innerHTML = '<div class="photo-wall-empty"><div>暂无照片</div></div>';
+                }
+            }
+
             function installDockIndicatorDrag() {
                 var dockBar = document.getElementById('dockBar');
                 var indicator = document.getElementById('dockIndicator');
@@ -6763,6 +6795,11 @@ function renderProfileActivityList(kind) {
                         } else if (tab === 'ai') {
                             const photoWallPage = document.getElementById('photoWallContainer');
                             if (photoWallPage) photoWallPage.scrollTo({ top: 0, behavior: 'smooth' });
+                            if (window.currentUser) {
+                                ensurePhotoWallVisibleContent().catch(function(err) {
+                                    console.warn('[photo-wall] current tab visibility check failed', err);
+                                });
+                            }
                         } else if (tab === 'profile') {
                             // 鎴戠殑椤碉細鍥炲埌顶部
                             const panel = document.getElementById('panelProfile');
@@ -6808,22 +6845,7 @@ function renderProfileActivityList(kind) {
                         renderPhotoWallLockedState();
                     } else {
                         setPhotoWallLockedState(false);
-                        ensurePhotoWallLoaded().then(async function() {
-                            if (typeof window.initPhotoWall === 'function') {
-                                await window.initPhotoWall();
-                            }
-                            var grid = document.getElementById('photoGrid');
-                            var hasRenderedPhotos = !!(grid && grid.querySelector('.photo-wall-item'));
-                            var hasPhotoData = Array.isArray(window.photoWallData) && window.photoWallData.length > 0;
-                            if ((!hasRenderedPhotos || !hasPhotoData) && typeof window.loadPhotoWallData === 'function') {
-                                await window.loadPhotoWallData();
-                                if (typeof window.renderPhotoWall === 'function') {
-                                    await window.renderPhotoWall();
-                                } else if (typeof window.renderPhotoWallWithoutReload === 'function') {
-                                    window.renderPhotoWallWithoutReload();
-                                }
-                            }
-                        }).catch(function(err) {
+                        ensurePhotoWallVisibleContent().catch(function(err) {
                             console.warn('[photo-wall] initial open render fallback failed', err);
                         });
                     }
