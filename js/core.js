@@ -2723,6 +2723,10 @@ function renderProfileActivityList(kind) {
                 btn.disabled = true;
 
                 try {
+                    var nextLiked = !wasLiked;
+                    var optimisticLikeRecord = { post_id: postId, user_name: currentUser, actor_key: deviceId };
+                    updatePostLikeUi(postId, nextLiked, optimisticLikeRecord);
+                    updateFeedStats();
                     if (wasLiked) {
                         var deleteQuery = sb.from("likes").delete().eq("post_id", postId);
                         var currentIds = getCurrentLikeIdentityValues();
@@ -2736,19 +2740,24 @@ function renderProfileActivityList(kind) {
                         } else {
                             await deleteQuery.eq("actor_key", deviceId);
                         }
-                        updatePostLikeUi(postId, false);
                     } else {
-                        var likeRecord = { post_id: postId, user_name: currentUser, actor_key: deviceId };
-                        await sb.from("likes").insert([likeRecord]);
-                        updatePostLikeUi(postId, true, likeRecord);
+                        await sb.from("likes").insert([optimisticLikeRecord]);
                         createHeartParticles(btn);
                     }
-                    updateFeedStats();
-                    refreshStatModal();
-                    loadProfileActivity(true);
+                    if (document.getElementById('statModal')?.classList.contains('active') && statCurrentType === 'likes') {
+                        refreshStatModal();
+                    }
+                    if (currentDockTab === 'profile' && typeof loadProfileActivity === 'function') {
+                        loadProfileActivity(true);
+                    }
                 } catch (e) {
                     console.error(e);
                     updatePostLikeUi(postId, wasLiked);
+                    updateFeedStats();
+                    if (document.getElementById('statModal')?.classList.contains('active') && statCurrentType === 'likes') {
+                        refreshStatModal();
+                    }
+                    showToast('点赞操作失败');
                 } finally {
                     setLikeButtonState(btn, btn.classList.contains('liked'));
                     btn.disabled = false;
@@ -4404,7 +4413,7 @@ function renderProfileActivityList(kind) {
                 var idHtml = escapeHtml(String(post.id));
                 var actorKeyJs = safeJsStr(String(post.actor_key || ""));
                 var actions = [
-                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>',
+                    '<button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + idJs + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>',
                     '<button class="action-btn" onclick="openComment(\'' + idJs + '\')">评论</button>'
                 ];
                 if (canEditPost(post)) {
@@ -10040,11 +10049,7 @@ function renderProfileActivityList(kind) {
                     return b[1].length - a[1].length;
                 });
                 if (!entries.length) {
-                    body.innerHTML = statEmptyMarkup({
-                        kicker: 'POSTS',
-                        title: '暂无动态数据',
-                        copy: '等有新的帖子之后，这里会先按用户分组整理，再进入对应用户的历史记录。'
-                    });
+                    body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无记录</div>';
                     return;
                 }
                 body.innerHTML = entries.map(function(entry, index) {
@@ -10064,7 +10069,7 @@ function renderProfileActivityList(kind) {
                     return [
                         '<button type="button" class="stat-user-summary stat-user-summary-card" onclick="loadUserAllPosts(\'' + nameJs + '\')" style="--xtj-enter-delay:' + Math.min(index * 42, 240) + 'ms;">',
                         '<div class="stat-user-main stat-user-main--simple">',
-                        '<div class="suh-copy"><span class="suh-name">' + escapeHtml(name) + '</span><span class="suh-sub">最近更新 ' + escapeHtml(latest) + '</span></div>',
+                        '<div class="suh-copy"><span class="suh-name">' + escapeHtml(name) + '</span><span class="suh-sub">' + escapeHtml(latest) + '</span></div>',
                         '<span class="suh-count">' + posts.length + ' 条</span>',
                         '</div>',
                         previewMedia ? '<div class="stat-user-preview">' + previewMedia + '</div>' : '',
@@ -10139,11 +10144,7 @@ function renderProfileActivityList(kind) {
                 var history = getViewHistory();
                 var postMap = statGetPostMap();
                 if (!history.length) {
-                    body.innerHTML = statEmptyMarkup({
-                        kicker: 'VIEWS',
-                        title: '暂无浏览记录',
-                        copy: '浏览帖子后，这里会自动累计每一条访问历史。'
-                    });
+                    body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无记录</div>';
                     return;
                 }
                 body.innerHTML = history.map(function(v, index) {
@@ -10236,6 +10237,7 @@ function renderProfileActivityList(kind) {
 
             window.openStatDetail = async function(type) {
                 statCurrentType = type;
+                var requestId = ++statOpenSeq;
                 var titles = {
                     posts: '总动态 - 按用户分组',
                     views: '总浏览 - 浏览记录',
@@ -10245,7 +10247,7 @@ function renderProfileActivityList(kind) {
                 var body = document.getElementById('statModalBody');
                 var modal = document.getElementById('statModal');
                 if (title) title.textContent = titles[type] || '统计详情';
-                if (modal) modal.classList.add('active');
+                if (modal && !modal.classList.contains('active')) modal.classList.add('active');
 
                 if (statAllPosts.length > 0 && Date.now() - statCacheTime < STAT_CACHE_DURATION) {
                     renderStatByType(type);
@@ -10340,6 +10342,43 @@ function renderProfileActivityList(kind) {
                 });
                 statCacheTime = Date.now();
             }
+
+            var statOpenSeq = 0;
+            var statDataPromise = null;
+
+            function hasUsableStatCache() {
+                return statCacheTime > 0 && (Date.now() - statCacheTime < STAT_CACHE_DURATION);
+            }
+
+            async function ensureStatDataLoaded(force) {
+                if (!force && hasUsableStatCache()) {
+                    return {
+                        posts: statAllPosts,
+                        comments: statAllComments,
+                        likes: statAllLikes
+                    };
+                }
+                if (!force && statDataPromise) return statDataPromise;
+                statDataPromise = fetchStatSnapshotWithTimeout(5000).then(function(snapshot) {
+                    if (snapshot) {
+                        applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
+                    }
+                    return snapshot;
+                }).finally(function() {
+                    statDataPromise = null;
+                });
+                return statDataPromise;
+            }
+
+            refreshStatModal = function() {
+                var modal = document.getElementById('statModal');
+                if (!modal || !modal.classList.contains('active') || !statCurrentType) return;
+                renderStatByType(statCurrentType);
+            };
+
+            window.prefetchStatData = function() {
+                return ensureStatDataLoaded(false).catch(function() { return null; });
+            };
 
             async function fetchStatSnapshotWithTimeout(timeoutMs) {
                 var timeout = new Promise(function(resolve) {
@@ -10477,14 +10516,17 @@ function renderProfileActivityList(kind) {
                 var sourcePosts = Array.isArray(feedAllPosts) && feedAllPosts.length ? feedAllPosts : statAllPosts;
                 var sourceComments = Array.isArray(feedAllComments) && feedAllComments.length ? feedAllComments : statAllComments;
                 var sourceLikes = Array.isArray(feedAllLikes) && feedAllLikes.length ? feedAllLikes : statAllLikes;
+                if (statPollTimer) {
+                    clearInterval(statPollTimer);
+                    statPollTimer = null;
+                }
 
                 if (sourcePosts.length || sourceComments.length || sourceLikes.length) {
                     applyStatSnapshot(sourcePosts, sourceComments, sourceLikes);
+                    if (requestId !== statOpenSeq) return;
                     renderStatByType(type);
-                    if (statPollTimer) clearInterval(statPollTimer);
-                    statPollTimer = setInterval(refreshStatModal, 15000);
-                    fetchStatSnapshotWithTimeout(4500).then(function(snapshot) {
-                        if (!snapshot || !modal || !modal.classList.contains('active') || statCurrentType !== type) return;
+                    ensureStatDataLoaded(false).then(function(snapshot) {
+                        if (!snapshot || !modal || !modal.classList.contains('active') || statCurrentType !== type || requestId !== statOpenSeq) return;
                         applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
                         renderStatByType(type);
                     });
@@ -10492,15 +10534,13 @@ function renderProfileActivityList(kind) {
                 }
 
                 if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
-                var snapshot = await fetchStatSnapshotWithTimeout(5000);
+                var snapshot = await ensureStatDataLoaded(true);
+                if (requestId !== statOpenSeq) return;
                 if (snapshot) {
-                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
                     renderStatByType(type);
                 } else if (body) {
-                    body.innerHTML = '<div class="stat-empty">暂无鍙敤数据</div>';
+                    body.innerHTML = '<div class="stat-empty">暂无记录</div>';
                 }
-                if (statPollTimer) clearInterval(statPollTimer);
-                statPollTimer = setInterval(refreshStatModal, 15000);
             };
 
             var originalInitialLoad = initialLoad;
