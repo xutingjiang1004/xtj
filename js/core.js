@@ -3538,6 +3538,8 @@ function renderProfileActivityList(kind) {
                     post_id: entry.post_id,
                     post_content: normalizeViewHistoryText(entry.post_content, VIEW_HISTORY_MEDIA_LABEL),
                     post_author: normalizeViewHistoryText(entry.post_author, VIEW_HISTORY_DELETED_AUTHOR),
+                    media_url: String(entry.media_url || '').trim(),
+                    media_type: String(entry.media_type || '').trim(),
                     viewed_at: entry.viewed_at || new Date().toISOString()
                 });
             }
@@ -3604,6 +3606,8 @@ function renderProfileActivityList(kind) {
                             post_id: postId,
                             post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || '(图片/视频)'),
                             post_author: postInfoCache[postId].user_name || '未知',
+                            media_url: postInfoCache[postId].media_url || '',
+                            media_type: postInfoCache[postId].media_type || '',
                             viewed_at: new Date().toISOString()
                         });
                     }
@@ -3661,6 +3665,8 @@ function renderProfileActivityList(kind) {
                             post_id: postId,
                             post_content: rawContent.length > 200 ? rawContent.slice(0, 200) + '...' : (rawContent || VIEW_HISTORY_MEDIA_LABEL),
                             post_author: postAuthor,
+                            media_url: postInfoCache[postId].media_url || '',
+                            media_type: postInfoCache[postId].media_type || '',
                             viewed_at: new Date().toISOString()
                         });
                     }
@@ -3908,7 +3914,14 @@ function renderProfileActivityList(kind) {
 
                 // 濉厖帖子淇℃伅缂撳瓨閿涘奔绶垫祻瑙堣褰曟担璺拷??
                 visiblePosts.forEach(p => {
-                    postInfoCache[p.id] = { content: p.content, user_name: p.user_name };
+                    postInfoCache[p.id] = {
+                        content: p.content,
+                        user_name: p.user_name,
+                        media_url: p.media_url || '',
+                        media_type: p.media_type || '',
+                        created_at: p.created_at || '',
+                        views: Number(p.views || 0)
+                    };
                 });
 
                 // 闁衡偓閸洘鑲犻柟纰樺亾闁哄牆顦垫付鐟曚礁銇斿儚鐨勶拷锟斤箑鐓曢柛?
@@ -5422,7 +5435,14 @@ function renderProfileActivityList(kind) {
                 var scopedLikes = (payload.likes || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
                 document.getElementById("sLikes").textContent = scopedLikes.length + visibleComments.length;
                 filteredPosts.forEach(function(post) {
-                    postInfoCache[post.id] = { content: post.content, user_name: post.user_name };
+                    postInfoCache[post.id] = {
+                        content: post.content,
+                        user_name: post.user_name,
+                        media_url: post.media_url || '',
+                        media_type: post.media_type || '',
+                        created_at: post.created_at || '',
+                        views: Number(post.views || 0)
+                    };
                 });
                 var allUsers = new Set();
                 filteredPosts.forEach(function(post) { allUsers.add(post.user_name); });
@@ -10088,29 +10108,114 @@ function renderProfileActivityList(kind) {
                 (Array.isArray(statAllPosts) ? statAllPosts : []).forEach(function(post) {
                     if (post && post.id != null) map[String(post.id)] = normalizePost(post);
                 });
+                Object.keys(postInfoCache || {}).forEach(function(id) {
+                    if (!id || map[id]) return;
+                    var cached = postInfoCache[id] || {};
+                    map[id] = normalizePost({
+                        id: id,
+                        content: cached.content || '',
+                        user_name: cached.user_name || '',
+                        media_url: cached.media_url || '',
+                        media_type: cached.media_type || '',
+                        created_at: cached.created_at || '',
+                        views: Number(cached.views || 0)
+                    });
+                });
                 return map;
             }
 
-            function simplePostSummary(post) {
+            function formatPostSummary(post) {
                 var normalized = normalizePost(post || {});
                 var text = String(normalized.content || '').trim();
-                if (text) return text.length > 48 ? text.slice(0, 48) + '...' : text;
-                if (normalized.media_type === 'video') return '视频动态';
-                if (normalized.media_type === 'image') return '图片动态';
-                return '无文字内容';
+                var hasImg = !!(normalized.media_url && normalized.media_type === 'image');
+                var hasVid = !!(normalized.media_url && normalized.media_type === 'video');
+                var summary = text.length > 28 ? text.slice(0, 28) + '...' : text;
+                return {
+                    display: summary || (hasImg ? '图片动态' : (hasVid ? '视频动态' : '无文字内容')),
+                    hasImg: hasImg,
+                    hasVid: hasVid,
+                    thumbUrl: hasImg ? normalized.media_url : null,
+                    normalized: normalized
+                };
             }
 
-            function simpleStatPostRow(post, index) {
+            function formatStatDateTime(value) {
+                var date = value ? new Date(value) : new Date();
+                if (Number.isNaN(date.getTime())) date = new Date();
+                return date.toLocaleString();
+            }
+
+            function renderStatThumb(summary) {
+                if (summary && summary.hasImg && summary.thumbUrl) {
+                    return '<img class="spi-thumb" src="' + escapeHtml(summary.thumbUrl) + '" alt="帖子缩略图" loading="lazy">';
+                }
+                if (summary && summary.hasVid) {
+                    return '<div class="spi-thumb spi-thumb--video" aria-hidden="true">视频</div>';
+                }
+                return '';
+            }
+
+            function renderPostItemHTML(post, index) {
                 var normalized = normalizePost(post || {});
+                var summary = formatPostSummary(normalized);
                 var detailOnclick = "openStatPostDetail('" + safeJsStr(String(normalized.id || '')) + "')";
+                var thumb = renderStatThumb(summary);
                 return [
-                    '<article class="stat-post-item stat-row" role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}" style="--xtj-enter-delay:' + Math.min((index || 0) * 20, 180) + 'ms;">',
-                    '<div class="stat-row-main">',
-                    '<div class="stat-row-title">' + escapeHtml(simplePostSummary(normalized)) + '</div>',
-                    '<div class="stat-row-meta"><span>' + escapeHtml(String(normalized.user_name || '')) + '</span><span>' + escapeHtml(new Date(normalized.created_at || Date.now()).toLocaleString()) + '</span></div>',
+                    '<article class="stat-post-item' + (thumb ? '' : ' stat-post-item--no-thumb') + '" role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}" style="--xtj-enter-delay:' + Math.min((index || 0) * 20, 180) + 'ms;">',
+                    '<div class="spi-main">',
+                    '<div class="spi-content">' + escapeHtml(summary.display) + '</div>',
+                    '<div class="spi-time">' + escapeHtml(formatStatDateTime(normalized.created_at)) + '</div>',
                     '</div>',
+                    thumb,
                     '</article>'
                 ].join('');
+            }
+
+            function buildStatRecordCard(options) {
+                var title = String(options && options.title || '');
+                var summary = String(options && options.summary || '');
+                var note = String(options && options.note || '');
+                var time = String(options && options.time || '');
+                var thumbHtml = String(options && options.thumbHtml || '');
+                var clickAttr = String(options && options.clickAttr || '');
+                var enterStyle = String(options && options.enterStyle || '');
+                return [
+                    '<article class="stat-record-card' + (thumbHtml ? '' : ' stat-record-card--no-thumb') + '"' + clickAttr + enterStyle + '>',
+                    '<div class="src-main">',
+                    '<div class="src-title">' + escapeHtml(title) + '</div>',
+                    '<div class="src-summary">' + escapeHtml(summary || '无文字内容') + '</div>',
+                    note ? '<div class="src-note">' + escapeHtml(note) + '</div>' : '',
+                    '<div class="src-time">' + escapeHtml(time) + '</div>',
+                    '</div>',
+                    thumbHtml,
+                    '</article>'
+                ].join('');
+            }
+
+            function renderRecordThumb(post) {
+                var summary = formatPostSummary(post || {});
+                if (summary.hasImg && summary.thumbUrl) {
+                    return '<img class="stat-record-thumb" src="' + escapeHtml(summary.thumbUrl) + '" alt="记录缩略图" loading="lazy">';
+                }
+                if (summary.hasVid) {
+                    return '<div class="stat-record-thumb stat-record-thumb--video" aria-hidden="true">视频</div>';
+                }
+                return '';
+            }
+
+            function resolveStatRecordPost(item, postMap) {
+                var postId = item && item.post_id != null ? String(item.post_id) : '';
+                var direct = postId ? (postMap[postId] || null) : null;
+                if (direct) return direct;
+                if (!item) return null;
+                return normalizePost({
+                    id: postId || '',
+                    content: item.post_content || '',
+                    user_name: item.post_author || '',
+                    media_url: item.media_url || '',
+                    media_type: item.media_type || '',
+                    created_at: item.created_at || item.viewed_at || ''
+                });
             }
 
             renderPostStats = window.renderPostStats = function() {
@@ -10137,7 +10242,7 @@ function renderProfileActivityList(kind) {
                     return [
                         '<section class="stat-user-group">',
                         '<div class="stat-user-header"><div class="suh-left"><div class="suh-avatar">' + escapeHtml(String(name).slice(0, 1).toUpperCase()) + '</div><span class="suh-name">' + escapeHtml(name) + '</span></div><span class="suh-count">' + posts.length + ' 条</span></div>',
-                        '<div class="stat-user-posts">' + posts.slice(0, 3).map(function(post, index) { return simpleStatPostRow(post, index); }).join('') + '</div>',
+                        '<div class="stat-user-posts">' + posts.slice(0, 3).map(function(post, index) { return renderPostItemHTML(post, index); }).join('') + '</div>',
                         (posts.length > 3 ? '<div style="padding-top:8px;"><button type="button" class="stat-view-btn" onclick="loadUserAllPosts(\'' + safeJsStr(name) + '\')">查看全部 ' + posts.length + ' 条</button></div>' : ''),
                         '</section>'
                     ].join('');
@@ -10152,7 +10257,7 @@ function renderProfileActivityList(kind) {
                 }));
                 body.innerHTML = [
                     '<div class="stat-history-head"><button type="button" class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">返回总动态</button></div>',
-                    '<div class="stat-stack">' + userPosts.map(function(post, index) { return simpleStatPostRow(post, index); }).join('') + '</div>'
+                    '<div class="stat-stack">' + userPosts.map(function(post, index) { return renderPostItemHTML(post, index); }).join('') + '</div>'
                 ].join('');
             };
 
@@ -10166,17 +10271,19 @@ function renderProfileActivityList(kind) {
                 }
                 var postMap = getSimpleStatPostMap();
                 body.innerHTML = history.map(function(item, index) {
-                    var post = postMap[String(item.post_id)] || null;
-                    var detailOnclick = post ? "openStatPostDetail('" + safeJsStr(String(post.id)) + "')" : '';
-                    return [
-                        '<article class="stat-view-item stat-row' + (post ? '' : ' stat-row--no-media') + '"' + (post ? ' role="button" tabindex="0" onclick="' + detailOnclick + '"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 16, 160) + 'ms;">',
-                        '<div class="stat-row-main">',
-                        '<div class="stat-row-title">' + escapeHtml(String(item.user_name || '')) + ' 浏览了 ' + escapeHtml(String(item.post_author || '')) + ' 的帖子</div>',
-                        '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(String(item.post_content || (post ? simplePostSummary(post) : '无内容'))) + '</div></div>',
-                        '<div class="stat-row-side"><span class="stat-row-time">' + escapeHtml(new Date(item.viewed_at || Date.now()).toLocaleString()) + '</span></div>',
-                        '</div>',
-                        '</article>'
-                    ].join('');
+                    var post = resolveStatRecordPost(item, postMap);
+                    var summary = formatPostSummary(post || {});
+                    var thumbHtml = renderRecordThumb(post || item || {});
+                    var detailOnclick = post && post.id ? "openStatPostDetail('" + safeJsStr(String(post.id)) + "')" : '';
+                    var clickAttr = detailOnclick ? ' role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"' : '';
+                    return buildStatRecordCard({
+                        title: String(item.user_name || '匿名用户') + ' 浏览了 ' + String(item.post_author || (post && post.user_name) || '该用户') + ' 的帖子',
+                        summary: String(item.post_content || summary.display || '无文字内容'),
+                        time: formatStatDateTime(item.viewed_at),
+                        thumbHtml: thumbHtml,
+                        clickAttr: clickAttr,
+                        enterStyle: ' style="--xtj-enter-delay:' + Math.min(index * 16, 160) + 'ms;"'
+                    });
                 }).join('');
             };
 
@@ -10185,17 +10292,20 @@ function renderProfileActivityList(kind) {
                 if (!body) return;
                 var postMap = getSimpleStatPostMap();
                 function renderRecord(kind, item, index) {
-                    var post = postMap[String(item.post_id)] || null;
-                    var detailOnclick = post ? "openStatPostDetail('" + safeJsStr(String(post.id)) + "')" : '';
-                    return [
-                        '<article class="stat-record-entry stat-row ' + (kind === 'likes' ? 'stat-like-item' : 'stat-comment-item') + '"' + (post ? ' role="button" tabindex="0" onclick="' + detailOnclick + '"' : '') + ' style="--xtj-enter-delay:' + Math.min(index * 14, 160) + 'ms;">',
-                        '<div class="stat-row-main">',
-                        '<div class="stat-row-title">' + escapeHtml(String(item.user_name || '匿名用户')) + (kind === 'likes' ? ' 点赞了这条帖子' : ' 评论了这条帖子') + '</div>',
-                        '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(post ? simplePostSummary(post) : '（帖子已删除）') + '</div>' + (kind === 'comments' ? '<div class="stat-record-note">' + escapeHtml(String(item.content || '')) + '</div>' : '') + '</div>',
-                        '<div class="stat-row-side"><span class="stat-row-time">' + escapeHtml(new Date(item.created_at || Date.now()).toLocaleString()) + '</span></div>',
-                        '</div>',
-                        '</article>'
-                    ].join('');
+                    var post = resolveStatRecordPost(item, postMap);
+                    var summary = formatPostSummary(post || {});
+                    var thumbHtml = renderRecordThumb(post || item || {});
+                    var detailOnclick = post && post.id ? "openStatPostDetail('" + safeJsStr(String(post.id)) + "')" : '';
+                    var clickAttr = detailOnclick ? ' role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"' : '';
+                    return buildStatRecordCard({
+                        title: String(item.user_name || '匿名用户') + (kind === 'likes' ? ' 点赞了这条帖子' : ' 评论了这条帖子'),
+                        summary: summary.display || '（帖子已删除）',
+                        note: kind === 'comments' ? ('评论：' + String(item.content || '')) : '',
+                        time: formatStatDateTime(item.created_at),
+                        thumbHtml: thumbHtml,
+                        clickAttr: clickAttr,
+                        enterStyle: ' style="--xtj-enter-delay:' + Math.min(index * 14, 160) + 'ms;"'
+                    });
                 }
                 var likesHtml = statAllLikes.length
                     ? statAllLikes.map(function(item, index) { return renderRecord('likes', item, index); }).join('')
