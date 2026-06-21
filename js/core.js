@@ -9041,11 +9041,6 @@ function renderProfileActivityList(kind) {
                 originalShowAnnouncementList();
             };
 
-            function bindHeaderActionButtons() {
-                return;
-            }
-            bindHeaderActionButtons();
-
         // ===================== 举报功能 =====================
         var _reportType = 'post';
         var _reportView = 'form';
