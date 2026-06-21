@@ -5762,9 +5762,9 @@ function renderProfileActivityList(kind) {
                 const hasVid = p.media_url && p.media_type === 'video';
                 let tag = '';
                 if (hasImg) tag = '<span class="spi-img-tag">? 图片</span>';
-                if (hasVid) tag = '<span class="spi-img-tag">馃幀 视频</span>';
+                if (hasVid) tag = '<span class="spi-img-tag">视频</span>';
                 const summary = text.length > 20 ? text.slice(0, 20) + '...' : text;
-                const display = summary || (hasImg ? '一张图片' : hasVid ? '一个视频' : '(无内容)');
+                const display = summary || (hasImg ? '图片动态' : hasVid ? '视频动态' : '无文字内容');
                 return { display, tag, hasImg, hasVid, thumbUrl: hasImg ? p.media_url : null };
             }
 
@@ -5796,7 +5796,7 @@ function renderProfileActivityList(kind) {
                 const entries = Object.entries(userMap).sort((a, b) => b[1].length - a[1].length);
                 
                 if (!entries.length) {
-                    body.innerHTML = '<div class="stat-empty">暂无鍔ㄦ€佹暟鎹?/div>';
+                    body.innerHTML = '<div class="stat-empty">暂无动态记录</div>';
                     return;
                 }
 
@@ -5807,7 +5807,7 @@ function renderProfileActivityList(kind) {
                                 <div class="suh-avatar">${escapeHtml(name)[0].toUpperCase()}</div>
                                 <span class="suh-name">${escapeHtml(name)}</span>
                             </div>
-                            <span class="suh-count">${posts.length} 条/span>
+                            <span class="suh-count">${posts.length} 条</span>
                         </div>
                         <div class="stat-user-posts">
                             ${posts.slice(0, 3).map(p => renderPostItemHTML(p)).join('')}
@@ -5826,7 +5826,7 @@ function renderProfileActivityList(kind) {
                 const body = document.getElementById('statModalBody');
                 const userPosts = statAllPosts.filter(p => p.user_name === userName);
                 body.innerHTML = `
-                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">鈫?返回总动态/button>
+                    <button class="back-to-stats-btn" onclick="openStatDetail('posts')">返回总动态</button>
                     <div style="font-weight:700; font-size:15px; margin-bottom:12px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.1);">
                         ${userName} 鐨勫叏閮ㄥ笘瀛愶紙${userPosts.length} 鏉★級
                     </div>
@@ -5843,7 +5843,7 @@ function renderProfileActivityList(kind) {
                     body.innerHTML = `
                         <div class="stat-empty">
                             <div style="font-size:16px; margin-bottom:8px;">📰 浏览记录</div>
-                            <div style="font-size:13px;">暂无浏览详情数据</div>
+                            <div style="font-size:13px;">暂无浏览记录</div>
                             <div style="font-size:12px; margin-top:12px; opacity:0.7;">浏览记录会在你查看帖子时自动保存</div>
                             <div style="font-size:12px; margin-top:8px; opacity:0.7;">当前已记录总浏览数：${document.getElementById('sViews').textContent} 次</div>
                         </div>
@@ -5879,7 +5879,7 @@ function renderProfileActivityList(kind) {
                         <div class="stat-like-item">
                             <div class="sli-info">
                                 <div class="sli-user">${escapeHtml(l.user_name)}</div>
-                                <div class="sli-target">点赞浜嗭細${postContent}</div>
+                                <div class="sli-target">点赞了这条内容：${postContent}</div>
                             </div>
                             <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                         </div>
@@ -5901,7 +5901,7 @@ function renderProfileActivityList(kind) {
                         <div class="stat-comment-item">
                             <div class="sci-info">
                                 <div class="sci-user">${escapeHtml(c.user_name)}</div>
-                                <div class="sci-target">评论娴滃棎鈧?{postContent}閵嗗稄绱?{escapeHtml(c.content)}</div>
+                                <div class="sci-target">原帖：${postContent} 评论：${escapeHtml(c.content)}</div>
                             </div>
                             <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                         </div>
@@ -8111,6 +8111,53 @@ function renderProfileActivityList(kind) {
             // 版本更新日志
             const changelogData = [
                 {
+                    version: 'v0.83',
+                    date: '2026-06-21',
+                    content: `
+                        <h4>修复</h4>
+                        <ul>
+                            <li>统计弹窗恢复到旧版记录布局，不再继续沿用 <code>statHero</code> / <code>stat-row</code> 的面板化样式</li>
+                            <li>“总动态”恢复为按用户分组的列表结构，组头只保留头像首字母、用户名和条数胶囊</li>
+                            <li>修复总动态中坏标签、乱码、时间与内容挤在一起、移动端时间断行等问题</li>
+                            <li>修复“总浏览”“点赞和评论”里图片帖只剩文字、原帖缩略图缺失、评论内容不独立显示的问题</li>
+                        </ul>
+                        <h4>优化</h4>
+                        <ul>
+                            <li>总浏览统一改回图文记录卡，浏览图片帖时优先显示真实缩略图，视频帖显示视频占位</li>
+                            <li>点赞记录与评论记录统一为旧版风格记录卡，原帖查不到时明确显示“原帖已删除”</li>
+                            <li>统计弹窗移动端布局收口为横向卡片，时间保持单行省略，不再退回竖排</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重做统计弹窗恢复策略：以 Git 历史旧版结构为基线回退，而不是继续在当前救火覆盖层上叠补丁</li>
+                            <li>重做版本同步到 <code>v0.83</code>，让关于页、站内 changelog、仓库文档与构建产物保持一致</li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.82',
+                    date: '2026-06-21',
+                    content: `
+                        <h4>修复</h4>
+                        <ul>
+                            <li>修复首页三大统计卡片点击后弹窗无响应的问题，“总动态 / 总浏览 / 点赞和评论” 重新可打开 <code>#statModal</code></li>
+                            <li>修复 <code>js/core.js</code> 中 <code>applyPerformanceMode()</code> 的作用域错误，避免脚本在初始化阶段中断</li>
+                            <li>修复旧版 <code>bindHeaderActionButtons()</code> 与最终全局导出互相干扰，导致公告与举报入口失效的问题</li>
+                            <li>修复顶部公告按钮与举报按钮的运行时入口链路，点击后不再被前序异常打断</li>
+                        </ul>
+                        <h4>优化</h4>
+                        <ul>
+                            <li>首页入口排查改为以浏览器真实点击结果为准，优先定位真实 <code>runtime blocker</code></li>
+                            <li>入口验证改为 <code>node --check</code>、<code>npm run build</code> 与浏览器点击结果三层校验</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重做首页入口修复思路：从静态绑定补丁改为先清理前序 runtime blocker，再让最终全局入口生效</li>
+                            <li>重做统计 / 公告 / 举报的修复标准，以真实 modal 打开结果为准，而不是只看函数名是否存在</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.81',
                     date: '2026-06-20',
                     content: `
@@ -10112,7 +10159,7 @@ function renderProfileActivityList(kind) {
                     if (!id || map[id]) return;
                     var cached = postInfoCache[id] || {};
                     map[id] = normalizePost({
-                        id: id,
+                        id: cached.id || id,
                         content: cached.content || '',
                         user_name: cached.user_name || '',
                         media_url: cached.media_url || '',
@@ -10122,6 +10169,26 @@ function renderProfileActivityList(kind) {
                     });
                 });
                 return map;
+            }
+
+            function getStatPostById(postId) {
+                if (postId == null || postId === '') return null;
+                var key = String(postId);
+                var direct = (Array.isArray(statAllPosts) ? statAllPosts : []).find(function(post) {
+                    return post && String(post.id) === key;
+                });
+                if (direct) return normalizePost(direct);
+                var cached = postInfoCache && postInfoCache[key];
+                if (!cached) return null;
+                return normalizePost({
+                    id: cached.id || key,
+                    content: cached.content || '',
+                    user_name: cached.user_name || '',
+                    media_url: cached.media_url || '',
+                    media_type: cached.media_type || '',
+                    created_at: cached.created_at || '',
+                    views: Number(cached.views || 0)
+                });
             }
 
             function formatPostSummary(post) {
@@ -10137,6 +10204,11 @@ function renderProfileActivityList(kind) {
                     thumbUrl: hasImg ? normalized.media_url : null,
                     normalized: normalized
                 };
+            }
+
+            function getStatPostSummary(post) {
+                if (!post) return '原帖已删除';
+                return formatPostSummary(post).display || '原帖已删除';
             }
 
             function formatStatDateTime(value) {
@@ -10171,43 +10243,47 @@ function renderProfileActivityList(kind) {
                 ].join('');
             }
 
-            function buildStatRecordCard(options) {
+            function getStatPostMediaHtml(post, postId) {
+                var normalized = post ? normalizePost(post) : null;
+                if (!normalized || !normalized.media_url) return '';
+                if (normalized.media_type === 'image') {
+                    return '<img class="stat-record-thumb" src="' + escapeHtml(normalized.media_url) + '" alt="记录缩略图" loading="lazy">';
+                }
+                if (normalized.media_type === 'video') {
+                    return '<div class="stat-record-thumb stat-record-thumb--video" aria-hidden="true">视频</div>';
+                }
+                return '';
+            }
+
+            function renderStatRecordCard(options) {
                 var title = String(options && options.title || '');
-                var summary = String(options && options.summary || '');
+                var copy = String(options && options.copy || '');
                 var note = String(options && options.note || '');
                 var time = String(options && options.time || '');
+                var postId = options && options.postId != null ? String(options.postId) : '';
                 var thumbHtml = String(options && options.thumbHtml || '');
-                var clickAttr = String(options && options.clickAttr || '');
+                var detailOnclick = postId ? "openStatPostDetail('" + safeJsStr(postId) + "')" : '';
+                var clickAttr = detailOnclick ? ' role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"' : '';
                 var enterStyle = String(options && options.enterStyle || '');
                 return [
                     '<article class="stat-record-card' + (thumbHtml ? '' : ' stat-record-card--no-thumb') + '"' + clickAttr + enterStyle + '>',
-                    '<div class="src-main">',
-                    '<div class="src-title">' + escapeHtml(title) + '</div>',
-                    '<div class="src-summary">' + escapeHtml(summary || '无文字内容') + '</div>',
-                    note ? '<div class="src-note">' + escapeHtml(note) + '</div>' : '',
-                    '<div class="src-time">' + escapeHtml(time) + '</div>',
+                    '<div class="stat-record-main">',
+                    '<div class="stat-record-title">' + escapeHtml(title) + '</div>',
+                    '<div class="stat-record-copy">' + escapeHtml(copy || '无文字内容') + '</div>',
+                    note ? '<div class="stat-record-note">' + escapeHtml(note) + '</div>' : '',
+                    '<div class="stat-record-meta">' + escapeHtml(time) + '</div>',
                     '</div>',
                     thumbHtml,
                     '</article>'
                 ].join('');
             }
 
-            function renderRecordThumb(post) {
-                var summary = formatPostSummary(post || {});
-                if (summary.hasImg && summary.thumbUrl) {
-                    return '<img class="stat-record-thumb" src="' + escapeHtml(summary.thumbUrl) + '" alt="记录缩略图" loading="lazy">';
-                }
-                if (summary.hasVid) {
-                    return '<div class="stat-record-thumb stat-record-thumb--video" aria-hidden="true">视频</div>';
-                }
-                return '';
-            }
-
-            function resolveStatRecordPost(item, postMap) {
+            function resolveStatRecordPost(item) {
                 var postId = item && item.post_id != null ? String(item.post_id) : '';
-                var direct = postId ? (postMap[postId] || null) : null;
+                var direct = postId ? getStatPostById(postId) : null;
                 if (direct) return direct;
                 if (!item) return null;
+                if (!item.post_content && !item.post_author && !item.media_url && !item.media_type) return null;
                 return normalizePost({
                     id: postId || '',
                     content: item.post_content || '',
@@ -10269,19 +10345,14 @@ function renderProfileActivityList(kind) {
                     body.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无浏览记录</div>';
                     return;
                 }
-                var postMap = getSimpleStatPostMap();
                 body.innerHTML = history.map(function(item, index) {
-                    var post = resolveStatRecordPost(item, postMap);
-                    var summary = formatPostSummary(post || {});
-                    var thumbHtml = renderRecordThumb(post || item || {});
-                    var detailOnclick = post && post.id ? "openStatPostDetail('" + safeJsStr(String(post.id)) + "')" : '';
-                    var clickAttr = detailOnclick ? ' role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"' : '';
-                    return buildStatRecordCard({
-                        title: String(item.user_name || '匿名用户') + ' 浏览了 ' + String(item.post_author || (post && post.user_name) || '该用户') + ' 的帖子',
-                        summary: String(item.post_content || summary.display || '无文字内容'),
+                    var post = resolveStatRecordPost(item);
+                    return renderStatRecordCard({
+                        title: '浏览了 ' + String(item.post_author || (post && post.user_name) || '该用户') + ' 的帖子',
+                        copy: String(item.post_content || getStatPostSummary(post)),
+                        postId: post && post.id ? String(post.id) : '',
                         time: formatStatDateTime(item.viewed_at),
-                        thumbHtml: thumbHtml,
-                        clickAttr: clickAttr,
+                        thumbHtml: getStatPostMediaHtml(post, post && post.id ? String(post.id) : ''),
                         enterStyle: ' style="--xtj-enter-delay:' + Math.min(index * 16, 160) + 'ms;"'
                     });
                 }).join('');
@@ -10290,20 +10361,18 @@ function renderProfileActivityList(kind) {
             renderLikeStats = window.renderLikeStats = function() {
                 var body = document.getElementById('statModalBody');
                 if (!body) return;
-                var postMap = getSimpleStatPostMap();
                 function renderRecord(kind, item, index) {
-                    var post = resolveStatRecordPost(item, postMap);
-                    var summary = formatPostSummary(post || {});
-                    var thumbHtml = renderRecordThumb(post || item || {});
-                    var detailOnclick = post && post.id ? "openStatPostDetail('" + safeJsStr(String(post.id)) + "')" : '';
-                    var clickAttr = detailOnclick ? ' role="button" tabindex="0" onclick="' + detailOnclick + '" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();' + detailOnclick + '}"' : '';
-                    return buildStatRecordCard({
-                        title: String(item.user_name || '匿名用户') + (kind === 'likes' ? ' 点赞了这条帖子' : ' 评论了这条帖子'),
-                        summary: summary.display || '（帖子已删除）',
+                    var post = getStatPostById(item && item.post_id);
+                    var copyText = kind === 'likes'
+                        ? getStatPostSummary(post)
+                        : '原帖：' + getStatPostSummary(post);
+                    return renderStatRecordCard({
+                        title: String(item.user_name || '匿名用户') + (kind === 'likes' ? ' 点赞了这条内容' : ' 评论了这条内容'),
+                        copy: copyText,
                         note: kind === 'comments' ? ('评论：' + String(item.content || '')) : '',
+                        postId: post && post.id ? String(post.id) : '',
                         time: formatStatDateTime(item.created_at),
-                        thumbHtml: thumbHtml,
-                        clickAttr: clickAttr,
+                        thumbHtml: getStatPostMediaHtml(post, post && post.id ? String(post.id) : ''),
                         enterStyle: ' style="--xtj-enter-delay:' + Math.min(index * 14, 160) + 'ms;"'
                     });
                 }
@@ -10313,7 +10382,7 @@ function renderProfileActivityList(kind) {
                 var commentsHtml = statAllComments.length
                     ? statAllComments.slice().reverse().map(function(item, index) { return renderRecord('comments', item, index); }).join('')
                     : '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
-                body.innerHTML = '<div class="stat-two-col stat-two-col--flat"><section class="stat-col stat-col--flat"><div class="stat-col-title">点赞记录</div>' + likesHtml + '</section><section class="stat-col stat-col--flat"><div class="stat-col-title">评论记录</div>' + commentsHtml + '</section></div>';
+                body.innerHTML = '<div class="stat-two-col"><section class="stat-col"><div class="stat-section-title">点赞记录</div>' + likesHtml + '</section><section class="stat-col"><div class="stat-section-title">评论记录</div>' + commentsHtml + '</section></div>';
             };
 
             function applySimpleStatSnapshot(snapshot) {
