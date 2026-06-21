@@ -293,9 +293,18 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
         function isAdmin() { return currentUser === ADMIN_NAME; }
 
         var __vipStatus = { is_vip: false, vip_info: null };
+        var vipStatusRefreshPromise = null;
         function isVipUser() {
             if (!currentUser) return false;
             if (currentUser === ADMIN_NAME) return true;
+            if (typeof window.__xtjCheckLocalVip === 'function') {
+                var localVip = window.__xtjCheckLocalVip(currentUser);
+                if (localVip) {
+                    __vipStatus.is_vip = true;
+                    __vipStatus.vip_info = localVip;
+                    return true;
+                }
+            }
             if (__vipStatus.is_vip !== true) return false;
             // 双重校验：即使 is_vip 标记为 true，也要检查 expire_at 是否过期
             var info = __vipStatus.vip_info;
@@ -362,6 +371,25 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
                 } catch(e) {}
             }
         }
+        async function ensureVipStatusFresh(force) {
+            if (!currentUser) {
+                __vipStatus.is_vip = false;
+                __vipStatus.vip_info = null;
+                return __vipStatus;
+            }
+            if (!force && isVipUser()) return __vipStatus;
+            if (!vipStatusRefreshPromise || force) {
+                vipStatusRefreshPromise = Promise.resolve()
+                    .then(function() { return updateVipStatus(); })
+                    .catch(function() {})
+                    .finally(function() {
+                        vipStatusRefreshPromise = null;
+                    });
+            }
+            await vipStatusRefreshPromise;
+            return __vipStatus;
+        }
+        window.ensureVipStatusFresh = ensureVipStatusFresh;
 
         function updateVipUI() {
             var badge = document.getElementById('vipCardBadge');
@@ -2513,6 +2541,7 @@ function renderProfileActivityList(kind) {
                     authUI.style.display = "flex";
                     annBtnWrapper.style.display = "block";
                     if (reportBtnWrapper) reportBtnWrapper.style.display = "block";
+                    bindHeaderActionButtons();
                     document.getElementById("myName").textContent = currentUser;
                     var avatar = document.getElementById("myAvatar");
                     avatar.textContent = currentUser[0].toUpperCase();
@@ -2591,41 +2620,6 @@ function renderProfileActivityList(kind) {
                     console.error("加载头像失败:", e);
                 }
             }
-
-            // DEPRECATED_DO_NOT_EDIT ===================== [瀹告彃绨惧锟?娑撳鏌熼敓?361鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 =====================
-            window.doPublish = async function () {
-                if (!currentUser) { showToast("请先登录"); return; }
-                if (isUserMuted()) { showToast("您已被禁言，无法发布内容"); return; }
-                var content = document.getElementById("postInp").value.trim();
-                var file = document.getElementById("fileInp").files[0];
-                if (!content && !file) { showToast("请输入帖子内容"); return; }
-                // 鏉堟挸鍙嗛弽锟犵崣閿涙岸妾洪崚鍫曟毐鎼达讣鎷烽敓钘夊箵闂勩倕宓勯梽鈺佸敶锟?
-                if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
-                // 文件上传安全校验
-                if (file) {
-                    var maxFileSize = isVipUser() ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
-                    if (file.size > maxFileSize) { showToast("文件大小不能超过" + (isVipUser() ? "200MB" : "50MB")); return; }
-                    var allowedTypes = ['image/','video/','audio/'];
-                    var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
-                    if (!typeOk) { showToast("不支持的文件类型，仅支持图片、视频、音频"); return; }
-                }
-                var btn = document.getElementById("pubBtn"); btn.disabled = true; btn.textContent = "发布中..";
-                try {
-                    let media_url = "", media_type = "";
-                    if (file) {
-                        const path = buildStorageUploadPath('posts', file.name);
-                        await sb.storage.from("uploads").upload(path, file);
-                        media_url = sb.storage.from("uploads").getPublicUrl(path).data.publicUrl;
-                        media_type = file.type.startsWith("image") ? "image" : "video";
-                    }
-                    var { error: insertErr } = await sb.from("posts").insert([{ user_name: currentUser, content: safeText(content).slice(0, 2000), media_url, media_type, actor_key: deviceId }]);
-                    if (insertErr) { showToast("发布失败: " + (insertErr.message || "未知错误")); btn.disabled = false; btn.textContent = "发布动态"; return; }
-                    document.getElementById("postInp").value = "";
-                    document.getElementById("fileInp").value = "";
-                    showToast("发布成功");
-                    loadFeed(true);
-                } catch (e) { showToast("发布失败: " + (e.message || "网络错误")); } finally { btn.disabled = false; btn.textContent = "发布动态"; }
-            };
 
             // ===================== 点赞 =====================
             function getCurrentLikeIdentityValues() {
@@ -2713,6 +2707,16 @@ function renderProfileActivityList(kind) {
                     updateLikeStatsText(statsEl, liked);
                 });
             }
+            var likeStatRefreshTimer = null;
+            function scheduleLikeStatRefresh() {
+                var modal = document.getElementById('statModal');
+                if (!modal || !modal.classList.contains('active') || statCurrentType !== 'likes') return;
+                if (likeStatRefreshTimer) clearTimeout(likeStatRefreshTimer);
+                likeStatRefreshTimer = setTimeout(function() {
+                    likeStatRefreshTimer = null;
+                    refreshStatModal();
+                }, 300);
+            }
 
             window.toggleLike = async function (btn, postId) {
                 if (!currentUser) { showToast("请先登录"); return; }
@@ -2744,9 +2748,7 @@ function renderProfileActivityList(kind) {
                         await sb.from("likes").insert([optimisticLikeRecord]);
                         createHeartParticles(btn);
                     }
-                    if (document.getElementById('statModal')?.classList.contains('active') && statCurrentType === 'likes') {
-                        refreshStatModal();
-                    }
+                    scheduleLikeStatRefresh();
                     if (currentDockTab === 'profile' && typeof loadProfileActivity === 'function') {
                         loadProfileActivity(true);
                     }
@@ -2754,9 +2756,7 @@ function renderProfileActivityList(kind) {
                     console.error(e);
                     updatePostLikeUi(postId, wasLiked);
                     updateFeedStats();
-                    if (document.getElementById('statModal')?.classList.contains('active') && statCurrentType === 'likes') {
-                        refreshStatModal();
-                    }
+                    scheduleLikeStatRefresh();
                     showToast('点赞操作失败');
                 } finally {
                     setLikeButtonState(btn, btn.classList.contains('liked'));
@@ -4245,8 +4245,7 @@ function renderProfileActivityList(kind) {
             }
 
             function collectPostMetadata(visibility, overrides) {
-                // 如果当前是 Pro 会员，在帖子 metadata 里冻结 Pro 状态
-                var wasPro = (typeof isVipUser === 'function') ? isVipUser() : false;
+                var wasPro = !!((typeof isVipUser === 'function') ? isVipUser() : false);
                 return Object.assign({}, POST_META_DEFAULTS, {
                     visibility: visibility || "public",
                     pro_at_post: wasPro
@@ -4378,7 +4377,6 @@ function renderProfileActivityList(kind) {
             function buildPostBadges(post) {
                 var normalized = normalizePost(post);
                 var bits = [];
-                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
                 // Pro 标志：优先看帖子冻结的 pro_at_post
                 // 再看 VIP 历史（post.created_at 是否在该用户的某个 Pro 期间内）
                 // 再看当前 Pro 状态（防止元数据丢失时仍能显示）
@@ -4393,6 +4391,7 @@ function renderProfileActivityList(kind) {
                 if (isProPost || isProByHistory) {
                     bits.push('<span class="post-visibility-badge public post-pro-badge">Pro</span>');
                 }
+                bits.push('<span class="post-visibility-badge ' + (normalized.visibility === "private" ? 'private' : 'public') + '">' + (normalized.visibility === "private" ? '私密' : '公开') + '</span>');
                 if (normalized.is_pinned) bits.push('<span class="post-pin-badge">置顶</span>');
                 return bits.join("");
             }
@@ -5197,8 +5196,10 @@ function renderProfileActivityList(kind) {
                 var visibility = visibilityEl ? visibilityEl.value : "public";
                 if (!content && !file) { showToast("请输入帖子内容"); return; }
                 if (content.length > 2000) { showToast("内容不能超过2000字"); return; }
-                var maxFileSize = isVipUser() ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
-                if (file && file.size > maxFileSize) { showToast("文件大小不能超过" + (isVipUser() ? "200MB" : "50MB")); return; }
+                await ensureVipStatusFresh(true);
+                var isProNow = isVipUser();
+                var maxFileSize = isProNow ? 200 * 1024 * 1024 : 50 * 1024 * 1024;
+                if (file && file.size > maxFileSize) { showToast("文件大小不能超过" + (isProNow ? "200MB" : "50MB")); return; }
                 if (file) {
                     var allowedTypes = ['image/','video/','audio/'];
                     var typeOk = allowedTypes.some(function(t) { return file.type.startsWith(t); });
@@ -5219,9 +5220,10 @@ function renderProfileActivityList(kind) {
                     }
                     var plainText = content.slice(0, 2000);
                     var metadata = collectPostMetadata ? collectPostMetadata(visibility) : { visibility: visibility || "public" };
+                    var contentPayload = buildPostContentPayload(plainText, metadata);
                     var payload = {
                         user_name: currentUser,
-                    content: plainText,
+                        content: contentPayload,
                         media_url: media_url,
                         media_type: media_type,
                         actor_key: deviceId,
@@ -5230,8 +5232,7 @@ function renderProfileActivityList(kind) {
                         pinned_at: null,
                         updated_at: null
                     };
-                    var fallbackContent = buildPostContentPayload(plainText, metadata);
-                    var insertRes = await insertPostRecord(payload, fallbackContent);
+                    var insertRes = await insertPostRecord(payload, contentPayload);
                     if (!insertRes.ok) {
                         showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
                         return;
@@ -5502,51 +5503,6 @@ function renderProfileActivityList(kind) {
                 } catch(e) {}
             };
 
-            // 闁瑰灚鎸哥槐鎴犵磼閻旀椿鍚€閻犲浄闄勯崕蹇斾繆椤栨澧查柍褜鍏涢悞?
-            window.openStatDetail = async function(type) {
-                statCurrentType = type;
-                const titles = { posts: '总动态 - 按用户分组', views: '总浏览 - 浏览记录', likes: '点赞和评论 - 记录' };
-                document.getElementById('statModalTitle').textContent = titles[type] || '统计详情';
-                document.getElementById('statModal').classList.add('active');
-
-                // 濡傛灉鏈夌紦瀛樻暟锟筋噯绱濋敓鏂ゆ嫹閿熸枻鎷峰〒鍙夌厠閿涘苯鎮撻弮璺虹磽濮濄儱鍩涳拷?
-                if (statAllPosts.length > 0 && Date.now() - statCacheTime < STAT_CACHE_DURATION) {
-                    renderStatByType(type);
-                    if (statPollTimer) clearInterval(statPollTimer);
-                    statPollTimer = setInterval(refreshStatModal, 15000);
-                    // 后台静默刷锟斤拷
-                    prefetchStatData().then(function() {
-                        if (document.getElementById('statModal').classList.contains('active') && statCurrentType === type) {
-                            renderStatByType(type);
-                        }
-                    });
-                    return;
-                }
-
-                document.getElementById('statModalBody').innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
-
-                try {
-                    const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
-                        sb.from("comments").select("*").order("created_at"),
-                        sb.from("likes").select("*").order("created_at", { ascending: false })
-                    ]);
-                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p); });
-                    var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
-                    statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
-                    statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
-                    statCacheTime = Date.now();
-
-                    renderStatByType(type);
-                } catch(e) {
-                    document.getElementById('statModalBody').innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
-                    console.error('stat error', e);
-                }
-
-                if (statPollTimer) clearInterval(statPollTimer);
-                statPollTimer = setInterval(refreshStatModal, 15000);
-            };
-
             function renderStatByType(type) {
                 if (type === 'posts') {
                     renderPostStats();
@@ -5587,40 +5543,6 @@ function renderProfileActivityList(kind) {
                 if (post.media_type === 'image') return '图片动态';
                 if (post.media_type === 'video') return '视频动态';
                 return '无文字内容';
-            }
-
-            function statMetricMarkup(label, value) {
-                return [
-                    '<div class="stat-metric">',
-                    '<span class="stat-metric-value">' + escapeHtml(String(value)) + '</span>',
-                    '<span class="stat-metric-label">' + escapeHtml(String(label)) + '</span>',
-                    '</div>'
-                ].join('');
-            }
-
-            function statHeroMarkup(opts) {
-                opts = opts || {};
-                var metrics = Array.isArray(opts.metrics) ? opts.metrics : [];
-                return [
-                    '<section class="stat-hero stat-hero--' + escapeHtml(opts.tone || 'posts') + '">',
-                    opts.kicker ? '<div class="stat-hero-kicker">' + escapeHtml(opts.kicker) + '</div>' : '',
-                    '<div class="stat-hero-title">' + escapeHtml(opts.title || '') + '</div>',
-                    opts.copy ? '<div class="stat-hero-copy">' + escapeHtml(opts.copy) + '</div>' : '',
-                    metrics.length ? '<div class="stat-hero-metrics">' + metrics.map(function(metric) { return statMetricMarkup(metric.label, metric.value); }).join('') + '</div>' : '',
-                    '</section>'
-                ].join('');
-            }
-
-            function statEmptyMarkup(opts) {
-                opts = opts || {};
-                return [
-                    '<div class="stat-empty-rich stat-surface-card">',
-                    opts.kicker ? '<div class="stat-hero-kicker">' + escapeHtml(opts.kicker) + '</div>' : '',
-                    '<div class="stat-empty-title">' + escapeHtml(opts.title || '暂无数据') + '</div>',
-                    opts.copy ? '<div class="stat-empty-copy">' + escapeHtml(opts.copy) + '</div>' : '',
-                    opts.note ? '<div class="stat-empty-note">' + escapeHtml(opts.note) + '</div>' : '',
-                    '</div>'
-                ].join('');
             }
 
             function statPostItemMarkup(post) {
@@ -7951,13 +7873,20 @@ function renderProfileActivityList(kind) {
                 localStorage.setItem(ANN_READ_KEY, JSON.stringify(readIds));
             }
 
+            function markAnnouncementsRead(ids) {
+                var nextIds = Array.isArray(ids) ? ids.map(function(id) { return String(id); }).filter(Boolean) : [];
+                if (!nextIds.length) return;
+                var readIds = getReadAnnouncements().map(function(id) { return String(id); });
+                var merged = new Set(readIds);
+                nextIds.forEach(function(id) {
+                    merged.add(id);
+                });
+                saveReadAnnouncements(Array.from(merged));
+                updateAnnouncementBadge();
+            }
+
             function markAnnouncementRead(annId) {
-                const readIds = getReadAnnouncements();
-                if (!readIds.includes(annId)) {
-                    readIds.push(annId);
-                    saveReadAnnouncements(readIds);
-                    updateAnnouncementBadge();
-                }
+                markAnnouncementsRead([annId]);
             }
 
             function isAnnouncementRead(annId) {
@@ -7980,15 +7909,18 @@ function renderProfileActivityList(kind) {
 
             window.openAnnouncementModal = async function() {
                 const overlay = document.getElementById('announcementModal');
+                if (!overlay) return;
                 overlay.style.opacity = '';
                 overlay.style.transition = '';
                 overlay.classList.add('active');
                 document.body.style.overflow = 'hidden';
                 showAnnouncementList();
                 if (announcements && announcements.length) {
+                    markAnnouncementsRead(announcements.map(function(item) { return item && item.id; }));
                     renderAnnouncementList();
                 }
                 await loadAnnouncements();
+                markAnnouncementsRead((announcements || []).map(function(item) { return item && item.id; }));
                 renderAnnouncementList();
 
                 if (isAdmin()) {
@@ -8000,6 +7932,7 @@ function renderProfileActivityList(kind) {
 
             window.closeAnnouncementModal = function() {
                 const overlay = document.getElementById('announcementModal');
+                if (!overlay) return;
                 overlay.style.opacity = '0';
                 overlay.style.transition = 'opacity 0.2s ease';
                 setTimeout(() => {
@@ -8007,6 +7940,7 @@ function renderProfileActivityList(kind) {
                     overlay.style.opacity = '';
                     overlay.style.transition = '';
                     document.body.style.overflow = '';
+                    if (typeof syncReportModalBodyLock === 'function') syncReportModalBodyLock();
                     currentAnnouncement = null;
                 }, 200);
             };
@@ -9165,20 +9099,34 @@ function renderProfileActivityList(kind) {
                 originalShowAnnouncementList();
             };
 
-            // 绑定公告按钮事件
-            const annBtn = document.getElementById('announcementBtn');
-            if (annBtn) {
-                annBtn.addEventListener('click', function() {
-                    currentAnnouncementTab = 'announcements';
-                    document.querySelectorAll('.announcement-tab').forEach(t => 
-                        t.classList.toggle('active', t.dataset.tab === 'announcements')
-                    );
-                    document.getElementById('announcementListContainer').style.display = 'block';
-                    document.getElementById('announcementDetail').style.display = 'none';
-                    document.getElementById('changelogContainer').style.display = 'none';
-                    openAnnouncementModal();
-                });
+            function bindHeaderActionButtons() {
+                var annBtn = document.getElementById('announcementBtn');
+                if (annBtn && annBtn.dataset.xtjBound !== '1') {
+                    annBtn.dataset.xtjBound = '1';
+                    annBtn.type = 'button';
+                    annBtn.addEventListener('click', function() {
+                        currentAnnouncementTab = 'announcements';
+                        document.querySelectorAll('.announcement-tab').forEach(function(t) {
+                            t.classList.toggle('active', t.dataset.tab === 'announcements');
+                        });
+                        document.getElementById('announcementListContainer').style.display = 'block';
+                        document.getElementById('announcementDetail').style.display = 'none';
+                        document.getElementById('changelogContainer').style.display = 'none';
+                        window.openAnnouncementModal();
+                    });
+                }
+                var reportBtn = document.getElementById('reportBtn');
+                if (reportBtn && reportBtn.dataset.xtjBound !== '1') {
+                    reportBtn.dataset.xtjBound = '1';
+                    reportBtn.type = 'button';
+                    reportBtn.onclick = null;
+                    reportBtn.addEventListener('click', function(event) {
+                        event.preventDefault();
+                        window.openReportModal();
+                    });
+                }
             }
+            bindHeaderActionButtons();
 
         // ===================== 举报功能 =====================
         var _reportType = 'post';
@@ -9851,40 +9799,6 @@ function renderProfileActivityList(kind) {
                 return '无文字内容';
             }
 
-            function statMetricMarkup(label, value) {
-                return [
-                    '<div class="stat-metric">',
-                    '<span class="stat-metric-value">' + escapeHtml(String(value)) + '</span>',
-                    '<span class="stat-metric-label">' + escapeHtml(String(label)) + '</span>',
-                    '</div>'
-                ].join('');
-            }
-
-            function statHeroMarkup(opts) {
-                opts = opts || {};
-                var metrics = Array.isArray(opts.metrics) ? opts.metrics : [];
-                return [
-                    '<section class="stat-hero stat-hero--' + escapeHtml(opts.tone || 'posts') + '">',
-                    opts.kicker ? '<div class="stat-hero-kicker">' + escapeHtml(opts.kicker) + '</div>' : '',
-                    '<div class="stat-hero-title">' + escapeHtml(opts.title || '') + '</div>',
-                    opts.copy ? '<div class="stat-hero-copy">' + escapeHtml(opts.copy) + '</div>' : '',
-                    metrics.length ? '<div class="stat-hero-metrics">' + metrics.map(function(metric) { return statMetricMarkup(metric.label, metric.value); }).join('') + '</div>' : '',
-                    '</section>'
-                ].join('');
-            }
-
-            function statEmptyMarkup(opts) {
-                opts = opts || {};
-                return [
-                    '<div class="stat-empty-rich stat-surface-card">',
-                    opts.kicker ? '<div class="stat-hero-kicker">' + escapeHtml(opts.kicker) + '</div>' : '',
-                    '<div class="stat-empty-title">' + escapeHtml(opts.title || '暂无数据') + '</div>',
-                    opts.copy ? '<div class="stat-empty-copy">' + escapeHtml(opts.copy) + '</div>' : '',
-                    opts.note ? '<div class="stat-empty-note">' + escapeHtml(opts.note) + '</div>' : '',
-                    '</div>'
-                ].join('');
-            }
-
             function statGetPostMap() {
                 var postMap = {};
                 (Array.isArray(statAllPosts) ? statAllPosts : []).forEach(function(post) {
@@ -10037,6 +9951,12 @@ function renderProfileActivityList(kind) {
                 ].join('');
             }
 
+            function renderStatByType(type) {
+                if (type === 'posts') renderPostStats();
+                else if (type === 'views') renderViewStats();
+                else if (type === 'likes') renderLikeStats();
+            }
+
             renderPostStats = function() {
                 var body = document.getElementById('statModalBody');
                 if (!body) return;
@@ -10084,7 +10004,7 @@ function renderProfileActivityList(kind) {
                 if (!body) return;
                 var userPosts = sortPosts(statAllPosts.filter(function(p) { return p.user_name === userName; }));
                 body.innerHTML = [
-                    '<div class="stat-history-head"><button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">返回总动态</button><div class="stat-inline-title">' + escapeHtml(userName) + ' 的历史记录 · ' + userPosts.length + ' 条</div></div>',
+                    '<div class="stat-history-head"><button class="back-to-stats-btn" onclick="openStatDetail(\'posts\')">返回总动态</button></div>',
                     '<div class="stat-stack">' + userPosts.map(function(p, index) {
                         return statPostItemMarkup(Object.assign({}, p, { _statIndex: index }));
                     }).join('') + '</div>'
@@ -10235,55 +10155,6 @@ function renderProfileActivityList(kind) {
                 }
             };
 
-            window.openStatDetail = async function(type) {
-                statCurrentType = type;
-                var requestId = ++statOpenSeq;
-                var titles = {
-                    posts: '总动态 - 按用户分组',
-                    views: '总浏览 - 浏览记录',
-                    likes: '点赞和评论 - 记录'
-                };
-                var title = document.getElementById('statModalTitle');
-                var body = document.getElementById('statModalBody');
-                var modal = document.getElementById('statModal');
-                if (title) title.textContent = titles[type] || '统计详情';
-                if (modal && !modal.classList.contains('active')) modal.classList.add('active');
-
-                if (statAllPosts.length > 0 && Date.now() - statCacheTime < STAT_CACHE_DURATION) {
-                    renderStatByType(type);
-                    if (statPollTimer) clearInterval(statPollTimer);
-                    statPollTimer = setInterval(refreshStatModal, 15000);
-                    prefetchStatData().then(function() {
-                        if (modal && modal.classList.contains('active') && statCurrentType === type) {
-                            renderStatByType(type);
-                        }
-                    });
-                    return;
-                }
-
-                if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
-                try {
-                    const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").order("created_at", { ascending: false }),
-                        sb.from("comments").select("*").order("created_at"),
-                        sb.from("likes").select("*").order("created_at", { ascending: false })
-                    ]);
-                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) {
-                        return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p);
-                    });
-                    var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
-                    statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
-                    statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
-                    statCacheTime = Date.now();
-                    renderStatByType(type);
-                } catch (e) {
-                    if (body) body.innerHTML = '<div class="stat-empty">加载失败，请重试</div>';
-                    console.error('stat error', e);
-                }
-
-                if (statPollTimer) clearInterval(statPollTimer);
-                statPollTimer = setInterval(refreshStatModal, 15000);
-            };
         })();
 
         (function installFinalUiAndDataOverrides() {
@@ -10330,7 +10201,7 @@ function renderProfileActivityList(kind) {
 
             function applyStatSnapshot(posts, comments, likes) {
                 var visiblePosts = normalizePosts(Array.isArray(posts) ? posts : []).filter(function(p) {
-                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && canViewPost(p);
+                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p);
                 });
                 var visiblePostIds = new Set(visiblePosts.map(function(p) { return String(p.id); }));
                 statAllPosts = visiblePosts;
@@ -10343,7 +10214,7 @@ function renderProfileActivityList(kind) {
                 statCacheTime = Date.now();
             }
 
-            var statOpenSeq = 0;
+            var statRequestId = 0;
             var statDataPromise = null;
 
             function hasUsableStatCache() {
@@ -10373,7 +10244,18 @@ function renderProfileActivityList(kind) {
             refreshStatModal = function() {
                 var modal = document.getElementById('statModal');
                 if (!modal || !modal.classList.contains('active') || !statCurrentType) return;
+                var sourcePosts = Array.isArray(feedAllPosts) && feedAllPosts.length ? feedAllPosts : statAllPosts;
+                var sourceComments = Array.isArray(feedAllComments) && feedAllComments.length ? feedAllComments : statAllComments;
+                var sourceLikes = Array.isArray(feedAllLikes) && feedAllLikes.length ? feedAllLikes : statAllLikes;
+                if (sourcePosts.length || sourceComments.length || sourceLikes.length) {
+                    applyStatSnapshot(sourcePosts, sourceComments, sourceLikes);
+                }
                 renderStatByType(statCurrentType);
+                ensureStatDataLoaded(false).then(function(snapshot) {
+                    if (!snapshot || !modal.classList.contains('active') || !statCurrentType) return;
+                    applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
+                    renderStatByType(statCurrentType);
+                }).catch(function() {});
             };
 
             window.prefetchStatData = function() {
@@ -10485,7 +10367,7 @@ function renderProfileActivityList(kind) {
 
             window.openStatDetail = async function(type) {
                 statCurrentType = type;
-                var requestId = ++statOpenSeq;
+                var requestId = ++statRequestId;
                 var titles = {
                     posts: '总动态 - 按用户分组',
                     views: '总浏览 - 浏览记录',
@@ -10524,10 +10406,10 @@ function renderProfileActivityList(kind) {
 
                 if (sourcePosts.length || sourceComments.length || sourceLikes.length) {
                     applyStatSnapshot(sourcePosts, sourceComments, sourceLikes);
-                    if (requestId !== statOpenSeq) return;
+                    if (requestId !== statRequestId) return;
                     renderStatByType(type);
                     ensureStatDataLoaded(false).then(function(snapshot) {
-                        if (!snapshot || !modal || !modal.classList.contains('active') || statCurrentType !== type || requestId !== statOpenSeq) return;
+                        if (!snapshot || !modal || !modal.classList.contains('active') || statCurrentType !== type || requestId !== statRequestId) return;
                         applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
                         renderStatByType(type);
                     });
@@ -10536,7 +10418,7 @@ function renderProfileActivityList(kind) {
 
                 if (body) body.innerHTML = getXtjLoadingHtml('加载中..', '加载中..', 'feed');
                 var snapshot = await ensureStatDataLoaded(true);
-                if (requestId !== statOpenSeq) return;
+                if (!modal || !modal.classList.contains('active') || statCurrentType !== type || requestId !== statRequestId) return;
                 if (snapshot) {
                     applyStatSnapshot(snapshot.posts, snapshot.comments, snapshot.likes);
                     renderStatByType(type);

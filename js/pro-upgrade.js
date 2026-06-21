@@ -360,5 +360,115 @@
     return !!(local && local.is_active);
   };
 
+  var vipHistoryCache = window.__xtjVipHistoryCache || {
+    loadedUsers: {},
+    intervalsByUser: {}
+  };
+  window.__xtjVipHistoryCache = vipHistoryCache;
+
+  function toTs(value) {
+    if (!value) return NaN;
+    var ts = new Date(value).getTime();
+    return Number.isFinite(ts) ? ts : NaN;
+  }
+
+  function buildVipInterval(userName, payload, fallbackStart) {
+    if (!userName || !payload) return null;
+    var startTs = toTs(payload.activated_at || payload.start_at || fallbackStart);
+    var endTs = toTs(payload.expire_at);
+    if (!Number.isFinite(startTs) || !Number.isFinite(endTs) || endTs < startTs) return null;
+    return {
+      user_name: String(userName),
+      startTs: startTs,
+      endTs: endTs
+    };
+  }
+
+  function mergeVipIntervals(userName, intervals) {
+    var key = String(userName || '');
+    if (!key) return;
+    if (!Array.isArray(vipHistoryCache.intervalsByUser[key])) {
+      vipHistoryCache.intervalsByUser[key] = [];
+    }
+    var existing = vipHistoryCache.intervalsByUser[key];
+    (Array.isArray(intervals) ? intervals : []).forEach(function(interval) {
+      if (!interval) return;
+      var duplicated = existing.some(function(item) {
+        return item.startTs === interval.startTs && item.endTs === interval.endTs;
+      });
+      if (!duplicated) existing.push(interval);
+    });
+    existing.sort(function(a, b) {
+      return a.startTs - b.startTs;
+    });
+  }
+
+  function mergeLocalVipHistory(userName) {
+    if (!userName || typeof window.__xtjCheckLocalVip !== 'function') return;
+    var local = window.__xtjCheckLocalVip(userName);
+    if (!local) return;
+    var interval = buildVipInterval(userName, local, local.activated_at || local.start_at);
+    if (interval) mergeVipIntervals(userName, [interval]);
+  }
+
+  window.__xtjBatchLoadVipHistory = async function(userNames) {
+    var names = Array.from(new Set((Array.isArray(userNames) ? userNames : []).map(function(name) {
+      return String(name || '').trim();
+    }).filter(Boolean)));
+    if (!names.length) return vipHistoryCache;
+
+    names.forEach(function(name) {
+      mergeLocalVipHistory(name);
+    });
+
+    var pending = names.filter(function(name) {
+      return !vipHistoryCache.loadedUsers[name];
+    });
+    if (!pending.length || !window.sb) return vipHistoryCache;
+
+    try {
+      var result = await window.sb.from('posts')
+        .select('user_name,content,created_at')
+        .eq('media_type', VIP_MARKER)
+        .in('user_name', pending)
+        .order('created_at', { ascending: false });
+
+      if (result && result.error) throw result.error;
+
+      pending.forEach(function(name) {
+        vipHistoryCache.loadedUsers[name] = true;
+        if (!Array.isArray(vipHistoryCache.intervalsByUser[name])) {
+          vipHistoryCache.intervalsByUser[name] = [];
+        }
+      });
+
+      (result && Array.isArray(result.data) ? result.data : []).forEach(function(row) {
+        if (!row || !row.user_name) return;
+        try {
+          var payload = JSON.parse(row.content || '{}');
+          var interval = buildVipInterval(row.user_name, payload, row.created_at);
+          if (interval) mergeVipIntervals(row.user_name, [interval]);
+        } catch (_) {}
+      });
+    } catch (e) {
+      pending.forEach(function(name) {
+        mergeLocalVipHistory(name);
+      });
+    }
+
+    return vipHistoryCache;
+  };
+
+  window.__xtjIsUserProAt = function(userName, createdAt) {
+    var key = String(userName || '').trim();
+    var createdTs = toTs(createdAt);
+    if (!key || !Number.isFinite(createdTs)) return false;
+    mergeLocalVipHistory(key);
+    var intervals = vipHistoryCache.intervalsByUser[key] || [];
+    return intervals.some(function(interval) {
+      return interval && createdTs >= interval.startTs && createdTs <= interval.endTs;
+    });
+  };
+
   // console.log('[Pro] Upgrade module loaded');
 })();
