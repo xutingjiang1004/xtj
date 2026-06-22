@@ -1830,6 +1830,9 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
     if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
 
+    const deviceIdVal = validateString(device_id, 120, '设备ID');
+    if (!deviceIdVal) return res.status(400).json({ error: '缺少设备ID' });
+
     // 验证密码 hash（与 /api/log-user-visit 相同验证方式）
     if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
     const { data: authRec } = await supabase.from('posts')
@@ -1847,12 +1850,12 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     const random = Math.random().toString(36).slice(2, 10);
 
     // 写入 posts 表（短期方案，不新建表）
-    await supabase.from('posts').insert([{
+    const { error } = await supabase.from('posts').insert([{
       user_name: userNameVal,
       media_type: LOGIN_EVENT_MARKER,
-      media_url: device_id || 'unknown',
+      media_url: deviceIdVal,
       content: JSON.stringify({
-        device_id: device_id || 'unknown',
+        device_id: deviceIdVal,
         device_type: device_type || 'unknown',
         os: os || 'Unknown',
         browser: browser || 'Unknown',
@@ -1863,6 +1866,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
       }),
       actor_key: 'login_' + Date.now() + '_' + random
     }]);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
 
     return res.json({ ok: true });
   } catch(e) {
