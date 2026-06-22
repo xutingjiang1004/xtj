@@ -81,6 +81,7 @@ const ADMIN_META_MARKER = '__admin_meta__';
 const USER_INFO_MARKER = '__user_info__';
 const USER_VISIT_MARKER = '__user_visit__';
 const LOGIN_EVENT_MARKER = '__login_event__';
+const SECURITY_ALERT_MARKER = '__security_alert__';
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
 let statsCache = { data: null, ts: 0, pending: null };
@@ -663,6 +664,247 @@ async function resolveIpLocation(ip) {
   return null;
 }
 
+// ===================== 安全检测逻辑 =====================
+
+// 写入安全提醒到 posts 表
+async function insertSecurityAlert(alert) {
+  try {
+    await supabase.from('posts').insert([{
+      user_name: alert.user_name || 'system',
+      media_type: SECURITY_ALERT_MARKER,
+      media_url: alert.type || 'unknown',
+      content: JSON.stringify({
+        type: alert.type,
+        level: alert.level || 'warning',
+        user_name: alert.user_name,
+        ip: alert.ip || null,
+        ip_location_text: alert.ip_location_text || null,
+        related_users: alert.related_users || [],
+        reason: alert.reason || '',
+        is_read: false
+      }),
+      actor_key: 'sec_alert_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+    }]);
+  } catch(e) {
+    console.warn('[Security] 写入安全提醒失败:', e.message || e);
+  }
+}
+
+// 检查同 IP 24h 内多账号登录
+async function checkSameIpMultiUsers(userName, ip, ipLocation) {
+  if (!ip || ip === 'unknown') return;
+  var since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  try {
+    var { data } = await supabase.from('posts')
+      .select('user_name, content')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (!data || !data.length) return;
+
+    var ipUsers = {};
+    data.forEach(function(row) {
+      try {
+        var c = JSON.parse(row.content || '{}');
+        if (c.ip === ip && row.user_name !== userName) {
+          ipUsers[row.user_name] = true;
+        }
+      } catch(e) {}
+    });
+
+    var related = Object.keys(ipUsers);
+    if (related.length >= 2) {
+      await insertSecurityAlert({
+        type: 'same_ip_multi_users',
+        level: 'warning',
+        user_name: userName,
+        ip: ip,
+        ip_location_text: ipLocation ? ipLocation.text : null,
+        related_users: [userName].concat(related),
+        reason: '同一 IP ' + ip + ' 在 24 小时内登录了 ' + (related.length + 1) + ' 个账号'
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkSameIpMultiUsers 异常:', e.message || e);
+  }
+}
+
+// 检查同 device_id 多账号登录
+async function checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation) {
+  if (!deviceId) return;
+  try {
+    var { data } = await supabase.from('posts')
+      .select('user_name, content')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .eq('media_url', deviceId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (!data || !data.length) return;
+
+    var deviceUsers = {};
+    data.forEach(function(row) {
+      if (row.user_name !== userName) {
+        deviceUsers[row.user_name] = true;
+      }
+    });
+
+    var related = Object.keys(deviceUsers);
+    if (related.length >= 1) {
+      await insertSecurityAlert({
+        type: 'same_device_multi_users',
+        level: 'high',
+        user_name: userName,
+        ip: ip,
+        ip_location_text: ipLocation ? ipLocation.text : null,
+        related_users: [userName].concat(related),
+        reason: '同一设备 ID ' + deviceId.slice(0, 12) + '... 登录了 ' + (related.length + 1) + ' 个账号'
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkSameDeviceMultiUsers 异常:', e.message || e);
+  }
+}
+
+// 检查同账号短时间内多 IP
+async function checkMultiIpSameUser(userName, ip, ipLocation) {
+  if (!ip || ip === 'unknown') return;
+  var since = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1小时
+  try {
+    var { data } = await supabase.from('posts')
+      .select('content, created_at')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .eq('user_name', userName)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (!data || !data.length) return;
+
+    var ips = {};
+    data.forEach(function(row) {
+      try {
+        var c = JSON.parse(row.content || '{}');
+        if (c.ip && c.ip !== ip) {
+          ips[c.ip] = true;
+        }
+      } catch(e) {}
+    });
+
+    var diffIps = Object.keys(ips);
+    if (diffIps.length >= 2) {
+      await insertSecurityAlert({
+        type: 'multi_ip_same_user',
+        level: 'high',
+        user_name: userName,
+        ip: ip,
+        ip_location_text: ipLocation ? ipLocation.text : null,
+        related_users: [userName],
+        reason: '账号 ' + userName + ' 在 1 小时内使用了 ' + (diffIps.length + 1) + ' 个不同 IP'
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkMultiIpSameUser 异常:', e.message || e);
+  }
+}
+
+// 检查同账号地区变化
+async function checkGeoChange(userName, ipLocation) {
+  if (!ipLocation || !ipLocation.country) return;
+  try {
+    var { data } = await supabase.from('posts')
+      .select('content')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .eq('user_name', userName)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (!data || !data.length) return;
+
+    var lastLoc = null;
+    for (var i = 0; i < data.length; i++) {
+      try {
+        var c = JSON.parse(data[i].content || '{}');
+        if (c.ip_location && c.ip_location.country) {
+          lastLoc = c.ip_location;
+          break;
+        }
+      } catch(e) {}
+    }
+
+    if (lastLoc && lastLoc.country !== ipLocation.country) {
+      await insertSecurityAlert({
+        type: 'geo_change',
+        level: 'info',
+        user_name: userName,
+        ip: null,
+        ip_location_text: ipLocation.text,
+        related_users: [userName],
+        reason: '账号 ' + userName + ' 地区从 ' + (lastLoc.text || lastLoc.country) + ' 变为 ' + ipLocation.text
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkGeoChange 异常:', e.message || e);
+  }
+}
+
+// 检查同账号短时间内 page_visit 过多
+async function checkHighFrequencyVisit(userName, source, ip, ipLocation) {
+  if (source !== 'page_visit') return;
+  var since = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5分钟
+  try {
+    var { data } = await supabase.from('posts')
+      .select('id')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .eq('user_name', userName)
+      .gte('created_at', since)
+      .limit(100);
+    if (!data || data.length < 30) return;
+
+    // 检查最近是否已生成同类提醒（去重）
+    var recentSince = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    var { data: existing } = await supabase.from('posts')
+      .select('id')
+      .eq('media_type', SECURITY_ALERT_MARKER)
+      .eq('media_url', 'high_frequency_visit')
+      .eq('user_name', userName)
+      .gte('created_at', recentSince)
+      .limit(1);
+
+    if (existing && existing.length > 0) return;
+
+    await insertSecurityAlert({
+      type: 'high_frequency_visit',
+      level: 'info',
+      user_name: userName,
+      ip: ip,
+      ip_location_text: ipLocation ? ipLocation.text : null,
+      related_users: [userName],
+      reason: '账号 ' + userName + ' 在 5 分钟内产生了 ' + data.length + ' 次页面访问'
+    });
+  } catch(e) {
+    console.warn('[Security] checkHighFrequencyVisit 异常:', e.message || e);
+  }
+}
+
+// 统一安全检测入口（登录事件写入后调用）
+async function runSecurityChecks(userName, deviceId, ip, ipLocation, source) {
+  // 并行执行各项检查
+  await Promise.allSettled
+    ? await Promise.allSettled([
+        checkSameIpMultiUsers(userName, ip, ipLocation),
+        checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation),
+        checkMultiIpSameUser(userName, ip, ipLocation),
+        checkGeoChange(userName, ipLocation),
+        checkHighFrequencyVisit(userName, source, ip, ipLocation)
+      ])
+    : await Promise.all([
+        checkSameIpMultiUsers(userName, ip, ipLocation).catch(function(){}),
+        checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation).catch(function(){}),
+        checkMultiIpSameUser(userName, ip, ipLocation).catch(function(){}),
+        checkGeoChange(userName, ipLocation).catch(function(){}),
+        checkHighFrequencyVisit(userName, source, ip, ipLocation).catch(function(){})
+      ]);
+}
+
 function rateLimit(windowMs, maxRequests) {
   return (req, res, next) => {
     const key = getRealIp(req) + ':' + req.path;
@@ -839,7 +1081,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
     autoExpireOverdueRecords().catch(function() {});
 
     const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes, annRes] = await Promise.all([
-      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).order('created_at', { ascending: false }).limit(5000),
+      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500),
@@ -1981,7 +2223,7 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
 // ===================== 登录设备/IP 记录（前端调用） =====================
 app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
   try {
-    const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source } = req.body;
+    const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source, device_meta, browser_fingerprint_hash, canvas_fingerprint_hash } = req.body;
 
     const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
     const srcVal = VALID_SOURCES.includes(source) ? source : 'login_success';
@@ -2026,7 +2268,10 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
         ip: ip,
         ip_location: ipLocation,
         login_at: loginAt,
-        source: srcVal
+        source: srcVal,
+        device_meta: device_meta || null,
+        browser_fingerprint_hash: browser_fingerprint_hash || null,
+        canvas_fingerprint_hash: canvas_fingerprint_hash || null
       }),
       actor_key: 'login_' + Date.now() + '_' + random
     }]);
@@ -2073,6 +2318,11 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
       console.warn('[API] 同步 user_info 失败:', e.message || e);
     }
 
+    // 异步执行安全检测（不影响响应速度，错误静默处理）
+    runSecurityChecks(userNameVal, deviceIdVal, ip, ipLocation, srcVal).catch(function(e) {
+      console.warn('[Security] 安全检测异常:', e.message || e);
+    });
+
     return res.json({ ok: true });
   } catch(e) {
     console.error('[API] 登录事件记录失败:', e.message);
@@ -2093,6 +2343,80 @@ app.get('/admin/login-events', verifyToken, rateLimit(60000, 10), async (req, re
   } catch(e) {
     console.error('[API] 登录事件查询失败:', e.message);
     return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// ===================== 安全提醒查询（管理员） =====================
+app.get('/admin/security-alerts', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var limit = parseInt(req.query.limit) || 200;
+    if (limit > 500) limit = 500;
+    var query = supabase.from('posts')
+      .select('id, user_name, content, media_url, created_at')
+      .eq('media_type', SECURITY_ALERT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    // 支持按类型筛选
+    if (req.query.type) {
+      query = query.eq('media_url', req.query.type);
+    }
+
+    var { data, error } = await query;
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+
+    // 解析 content JSON
+    var alerts = (data || []).map(function(row) {
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      return {
+        id: row.id,
+        user_name: row.user_name,
+        created_at: row.created_at,
+        type: info.type || row.media_url,
+        level: info.level || 'warning',
+        ip: info.ip || null,
+        ip_location_text: info.ip_location_text || null,
+        related_users: info.related_users || [],
+        reason: info.reason || '',
+        is_read: info.is_read || false
+      };
+    });
+
+    return res.json({ data: alerts });
+  } catch(e) {
+    console.error('[API] 安全提醒查询失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// ===================== 标记安全提醒已读 =====================
+app.post('/admin/security-alerts/read', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var alertId = req.body.id;
+    if (!alertId) return res.status(400).json({ error: '缺少提醒ID' });
+
+    var { data: existing } = await supabase.from('posts')
+      .select('content')
+      .eq('id', alertId)
+      .eq('media_type', SECURITY_ALERT_MARKER)
+      .maybeSingle();
+
+    if (!existing) return res.status(404).json({ error: '提醒不存在' });
+
+    var info = {};
+    try { info = JSON.parse(existing.content || '{}'); } catch(e) {}
+    info.is_read = true;
+
+    var { error } = await supabase.from('posts')
+      .update({ content: JSON.stringify(info) })
+      .eq('id', alertId);
+
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[API] 标记安全提醒已读失败:', e.message);
+    return res.status(500).json({ error: '操作失败' });
   }
 });
 
