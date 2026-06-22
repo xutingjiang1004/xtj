@@ -74,17 +74,67 @@
         return 'Unknown';
     }
 
+
+    // 根据 iOS/Safari 暴露的屏幕参数推测 iPhone 疑似型号（非精确识别）
+    function getPossibleDeviceModel(info) {
+        info = info || {};
+        var ua = String(info.user_agent || (navigator && navigator.userAgent) || '');
+        var platform = String(info.platform || (navigator && navigator.platform) || '');
+        var maxTouchPoints = Number(info.max_touch_points || (navigator && navigator.maxTouchPoints) || 0);
+        var isIPhone = /iPhone/i.test(ua) || (/Mac/i.test(platform) && maxTouchPoints > 1 && Math.min(Number(info.screen_width) || 0, Number(info.screen_height) || 0) < 600);
+        if (!isIPhone) return '';
+
+        var sw = Number(info.screen_width) || 0;
+        var sh = Number(info.screen_height) || 0;
+        var dpr = Number(info.device_pixel_ratio) || 0;
+        var shortSide = Math.min(sw, sh);
+        var longSide = Math.max(sw, sh);
+        var key = shortSide + 'x' + longSide + '@' + (dpr || '');
+        var modelMap = {
+            '440x956@3': '疑似 iPhone 16 Pro Max / iPhone 17 Pro Max',
+            '402x874@3': '疑似 iPhone 16 Pro / iPhone 17 / iPhone 17 Pro',
+            '393x852@3': '疑似 iPhone 14 Pro / iPhone 15 / iPhone 15 Pro / iPhone 16',
+            '430x932@3': '疑似 iPhone 14 Pro Max / iPhone 15 Plus / iPhone 15 Pro Max / iPhone 16 Plus',
+            '428x926@3': '疑似 iPhone 12 Pro Max / iPhone 13 Pro Max / iPhone 14 Plus',
+            '390x844@3': '疑似 iPhone 12 / iPhone 12 Pro / iPhone 13 / iPhone 13 Pro / iPhone 14',
+            '375x812@3': '疑似 iPhone X / iPhone XS / iPhone 11 Pro / iPhone 12 mini / iPhone 13 mini',
+            '414x896@3': '疑似 iPhone XS Max / iPhone 11 Pro Max',
+            '414x896@2': '疑似 iPhone XR / iPhone 11',
+            '414x736@3': '疑似 iPhone 6 Plus / 6s Plus / 7 Plus / 8 Plus',
+            '375x667@2': '疑似 iPhone 6 / 6s / 7 / 8 / SE（第 2/3 代）',
+            '320x568@2': '疑似 iPhone 5 / 5s / SE（第 1 代）'
+        };
+        return modelMap[key] || 'iPhone（型号不可确定）';
+    }
+
     // 设备元信息（仅基础信息，不做跨站追踪）
     function getDeviceMeta() {
         try {
-            return {
+            var meta = {
                 screen: (window.screen ? window.screen.width + 'x' + window.screen.height : 'unknown'),
+                screen_width: window.screen ? window.screen.width : null,
+                screen_height: window.screen ? window.screen.height : null,
+                inner_width: window.innerWidth || null,
+                inner_height: window.innerHeight || null,
                 dpr: window.devicePixelRatio || 1,
+                device_pixel_ratio: window.devicePixelRatio || 1,
                 language: (navigator.language || navigator.userLanguage || 'unknown'),
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
                 platform: (navigator.platform || 'unknown'),
+                max_touch_points: navigator.maxTouchPoints || 0,
                 touch: ('ontouchstart' in window || navigator.maxTouchPoints > 0)
             };
+            meta.possible_device_model = getPossibleDeviceModel({
+                screen_width: meta.screen_width,
+                screen_height: meta.screen_height,
+                inner_width: meta.inner_width,
+                inner_height: meta.inner_height,
+                device_pixel_ratio: meta.device_pixel_ratio,
+                platform: meta.platform,
+                max_touch_points: meta.max_touch_points,
+                user_agent: navigator.userAgent || ''
+            });
+            return meta;
         } catch(e) {
             return null;
         }
