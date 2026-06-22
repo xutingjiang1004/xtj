@@ -7407,6 +7407,16 @@
     position: relative;
 }
 
+.xtj-magic-loading,
+.xtj-magic-loading * {
+    pointer-events: none !important;
+}
+
+.xtj-magic-loading {
+    position: relative !important;
+    z-index: 0 !important;
+}
+
 /* ===== Photo Loader（通用加载动画，与照片墙风格一致） ===== */
 
 @media (max-width: 480px) {
