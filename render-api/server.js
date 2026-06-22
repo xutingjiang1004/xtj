@@ -1875,6 +1875,22 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
   }
 });
 
+// ===================== 登录事件查询（管理员） =====================
+app.get('/admin/login-events', verifyToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('posts')
+      .select('id, user_name, content, media_url, created_at')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ data: data || [] });
+  } catch(e) {
+    console.error('[API] 登录事件查询失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
 // ===================== 用户访问统计（管理员） =====================
 app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {

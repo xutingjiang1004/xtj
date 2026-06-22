@@ -97,7 +97,7 @@
         }, 30000); // 每30秒检查一次
     }
 
-    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [];
+    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [];
     var searchUser = '', searchPost = '';
     var userFilterStatus = 'all';
     var userSortBy = 'reg';
@@ -541,6 +541,14 @@
                 };
             });
 
+            // 加载登录事件记录
+            try {
+                var loginRes = await apiCall('GET', '/admin/login-events');
+                allLoginEvents = loginRes.data || [];
+            } catch(e) {
+                allLoginEvents = [];
+            }
+
             // 数据已经在 /admin/data 中加载，不需要单独加载
             await loadPhotosAdminData();
 
@@ -574,6 +582,14 @@
         var d = document.createElement('div');
         d.textContent = s || '';
         return d.innerHTML;
+    }
+
+    function maskIp(ip) {
+        if (!ip) return '-';
+        var s = String(ip).trim();
+        var parts = s.split('.');
+        if (parts.length === 4) return parts[0] + '.xxx.xxx.xxx';
+        return s.slice(0, 4) + 'xxx';
     }
 
     function getDisplayContent(content) {
@@ -2571,7 +2587,19 @@
         h += '</div>';
         if (!filtered.length) { h += '<div class="empty">没有匹配用户</div>'; }
         else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>帖子</th><th>点赞</th><th>评论</th><th>注册时间</th><th>操作</th></tr></thead><tbody>';
+            // 构建登录事件查找表
+            var loginEventMap = {};
+            allLoginEvents.forEach(function(e) {
+                if (!loginEventMap[e.user_name]) loginEventMap[e.user_name] = [];
+                loginEventMap[e.user_name].push(e);
+            });
+            Object.keys(loginEventMap).forEach(function(name) {
+                loginEventMap[name].sort(function(a, b) {
+                    return (new Date(b.created_at || 0).getTime()) - (new Date(a.created_at || 0).getTime());
+                });
+            });
+
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>帖子</th><th>点赞</th><th>评论</th><th>注册时间</th><th>最近设备</th><th>最近IP</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(u) {
                 var stats = getUserActivityStats(u.name);
                 var flags = getUserStateFlags(u.name);
@@ -2587,7 +2615,24 @@
                     ? '-'
                     : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button>';
                 var regTime = getAdminUserEffectiveRegTime(u.info);
-                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + statusBadge + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + actions + '</td></tr>';
+
+                // 最近登录设备 & IP
+                var userEvents = loginEventMap[u.name] || [];
+                var latestEvent = userEvents[0];
+                var deviceCell = '-';
+                var ipCell = '-';
+                if (latestEvent) {
+                    try {
+                        var lc = JSON.parse(latestEvent.content || '{}');
+                        var deviceText = escapeHtml((lc.device_type || '?') + ' · ' + (lc.os || '?') + ' · ' + (lc.browser || '?'));
+                        ipCell = maskIp(lc.ip);
+                        var dataName = u.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        deviceCell = '<span onclick="toggleLoginDetail(\'' + dataName + '\')" style="cursor:pointer;color:var(--primary);text-decoration:underline;" title="点击查看全部登录记录">' + deviceText + '</span>';
+                    } catch(ex) {}
+                }
+
+                var escapedDataName = u.name.replace(/"/g, '&quot;');
+                h += '<tr data-username="' + escapedDataName + '"><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + statusBadge + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + deviceCell + '</td><td>' + ipCell + '</td><td>' + actions + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -2734,6 +2779,14 @@
             allUsers = Object.keys(userMap).sort().map(function(u) {
                 return { name: u, info: userInfoMap[u] || null };
             });
+
+            // 加载登录事件记录
+            try {
+                var loginRes = await apiCall('GET', '/admin/login-events');
+                allLoginEvents = loginRes.data || [];
+            } catch(e) {
+                allLoginEvents = [];
+            }
 
             // 数据已在 API 路径中统一加载
             await loadPhotosAdminData();
@@ -3148,5 +3201,63 @@
         box.innerHTML = html;
         modal.appendChild(box);
         document.body.appendChild(modal);
+    };
+
+    // 登录设备详情展开/收起
+    window.toggleLoginDetail = function(userName) {
+        // 移除已存在的同用户详情行（切换收起）
+        var existing = document.querySelector('.login-detail-row[data-user="' + userName.replace(/"/g, '\\"') + '"]');
+        if (existing) { existing.remove(); return; }
+        // 移除所有其他展开的详情行
+        var allRows = document.querySelectorAll('.login-detail-row');
+        for (var i = 0; i < allRows.length; i++) { allRows[i].remove(); }
+
+        // 从全局数据获取该用户的登录事件
+        var userEvents = [];
+        for (var j = 0; j < allLoginEvents.length; j++) {
+            if (allLoginEvents[j].user_name === userName) userEvents.push(allLoginEvents[j]);
+        }
+        userEvents.sort(function(a, b) {
+            return (new Date(b.created_at || 0).getTime()) - (new Date(a.created_at || 0).getTime());
+        });
+        if (!userEvents.length) return;
+
+        var escapedName = userName.replace(/"/g, '\\"');
+        var targetRow = document.querySelector('tr[data-username="' + escapedName + '"]');
+        if (!targetRow) return;
+
+        var detailRow = document.createElement('tr');
+        detailRow.className = 'login-detail-row';
+        detailRow.setAttribute('data-user', userName);
+
+        var html = '<td colspan="9" style="padding:0;background:rgba(0,0,0,0.02);">' +
+            '<div style="max-height:360px;overflow-y:auto;padding:12px 16px;">' +
+            '<div style="font-weight:600;margin-bottom:8px;font-size:14px;">登录记录：共 ' + userEvents.length + ' 条</div>' +
+            '<table style="width:100%;font-size:13px;border-collapse:collapse;"><thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);">' +
+            '<th style="padding:6px 8px;text-align:left;">登录时间</th>' +
+            '<th style="padding:6px 8px;text-align:left;">设备类型</th>' +
+            '<th style="padding:6px 8px;text-align:left;">系统</th>' +
+            '<th style="padding:6px 8px;text-align:left;">浏览器</th>' +
+            '<th style="padding:6px 8px;text-align:left;">IP</th>' +
+            '<th style="padding:6px 8px;text-align:left;">地区</th>' +
+            '</tr></thead><tbody>';
+
+        userEvents.forEach(function(e) {
+            var c = {};
+            try { c = JSON.parse(e.content || '{}'); } catch(ex) {}
+            var loginTime = c.login_at || e.created_at || '';
+            html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.05);">' +
+                '<td style="padding:6px 8px;">' + (loginTime ? new Date(loginTime).toLocaleString() : '-') + '</td>' +
+                '<td style="padding:6px 8px;">' + (c.device_type || '-') + '</td>' +
+                '<td style="padding:6px 8px;">' + (c.os || '-') + '</td>' +
+                '<td style="padding:6px 8px;">' + (c.browser || '-') + '</td>' +
+                '<td style="padding:6px 8px;">' + maskIp(c.ip) + '</td>' +
+                '<td style="padding:6px 8px;">暂未解析</td>' +
+                '</tr>';
+        });
+
+        html += '</tbody></table></div></td>';
+        detailRow.innerHTML = html;
+        targetRow.insertAdjacentElement('afterend', detailRow);
     };
 })();
