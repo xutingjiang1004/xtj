@@ -3222,30 +3222,29 @@
 
     // 登录设备详情展示
     window.showUserLoginDetail = function(userName) {
-        var container = document.getElementById('userLoginDetail');
-        if (!container) return;
+        var box = document.getElementById('userLoginDetail');
+        if (!box) return;
 
-        // 从全局数据筛选该用户的全部登录事件
-        var userEvents = [];
-        for (var i = 0; i < allLoginEvents.length; i++) {
-            if (allLoginEvents[i].user_name === userName) userEvents.push(allLoginEvents[i]);
-        }
+        // 从 allLoginEvents 筛选该用户的全部登录记录
+        var userEvents = allLoginEvents.filter(function(ev) {
+            return ev.user_name === userName;
+        }).map(function(ev) {
+            var info = {};
+            try { info = JSON.parse(ev.content || '{}'); } catch(e) {}
+            return { raw: ev, info: info };
+        }).sort(function(a, b) {
+            return toAdminTimeMs((b.info && b.info.login_at) || (b.raw && b.raw.created_at))
+                 - toAdminTimeMs((a.info && a.info.login_at) || (a.raw && a.raw.created_at));
+        });
+
         if (!userEvents.length) {
-            container.style.display = 'none';
+            box.innerHTML = '<div class="card"><div class="empty">暂无登录记录</div></div>';
+            box.style.display = 'block';
             return;
         }
 
-        // 按 login_at 优先，其次 created_at，倒序
-        userEvents.sort(function(a, b) {
-            var cA = {}; try { cA = JSON.parse(a.content || '{}'); } catch(ex) {}
-            var cB = {}; try { cB = JSON.parse(b.content || '{}'); } catch(ex) {}
-            var ta = (cA.login_at || a.created_at || '');
-            var tb = (cB.login_at || b.created_at || '');
-            return (new Date(tb).getTime() || 0) - (new Date(ta).getTime() || 0);
-        });
-
         var html = '<div class="card">' +
-            '<h3 style="margin-top:0;">登录记录：共 ' + userEvents.length + ' 条 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">（' + escapeHtml(userName) + '）</span></h3>' +
+            '<h3 style="margin-top:0;">登录记录：共 ' + userEvents.length + ' 条</h3>' +
             '<div style="max-height:360px;overflow-y:auto;">' +
             '<table style="width:100%;font-size:13px;border-collapse:collapse;">' +
             '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);">' +
@@ -3257,22 +3256,20 @@
             '<th style="padding:6px 8px;text-align:left;">地区</th>' +
             '</tr></thead><tbody>';
 
-        userEvents.forEach(function(e) {
-            var c = {};
-            try { c = JSON.parse(e.content || '{}'); } catch(ex) {}
-            var loginTime = c.login_at || e.created_at || '';
+        userEvents.forEach(function(ev) {
+            var loginTime = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
             html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.05);">' +
-                '<td style="padding:6px 8px;">' + (loginTime ? new Date(loginTime).toLocaleString() : '-') + '</td>' +
-                '<td style="padding:6px 8px;">' + escapeHtml(c.device_type || '-') + '</td>' +
-                '<td style="padding:6px 8px;">' + escapeHtml(c.os || '-') + '</td>' +
-                '<td style="padding:6px 8px;">' + escapeHtml(c.browser || '-') + '</td>' +
-                '<td style="padding:6px 8px;">' + maskIp(c.ip) + '</td>' +
+                '<td style="padding:6px 8px;">' + (loginTime ? escapeHtml(formatTime(loginTime)) : '-') + '</td>' +
+                '<td style="padding:6px 8px;">' + escapeHtml(ev.info.device_type || '-') + '</td>' +
+                '<td style="padding:6px 8px;">' + escapeHtml(ev.info.os || '-') + '</td>' +
+                '<td style="padding:6px 8px;">' + escapeHtml(ev.info.browser || '-') + '</td>' +
+                '<td style="padding:6px 8px;">' + maskIp(ev.info.ip) + '</td>' +
                 '<td style="padding:6px 8px;">暂未解析</td>' +
                 '</tr>';
         });
 
         html += '</tbody></table></div></div>';
-        container.innerHTML = html;
-        container.style.display = 'block';
+        box.innerHTML = html;
+        box.style.display = 'block';
     };
 })();
