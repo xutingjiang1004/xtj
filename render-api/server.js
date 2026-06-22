@@ -1818,11 +1818,33 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     if (!userName || userName.length > MAX_USERNAME_LEN) return res.status(400).json({ error: '用户名无效' });
     if (userName === ADMIN_USERNAME) return res.status(403).json({ error: '不能删除管理员账号' });
 
-    // 检查用户是否存在
-    var { data: authRecord } = await supabase.from('posts')
-      .select('id').eq('media_type', AUTH_MARKER).eq('user_name', userName).limit(1);
-    if (!authRecord || authRecord.length === 0) {
-      return res.status(404).json({ error: '用户不存在' });
+    // 检查用户是否在任意表中存在（不仅 AUTH_MARKER）
+    var existsChecks = await Promise.all([
+      supabase.from('posts').select('id').eq('user_name', userName).limit(1),
+      supabase.from('likes').select('id').eq('user_name', userName).limit(1),
+      supabase.from('comments').select('id').eq('user_name', userName).limit(1),
+      supabase.from('bans').select('id').eq('user_name', userName).limit(1),
+      supabase.from('mutes').select('id').eq('user_name', userName).limit(1),
+      supabase.from('blacklist').select('id').eq('user_name', userName).limit(1)
+    ]);
+
+    var exists = existsChecks.some(function(r) {
+      return r && r.data && r.data.length > 0;
+    });
+
+    if (!exists) {
+      return res.status(404).json({ error: '用户不存在或已被删除' });
+    }
+
+    // 先查询该用户发布的帖子 ID，用于级联删除点赞和评论
+    var userPostIds = [];
+    try {
+      var { data: userPosts } = await supabase.from('posts').select('id').eq('user_name', userName);
+      if (userPosts && userPosts.length) {
+        userPostIds = userPosts.map(function(p) { return p.id; });
+      }
+    } catch(e) {
+      console.warn('[admin] 查询用户帖子ID失败:', e.message);
     }
 
     // 查询并删除照片墙的 Storage 文件
@@ -1833,7 +1855,6 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       if (photoRecords && photoRecords.length) {
         photoRecords.forEach(function(p) {
           if (p.media_url) {
-            // 从 URL 中提取路径
             var url = p.media_url;
             var pathMatch = url.match(/\/uploads\/(.+?)(?:\?|$)/);
             if (pathMatch) storagePaths.push(pathMatch[1]);
@@ -1859,23 +1880,44 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
       }
     }
 
-    // 删除用户数据
     var deletedPosts = 0, deletedLikes = 0, deletedComments = 0, deletedBans = 0, deletedMutes = 0, deletedBlacklist = 0;
 
-    // 删除 posts 表
+    // 删除帖子的同时，级联删除该帖子下的点赞和评论
+    if (userPostIds.length > 0) {
+      // 级联删除这些帖子的点赞
+      for (var pi = 0; pi < userPostIds.length; pi++) {
+        try {
+          var cascadeLikeRes = await supabase.from('likes').delete().eq('post_id', userPostIds[pi]);
+          if (!cascadeLikeRes.error) deletedLikes += (cascadeLikeRes.count || 0);
+        } catch(e) { console.warn('[admin] 级联删除 likes 失败:', e.message); }
+      }
+      // 级联删除这些帖子的评论
+      for (var ci = 0; ci < userPostIds.length; ci++) {
+        try {
+          var cascadeCommentRes = await supabase.from('comments').delete().eq('post_id', userPostIds[ci]);
+          if (!cascadeCommentRes.error) deletedComments += (cascadeCommentRes.count || 0);
+        } catch(e) { console.warn('[admin] 级联删除 comments 失败:', e.message); }
+      }
+    }
+
+    // 删除 posts 表（用户发布的帖子）
     var delPostsRes = await supabase.from('posts').delete().eq('user_name', userName);
-    if (!delPostsRes.error) deletedPosts = delPostsRes.count || 0;
+    if (!delPostsRes.error) deletedPosts = (delPostsRes.count || 0);
     else console.warn('[admin] 删除 posts 失败:', delPostsRes.error.message);
 
-    // 删除 likes 表
-    var delLikesRes = await supabase.from('likes').delete().eq('user_name', userName);
-    if (!delLikesRes.error) deletedLikes = delLikesRes.count || 0;
-    else console.warn('[admin] 删除 likes 失败:', delLikesRes.error.message);
+    // 删除 likes 表（该用户自己点的赞）
+    try {
+      var delLikesRes = await supabase.from('likes').delete().eq('user_name', userName);
+      if (!delLikesRes.error) deletedLikes += (delLikesRes.count || 0);
+      else console.warn('[admin] 删除 likes 失败:', delLikesRes.error.message);
+    } catch(e) { console.warn('[admin] 删除 likes 异常:', e.message); }
 
-    // 删除 comments 表
-    var delCommentsRes = await supabase.from('comments').delete().eq('user_name', userName);
-    if (!delCommentsRes.error) deletedComments = delCommentsRes.count || 0;
-    else console.warn('[admin] 删除 comments 失败:', delCommentsRes.error.message);
+    // 删除 comments 表（该用户自己的评论）
+    try {
+      var delCommentsRes = await supabase.from('comments').delete().eq('user_name', userName);
+      if (!delCommentsRes.error) deletedComments += (delCommentsRes.count || 0);
+      else console.warn('[admin] 删除 comments 失败:', delCommentsRes.error.message);
+    } catch(e) { console.warn('[admin] 删除 comments 异常:', e.message); }
 
     // 删除 bans 表
     var delBansRes = await supabase.from('bans').delete().eq('user_name', userName);
