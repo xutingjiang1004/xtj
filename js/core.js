@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -1331,6 +1331,11 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
+                    try {
+                        if (typeof window.logLoginEventSafe === "function" && name !== ADMIN_NAME) {
+                            window.logLoginEventSafe(name);
+                        }
+                    } catch(e) {}
                     showToast("登录成功，欢迎回来！" + name);
                     closeModal('loginModal');
                     
@@ -1394,6 +1399,11 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
                     localStorage.setItem("xtj_pw_hash", pwHash);
+                    try {
+                        if (typeof window.logLoginEventSafe === "function") {
+                            window.logLoginEventSafe(name);
+                        }
+                    } catch(e) {}
                     showToast("注册成功，欢迎你！" + name);
                     closeModal('registerModal');
                     
