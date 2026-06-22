@@ -4,6 +4,7 @@
     var API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
     var CHECK_DELAY_MS = 300;
     var SEND_COOLDOWN_MS = 10000;
+    var VISIT_COOLDOWN_MS = 60000;
     var debounceTimer = null;
     var lastSendAtByKey = {};
 
@@ -53,14 +54,14 @@
         return 'Unknown';
     }
 
-    // 检查冷却
+    // 检查冷却（10s 内存级别）
     function isInCooldown(sentKey) {
         var lastAt = lastSendAtByKey[sentKey] || 0;
         return (Date.now() - lastAt) < SEND_COOLDOWN_MS;
     }
 
     // 发送登录事件
-    function doSend(userName, passwordHash, deviceId, sentKey) {
+    function doSend(userName, passwordHash, deviceId, sentKey, source) {
         try {
             if (isInCooldown(sentKey)) return;
 
@@ -72,7 +73,8 @@
                 device_type: detectDeviceType(ua),
                 os: detectOS(ua),
                 browser: detectBrowser(ua),
-                user_agent: ua
+                user_agent: ua,
+                source: source
             });
 
             lastSendAtByKey[sentKey] = Date.now();
@@ -82,7 +84,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: body
             }).then(function(res) {
-                if (res.ok) {
+                if (res.ok && source === 'login_success') {
                     try { sessionStorage.setItem(sentKey, '1'); } catch(e) {}
                 }
             }).catch(function() {
@@ -92,8 +94,22 @@
         } catch(e) {}
     }
 
-    // 检查并尝试发送
-    function trySendLoginEvent() {
+    // 登录/注册成功后主动调用（由 core.js 触发）
+    window.logLoginEventSafe = function(userName) {
+        if (!userName) return;
+        var deviceId = getOrCreateDeviceId();
+        var sentKey = 'xtj_login_event_sent_' + userName + '_' + deviceId;
+        try {
+            if (sessionStorage.getItem(sentKey)) return;
+        } catch(e) {}
+        var pwHash;
+        try { pwHash = localStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
+        if (!pwHash) return;
+        doSend(userName, pwHash, deviceId, sentKey, 'login_success');
+    };
+
+    // 页面访问记录（60s localStorage 冷却，页面刷新/打开时记录）
+    function trySendPageVisit() {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function() {
             debounceTimer = null;
@@ -106,27 +122,21 @@
 
             if (!userName || !passwordHash || !deviceId) return;
 
-            var sentKey = 'xtj_login_event_sent_' + userName + '_' + deviceId;
-            try {
-                if (sessionStorage.getItem(sentKey)) return;
-            } catch(e) {}
+            // 60s localStorage 冷却
+            var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
+            var lastAt = 0;
+            try { lastAt = parseInt(localStorage.getItem(visitKey)) || 0; } catch(e) {}
+            if (Date.now() - lastAt < VISIT_COOLDOWN_MS) return;
+            try { localStorage.setItem(visitKey, String(Date.now())); } catch(e) {}
 
-            doSend(userName, passwordHash, deviceId, sentKey);
+            var sentKey = 'xtj_login_visit_' + userName + '_' + deviceId;
+            doSend(userName, passwordHash, deviceId, sentKey, 'page_visit');
         }, CHECK_DELAY_MS);
     }
 
-    // 暴露手动调用接口
-    window.logLoginEventSafe = function(userName) {
-        if (!userName) return;
-        var deviceId = getOrCreateDeviceId();
-        var sentKey = 'xtj_login_event_sent_' + userName + '_' + deviceId;
-        try {
-            if (sessionStorage.getItem(sentKey)) return;
-        } catch(e) {}
-        var pwHash;
-        try { pwHash = localStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
-        if (!pwHash) return;
-        doSend(userName, pwHash, deviceId, sentKey);
+    // 暴露页面访问手动调用接口
+    window.logLoginVisitSafe = function() {
+        trySendPageVisit();
     };
 
     // 确保 device_id 已存在
@@ -138,11 +148,11 @@
         localStorage.setItem = function(key, value) {
             _origSetItem(key, value);
             if (key === 'xtj_user' || key === 'xtj_pw_hash') {
-                trySendLoginEvent();
+                trySendPageVisit();
             }
         };
     } catch(e) {}
 
-    // 已登录用户刷新页面时也能记录一次
-    trySendLoginEvent();
+    // 已登录用户刷新页面时记录一次
+    trySendPageVisit();
 })();
