@@ -36,22 +36,12 @@
     return layer;
   }
 
-  /* ==========================================================
-     1. Click Ripple Effect (excludes dock-tab buttons)
-     ========================================================== */
-  document.addEventListener('click', function (e) {
-    var target = e.target;
-    if (isDockTab(target)) return;
-    if (target.closest('#themeToggle, .theme-toggle-btn')) return;
-    if (target.closest(rippleSkipSelector)) return;
-
-    var btn = target.closest(rippleButtonSelector);
+  function spawnRipple(btn, clientX, clientY) {
     if (!btn) return;
-
     var rect = btn.getBoundingClientRect();
     var size = Math.max(rect.width, rect.height);
-    var x = e.clientX - rect.left - size / 2;
-    var y = e.clientY - rect.top - size / 2;
+    var x = (typeof clientX === 'number' ? clientX : rect.left + rect.width / 2) - rect.left - size / 2;
+    var y = (typeof clientY === 'number' ? clientY : rect.top + rect.height / 2) - rect.top - size / 2;
     var layer = ensureRippleLayer(btn);
 
     var ripple = document.createElement('span');
@@ -67,6 +57,21 @@
     setTimeout(function () {
       if (ripple.parentNode) ripple.parentNode.removeChild(ripple);
     }, 700);
+  }
+
+  /* ==========================================================
+     1. Click Ripple Effect (excludes dock-tab buttons)
+     ========================================================== */
+  document.addEventListener('click', function (e) {
+    var target = e.target;
+    if (isDockTab(target)) return;
+    if (target.closest('#themeToggle, .theme-toggle-btn')) return;
+    if (target.closest(rippleSkipSelector)) return;
+
+    var btn = target.closest(rippleButtonSelector);
+    if (!btn) return;
+
+    spawnRipple(btn, e.clientX, e.clientY);
   }, true);
 
   /* ==========================================================
@@ -181,7 +186,8 @@
      ========================================================== */
   window.XTJEffects = {
     ripple: function (el) {
-      // manual trigger if needed
+      if (!el || isDockTab(el) || (el.closest && el.closest(rippleSkipSelector))) return;
+      spawnRipple(el);
     },
     particleBurst: createParticleBurst,
     heartBurst: window.xtjHeartBurst

@@ -81,7 +81,6 @@
      3. 点赞 - GSAP 弹性缩放 + 粒子爆发
      ================================================= */
   var _origToggleLike = window.toggleLike;
-  var _origHeartParticles = window.createHeartParticles;
 
   window.createHeartParticles = function () {};
 
