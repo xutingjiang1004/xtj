@@ -80,6 +80,7 @@ const ADMIN_AUTH_MARKER = '__admin_auth__';
 const ADMIN_META_MARKER = '__admin_meta__';
 const USER_INFO_MARKER = '__user_info__';
 const USER_VISIT_MARKER = '__user_visit__';
+const LOGIN_EVENT_MARKER = '__login_event__';
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
 let statsCache = { data: null, ts: 0, pending: null };
@@ -498,6 +499,80 @@ function getRealIp(req) {
   // trust proxy 已配置，req.ip 返回真实客户端 IP
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
+
+// 获取客户端 IP（优先 X-Forwarded-For 第一段，用于登录事件记录）
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    const first = String(forwarded).split(',')[0].trim();
+    if (first) return first;
+  }
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
+// UA 解析（后端用，与前端 js/login-device.js 规则一致）
+function detectDeviceTypeFromUA(ua) {
+  if (/iPhone/i.test(ua)) return 'iPhone';
+  if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && /Mobile\/\w+/i.test(ua))) return 'iPad';
+  if (/Android/i.test(ua)) return 'Android';
+  if (/Mobi/i.test(ua)) return 'Mobile';
+  return 'Desktop';
+}
+
+function detectOSFromUA(ua) {
+  if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && /Mobile\/\w+/i.test(ua))) return 'iPadOS';
+  if (/iPhone|iPod/i.test(ua)) return 'iOS';
+  if (/Android/i.test(ua)) return 'Android';
+  if (/Windows/i.test(ua)) return 'Windows';
+  if (/Macintosh|Mac OS X/i.test(ua)) return 'macOS';
+  if (/Linux/i.test(ua)) return 'Linux';
+  return 'Unknown';
+}
+
+function detectBrowserFromUA(ua) {
+  if (/MicroMessenger/i.test(ua)) return 'WeChat';
+  if (/Edg\//i.test(ua)) return 'Edge';
+  if (/Firefox/i.test(ua)) return 'Firefox';
+  if (/Chrome/i.test(ua)) return 'Chrome';
+  if (/Safari/i.test(ua)) return 'Safari';
+  return 'Unknown';
+}
+
+// 记录管理员登录事件（静默，不影响登录流程）
+async function logAdminLoginEvent(req) {
+  try {
+    const ip = getClientIp(req);
+    const ua = String(req.headers['user-agent'] || '');
+    const deviceId = 'admin_' + crypto.createHash('sha256').update(ip + '|' + ua).digest('hex').slice(0, 32);
+    const loginAt = new Date().toISOString();
+    const random = Math.random().toString(36).slice(2, 10);
+
+    const { error } = await supabase.from('posts').insert([{
+      user_name: ADMIN_USERNAME,
+      media_type: LOGIN_EVENT_MARKER,
+      media_url: deviceId,
+      content: JSON.stringify({
+        device_id: deviceId,
+        device_type: detectDeviceTypeFromUA(ua),
+        os: detectOSFromUA(ua),
+        browser: detectBrowserFromUA(ua),
+        user_agent: ua,
+        ip: ip,
+        ip_location: null,
+        login_at: loginAt,
+        is_admin: true,
+        source: 'admin_login'
+      }),
+      actor_key: 'admin_login_' + Date.now() + '_' + random
+    }]);
+    if (error) {
+      console.warn('[AdminLoginEvent] 写入失败:', error.message || error);
+    }
+  } catch(e) {
+    console.warn('[AdminLoginEvent] 记录异常:', e.message || e);
+  }
+}
+
 function rateLimit(windowMs, maxRequests) {
   return (req, res, next) => {
     const key = getRealIp(req) + ':' + req.path;
@@ -626,7 +701,10 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   
   const token = signToken();
   adminTokens.set(token, { expiresAt: Date.now() + TOKEN_EXPIRY_MS });
-  
+
+  // 记录管理员登录设备/IP
+  logAdminLoginEvent(req).catch(function(){});
+
   return res.json({ ok: true, token, username: ADMIN_USERNAME });
 });
 
@@ -1807,6 +1885,75 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
   } catch(e) {
     console.error('[API] 用户访问记录失败:', e.message);
     return res.status(500).json({ error: '记录失败' });
+  }
+});
+
+// ===================== 登录设备/IP 记录（前端调用） =====================
+app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
+  try {
+    const { user_name, password_hash, device_id, device_type, os, browser, user_agent } = req.body;
+
+    const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
+    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
+
+    const deviceIdVal = validateString(device_id, 120, '设备ID');
+    if (!deviceIdVal) return res.status(400).json({ error: '缺少设备ID' });
+
+    // 验证密码 hash（与 /api/log-user-visit 相同验证方式）
+    if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
+    const { data: authRec } = await supabase.from('posts')
+      .select('media_url')
+      .eq('user_name', userNameVal)
+      .eq('media_type', AUTH_MARKER)
+      .maybeSingle();
+    if (!authRec || authRec.media_url !== password_hash) {
+      return res.status(403).json({ error: '身份验证失败' });
+    }
+
+    // IP 由后端获取，前端不允许传 ip
+    const ip = getClientIp(req);
+    const loginAt = new Date().toISOString();
+    const random = Math.random().toString(36).slice(2, 10);
+
+    // 写入 posts 表（短期方案，不新建表）
+    const { error } = await supabase.from('posts').insert([{
+      user_name: userNameVal,
+      media_type: LOGIN_EVENT_MARKER,
+      media_url: deviceIdVal,
+      content: JSON.stringify({
+        device_id: deviceIdVal,
+        device_type: device_type || 'unknown',
+        os: os || 'Unknown',
+        browser: browser || 'Unknown',
+        user_agent: user_agent || '',
+        ip: ip,
+        ip_location: null,
+        login_at: loginAt
+      }),
+      actor_key: 'login_' + Date.now() + '_' + random
+    }]);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[API] 登录事件记录失败:', e.message);
+    return res.status(500).json({ error: '记录失败' });
+  }
+});
+
+// ===================== 登录事件查询（管理员） =====================
+app.get('/admin/login-events', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('posts')
+      .select('id, user_name, content, media_url, created_at')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ data: data || [] });
+  } catch(e) {
+    console.error('[API] 登录事件查询失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
   }
 });
 
