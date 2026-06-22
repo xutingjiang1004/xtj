@@ -5252,6 +5252,7 @@ function renderProfileActivityList(kind) {
                     }
                     clearFeedCache();
                     resetPostComposer();
+                    if (typeof window.resetPostPreview === "function") window.resetPostPreview();
                     showToast(insertRes.fallback ? "发布成功，已兼容旧数据结构" : "发布成功");
                     await loadFeed(true);
                     loadProfileActivity(true);
@@ -5375,7 +5376,7 @@ function renderProfileActivityList(kind) {
                         noMore = document.createElement("div");
                         noMore.id = "feedNoMore";
                         noMore.className = "loading";
-                        noMore.textContent = "没有鏇村帖子";
+                        noMore.textContent = "没有更多帖子";
                         noMore.style.padding = "30px";
                         noMore.style.textAlign = "center";
                         feed.appendChild(noMore);
@@ -5740,7 +5741,7 @@ function renderProfileActivityList(kind) {
                             `).join('') : '<div class="stat-empty" style="padding:12px 0;">暂无点赞</div>'}
                         </div>
                         <div class="stat-col">
-                            <div class="stat-section-title">馃挰 评论列表 ${comments.length}</div>
+                            <div class="stat-section-title">评论列表 ${comments.length}</div>
                             ${comments.length ? comments.map(c => `
                                 <div class="stat-comment-item">
                                     <div class="sci-info">
@@ -5892,7 +5893,7 @@ function renderProfileActivityList(kind) {
                 }
 
                 function buildCommentsCol() {
-                    let h = '<div class="stat-section-title">馃挰 评论记录</div>';
+                    let h = '<div class="stat-section-title">评论记录</div>';
                     if (statAllComments.length) {
                         h += [...statAllComments].reverse().slice(0, 200).map(c => {
                             const post = postMap[c.post_id];
@@ -7454,7 +7455,7 @@ function renderProfileActivityList(kind) {
                 const thumb = document.getElementById('dockCfpThumb'), name = document.getElementById('dockCfpName');
                 if (_dockPreviewUrl) { URL.revokeObjectURL(_dockPreviewUrl); _dockPreviewUrl = null; }
                 const xBtn = thumb.querySelector('.cfp-x'); thumb.innerHTML = '';
-                if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">馃幀</span>'; }
+                if (file.type.startsWith('video/')) { thumb.innerHTML = '<span class="cfp-video-icon">视频</span>'; }
                 else { const img = document.createElement('img'); _dockPreviewUrl = URL.createObjectURL(file); img.src = _dockPreviewUrl; thumb.appendChild(img); }
                 if (xBtn) thumb.appendChild(xBtn);
                 name.textContent = file.name; input.classList.add('hidden'); preview.classList.remove('hidden');
@@ -8042,7 +8043,7 @@ function renderProfileActivityList(kind) {
                 const content = contentInput.value.trim();
                 
                 if (!title && !content) {
-                    showToast('璇疯嚦灏戝～鍐欐爣棰樻垨鍐呭');
+                    showToast('请至少填写标题或内容');
                     return;
                 }
 

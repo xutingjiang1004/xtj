@@ -12,6 +12,22 @@
     return !!(el && el.closest && el.closest('#dockBar,.dock-bar,.dock-tab'));
   }
 
+  var postToggleIgnoreSelector = [
+    '.avatar',
+    '.avatar-wrap',
+    '.xtj-pro-avatar-ring',
+    '.user-name',
+    '.post-badge-stack',
+    'a',
+    'button',
+    'input',
+    'textarea',
+    'select',
+    'label',
+    '.media',
+    '.comments'
+  ].join(',');
+
   /* =================================================
      1. 弹窗 - 磨砂冲击入场 (挂钩 openModal)
      ================================================= */
@@ -131,10 +147,10 @@
      5. 帖子卡片点击展开/收起
      ================================================= */
   document.addEventListener('click', function (e) {
-    var post = e.target.closest('.post');
-    if (!post || isDock(e.target)) return;
-    if (e.target.closest('.action-btn') || e.target.closest('button') || e.target.closest('.media') || e.target.closest('.comments')) return;
-    e.stopPropagation();
+    var target = e.target;
+    var post = target.closest('.post');
+    if (!post || isDock(target)) return;
+    if (target.closest(postToggleIgnoreSelector) || target.closest('.action-btn')) return;
     togglePostExpand(post);
   }, true);
 

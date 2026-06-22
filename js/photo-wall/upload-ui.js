@@ -6,7 +6,6 @@
     photoFiles: [],
     photoUrls: [],
     uploading: false,
-    postPublishing: false,
     postPreviewUrls: []
   };
 
@@ -52,15 +51,6 @@
     if (type === 'video/webm') return '.webm';
     if (type === 'video/quicktime') return '.mov';
     return '';
-  }
-
-  function escapeText(value){
-    return String(value == null ? '' : value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
   }
 
   function revoke(listName){
@@ -203,7 +193,6 @@
           setProgress('正在上传 ' + (i + 1) + ' / ' + state.photoFiles.length, pct);
           var row = await uploadOnePhotoWallFile(state.photoFiles[i], i, state.photoFiles.length);
           ok += 1;
-          // 上传成功更新进度
           setProgress('已上传 ' + ok + ' / ' + state.photoFiles.length, Math.round((ok / state.photoFiles.length) * 100));
           if (row && typeof window.normalizePhotoWallRow === 'function') {
             var item = window.normalizePhotoWallRow(row);
@@ -289,25 +278,6 @@
     input.click();
   }
 
-  function uploadPostMedia(file){
-    var kind = isVideo(file) ? 'video' : 'image';
-    var path = 'posts/' + safeFileName(file, inferExt(file));
-    var type = file.type || (kind === 'video' ? 'video/mp4' : 'image/jpeg');
-    return window.sb.storage.from('uploads').upload(path, file, {
-      contentType: type,
-      cacheControl: '31536000',
-      upsert: false
-    }).then(function(res){
-      if (res.error) throw res.error;
-      return {
-        url: window.sb.storage.from('uploads').getPublicUrl(path).data.publicUrl,
-        mediaType: kind,
-        mimeType: type,
-        size: file.size || null
-      };
-    });
-  }
-
   function resetPostPreview(){
     var wrap = byId('postMediaPreview');
     var grid = byId('postMediaPreviewGrid');
@@ -343,76 +313,6 @@
     if (count) count.textContent = '已选择 ' + list.length + ' 个文件';
   }
 
-  async function publishPost(){
-    var user = getCurrentUser();
-    if (!user) { toast('请先登录'); return; }
-    if (!window.sb) { toast('Supabase 未加载，请刷新页面'); return; }
-    if (state.postPublishing) return;
-    var input = byId('postInp');
-    var fileInput = byId('fileInp');
-    var visibilityEl = byId('postVisibility');
-    var text = input ? String(input.value || '').trim() : '';
-    var file = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
-    var visibility = visibilityEl ? visibilityEl.value : 'public';
-    if (!text && !file) { toast('请输入内容或选择媒体'); return; }
-    if (text.length > 2000) { toast('内容不能超过 2000 字'); return; }
-    state.postPublishing = true;
-    var btn = byId('pubBtn');
-    var oldText = btn ? btn.textContent : '';
-    if (btn) btn.disabled = true;
-    if (btn) btn.textContent = file ? '上传中...' : '发布中...';
-    try {
-      var media = { url:'', mediaType:'', mimeType:'', size:null };
-      if (file) media = await uploadPostMedia(file);
-      var meta = {
-        visibility: visibility || 'public',
-        is_pinned: false,
-        pinned_at: null,
-        updated_at: null,
-        fileSize: media.size,
-        originalSize: media.size,
-        mimeType: media.mimeType || ''
-      };
-      var content = JSON.stringify({ __type:'__xtj_post_v2__', text:text, meta:meta });
-      var payload = {
-        user_name: user,
-        content: content,
-        media_url: media.url,
-        media_type: media.mediaType,
-        actor_key: window.deviceId || ('post_' + Date.now()),
-        visibility: meta.visibility,
-        is_pinned: false,
-        pinned_at: null,
-        updated_at: null
-      };
-      var result = await window.sb.from('posts').insert([payload]).select('*').maybeSingle();
-      if (result.error && /visibility|is_pinned|pinned_at|updated_at|column/i.test(String(result.error.message || ''))) {
-        result = await window.sb.from('posts').insert([{
-          user_name: payload.user_name,
-          content: payload.content,
-          media_url: payload.media_url,
-          media_type: payload.media_type,
-          actor_key: payload.actor_key
-        }]).select('*').maybeSingle();
-      }
-      if (result.error) throw result.error;
-      if (input) input.value = '';
-      if (fileInput) fileInput.value = '';
-      if (visibilityEl) visibilityEl.value = 'public';
-      resetPostPreview();
-      if (typeof window.clearFeedCache === 'function') window.clearFeedCache();
-      if (typeof window.loadFeed === 'function') await window.loadFeed(true);
-      toast('发布成功');
-    } catch (err) {
-      console.error('[post-publish] failed', err);
-      toast('发布失败：' + (err && err.message ? err.message : '请重试'));
-    } finally {
-      state.postPublishing = false;
-      if (btn) btn.disabled = false;
-      if (btn) btn.textContent = oldText || '发布动态';
-    }
-  }
-
   function attachPostPreview(){
     var input = byId('fileInp');
     if (input && !input.__xtjPostPreviewBound) {
@@ -431,7 +331,7 @@
   window.attachPhotoUploadUi = attachPhotoUploadUi;
   window.handlePhotoUpload = handlePhotoSelection;
   window.triggerPhotoWallUpload = uploadPhotoWallFiles;
-  window.doPublish = publishPost;
+  window.resetPostPreview = resetPostPreview;
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();

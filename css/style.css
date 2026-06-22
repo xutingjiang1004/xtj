@@ -13348,6 +13348,23 @@ h1 {
   height: 24px;
 }
 
+@media (min-width: 1024px) {
+  .dock-bar .dock-tab[data-tab="ai"] .dt-icon {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    flex: 0 0 36px !important;
+  }
+
+  .dock-bar .dock-tab[data-tab="ai"] .dt-svg {
+    width: 35px !important;
+    height: 35px !important;
+    min-width: 35px !important;
+    min-height: 35px !important;
+  }
+}
+
 .dock-bar .dock-tab .dt-label {
   font-weight: 600;
   letter-spacing: 0;

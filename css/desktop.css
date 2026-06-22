@@ -119,10 +119,20 @@
     font-weight: normal;
   }
 
-  /* AI SVG 缂╁皬閫傞厤 */
+  /* Desktop AI dock icon size */
+  .dock-tab[data-tab="ai"] .dt-icon {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    flex: 0 0 36px !important;
+  }
+
   .dock-tab[data-tab="ai"] .dt-icon .dt-svg {
-    width: 26px !important;
-    height: 26px !important;
+    width: 35px !important;
+    height: 35px !important;
+    min-width: 35px !important;
+    min-height: 35px !important;
   }
 
   /* ==============================================================
