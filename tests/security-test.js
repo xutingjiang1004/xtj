@@ -3,19 +3,22 @@
  *  xtj 安全攻击模拟测试脚本
  *  模拟黑客攻击请求，验证修复效果
  * ============================================
- *  用法: node security-test.js
+ *  用法: node tests/security-test.js
  *  前提: 后端 server.js 已启动在 localhost:3000
  * ============================================
  */
 
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 // ==================== 配置 ====================
 const API_HOST = 'localhost';
 const API_PORT = 3000;
 const API_BASE = `http://${API_HOST}:${API_PORT}`;
 const SUPABASE_URL = 'https://ithowxqignlhkwaykglt.supabase.co';
+const REPO_ROOT = path.resolve(__dirname, '..');
 
 let totalTests = 0;
 let passedTests = 0;
@@ -613,10 +616,9 @@ function testAdminAuthIsolation() {
   const feedQueryMarkerFilter = `(p) { return p.media_type !== '__auth__' && p.media_type !== '__admin_auth__'`;
 
   // 检查 core.js 中是否过滤 __admin_auth__
-  const coreJsPath = require('path').join(__dirname, 'js', 'core.js');
-  const fs = require('fs');
+  const coreJsPath = path.join(REPO_ROOT, 'js', 'core.js');
   const coreContent = fs.readFileSync(coreJsPath, 'utf-8');
-  const adminJsPath = require('path').join(__dirname, 'js', 'admin', 'admin.js');
+  const adminJsPath = path.join(REPO_ROOT, 'js', 'admin', 'admin.js');
   const adminContent = fs.readFileSync(adminJsPath, 'utf-8');
 
   // core.js: ADMIN_AUTH_MARKER 定义
@@ -657,8 +659,7 @@ function testAdminAuthIsolation() {
 logSection('测试12: Session 超时自动登出测试');
 
 function testSessionTimeout() {
-  const adminJsPath = require('path').join(__dirname, 'js', 'admin', 'admin.js');
-  const fs = require('fs');
+  const adminJsPath = path.join(REPO_ROOT, 'js', 'admin', 'admin.js');
   const adminContent = fs.readFileSync(adminJsPath, 'utf-8');
 
   const hasTimeoutMs = adminContent.includes('SESSION_TIMEOUT_MS = 30 * 60 * 1000');
@@ -684,8 +685,7 @@ function testSessionTimeout() {
 logSection('测试13: 服务端安全配置测试 (SUPABASE_SERVICE_KEY)');
 
 function testServerSecurityConfig() {
-  const serverJsPath = require('path').join(__dirname, 'render-api', 'server.js');
-  const fs = require('fs');
+  const serverJsPath = path.join(REPO_ROOT, 'render-api', 'server.js');
   const serverContent = fs.readFileSync(serverJsPath, 'utf-8');
 
   // 必须要求 SUPABASE_SERVICE_KEY，否则 fatal 退出
