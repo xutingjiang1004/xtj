@@ -544,6 +544,36 @@ function detectBrowserFromUA(ua) {
   return 'Unknown';
 }
 
+
+// 根据屏幕参数推测 iPhone 疑似型号（iOS/Safari 不稳定暴露具体型号，非精确识别）
+function getPossibleDeviceModel(info) {
+  info = info || {};
+  var ua = String(info.user_agent || '');
+  var platform = String(info.platform || '');
+  var maxTouchPoints = Number(info.max_touch_points || 0);
+  var sw = Number(info.screen_width || (info.screen && String(info.screen).split('x')[0])) || 0;
+  var sh = Number(info.screen_height || (info.screen && String(info.screen).split('x')[1])) || 0;
+  var dpr = Number(info.device_pixel_ratio || info.dpr) || 0;
+  var isIPhone = /iPhone/i.test(ua) || (/Mac/i.test(platform) && maxTouchPoints > 1 && Math.min(sw, sh) < 600);
+  if (!isIPhone) return '';
+  var key = Math.min(sw, sh) + 'x' + Math.max(sw, sh) + '@' + (dpr || '');
+  var modelMap = {
+    '440x956@3': '疑似 iPhone 16 Pro Max / iPhone 17 Pro Max',
+    '402x874@3': '疑似 iPhone 16 Pro / iPhone 17 / iPhone 17 Pro',
+    '393x852@3': '疑似 iPhone 14 Pro / iPhone 15 / iPhone 15 Pro / iPhone 16',
+    '430x932@3': '疑似 iPhone 14 Pro Max / iPhone 15 Plus / iPhone 15 Pro Max / iPhone 16 Plus',
+    '428x926@3': '疑似 iPhone 12 Pro Max / iPhone 13 Pro Max / iPhone 14 Plus',
+    '390x844@3': '疑似 iPhone 12 / iPhone 12 Pro / iPhone 13 / iPhone 13 Pro / iPhone 14',
+    '375x812@3': '疑似 iPhone X / iPhone XS / iPhone 11 Pro / iPhone 12 mini / iPhone 13 mini',
+    '414x896@3': '疑似 iPhone XS Max / iPhone 11 Pro Max',
+    '414x896@2': '疑似 iPhone XR / iPhone 11',
+    '414x736@3': '疑似 iPhone 6 Plus / 6s Plus / 7 Plus / 8 Plus',
+    '375x667@2': '疑似 iPhone 6 / 6s / 7 / 8 / SE（第 2/3 代）',
+    '320x568@2': '疑似 iPhone 5 / 5s / SE（第 1 代）'
+  };
+  return modelMap[key] || 'iPhone（型号不可确定）';
+}
+
 // 记录管理员登录事件（静默，不影响登录流程）
 async function logAdminLoginEvent(req) {
   try {
@@ -2712,6 +2742,11 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     } catch(e) {}
 
     var finalDeviceMeta = securitySettings.record_device ? (device_meta || null) : null;
+    var possibleDeviceModel = '';
+    if (finalDeviceMeta && typeof finalDeviceMeta === 'object') {
+      possibleDeviceModel = getPossibleDeviceModel(Object.assign({}, finalDeviceMeta, { user_agent: user_agent || '' }));
+      if (possibleDeviceModel) finalDeviceMeta.possible_device_model = possibleDeviceModel;
+    }
     var finalBrowserFp = securitySettings.browser_fingerprint ? (browser_fingerprint_hash || null) : null;
     var finalCanvasFp = securitySettings.canvas_fingerprint ? (canvas_fingerprint_hash || null) : null;
 
@@ -2726,6 +2761,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
         os: os || 'Unknown',
         browser: browser || 'Unknown',
         user_agent: user_agent || '',
+        possible_device_model: possibleDeviceModel,
         ip: ip,
         ip_location: ipLocation,
         login_at: loginAt,
