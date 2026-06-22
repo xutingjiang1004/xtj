@@ -1922,7 +1922,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
   try {
     const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source } = req.body;
 
-    const VALID_SOURCES = ['login_success', 'page_visit', 'register_success', 'admin_login'];
+    const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
     const srcVal = VALID_SOURCES.includes(source) ? source : 'login_success';
 
     const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
