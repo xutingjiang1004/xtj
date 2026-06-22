@@ -2008,7 +2008,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     const loginAt = new Date().toISOString();
     const random = Math.random().toString(36).slice(2, 10);
 
-    // 解析 IP 地区（静默失败）
+    // 解析 IP 地区（多源 fallback，失败有日志）
     var ipLocation = null;
     try { ipLocation = await resolveIpLocation(ip); } catch(e) {}
 
