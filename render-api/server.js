@@ -775,7 +775,8 @@ async function checkSameIpMultiUsers(userName, ip, ipLocation) {
     });
 
     var related = Object.keys(ipUsers);
-    if (related.length >= 2) {
+    if (related.length >= 1) {
+      var ipLevel = related.length >= 3 ? 'high' : 'warning';
       // 去重检查
       var dupSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
       var { data: existingAlert } = await supabase.from('posts')
@@ -789,7 +790,7 @@ async function checkSameIpMultiUsers(userName, ip, ipLocation) {
 
       await insertSecurityAlert({
         type: 'same_ip_multi_users',
-        level: 'warning',
+        level: ipLevel,
         user_name: userName,
         ip: ip,
         ip_location_text: ipLocation ? ipLocation.text : null,
@@ -902,13 +903,14 @@ async function checkMultiIpSameUser(userName, ip, ipLocation) {
 }
 
 // 检查同账号地区变化
-async function checkGeoChange(userName, ipLocation) {
+async function checkGeoChange(userName, ipLocation, currentLoginAt) {
   if (!ipLocation || !ipLocation.country) return;
   try {
     var { data } = await supabase.from('posts')
       .select('content')
       .eq('media_type', LOGIN_EVENT_MARKER)
       .eq('user_name', userName)
+      .lt('created_at', currentLoginAt)
       .order('created_at', { ascending: false })
       .limit(20);
     if (!data || !data.length) return;
@@ -990,8 +992,112 @@ async function checkHighFrequencyVisit(userName, source, ip, ipLocation) {
   }
 }
 
+// 检查相同浏览器指纹多账号登录
+async function checkSameBrowserFingerprintMultiUsers(userName, browserFp, ip, ipLocation) {
+  if (!browserFp) return;
+  var since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  try {
+    var { data } = await supabase.from('posts')
+      .select('user_name, content')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (!data || !data.length) return;
+
+    var fpUsers = {};
+    data.forEach(function(row) {
+      if (row.user_name === userName) return;
+      try {
+        var c = JSON.parse(row.content || '{}');
+        if (c.browser_fingerprint_hash === browserFp) {
+          fpUsers[row.user_name] = true;
+        }
+      } catch(e) {}
+    });
+
+    var related = Object.keys(fpUsers);
+    if (related.length >= 1) {
+      // 去重
+      var dupSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      var { data: existingAlert } = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', SECURITY_ALERT_MARKER)
+        .eq('media_url', 'same_browser_fp_multi_users')
+        .eq('user_name', userName)
+        .gte('created_at', dupSince)
+        .limit(1);
+      if (existingAlert && existingAlert.length > 0) return;
+
+      await insertSecurityAlert({
+        type: 'same_browser_fp_multi_users',
+        level: 'warning',
+        user_name: userName,
+        ip: ip,
+        ip_location_text: ipLocation ? ipLocation.text : null,
+        related_users: [userName].concat(related),
+        reason: '相同浏览器指纹 ' + browserFp.slice(0, 12) + '... 登录了 ' + (related.length + 1) + ' 个账号'
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkSameBrowserFingerprintMultiUsers 异常:', e.message || e);
+  }
+}
+
+// 检查相同 Canvas 指纹多账号登录
+async function checkSameCanvasFingerprintMultiUsers(userName, canvasFp, ip, ipLocation) {
+  if (!canvasFp) return;
+  var since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  try {
+    var { data } = await supabase.from('posts')
+      .select('user_name, content')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (!data || !data.length) return;
+
+    var fpUsers = {};
+    data.forEach(function(row) {
+      if (row.user_name === userName) return;
+      try {
+        var c = JSON.parse(row.content || '{}');
+        if (c.canvas_fingerprint_hash === canvasFp) {
+          fpUsers[row.user_name] = true;
+        }
+      } catch(e) {}
+    });
+
+    var related = Object.keys(fpUsers);
+    if (related.length >= 1) {
+      // 去重
+      var dupSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      var { data: existingAlert } = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', SECURITY_ALERT_MARKER)
+        .eq('media_url', 'same_canvas_fp_multi_users')
+        .eq('user_name', userName)
+        .gte('created_at', dupSince)
+        .limit(1);
+      if (existingAlert && existingAlert.length > 0) return;
+
+      await insertSecurityAlert({
+        type: 'same_canvas_fp_multi_users',
+        level: 'warning',
+        user_name: userName,
+        ip: ip,
+        ip_location_text: ipLocation ? ipLocation.text : null,
+        related_users: [userName].concat(related),
+        reason: '相同 Canvas 指纹 ' + canvasFp.slice(0, 12) + '... 登录了 ' + (related.length + 1) + ' 个账号'
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkSameCanvasFingerprintMultiUsers 异常:', e.message || e);
+  }
+}
+
 // 统一安全检测入口（登录事件写入后调用）
-async function runSecurityChecks(userName, deviceId, ip, ipLocation, source) {
+async function runSecurityChecks(userName, deviceId, ip, ipLocation, source, currentLoginAt, browserFp, canvasFp) {
   // 检查安全提醒开关
   try {
     var { data: settingsData } = await supabase.from('posts')
@@ -1010,15 +1116,19 @@ async function runSecurityChecks(userName, deviceId, ip, ipLocation, source) {
         checkSameIpMultiUsers(userName, ip, ipLocation),
         checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation),
         checkMultiIpSameUser(userName, ip, ipLocation),
-        checkGeoChange(userName, ipLocation),
-        checkHighFrequencyVisit(userName, source, ip, ipLocation)
+        checkGeoChange(userName, ipLocation, currentLoginAt),
+        checkHighFrequencyVisit(userName, source, ip, ipLocation),
+        checkSameBrowserFingerprintMultiUsers(userName, browserFp, ip, ipLocation),
+        checkSameCanvasFingerprintMultiUsers(userName, canvasFp, ip, ipLocation)
       ])
     : await Promise.all([
         checkSameIpMultiUsers(userName, ip, ipLocation).catch(function(){}),
         checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation).catch(function(){}),
         checkMultiIpSameUser(userName, ip, ipLocation).catch(function(){}),
-        checkGeoChange(userName, ipLocation).catch(function(){}),
-        checkHighFrequencyVisit(userName, source, ip, ipLocation).catch(function(){})
+        checkGeoChange(userName, ipLocation, currentLoginAt).catch(function(){}),
+        checkHighFrequencyVisit(userName, source, ip, ipLocation).catch(function(){}),
+        checkSameBrowserFingerprintMultiUsers(userName, browserFp, ip, ipLocation).catch(function(){}),
+        checkSameCanvasFingerprintMultiUsers(userName, canvasFp, ip, ipLocation).catch(function(){})
       ]);
 }
 
@@ -2258,7 +2368,7 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
         .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER)
         .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER)
-        .neq('media_type', USER_VISIT_MARKER).neq('media_type', LOGIN_EVENT_MARKER),
+        .neq('media_type', USER_VISIT_MARKER).neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', AUDIT_LOG_MARKER).neq('media_type', CLIENT_ERROR_MARKER),
       buildQuery('comments', 'id, created_at', null, null, 'created_at'),
       buildQuery('likes', 'id, created_at', null, null, 'created_at'),
       fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at'),
@@ -2516,7 +2626,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     }
 
     // 异步执行安全检测（不影响响应速度，错误静默处理）
-    runSecurityChecks(userNameVal, deviceIdVal, ip, ipLocation, srcVal).catch(function(e) {
+    runSecurityChecks(userNameVal, deviceIdVal, ip, ipLocation, srcVal, loginAt, browser_fingerprint_hash || null, canvas_fingerprint_hash || null).catch(function(e) {
       console.warn('[Security] 安全检测异常:', e.message || e);
     });
 
@@ -2685,7 +2795,7 @@ app.get('/admin/security-settings', verifyToken, rateLimit(60000, 20), async (re
       .eq('media_type', ADMIN_META_MARKER)
       .eq('media_url', 'security_settings')
       .maybeSingle();
-    var settings = { record_device: true, browser_fingerprint: true, canvas_fingerprint: true, security_alerts: true };
+    var settings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
     if (data && data.content) {
       try { var parsed = JSON.parse(data.content); Object.assign(settings, parsed); } catch(e) {}
     }
@@ -2770,78 +2880,6 @@ app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, re
 });
 
 // ===================== 用户风险评分 =====================
-app.get('/admin/user-risk-scores', verifyToken, rateLimit(60000, 10), async (req, res) => {
-  try {
-    var { data: loginEvents } = await supabase.from('posts')
-      .select('user_name, content, created_at')
-      .eq('media_type', LOGIN_EVENT_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(1000);
-    if (!loginEvents) loginEvents = [];
-
-    var { data: alerts } = await supabase.from('posts')
-      .select('user_name, content, created_at')
-      .eq('media_type', SECURITY_ALERT_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(500);
-    if (!alerts) alerts = [];
-
-    var userScores = {};
-
-    // Process login events per user
-    loginEvents.forEach(function(ev) {
-      var u = ev.user_name;
-      if (!userScores[u]) userScores[u] = { score: 0, reasons: [] };
-      try {
-        var c = JSON.parse(ev.content || '{}');
-      } catch(e) {}
-    });
-
-    // Process security alerts per user
-    var now = new Date();
-    var monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    alerts.forEach(function(a) {
-      var u = a.user_name;
-      if (!userScores[u]) userScores[u] = { score: 0, reasons: [] };
-      try {
-        var info = JSON.parse(a.content || '{}');
-        var isRecent = a.created_at >= monthAgo;
-        if (info.type === 'same_device_multi_users') {
-          userScores[u].score += isRecent ? 20 : 5;
-          userScores[u].reasons.push('同设备多账号');
-        } else if (info.type === 'multi_ip_same_user') {
-          userScores[u].score += isRecent ? 15 : 3;
-          userScores[u].reasons.push('多IP同账号');
-        } else if (info.type === 'same_ip_multi_users') {
-          userScores[u].score += isRecent ? 10 : 2;
-          userScores[u].reasons.push('同IP多账号');
-        } else if (info.type === 'geo_change') {
-          userScores[u].score += isRecent ? 5 : 1;
-          userScores[u].reasons.push('地区变化');
-        } else if (info.type === 'high_frequency_visit') {
-          userScores[u].score += isRecent ? 3 : 1;
-        }
-      } catch(e) {}
-    });
-
-    var result = Object.keys(userScores).map(function(u) {
-      var s = userScores[u];
-      var level = s.score >= 30 ? '高风险' : (s.score >= 15 ? '中风险' : (s.score >= 5 ? '低风险' : '正常'));
-      return {
-        user_name: u,
-        risk_score: s.score,
-        risk_level: level,
-        reasons: s.reasons.slice(0, 5)
-      };
-    });
-
-    return res.json({ data: result });
-  } catch(e) {
-    console.error('[API] 风险评分计算失败:', e.message);
-    return res.status(500).json({ error: '查询失败' });
-  }
-});
-
 // ===================== 审计日志查询 =====================
 app.get('/admin/audit-logs', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
