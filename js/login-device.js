@@ -4,7 +4,7 @@
     var API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
     var CHECK_DELAY_MS = 300;
     var SEND_COOLDOWN_MS = 10000;
-    var VISIT_COOLDOWN_MS = 60000;
+    var VISIT_COOLDOWN_MS = 15000;
     var debounceTimer = null;
     var lastSendAtByKey = {};
 
