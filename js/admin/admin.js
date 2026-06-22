@@ -385,12 +385,60 @@
     }
 
     // 安全说明：不再创建 Supabase 客户端，所有管理操作通过 API_BASE 执行
+    // ===================== 双击 Tab 刷新数据 =====================
+    window.refreshAdminTab = async function(tab) {
+        var normalized = tab === 'blacklist' ? 'bans' : (tab || currentTab || 'ann');
+        try {
+            currentTab = normalized;
+            saveCurrentTab();
+            showToast('正在刷新数据...', 'info');
+
+            var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','audit','errorlog','blacklist'];
+            allTabs.forEach(function(t) {
+                var panel = document.getElementById('tab' + getTabDomName(t));
+                var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
+                if (panel) panel.classList.remove('active');
+                if (btn) btn.classList.remove('active');
+            });
+
+            var panel = document.getElementById('tab' + getTabDomName(normalized));
+            var btn = document.getElementById('tab' + getTabDomName(normalized) + 'Btn');
+            if (panel) panel.classList.add('active');
+            if (btn) btn.classList.add('active');
+
+            await loadAllData(true);
+            renderTab(normalized);
+            showToast('数据已刷新', 'success');
+        } catch(e) {
+            showToast('刷新失败：' + e.message, 'error');
+        }
+    };
+
+    function installAdminTabDoubleClickRefresh() {
+        if (window.__xtjAdminTabDblRefresh) return;
+        window.__xtjAdminTabDblRefresh = true;
+
+        document.addEventListener('dblclick', function(e) {
+            var btn = e.target && e.target.closest ? e.target.closest('.dash-header .dh-right button[id^="tab"]') : null;
+            if (!btn) return;
+
+            var onclickText = btn.getAttribute('onclick') || '';
+            var match = onclickText.match(/switchTab\('([^']+)'\)/);
+            if (!match || !match[1]) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+            window.refreshAdminTab(match[1]);
+        }, true);
+    }
+
     async function initAdminClient() {
         document.getElementById('loginWrap').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
         saveSession();
         ensureRegisterAlertBadge();
         startSessionTimeoutMonitor(); // 启动30分钟无操作自动登出
+        installAdminTabDoubleClickRefresh(); // 启动双击 Tab 刷新
         
         var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos'];
         var savedTab = localStorage.getItem(TAB_KEY);
@@ -2769,7 +2817,7 @@
                 var displayLastLogin = latestLoginTime || (u.info && (u.info.last_login || u.info.last_visit));
                 var lastLogin = displayLastLogin ? formatTime(displayLastLogin) : '-';
 
-                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + escapeHtml(statusText) + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + escapeHtml(lastLogin) + '</td><td>' + deviceCell + '</td><td>' + regionCell + '</td><td>' + ipCell + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + actions + '</td></tr>';
+                h += '<tr><td><strong><a href="#" onclick="showUserDetailModal(\'' + safeName + '\');return false;" style="color:var(--primary);font-weight:700;text-decoration:underline;text-underline-offset:3px;">' + escapeHtml(u.name) + '</a></strong></td><td>' + escapeHtml(statusText) + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + escapeHtml(lastLogin) + '</td><td>' + deviceCell + '</td><td>' + regionCell + '</td><td>' + ipCell + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + actions + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
