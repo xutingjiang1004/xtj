@@ -2896,7 +2896,6 @@
         el.innerHTML = h;
     };
 
-    var _origSwitchTabV2 = window.switchTab;
     window.switchTab = async function(tab) {
         var normalized = tab === 'blacklist' ? 'bans' : tab;
         var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','audit','errorlog','blacklist'];
