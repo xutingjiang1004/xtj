@@ -2710,7 +2710,11 @@ app.get('/admin/security-alerts', verifyToken, rateLimit(60000, 10), async (req,
         ip_location_text: info.ip_location_text || null,
         related_users: info.related_users || [],
         reason: info.reason || '',
-        is_read: info.is_read || false
+        is_read: info.is_read || false,
+        ignored: info.ignored || false,
+        false_positive: info.false_positive || false,
+        reviewed_at: info.reviewed_at || null,
+        reviewed_by: info.reviewed_by || null
       };
     });
 
@@ -2879,7 +2883,6 @@ app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, re
   }
 });
 
-// ===================== 用户风险评分 =====================
 // ===================== 审计日志查询 =====================
 app.get('/admin/audit-logs', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
