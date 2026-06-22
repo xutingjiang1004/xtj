@@ -1876,7 +1876,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
 });
 
 // ===================== 登录事件查询（管理员） =====================
-app.get('/admin/login-events', verifyToken, async (req, res) => {
+app.get('/admin/login-events', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
     const { data, error } = await supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
