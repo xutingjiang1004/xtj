@@ -923,7 +923,6 @@
             h += '</tbody></table></div>';
         }
         h += '</div>';
-        h += '<div id="userLoginDetail" style="display:none;margin-top:12px;"></div>';
         el.innerHTML = h;
     }
 
@@ -2588,19 +2587,7 @@
         h += '</div>';
         if (!filtered.length) { h += '<div class="empty">没有匹配用户</div>'; }
         else {
-            // 构建登录事件查找表
-            var loginEventMap = {};
-            allLoginEvents.forEach(function(e) {
-                if (!loginEventMap[e.user_name]) loginEventMap[e.user_name] = [];
-                loginEventMap[e.user_name].push(e);
-            });
-            Object.keys(loginEventMap).forEach(function(name) {
-                loginEventMap[name].sort(function(a, b) {
-                    return (new Date(b.created_at || 0).getTime()) - (new Date(a.created_at || 0).getTime());
-                });
-            });
-
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>帖子</th><th>点赞</th><th>评论</th><th>注册时间</th><th>最近设备</th><th>最近IP</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>最近设备</th><th>最近IP</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(u) {
                 var stats = getUserActivityStats(u.name);
                 var flags = getUserStateFlags(u.name);
@@ -2616,9 +2603,17 @@
                     ? '-'
                     : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button>';
                 var regTime = getAdminUserEffectiveRegTime(u.info);
+                var lastLogin = u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-';
 
-                // 最近登录设备 & IP
-                var userEvents = loginEventMap[u.name] || [];
+                // 最近登录设备 & IP（从 allLoginEvents 筛选并排序）
+                var userEvents = allLoginEvents.filter(function(ev) { return ev.user_name === u.name; });
+                userEvents.sort(function(a, b) {
+                    var infoA = {}; try { infoA = JSON.parse(a.content || '{}'); } catch(e) {}
+                    var infoB = {}; try { infoB = JSON.parse(b.content || '{}'); } catch(e) {}
+                    var ta = (infoA.login_at || a.created_at || '');
+                    var tb = (infoB.login_at || b.created_at || '');
+                    return (new Date(tb).getTime() || 0) - (new Date(ta).getTime() || 0);
+                });
                 var latestEvent = userEvents[0];
                 var deviceCell = '-';
                 var ipCell = '-';
@@ -2627,13 +2622,12 @@
                         var lc = JSON.parse(latestEvent.content || '{}');
                         var deviceText = escapeHtml((lc.device_type || '?') + ' · ' + (lc.os || '?') + ' · ' + (lc.browser || '?'));
                         ipCell = maskIp(lc.ip);
-                        var dataName = u.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-                        deviceCell = '<span onclick="showUserLoginDetail(\'' + dataName + '\')" style="cursor:pointer;color:var(--primary);text-decoration:underline;" title="点击查看全部登录记录">' + deviceText + '</span>';
+                        var escapedName = u.name.replace(/'/g, "\\'");
+                        deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + escapedName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceText + '</a>';
                     } catch(ex) {}
                 }
 
-                var escapedDataName = u.name.replace(/"/g, '&quot;');
-                h += '<tr data-username="' + escapedDataName + '"><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + statusBadge + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + deviceCell + '</td><td>' + ipCell + '</td><td>' + actions + '</td></tr>';
+                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + statusBadge + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + escapeHtml(lastLogin) + '</td><td>' + deviceCell + '</td><td>' + ipCell + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + actions + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
