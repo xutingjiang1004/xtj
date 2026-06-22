@@ -8,6 +8,26 @@
     var debounceTimer = null;
     var lastSendAtByKey = {};
 
+    // 安全设置缓存（懒加载，1分钟缓存）
+    var cachedSecuritySettings = null;
+    var settingsLastFetch = 0;
+    function getSecuritySettings() {
+        var now = Date.now();
+        if (cachedSecuritySettings && (now - settingsLastFetch < 60000)) {
+            return Promise.resolve(cachedSecuritySettings);
+        }
+        return fetch(API_BASE + '/api/security-settings')
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                cachedSecuritySettings = (data && data.settings) || { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
+                settingsLastFetch = now;
+                return cachedSecuritySettings;
+            })
+            .catch(function() {
+                return { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
+            });
+    }
+
     // 获取或生成 device_id
     function getOrCreateDeviceId() {
         try {
@@ -191,26 +211,33 @@
                 });
             };
 
-            // 异步采集指纹（不阻塞发送）
-            var browserFpPromise = getBrowserFingerprint();
-            var canvasFpPromise = getCanvasFingerprint();
+            // 加载安全设置，按开关决定是否采集指纹
+            getSecuritySettings().then(function(settings) {
+                if (!settings.record_device) bodyObj.device_meta = null;
+                var browserFpPromise = settings.browser_fingerprint ? getBrowserFingerprint() : null;
+                var canvasFpPromise = settings.canvas_fingerprint ? getCanvasFingerprint() : null;
 
-            if (browserFpPromise && browserFpPromise.then) {
-                browserFpPromise.then(function(hash) {
-                    if (hash) bodyObj.browser_fingerprint_hash = hash;
-                    // 继续采集 canvas
-                    if (canvasFpPromise && canvasFpPromise.then) {
-                        canvasFpPromise.then(function(cHash) {
-                            if (cHash) bodyObj.canvas_fingerprint_hash = cHash;
+                if (browserFpPromise && browserFpPromise.then) {
+                    browserFpPromise.then(function(hash) {
+                        if (hash) bodyObj.browser_fingerprint_hash = hash;
+                        if (canvasFpPromise && canvasFpPromise.then) {
+                            canvasFpPromise.then(function(cHash) {
+                                if (cHash) bodyObj.canvas_fingerprint_hash = cHash;
+                                sendReq();
+                            }).catch(function() { sendReq(); });
+                        } else {
                             sendReq();
-                        }).catch(function() { sendReq(); });
-                    } else {
+                        }
+                    }).catch(function() { sendReq(); });
+                } else if (canvasFpPromise && canvasFpPromise.then) {
+                    canvasFpPromise.then(function(cHash) {
+                        if (cHash) bodyObj.canvas_fingerprint_hash = cHash;
                         sendReq();
-                    }
-                }).catch(function() { sendReq(); });
-            } else {
-                sendReq();
-            }
+                    }).catch(function() { sendReq(); });
+                } else {
+                    sendReq();
+                }
+            }).catch(function() { sendReq(); });
         } catch(e) {}
     }
 
@@ -279,4 +306,85 @@
 
     // 已登录用户刷新页面时记录一次
     trySendPageVisit();
+
+    // ===================== 前端错误监控（不采集输入内容） =====================
+    (function() {
+        var errorSent = {};
+        function sendClientError(type, message, stack, url, line, col) {
+            var errKey = (type + '|' + (message || '').slice(0, 100) + '|' + (url || '').slice(0, 100));
+            var now = Date.now();
+            // 去重：同类型同消息5分钟内不重复上报
+            if (errorSent[errKey] && (now - errorSent[errKey] < 300000)) return;
+            errorSent[errKey] = now;
+
+            try {
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', API_BASE + '/api/client-error-log', true);
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.send(JSON.stringify({
+                    type: type,
+                    message: (message || '').slice(0, 500),
+                    stack: (stack || '').slice(0, 1000),
+                    url: (url || (window.location && window.location.href) || '').slice(0, 500),
+                    line: line || null,
+                    col: col || null,
+                    user_agent: (navigator && navigator.userAgent || '').slice(0, 500),
+                    timestamp: new Date().toISOString()
+                }));
+            } catch(e) {}
+        }
+
+        // JS Error
+        window.addEventListener('error', function(event) {
+            if (!event || !event.error) return;
+            sendClientError('js_error', event.error.message, event.error.stack, event.filename, event.lineno, event.colno);
+        });
+
+        // Unhandled Promise rejection
+        window.addEventListener('unhandledrejection', function(event) {
+            var reason = event && event.reason;
+            var msg = reason ? (reason.message || String(reason)) : 'Unhandled rejection';
+            sendClientError('unhandled_rejection', msg, (reason && reason.stack) || '', '', null, null);
+        });
+
+        // Fetch failure monitoring (intercept fetch)
+        try {
+            var _origFetch = window.fetch;
+            window.fetch = function() {
+                return _origFetch.apply(this, arguments).catch(function(err) {
+                    var url = (arguments[0] && typeof arguments[0] === 'string') ? arguments[0] : ((arguments[0] && arguments[0].url) || '');
+                    // Skip reporting our own error/event endpoints to avoid loops
+                    if (url.indexOf('/client-error-log') >= 0) throw err;
+                    sendClientError('fetch_error', err.message || 'fetch failed', '', url, null, null);
+                    throw err;
+                });
+            };
+        } catch(e) {}
+
+        // Image load failure
+        document.addEventListener('error', function(event) {
+            var target = event && event.target;
+            if (target && target.tagName === 'IMG') {
+                sendClientError('img_error', 'Image load failed: ' + ((target.src || '').slice(0, 200)), '', '', null, null);
+            }
+        }, true);
+
+        // 页面白屏检测（DOM 加载5秒后检查）
+        window.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                try {
+                    var body = document.body;
+                    if (!body || !body.children || body.children.length === 0) {
+                        sendClientError('blank_page', 'Page appears blank (no children in body)', '', window.location.href, null, null);
+                        return;
+                    }
+                    // Check if any visible text
+                    var text = (body.innerText || '').trim();
+                    if (!text || text.length < 10) {
+                        sendClientError('blank_page', 'Page appears blank (minimal text)', '', window.location.href, null, null);
+                    }
+                } catch(e) {}
+            }, 5000);
+        });
+    })();
 })();
