@@ -8,6 +8,26 @@
     var debounceTimer = null;
     var lastSendAtByKey = {};
 
+    // 安全设置缓存（懒加载，1分钟缓存）
+    var cachedSecuritySettings = null;
+    var settingsLastFetch = 0;
+    function getSecuritySettings() {
+        var now = Date.now();
+        if (cachedSecuritySettings && (now - settingsLastFetch < 60000)) {
+            return Promise.resolve(cachedSecuritySettings);
+        }
+        return fetch(API_BASE + '/api/security-settings')
+            .then(function(res) { return res.json(); })
+            .then(function(data) {
+                cachedSecuritySettings = (data && data.settings) || { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
+                settingsLastFetch = now;
+                return cachedSecuritySettings;
+            })
+            .catch(function() {
+                return { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
+            });
+    }
+
     // 获取或生成 device_id
     function getOrCreateDeviceId() {
         try {
@@ -54,6 +74,99 @@
         return 'Unknown';
     }
 
+    // 设备元信息（仅基础信息，不做跨站追踪）
+    function getDeviceMeta() {
+        try {
+            return {
+                screen: (window.screen ? window.screen.width + 'x' + window.screen.height : 'unknown'),
+                dpr: window.devicePixelRatio || 1,
+                language: (navigator.language || navigator.userLanguage || 'unknown'),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
+                platform: (navigator.platform || 'unknown'),
+                touch: ('ontouchstart' in window || navigator.maxTouchPoints > 0)
+            };
+        } catch(e) {
+            return null;
+        }
+    }
+
+    // 温和浏览器指纹 hash（SHA-256，仅保存 hash）
+    function getBrowserFingerprint() {
+        try {
+            if (typeof crypto === 'undefined' || !crypto.subtle || !crypto.subtle.digest) {
+                return null;
+            }
+            var fp = [
+                window.screen ? window.screen.width + 'x' + window.screen.height + 'x' + (window.screen.colorDepth || '') : '',
+                window.devicePixelRatio || 1,
+                navigator.language || navigator.userLanguage || '',
+                Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+                navigator.platform || '',
+                navigator.hardwareConcurrency || 'unknown',
+                navigator.deviceMemory || 'unknown',
+                ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? '1' : '0',
+                detectBrowser(navigator.userAgent || ''),
+                detectOS(navigator.userAgent || '')
+            ].join('|');
+
+            // 同步计算 hash（SHA-256，不阻塞主线程太久）
+            var encoder = new TextEncoder();
+            var data = encoder.encode(fp);
+            return crypto.subtle.digest('SHA-256', data).then(function(hashBuffer) {
+                var hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+            }).catch(function() {
+                return null;
+            });
+        } catch(e) {
+            return null;
+        }
+    }
+
+    // Canvas 指纹 hash（仅辅助判断，不保存图像）
+    function getCanvasFingerprint() {
+        try {
+            var canvas = document.createElement('canvas');
+            canvas.width = 200;
+            canvas.height = 40;
+            canvas.style.display = 'none';
+            var ctx = canvas.getContext('2d');
+            if (!ctx) return null;
+
+            // 绘制温和的识别文本
+            ctx.textBaseline = 'top';
+            ctx.font = '14px Arial';
+            ctx.fillStyle = '#059669';
+            ctx.fillText('XTJ ' + (new Date().getFullYear()), 4, 4);
+
+            ctx.font = '12px sans-serif';
+            ctx.fillStyle = '#333';
+            ctx.fillText('device check only', 4, 22);
+
+            // 尝试读取像素（浏览器可能阻止）
+            try {
+                var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                var pixels = imageData.data;
+
+                // 只计算 hash，不保存像素数据
+                if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+                    return crypto.subtle.digest('SHA-256', pixels.slice(0, 512)).then(function(hashBuffer) {
+                        var hashArray = Array.from(new Uint8Array(hashBuffer));
+                        return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                    }).catch(function() {
+                        return null;
+                    });
+                }
+                return null;
+            } catch(e) {
+                // Canvas 被浏览器限制（如隐私模式），记录 null
+                return null;
+            }
+        } catch(e) {
+            return null;
+        }
+    }
+
     // 检查冷却（10s 内存级别）
     function isInCooldown(sentKey) {
         var lastAt = lastSendAtByKey[sentKey] || 0;
@@ -66,7 +179,10 @@
             if (isInCooldown(sentKey)) return;
 
             var ua = navigator.userAgent || '';
-            var body = JSON.stringify({
+            var deviceMeta = getDeviceMeta();
+
+            // 构建基础 body
+            var bodyObj = {
                 user_name: userName,
                 password_hash: passwordHash,
                 device_id: deviceId,
@@ -74,23 +190,54 @@
                 os: detectOS(ua),
                 browser: detectBrowser(ua),
                 user_agent: ua,
-                source: source
-            });
+                source: source,
+                device_meta: deviceMeta
+            };
 
-            lastSendAtByKey[sentKey] = Date.now();
+            // 发送请求（指纹异步采集）
+            var sendReq = function() {
+                lastSendAtByKey[sentKey] = Date.now();
+                fetch(API_BASE + '/api/log-login-event', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(bodyObj)
+                }).then(function(res) {
+                    if (res.ok && source === 'login_success') {
+                        try { sessionStorage.setItem(sentKey, '1'); } catch(e) {}
+                    }
+                }).catch(function() {
+                    // 请求失败清除冷却，允许重试
+                    lastSendAtByKey[sentKey] = 0;
+                });
+            };
 
-            fetch(API_BASE + '/api/log-login-event', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: body
-            }).then(function(res) {
-                if (res.ok && source === 'login_success') {
-                    try { sessionStorage.setItem(sentKey, '1'); } catch(e) {}
+            // 加载安全设置，按开关决定是否采集指纹
+            getSecuritySettings().then(function(settings) {
+                if (!settings.record_device) bodyObj.device_meta = null;
+                var browserFpPromise = settings.browser_fingerprint ? getBrowserFingerprint() : null;
+                var canvasFpPromise = settings.canvas_fingerprint ? getCanvasFingerprint() : null;
+
+                if (browserFpPromise && browserFpPromise.then) {
+                    browserFpPromise.then(function(hash) {
+                        if (hash) bodyObj.browser_fingerprint_hash = hash;
+                        if (canvasFpPromise && canvasFpPromise.then) {
+                            canvasFpPromise.then(function(cHash) {
+                                if (cHash) bodyObj.canvas_fingerprint_hash = cHash;
+                                sendReq();
+                            }).catch(function() { sendReq(); });
+                        } else {
+                            sendReq();
+                        }
+                    }).catch(function() { sendReq(); });
+                } else if (canvasFpPromise && canvasFpPromise.then) {
+                    canvasFpPromise.then(function(cHash) {
+                        if (cHash) bodyObj.canvas_fingerprint_hash = cHash;
+                        sendReq();
+                    }).catch(function() { sendReq(); });
+                } else {
+                    sendReq();
                 }
-            }).catch(function() {
-                // 请求失败清除冷却，允许重试
-                lastSendAtByKey[sentKey] = 0;
-            });
+            }).catch(function() { sendReq(); });
         } catch(e) {}
     }
 
@@ -112,7 +259,7 @@
         doSend(userName, pwHash, deviceId, sentKey, src);
     };
 
-    // 页面访问记录（60s localStorage 冷却，页面刷新/打开时记录）
+    // 页面访问记录（15 秒冷却，页面刷新/打开时记录）
     function trySendPageVisit() {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function() {
@@ -159,4 +306,85 @@
 
     // 已登录用户刷新页面时记录一次
     trySendPageVisit();
+
+    // ===================== 前端错误监控（不采集输入内容） =====================
+    (function() {
+        var errorSent = {};
+        function sendClientError(type, message, stack, url, line, col) {
+            var errKey = (type + '|' + (message || '').slice(0, 100) + '|' + (url || '').slice(0, 100));
+            var now = Date.now();
+            // 去重：同类型同消息5分钟内不重复上报
+            if (errorSent[errKey] && (now - errorSent[errKey] < 300000)) return;
+            errorSent[errKey] = now;
+
+            try {
+                var xhr = new XMLHttpRequest();
+                xhr.open('POST', API_BASE + '/api/client-error-log', true);
+                xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.send(JSON.stringify({
+                    type: type,
+                    message: (message || '').slice(0, 500),
+                    stack: (stack || '').slice(0, 1000),
+                    url: (url || (window.location && window.location.href) || '').slice(0, 500),
+                    line: line || null,
+                    col: col || null,
+                    user_agent: (navigator && navigator.userAgent || '').slice(0, 500),
+                    timestamp: new Date().toISOString()
+                }));
+            } catch(e) {}
+        }
+
+        // JS Error
+        window.addEventListener('error', function(event) {
+            if (!event || !event.error) return;
+            sendClientError('js_error', event.error.message, event.error.stack, event.filename, event.lineno, event.colno);
+        });
+
+        // Unhandled Promise rejection
+        window.addEventListener('unhandledrejection', function(event) {
+            var reason = event && event.reason;
+            var msg = reason ? (reason.message || String(reason)) : 'Unhandled rejection';
+            sendClientError('unhandled_rejection', msg, (reason && reason.stack) || '', '', null, null);
+        });
+
+        // Fetch failure monitoring (intercept fetch)
+        try {
+            var _origFetch = window.fetch;
+            window.fetch = function() {
+                return _origFetch.apply(this, arguments).catch(function(err) {
+                    var url = (arguments[0] && typeof arguments[0] === 'string') ? arguments[0] : ((arguments[0] && arguments[0].url) || '');
+                    // Skip reporting our own error/event endpoints to avoid loops
+                    if (url.indexOf('/client-error-log') >= 0) throw err;
+                    sendClientError('fetch_error', err.message || 'fetch failed', '', url, null, null);
+                    throw err;
+                });
+            };
+        } catch(e) {}
+
+        // Image load failure
+        document.addEventListener('error', function(event) {
+            var target = event && event.target;
+            if (target && target.tagName === 'IMG') {
+                sendClientError('img_error', 'Image load failed: ' + ((target.src || '').slice(0, 200)), '', '', null, null);
+            }
+        }, true);
+
+        // 页面白屏检测（DOM 加载5秒后检查）
+        window.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                try {
+                    var body = document.body;
+                    if (!body || !body.children || body.children.length === 0) {
+                        sendClientError('blank_page', 'Page appears blank (no children in body)', '', window.location.href, null, null);
+                        return;
+                    }
+                    // Check if any visible text
+                    var text = (body.innerText || '').trim();
+                    if (!text || text.length < 10) {
+                        sendClientError('blank_page', 'Page appears blank (minimal text)', '', window.location.href, null, null);
+                    }
+                } catch(e) {}
+            }, 5000);
+        });
+    })();
 })();
