@@ -557,6 +557,36 @@
                 allLoginEvents = [];
             }
 
+            // 加载安全提醒
+            try {
+                var secRes = await apiCall('GET', '/admin/security-alerts');
+                allSecurityAlerts = secRes.data || [];
+            } catch(e) {
+                allSecurityAlerts = [];
+            }
+
+            // 加载安全设置
+            try {
+                var settingsRes = await apiCall('GET', '/admin/security-settings');
+                if (settingsRes && settingsRes.settings) securitySettings = settingsRes.settings;
+            } catch(e) {}
+
+            // 加载审计日志
+            try {
+                var auditRes = await apiCall('GET', '/admin/audit-logs');
+                allAuditLogs = auditRes.data || [];
+            } catch(e) {
+                allAuditLogs = [];
+            }
+
+            // 加载错误日志
+            try {
+                var errorRes = await apiCall('GET', '/admin/error-logs');
+                allErrorLogs = errorRes.data || [];
+            } catch(e) {
+                allErrorLogs = [];
+            }
+
             // 数据已经在 /admin/data 中加载，不需要单独加载
             await loadPhotosAdminData();
 
@@ -2967,89 +2997,6 @@
         } catch(_) {}
     })();
 
-    var _origLoadAllData = window.loadAllData;
-    window.loadAllData = async function(keepTab) {
-        try {
-            if (API_BASE && getToken()) {
-                var apiData = await apiCall('GET', '/admin/data');
-                var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER && p.media_type !== AUDIT_LOG_MARKER && p.media_type !== CLIENT_ERROR_MARKER; });
-                annList = apiData.announcements || [];
-                allLikes = apiData.likes || [];
-                allComments = apiData.comments || [];
-                updateReportBadge();
-                bansData = apiData.bans || [];
-                mutesData = apiData.mutes || [];
-                blacklistData = apiData.blacklist || [];
-            }
-
-            var userMap = {};
-            allPosts.forEach(function(p) { userMap[p.user_name] = true; });
-            allLikes.forEach(function(l) { userMap[l.user_name] = true; });
-            allComments.forEach(function(c) { userMap[c.user_name] = true; });
-
-            var userInfoList = [];
-            if (API_BASE && getToken()) {
-                try { var userRes = await apiCall('GET', '/admin/users'); userInfoList = userRes.data || []; } catch(e) {}
-            }
-
-            var userInfoMap = {};
-            userInfoList.forEach(function(ui) {
-                try {
-                    var info = JSON.parse(ui.content || '{}');
-                    userInfoMap[ui.user_name] = mergeAdminUserInfo(userInfoMap[ui.user_name], info);
-                    userMap[ui.user_name] = true;
-                } catch(e) {}
-            });
-
-            allUsers = Object.keys(userMap).sort().map(function(u) {
-                return { name: u, info: userInfoMap[u] || null };
-            });
-
-            // 加载登录事件记录
-            try {
-                var loginRes = await apiCall('GET', '/admin/login-events');
-                allLoginEvents = loginRes.data || [];
-            } catch(e) {
-                allLoginEvents = [];
-            }
-
-            // 加载安全提醒
-            try {
-                var secRes = await apiCall('GET', '/admin/security-alerts');
-                allSecurityAlerts = secRes.data || [];
-            } catch(e) {
-                allSecurityAlerts = [];
-            }
-
-            // 加载审计日志
-            try {
-                var auditRes = await apiCall('GET', '/admin/audit-logs');
-                allAuditLogs = auditRes.data || [];
-            } catch(e) {
-                allAuditLogs = [];
-            }
-
-            // 加载错误日志
-            try {
-                var errLogRes = await apiCall('GET', '/admin/error-logs');
-                allErrorLogs = errLogRes.data || [];
-            } catch(e) {
-                allErrorLogs = [];
-            }
-
-            // 加载安全设置
-            await loadSecuritySettings();
-
-            // 数据已在 API 路径中统一加载
-            await loadPhotosAdminData();
-
-            if (!keepTab) { switchTab('ann'); }
-            else { window.renderTab(currentTab); }
-        } catch(e) {
-            showToast('数据加载失败，请刷新重试', 'error');
-        }
-    };
     function buildAdminMediaThumb(post, username, createdAt) {
         if (!post || !post.media_url) return '-';
         if (String(post.media_url).indexOf('http') === 0) {
