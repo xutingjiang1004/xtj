@@ -600,22 +600,6 @@
         }
     }
 
-    window.switchTab = async function(tab) {
-        currentTab = tab;
-        saveCurrentTab();
-        if (tab === 'reports') {
-            var badge = document.getElementById('reportBadge');
-            if (badge) badge.style.display = 'none';
-        }
-        ['ann','users','posts','likes','comments'].forEach(function(t) {
-            document.getElementById('tab' + getTabDomName(t)).classList.remove('active');
-            document.getElementById('tab' + getTabDomName(t) + 'Btn').classList.remove('active');
-        });
-        document.getElementById('tab' + getTabDomName(tab)).classList.add('active');
-        document.getElementById('tab' + getTabDomName(tab) + 'Btn').classList.add('active');
-        window.renderTab(tab);
-    };
-
     function escapeHtml(s) {
         var d = document.createElement('div');
         d.textContent = s || '';
@@ -1130,6 +1114,24 @@
             } catch(e) { showToast('拉黑封禁失败: ' + e.message, 'error'); }
         });
     };
+
+    window.confirmDeleteUser = function(userName) {
+        showConfirm('删除账号', '确认删除用户 <strong>' + escapeHtml(userName) + '</strong>？<br><br>删除后不可恢复，会删除该用户的登录信息、帖子、照片、点赞、评论等所有数据。', '确认删除', function() {
+            deleteUserAccount(userName);
+        });
+    };
+
+    async function deleteUserAccount(userName) {
+        try {
+            var res = await apiCall('DELETE', '/admin/user/' + encodeURIComponent(userName));
+            if (!res || !res.ok) throw new Error('删除失败');
+            showToast('用户账号已删除', 'success');
+            await loadAllData(true);
+            renderTab('users');
+        } catch(e) {
+            showToast('删除失败: ' + (e.message || '未知错误'), 'error');
+        }
+    }
 
     async function renderPostsTab(el) {
         // 每次切到帖子管理时自动刷新数据
@@ -2369,49 +2371,6 @@
         }
     }
 
-    var _origSwitchTab = window.switchTab;
-    window.switchTab = function(tab) {
-        currentTab = tab;
-        saveCurrentTab();
-        if (tab === 'reports') {
-            var badge = document.getElementById('reportBadge');
-            if (badge) badge.style.display = 'none';
-        }
-        ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos','stats','security','audit','errorlog'].forEach(function(t) {
-            var panel = document.getElementById('tab' + getTabDomName(t));
-            var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
-            if (panel) panel.classList.remove('active');
-            if (btn) btn.classList.remove('active');
-        });
-        var panel = document.getElementById('tab' + getTabDomName(tab));
-        var btn = document.getElementById('tab' + getTabDomName(tab) + 'Btn');
-        if (panel) panel.classList.add('active');
-        if (btn) btn.classList.add('active');
-        window.renderTab(tab);
-    };
-
-    var _origRenderTab = window.renderTab;
-    window.renderTab = function(tab) {
-        var el = document.getElementById('tab' + getTabDomName(tab));
-        if (!el) return;
-        switch(tab) {
-            case 'ann': renderAnnTab(el); break;
-            case 'users': renderUsersTab(el); break;
-            case 'posts': renderPostsTab(el); break;
-            case 'likes': renderLikesTab(el); break;
-            case 'comments': renderCommentsTab(el); break;
-            case 'reports': renderReportsTab(el); break;
-            case 'bans': renderBansTab(el); break;
-            case 'mutes': renderMutesTab(el); break;
-            case 'blacklist': renderBlacklistTab(el); break;
-            case 'photos': renderPhotosTab(el); break;
-            case 'stats': renderStatsTab(el); break;
-            case 'security': renderSecurityTab(el); break;
-            case 'audit': renderAuditTab(el); break;
-            case 'errorlog': renderErrorLogTab(el); break;
-        }
-    };
-
     window.quickBlacklistUser = function(userName) {
         var hours = prompt('请输入拉黑时长（小时），0=永久拉黑：', '24');
         if (hours === null) return;
@@ -2849,7 +2808,7 @@
                 var safeName = u.name.replace(/'/g, "\\'");
                 var actions = flags.isAdmin
                     ? '-'
-                    : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button>';
+                    : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button><button class="btn-sm del" onclick="confirmDeleteUser(\'' + safeName + '\')">删除账号</button>';
                 var regTime = getAdminUserEffectiveRegTime(u.info);
 
                 // 最近登录设备 & IP（从 allLoginEvents 筛选并排序）
@@ -2942,7 +2901,7 @@
         var normalized = tab === 'blacklist' ? 'bans' : tab;
         var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','audit','errorlog','blacklist'];
         currentTab = normalized;
-        localStorage.setItem('admin_tab', normalized);
+        saveCurrentTab();
         if (normalized === 'users') {
             await markRegisterAlertsRead();
         }
@@ -2991,8 +2950,8 @@
         if (btn) btn.remove();
         if (panel) panel.remove();
         try {
-            if (localStorage.getItem('admin_tab') === 'blacklist') {
-                localStorage.setItem('admin_tab', 'bans');
+            if (localStorage.getItem(TAB_KEY) === 'blacklist') {
+                localStorage.setItem(TAB_KEY, 'bans');
             }
         } catch(_) {}
     })();
@@ -3554,7 +3513,8 @@
                 'unmute_user': '解除禁言',
                 'cleanup_logs': '清理日志',
                 'update_security_settings': '修改安全设置',
-                'review_security_alert': '审查安全提醒'
+                'review_security_alert': '审查安全提醒',
+                'delete_user': '删除用户账号'
             };
             allAuditLogs.forEach(function(log) {
                 h += '<tr><td>' + escapeHtml(formatTime(log.created_at)) + '</td><td>' + escapeHtml(actionLabels[log.action] || log.action) + '</td><td>' + escapeHtml(log.operator) + '</td><td style="max-width:300px;white-space:normal;word-break:break-word;">' + escapeHtml(log.detail || '-') + '</td></tr>';

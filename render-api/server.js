@@ -1811,6 +1811,118 @@ app.put('/admin/blacklist/:id/lift', verifyToken, async (req, res) => {
   return res.json({ ok: true });
 });
 
+// ===================== 管理员删除用户账号 =====================
+app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req, res) => {
+  try {
+    var userName = String(req.params.userName || '').trim();
+    if (!userName || userName.length > MAX_USERNAME_LEN) return res.status(400).json({ error: '用户名无效' });
+    if (userName === ADMIN_USERNAME) return res.status(403).json({ error: '不能删除管理员账号' });
+
+    // 检查用户是否存在
+    var { data: authRecord } = await supabase.from('posts')
+      .select('id').eq('media_type', AUTH_MARKER).eq('user_name', userName).limit(1);
+    if (!authRecord || authRecord.length === 0) {
+      return res.status(404).json({ error: '用户不存在' });
+    }
+
+    // 查询并删除照片墙的 Storage 文件
+    var storagePaths = [];
+    try {
+      var { data: photoRecords } = await supabase.from('posts')
+        .select('media_url').eq('user_name', userName).eq('media_type', '__photo_wall__');
+      if (photoRecords && photoRecords.length) {
+        photoRecords.forEach(function(p) {
+          if (p.media_url) {
+            // 从 URL 中提取路径
+            var url = p.media_url;
+            var pathMatch = url.match(/\/uploads\/(.+?)(?:\?|$)/);
+            if (pathMatch) storagePaths.push(pathMatch[1]);
+          }
+        });
+      }
+    } catch(storageErr) {
+      console.warn('[admin] 查询照片路径失败:', storageErr.message);
+    }
+
+    // 删除 Storage 文件（失败不影响账号删除）
+    var deletedStorage = 0;
+    if (storagePaths.length > 0) {
+      try {
+        var { error: storageError } = await supabase.storage.from('uploads').remove(storagePaths);
+        if (storageError) {
+          console.warn('[admin] 删除照片文件失败:', storageError.message);
+        } else {
+          deletedStorage = storagePaths.length;
+        }
+      } catch(storageErr) {
+        console.warn('[admin] 删除照片文件异常:', storageErr.message);
+      }
+    }
+
+    // 删除用户数据
+    var deletedPosts = 0, deletedLikes = 0, deletedComments = 0, deletedBans = 0, deletedMutes = 0, deletedBlacklist = 0;
+
+    // 删除 posts 表
+    var delPostsRes = await supabase.from('posts').delete().eq('user_name', userName);
+    if (!delPostsRes.error) deletedPosts = delPostsRes.count || 0;
+    else console.warn('[admin] 删除 posts 失败:', delPostsRes.error.message);
+
+    // 删除 likes 表
+    var delLikesRes = await supabase.from('likes').delete().eq('user_name', userName);
+    if (!delLikesRes.error) deletedLikes = delLikesRes.count || 0;
+    else console.warn('[admin] 删除 likes 失败:', delLikesRes.error.message);
+
+    // 删除 comments 表
+    var delCommentsRes = await supabase.from('comments').delete().eq('user_name', userName);
+    if (!delCommentsRes.error) deletedComments = delCommentsRes.count || 0;
+    else console.warn('[admin] 删除 comments 失败:', delCommentsRes.error.message);
+
+    // 删除 bans 表
+    var delBansRes = await supabase.from('bans').delete().eq('user_name', userName);
+    if (!delBansRes.error) deletedBans = delBansRes.count || 0;
+    else console.warn('[admin] 删除 bans 失败:', delBansRes.error.message);
+
+    // 删除 mutes 表
+    var delMutesRes = await supabase.from('mutes').delete().eq('user_name', userName);
+    if (!delMutesRes.error) deletedMutes = delMutesRes.count || 0;
+    else console.warn('[admin] 删除 mutes 失败:', delMutesRes.error.message);
+
+    // 删除 blacklist 表
+    var delBlacklistRes = await supabase.from('blacklist').delete().eq('user_name', userName);
+    if (!delBlacklistRes.error) deletedBlacklist = delBlacklistRes.count || 0;
+    else console.warn('[admin] 删除 blacklist 失败:', delBlacklistRes.error.message);
+
+    // 写入审计日志
+    await logAdminAudit('delete_user', ADMIN_USERNAME,
+      'user:' + userName +
+      ' posts:' + deletedPosts +
+      ' likes:' + deletedLikes +
+      ' comments:' + deletedComments +
+      ' bans:' + deletedBans +
+      ' mutes:' + deletedMutes +
+      ' blacklist:' + deletedBlacklist +
+      ' storage_files:' + deletedStorage
+    );
+
+    return res.json({
+      ok: true,
+      user_name: userName,
+      deleted: {
+        posts: deletedPosts,
+        likes: deletedLikes,
+        comments: deletedComments,
+        bans: deletedBans,
+        mutes: deletedMutes,
+        blacklist: deletedBlacklist,
+        storage_files: deletedStorage
+      }
+    });
+  } catch(e) {
+    console.error('[admin] 删除用户失败:', e.message || e);
+    return res.status(500).json({ error: '删除用户失败: ' + (e.message || '服务器错误') });
+  }
+});
+
 function firstNonEmptyValue() {
   for (let i = 0; i < arguments.length; i++) {
     const value = arguments[i];
