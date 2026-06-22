@@ -1005,6 +1005,9 @@
                 if (latestLoginEvent) {
                     deviceCell = escapeHtml((latestLoginEvent.info.device_type || '?') + ' · ' + (latestLoginEvent.info.os || '?') + ' · ' + (latestLoginEvent.info.browser || '?'));
                     ipCell = escapeHtml(maskIp(latestLoginEvent.info.ip));
+                    if (latestLoginEvent.info.ip_location && latestLoginEvent.info.ip_location.text) {
+                        ipCell += '<br><small style="color:#888;font-size:11px;">' + escapeHtml(latestLoginEvent.info.ip_location.text) + '</small>';
+                    }
                     deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + safeName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceCell + '</a>';
                 }
 
@@ -2643,6 +2646,9 @@
                         var lc = JSON.parse(latestEvent.content || '{}');
                         var deviceText = escapeHtml((lc.device_type || '?') + ' · ' + (lc.os || '?') + ' · ' + (lc.browser || '?'));
                         ipCell = escapeHtml(maskIp(lc.ip));
+                        if (lc.ip_location && lc.ip_location.text) {
+                            ipCell += '<br><small style="color:#888;font-size:11px;">' + escapeHtml(lc.ip_location.text) + '</small>';
+                        }
                         var escapedName = u.name.replace(/'/g, "\\'");
                         deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + escapedName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceText + '</a>';
                     } catch(ex) {}
@@ -3249,6 +3255,7 @@
             '<table style="width:100%;font-size:13px;border-collapse:collapse;">' +
             '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);">' +
             '<th style="padding:6px 8px;text-align:left;">登录时间</th>' +
+            '<th style="padding:6px 8px;text-align:left;">来源</th>' +
             '<th style="padding:6px 8px;text-align:left;">设备类型</th>' +
             '<th style="padding:6px 8px;text-align:left;">系统</th>' +
             '<th style="padding:6px 8px;text-align:left;">浏览器</th>' +
@@ -3256,15 +3263,26 @@
             '<th style="padding:6px 8px;text-align:left;">地区</th>' +
             '</tr></thead><tbody>';
 
+        var sourceLabels = {
+            'login_success': '登录成功',
+            'page_visit': '页面访问',
+            'register_success': '注册成功',
+            'admin_login': '管理员登录'
+        };
+
         userEvents.forEach(function(ev) {
             var loginTime = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
+            var srcLabel = sourceLabels[ev.info.source] || '登录记录';
+            var locText = (ev.info.ip_location && ev.info.ip_location.text) ? escapeHtml(ev.info.ip_location.text) : '暂未解析';
+            var fullIp = ev.info.ip || '-';
             html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.05);">' +
                 '<td style="padding:6px 8px;">' + (loginTime ? escapeHtml(formatTime(loginTime)) : '-') + '</td>' +
+                '<td style="padding:6px 8px;">' + escapeHtml(srcLabel) + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.device_type || '-') + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.os || '-') + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.browser || '-') + '</td>' +
-                '<td style="padding:6px 8px;">' + escapeHtml(maskIp(ev.info.ip)) + '</td>' +
-                '<td style="padding:6px 8px;">暂未解析</td>' +
+                '<td style="padding:6px 8px;">' + escapeHtml(fullIp) + '</td>' +
+                '<td style="padding:6px 8px;">' + locText + '</td>' +
                 '</tr>';
         });
 
