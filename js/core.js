@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -1401,7 +1401,7 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
                     localStorage.setItem("xtj_pw_hash", pwHash);
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
-                            window.logLoginEventSafe(name);
+                            window.logLoginEventSafe(name, "register_success");
                         }
                     } catch(e) {}
                     showToast("注册成功，欢迎你！" + name);
