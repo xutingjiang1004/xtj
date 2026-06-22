@@ -978,7 +978,7 @@
         if (!filtered.length) {
             h += '<div class="empty">无匹配用户</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>最近设备</th><th>最近IP</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(u) {
                 var pc = allPosts.filter(function(p) { return p.user_name === u.name; }).length;
                 var lc = allLikes.filter(function(l) { return l.user_name === u.name; }).length;
@@ -990,6 +990,24 @@
                 var isMuted = mutesData.some(function(m) { return m.user_name === u.name && m.is_active; });
                 var safeName = u.name.replace(/'/g, "\\'");
 
+                // 最近登录设备 & IP
+                var userEvents = allLoginEvents.filter(function(ev) { return ev.user_name === u.name; }).map(function(ev) {
+                    var info = {};
+                    try { info = JSON.parse(ev.content || '{}'); } catch(e) {}
+                    return { raw: ev, info: info };
+                }).sort(function(a, b) {
+                    return toAdminTimeMs((b.info && b.info.login_at) || (b.raw && b.raw.created_at))
+                         - toAdminTimeMs((a.info && a.info.login_at) || (a.raw && a.raw.created_at));
+                });
+                var latestLoginEvent = userEvents[0] || null;
+                var deviceCell = '-';
+                var ipCell = '-';
+                if (latestLoginEvent) {
+                    deviceCell = escapeHtml((latestLoginEvent.info.device_type || '?') + ' · ' + (latestLoginEvent.info.os || '?') + ' · ' + (latestLoginEvent.info.browser || '?'));
+                    ipCell = maskIp(latestLoginEvent.info.ip);
+                    deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + safeName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceCell + '</a>';
+                }
+
                 var statusBadge = isAdmin ? '<span class="badge" style="background:rgba(99,102,241,0.15);color:#818cf8">管理员</span>' :
                                   isBanned ? '<span class="badge badge-red">拉黑封禁中</span>' :
                                   isMuted ? '<span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24">禁言中</span>' :
@@ -999,6 +1017,8 @@
                 h += '<td>' + statusBadge + '</td>';
                 h += '<td>' + regTime + '</td>';
                 h += '<td>' + lastLogin + '</td>';
+                h += '<td>' + deviceCell + '</td>';
+                h += '<td>' + ipCell + '</td>';
                 h += '<td>' + pc + '</td>';
                 h += '<td>' + lc + '</td>';
                 h += '<td>' + cc + '</td>';
@@ -1014,6 +1034,7 @@
             h += '</tbody></table></div>';
         }
         h += '</div>';
+        h += '<div id="userLoginDetail" style="display:none;margin-top:12px;"></div>';
 
         el.innerHTML = h;
     }
