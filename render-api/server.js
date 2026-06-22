@@ -80,6 +80,7 @@ const ADMIN_AUTH_MARKER = '__admin_auth__';
 const ADMIN_META_MARKER = '__admin_meta__';
 const USER_INFO_MARKER = '__user_info__';
 const USER_VISIT_MARKER = '__user_visit__';
+const LOGIN_EVENT_MARKER = '__login_event__';
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
 let statsCache = { data: null, ts: 0, pending: null };
@@ -498,6 +499,17 @@ function getRealIp(req) {
   // trust proxy 已配置，req.ip 返回真实客户端 IP
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
+
+// 获取客户端 IP（优先 X-Forwarded-For 第一段，用于登录事件记录）
+function getClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    const first = String(forwarded).split(',')[0].trim();
+    if (first) return first;
+  }
+  return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
 function rateLimit(windowMs, maxRequests) {
   return (req, res, next) => {
     const key = getRealIp(req) + ':' + req.path;
@@ -1806,6 +1818,55 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
     return res.json({ ok: true });
   } catch(e) {
     console.error('[API] 用户访问记录失败:', e.message);
+    return res.status(500).json({ error: '记录失败' });
+  }
+});
+
+// ===================== 登录设备/IP 记录（前端调用） =====================
+app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
+  try {
+    const { user_name, password_hash, device_id, device_type, os, browser, user_agent } = req.body;
+
+    const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
+    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
+
+    // 验证密码 hash（与 /api/log-user-visit 相同验证方式）
+    if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
+    const { data: authRec } = await supabase.from('posts')
+      .select('media_url')
+      .eq('user_name', userNameVal)
+      .eq('media_type', AUTH_MARKER)
+      .maybeSingle();
+    if (!authRec || authRec.media_url !== password_hash) {
+      return res.status(403).json({ error: '身份验证失败' });
+    }
+
+    // IP 由后端获取，前端不允许传 ip
+    const ip = getClientIp(req);
+    const loginAt = new Date().toISOString();
+    const random = Math.random().toString(36).slice(2, 10);
+
+    // 写入 posts 表（短期方案，不新建表）
+    await supabase.from('posts').insert([{
+      user_name: userNameVal,
+      media_type: LOGIN_EVENT_MARKER,
+      media_url: device_id || 'unknown',
+      content: JSON.stringify({
+        device_id: device_id || 'unknown',
+        device_type: device_type || 'unknown',
+        os: os || 'Unknown',
+        browser: browser || 'Unknown',
+        user_agent: user_agent || '',
+        ip: ip,
+        ip_location: null,
+        login_at: loginAt
+      }),
+      actor_key: 'login_' + Date.now() + '_' + random
+    }]);
+
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[API] 登录事件记录失败:', e.message);
     return res.status(500).json({ error: '记录失败' });
   }
 });
