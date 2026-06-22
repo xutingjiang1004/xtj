@@ -106,7 +106,7 @@
         try { pwHash = localStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
         if (!pwHash) return;
         var src = source || 'login_success';
-        // 设置页面访问冷却，避免登录成功后 60 秒内重复产生 page_visit
+        // 设置页面访问冷却，避免登录成功后 15 秒内重复产生 page_visit
         var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
         try { localStorage.setItem(visitKey, String(Date.now())); } catch(e) {}
         doSend(userName, pwHash, deviceId, sentKey, src);
@@ -126,7 +126,7 @@
 
             if (!userName || !passwordHash || !deviceId) return;
 
-            // 60s localStorage 冷却
+            // 15s localStorage 冷却
             var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
             var lastAt = 0;
             try { lastAt = parseInt(localStorage.getItem(visitKey)) || 0; } catch(e) {}
