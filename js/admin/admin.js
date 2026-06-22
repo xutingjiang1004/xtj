@@ -7,6 +7,7 @@
     var DM_MARKER = "__dm__";
     var ANN_MARKER = "__ann__";
     var REPORT_MARKER = '__report__';
+    var SECURITY_ALERT_MARKER = '__security_alert__';
     var SESSION_KEY = "xtj_admin_session";
     var TOKEN_KEY = "xtj_admin_token";
     var TAB_KEY = "xtj_admin_tab";
@@ -97,7 +98,7 @@
         }, 30000); // 每30秒检查一次
     }
 
-    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [];
+    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allSecurityAlerts = [];
     var searchUser = '', searchPost = '';
     var userFilterStatus = 'all';
     var userSortBy = 'reg';
@@ -1090,7 +1091,7 @@
             try {
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER; });
                 annList = apiData.announcements || [];
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
@@ -2456,6 +2457,86 @@
         el.innerHTML = h;
     };
 
+    // 安全中心
+    var securityTypeFilter = 'all';
+    renderSecurityTab = function(el) {
+        var alerts = allSecurityAlerts.slice();
+        var now = new Date();
+        var todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+
+        var todayAlerts = alerts.filter(function(a) { return a.created_at >= todayStart; });
+        var highRiskCount = todayAlerts.filter(function(a) { return a.level === 'high'; }).length;
+        var unreadCount = alerts.filter(function(a) { return !a.is_read; }).length;
+
+        var typeLabels = {
+            'same_ip_multi_users': '同 IP 多账号',
+            'same_device_multi_users': '同设备多账号',
+            'multi_ip_same_user': '同账号多 IP',
+            'geo_change': '地区变化',
+            'high_frequency_visit': '高频访问'
+        };
+
+        var typeLevelClass = {
+            'same_ip_multi_users': 'warn',
+            'same_device_multi_users': 'danger',
+            'multi_ip_same_user': 'danger',
+            'geo_change': '',
+            'high_frequency_visit': ''
+        };
+
+        if (securityTypeFilter !== 'all') {
+            alerts = alerts.filter(function(a) { return a.type === securityTypeFilter; });
+        }
+
+        var h = '<div class="stats-row">';
+        h += '<div class="stat-box"><div class="val">' + todayAlerts.length + '</div><div class="lbl">今日异常数</div></div>';
+        h += '<div class="stat-box danger"><div class="val">' + highRiskCount + '</div><div class="lbl">高风险</div></div>';
+        h += '<div class="stat-box warn"><div class="val">' + unreadCount + '</div><div class="lbl">未读</div></div>';
+        h += '<div class="stat-box"><div class="val">' + alerts.length + '</div><div class="lbl">总提醒数</div></div>';
+        h += '</div>';
+
+        h += '<div class="card"><h3>安全提醒</h3>';
+
+        // 类型筛选
+        h += '<div class="filter-chips" style="margin-bottom:10px;">';
+        h += '<span class="filter-chip' + (securityTypeFilter === 'all' ? ' active' : '') + '" onclick="securityTypeFilter=\'all\';renderTab(\'security\')">全部</span>';
+        Object.keys(typeLabels).forEach(function(k) {
+            h += '<span class="filter-chip' + (securityTypeFilter === k ? ' active' : '') + '" onclick="securityTypeFilter=\'' + k + '\';renderTab(\'security\')">' + typeLabels[k] + '</span>';
+        });
+        h += '</div>';
+
+        if (!alerts.length) {
+            h += '<div class="empty">暂无安全提醒</div>';
+        } else {
+            h += '<div class="table-wrap"><table><thead><tr><th>时间</th><th>类型</th><th>等级</th><th>用户</th><th>说明</th><th>关联</th><th>操作</th></tr></thead><tbody>';
+            alerts.forEach(function(a) {
+                var levelBadge = a.level === 'high' ? '<span class="badge badge-red">高风险</span>' : (a.level === 'warning' ? '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">警告</span>' : '<span class="badge badge-green">信息</span>');
+                var typeLabel = typeLabels[a.type] || a.type;
+                var relatedHtml = (a.related_users || []).slice(0, 3).map(function(u) { return escapeHtml(u); }).join(', ');
+                if ((a.related_users || []).length > 3) relatedHtml += ' ...';
+                var readBtn = a.is_read ? '<span style="font-size:11px;color:var(--text-muted);">已读</span>' : '<button class="btn-sm" onclick="markSecurityAlertRead(\'' + a.id + '\')">标记已读</button>';
+                var rowClass = !a.is_read ? ' style="background:rgba(255,59,96,0.03);"' : '';
+                h += '<tr' + rowClass + '><td>' + escapeHtml(formatTime(a.created_at)) + '</td><td>' + escapeHtml(typeLabel) + '</td><td>' + levelBadge + '</td><td><strong>' + escapeHtml(a.user_name) + '</strong></td><td style="max-width:240px;white-space:normal;word-break:break-word;">' + escapeHtml(a.reason || '-') + '</td><td style="font-size:11px;max-width:160px;white-space:normal;word-break:break-word;">' + relatedHtml + '</td><td>' + readBtn + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    };
+
+    // 标记安全提醒已读
+    window.markSecurityAlertRead = async function(alertId) {
+        if (!alertId) return;
+        try {
+            await apiCall('POST', '/admin/security-alerts/read', { id: alertId });
+            var alert = allSecurityAlerts.find(function(a) { return a.id === alertId; });
+            if (alert) alert.is_read = true;
+            renderTab('security');
+        } catch(e) {
+            showToast('操作失败', 'error');
+        }
+    };
+
     renderBansTab = async function(el) {
         if (!bansData.length) await loadBansData();
         var active = bansData.filter(function(b) { return b.is_active; }).length;
@@ -2721,7 +2802,7 @@
     var _origSwitchTabV2 = window.switchTab;
     window.switchTab = async function(tab) {
         var normalized = tab === 'blacklist' ? 'bans' : tab;
-        var allTabs = ['ann','stats','users','posts','likes','comments','reports','bans','mutes','photos'];
+        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos'];
         currentTab = normalized;
         localStorage.setItem('admin_tab', normalized);
         if (normalized === 'users') {
@@ -2752,6 +2833,7 @@
         switch(normalized) {
             case 'ann': renderAnnTab(el); break;
             case 'users': renderUsersTab(el); break;
+            case 'security': renderSecurityTab(el); break;
             case 'posts': renderPostsTab(el); break;
             case 'likes': renderLikesTab(el); break;
             case 'comments': renderCommentsTab(el); break;
@@ -2820,6 +2902,14 @@
                 allLoginEvents = loginRes.data || [];
             } catch(e) {
                 allLoginEvents = [];
+            }
+
+            // 加载安全提醒
+            try {
+                var secRes = await apiCall('GET', '/admin/security-alerts');
+                allSecurityAlerts = secRes.data || [];
+            } catch(e) {
+                allSecurityAlerts = [];
             }
 
             // 数据已在 API 路径中统一加载
@@ -3260,8 +3350,80 @@
             return;
         }
 
+        // 获取最新指纹信息
+        var latestFpEvent = null;
+        for (var i = 0; i < userEvents.length; i++) {
+            if (userEvents[i].info.browser_fingerprint_hash || userEvents[i].info.canvas_fingerprint_hash) {
+                latestFpEvent = userEvents[i];
+                break;
+            }
+        }
+        var bfHash = latestFpEvent ? (latestFpEvent.info.browser_fingerprint_hash || null) : null;
+        var cfHash = latestFpEvent ? (latestFpEvent.info.canvas_fingerprint_hash || null) : null;
+
+        // 查找关联账号（同一 IP 或同一 device_id）
+        var userIps = {};
+        var userDevices = {};
+        userEvents.forEach(function(ev) {
+            if (ev.info.ip) userIps[ev.info.ip] = true;
+            if (ev.info.device_id) userDevices[ev.info.device_id] = true;
+        });
+
+        var relatedAccounts = {};
+        allLoginEvents.forEach(function(ev) {
+            if (ev.user_name === userName) return;
+            var info = {};
+            try { info = JSON.parse(ev.content || '{}'); } catch(e) {}
+            if (info.ip && userIps[info.ip]) relatedAccounts[ev.user_name] = (relatedAccounts[ev.user_name] || 0) + 1;
+            if (info.device_id && userDevices[info.device_id]) relatedAccounts[ev.user_name] = (relatedAccounts[ev.user_name] || 0) + 1;
+        });
+        var relatedList = Object.keys(relatedAccounts).sort(function(a, b) { return relatedAccounts[b] - relatedAccounts[a]; }).slice(0, 10);
+
+        // 查找该用户的安全提醒
+        var userAlerts = allSecurityAlerts.filter(function(a) {
+            return a.user_name === userName || (a.related_users && a.related_users.indexOf(userName) >= 0);
+        }).slice(0, 5);
+
+        var sourceLabels = {
+            'login_success': '登录成功',
+            'page_visit': '页面访问',
+            'register_success': '注册成功',
+            'admin_login': '管理员登录'
+        };
+
         var html = '<div class="card">' +
-            '<h3 style="margin-top:0;">登录记录：共 ' + userEvents.length + ' 条</h3>' +
+            '<h3 style="margin-top:0;">用户详情：' + escapeHtml(userName) + '</h3>';
+
+        // 设备指纹信息
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px;padding:12px;background:rgba(255,255,255,0.05);border-radius:10px;">';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">浏览器指纹</span><br><span style="font-size:12px;font-family:monospace;">' + (bfHash ? escapeHtml(bfHash.slice(0, 16)) + '...' : '-') + '</span></div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">Canvas 指纹</span><br><span style="font-size:12px;font-family:monospace;">' + (cfHash ? escapeHtml(cfHash.slice(0, 16)) + '...' : '-') + '</span></div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">登录记录</span><br><span style="font-size:12px;font-weight:600;">' + userEvents.length + ' 条</span></div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">关联账号</span><br><span style="font-size:12px;font-weight:600;">' + relatedList.length + ' 个</span></div>';
+        html += '</div>';
+
+        // 关联账号
+        if (relatedList.length > 0) {
+            html += '<div style="margin-bottom:12px;"><span style="font-size:12px;font-weight:600;color:var(--text-muted);">关联账号：</span>';
+            relatedList.forEach(function(r) {
+                html += '<span style="display:inline-block;margin:2px 4px;padding:2px 8px;background:rgba(5,150,105,0.08);border-radius:99px;font-size:11px;">' + escapeHtml(r) + '</span>';
+            });
+            html += '</div>';
+        }
+
+        // 安全提醒
+        if (userAlerts.length > 0) {
+            html += '<div style="margin-bottom:14px;"><span style="font-size:12px;font-weight:600;color:var(--danger);">最近安全提醒：</span>';
+            html += '<div style="margin-top:4px;">';
+            userAlerts.forEach(function(a) {
+                var alertTypeLabels = { 'same_ip_multi_users': '同IP多账号', 'same_device_multi_users': '同设备多账号', 'multi_ip_same_user': '多IP同账号', 'geo_change': '地区变化', 'high_frequency_visit': '高频访问' };
+                html += '<div style="font-size:11px;padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.04);"><span style="color:var(--danger);">' + (alertTypeLabels[a.type] || a.type) + '</span> ' + escapeHtml(a.reason) + ' <span style="color:var(--text-muted);">' + escapeHtml(formatTime(a.created_at)) + '</span></div>';
+            });
+            html += '</div></div>';
+        }
+
+        // 登录记录表格（带指纹列）
+        html += '<h4 style="margin-bottom:8px;">登录记录（共 ' + userEvents.length + ' 条）</h4>' +
             '<div style="max-height:360px;overflow-y:auto;">' +
             '<table style="width:100%;font-size:13px;border-collapse:collapse;">' +
             '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);">' +
@@ -3272,20 +3434,17 @@
             '<th style="padding:6px 8px;text-align:left;">浏览器</th>' +
             '<th style="padding:6px 8px;text-align:left;">IP</th>' +
             '<th style="padding:6px 8px;text-align:left;">地区</th>' +
+            '<th style="padding:6px 8px;text-align:left;">指纹Hash</th>' +
             '</tr></thead><tbody>';
-
-        var sourceLabels = {
-            'login_success': '登录成功',
-            'page_visit': '页面访问',
-            'register_success': '注册成功',
-            'admin_login': '管理员登录'
-        };
 
         userEvents.forEach(function(ev) {
             var loginTime = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
             var srcLabel = sourceLabels[ev.info.source] || '登录记录';
             var locText = (ev.info.ip_location && ev.info.ip_location.text) ? escapeHtml(ev.info.ip_location.text) : '暂未解析';
             var fullIp = ev.info.ip || '-';
+            var fpShort = '-';
+            if (ev.info.browser_fingerprint_hash) fpShort = escapeHtml(ev.info.browser_fingerprint_hash.slice(0, 10)) + '...';
+            else if (ev.info.canvas_fingerprint_hash) fpShort = 'C:' + escapeHtml(ev.info.canvas_fingerprint_hash.slice(0, 10)) + '...';
             html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.05);">' +
                 '<td style="padding:6px 8px;">' + (loginTime ? escapeHtml(formatTime(loginTime)) : '-') + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(srcLabel) + '</td>' +
@@ -3294,6 +3453,7 @@
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.browser || '-') + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(fullIp) + '</td>' +
                 '<td style="padding:6px 8px;">' + locText + '</td>' +
+                '<td style="padding:6px 8px;font-size:11px;font-family:monospace;">' + fpShort + '</td>' +
                 '</tr>';
         });
 
