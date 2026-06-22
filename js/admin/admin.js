@@ -1015,13 +1015,13 @@
 
                 var lastLogin = latestLoginTimeV1 || (u.info && (u.info.last_login || u.info.last_visit)) ? formatTime(latestLoginTimeV1 || u.info.last_login || u.info.last_visit) : '-';
 
-                var statusBadge = isAdmin ? '<span class="badge" style="background:rgba(99,102,241,0.15);color:#818cf8">管理员</span>' :
-                                  isBanned ? '<span class="badge badge-red">拉黑封禁中</span>' :
-                                  isMuted ? '<span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24">禁言中</span>' :
-                                  '<span class="badge badge-green">正常</span>';
+                var statusText = isAdmin ? '管理员' :
+                                  isBanned ? '封禁中' :
+                                  isMuted ? '禁言中' :
+                                  '正常';
 
                 h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td>';
-                h += '<td>' + statusBadge + '</td>';
+                h += '<td>' + escapeHtml(statusText) + '</td>';
                 h += '<td>' + regTime + '</td>';
                 h += '<td>' + lastLogin + '</td>';
                 h += '<td>' + deviceCell + '</td>';
@@ -2620,13 +2620,13 @@
             filtered.forEach(function(u) {
                 var stats = getUserActivityStats(u.name);
                 var flags = getUserStateFlags(u.name);
-                var statusBadge = flags.isAdmin
-                    ? '<span class="badge badge-green">管理员</span>'
+                var statusText = flags.isAdmin
+                    ? '管理员'
                     : (flags.isBanned
-                        ? '<span class="badge badge-red">封禁中</span>'
+                        ? '封禁中'
                         : (flags.isMuted
-                            ? '<span class="badge" style="background:rgba(245,158,11,0.15);color:#f59e0b;">禁言中</span>'
-                            : '<span class="badge badge-green">正常</span>'));
+                            ? '禁言中'
+                            : '正常'));
                 var safeName = u.name.replace(/'/g, "\\'");
                 var actions = flags.isAdmin
                     ? '-'
@@ -2665,7 +2665,7 @@
                 var displayLastLogin = latestLoginTime || (u.info && (u.info.last_login || u.info.last_visit));
                 var lastLogin = displayLastLogin ? formatTime(displayLastLogin) : '-';
 
-                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + statusBadge + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + escapeHtml(lastLogin) + '</td><td>' + deviceCell + '</td><td>' + regionCell + '</td><td>' + ipCell + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + actions + '</td></tr>';
+                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + escapeHtml(statusText) + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + escapeHtml(lastLogin) + '</td><td>' + deviceCell + '</td><td>' + regionCell + '</td><td>' + ipCell + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + actions + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
