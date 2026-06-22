@@ -1116,22 +1116,21 @@
     };
 
     window.confirmDeleteUser = function(userName) {
-        showConfirm('删除账号', '确认删除用户 <strong>' + escapeHtml(userName) + '</strong>？<br><br>删除后不可恢复，会删除该用户的登录信息、帖子、照片、点赞、评论等所有数据。', '确认删除', function() {
-            deleteUserAccount(userName);
+        showConfirm('删除用户账号', '确认删除用户「' + userName + '」吗？此操作不可恢复，会删除账号登录信息、帖子、照片、点赞、评论等用户数据。', '确认删除', function() {
+            window.deleteUserAccount(userName);
         });
     };
 
-    async function deleteUserAccount(userName) {
+    window.deleteUserAccount = async function(userName) {
         try {
-            var res = await apiCall('DELETE', '/admin/user/' + encodeURIComponent(userName));
-            if (!res || !res.ok) throw new Error('删除失败');
+            await apiCall('DELETE', '/admin/user/' + encodeURIComponent(userName));
             showToast('用户账号已删除', 'success');
             await loadAllData(true);
             renderTab('users');
         } catch(e) {
-            showToast('删除失败: ' + (e.message || '未知错误'), 'error');
+            showToast('删除用户失败：' + e.message, 'error');
         }
-    }
+    };
 
     async function renderPostsTab(el) {
         // 每次切到帖子管理时自动刷新数据
