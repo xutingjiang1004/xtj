@@ -54,6 +54,99 @@
         return 'Unknown';
     }
 
+    // 设备元信息（仅基础信息，不做跨站追踪）
+    function getDeviceMeta() {
+        try {
+            return {
+                screen: (window.screen ? window.screen.width + 'x' + window.screen.height : 'unknown'),
+                dpr: window.devicePixelRatio || 1,
+                language: (navigator.language || navigator.userLanguage || 'unknown'),
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'unknown',
+                platform: (navigator.platform || 'unknown'),
+                touch: ('ontouchstart' in window || navigator.maxTouchPoints > 0)
+            };
+        } catch(e) {
+            return null;
+        }
+    }
+
+    // 温和浏览器指纹 hash（SHA-256，仅保存 hash）
+    function getBrowserFingerprint() {
+        try {
+            if (typeof crypto === 'undefined' || !crypto.subtle || !crypto.subtle.digest) {
+                return null;
+            }
+            var fp = [
+                window.screen ? window.screen.width + 'x' + window.screen.height + 'x' + (window.screen.colorDepth || '') : '',
+                window.devicePixelRatio || 1,
+                navigator.language || navigator.userLanguage || '',
+                Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+                navigator.platform || '',
+                navigator.hardwareConcurrency || 'unknown',
+                navigator.deviceMemory || 'unknown',
+                ('ontouchstart' in window || navigator.maxTouchPoints > 0) ? '1' : '0',
+                detectBrowser(navigator.userAgent || ''),
+                detectOS(navigator.userAgent || '')
+            ].join('|');
+
+            // 同步计算 hash（SHA-256，不阻塞主线程太久）
+            var encoder = new TextEncoder();
+            var data = encoder.encode(fp);
+            return crypto.subtle.digest('SHA-256', data).then(function(hashBuffer) {
+                var hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+            }).catch(function() {
+                return null;
+            });
+        } catch(e) {
+            return null;
+        }
+    }
+
+    // Canvas 指纹 hash（仅辅助判断，不保存图像）
+    function getCanvasFingerprint() {
+        try {
+            var canvas = document.createElement('canvas');
+            canvas.width = 200;
+            canvas.height = 40;
+            canvas.style.display = 'none';
+            var ctx = canvas.getContext('2d');
+            if (!ctx) return null;
+
+            // 绘制温和的识别文本
+            ctx.textBaseline = 'top';
+            ctx.font = '14px Arial';
+            ctx.fillStyle = '#059669';
+            ctx.fillText('XTJ ' + (new Date().getFullYear()), 4, 4);
+
+            ctx.font = '12px sans-serif';
+            ctx.fillStyle = '#333';
+            ctx.fillText('device check only', 4, 22);
+
+            // 尝试读取像素（浏览器可能阻止）
+            try {
+                var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                var pixels = imageData.data;
+
+                // 只计算 hash，不保存像素数据
+                if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+                    return crypto.subtle.digest('SHA-256', pixels.slice(0, 512)).then(function(hashBuffer) {
+                        var hashArray = Array.from(new Uint8Array(hashBuffer));
+                        return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                    }).catch(function() {
+                        return null;
+                    });
+                }
+                return null;
+            } catch(e) {
+                // Canvas 被浏览器限制（如隐私模式），记录 null
+                return null;
+            }
+        } catch(e) {
+            return null;
+        }
+    }
+
     // 检查冷却（10s 内存级别）
     function isInCooldown(sentKey) {
         var lastAt = lastSendAtByKey[sentKey] || 0;
@@ -66,7 +159,10 @@
             if (isInCooldown(sentKey)) return;
 
             var ua = navigator.userAgent || '';
-            var body = JSON.stringify({
+            var deviceMeta = getDeviceMeta();
+
+            // 构建基础 body
+            var bodyObj = {
                 user_name: userName,
                 password_hash: passwordHash,
                 device_id: deviceId,
@@ -74,23 +170,47 @@
                 os: detectOS(ua),
                 browser: detectBrowser(ua),
                 user_agent: ua,
-                source: source
-            });
+                source: source,
+                device_meta: deviceMeta
+            };
 
-            lastSendAtByKey[sentKey] = Date.now();
+            // 发送请求（指纹异步采集）
+            var sendReq = function() {
+                lastSendAtByKey[sentKey] = Date.now();
+                fetch(API_BASE + '/api/log-login-event', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(bodyObj)
+                }).then(function(res) {
+                    if (res.ok && source === 'login_success') {
+                        try { sessionStorage.setItem(sentKey, '1'); } catch(e) {}
+                    }
+                }).catch(function() {
+                    // 请求失败清除冷却，允许重试
+                    lastSendAtByKey[sentKey] = 0;
+                });
+            };
 
-            fetch(API_BASE + '/api/log-login-event', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: body
-            }).then(function(res) {
-                if (res.ok && source === 'login_success') {
-                    try { sessionStorage.setItem(sentKey, '1'); } catch(e) {}
-                }
-            }).catch(function() {
-                // 请求失败清除冷却，允许重试
-                lastSendAtByKey[sentKey] = 0;
-            });
+            // 异步采集指纹（不阻塞发送）
+            var browserFpPromise = getBrowserFingerprint();
+            var canvasFpPromise = getCanvasFingerprint();
+
+            if (browserFpPromise && browserFpPromise.then) {
+                browserFpPromise.then(function(hash) {
+                    if (hash) bodyObj.browser_fingerprint_hash = hash;
+                    // 继续采集 canvas
+                    if (canvasFpPromise && canvasFpPromise.then) {
+                        canvasFpPromise.then(function(cHash) {
+                            if (cHash) bodyObj.canvas_fingerprint_hash = cHash;
+                            sendReq();
+                        }).catch(function() { sendReq(); });
+                    } else {
+                        sendReq();
+                    }
+                }).catch(function() { sendReq(); });
+            } else {
+                sendReq();
+            }
         } catch(e) {}
     }
 
@@ -112,7 +232,7 @@
         doSend(userName, pwHash, deviceId, sentKey, src);
     };
 
-    // 页面访问记录（60s localStorage 冷却，页面刷新/打开时记录）
+    // 页面访问记录（15 秒冷却，页面刷新/打开时记录）
     function trySendPageVisit() {
         if (debounceTimer) clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function() {
