@@ -10,6 +10,32 @@
     return el && (el.classList.contains('dock-tab') || el.closest('.dock-tab'));
   };
 
+  var rippleButtonSelector = '.btn, .af-btn, .send-btn, .photo-wall-upload-btn, .publish-btn, .filter-btn, .view-all-btn, .load-more-btn, .report-submit-btn, .auth-btn, .profile-action-btn, .post-action-btn, .chat-action-btn, .close-modal-btn, .modal-close-btn';
+  var rippleSkipSelector = '.announcement-btn, .report-btn';
+
+  function ensureRippleLayer(btn) {
+    var cs = window.getComputedStyle(btn);
+    if (cs.position === 'static') btn.style.position = 'relative';
+
+    var layer = btn.__xtjRippleLayer;
+    if (layer && layer.parentNode === btn) return layer;
+
+    layer = document.createElement('span');
+    layer.className = 'xtj-ripple-layer';
+    layer.setAttribute('aria-hidden', 'true');
+    layer.style.position = 'absolute';
+    layer.style.left = '0';
+    layer.style.top = '0';
+    layer.style.right = '0';
+    layer.style.bottom = '0';
+    layer.style.overflow = 'hidden';
+    layer.style.pointerEvents = 'none';
+    layer.style.borderRadius = 'inherit';
+    btn.appendChild(layer);
+    btn.__xtjRippleLayer = layer;
+    return layer;
+  }
+
   /* ==========================================================
      1. Click Ripple Effect (excludes dock-tab buttons)
      ========================================================== */
@@ -17,30 +43,26 @@
     var target = e.target;
     if (isDockTab(target)) return;
     if (target.closest('#themeToggle, .theme-toggle-btn')) return;
+    if (target.closest(rippleSkipSelector)) return;
 
-    var btn = target.closest('.btn, .af-btn, .send-btn, .photo-wall-upload-btn, .publish-btn, .filter-btn, .view-all-btn, .load-more-btn, .report-submit-btn, .auth-btn, .profile-action-btn, .post-action-btn, .chat-action-btn, .announcement-btn, .close-modal-btn, .modal-close-btn');
+    var btn = target.closest(rippleButtonSelector);
     if (!btn) return;
 
     var rect = btn.getBoundingClientRect();
     var size = Math.max(rect.width, rect.height);
     var x = e.clientX - rect.left - size / 2;
     var y = e.clientY - rect.top - size / 2;
+    var layer = ensureRippleLayer(btn);
 
     var ripple = document.createElement('span');
     ripple.className = 'xtj-ripple';
+    ripple.style.position = 'absolute';
+    ripple.style.pointerEvents = 'none';
     ripple.style.width = size + 'px';
     ripple.style.height = size + 'px';
     ripple.style.left = x + 'px';
     ripple.style.top = y + 'px';
-
-    btn.style.position = btn.style.position || 'relative';
-    btn.style.overflow = btn.style.overflow || 'hidden';
-    btn.appendChild(ripple);
-
-    // If btn doesn't have relative, apply it
-    var cs = window.getComputedStyle(btn);
-    if (cs.position === 'static') btn.style.position = 'relative';
-    if (cs.overflow === 'visible') btn.style.overflow = 'hidden';
+    layer.appendChild(ripple);
 
     setTimeout(function () {
       if (ripple.parentNode) ripple.parentNode.removeChild(ripple);
