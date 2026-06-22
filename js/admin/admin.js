@@ -8,6 +8,8 @@
     var ANN_MARKER = "__ann__";
     var REPORT_MARKER = '__report__';
     var SECURITY_ALERT_MARKER = '__security_alert__';
+    var AUDIT_LOG_MARKER = '__admin_audit__';
+    var CLIENT_ERROR_MARKER = '__client_error__';
     var SESSION_KEY = "xtj_admin_session";
     var TOKEN_KEY = "xtj_admin_token";
     var TAB_KEY = "xtj_admin_tab";
@@ -98,7 +100,7 @@
         }, 30000); // 每30秒检查一次
     }
 
-    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allSecurityAlerts = [];
+    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [], riskScoreMap = {};
     var searchUser = '', searchPost = '';
     var userFilterStatus = 'all';
     var userSortBy = 'reg';
@@ -503,7 +505,7 @@
             // 通过 API 加载数据（安全：仅服务端密钥可访问敏感数据）
             var apiData = await apiCall('GET', '/admin/data');
             var postData = apiData.posts || [];
-            allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER && p.media_type !== AUDIT_LOG_MARKER && p.media_type !== CLIENT_ERROR_MARKER; });
             annList = apiData.announcements || [];
             allLikes = apiData.likes || [];
             allComments = apiData.comments || [];
@@ -1091,7 +1093,7 @@
             try {
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER; });
+                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER && p.media_type !== AUDIT_LOG_MARKER && p.media_type !== CLIENT_ERROR_MARKER; });
                 annList = apiData.announcements || [];
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
@@ -2360,6 +2362,8 @@
             case 'blacklist': renderBlacklistTab(el); break;
             case 'photos': renderPhotosTab(el); break;
             case 'stats': renderStatsTab(el); break;
+            case 'audit': renderAuditTab(el); break;
+            case 'errorlog': renderErrorLogTab(el); break;
         }
     };
 
@@ -2437,10 +2441,13 @@
                 var safeName = u.name.replace(/'/g, "\\'");
                 var regTime = getAdminUserEffectiveRegTime(u.info) ? formatTime(getAdminUserEffectiveRegTime(u.info)) : '-';
                 var lastLogin = u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-';
+                var risk = riskScoreMap[u.name];
+                var riskText = risk ? risk.risk_level : '正常';
+                var riskColor = riskText === '高风险' ? 'var(--danger)' : (riskText === '中风险' ? '#f59e0b' : (riskText === '低风险' ? '#3b82f6' : 'var(--text-muted)'));
                 h += '<div class="user-card' + (flags.isBanned ? ' is-banned' : '') + (flags.isMuted ? ' is-muted' : '') + (flags.isAdmin ? ' is-admin' : '') + '">';
-                h += '<div class="user-card-head"><div class="user-avatar' + (flags.isAdmin ? ' admin-avatar' : (flags.isBanned ? ' banned-avatar' : (flags.isMuted ? ' muted-avatar' : ''))) + '">' + escapeHtml((u.name || '?').slice(0, 1).toUpperCase()) + '</div><div class="user-card-name"><strong>' + escapeHtml(u.name) + '</strong><div class="user-tags">' + buildUserTagMarkup(flags) + '</div></div></div>';
+                h += '<div class="user-card-head"><div class="user-avatar' + (flags.isAdmin ? ' admin-avatar' : (flags.isBanned ? ' banned-avatar' : (flags.isMuted ? ' muted-avatar' : ''))) + '">' + escapeHtml((u.name || '?').slice(0, 1).toUpperCase()) + '</div><div class="user-card-name"><strong><a href="#" onclick="showUserDetailModal(\'' + safeName + '\');return false;" style="color:var(--text);text-decoration:none;" onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">' + escapeHtml(u.name) + '</a></strong><div class="user-tags">' + buildUserTagMarkup(flags) + '</div></div></div>';
                 h += '<div class="user-card-stats"><div class="user-stat-item"><div class="num">' + stats.posts + '</div><div class="lbl">帖子</div></div><div class="user-stat-item"><div class="num">' + stats.likes + '</div><div class="lbl">点赞</div></div><div class="user-stat-item"><div class="num">' + stats.comments + '</div><div class="lbl">评论</div></div></div>';
-                h += '<div class="user-card-meta"><div class="meta-row"><span class="label">注册时间</span><span class="value">' + regTime + '</span></div><div class="meta-row"><span class="label">最近登录</span><span class="value">' + lastLogin + '</span></div></div>';
+                h += '<div class="user-card-meta"><div class="meta-row"><span class="label">注册时间</span><span class="value">' + regTime + '</span></div><div class="meta-row"><span class="label">最近登录</span><span class="value">' + lastLogin + '</span></div><div class="meta-row"><span class="label">风险评分</span><span class="value" style="color:' + riskColor + ';font-weight:' + (riskText !== '正常' ? '600' : '400') + ';">' + riskText + '</span></div></div>';
                 h += '<div class="user-card-actions">';
                 if (!flags.isAdmin) {
                     h += '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button>';
@@ -2455,6 +2462,42 @@
         }
         h += '</div>';
         el.innerHTML = h;
+    };
+
+    // 安全设置
+    var securitySettings = { record_device: true, browser_fingerprint: true, canvas_fingerprint: true, security_alerts: true };
+
+    async function loadSecuritySettings() {
+        try {
+            var res = await apiCall('GET', '/admin/security-settings');
+            if (res && res.settings) securitySettings = res.settings;
+        } catch(e) {}
+    }
+
+    async function saveSecuritySetting(key, value) {
+        var body = {};
+        body[key] = value;
+        try {
+            await apiCall('POST', '/admin/security-settings', body);
+            securitySettings[key] = value;
+            showToast('设置已保存', 'success');
+        } catch(e) {
+            showToast('保存失败', 'error');
+        }
+    }
+
+    window.cleanupOldLogs = async function() {
+        if (!confirm('确定要清理过期日志吗？\n- 90天前的登录/安全日志\n- 30天前的错误日志\n此操作不会影响帖子、照片、评论、点赞。')) return;
+        var resultEl = document.getElementById('cleanupResult');
+        if (resultEl) resultEl.textContent = '清理中...';
+        try {
+            var res = await apiCall('POST', '/admin/cleanup-logs', { types: ['login','security','error'] });
+            if (resultEl) resultEl.textContent = '已清理 ' + (res.total_deleted || 0) + ' 条记录';
+            showToast('清理完成，共删除 ' + (res.total_deleted || 0) + ' 条', 'success');
+        } catch(e) {
+            if (resultEl) resultEl.textContent = '清理失败';
+            showToast('清理失败', 'error');
+        }
     };
 
     // 安全中心
@@ -2488,7 +2531,25 @@
             alerts = alerts.filter(function(a) { return a.type === securityTypeFilter; });
         }
 
-        var h = '<div class="stats-row">';
+        var h = '';
+        // 安全设置卡片
+        h += '<div class="card" style="margin-bottom:12px;"><h3>⚙️ 安全识别开关</h3>';
+        h += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;">';
+        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.record_device ? 'checked' : '') + ' onchange="saveSecuritySetting(\'record_device\',this.checked)" /> 基础设备记录</label></div>';
+        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.browser_fingerprint ? 'checked' : '') + ' onchange="saveSecuritySetting(\'browser_fingerprint\',this.checked)" /> 浏览器指纹 Hash</label></div>';
+        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.canvas_fingerprint ? 'checked' : '') + ' onchange="saveSecuritySetting(\'canvas_fingerprint\',this.checked)" /> Canvas 指纹 Hash</label></div>';
+        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.security_alerts ? 'checked' : '') + ' onchange="saveSecuritySetting(\'security_alerts\',this.checked)" /> 安全提醒生成</label></div>';
+        h += '</div></div>';
+
+        // 日志清理按钮
+        h += '<div class="card" style="margin-bottom:12px;">';
+        h += '<h3>🗑️ 日志清理</h3>';
+        h += '<p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">登录/安全日志保留90天，错误日志保留30天</p>';
+        h += '<button class="btn-sm del" onclick="cleanupOldLogs()">一键清理过期日志</button>';
+        h += '<span id="cleanupResult" style="margin-left:8px;font-size:12px;"></span>';
+        h += '</div>';
+
+        h += '<div class="stats-row">';
         h += '<div class="stat-box"><div class="val">' + todayAlerts.length + '</div><div class="lbl">今日异常数</div></div>';
         h += '<div class="stat-box danger"><div class="val">' + highRiskCount + '</div><div class="lbl">高风险</div></div>';
         h += '<div class="stat-box warn"><div class="val">' + unreadCount + '</div><div class="lbl">未读</div></div>';
@@ -2514,9 +2575,21 @@
                 var typeLabel = typeLabels[a.type] || a.type;
                 var relatedHtml = (a.related_users || []).slice(0, 3).map(function(u) { return escapeHtml(u); }).join(', ');
                 if ((a.related_users || []).length > 3) relatedHtml += ' ...';
-                var readBtn = a.is_read ? '<span style="font-size:11px;color:var(--text-muted);">已读</span>' : '<button class="btn-sm" onclick="markSecurityAlertRead(\'' + a.id + '\')">标记已读</button>';
+                var actionsHtml = '';
+                if (!a.is_read) {
+                    actionsHtml += '<button class="btn-sm" onclick="markSecurityAlertRead(\'' + a.id + '\')">已读</button>';
+                }
+                var ignored = a.ignored || false;
+                var fpVal = a.false_positive || false;
+                if (!fpVal) {
+                    actionsHtml += '<button class="btn-sm" onclick="setSecurityAlertStatus(\'' + a.id + '\',\'ignored\')">忽略</button>';
+                    actionsHtml += '<button class="btn-sm del" onclick="setSecurityAlertStatus(\'' + a.id + '\',\'false_positive\')">误报</button>';
+                }
+                if (ignored || fpVal) {
+                    actionsHtml += '<span style="font-size:10px;color:var(--text-muted);">' + (fpVal ? '已标记误报' : '已忽略') + '</span>';
+                }
                 var rowClass = !a.is_read ? ' style="background:rgba(255,59,96,0.03);"' : '';
-                h += '<tr' + rowClass + '><td>' + escapeHtml(formatTime(a.created_at)) + '</td><td>' + escapeHtml(typeLabel) + '</td><td>' + levelBadge + '</td><td><strong>' + escapeHtml(a.user_name) + '</strong></td><td style="max-width:240px;white-space:normal;word-break:break-word;">' + escapeHtml(a.reason || '-') + '</td><td style="font-size:11px;max-width:160px;white-space:normal;word-break:break-word;">' + relatedHtml + '</td><td>' + readBtn + '</td></tr>';
+                h += '<tr' + rowClass + '><td>' + escapeHtml(formatTime(a.created_at)) + '</td><td>' + escapeHtml(typeLabel) + '</td><td>' + levelBadge + '</td><td><strong>' + escapeHtml(a.user_name) + '</strong></td><td style="max-width:240px;white-space:normal;word-break:break-word;">' + escapeHtml(a.reason || '-') + '</td><td style="font-size:11px;max-width:160px;white-space:normal;word-break:break-word;">' + relatedHtml + '</td><td>' + actionsHtml + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
@@ -2528,10 +2601,24 @@
     window.markSecurityAlertRead = async function(alertId) {
         if (!alertId) return;
         try {
-            await apiCall('POST', '/admin/security-alerts/read', { id: alertId });
+            await apiCall('POST', '/admin/security-alerts/status', { id: alertId, status: 'read' });
             var alert = allSecurityAlerts.find(function(a) { return a.id === alertId; });
             if (alert) alert.is_read = true;
             renderTab('security');
+        } catch(e) {
+            showToast('操作失败', 'error');
+        }
+    };
+
+    window.setSecurityAlertStatus = async function(alertId, status) {
+        if (!alertId) return;
+        try {
+            await apiCall('POST', '/admin/security-alerts/status', { id: alertId, status: status });
+            // Reload alerts
+            var secRes = await apiCall('GET', '/admin/security-alerts');
+            allSecurityAlerts = secRes.data || [];
+            renderTab('security');
+            showToast(status === 'ignored' ? '已忽略' : '已标记误报', 'success');
         } catch(e) {
             showToast('操作失败', 'error');
         }
@@ -2802,7 +2889,7 @@
     var _origSwitchTabV2 = window.switchTab;
     window.switchTab = async function(tab) {
         var normalized = tab === 'blacklist' ? 'bans' : tab;
-        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos'];
+        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','audit','errorlog'];
         currentTab = normalized;
         localStorage.setItem('admin_tab', normalized);
         if (normalized === 'users') {
@@ -2842,6 +2929,8 @@
             case 'mutes': renderMutesTab(el); break;
             case 'photos': renderPhotosTab(el); break;
             case 'stats': renderStatsTab(el); break;
+            case 'audit': renderAuditTab(el); break;
+            case 'errorlog': renderErrorLogTab(el); break;
         }
     };
 
@@ -2863,7 +2952,7 @@
             if (API_BASE && getToken()) {
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__'; });
+                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER && p.media_type !== AUDIT_LOG_MARKER && p.media_type !== CLIENT_ERROR_MARKER; });
                 annList = apiData.announcements || [];
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
@@ -2911,6 +3000,36 @@
             } catch(e) {
                 allSecurityAlerts = [];
             }
+
+            // 加载审计日志
+            try {
+                var auditRes = await apiCall('GET', '/admin/audit-logs');
+                allAuditLogs = auditRes.data || [];
+            } catch(e) {
+                allAuditLogs = [];
+            }
+
+            // 加载错误日志
+            try {
+                var errLogRes = await apiCall('GET', '/admin/error-logs');
+                allErrorLogs = errLogRes.data || [];
+            } catch(e) {
+                allErrorLogs = [];
+            }
+
+            // 加载风险评分
+            try {
+                var riskRes = await apiCall('GET', '/admin/user-risk-scores');
+                riskScoreMap = {};
+                (riskRes.data || []).forEach(function(r) {
+                    riskScoreMap[r.user_name] = r;
+                });
+            } catch(e) {
+                riskScoreMap = {};
+            }
+
+            // 加载安全设置
+            await loadSecuritySettings();
 
             // 数据已在 API 路径中统一加载
             await loadPhotosAdminData();
@@ -3460,5 +3579,222 @@
         html += '</tbody></table></div></div>';
         box.innerHTML = html;
         box.style.display = 'block';
+    };
+
+    var auditTypeFilter = 'all';
+    renderAuditTab = function(el) {
+        var h = '<div class="card"><h3>📋 操作审计日志</h3>';
+        if (!allAuditLogs.length) {
+            h += '<div class="empty">暂无审计记录</div>';
+        } else {
+            h += '<div class="table-wrap"><table><thead><tr><th>时间</th><th>操作</th><th>操作人</th><th>详情</th></tr></thead><tbody>';
+            var actionLabels = {
+                'delete_post': '删除帖子',
+                'delete_photo': '删除照片',
+                'ban_user': '封禁用户',
+                'unban_user': '解除封禁',
+                'mute_user': '禁言用户',
+                'unmute_user': '解除禁言',
+                'cleanup_logs': '清理日志',
+                'update_security_settings': '修改安全设置',
+                'review_security_alert': '审查安全提醒'
+            };
+            allAuditLogs.forEach(function(log) {
+                h += '<tr><td>' + escapeHtml(formatTime(log.created_at)) + '</td><td>' + escapeHtml(actionLabels[log.action] || log.action) + '</td><td>' + escapeHtml(log.operator) + '</td><td style="max-width:300px;white-space:normal;word-break:break-word;">' + escapeHtml(log.detail || '-') + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    };
+
+    var errorLogTypeFilter = 'all';
+    renderErrorLogTab = function(el) {
+        var errors = allErrorLogs.slice();
+        if (errorLogTypeFilter !== 'all') {
+            errors = errors.filter(function(e) { return e.type === errorLogTypeFilter; });
+        }
+
+        var typeCounts = {};
+        allErrorLogs.forEach(function(e) { typeCounts[e.type] = (typeCounts[e.type] || 0) + 1; });
+        var types = Object.keys(typeCounts).sort(function(a, b) { return typeCounts[b] - typeCounts[a]; });
+
+        var h = '<div class="stats-row">';
+        h += '<div class="stat-box"><div class="val">' + allErrorLogs.length + '</div><div class="lbl">总错误数</div></div>';
+        h += '<div class="stat-box"><div class="val">' + types.length + '</div><div class="lbl">错误类型</div></div>';
+        h += '</div>';
+
+        h += '<div class="card"><h3>🐛 前端错误日志（保留30天）</h3>';
+        h += '<div class="filter-chips" style="margin-bottom:10px;">';
+        h += '<span class="filter-chip' + (errorLogTypeFilter === 'all' ? ' active' : '') + '" onclick="errorLogTypeFilter=\'all\';renderTab(\'errorlog\')">全部</span>';
+        types.slice(0, 8).forEach(function(t) {
+            var label = t === 'js_error' ? 'JS错误' : (t === 'unhandled_rejection' ? 'Promise异常' : (t === 'fetch_error' ? '请求失败' : (t === 'img_error' ? '图片失败' : (t === 'blank_page' ? '白屏' : t))));
+            h += '<span class="filter-chip' + (errorLogTypeFilter === t ? ' active' : '') + '" onclick="errorLogTypeFilter=\'' + t + '\';renderTab(\'errorlog\')">' + label + ' (' + typeCounts[t] + ')</span>';
+        });
+        h += '</div>';
+
+        if (!errors.length) {
+            h += '<div class="empty">暂无错误记录</div>';
+        } else {
+            h += '<div class="table-wrap"><table><thead><tr><th>时间</th><th>类型</th><th>消息</th><th>页面</th></tr></thead><tbody>';
+            errors.forEach(function(e) {
+                var typeLabel = e.type === 'js_error' ? 'JS错误' : (e.type === 'unhandled_rejection' ? 'Promise异常' : (e.type === 'fetch_error' ? '请求失败' : (e.type === 'img_error' ? '图片失败' : (e.type === 'blank_page' ? '白屏' : e.type))));
+                h += '<tr><td>' + escapeHtml(formatTime(e.created_at || e.timestamp)) + '</td><td><span class="badge badge-red">' + escapeHtml(typeLabel) + '</span></td><td style="max-width:300px;white-space:normal;word-break:break-word;">' + escapeHtml(e.message || '-') + '</td><td style="max-width:200px;white-space:normal;word-break:break-word;font-size:10px;">' + escapeHtml(e.url || '-') + '</td></tr>';
+            });
+            h += '</tbody></table></div>';
+        }
+        h += '</div>';
+        el.innerHTML = h;
+    };
+
+    function showModal(title, contentHtml) {
+        var overlay = document.getElementById('detailModal');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'detailModal';
+            overlay.className = 'modal-overlay';
+            document.body.appendChild(overlay);
+        }
+        overlay.innerHTML = '<div class="modal-dialog" style="max-width:600px;max-height:80vh;overflow-y:auto;">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
+            '<h3 style="margin:0;">' + title + '</h3>' +
+            '<button onclick="document.getElementById(\'detailModal\').classList.remove(\'active\')" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text);">&times;</button>' +
+            '</div>' + contentHtml + '</div>';
+        overlay.classList.add('active');
+    }
+
+    window.showUserDetailModal = function(userName) {
+        // Find user info
+        var userObj = null;
+        for (var i = 0; i < allUsers.length; i++) {
+            if (allUsers[i].name === userName) { userObj = allUsers[i]; break; }
+        }
+        var userInfo = (userObj && userObj.info) || {};
+        var riskInfo = riskScoreMap[userName] || { risk_score: 0, risk_level: '正常', reasons: [] };
+        var stats = getUserActivityStats(userName);
+        var flags = getUserStateFlags(userName);
+
+        // Get login events for this user
+        var userEvents = allLoginEvents.filter(function(ev) { return ev.user_name === userName; })
+            .map(function(ev) {
+                var info = {};
+                try { info = JSON.parse(ev.content || '{}'); } catch(e) {}
+                return { raw: ev, info: info };
+            }).sort(function(a, b) {
+                return toAdminTimeMs((b.info && b.info.login_at) || (b.raw && b.raw.created_at))
+                     - toAdminTimeMs((a.info && a.info.login_at) || (a.raw && a.raw.created_at));
+            });
+
+        // Get fingerprint from latest event
+        var latestFp = {};
+        for (var j = 0; j < userEvents.length; j++) {
+            if (userEvents[j].info.browser_fingerprint_hash || userEvents[j].info.canvas_fingerprint_hash) {
+                latestFp = userEvents[j].info;
+                break;
+            }
+        }
+
+        // Get security alerts
+        var userAlerts = allSecurityAlerts.filter(function(a) {
+            return a.user_name === userName || (a.related_users && a.related_users.indexOf(userName) >= 0);
+        }).slice(0, 10);
+
+        // Get bans/mutes
+        var userBans = bansData.filter(function(b) { return b.user_name === userName; });
+        var userMutes = mutesData.filter(function(m) { return m.user_name === userName; });
+
+        // Build modal HTML
+        var html = '<div style="padding:20px;max-height:70vh;overflow-y:auto;">';
+        html += '<h2 style="margin-top:0;">' + escapeHtml(userName) + '</h2>';
+        html += buildUserTagMarkup(flags) + '<br><br>';
+
+        // Basic info grid
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-bottom:16px;">';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">注册时间</span><br>' + escapeHtml(getAdminUserEffectiveRegTime(userInfo) ? formatTime(getAdminUserEffectiveRegTime(userInfo)) : '-') + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近登录</span><br>' + escapeHtml(userInfo.last_login ? formatTime(userInfo.last_login) : '-') + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近访问</span><br>' + escapeHtml(userInfo.last_visit ? formatTime(userInfo.last_visit) : '-') + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近IP</span><br>' + escapeHtml(userInfo.last_ip || '-') + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">地区</span><br>' + escapeHtml((userInfo.last_ip_location && userInfo.last_ip_location.text) || '-') + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近设备</span><br>' + escapeHtml((userInfo.last_device || '-').slice(0, 40)) + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">设备ID</span><br><span style="font-size:11px;font-family:monospace;">' + escapeHtml((userInfo.last_device_id || (userEvents[0] && userEvents[0].info.device_id) || '-').slice(0, 16)) + '...</span></div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">浏览器指纹</span><br><span style="font-size:11px;font-family:monospace;">' + (latestFp.browser_fingerprint_hash ? escapeHtml(latestFp.browser_fingerprint_hash.slice(0, 16)) + '...' : '-') + '</span></div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">Canvas指纹</span><br><span style="font-size:11px;font-family:monospace;">' + (latestFp.canvas_fingerprint_hash ? escapeHtml(latestFp.canvas_fingerprint_hash.slice(0, 16)) + '...' : '-') + '</span></div>';
+        html += '</div>';
+
+        // Activity stats
+        html += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;padding:10px;background:rgba(255,255,255,0.05);border-radius:10px;">';
+        html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:700;">' + stats.posts + '</div><div style="font-size:10px;color:var(--text-muted);">帖子</div></div>';
+        html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:700;">' + stats.likes + '</div><div style="font-size:10px;color:var(--text-muted);">点赞</div></div>';
+        html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:700;">' + stats.comments + '</div><div style="font-size:10px;color:var(--text-muted);">评论</div></div>';
+        html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:700;">' + (stats.photos || '0') + '</div><div style="font-size:10px;color:var(--text-muted);">照片</div></div>';
+        html += '</div>';
+
+        // Risk score
+        var riskColor = riskInfo.risk_level === '高风险' ? 'var(--danger)' : (riskInfo.risk_level === '中风险' ? '#f59e0b' : (riskInfo.risk_level === '低风险' ? '#3b82f6' : 'var(--text-muted)'));
+        html += '<div style="margin-bottom:12px;padding:8px 12px;background:rgba(255,255,255,0.05);border-radius:8px;">';
+        html += '<span style="font-size:12px;font-weight:600;">风险评分：</span>';
+        html += '<span style="font-weight:700;color:' + riskColor + ';">' + escapeHtml(riskInfo.risk_level) + '（' + riskInfo.risk_score + '分）</span>';
+        if (riskInfo.reasons && riskInfo.reasons.length > 0) {
+            html += '<span style="font-size:11px;color:var(--text-muted);margin-left:8px;">' + riskInfo.reasons.join(' / ') + '</span>';
+        }
+        html += '</div>';
+
+        // Login records (recent 10)
+        html += '<h4 style="margin-bottom:8px;">最近登录记录</h4>';
+        if (userEvents.length === 0) {
+            html += '<div class="empty">暂无登录记录</div>';
+        } else {
+            html += '<div style="max-height:200px;overflow-y:auto;margin-bottom:12px;"><table style="width:100%;font-size:11px;border-collapse:collapse;">';
+            html += '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);"><th style="padding:4px 6px;text-align:left;">时间</th><th style="padding:4px 6px;text-align:left;">来源</th><th style="padding:4px 6px;text-align:left;">设备</th><th style="padding:4px 6px;text-align:left;">IP</th><th style="padding:4px 6px;text-align:left;">地区</th></tr></thead><tbody>';
+            var sourceLabelsV2 = { 'login_success': '登录', 'page_visit': '访问', 'register_success': '注册', 'admin_login': '管理' };
+            userEvents.slice(0, 10).forEach(function(ev) {
+                var lt = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
+                html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.03);">';
+                html += '<td style="padding:4px 6px;">' + (lt ? escapeHtml(formatTime(lt)) : '-') + '</td>';
+                html += '<td style="padding:4px 6px;">' + escapeHtml(sourceLabelsV2[ev.info.source] || ev.info.source || '-') + '</td>';
+                html += '<td style="padding:4px 6px;">' + escapeHtml(((ev.info.device_type || '') + ' ' + (ev.info.os || '')).slice(0, 20)) + '</td>';
+                html += '<td style="padding:4px 6px;">' + escapeHtml(ev.info.ip || '-') + '</td>';
+                html += '<td style="padding:4px 6px;">' + escapeHtml((ev.info.ip_location && ev.info.ip_location.text) || '-') + '</td>';
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Security alerts
+        html += '<h4 style="margin-bottom:8px;">最近安全提醒</h4>';
+        if (userAlerts.length === 0) {
+            html += '<div class="empty">暂无安全提醒</div>';
+        } else {
+            var alertTypeLabels = { 'same_ip_multi_users': '同IP多账号', 'same_device_multi_users': '同设备多账号', 'multi_ip_same_user': '多IP同账号', 'geo_change': '地区变化', 'high_frequency_visit': '高频访问' };
+            html += '<div style="margin-bottom:12px;">';
+            userAlerts.forEach(function(a) {
+                html += '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid rgba(0,0,0,0.03);">';
+                html += '<span style="color:var(--danger);">[' + (alertTypeLabels[a.type] || a.type) + ']</span> ';
+                html += escapeHtml(a.reason) + ' ';
+                html += '<span style="color:var(--text-muted);">' + escapeHtml(formatTime(a.created_at)) + '</span>';
+                if (a.false_positive) html += '<span class="badge badge-green" style="font-size:9px;">误报</span>';
+                else if (a.ignored) html += '<span class="badge" style="font-size:9px;background:rgba(100,100,100,0.15);">已忽略</span>';
+                html += '</div>';
+            });
+            html += '</div>';
+        }
+
+        // Ban/Mute history
+        if (userBans.length > 0 || userMutes.length > 0) {
+            html += '<h4 style="margin-bottom:8px;">处罚历史</h4>';
+            html += '<div style="font-size:11px;">';
+            userBans.forEach(function(b) {
+                html += '<div style="padding:2px 0;">🔒 封禁: ' + (b.reason || '无原因') + ' | ' + escapeHtml(formatTime(b.banned_at || b.created_at)) + ' | ' + (b.is_active ? '<span style="color:var(--danger);">生效中</span>' : '已解除') + '</div>';
+            });
+            userMutes.forEach(function(m) {
+                html += '<div style="padding:2px 0;">🤐 禁言: ' + (m.reason || '无原因') + ' | ' + escapeHtml(formatTime(m.created_at)) + ' | ' + (m.is_active ? '<span style="color:#f59e0b;">生效中</span>' : '已解除') + '</div>';
+            });
+            html += '</div>';
+        }
+
+        html += '</div>';
+
+        // Show in modal
+        showModal('用户详情', html);
     };
 })();
