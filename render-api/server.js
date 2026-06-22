@@ -579,7 +579,9 @@ async function logAdminLoginEvent(req) {
 // IP 地区解析（免费接口，静默失败）
 async function resolveIpLocation(ip) {
   if (!ip || ip === 'unknown') return null;
-  if (ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('172.') || ip === '::1' || ip === '::ffff:127.0.0.1') return null;
+  if (ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.')) return null;
+  if (ip.match(/^172\.(1[6-9]|2\d|3[01])\./)) return null;
+  if (ip === '::1' || ip === '::ffff:127.0.0.1') return null;
   try {
     var controller = new AbortController();
     var timeout = setTimeout(function() { controller.abort(); }, 2000);
