@@ -392,12 +392,12 @@
         ensureRegisterAlertBadge();
         startSessionTimeoutMonitor(); // 启动30分钟无操作自动登出
         
+        var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos'];
         var savedTab = localStorage.getItem(TAB_KEY);
-        if (savedTab === 'blacklist') savedTab = 'bans';
-        if (savedTab && ['ann','users','posts','likes','comments','reports','bans','mutes','photos','stats'].indexOf(savedTab) !== -1) {
+        if (savedTab && allowedTabs.indexOf(savedTab) !== -1) {
             currentTab = savedTab;
             await loadAllData(true);
-            ['ann','users','posts','likes','comments','reports','bans','mutes','photos','stats'].forEach(function(t) {
+            allowedTabs.forEach(function(t) {
                 var panel = document.getElementById('tab' + getTabDomName(t));
                 var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
                 if (panel) panel.classList.remove('active');
@@ -900,10 +900,19 @@
         if (!el) return;
         switch(tab) {
             case 'ann': renderAnnTab(el); break;
+            case 'stats': renderStatsTab(el); break;
             case 'users': renderUsersTab(el); break;
+            case 'security': renderSecurityTab(el); break;
+            case 'audit': renderAuditTab(el); break;
+            case 'errorlog': renderErrorLogTab(el); break;
             case 'posts': renderPostsTab(el); break;
             case 'likes': renderLikesTab(el); break;
             case 'comments': renderCommentsTab(el); break;
+            case 'reports': renderReportsTab(el); break;
+            case 'bans': renderBansTab(el); break;
+            case 'mutes': renderMutesTab(el); break;
+            case 'blacklist': renderBlacklistTab(el); break;
+            case 'photos': renderPhotosTab(el); break;
         }
     }
 
@@ -2901,7 +2910,7 @@
     var _origSwitchTabV2 = window.switchTab;
     window.switchTab = async function(tab) {
         var normalized = tab === 'blacklist' ? 'bans' : tab;
-        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','audit','errorlog'];
+        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','audit','errorlog','blacklist'];
         currentTab = normalized;
         localStorage.setItem('admin_tab', normalized);
         if (normalized === 'users') {
