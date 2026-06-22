@@ -600,22 +600,6 @@
         }
     }
 
-    window.switchTab = async function(tab) {
-        currentTab = tab;
-        saveCurrentTab();
-        if (tab === 'reports') {
-            var badge = document.getElementById('reportBadge');
-            if (badge) badge.style.display = 'none';
-        }
-        ['ann','users','posts','likes','comments'].forEach(function(t) {
-            document.getElementById('tab' + getTabDomName(t)).classList.remove('active');
-            document.getElementById('tab' + getTabDomName(t) + 'Btn').classList.remove('active');
-        });
-        document.getElementById('tab' + getTabDomName(tab)).classList.add('active');
-        document.getElementById('tab' + getTabDomName(tab) + 'Btn').classList.add('active');
-        window.renderTab(tab);
-    };
-
     function escapeHtml(s) {
         var d = document.createElement('div');
         d.textContent = s || '';
@@ -1129,6 +1113,23 @@
                 showToast('已拉黑封禁 ' + userName, 'success');
             } catch(e) { showToast('拉黑封禁失败: ' + e.message, 'error'); }
         });
+    };
+
+    window.confirmDeleteUser = function(userName) {
+        showConfirm('删除用户账号', '确认删除用户「' + userName + '」吗？此操作不可恢复，会删除账号登录信息、帖子、照片、点赞、评论等用户数据。', '确认删除', function() {
+            window.deleteUserAccount(userName);
+        });
+    };
+
+    window.deleteUserAccount = async function(userName) {
+        try {
+            await apiCall('DELETE', '/admin/user/' + encodeURIComponent(userName));
+            showToast('用户账号已删除', 'success');
+            await loadAllData(true);
+            renderTab('users');
+        } catch(e) {
+            showToast('删除用户失败：' + e.message, 'error');
+        }
     };
 
     async function renderPostsTab(el) {
@@ -2369,49 +2370,6 @@
         }
     }
 
-    var _origSwitchTab = window.switchTab;
-    window.switchTab = function(tab) {
-        currentTab = tab;
-        saveCurrentTab();
-        if (tab === 'reports') {
-            var badge = document.getElementById('reportBadge');
-            if (badge) badge.style.display = 'none';
-        }
-        ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos','stats','security','audit','errorlog'].forEach(function(t) {
-            var panel = document.getElementById('tab' + getTabDomName(t));
-            var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
-            if (panel) panel.classList.remove('active');
-            if (btn) btn.classList.remove('active');
-        });
-        var panel = document.getElementById('tab' + getTabDomName(tab));
-        var btn = document.getElementById('tab' + getTabDomName(tab) + 'Btn');
-        if (panel) panel.classList.add('active');
-        if (btn) btn.classList.add('active');
-        window.renderTab(tab);
-    };
-
-    var _origRenderTab = window.renderTab;
-    window.renderTab = function(tab) {
-        var el = document.getElementById('tab' + getTabDomName(tab));
-        if (!el) return;
-        switch(tab) {
-            case 'ann': renderAnnTab(el); break;
-            case 'users': renderUsersTab(el); break;
-            case 'posts': renderPostsTab(el); break;
-            case 'likes': renderLikesTab(el); break;
-            case 'comments': renderCommentsTab(el); break;
-            case 'reports': renderReportsTab(el); break;
-            case 'bans': renderBansTab(el); break;
-            case 'mutes': renderMutesTab(el); break;
-            case 'blacklist': renderBlacklistTab(el); break;
-            case 'photos': renderPhotosTab(el); break;
-            case 'stats': renderStatsTab(el); break;
-            case 'security': renderSecurityTab(el); break;
-            case 'audit': renderAuditTab(el); break;
-            case 'errorlog': renderErrorLogTab(el); break;
-        }
-    };
-
     window.quickBlacklistUser = function(userName) {
         var hours = prompt('请输入拉黑时长（小时），0=永久拉黑：', '24');
         if (hours === null) return;
@@ -2431,79 +2389,6 @@
                 showToast('拉黑失败: ' + e.message, 'error');
             }
         });
-    };
-
-    renderUsersTab = function(el) {
-        var h = '<div class="stats-row">';
-        h += '<div class="stat-box"><div class="val">' + allUsers.length + '</div><div class="lbl">注册用户总数</div></div>';
-        h += '<div class="stat-box"><div class="val">' + allPosts.length + '</div><div class="lbl">帖子总数</div></div>';
-        h += '<div class="stat-box"><div class="val">' + allLikes.length + '</div><div class="lbl">点赞总数</div></div>';
-        h += '<div class="stat-box"><div class="val">' + allComments.length + '</div><div class="lbl">评论总数</div></div>';
-        h += '</div>';
-        h += '<div class="filter-bar">';
-        h += '<div class="search-wrap"><span class="search-icon">搜</span><input id="userSearchInp" placeholder="搜索用户名..." oninput="searchUserInp()" value="' + escapeHtml(searchUser) + '"></div>';
-        h += '<div class="filter-chips">';
-        h += '<span class="filter-chip' + (userFilterStatus === 'all' ? ' active' : '') + '" onclick="userFilterStatus=\'all\';renderTab(\'users\')">全部</span>';
-        h += '<span class="filter-chip' + (userFilterStatus === 'admin' ? ' active' : '') + '" onclick="userFilterStatus=\'admin\';renderTab(\'users\')">管理员</span>';
-        h += '<span class="filter-chip' + (userFilterStatus === 'banned' ? ' active active-del' : '') + '" onclick="userFilterStatus=\'banned\';renderTab(\'users\')">封禁中</span>';
-        h += '<span class="filter-chip' + (userFilterStatus === 'muted' ? ' active active-warn' : '') + '" onclick="userFilterStatus=\'muted\';renderTab(\'users\')">禁言中</span>';
-        h += '</div>';
-        h += '<select onchange="userSortBy=this.value;renderTab(\'users\')">';
-        h += '<option value="reg"' + (userSortBy === 'reg' ? ' selected' : '') + '>按注册时间</option>';
-        h += '<option value="login"' + (userSortBy === 'login' ? ' selected' : '') + '>按最近登录</option>';
-        h += '<option value="posts"' + (userSortBy === 'posts' ? ' selected' : '') + '>按帖子数</option>';
-        h += '</select>';
-        h += '</div>';
-
-        var filtered = allUsers.slice();
-        if (searchUser) {
-            var sq = searchUser.toLowerCase();
-            filtered = filtered.filter(function(u) { return u.name.toLowerCase().includes(sq); });
-        }
-        if (userFilterStatus === 'admin') {
-            filtered = filtered.filter(function(u) { return u.name === ADMIN; });
-        } else if (userFilterStatus === 'banned') {
-            filtered = filtered.filter(function(u) { return bansData.some(function(b) { return b.user_name === u.name && b.is_active; }); });
-        } else if (userFilterStatus === 'muted') {
-            filtered = filtered.filter(function(u) { return mutesData.some(function(m) { return m.user_name === u.name && m.is_active; }); });
-        }
-        filtered.sort(function(a, b) {
-            if (userSortBy === 'posts') return getUserActivityStats(b.name).posts - getUserActivityStats(a.name).posts;
-            if (userSortBy === 'login') {
-                return toAdminTimeMs(b.info && (b.info.last_login || b.info.last_visit)) - toAdminTimeMs(a.info && (a.info.last_login || a.info.last_visit));
-            }
-            return toAdminTimeMs(getAdminUserEffectiveRegTime(b.info)) - toAdminTimeMs(getAdminUserEffectiveRegTime(a.info));
-        });
-
-        h += '<div class="card"><h3>用户列表 <span style="font-weight:400;font-size:12px;color:var(--text-muted);">共 ' + filtered.length + ' 位用户</span></h3>';
-        if (!filtered.length) {
-            h += '<div class="empty">没有匹配用户</div>';
-        } else {
-            h += '<div class="user-grid">';
-            filtered.forEach(function(u) {
-                var stats = getUserActivityStats(u.name);
-                var flags = getUserStateFlags(u.name);
-                var safeName = u.name.replace(/'/g, "\\'");
-                var regTime = getAdminUserEffectiveRegTime(u.info) ? formatTime(getAdminUserEffectiveRegTime(u.info)) : '-';
-                var lastLogin = u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-';
-                h += '<div class="user-card' + (flags.isBanned ? ' is-banned' : '') + (flags.isMuted ? ' is-muted' : '') + (flags.isAdmin ? ' is-admin' : '') + '">';
-                h += '<div class="user-card-head"><div class="user-avatar' + (flags.isAdmin ? ' admin-avatar' : (flags.isBanned ? ' banned-avatar' : (flags.isMuted ? ' muted-avatar' : ''))) + '">' + escapeHtml((u.name || '?').slice(0, 1).toUpperCase()) + '</div><div class="user-card-name"><strong><a href="#" onclick="showUserDetailModal(\'' + safeName + '\');return false;" style="color:var(--text);text-decoration:none;" onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">' + escapeHtml(u.name) + '</a></strong><div class="user-tags">' + buildUserTagMarkup(flags) + '</div></div></div>';
-                h += '<div class="user-card-stats"><div class="user-stat-item"><div class="num">' + stats.posts + '</div><div class="lbl">帖子</div></div><div class="user-stat-item"><div class="num">' + stats.likes + '</div><div class="lbl">点赞</div></div><div class="user-stat-item"><div class="num">' + stats.comments + '</div><div class="lbl">评论</div></div></div>';
-                h += '<div class="user-card-meta"><div class="meta-row"><span class="label">注册时间</span><span class="value">' + regTime + '</span></div><div class="meta-row"><span class="label">最近登录</span><span class="value">' + lastLogin + '</span></div></div>';
-                h += '<div class="user-card-actions">';
-                if (!flags.isAdmin) {
-                    h += '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button>';
-                    h += '<button class="btn-sm" onclick="quickBanUser(\'' + safeName + '\')">封禁</button>';
-                    h += '<button class="btn-sm" onclick="quickBlacklistUser(\'' + safeName + '\')">拉黑</button>';
-                } else {
-                    h += '<span style="color:var(--text-muted);font-size:12px;">管理员不可操作</span>';
-                }
-                h += '</div></div>';
-            });
-            h += '</div>';
-        }
-        h += '</div>';
-        el.innerHTML = h;
     };
 
     // 安全设置
@@ -2849,7 +2734,7 @@
                 var safeName = u.name.replace(/'/g, "\\'");
                 var actions = flags.isAdmin
                     ? '-'
-                    : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button>';
+                    : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button><button class="btn-sm del" onclick="confirmDeleteUser(\'' + safeName + '\')">删除账号</button>';
                 var regTime = getAdminUserEffectiveRegTime(u.info);
 
                 // 最近登录设备 & IP（从 allLoginEvents 筛选并排序）
@@ -2937,12 +2822,11 @@
         el.innerHTML = h;
     };
 
-    var _origSwitchTabV2 = window.switchTab;
     window.switchTab = async function(tab) {
         var normalized = tab === 'blacklist' ? 'bans' : tab;
         var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','audit','errorlog','blacklist'];
         currentTab = normalized;
-        localStorage.setItem('admin_tab', normalized);
+        saveCurrentTab();
         if (normalized === 'users') {
             await markRegisterAlertsRead();
         }
@@ -2991,8 +2875,8 @@
         if (btn) btn.remove();
         if (panel) panel.remove();
         try {
-            if (localStorage.getItem('admin_tab') === 'blacklist') {
-                localStorage.setItem('admin_tab', 'bans');
+            if (localStorage.getItem(TAB_KEY) === 'blacklist') {
+                localStorage.setItem(TAB_KEY, 'bans');
             }
         } catch(_) {}
     })();
@@ -3554,7 +3438,8 @@
                 'unmute_user': '解除禁言',
                 'cleanup_logs': '清理日志',
                 'update_security_settings': '修改安全设置',
-                'review_security_alert': '审查安全提醒'
+                'review_security_alert': '审查安全提醒',
+                'delete_user': '删除用户账号'
             };
             allAuditLogs.forEach(function(log) {
                 h += '<tr><td>' + escapeHtml(formatTime(log.created_at)) + '</td><td>' + escapeHtml(actionLabels[log.action] || log.action) + '</td><td>' + escapeHtml(log.operator) + '</td><td style="max-width:300px;white-space:normal;word-break:break-word;">' + escapeHtml(log.detail || '-') + '</td></tr>';
