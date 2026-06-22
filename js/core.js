@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -8127,6 +8127,39 @@ function renderProfileActivityList(kind) {
 
             // 版本更新日志
             const changelogData = [
+                {
+                    version: 'v0.84',
+                    date: '2026-06-22',
+                    content: `
+                        <h4>新增</h4>
+                        <ul>
+                            <li>管理后台新增"🛡️ 安全中心"：同 IP 多账号、同设备多账号、多 IP 同账号、地区变化、高频访问五类安全提醒</li>
+                            <li>安全提醒支持已读、忽略、误报三种处理状态</li>
+                            <li>客户端温和浏览器指纹 + Canvas 指纹 Hash（仅保存 hash，不存图像/像素）</li>
+                            <li>前端错误监控：JS error、unhandledrejection、fetch 失败、图片加载失败、白屏检测自动上报</li>
+                            <li>管理员操作审计日志：所有敏感操作全记录</li>
+                            <li>日志保留与清理：登录/安全日志 90 天，错误日志 30 天</li>
+                            <li>用户详情弹窗：点击用户名查看完整信息（IP、地区、设备、指纹、统计、登录记录、安全提醒、处罚历史）</li>
+                            <li>风险评分系统：用户列表显示"正常/低风险/中风险/高风险"</li>
+                            <li>安全识别开关：可独立控制基础设备、浏览器指纹、Canvas 指纹、安全提醒的采集与生成</li>
+                        </ul>
+                        <h4>修复</h4>
+                        <ul>
+                            <li>用户列表最近 IP 改为完整显示，不再打码</li>
+                        </ul>
+                        <h4>优化</h4>
+                        <ul>
+                            <li>IP 地区解析改为多源 fallback</li>
+                            <li>登录事件写入后同步更新用户信息</li>
+                            <li>页面访问冷却改为 15 秒</li>
+                        </ul>
+                        <h4>安全</h4>
+                        <ul>
+                            <li>所有敏感数据仅限管理员后台查看，前台不泄露</li>
+                            <li>指纹仅作辅助判断，不做跨站追踪</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.83',
                     date: '2026-06-21',

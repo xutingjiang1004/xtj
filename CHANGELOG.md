@@ -1,5 +1,43 @@
 # 更新日志
 
+## v0.84 - 2026-06-22
+安全中心、设备识别、错误监控、操作审计与用户详情全面上线
+
+### 新增
+- 管理后台新增"🛡️ 安全中心"tab，包含今日异常数、高风险、未读等统计卡片
+- 五类安全提醒自动生成：`same_ip_multi_users`（同IP多账号）、`same_device_multi_users`（同设备多账号）、`multi_ip_same_user`（同账号多IP）、`geo_change`（地区变化）、`high_frequency_visit`（高频访问）
+- 安全提醒支持三种处理状态：已读、忽略、误报，每条含 `reviewed_at` 和 `reviewed_by` 审计字段
+- 客户端温和浏览器指纹：由 screen/timezone/language/platform/hardwareConcurrency/deviceMemory/colorDepth/touch/browser/os 生成 SHA-256 hash，仅保存 hash
+- Canvas 指纹 Hash：渲染温和识别文本后取前 512 像素 SHA-256 hash，不保存图像/像素/base64，浏览器阻止时优雅降级为 null
+- 前端错误监控：`/api/client-error-log` 端点，自动捕获 JS error、unhandledrejection、fetch 失败、图片加载失败、白屏检测
+- 管理员操作审计日志：`/admin/audit-logs` 端点，记录删除帖子/照片、封禁/解封、禁言/解禁、清理日志、修改安全设置、审查安全提醒等操作
+- 日志保留与清理：登录记录/安全提醒保留 90 天，错误日志保留 30 天，支持一键清理过期日志 + 每24小时自动清理
+- 用户详情弹窗：点击用户列表用户名打开完整详情（注册时间/IP/地区/设备/fingerprint hash/帖子等统计数据/最近10条登录/最近10条安全提醒/处罚历史）
+- 风险评分系统：`/admin/user-risk-scores` 基于安全告警自动计算，用户列表显示"正常/低风险/中风险/高风险"彩色标签
+- 安全识别开关：后台可独立开关"基础设备记录""浏览器指纹 Hash""Canvas 指纹 Hash""安全提醒生成"，前端按开关跳过采集，后端按开关跳过写入
+
+### 修复
+- 修复安全检测函数未去重可能导致重复告警的问题，四个检测函数均增加时间窗口去重逻辑
+- 管理后台用户列表最近 IP 改为完整显示，不再使用 maskIp 打码
+
+### 优化
+- IP 地区解析改为多源 fallback：ip-api.com（2s 超时）→ ipapi.co（2.5s）→ ipwho.is（2.5s），失败有 console.warn 日志
+- `/api/log-login-event` 写入后自动同步更新 `__user_info__` 的 last_login、last_visit、last_device、last_ip、last_ip_location
+- 前台帖子流、`/admin/data` 全链路排除 `__login_event__` 与 `__security_alert__`，确保前台和统计不泄露登录/安全数据
+- 页面访问冷却从 60s 改为 15s
+- 安全提醒异步生成，不影响登录/刷新/发帖速度
+
+### 安全
+- 所有敏感数据（完整IP、地区、设备指纹）仅限管理员后台查看，前台不暴露
+- 指纹仅作辅助判断展示，不作为自动封禁唯一依据
+- 不做跨站追踪，不采集剪贴板、通讯录、麦克风、摄像头、键盘输入、未发送草稿
+- Canvas 指纹渲染不保存原始图像、base64 原文或像素数据
+
+### Remade
+- 重做管理后台用户列表：新增"地区"列（最近设备与最近IP之间）和"风险评分"列
+- 重做设备记录链路：从前端懒加载安全设置、条件采集指纹、到后端开关写入、异步安全检查、同步 user_info，统一为一条完整链路
+- 重做版本同步：关于页、站内 changelog、仓库 README 与 CHANGELOG.md 统一到 v0.84
+
 ## v0.83 - 2026-06-21
 统计弹窗旧版结构恢复、版本号同步到 0.83
 
