@@ -2338,7 +2338,7 @@
             var badge = document.getElementById('reportBadge');
             if (badge) badge.style.display = 'none';
         }
-        ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos','stats'].forEach(function(t) {
+        ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos','stats','security','audit','errorlog'].forEach(function(t) {
             var panel = document.getElementById('tab' + getTabDomName(t));
             var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
             if (panel) panel.classList.remove('active');
@@ -2367,6 +2367,7 @@
             case 'blacklist': renderBlacklistTab(el); break;
             case 'photos': renderPhotosTab(el); break;
             case 'stats': renderStatsTab(el); break;
+            case 'security': renderSecurityTab(el); break;
             case 'audit': renderAuditTab(el); break;
             case 'errorlog': renderErrorLogTab(el); break;
         }
@@ -2523,7 +2524,9 @@
             'same_device_multi_users': '同设备多账号',
             'multi_ip_same_user': '同账号多 IP',
             'geo_change': '地区变化',
-            'high_frequency_visit': '高频访问'
+            'high_frequency_visit': '高频访问',
+            'same_browser_fp_multi_users': '同浏览器指纹多账号',
+            'same_canvas_fp_multi_users': '同 Canvas 指纹多账号'
         };
 
         var typeLevelClass = {
@@ -2531,7 +2534,9 @@
             'same_device_multi_users': 'danger',
             'multi_ip_same_user': 'danger',
             'geo_change': '',
-            'high_frequency_visit': ''
+            'high_frequency_visit': '',
+            'same_browser_fp_multi_users': 'warn',
+            'same_canvas_fp_multi_users': 'warn'
         };
 
         if (securityTypeFilter !== 'all') {
@@ -3531,7 +3536,7 @@
             html += '<div style="margin-bottom:14px;"><span style="font-size:12px;font-weight:600;color:var(--danger);">最近安全提醒：</span>';
             html += '<div style="margin-top:4px;">';
             userAlerts.forEach(function(a) {
-                var alertTypeLabels = { 'same_ip_multi_users': '同IP多账号', 'same_device_multi_users': '同设备多账号', 'multi_ip_same_user': '多IP同账号', 'geo_change': '地区变化', 'high_frequency_visit': '高频访问' };
+                var alertTypeLabels = { 'same_ip_multi_users': '同IP多账号', 'same_device_multi_users': '同设备多账号', 'multi_ip_same_user': '多IP同账号', 'geo_change': '地区变化', 'high_frequency_visit': '高频访问', 'same_browser_fp_multi_users': '同浏览器指纹多账号', 'same_canvas_fp_multi_users': '同Canvas指纹多账号' };
                 html += '<div style="font-size:11px;padding:4px 0;border-bottom:1px solid rgba(0,0,0,0.04);"><span style="color:var(--danger);">' + (alertTypeLabels[a.type] || a.type) + '</span> ' + escapeHtml(a.reason) + ' <span style="color:var(--text-muted);">' + escapeHtml(formatTime(a.created_at)) + '</span></div>';
             });
             html += '</div></div>';
@@ -3755,7 +3760,7 @@
         if (userAlerts.length === 0) {
             html += '<div class="empty">暂无安全提醒</div>';
         } else {
-            var alertTypeLabels = { 'same_ip_multi_users': '同IP多账号', 'same_device_multi_users': '同设备多账号', 'multi_ip_same_user': '多IP同账号', 'geo_change': '地区变化', 'high_frequency_visit': '高频访问' };
+            var alertTypeLabels = { 'same_ip_multi_users': '同IP多账号', 'same_device_multi_users': '同设备多账号', 'multi_ip_same_user': '多IP同账号', 'geo_change': '地区变化', 'high_frequency_visit': '高频访问', 'same_browser_fp_multi_users': '同浏览器指纹多账号', 'same_canvas_fp_multi_users': '同Canvas指纹多账号' };
             html += '<div style="margin-bottom:12px;">';
             userAlerts.forEach(function(a) {
                 html += '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid rgba(0,0,0,0.03);">';
