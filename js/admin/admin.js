@@ -2817,7 +2817,7 @@
                 var displayLastLogin = latestLoginTime || (u.info && (u.info.last_login || u.info.last_visit));
                 var lastLogin = displayLastLogin ? formatTime(displayLastLogin) : '-';
 
-                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + escapeHtml(statusText) + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + escapeHtml(lastLogin) + '</td><td>' + deviceCell + '</td><td>' + regionCell + '</td><td>' + ipCell + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + actions + '</td></tr>';
+                h += '<tr><td><strong><a href="#" onclick="showUserDetailModal(\'' + safeName + '\');return false;" style="color:var(--primary);font-weight:700;text-decoration:underline;text-underline-offset:3px;">' + escapeHtml(u.name) + '</a></strong></td><td>' + escapeHtml(statusText) + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + escapeHtml(lastLogin) + '</td><td>' + deviceCell + '</td><td>' + regionCell + '</td><td>' + ipCell + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + actions + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
