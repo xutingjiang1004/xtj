@@ -650,8 +650,9 @@
             adminDataLoadedAt = Date.now();
         } catch(e) {
             showToast('数据加载失败，请刷新重试', 'error');
+        } finally {
+            adminDataLoading = false;
         }
-        adminDataLoading = false;
     }
 
     function escapeHtml(s) {
@@ -2897,6 +2898,15 @@
         if (panel) panel.classList.add('active');
         if (btn) btn.classList.add('active');
         window.renderTab(normalized);
+
+        // 后台刷新数据，刷新完成后重渲染当前 tab
+        if (!adminDataLoading) {
+            try {
+                await loadAllData(true);
+            } catch(e) {
+                showToast('刷新数据失败：' + e.message, 'error');
+            }
+        }
     };
 
     window.renderTab = function(tab) {
