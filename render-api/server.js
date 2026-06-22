@@ -571,35 +571,96 @@ async function logAdminLoginEvent(req) {
     if (error) {
       console.warn('[AdminLoginEvent] 写入失败:', error.message || error);
     }
+
+    // 同步更新管理员 user_info
+    if (!error) {
+      try {
+        const now = new Date().toISOString();
+        const { data: existingInfo } = await supabase.from('posts')
+          .select('id, content')
+          .eq('user_name', ADMIN_USERNAME)
+          .eq('media_type', USER_INFO_MARKER)
+          .maybeSingle();
+
+        var info = {};
+        if (existingInfo) {
+          try { info = JSON.parse(existingInfo.content || '{}'); } catch(e) {}
+        }
+
+        info.last_login = now;
+        if (!info.last_visit) info.last_visit = now;
+        info.last_device = detectDeviceTypeFromUA(ua) + ' · ' + detectOSFromUA(ua) + ' · ' + detectBrowserFromUA(ua);
+        info.last_ip = ip;
+        if (ipLocation) info.last_ip_location = ipLocation;
+
+        if (existingInfo) {
+          await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existingInfo.id);
+        }
+      } catch(e) {
+        console.warn('[AdminLoginEvent] 同步 user_info 失败:', e.message || e);
+      }
+    }
   } catch(e) {
     console.warn('[AdminLoginEvent] 记录异常:', e.message || e);
   }
 }
 
-// IP 地区解析（免费接口，静默失败）
+// IP 地区解析（多源 fallback: ip-api.com → ipapi.co → ipwho.is）
 async function resolveIpLocation(ip) {
   if (!ip || ip === 'unknown') return null;
   if (ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.')) return null;
   if (ip.match(/^172\.(1[6-9]|2\d|3[01])\./)) return null;
   if (ip === '::1' || ip === '::ffff:127.0.0.1') return null;
-  try {
-    var controller = new AbortController();
-    var timeout = setTimeout(function() { controller.abort(); }, 2000);
-    var resp = await fetch('http://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query', { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!resp.ok) return null;
-    var data = await resp.json();
-    if (data.status !== 'success') return null;
-    var parts = [data.country, data.regionName, data.city].filter(Boolean);
-    return {
-      country: data.country || '',
-      region: data.regionName || '',
-      city: data.city || '',
-      text: parts.length > 0 ? parts.join(' · ') : '未知'
-    };
-  } catch(e) {
-    return null;
+
+  const fetchers = [
+    async function() {
+      var controller = new AbortController();
+      var timeout = setTimeout(function() { controller.abort(); }, 2000);
+      var resp = await fetch('http://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query', { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) throw new Error('ip-api.com HTTP ' + resp.status);
+      var data = await resp.json();
+      if (data.status !== 'success') throw new Error('ip-api.com status: ' + data.status);
+      return { country: data.country || '', region: data.regionName || '', city: data.city || '' };
+    },
+    async function() {
+      var controller = new AbortController();
+      var timeout = setTimeout(function() { controller.abort(); }, 2500);
+      var resp = await fetch('https://ipapi.co/' + encodeURIComponent(ip) + '/json/', { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) throw new Error('ipapi.co HTTP ' + resp.status);
+      var data = await resp.json();
+      if (data.error) throw new Error('ipapi.co error: ' + (data.reason || data.error));
+      return { country: data.country_name || '', region: data.region || '', city: data.city || '' };
+    },
+    async function() {
+      var controller = new AbortController();
+      var timeout = setTimeout(function() { controller.abort(); }, 2500);
+      var resp = await fetch('https://ipwho.is/' + encodeURIComponent(ip), { signal: controller.signal });
+      clearTimeout(timeout);
+      if (!resp.ok) throw new Error('ipwho.is HTTP ' + resp.status);
+      var data = await resp.json();
+      if (!data.success) throw new Error('ipwho.is not success');
+      return { country: data.country || '', region: data.region || '', city: data.city || '' };
+    }
+  ];
+
+  for (var i = 0; i < fetchers.length; i++) {
+    try {
+      var result = await fetchers[i]();
+      var parts = [result.country, result.region, result.city].filter(Boolean);
+      return {
+        country: result.country,
+        region: result.region,
+        city: result.city,
+        text: parts.length > 0 ? parts.join(' · ') : '未知'
+      };
+    } catch(e) {
+      console.warn('[IP] 解析源 ' + (i + 1) + ' 失败:', e.message || e);
+    }
   }
+  console.warn('[IP] 所有解析源均失败，返回 null:', ip);
+  return null;
 }
 
 function rateLimit(windowMs, maxRequests) {
@@ -778,7 +839,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
     autoExpireOverdueRecords().catch(function() {});
 
     const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes, annRes] = await Promise.all([
-      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').order('created_at', { ascending: false }).limit(5000),
+      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500),
@@ -1629,7 +1690,7 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
         .neq('media_type', AUTH_MARKER).neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER)
         .neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER)
-        .neq('media_type', '__user_visit__'),
+        .neq('media_type', '__user_visit__').neq('media_type', LOGIN_EVENT_MARKER),
       buildSummaryQuery('posts', 'user_name, created_at', 'media_type', AUTH_MARKER, 'created_at'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
@@ -1778,7 +1839,7 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
         .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER)
         .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER)
-        .neq('media_type', USER_VISIT_MARKER),
+        .neq('media_type', USER_VISIT_MARKER).neq('media_type', LOGIN_EVENT_MARKER),
       buildQuery('comments', 'id, created_at', null, null, 'created_at'),
       buildQuery('likes', 'id, created_at', null, null, 'created_at'),
       fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at'),
@@ -1947,7 +2008,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     const loginAt = new Date().toISOString();
     const random = Math.random().toString(36).slice(2, 10);
 
-    // 解析 IP 地区（静默失败）
+    // 解析 IP 地区（多源 fallback，失败有日志）
     var ipLocation = null;
     try { ipLocation = await resolveIpLocation(ip); } catch(e) {}
 
@@ -1970,6 +2031,47 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
       actor_key: 'login_' + Date.now() + '_' + random
     }]);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
+
+    // 同步更新 user_info（记录最近设备/IP/地区/登录时间）
+    try {
+      const now = new Date().toISOString();
+      const { data: existingInfo } = await supabase.from('posts')
+        .select('id, content')
+        .eq('user_name', userNameVal)
+        .eq('media_type', USER_INFO_MARKER)
+        .maybeSingle();
+
+      var info = {};
+      if (existingInfo) {
+        try { info = JSON.parse(existingInfo.content || '{}'); } catch(e) {}
+      }
+
+      if (srcVal === 'login_success' || srcVal === 'register_success') {
+        info.last_login = now;
+      }
+      if (srcVal === 'page_visit') {
+        info.last_visit = now;
+      }
+      // 同时设置 last_visit 作为兜底
+      if (!info.last_visit) info.last_visit = now;
+
+      info.last_device = (device_type || 'unknown') + ' · ' + (os || 'Unknown') + ' · ' + (browser || 'Unknown');
+      info.last_ip = ip;
+      if (ipLocation) info.last_ip_location = ipLocation;
+
+      if (existingInfo) {
+        await supabase.from('posts').update({ content: JSON.stringify(info) }).eq('id', existingInfo.id);
+      } else {
+        await supabase.from('posts').insert([{
+          user_name: userNameVal,
+          media_type: USER_INFO_MARKER,
+          content: JSON.stringify(info),
+          actor_key: 'user_info_' + Date.now()
+        }]);
+      }
+    } catch(e) {
+      console.warn('[API] 同步 user_info 失败:', e.message || e);
+    }
 
     return res.json({ ok: true });
   } catch(e) {
