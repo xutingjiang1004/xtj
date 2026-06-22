@@ -3,7 +3,9 @@
 
     var API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
     var CHECK_DELAY_MS = 300;
+    var SEND_COOLDOWN_MS = 10000;
     var debounceTimer = null;
+    var lastSendAtByKey = {};
 
     // 获取或生成 device_id
     function getOrCreateDeviceId() {
@@ -51,9 +53,17 @@
         return 'Unknown';
     }
 
+    // 检查冷却
+    function isInCooldown(sentKey) {
+        var lastAt = lastSendAtByKey[sentKey] || 0;
+        return (Date.now() - lastAt) < SEND_COOLDOWN_MS;
+    }
+
     // 发送登录事件
     function doSend(userName, passwordHash, deviceId, sentKey) {
         try {
+            if (isInCooldown(sentKey)) return;
+
             var ua = navigator.userAgent || '';
             var body = JSON.stringify({
                 user_name: userName,
@@ -65,6 +75,8 @@
                 user_agent: ua
             });
 
+            lastSendAtByKey[sentKey] = Date.now();
+
             fetch(API_BASE + '/api/log-login-event', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -73,7 +85,10 @@
                 if (res.ok) {
                     try { sessionStorage.setItem(sentKey, '1'); } catch(e) {}
                 }
-            }).catch(function() {});
+            }).catch(function() {
+                // 请求失败清除冷却，允许重试
+                lastSendAtByKey[sentKey] = 0;
+            });
         } catch(e) {}
     }
 
@@ -110,6 +125,7 @@
         } catch(e) {}
         var pwHash;
         try { pwHash = localStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
+        if (!pwHash) return;
         doSend(userName, pwHash, deviceId, sentKey);
     };
 
@@ -117,11 +133,16 @@
     getOrCreateDeviceId();
 
     // 拦截 localStorage.setItem，监听登录凭据写入
-    var _origSetItem = localStorage.setItem.bind(localStorage);
-    localStorage.setItem = function(key, value) {
-        _origSetItem(key, value);
-        if (key === 'xtj_user' || key === 'xtj_pw_hash') {
-            trySendLoginEvent();
-        }
-    };
+    try {
+        var _origSetItem = localStorage.setItem.bind(localStorage);
+        localStorage.setItem = function(key, value) {
+            _origSetItem(key, value);
+            if (key === 'xtj_user' || key === 'xtj_pw_hash') {
+                trySendLoginEvent();
+            }
+        };
+    } catch(e) {}
+
+    // 已登录用户刷新页面时也能记录一次
+    trySendLoginEvent();
 })();
