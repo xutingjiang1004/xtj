@@ -95,7 +95,7 @@
     }
 
     // 登录/注册成功后主动调用（由 core.js 触发）
-    window.logLoginEventSafe = function(userName) {
+    window.logLoginEventSafe = function(userName, source) {
         if (!userName) return;
         var deviceId = getOrCreateDeviceId();
         var sentKey = 'xtj_login_event_sent_' + userName + '_' + deviceId;
@@ -105,7 +105,8 @@
         var pwHash;
         try { pwHash = localStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
         if (!pwHash) return;
-        doSend(userName, pwHash, deviceId, sentKey, 'login_success');
+        var src = source || 'login_success';
+        doSend(userName, pwHash, deviceId, sentKey, src);
     };
 
     // 页面访问记录（60s localStorage 冷却，页面刷新/打开时记录）
