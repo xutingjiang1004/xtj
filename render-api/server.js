@@ -513,14 +513,14 @@ function getClientIp(req) {
 // UA 解析（后端用，与前端 js/login-device.js 规则一致）
 function detectDeviceTypeFromUA(ua) {
   if (/iPhone/i.test(ua)) return 'iPhone';
-  if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && /touch/i.test(ua))) return 'iPad';
+  if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && /Mobile\/\w+/i.test(ua))) return 'iPad';
   if (/Android/i.test(ua)) return 'Android';
   if (/Mobi/i.test(ua)) return 'Mobile';
   return 'Desktop';
 }
 
 function detectOSFromUA(ua) {
-  if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && /touch/i.test(ua))) return 'iPadOS';
+  if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && /Mobile\/\w+/i.test(ua))) return 'iPadOS';
   if (/iPhone|iPod/i.test(ua)) return 'iOS';
   if (/Android/i.test(ua)) return 'Android';
   if (/Windows/i.test(ua)) return 'Windows';
