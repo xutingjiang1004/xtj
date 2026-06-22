@@ -510,6 +510,69 @@ function getClientIp(req) {
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
+// UA 解析（后端用，与前端 js/login-device.js 规则一致）
+function detectDeviceTypeFromUA(ua) {
+  if (/iPhone/i.test(ua)) return 'iPhone';
+  if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && /touch/i.test(ua))) return 'iPad';
+  if (/Android/i.test(ua)) return 'Android';
+  if (/Mobi/i.test(ua)) return 'Mobile';
+  return 'Desktop';
+}
+
+function detectOSFromUA(ua) {
+  if (/iPad/i.test(ua) || (/Macintosh/i.test(ua) && /touch/i.test(ua))) return 'iPadOS';
+  if (/iPhone|iPod/i.test(ua)) return 'iOS';
+  if (/Android/i.test(ua)) return 'Android';
+  if (/Windows/i.test(ua)) return 'Windows';
+  if (/Macintosh|Mac OS X/i.test(ua)) return 'macOS';
+  if (/Linux/i.test(ua)) return 'Linux';
+  return 'Unknown';
+}
+
+function detectBrowserFromUA(ua) {
+  if (/MicroMessenger/i.test(ua)) return 'WeChat';
+  if (/Edg\//i.test(ua)) return 'Edge';
+  if (/Firefox/i.test(ua)) return 'Firefox';
+  if (/Chrome/i.test(ua)) return 'Chrome';
+  if (/Safari/i.test(ua)) return 'Safari';
+  return 'Unknown';
+}
+
+// 记录管理员登录事件（静默，不影响登录流程）
+async function logAdminLoginEvent(req) {
+  try {
+    const ip = getClientIp(req);
+    const ua = String(req.headers['user-agent'] || '');
+    const deviceId = 'admin_' + crypto.createHash('sha256').update(ip + '|' + ua).digest('hex').slice(0, 32);
+    const loginAt = new Date().toISOString();
+    const random = Math.random().toString(36).slice(2, 10);
+
+    const { error } = await supabase.from('posts').insert([{
+      user_name: ADMIN_USERNAME,
+      media_type: LOGIN_EVENT_MARKER,
+      media_url: deviceId,
+      content: JSON.stringify({
+        device_id: deviceId,
+        device_type: detectDeviceTypeFromUA(ua),
+        os: detectOSFromUA(ua),
+        browser: detectBrowserFromUA(ua),
+        user_agent: ua,
+        ip: ip,
+        ip_location: null,
+        login_at: loginAt,
+        is_admin: true,
+        source: 'admin_login'
+      }),
+      actor_key: 'admin_login_' + Date.now() + '_' + random
+    }]);
+    if (error) {
+      console.warn('[AdminLoginEvent] 写入失败:', error.message || error);
+    }
+  } catch(e) {
+    console.warn('[AdminLoginEvent] 记录异常:', e.message || e);
+  }
+}
+
 function rateLimit(windowMs, maxRequests) {
   return (req, res, next) => {
     const key = getRealIp(req) + ':' + req.path;
@@ -638,7 +701,10 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   
   const token = signToken();
   adminTokens.set(token, { expiresAt: Date.now() + TOKEN_EXPIRY_MS });
-  
+
+  // 记录管理员登录设备/IP
+  logAdminLoginEvent(req).catch(function(){});
+
   return res.json({ ok: true, token, username: ADMIN_USERNAME });
 });
 
