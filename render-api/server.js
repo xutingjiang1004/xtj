@@ -547,6 +547,9 @@ async function logAdminLoginEvent(req) {
     const loginAt = new Date().toISOString();
     const random = Math.random().toString(36).slice(2, 10);
 
+    var ipLocation = null;
+    try { ipLocation = await resolveIpLocation(ip); } catch(e) {}
+
     const { error } = await supabase.from('posts').insert([{
       user_name: ADMIN_USERNAME,
       media_type: LOGIN_EVENT_MARKER,
@@ -558,7 +561,7 @@ async function logAdminLoginEvent(req) {
         browser: detectBrowserFromUA(ua),
         user_agent: ua,
         ip: ip,
-        ip_location: null,
+        ip_location: ipLocation,
         login_at: loginAt,
         is_admin: true,
         source: 'admin_login'
@@ -570,6 +573,32 @@ async function logAdminLoginEvent(req) {
     }
   } catch(e) {
     console.warn('[AdminLoginEvent] 记录异常:', e.message || e);
+  }
+}
+
+// IP 地区解析（免费接口，静默失败）
+async function resolveIpLocation(ip) {
+  if (!ip || ip === 'unknown') return null;
+  if (ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.')) return null;
+  if (ip.match(/^172\.(1[6-9]|2\d|3[01])\./)) return null;
+  if (ip === '::1' || ip === '::ffff:127.0.0.1') return null;
+  try {
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, 2000);
+    var resp = await fetch('http://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    if (data.status !== 'success') return null;
+    var parts = [data.country, data.regionName, data.city].filter(Boolean);
+    return {
+      country: data.country || '',
+      region: data.regionName || '',
+      city: data.city || '',
+      text: parts.length > 0 ? parts.join(' · ') : '未知'
+    };
+  } catch(e) {
+    return null;
   }
 }
 
@@ -1891,7 +1920,10 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
 // ===================== 登录设备/IP 记录（前端调用） =====================
 app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
   try {
-    const { user_name, password_hash, device_id, device_type, os, browser, user_agent } = req.body;
+    const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source } = req.body;
+
+    const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
+    const srcVal = VALID_SOURCES.includes(source) ? source : 'login_success';
 
     const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
     if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
@@ -1915,6 +1947,10 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     const loginAt = new Date().toISOString();
     const random = Math.random().toString(36).slice(2, 10);
 
+    // 解析 IP 地区（静默失败）
+    var ipLocation = null;
+    try { ipLocation = await resolveIpLocation(ip); } catch(e) {}
+
     // 写入 posts 表（短期方案，不新建表）
     const { error } = await supabase.from('posts').insert([{
       user_name: userNameVal,
@@ -1927,8 +1963,9 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
         browser: browser || 'Unknown',
         user_agent: user_agent || '',
         ip: ip,
-        ip_location: null,
-        login_at: loginAt
+        ip_location: ipLocation,
+        login_at: loginAt,
+        source: srcVal
       }),
       actor_key: 'login_' + Date.now() + '_' + random
     }]);
