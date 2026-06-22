@@ -100,8 +100,13 @@
         }, 30000); // 每30秒检查一次
     }
 
-    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [], riskScoreMap = {};
+    var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [];
     var searchUser = '', searchPost = '';
+
+    function getTabDomName(tab) {
+        if (tab === 'errorlog') return 'ErrorLog';
+        return tab.charAt(0).toUpperCase() + tab.slice(1);
+    }
     var userFilterStatus = 'all';
     var userSortBy = 'reg';
     var confirmCallback = null;
@@ -393,13 +398,13 @@
             currentTab = savedTab;
             await loadAllData(true);
             ['ann','users','posts','likes','comments','reports','bans','mutes','photos','stats'].forEach(function(t) {
-                var panel = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
-                var btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn');
+                var panel = document.getElementById('tab' + getTabDomName(t));
+                var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
                 if (panel) panel.classList.remove('active');
                 if (btn) btn.classList.remove('active');
             });
-            var activePanel = document.getElementById('tab' + savedTab.charAt(0).toUpperCase() + savedTab.slice(1));
-            var activeBtn = document.getElementById('tab' + savedTab.charAt(0).toUpperCase() + savedTab.slice(1) + 'Btn');
+            var activePanel = document.getElementById('tab' + getTabDomName(savedTab));
+            var activeBtn = document.getElementById('tab' + getTabDomName(savedTab) + 'Btn');
             if (activePanel) activePanel.classList.add('active');
             if (activeBtn) activeBtn.classList.add('active');
         } else {
@@ -573,11 +578,11 @@
             if (badge) badge.style.display = 'none';
         }
         ['ann','users','posts','likes','comments'].forEach(function(t) {
-            document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.remove('active');
-            document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn').classList.remove('active');
+            document.getElementById('tab' + getTabDomName(t)).classList.remove('active');
+            document.getElementById('tab' + getTabDomName(t) + 'Btn').classList.remove('active');
         });
-        document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
-        document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1) + 'Btn').classList.add('active');
+        document.getElementById('tab' + getTabDomName(tab)).classList.add('active');
+        document.getElementById('tab' + getTabDomName(tab) + 'Btn').classList.add('active');
         window.renderTab(tab);
     };
 
@@ -891,7 +896,7 @@
     };
 
     function renderTab(tab) {
-        var el = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+        var el = document.getElementById('tab' + getTabDomName(tab));
         if (!el) return;
         switch(tab) {
             case 'ann': renderAnnTab(el); break;
@@ -2334,13 +2339,13 @@
             if (badge) badge.style.display = 'none';
         }
         ['ann','users','posts','likes','comments','reports','bans','mutes','blacklist','photos','stats'].forEach(function(t) {
-            var panel = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
-            var btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn');
+            var panel = document.getElementById('tab' + getTabDomName(t));
+            var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
             if (panel) panel.classList.remove('active');
             if (btn) btn.classList.remove('active');
         });
-        var panel = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
-        var btn = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1) + 'Btn');
+        var panel = document.getElementById('tab' + getTabDomName(tab));
+        var btn = document.getElementById('tab' + getTabDomName(tab) + 'Btn');
         if (panel) panel.classList.add('active');
         if (btn) btn.classList.add('active');
         window.renderTab(tab);
@@ -2348,7 +2353,7 @@
 
     var _origRenderTab = window.renderTab;
     window.renderTab = function(tab) {
-        var el = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+        var el = document.getElementById('tab' + getTabDomName(tab));
         if (!el) return;
         switch(tab) {
             case 'ann': renderAnnTab(el); break;
@@ -2441,13 +2446,10 @@
                 var safeName = u.name.replace(/'/g, "\\'");
                 var regTime = getAdminUserEffectiveRegTime(u.info) ? formatTime(getAdminUserEffectiveRegTime(u.info)) : '-';
                 var lastLogin = u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-';
-                var risk = riskScoreMap[u.name];
-                var riskText = risk ? risk.risk_level : '正常';
-                var riskColor = riskText === '高风险' ? 'var(--danger)' : (riskText === '中风险' ? '#f59e0b' : (riskText === '低风险' ? '#3b82f6' : 'var(--text-muted)'));
                 h += '<div class="user-card' + (flags.isBanned ? ' is-banned' : '') + (flags.isMuted ? ' is-muted' : '') + (flags.isAdmin ? ' is-admin' : '') + '">';
                 h += '<div class="user-card-head"><div class="user-avatar' + (flags.isAdmin ? ' admin-avatar' : (flags.isBanned ? ' banned-avatar' : (flags.isMuted ? ' muted-avatar' : ''))) + '">' + escapeHtml((u.name || '?').slice(0, 1).toUpperCase()) + '</div><div class="user-card-name"><strong><a href="#" onclick="showUserDetailModal(\'' + safeName + '\');return false;" style="color:var(--text);text-decoration:none;" onmouseover="this.style.textDecoration=\'underline\'" onmouseout="this.style.textDecoration=\'none\'">' + escapeHtml(u.name) + '</a></strong><div class="user-tags">' + buildUserTagMarkup(flags) + '</div></div></div>';
                 h += '<div class="user-card-stats"><div class="user-stat-item"><div class="num">' + stats.posts + '</div><div class="lbl">帖子</div></div><div class="user-stat-item"><div class="num">' + stats.likes + '</div><div class="lbl">点赞</div></div><div class="user-stat-item"><div class="num">' + stats.comments + '</div><div class="lbl">评论</div></div></div>';
-                h += '<div class="user-card-meta"><div class="meta-row"><span class="label">注册时间</span><span class="value">' + regTime + '</span></div><div class="meta-row"><span class="label">最近登录</span><span class="value">' + lastLogin + '</span></div><div class="meta-row"><span class="label">风险评分</span><span class="value" style="color:' + riskColor + ';font-weight:' + (riskText !== '正常' ? '600' : '400') + ';">' + riskText + '</span></div></div>';
+                h += '<div class="user-card-meta"><div class="meta-row"><span class="label">注册时间</span><span class="value">' + regTime + '</span></div><div class="meta-row"><span class="label">最近登录</span><span class="value">' + lastLogin + '</span></div></div>';
                 h += '<div class="user-card-actions">';
                 if (!flags.isAdmin) {
                     h += '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button>';
@@ -2474,7 +2476,7 @@
         } catch(e) {}
     }
 
-    async function saveSecuritySetting(key, value) {
+    window.saveSecuritySetting = async function(key, value) {
         var body = {};
         body[key] = value;
         try {
@@ -2498,6 +2500,11 @@
             if (resultEl) resultEl.textContent = '清理失败';
             showToast('清理失败', 'error');
         }
+    };
+
+    window.setSecurityTypeFilter = function(type) {
+        securityTypeFilter = type;
+        renderTab('security');
     };
 
     // 安全中心
@@ -2560,9 +2567,9 @@
 
         // 类型筛选
         h += '<div class="filter-chips" style="margin-bottom:10px;">';
-        h += '<span class="filter-chip' + (securityTypeFilter === 'all' ? ' active' : '') + '" onclick="securityTypeFilter=\'all\';renderTab(\'security\')">全部</span>';
+        h += '<span class="filter-chip' + (securityTypeFilter === 'all' ? ' active' : '') + '" onclick="window.setSecurityTypeFilter(\'all\')">全部</span>';
         Object.keys(typeLabels).forEach(function(k) {
-            h += '<span class="filter-chip' + (securityTypeFilter === k ? ' active' : '') + '" onclick="securityTypeFilter=\'' + k + '\';renderTab(\'security\')">' + typeLabels[k] + '</span>';
+            h += '<span class="filter-chip' + (securityTypeFilter === k ? ' active' : '') + '" onclick="window.setSecurityTypeFilter(\'' + k + '\')">' + typeLabels[k] + '</span>';
         });
         h += '</div>';
 
@@ -2901,13 +2908,13 @@
             if (badge) badge.style.display = 'none';
         }
         allTabs.forEach(function(t) {
-            var panel = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1));
-            var btn = document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Btn');
+            var panel = document.getElementById('tab' + getTabDomName(t));
+            var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
             if (panel) panel.classList.remove('active');
             if (btn) btn.classList.remove('active');
         });
-        var panel = document.getElementById('tab' + normalized.charAt(0).toUpperCase() + normalized.slice(1));
-        var btn = document.getElementById('tab' + normalized.charAt(0).toUpperCase() + normalized.slice(1) + 'Btn');
+        var panel = document.getElementById('tab' + getTabDomName(normalized));
+        var btn = document.getElementById('tab' + getTabDomName(normalized) + 'Btn');
         if (panel) panel.classList.add('active');
         if (btn) btn.classList.add('active');
         window.renderTab(normalized);
@@ -2915,7 +2922,7 @@
 
     window.renderTab = function(tab) {
         var normalized = tab === 'blacklist' ? 'bans' : tab;
-        var el = document.getElementById('tab' + normalized.charAt(0).toUpperCase() + normalized.slice(1));
+        var el = document.getElementById('tab' + getTabDomName(normalized));
         if (!el) return;
         switch(normalized) {
             case 'ann': renderAnnTab(el); break;
@@ -3015,17 +3022,6 @@
                 allErrorLogs = errLogRes.data || [];
             } catch(e) {
                 allErrorLogs = [];
-            }
-
-            // 加载风险评分
-            try {
-                var riskRes = await apiCall('GET', '/admin/user-risk-scores');
-                riskScoreMap = {};
-                (riskRes.data || []).forEach(function(r) {
-                    riskScoreMap[r.user_name] = r;
-                });
-            } catch(e) {
-                riskScoreMap = {};
             }
 
             // 加载安全设置
@@ -3608,6 +3604,11 @@
         el.innerHTML = h;
     };
 
+    window.setErrorLogTypeFilter = function(type) {
+        errorLogTypeFilter = type;
+        renderTab('errorlog');
+    };
+
     var errorLogTypeFilter = 'all';
     renderErrorLogTab = function(el) {
         var errors = allErrorLogs.slice();
@@ -3626,10 +3627,10 @@
 
         h += '<div class="card"><h3>🐛 前端错误日志（保留30天）</h3>';
         h += '<div class="filter-chips" style="margin-bottom:10px;">';
-        h += '<span class="filter-chip' + (errorLogTypeFilter === 'all' ? ' active' : '') + '" onclick="errorLogTypeFilter=\'all\';renderTab(\'errorlog\')">全部</span>';
+        h += '<span class="filter-chip' + (errorLogTypeFilter === 'all' ? ' active' : '') + '" onclick="window.setErrorLogTypeFilter(\'all\')">全部</span>';
         types.slice(0, 8).forEach(function(t) {
             var label = t === 'js_error' ? 'JS错误' : (t === 'unhandled_rejection' ? 'Promise异常' : (t === 'fetch_error' ? '请求失败' : (t === 'img_error' ? '图片失败' : (t === 'blank_page' ? '白屏' : t))));
-            h += '<span class="filter-chip' + (errorLogTypeFilter === t ? ' active' : '') + '" onclick="errorLogTypeFilter=\'' + t + '\';renderTab(\'errorlog\')">' + label + ' (' + typeCounts[t] + ')</span>';
+            h += '<span class="filter-chip' + (errorLogTypeFilter === t ? ' active' : '') + '" onclick="window.setErrorLogTypeFilter(\'' + t + '\')">' + label + ' (' + typeCounts[t] + ')</span>';
         });
         h += '</div>';
 
@@ -3670,7 +3671,6 @@
             if (allUsers[i].name === userName) { userObj = allUsers[i]; break; }
         }
         var userInfo = (userObj && userObj.info) || {};
-        var riskInfo = riskScoreMap[userName] || { risk_score: 0, risk_level: '正常', reasons: [] };
         var stats = getUserActivityStats(userName);
         var flags = getUserStateFlags(userName);
 
@@ -3727,16 +3727,6 @@
         html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:700;">' + stats.likes + '</div><div style="font-size:10px;color:var(--text-muted);">点赞</div></div>';
         html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:700;">' + stats.comments + '</div><div style="font-size:10px;color:var(--text-muted);">评论</div></div>';
         html += '<div style="text-align:center;"><div style="font-size:20px;font-weight:700;">' + (stats.photos || '0') + '</div><div style="font-size:10px;color:var(--text-muted);">照片</div></div>';
-        html += '</div>';
-
-        // Risk score
-        var riskColor = riskInfo.risk_level === '高风险' ? 'var(--danger)' : (riskInfo.risk_level === '中风险' ? '#f59e0b' : (riskInfo.risk_level === '低风险' ? '#3b82f6' : 'var(--text-muted)'));
-        html += '<div style="margin-bottom:12px;padding:8px 12px;background:rgba(255,255,255,0.05);border-radius:8px;">';
-        html += '<span style="font-size:12px;font-weight:600;">风险评分：</span>';
-        html += '<span style="font-weight:700;color:' + riskColor + ';">' + escapeHtml(riskInfo.risk_level) + '（' + riskInfo.risk_score + '分）</span>';
-        if (riskInfo.reasons && riskInfo.reasons.length > 0) {
-            html += '<span style="font-size:11px;color:var(--text-muted);margin-left:8px;">' + riskInfo.reasons.join(' / ') + '</span>';
-        }
         html += '</div>';
 
         // Login records (recent 10)
