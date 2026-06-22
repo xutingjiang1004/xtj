@@ -101,6 +101,8 @@
     }
 
     var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [];
+    var adminDataLoadedAt = 0;
+    var adminDataLoading = false;
     var searchUser = '', searchPost = '';
 
     function getTabDomName(tab) {
@@ -551,6 +553,8 @@
     });
 
     async function loadAllData(keepTab) {
+        if (adminDataLoading) return;
+        adminDataLoading = true;
         try {
             if (!API_BASE || !getToken()) {
                 throw new Error('API 未配置或未登录，拒绝加载数据');
@@ -643,9 +647,11 @@
             } else {
                 renderTab(currentTab);
             }
+            adminDataLoadedAt = Date.now();
         } catch(e) {
             showToast('数据加载失败，请刷新重试', 'error');
         }
+        adminDataLoading = false;
     }
 
     function escapeHtml(s) {
@@ -1181,7 +1187,6 @@
     };
 
     async function renderPostsTab(el) {
-        // 每次切到帖子管理时自动刷新数据
         if (API_BASE && getToken()) {
             try {
                 var apiData = await apiCall('GET', '/admin/data');
@@ -1234,7 +1239,6 @@
     }
 
     async function renderLikesTab(el) {
-        // 自动刷新
         if (API_BASE && getToken()) {
             try { var apiData = await apiCall('GET', '/admin/data'); allLikes = apiData.likes || []; allPosts = (apiData.posts || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER; }); } catch(e) {}
         }
@@ -1261,7 +1265,6 @@
     }
 
     async function renderCommentsTab(el) {
-        // 自动刷新
         if (API_BASE && getToken()) {
             try { var apiData = await apiCall('GET', '/admin/data'); allComments = apiData.comments || []; } catch(e) {}
         }
@@ -3547,14 +3550,25 @@
         if (!overlay) {
             overlay = document.createElement('div');
             overlay.id = 'detailModal';
-            overlay.className = 'modal-overlay';
+            overlay.className = 'modal-overlay admin-detail-overlay';
             document.body.appendChild(overlay);
         }
-        overlay.innerHTML = '<div class="modal-dialog" style="max-width:600px;max-height:80vh;overflow-y:auto;">' +
-            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
-            '<h3 style="margin:0;">' + title + '</h3>' +
-            '<button onclick="document.getElementById(\'detailModal\').classList.remove(\'active\')" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text);">&times;</button>' +
-            '</div>' + contentHtml + '</div>';
+
+        overlay.onclick = function(e) {
+            if (e.target === overlay) {
+                overlay.classList.remove('active');
+            }
+        };
+
+        overlay.innerHTML =
+            '<div class="modal-dialog admin-detail-dialog" onclick="event.stopPropagation()">' +
+                '<div class="admin-detail-head">' +
+                    '<h3>' + title + '</h3>' +
+                    '<button class="admin-detail-close" onclick="document.getElementById(\'detailModal\').classList.remove(\'active\')">&times;</button>' +
+                '</div>' +
+                '<div class="admin-detail-body">' + contentHtml + '</div>' +
+            '</div>';
+
         overlay.classList.add('active');
     }
 
@@ -3598,7 +3612,7 @@
         var userMutes = mutesData.filter(function(m) { return m.user_name === userName; });
 
         // Build modal HTML
-        var html = '<div style="padding:20px;max-height:70vh;overflow-y:auto;">';
+        var html = '<div class="admin-user-detail-content">';
         html += '<h2 style="margin-top:0;">' + escapeHtml(userName) + '</h2>';
         html += buildUserTagMarkup(flags) + '<br><br>';
 
