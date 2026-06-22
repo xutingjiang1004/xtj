@@ -1004,7 +1004,7 @@
                 var ipCell = '-';
                 if (latestLoginEvent) {
                     deviceCell = escapeHtml((latestLoginEvent.info.device_type || '?') + ' · ' + (latestLoginEvent.info.os || '?') + ' · ' + (latestLoginEvent.info.browser || '?'));
-                    ipCell = maskIp(latestLoginEvent.info.ip);
+                    ipCell = escapeHtml(maskIp(latestLoginEvent.info.ip));
                     deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + safeName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceCell + '</a>';
                 }
 
@@ -2642,7 +2642,7 @@
                     try {
                         var lc = JSON.parse(latestEvent.content || '{}');
                         var deviceText = escapeHtml((lc.device_type || '?') + ' · ' + (lc.os || '?') + ' · ' + (lc.browser || '?'));
-                        ipCell = maskIp(lc.ip);
+                        ipCell = escapeHtml(maskIp(lc.ip));
                         var escapedName = u.name.replace(/'/g, "\\'");
                         deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + escapedName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceText + '</a>';
                     } catch(ex) {}
@@ -3263,7 +3263,7 @@
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.device_type || '-') + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.os || '-') + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.browser || '-') + '</td>' +
-                '<td style="padding:6px 8px;">' + maskIp(ev.info.ip) + '</td>' +
+                '<td style="padding:6px 8px;">' + escapeHtml(maskIp(ev.info.ip)) + '</td>' +
                 '<td style="padding:6px 8px;">暂未解析</td>' +
                 '</tr>';
         });
