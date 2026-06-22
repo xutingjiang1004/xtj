@@ -978,13 +978,12 @@
         if (!filtered.length) {
             h += '<div class="empty">无匹配用户</div>';
         } else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>最近设备</th><th>最近IP</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>最近设备</th><th>地区</th><th>最近IP</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(u) {
                 var pc = allPosts.filter(function(p) { return p.user_name === u.name; }).length;
                 var lc = allLikes.filter(function(l) { return l.user_name === u.name; }).length;
                 var cc = allComments.filter(function(c) { return c.user_name === u.name; }).length;
                 var regTime = getAdminUserEffectiveRegTime(u.info) ? formatTime(getAdminUserEffectiveRegTime(u.info)) : '-';
-                var lastLogin = u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-';
                 var isAdmin = u.name === ADMIN;
                 var isBanned = bansData.some(function(b) { return b.user_name === u.name && b.is_active; });
                 var isMuted = mutesData.some(function(m) { return m.user_name === u.name && m.is_active; });
@@ -1001,15 +1000,20 @@
                 });
                 var latestLoginEvent = userEvents[0] || null;
                 var deviceCell = '-';
+                var regionCellV1 = '-';
                 var ipCell = '-';
+                var latestLoginTimeV1 = '';
                 if (latestLoginEvent) {
                     deviceCell = escapeHtml((latestLoginEvent.info.device_type || '?') + ' · ' + (latestLoginEvent.info.os || '?') + ' · ' + (latestLoginEvent.info.browser || '?'));
-                    ipCell = escapeHtml(maskIp(latestLoginEvent.info.ip));
+                    ipCell = escapeHtml(latestLoginEvent.info.ip || '-');
                     if (latestLoginEvent.info.ip_location && latestLoginEvent.info.ip_location.text) {
-                        ipCell += '<br><small style="color:#888;font-size:11px;">' + escapeHtml(latestLoginEvent.info.ip_location.text) + '</small>';
+                        regionCellV1 = escapeHtml(latestLoginEvent.info.ip_location.text);
                     }
+                    latestLoginTimeV1 = latestLoginEvent.info.login_at || (latestLoginEvent.raw && latestLoginEvent.raw.created_at) || '';
                     deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + safeName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceCell + '</a>';
                 }
+
+                var lastLogin = latestLoginTimeV1 || (u.info && (u.info.last_login || u.info.last_visit)) ? formatTime(latestLoginTimeV1 || u.info.last_login || u.info.last_visit) : '-';
 
                 var statusBadge = isAdmin ? '<span class="badge" style="background:rgba(99,102,241,0.15);color:#818cf8">管理员</span>' :
                                   isBanned ? '<span class="badge badge-red">拉黑封禁中</span>' :
@@ -1021,6 +1025,7 @@
                 h += '<td>' + regTime + '</td>';
                 h += '<td>' + lastLogin + '</td>';
                 h += '<td>' + deviceCell + '</td>';
+                h += '<td>' + regionCellV1 + '</td>';
                 h += '<td>' + ipCell + '</td>';
                 h += '<td>' + pc + '</td>';
                 h += '<td>' + lc + '</td>';
@@ -2611,7 +2616,7 @@
         h += '</div>';
         if (!filtered.length) { h += '<div class="empty">没有匹配用户</div>'; }
         else {
-            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>最近设备</th><th>最近IP</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
+            h += '<div class="table-wrap"><table><thead><tr><th>用户名</th><th>状态</th><th>注册时间</th><th>最近登录</th><th>最近设备</th><th>地区</th><th>最近IP</th><th>帖子</th><th>点赞</th><th>评论</th><th>操作</th></tr></thead><tbody>';
             filtered.forEach(function(u) {
                 var stats = getUserActivityStats(u.name);
                 var flags = getUserStateFlags(u.name);
@@ -2627,7 +2632,6 @@
                     ? '-'
                     : '<button class="btn-sm" onclick="quickMuteUser(\'' + safeName + '\')">禁言</button><button class="btn-sm del" onclick="quickBanUser(\'' + safeName + '\')">封禁</button>';
                 var regTime = getAdminUserEffectiveRegTime(u.info);
-                var lastLogin = u.info && (u.info.last_login || u.info.last_visit) ? formatTime(u.info.last_login || u.info.last_visit) : '-';
 
                 // 最近登录设备 & IP（从 allLoginEvents 筛选并排序）
                 var userEvents = allLoginEvents.filter(function(ev) { return ev.user_name === u.name; });
@@ -2640,21 +2644,28 @@
                 });
                 var latestEvent = userEvents[0];
                 var deviceCell = '-';
+                var regionCell = '-';
                 var ipCell = '-';
+                var latestLoginTime = '';
                 if (latestEvent) {
                     try {
                         var lc = JSON.parse(latestEvent.content || '{}');
                         var deviceText = escapeHtml((lc.device_type || '?') + ' · ' + (lc.os || '?') + ' · ' + (lc.browser || '?'));
-                        ipCell = escapeHtml(maskIp(lc.ip));
+                        ipCell = escapeHtml(lc.ip || '-');
                         if (lc.ip_location && lc.ip_location.text) {
-                            ipCell += '<br><small style="color:#888;font-size:11px;">' + escapeHtml(lc.ip_location.text) + '</small>';
+                            regionCell = escapeHtml(lc.ip_location.text);
                         }
+                        latestLoginTime = lc.login_at || latestEvent.created_at || '';
                         var escapedName = u.name.replace(/'/g, "\\'");
                         deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + escapedName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceText + '</a>';
                     } catch(ex) {}
                 }
 
-                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + statusBadge + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + escapeHtml(lastLogin) + '</td><td>' + deviceCell + '</td><td>' + ipCell + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + actions + '</td></tr>';
+                // 最近登录时间优先用最新 login 事件
+                var displayLastLogin = latestLoginTime || (u.info && (u.info.last_login || u.info.last_visit));
+                var lastLogin = displayLastLogin ? formatTime(displayLastLogin) : '-';
+
+                h += '<tr><td><strong>' + escapeHtml(u.name) + '</strong></td><td>' + statusBadge + '</td><td>' + escapeHtml(regTime ? formatTime(regTime) : '-') + '</td><td>' + escapeHtml(lastLogin) + '</td><td>' + deviceCell + '</td><td>' + regionCell + '</td><td>' + ipCell + '</td><td>' + stats.posts + '</td><td>' + stats.likes + '</td><td>' + stats.comments + '</td><td>' + actions + '</td></tr>';
             });
             h += '</tbody></table></div>';
         }
