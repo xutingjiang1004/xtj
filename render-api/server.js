@@ -81,6 +81,12 @@ const ADMIN_META_MARKER = '__admin_meta__';
 const USER_INFO_MARKER = '__user_info__';
 const USER_VISIT_MARKER = '__user_visit__';
 const LOGIN_EVENT_MARKER = '__login_event__';
+const SECURITY_ALERT_MARKER = '__security_alert__';
+const AUDIT_LOG_MARKER = '__admin_audit__';
+const CLIENT_ERROR_MARKER = '__client_error__';
+const LOGIN_LOG_RETENTION_DAYS = 90;
+const SECURITY_LOG_RETENTION_DAYS = 90;
+const ERROR_LOG_RETENTION_DAYS = 30;
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
 let statsCache = { data: null, ts: 0, pending: null };
@@ -663,6 +669,469 @@ async function resolveIpLocation(ip) {
   return null;
 }
 
+// ===================== 安全检测逻辑 =====================
+
+// 写入安全提醒到 posts 表
+async function insertSecurityAlert(alert) {
+  try {
+    await supabase.from('posts').insert([{
+      user_name: alert.user_name || 'system',
+      media_type: SECURITY_ALERT_MARKER,
+      media_url: alert.type || 'unknown',
+      content: JSON.stringify({
+        type: alert.type,
+        level: alert.level || 'warning',
+        user_name: alert.user_name,
+        ip: alert.ip || null,
+        ip_location_text: alert.ip_location_text || null,
+        related_users: alert.related_users || [],
+        reason: alert.reason || '',
+        is_read: false,
+        ignored: false,
+        false_positive: false,
+        reviewed_at: null,
+        reviewed_by: null
+      }),
+      actor_key: 'sec_alert_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+    }]);
+  } catch(e) {
+    console.warn('[Security] 写入安全提醒失败:', e.message || e);
+  }
+}
+
+// 管理员审计日志
+async function logAdminAudit(action, operator, detail) {
+  try {
+    await supabase.from('posts').insert([{
+      user_name: operator || 'system',
+      media_type: AUDIT_LOG_MARKER,
+      media_url: action,
+      content: JSON.stringify({
+        action: action,
+        operator: operator,
+        detail: String(detail || '').slice(0, 500),
+        timestamp: new Date().toISOString()
+      }),
+      actor_key: 'audit_' + Date.now()
+    }]);
+  } catch(e) {
+    console.warn('[Audit] 审计日志写入失败:', e.message);
+  }
+}
+
+// 自动清理旧日志
+async function cleanupOldLogs(type) {
+  try {
+    var days = type === 'error' ? ERROR_LOG_RETENTION_DAYS : (type === 'login' || type === 'security' ? LOGIN_LOG_RETENTION_DAYS : 90);
+    var cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    var mediaType;
+    if (type === 'login') mediaType = LOGIN_EVENT_MARKER;
+    else if (type === 'security') mediaType = SECURITY_ALERT_MARKER;
+    else if (type === 'error') mediaType = CLIENT_ERROR_MARKER;
+    else return { deleted: 0 };
+
+    var { data, error } = await supabase.from('posts')
+      .select('id')
+      .eq('media_type', mediaType)
+      .lt('created_at', cutoff);
+    if (error || !data || !data.length) return { deleted: 0 };
+
+    var ids = data.map(function(r) { return r.id; });
+    // Delete in batches of 100
+    var deleted = 0;
+    for (var i = 0; i < ids.length; i += 100) {
+      var batch = ids.slice(i, i + 100);
+      await supabase.from('posts').delete().in('id', batch);
+      deleted += batch.length;
+    }
+    return { deleted: deleted };
+  } catch(e) {
+    console.warn('[Cleanup] 清理 ' + type + ' 日志失败:', e.message);
+    return { deleted: 0, error: e.message };
+  }
+}
+
+// 检查同 IP 24h 内多账号登录
+async function checkSameIpMultiUsers(userName, ip, ipLocation) {
+  if (!ip || ip === 'unknown') return;
+  var since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  try {
+    var { data } = await supabase.from('posts')
+      .select('user_name, content')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (!data || !data.length) return;
+
+    var ipUsers = {};
+    data.forEach(function(row) {
+      try {
+        var c = JSON.parse(row.content || '{}');
+        if (c.ip === ip && row.user_name !== userName) {
+          ipUsers[row.user_name] = true;
+        }
+      } catch(e) {}
+    });
+
+    var related = Object.keys(ipUsers);
+    if (related.length >= 1) {
+      var ipLevel = related.length >= 3 ? 'high' : 'warning';
+      // 去重检查
+      var dupSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      var { data: existingAlert } = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', SECURITY_ALERT_MARKER)
+        .eq('media_url', 'same_ip_multi_users')
+        .eq('user_name', userName)
+        .gte('created_at', dupSince)
+        .limit(1);
+      if (existingAlert && existingAlert.length > 0) return;
+
+      await insertSecurityAlert({
+        type: 'same_ip_multi_users',
+        level: ipLevel,
+        user_name: userName,
+        ip: ip,
+        ip_location_text: ipLocation ? ipLocation.text : null,
+        related_users: [userName].concat(related),
+        reason: '同一 IP ' + ip + ' 在 24 小时内登录了 ' + (related.length + 1) + ' 个账号'
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkSameIpMultiUsers 异常:', e.message || e);
+  }
+}
+
+// 检查同 device_id 多账号登录
+async function checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation) {
+  if (!deviceId) return;
+  try {
+    var { data } = await supabase.from('posts')
+      .select('user_name, content')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .eq('media_url', deviceId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (!data || !data.length) return;
+
+    var deviceUsers = {};
+    data.forEach(function(row) {
+      if (row.user_name !== userName) {
+        deviceUsers[row.user_name] = true;
+      }
+    });
+
+    var related = Object.keys(deviceUsers);
+    if (related.length >= 1) {
+      // 去重检查
+      var dupSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      var { data: existingAlert } = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', SECURITY_ALERT_MARKER)
+        .eq('media_url', 'same_device_multi_users')
+        .eq('user_name', userName)
+        .gte('created_at', dupSince)
+        .limit(1);
+      if (existingAlert && existingAlert.length > 0) return;
+
+      await insertSecurityAlert({
+        type: 'same_device_multi_users',
+        level: 'high',
+        user_name: userName,
+        ip: ip,
+        ip_location_text: ipLocation ? ipLocation.text : null,
+        related_users: [userName].concat(related),
+        reason: '同一设备 ID ' + deviceId.slice(0, 12) + '... 登录了 ' + (related.length + 1) + ' 个账号'
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkSameDeviceMultiUsers 异常:', e.message || e);
+  }
+}
+
+// 检查同账号短时间内多 IP
+async function checkMultiIpSameUser(userName, ip, ipLocation) {
+  if (!ip || ip === 'unknown') return;
+  var since = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1小时
+  try {
+    var { data } = await supabase.from('posts')
+      .select('content, created_at')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .eq('user_name', userName)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (!data || !data.length) return;
+
+    var ips = {};
+    data.forEach(function(row) {
+      try {
+        var c = JSON.parse(row.content || '{}');
+        if (c.ip && c.ip !== ip) {
+          ips[c.ip] = true;
+        }
+      } catch(e) {}
+    });
+
+    var diffIps = Object.keys(ips);
+    if (diffIps.length >= 2) {
+      // 去重检查
+      var dupSince = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      var { data: existingAlert } = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', SECURITY_ALERT_MARKER)
+        .eq('media_url', 'multi_ip_same_user')
+        .eq('user_name', userName)
+        .gte('created_at', dupSince)
+        .limit(1);
+      if (existingAlert && existingAlert.length > 0) return;
+
+      await insertSecurityAlert({
+        type: 'multi_ip_same_user',
+        level: 'high',
+        user_name: userName,
+        ip: ip,
+        ip_location_text: ipLocation ? ipLocation.text : null,
+        related_users: [userName],
+        reason: '账号 ' + userName + ' 在 1 小时内使用了 ' + (diffIps.length + 1) + ' 个不同 IP'
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkMultiIpSameUser 异常:', e.message || e);
+  }
+}
+
+// 检查同账号地区变化
+async function checkGeoChange(userName, ipLocation, currentLoginAt) {
+  if (!ipLocation || !ipLocation.country) return;
+  try {
+    var { data } = await supabase.from('posts')
+      .select('content')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .eq('user_name', userName)
+      .lt('created_at', currentLoginAt)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (!data || !data.length) return;
+
+    var lastLoc = null;
+    for (var i = 0; i < data.length; i++) {
+      try {
+        var c = JSON.parse(data[i].content || '{}');
+        if (c.ip_location && c.ip_location.country) {
+          lastLoc = c.ip_location;
+          break;
+        }
+      } catch(e) {}
+    }
+
+    if (lastLoc && lastLoc.country !== ipLocation.country) {
+      // 去重检查
+      var dupSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      var { data: existingAlert } = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', SECURITY_ALERT_MARKER)
+        .eq('media_url', 'geo_change')
+        .eq('user_name', userName)
+        .gte('created_at', dupSince)
+        .limit(1);
+      if (existingAlert && existingAlert.length > 0) return;
+
+      await insertSecurityAlert({
+        type: 'geo_change',
+        level: 'info',
+        user_name: userName,
+        ip: null,
+        ip_location_text: ipLocation.text,
+        related_users: [userName],
+        reason: '账号 ' + userName + ' 地区从 ' + (lastLoc.text || lastLoc.country) + ' 变为 ' + ipLocation.text
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkGeoChange 异常:', e.message || e);
+  }
+}
+
+// 检查同账号短时间内 page_visit 过多
+async function checkHighFrequencyVisit(userName, source, ip, ipLocation) {
+  if (source !== 'page_visit') return;
+  var since = new Date(Date.now() - 5 * 60 * 1000).toISOString(); // 5分钟
+  try {
+    var { data } = await supabase.from('posts')
+      .select('id')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .eq('user_name', userName)
+      .gte('created_at', since)
+      .limit(100);
+    if (!data || data.length < 30) return;
+
+    // 检查最近是否已生成同类提醒（去重）
+    var recentSince = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    var { data: existing } = await supabase.from('posts')
+      .select('id')
+      .eq('media_type', SECURITY_ALERT_MARKER)
+      .eq('media_url', 'high_frequency_visit')
+      .eq('user_name', userName)
+      .gte('created_at', recentSince)
+      .limit(1);
+
+    if (existing && existing.length > 0) return;
+
+    await insertSecurityAlert({
+      type: 'high_frequency_visit',
+      level: 'info',
+      user_name: userName,
+      ip: ip,
+      ip_location_text: ipLocation ? ipLocation.text : null,
+      related_users: [userName],
+      reason: '账号 ' + userName + ' 在 5 分钟内产生了 ' + data.length + ' 次页面访问'
+    });
+  } catch(e) {
+    console.warn('[Security] checkHighFrequencyVisit 异常:', e.message || e);
+  }
+}
+
+// 检查相同浏览器指纹多账号登录
+async function checkSameBrowserFingerprintMultiUsers(userName, browserFp, ip, ipLocation) {
+  if (!browserFp) return;
+  var since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  try {
+    var { data } = await supabase.from('posts')
+      .select('user_name, content')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (!data || !data.length) return;
+
+    var fpUsers = {};
+    data.forEach(function(row) {
+      if (row.user_name === userName) return;
+      try {
+        var c = JSON.parse(row.content || '{}');
+        if (c.browser_fingerprint_hash === browserFp) {
+          fpUsers[row.user_name] = true;
+        }
+      } catch(e) {}
+    });
+
+    var related = Object.keys(fpUsers);
+    if (related.length >= 1) {
+      // 去重
+      var dupSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      var { data: existingAlert } = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', SECURITY_ALERT_MARKER)
+        .eq('media_url', 'same_browser_fp_multi_users')
+        .eq('user_name', userName)
+        .gte('created_at', dupSince)
+        .limit(1);
+      if (existingAlert && existingAlert.length > 0) return;
+
+      await insertSecurityAlert({
+        type: 'same_browser_fp_multi_users',
+        level: 'warning',
+        user_name: userName,
+        ip: ip,
+        ip_location_text: ipLocation ? ipLocation.text : null,
+        related_users: [userName].concat(related),
+        reason: '相同浏览器指纹 ' + browserFp.slice(0, 12) + '... 登录了 ' + (related.length + 1) + ' 个账号'
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkSameBrowserFingerprintMultiUsers 异常:', e.message || e);
+  }
+}
+
+// 检查相同 Canvas 指纹多账号登录
+async function checkSameCanvasFingerprintMultiUsers(userName, canvasFp, ip, ipLocation) {
+  if (!canvasFp) return;
+  var since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  try {
+    var { data } = await supabase.from('posts')
+      .select('user_name, content')
+      .eq('media_type', LOGIN_EVENT_MARKER)
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    if (!data || !data.length) return;
+
+    var fpUsers = {};
+    data.forEach(function(row) {
+      if (row.user_name === userName) return;
+      try {
+        var c = JSON.parse(row.content || '{}');
+        if (c.canvas_fingerprint_hash === canvasFp) {
+          fpUsers[row.user_name] = true;
+        }
+      } catch(e) {}
+    });
+
+    var related = Object.keys(fpUsers);
+    if (related.length >= 1) {
+      // 去重
+      var dupSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      var { data: existingAlert } = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', SECURITY_ALERT_MARKER)
+        .eq('media_url', 'same_canvas_fp_multi_users')
+        .eq('user_name', userName)
+        .gte('created_at', dupSince)
+        .limit(1);
+      if (existingAlert && existingAlert.length > 0) return;
+
+      await insertSecurityAlert({
+        type: 'same_canvas_fp_multi_users',
+        level: 'warning',
+        user_name: userName,
+        ip: ip,
+        ip_location_text: ipLocation ? ipLocation.text : null,
+        related_users: [userName].concat(related),
+        reason: '相同 Canvas 指纹 ' + canvasFp.slice(0, 12) + '... 登录了 ' + (related.length + 1) + ' 个账号'
+      });
+    }
+  } catch(e) {
+    console.warn('[Security] checkSameCanvasFingerprintMultiUsers 异常:', e.message || e);
+  }
+}
+
+// 统一安全检测入口（登录事件写入后调用）
+async function runSecurityChecks(userName, deviceId, ip, ipLocation, source, currentLoginAt, browserFp, canvasFp) {
+  // 检查安全提醒开关
+  try {
+    var { data: settingsData } = await supabase.from('posts')
+      .select('content')
+      .eq('media_type', ADMIN_META_MARKER)
+      .eq('media_url', 'security_settings')
+      .maybeSingle();
+    if (settingsData && settingsData.content) {
+      var s = JSON.parse(settingsData.content);
+      if (s.security_alerts === false) return;
+    }
+  } catch(e) {}
+  // 并行执行各项检查
+  await Promise.allSettled
+    ? await Promise.allSettled([
+        checkSameIpMultiUsers(userName, ip, ipLocation),
+        checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation),
+        checkMultiIpSameUser(userName, ip, ipLocation),
+        checkGeoChange(userName, ipLocation, currentLoginAt),
+        checkHighFrequencyVisit(userName, source, ip, ipLocation),
+        checkSameBrowserFingerprintMultiUsers(userName, browserFp, ip, ipLocation),
+        checkSameCanvasFingerprintMultiUsers(userName, canvasFp, ip, ipLocation)
+      ])
+    : await Promise.all([
+        checkSameIpMultiUsers(userName, ip, ipLocation).catch(function(){}),
+        checkSameDeviceMultiUsers(userName, deviceId, ip, ipLocation).catch(function(){}),
+        checkMultiIpSameUser(userName, ip, ipLocation).catch(function(){}),
+        checkGeoChange(userName, ipLocation, currentLoginAt).catch(function(){}),
+        checkHighFrequencyVisit(userName, source, ip, ipLocation).catch(function(){}),
+        checkSameBrowserFingerprintMultiUsers(userName, browserFp, ip, ipLocation).catch(function(){}),
+        checkSameCanvasFingerprintMultiUsers(userName, canvasFp, ip, ipLocation).catch(function(){})
+      ]);
+}
+
 function rateLimit(windowMs, maxRequests) {
   return (req, res, next) => {
     const key = getRealIp(req) + ':' + req.path;
@@ -839,7 +1308,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
     autoExpireOverdueRecords().catch(function() {});
 
     const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes, annRes] = await Promise.all([
-      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).order('created_at', { ascending: false }).limit(5000),
+      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', CLIENT_ERROR_MARKER).neq('media_type', AUDIT_LOG_MARKER).order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500),
@@ -904,6 +1373,15 @@ app.delete('/admin/announcement/:id', verifyToken, async (req, res) => {
 
 // ===================== 帖子管理 ======================
 app.delete('/admin/post/:id', verifyToken, async (req, res) => {
+  var auditUser = 'unknown';
+  try {
+    var token = (req.headers.authorization || '').replace('Bearer ', '');
+    var parts = token.split('.');
+    if (parts.length >= 2) {
+      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      auditUser = payload.user || 'unknown';
+    }
+  } catch(e) {}
   const { id } = req.params;
   // 先获取帖子的 actor_key
   const { data: post } = await supabase.from('posts').select('actor_key').eq('id', id).maybeSingle();
@@ -914,6 +1392,7 @@ app.delete('/admin/post/:id', verifyToken, async (req, res) => {
     p_actor_key: actorKey
   });
   if (error) return res.status(400).json({ error: sanitizeError(error) });
+  await logAdminAudit('delete_post', auditUser, 'post_id:' + id);
   return res.json({ ok: true });
 });
 
@@ -1006,6 +1485,15 @@ app.get('/admin/photos', verifyToken, async (req, res) => {
 });
 
 app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
+  var auditUser = 'unknown';
+  try {
+    var token = (req.headers.authorization || '').replace('Bearer ', '');
+    var parts = token.split('.');
+    if (parts.length >= 2) {
+      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      auditUser = payload.user || 'unknown';
+    }
+  } catch(e) {}
   const { id } = req.params;
   const { error } = await supabase.from('posts').update({
     is_deleted: true,
@@ -1013,6 +1501,7 @@ app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
     deleted_by: 'admin'
   }).eq('id', id).eq('media_type', '__photo_wall__');
   if (error) return res.status(400).json({ error: sanitizeError(error) });
+  await logAdminAudit('delete_photo', auditUser, 'photo_id:' + id);
   return res.json({ ok: true });
 });
 
@@ -1103,6 +1592,15 @@ app.get('/admin/bans', verifyToken, async (req, res) => {
 });
 
 app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
+  var auditUser = 'unknown';
+  try {
+    var token = (req.headers.authorization || '').replace('Bearer ', '');
+    var parts = token.split('.');
+    if (parts.length >= 2) {
+      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      auditUser = payload.user || 'unknown';
+    }
+  } catch(e) {}
   const { user_name, duration_hours, reason } = req.body;
   const durationCheck = validateDurationHours(duration_hours);
   if (durationCheck.error) return res.status(400).json({ error: durationCheck.error });
@@ -1160,15 +1658,26 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
     }
   }
   
+  await logAdminAudit('ban_user', auditUser, 'user:' + userNameVal);
   return res.json({ ok: true });
 });
 
 app.put('/admin/ban/:id/lift', verifyToken, async (req, res) => {
+  var auditUser = 'unknown';
+  try {
+    var token = (req.headers.authorization || '').replace('Bearer ', '');
+    var parts = token.split('.');
+    if (parts.length >= 2) {
+      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      auditUser = payload.user || 'unknown';
+    }
+  } catch(e) {}
   const { id } = req.params;
   const { error } = await supabase.from('bans').update({
     is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN_USERNAME
   }).eq('id', id);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
+  await logAdminAudit('unban_user', auditUser, 'ban_id:' + id);
   return res.json({ ok: true });
 });
 
@@ -1180,6 +1689,15 @@ app.get('/admin/mutes', verifyToken, async (req, res) => {
 });
 
 app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
+  var auditUser = 'unknown';
+  try {
+    var token = (req.headers.authorization || '').replace('Bearer ', '');
+    var parts = token.split('.');
+    if (parts.length >= 2) {
+      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      auditUser = payload.user || 'unknown';
+    }
+  } catch(e) {}
   const { user_name, duration_hours, reason } = req.body;
   const durationCheck = validateDurationHours(duration_hours);
   if (durationCheck.error) return res.status(400).json({ error: durationCheck.error });
@@ -1207,15 +1725,26 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
   }]);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   
+  await logAdminAudit('mute_user', auditUser, 'user:' + userNameVal);
   return res.json({ ok: true });
 });
 
 app.put('/admin/mute/:id/lift', verifyToken, async (req, res) => {
+  var auditUser = 'unknown';
+  try {
+    var token = (req.headers.authorization || '').replace('Bearer ', '');
+    var parts = token.split('.');
+    if (parts.length >= 2) {
+      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      auditUser = payload.user || 'unknown';
+    }
+  } catch(e) {}
   const { id } = req.params;
   const { error } = await supabase.from('mutes').update({
     is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN_USERNAME
   }).eq('id', id);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
+  await logAdminAudit('unmute_user', auditUser, 'mute_id:' + id);
   return res.json({ ok: true });
 });
 
@@ -1839,7 +2368,7 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
         .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
         .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER)
         .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER)
-        .neq('media_type', USER_VISIT_MARKER).neq('media_type', LOGIN_EVENT_MARKER),
+        .neq('media_type', USER_VISIT_MARKER).neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', AUDIT_LOG_MARKER).neq('media_type', CLIENT_ERROR_MARKER),
       buildQuery('comments', 'id, created_at', null, null, 'created_at'),
       buildQuery('likes', 'id, created_at', null, null, 'created_at'),
       fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at'),
@@ -1981,7 +2510,7 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
 // ===================== 登录设备/IP 记录（前端调用） =====================
 app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
   try {
-    const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source } = req.body;
+    const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source, device_meta, browser_fingerprint_hash, canvas_fingerprint_hash } = req.body;
 
     const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
     const srcVal = VALID_SOURCES.includes(source) ? source : 'login_success';
@@ -2012,6 +2541,26 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     var ipLocation = null;
     try { ipLocation = await resolveIpLocation(ip); } catch(e) {}
 
+    // 加载安全设置，按开关决定是否写入
+    var securitySettings = { record_device: true, browser_fingerprint: true, canvas_fingerprint: true };
+    try {
+      var { data: settingsData } = await supabase.from('posts')
+        .select('content')
+        .eq('media_type', ADMIN_META_MARKER)
+        .eq('media_url', 'security_settings')
+        .maybeSingle();
+      if (settingsData && settingsData.content) {
+        var parsed = JSON.parse(settingsData.content);
+        if (typeof parsed.record_device === 'boolean') securitySettings.record_device = parsed.record_device;
+        if (typeof parsed.browser_fingerprint === 'boolean') securitySettings.browser_fingerprint = parsed.browser_fingerprint;
+        if (typeof parsed.canvas_fingerprint === 'boolean') securitySettings.canvas_fingerprint = parsed.canvas_fingerprint;
+      }
+    } catch(e) {}
+
+    var finalDeviceMeta = securitySettings.record_device ? (device_meta || null) : null;
+    var finalBrowserFp = securitySettings.browser_fingerprint ? (browser_fingerprint_hash || null) : null;
+    var finalCanvasFp = securitySettings.canvas_fingerprint ? (canvas_fingerprint_hash || null) : null;
+
     // 写入 posts 表（短期方案，不新建表）
     const { error } = await supabase.from('posts').insert([{
       user_name: userNameVal,
@@ -2026,7 +2575,10 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
         ip: ip,
         ip_location: ipLocation,
         login_at: loginAt,
-        source: srcVal
+        source: srcVal,
+        device_meta: finalDeviceMeta,
+        browser_fingerprint_hash: finalBrowserFp,
+        canvas_fingerprint_hash: finalCanvasFp
       }),
       actor_key: 'login_' + Date.now() + '_' + random
     }]);
@@ -2073,10 +2625,39 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
       console.warn('[API] 同步 user_info 失败:', e.message || e);
     }
 
+    // 异步执行安全检测（不影响响应速度，错误静默处理）
+    runSecurityChecks(userNameVal, deviceIdVal, ip, ipLocation, srcVal, loginAt, browser_fingerprint_hash || null, canvas_fingerprint_hash || null).catch(function(e) {
+      console.warn('[Security] 安全检测异常:', e.message || e);
+    });
+
     return res.json({ ok: true });
   } catch(e) {
     console.error('[API] 登录事件记录失败:', e.message);
     return res.status(500).json({ error: '记录失败' });
+  }
+});
+
+// ===================== 安全设置（前端公开读取） =====================
+app.get('/api/security-settings', rateLimit(60000, 60), async (req, res) => {
+  try {
+    var { data } = await supabase.from('posts')
+      .select('content')
+      .eq('media_type', ADMIN_META_MARKER)
+      .eq('media_url', 'security_settings')
+      .maybeSingle();
+    var settings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
+    if (data && data.content) {
+      try {
+        var parsed = JSON.parse(data.content);
+        if (parsed.record_device !== undefined) settings.record_device = parsed.record_device;
+        if (parsed.browser_fingerprint !== undefined) settings.browser_fingerprint = parsed.browser_fingerprint;
+        if (parsed.canvas_fingerprint !== undefined) settings.canvas_fingerprint = parsed.canvas_fingerprint;
+        if (parsed.security_alerts !== undefined) settings.security_alerts = parsed.security_alerts;
+      } catch(e) {}
+    }
+    return res.json({ settings: settings });
+  } catch(e) {
+    return res.json({ settings: { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true } });
   }
 });
 
@@ -2092,6 +2673,242 @@ app.get('/admin/login-events', verifyToken, rateLimit(60000, 10), async (req, re
     return res.json({ data: data || [] });
   } catch(e) {
     console.error('[API] 登录事件查询失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// ===================== 安全提醒查询（管理员） =====================
+app.get('/admin/security-alerts', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var limit = parseInt(req.query.limit) || 200;
+    if (limit > 500) limit = 500;
+    var query = supabase.from('posts')
+      .select('id, user_name, content, media_url, created_at')
+      .eq('media_type', SECURITY_ALERT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    // 支持按类型筛选
+    if (req.query.type) {
+      query = query.eq('media_url', req.query.type);
+    }
+
+    var { data, error } = await query;
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+
+    // 解析 content JSON
+    var alerts = (data || []).map(function(row) {
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      return {
+        id: row.id,
+        user_name: row.user_name,
+        created_at: row.created_at,
+        type: info.type || row.media_url,
+        level: info.level || 'warning',
+        ip: info.ip || null,
+        ip_location_text: info.ip_location_text || null,
+        related_users: info.related_users || [],
+        reason: info.reason || '',
+        is_read: info.is_read || false,
+        ignored: info.ignored || false,
+        false_positive: info.false_positive || false,
+        reviewed_at: info.reviewed_at || null,
+        reviewed_by: info.reviewed_by || null
+      };
+    });
+
+    return res.json({ data: alerts });
+  } catch(e) {
+    console.error('[API] 安全提醒查询失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// ===================== 标记安全提醒已读 =====================
+app.post('/admin/security-alerts/read', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var alertId = req.body.id;
+    if (!alertId) return res.status(400).json({ error: '缺少提醒ID' });
+
+    var { data: existing } = await supabase.from('posts')
+      .select('content')
+      .eq('id', alertId)
+      .eq('media_type', SECURITY_ALERT_MARKER)
+      .maybeSingle();
+
+    if (!existing) return res.status(404).json({ error: '提醒不存在' });
+
+    var info = {};
+    try { info = JSON.parse(existing.content || '{}'); } catch(e) {}
+    info.is_read = true;
+
+    var { error } = await supabase.from('posts')
+      .update({ content: JSON.stringify(info) })
+      .eq('id', alertId);
+
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[API] 标记安全提醒已读失败:', e.message);
+    return res.status(500).json({ error: '操作失败' });
+  }
+});
+
+// ===================== 安全提醒状态管理 =====================
+app.post('/admin/security-alerts/status', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var { id, status } = req.body;
+    if (!id || !status) return res.status(400).json({ error: '缺少参数' });
+    var VALID_STATUSES = ['read', 'ignored', 'false_positive'];
+    if (VALID_STATUSES.indexOf(status) === -1) return res.status(400).json({ error: '无效状态' });
+
+    var { data: existing } = await supabase.from('posts')
+      .select('content')
+      .eq('id', id)
+      .eq('media_type', SECURITY_ALERT_MARKER)
+      .maybeSingle();
+    if (!existing) return res.status(404).json({ error: '提醒不存在' });
+
+    var info = {};
+    try { info = JSON.parse(existing.content || '{}'); } catch(e) {}
+    info.is_read = true;
+    if (status === 'ignored') info.ignored = true;
+    if (status === 'false_positive') { info.false_positive = true; info.ignored = true; }
+    info.reviewed_at = new Date().toISOString();
+    info.reviewed_by = ADMIN_USERNAME;
+
+    var { error } = await supabase.from('posts')
+      .update({ content: JSON.stringify(info) })
+      .eq('id', id);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+
+    await logAdminAudit('review_security_alert', ADMIN_USERNAME, 'alert:' + id + ' status:' + status);
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[API] 安全提醒状态更新失败:', e.message);
+    return res.status(500).json({ error: '操作失败' });
+  }
+});
+
+// ===================== 安全设置 =====================
+app.get('/admin/security-settings', verifyToken, rateLimit(60000, 20), async (req, res) => {
+  try {
+    var { data } = await supabase.from('posts')
+      .select('content')
+      .eq('media_type', ADMIN_META_MARKER)
+      .eq('media_url', 'security_settings')
+      .maybeSingle();
+    var settings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
+    if (data && data.content) {
+      try { var parsed = JSON.parse(data.content); Object.assign(settings, parsed); } catch(e) {}
+    }
+    return res.json({ settings: settings });
+  } catch(e) {
+    console.error('[API] 安全设置查询失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+app.post('/admin/security-settings', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var { record_device, browser_fingerprint, canvas_fingerprint, security_alerts } = req.body;
+    var settings = {};
+    if (typeof record_device === 'boolean') settings.record_device = record_device;
+    if (typeof browser_fingerprint === 'boolean') settings.browser_fingerprint = browser_fingerprint;
+    if (typeof canvas_fingerprint === 'boolean') settings.canvas_fingerprint = canvas_fingerprint;
+    if (typeof security_alerts === 'boolean') settings.security_alerts = security_alerts;
+
+    var { data: existing } = await supabase.from('posts')
+      .select('id')
+      .eq('media_type', ADMIN_META_MARKER)
+      .eq('media_url', 'security_settings')
+      .maybeSingle();
+
+    var oldSettings = {};
+    if (existing) {
+      // Merge with existing
+      var { data: oldData } = await supabase.from('posts')
+        .select('content')
+        .eq('id', existing.id)
+        .maybeSingle();
+      if (oldData && oldData.content) {
+        try { oldSettings = JSON.parse(oldData.content); } catch(e) {}
+      }
+      Object.assign(oldSettings, settings);
+      await supabase.from('posts').update({ content: JSON.stringify(oldSettings) }).eq('id', existing.id);
+    } else {
+      await supabase.from('posts').insert([{
+        user_name: ADMIN_USERNAME,
+        media_type: ADMIN_META_MARKER,
+        media_url: 'security_settings',
+        content: JSON.stringify(settings),
+        actor_key: 'sec_settings_' + Date.now()
+      }]);
+    }
+
+    // Audit log
+    await logAdminAudit('update_security_settings', ADMIN_USERNAME, JSON.stringify(settings));
+
+    return res.json({ ok: true, settings: oldSettings });
+  } catch(e) {
+    console.error('[API] 安全设置更新失败:', e.message);
+    return res.status(500).json({ error: '更新失败' });
+  }
+});
+
+// ===================== 日志清理 =====================
+app.post('/admin/cleanup-logs', verifyToken, rateLimit(60000, 3), async (req, res) => {
+  try {
+    var types = req.body.types || ['login', 'security', 'error'];
+    if (typeof types === 'string') types = [types];
+    var VALID_TYPES = ['login', 'security', 'error', 'all'];
+    var results = {};
+    var totalDeleted = 0;
+
+    if (types.indexOf('all') >= 0) types = ['login', 'security', 'error'];
+
+    for (var i = 0; i < types.length; i++) {
+      var t = types[i];
+      if (VALID_TYPES.indexOf(t) < 0 || t === 'all') continue;
+      results[t] = await cleanupOldLogs(t);
+      totalDeleted += results[t].deleted || 0;
+    }
+
+    await logAdminAudit('cleanup_logs', ADMIN_USERNAME, 'types:' + types.join(',') + ' deleted:' + totalDeleted);
+    return res.json({ ok: true, results: results, total_deleted: totalDeleted });
+  } catch(e) {
+    console.error('[API] 日志清理失败:', e.message);
+    return res.status(500).json({ error: '清理失败' });
+  }
+});
+
+// ===================== 审计日志查询 =====================
+app.get('/admin/audit-logs', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var limit = parseInt(req.query.limit) || 200;
+    if (limit > 500) limit = 500;
+    var { data, error } = await supabase.from('posts')
+      .select('id, user_name, content, media_url, created_at')
+      .eq('media_type', AUDIT_LOG_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    var logs = (data || []).map(function(row) {
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      return {
+        id: row.id,
+        action: info.action || row.media_url,
+        operator: info.operator || row.user_name,
+        detail: info.detail || '',
+        timestamp: info.timestamp || row.created_at,
+        created_at: row.created_at
+      };
+    });
+    return res.json({ data: logs });
+  } catch(e) {
+    console.error('[API] 审计日志查询失败:', e.message);
     return res.status(500).json({ error: '查询失败' });
   }
 });
@@ -2517,6 +3334,85 @@ app.post('/api/vip/notify', async (req, res) => {
 
   res.send('success');
 });
+
+// ===================== 客户端错误监控 =====================
+app.post('/api/client-error-log', rateLimit(60000, 30), async (req, res) => {
+  try {
+    var { type, message, stack, url, line, col, user_agent, timestamp } = req.body;
+    var errorType = (type || 'unknown').slice(0, 50);
+    var errorMsg = (message || '').slice(0, 500);
+    var errorStack = (stack || '').slice(0, 1000);
+    var pageUrl = (url || '').slice(0, 500);
+    var ua = (user_agent || '').slice(0, 500);
+
+    await supabase.from('posts').insert([{
+      user_name: 'system',
+      media_type: CLIENT_ERROR_MARKER,
+      media_url: errorType,
+      content: JSON.stringify({
+        type: errorType,
+        message: errorMsg,
+        stack: errorStack,
+        url: pageUrl,
+        line: line || null,
+        col: col || null,
+        user_agent: ua,
+        timestamp: timestamp || new Date().toISOString()
+      }),
+      actor_key: 'cl_err_' + Date.now()
+    }]);
+    return res.json({ ok: true });
+  } catch(e) {
+    return res.status(500).json({ error: '记录失败' });
+  }
+});
+
+app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var limit = parseInt(req.query.limit) || 200;
+    if (limit > 500) limit = 500;
+    var query = supabase.from('posts')
+      .select('id, content, media_url, created_at')
+      .eq('media_type', CLIENT_ERROR_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (req.query.type) {
+      query = query.eq('media_url', req.query.type);
+    }
+
+    var { data, error } = await query;
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+
+    var logs = (data || []).map(function(row) {
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      return {
+        id: row.id,
+        type: info.type || row.media_url,
+        message: info.message || '',
+        stack: info.stack || '',
+        url: info.url || '',
+        line: info.line,
+        col: info.col,
+        user_agent: info.user_agent || '',
+        timestamp: info.timestamp || row.created_at,
+        created_at: row.created_at
+      };
+    });
+    return res.json({ data: logs });
+  } catch(e) {
+    console.error('[API] 错误日志查询失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// 自动清理旧日志（每24小时执行一次）
+setInterval(function() {
+  cleanupOldLogs('login').catch(function() {});
+  cleanupOldLogs('security').catch(function() {});
+  cleanupOldLogs('error').catch(function() {});
+}, 24 * 60 * 60 * 1000);
 
 // ===================== 启动 =====================
 const port = process.env.PORT || 3000;
