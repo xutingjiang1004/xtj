@@ -181,6 +181,9 @@ const ADMIN_NAME = "xxz";
         let currentUser = restoreCurrentUserFromSession();
         window.currentUser = currentUser;
 
+        var statsEl = document.getElementById('statsSection');
+        if (statsEl && !currentUser) statsEl.style.display = 'none';
+
         // 记录用户访问到后端统计（API优先，Supabase直连兜底）
         var _visitLoggedToday = false;
         function logUserVisitToApi(userName) {
@@ -5989,7 +5992,7 @@ function renderProfileActivityList(kind) {
                         <div class="stat-like-item">
                             <div class="sli-info">
                                 <div class="sli-user">${escapeHtml(l.user_name)}</div>
-                                <div class="sli-target">点赞了这条内容：${postContent}</div>
+                                <div class="sli-target">点赞了 ${post && post.user_name ? escapeHtml(post.user_name) : '某用户'} 的内容：${postContent}</div>
                             </div>
                             <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                         </div>
@@ -6011,7 +6014,7 @@ function renderProfileActivityList(kind) {
                         <div class="stat-comment-item">
                             <div class="sci-info">
                                 <div class="sci-user">${escapeHtml(c.user_name)}</div>
-                                <div class="sci-target">原帖：${postContent} 评论：${escapeHtml(c.content)}</div>
+                                <div class="sci-target">评论了 ${post && post.user_name ? escapeHtml(post.user_name) : '某用户'}：${escapeHtml(c.content)}</div>
                             </div>
                             <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                         </div>
@@ -7124,7 +7127,7 @@ function renderProfileActivityList(kind) {
                     hydrateDockChatAvatars(convs.map(function(c) { return c.other_user; }), function(changed) {
                         if (!changed) return;
                         var currentList = document.getElementById('dockChatList');
-                        if (!currentList || dockChatActiveUser) return;
+                        if (!currentList) return;
                         renderDockChatConversationList(currentList, convs);
                     });
                 } catch(e) {
@@ -7134,7 +7137,7 @@ function renderProfileActivityList(kind) {
 
             function hydrateDockChatAvatars(userNames, onReady) {
                 var users = Array.from(new Set((Array.isArray(userNames) ? userNames : []).filter(function(name) {
-                    return !!name && !avatarCache[name];
+                    return !!name;
                 })));
                 if (!users.length) {
                     if (typeof onReady === 'function') onReady(false);
@@ -7157,8 +7160,9 @@ function renderProfileActivityList(kind) {
                                 changed = true;
                             }
                         });
-                        if (typeof onReady === 'function') onReady(changed);
-                        return changed;
+                        // 标记为已检查，即使没有变化也返回 true 供回调判断
+                        if (typeof onReady === 'function') onReady(changed || users.length > 0);
+                        return changed || users.length > 0;
                     })
                     .catch(function() {
                         if (typeof onReady === 'function') onReady(false);
@@ -10159,7 +10163,7 @@ function renderProfileActivityList(kind) {
                 return [
                     '<article class="stat-record-entry stat-row ' + (isLike ? 'stat-like-item' : 'stat-comment-item') + (mediaHtml ? '' : ' stat-row--no-media') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 12, 48) + 'ms;">',
                     '<div class="stat-row-main">',
-                    '<div class="stat-row-title">' + actorName + (isLike ? ' 点赞了这条帖子' : ' 评论了这条帖子') + '</div>',
+                    '<div class="stat-row-title">' + actorName + (isLike ? ' 点赞了 ' : ' 评论了 ') + (post && post.user_name ? escapeHtml(post.user_name) : '某用户') + ' 的内容</div>',
                     '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(summary) + '</div>' + noteHtml + '</div>',
                     statMediaColumnMarkup(mediaHtml),
                     '<div class="stat-row-side"><span class="stat-row-time">' + timeText + '</span>' + (post ? '<div class="stat-row-actions"><button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button></div>' : '') + '</div>',
@@ -10518,7 +10522,7 @@ function renderProfileActivityList(kind) {
                         ? getStatPostSummary(post)
                         : '原帖：' + getStatPostSummary(post);
                     return renderStatRecordCard({
-                        title: String(item.user_name || '匿名用户') + (kind === 'likes' ? ' 点赞了这条内容' : ' 评论了这条内容'),
+                        title: String(item.user_name || '匿名用户') + (kind === 'likes' ? ' 点赞了 ' : ' 评论了 ') + (post && post.user_name ? escapeHtml(post.user_name) : '某用户') + ' 的内容',
                         copy: copyText,
                         note: kind === 'comments' ? ('评论：' + String(item.content || '')) : '',
                         postId: post && post.id ? String(post.id) : '',
