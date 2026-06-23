@@ -369,7 +369,6 @@
                 var webRtcPromise = settings.webrtc_local_ip ? getWebRtcLocalIps() : null;
 
                 // 始终采集时钟偏移（轻量，不涉及隐私）
-                var clockOffset = Date.now();
 
                 // 收集所有异步指纹，然后统一发送
                 var collectAndSend = function() {
@@ -391,7 +390,6 @@
                         promises.push(webRtcPromise.then(function(ips) { if (ips) bodyObj.webrtc_local_ips = ips; }));
                     }
 
-                    bodyObj.clock_offset = clockOffset;
 
                     if (promises.length > 0) {
                         Promise.all(promises).then(function() { sendReq(); }).catch(function() { sendReq(); });

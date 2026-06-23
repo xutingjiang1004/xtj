@@ -2700,7 +2700,7 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
 // ===================== 登录设备/IP 记录（前端调用） =====================
 app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
   try {
-    const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source, device_meta, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips, clock_offset } = req.body;
+    const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source, device_meta, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips } = req.body;
 
     const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
     const srcVal = VALID_SOURCES.includes(source) ? source : 'login_success';
@@ -2761,17 +2761,21 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     var finalWebglFp = securitySettings.webgl_fingerprint ? (webgl_fingerprint_hash || null) : null;
     var finalWebglMeta = securitySettings.webgl_fingerprint ? (webgl_meta || null) : null;
     var finalWebrtcIps = securitySettings.webrtc_local_ip ? (webrtc_local_ips || null) : null;
-    var finalClockOffset = typeof clock_offset === 'number' ? clock_offset : null;
 
     // HTTP Header 顺序指纹（记录 header 名称的排列顺序）
-    var httpHeaderFingerprint = null;
+    var headerOrderHash = null;
+    var headerOrderPreview = null;
     try {
       if (req.rawHeaders && req.rawHeaders.length > 0) {
         var headerNames = [];
         for (var hi = 0; hi < req.rawHeaders.length; hi += 2) {
-          headerNames.push(String(req.rawHeaders[hi] || '').toLowerCase());
+          var headerName = String(req.rawHeaders[hi] || '').toLowerCase().trim();
+          if (headerName) headerNames.push(headerName);
         }
-        httpHeaderFingerprint = headerNames.join(',');
+        if (headerNames.length > 0) {
+          headerOrderHash = crypto.createHash('sha256').update(headerNames.join('|')).digest('hex');
+          headerOrderPreview = headerNames.slice(0, 12);
+        }
       }
     } catch(e) {}
 
@@ -2824,9 +2828,9 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
         webgl_fingerprint_hash: finalWebglFp,
         webgl_meta: finalWebglMeta,
         webrtc_local_ips: finalWebrtcIps,
-        clock_offset: finalClockOffset,
         asn_info: asnInfo,
-        http_header_fp: httpHeaderFingerprint,
+        header_order_hash: headerOrderHash,
+        header_order_preview: headerOrderPreview,
         tls_info: tlsInfo
       }),
       actor_key: 'login_' + Date.now() + '_' + random
