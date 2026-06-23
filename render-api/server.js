@@ -3296,11 +3296,8 @@ app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20),
 });
 
 // ===================== 管理员邮件通知 API =====================
-const SMTP_HOST = process.env.SMTP_HOST || 'smtp.qq.com';
-const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587', 10);
-const SMTP_USER = process.env.SMTP_USER || '';
-const SMTP_PASS = process.env.SMTP_PASS || '';
-const SMTP_FROM = process.env.FROM_EMAIL || SMTP_USER || 'noreply@xtj.app';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const RESEND_FROM = process.env.FROM_EMAIL || 'onboarding@resend.dev';
 
 // 获取有邮箱的用户列表
 app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req, res) => {
@@ -3338,7 +3335,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
   var tmr = setTimeout(function() {
     timedOut = true;
     if (!res.headersSent) {
-      try { return res.status(504).json({ error: '发送邮件超时，请检查SMTP配置或稍后重试' }); } catch(e) {}
+      try { return res.status(504).json({ error: '发送邮件超时，请稍后重试' }); } catch(e) {}
     }
   }, 25000);
   try {
@@ -3360,31 +3357,33 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     const isHtml = content_type === 'html';
     const bodyText = isHtml ? content.replace(/<[^>]*>/g, '') : content;
     const bodyHtml = isHtml ? content : content.split('\n').map(function(l) { return '<p>' + l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p>'; }).join('');
-    if (!SMTP_USER || !SMTP_PASS) {
-      return res.status(500).json({ error: 'SMTP 未配置，请在环境变量中设置 SMTP_USER 和 SMTP_PASS' });
+    if (!RESEND_API_KEY) {
+      return res.status(500).json({ error: 'Resend API Key 未配置，请在环境变量中设置 RESEND_API_KEY' });
     }
-    const nodemailer = require('nodemailer');
-    const transporter = nodemailer.createTransport({
-      host: SMTP_HOST,
-      port: SMTP_PORT,
-      secure: SMTP_PORT === 465,
-      auth: { user: SMTP_USER, pass: SMTP_PASS },
-      connectionTimeout: 8000,
-      greetingTimeout: 8000,
-      socketTimeout: 10000
-    });
     const sent = [];
     const failed = [];
     for (const r of recipients) {
       try {
-        await transporter.sendMail({
-          from: '"XTJ 管理员" <' + SMTP_FROM + '>',
-          to: r.email,
-          subject: subjectVal,
-          text: bodyText,
-          html: bodyHtml
+        var mailRes = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + RESEND_API_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from: 'XTJ 管理员 <' + RESEND_FROM + '>',
+            to: [r.email],
+            subject: subjectVal,
+            text: bodyText,
+            html: bodyHtml
+          })
         });
-        sent.push(r.user_name || r.email);
+        if (mailRes.ok) {
+          sent.push(r.user_name || r.email);
+        } else {
+          var mailErr = await mailRes.text();
+          failed.push({ user: r.user_name || r.email, error: 'HTTP ' + mailRes.status + ': ' + mailErr });
+        }
       } catch (e) {
         failed.push({ user: r.user_name || r.email, error: e.message });
       }
@@ -3398,9 +3397,6 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     });
   } catch (e) {
     console.error('[Email API] 发送邮件失败:', e.message);
-    if (e.code === 'ESOCKET' || e.code === 'ETIMEDOUT') {
-      return res.status(504).json({ error: '连接SMTP服务器超时，请检查SMTP_HOST/SMTP_PORT配置' });
-    }
     return res.status(500).json({ error: '发送邮件失败: ' + e.message });
   } finally {
     clearTimeout(tmr);
