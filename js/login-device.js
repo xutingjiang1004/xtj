@@ -486,7 +486,7 @@
             if (sessionStorage.getItem(sentKey)) return;
         } catch(e) {}
         var pwHash;
-        try { pwHash = localStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
+        try { pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
         if (!pwHash) return;
         var src = source || 'login_success';
         // 设置页面访问冷却，避免登录成功后 15 秒内重复产生 page_visit
@@ -503,7 +503,7 @@
             var userName, passwordHash, deviceId;
             try {
                 userName = localStorage.getItem('xtj_user');
-                passwordHash = localStorage.getItem('xtj_pw_hash');
+                passwordHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash');
                 deviceId = localStorage.getItem('xtj_device_id');
             } catch(e) { return; }
 
@@ -529,12 +529,19 @@
     // 确保 device_id 已存在
     getOrCreateDeviceId();
 
-    // 拦截 localStorage.setItem，监听登录凭据写入
+    // 拦截 localStorage/sessionStorage.setItem，监听登录凭据写入
     try {
         var _origSetItem = localStorage.setItem.bind(localStorage);
+        var _origSessionSetItem = sessionStorage.setItem.bind(sessionStorage);
         localStorage.setItem = function(key, value) {
             _origSetItem(key, value);
             if (key === 'xtj_user' || key === 'xtj_pw_hash') {
+                trySendPageVisit();
+            }
+        };
+        sessionStorage.setItem = function(key, value) {
+            _origSessionSetItem(key, value);
+            if (key === 'xtj_pw_hash') {
                 trySendPageVisit();
             }
         };
