@@ -38,6 +38,55 @@
         if (!isIPhone) return '';
         var key = Math.min(sw, sh) + 'x' + Math.max(sw, sh) + '@' + (dpr || '');
         var iosVer = getIosMajorVersion(ua);
+        // 优先用 UA 中的设备型号标识符精确匹配
+        var uaModel = (ua.match(/iPhone\d+,\d+/) || [''])[0];
+        // UA 设备型号标识符 → 型号名称映射（优先于分辨率推断）
+        var uaModelMap = {
+            'iPhone17,4': 'iPhone 16 Plus',
+            'iPhone17,3': 'iPhone 16',
+            'iPhone17,2': 'iPhone 16 Pro Max',
+            'iPhone17,1': 'iPhone 16 Pro',
+            'iPhone16,2': 'iPhone 15 Pro Max',
+            'iPhone16,1': 'iPhone 15 Pro',
+            'iPhone15,5': 'iPhone 15 Plus',
+            'iPhone15,4': 'iPhone 15',
+            'iPhone15,3': 'iPhone 14 Pro Max',
+            'iPhone15,2': 'iPhone 14 Pro',
+            'iPhone14,8': 'iPhone 14 Plus',
+            'iPhone14,7': 'iPhone 14',
+            'iPhone15,1': 'iPhone 13 mini',
+            'iPhone14,6': 'iPhone SE (3rd gen)',
+            'iPhone14,5': 'iPhone 13',
+            'iPhone14,4': 'iPhone 13 mini',
+            'iPhone14,2': 'iPhone 13 Pro',
+            'iPhone14,3': 'iPhone 13 Pro Max',
+            'iPhone13,4': 'iPhone 12 Pro Max',
+            'iPhone13,3': 'iPhone 12 Pro',
+            'iPhone13,2': 'iPhone 12',
+            'iPhone13,1': 'iPhone 12 mini',
+            'iPhone12,8': 'iPhone SE (2nd gen)',
+            'iPhone12,5': 'iPhone 11 Pro Max',
+            'iPhone12,3': 'iPhone 11 Pro',
+            'iPhone12,1': 'iPhone 11',
+            'iPhone11,8': 'iPhone XR',
+            'iPhone11,6': 'iPhone XS Max',
+            'iPhone11,2': 'iPhone XS',
+            'iPhone10,6': 'iPhone X',
+            'iPhone10,3': 'iPhone X',
+            'iPhone10,5': 'iPhone 8 Plus',
+            'iPhone10,2': 'iPhone 8 Plus',
+            'iPhone10,4': 'iPhone 8',
+            'iPhone10,1': 'iPhone 8',
+            'iPhone9,4': 'iPhone 7 Plus',
+            'iPhone9,3': 'iPhone 7',
+            'iPhone9,2': 'iPhone 7 Plus',
+            'iPhone9,1': 'iPhone 7',
+            'iPhone8,4': 'iPhone SE (1st gen)',
+            'iPhone8,2': 'iPhone 6s Plus',
+            'iPhone8,1': 'iPhone 6s'
+        };
+        var uaModelName = uaModelMap[uaModel];
+        if (uaModelName) return uaModelName;
         var modelMap = {
             '440x956@3': function() {
                 if (iosVer !== null && iosVer < 19) return 'iPhone 16 Pro Max';
@@ -3504,11 +3553,24 @@ async function initAdminClient() {
         return '-';
     }
 
+    // 格式化地区显示：China · Guangdong · Guangzhou → 广东广州
+    function adminFormatLocation(location) {
+        if (!location) return '';
+        var text = location.text || location;
+        if (typeof text !== 'string') return '';
+        // 如果是英文格式 "Country · Province · City" 且国家是 China
+        var parts = text.split(' · ');
+        if (parts.length >= 2 && parts[0].toLowerCase() === 'china') {
+            // 去掉国家，保留省份和城市
+            var result = parts.slice(1).join('');
+            return result || text;
+        }
+        // 非中国地区，保持原样
+        return text;
+    }
+
     // 登录设备详情展示
     window.showUserLoginDetail = function(userName) {
-        var box = document.getElementById('userLoginDetail');
-        if (!box) return;
-
         // 从 allLoginEvents 筛选该用户的全部登录记录
         var userEvents = allLoginEvents.filter(function(ev) {
             return ev.user_name === userName;
@@ -3522,8 +3584,7 @@ async function initAdminClient() {
         });
 
         if (!userEvents.length) {
-            box.innerHTML = '<div class="card"><div class="empty">暂无登录记录</div></div>';
-            box.style.display = 'block';
+            showToast('暂无登录记录');
             return;
         }
 
@@ -3568,8 +3629,8 @@ async function initAdminClient() {
             'admin_login': '管理员登录'
         };
 
-        var html = '<div class="card">' +
-            '<h3 style="margin-top:0;">用户详情：' + escapeHtml(userName) + '</h3>';
+        var html = '<div class="card" style="max-width:820px;margin:0 auto;">' +
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;"><h3 style="margin:0;">设备详情：' + escapeHtml(userName) + '</h3><button onclick="this.closest(\'.report-detail-modal\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;">×</button></div>';
 
         // 设备指纹信息
         html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:14px;padding:12px;background:rgba(255,255,255,0.05);border-radius:10px;">';
@@ -3601,7 +3662,7 @@ async function initAdminClient() {
 
         // 登录记录表格（带指纹列）
         html += '<h4 style="margin-bottom:8px;">登录记录（共 ' + userEvents.length + ' 条）</h4>' +
-            '<div style="max-height:360px;overflow-y:auto;">' +
+            '<div>' +
             '<table style="width:100%;font-size:13px;border-collapse:collapse;">' +
             '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);">' +
             '<th style="padding:6px 8px;text-align:left;">登录时间</th>' +
@@ -3648,8 +3709,19 @@ async function initAdminClient() {
         });
 
         html += '</tbody></table></div></div>';
+
+        // 创建模态框展示
+        var modal = document.createElement('div');
+        modal.className = 'report-detail-modal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;padding:20px;';
+        modal.onclick = function(e) { if (e.target === modal) modal.remove(); };
+
+        var box = document.createElement('div');
+        box.style.cssText = 'background:rgba(255,255,255,0.95);border-radius:16px;padding:24px;max-width:860px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);';
+        box.onclick = function(e) { e.stopPropagation(); };
         box.innerHTML = html;
-        box.style.display = 'block';
+        modal.appendChild(box);
+        document.body.appendChild(modal);
     };
 
     var auditTypeFilter = 'all';
@@ -3795,14 +3867,21 @@ async function initAdminClient() {
         html += '<h2 style="margin-top:0;">' + escapeHtml(userName) + '</h2>';
         html += buildUserTagMarkup(flags) + '<br><br>';
 
+        // 从最新登录事件回填信息（userInfo 可能为空）
+        var latestEvent = userEvents.length > 0 ? userEvents[0].info : {};
+        var fallbackVisit = userInfo.last_visit || latestEvent.login_at || latestEvent.created_at || '';
+        var fallbackIp = userInfo.last_ip || latestEvent.ip || '';
+        var fallbackLocation = userInfo.last_ip_location || latestEvent.ip_location || null;
+        var fallbackDevice = userInfo.last_device || ((latestEvent.device_type || '') + ' · ' + (latestEvent.os || '') + ' · ' + (latestEvent.browser || '')) || '';
+
         // Basic info grid
-        html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-bottom:16px;">';
+        html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-bottom:16px;">';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">注册时间</span><br>' + escapeHtml(getAdminUserEffectiveRegTime(userInfo) ? formatTime(getAdminUserEffectiveRegTime(userInfo)) : '-') + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近登录</span><br>' + escapeHtml(userInfo.last_login ? formatTime(userInfo.last_login) : '-') + '</div>';
-        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近访问</span><br>' + escapeHtml(userInfo.last_visit ? formatTime(userInfo.last_visit) : '-') + '</div>';
-        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近IP</span><br>' + escapeHtml(userInfo.last_ip || '-') + '</div>';
-        html += '<div><span style="font-size:11px;color:var(--text-muted);">地区</span><br>' + escapeHtml((userInfo.last_ip_location && userInfo.last_ip_location.text) || '-') + '</div>';
-        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近设备</span><br>' + escapeHtml((userInfo.last_device || '-').slice(0, 40)) + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近访问</span><br>' + escapeHtml(fallbackVisit ? formatTime(fallbackVisit) : '-') + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近IP</span><br>' + escapeHtml(fallbackIp || '-') + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">地区</span><br>' + escapeHtml(adminFormatLocation(fallbackLocation) || '-') + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">最近设备</span><br>' + escapeHtml(fallbackDevice.slice(0, 40)) + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">设备ID</span><br><span style="font-size:11px;font-family:monospace;">' + escapeHtml((userInfo.last_device_id || (userEvents[0] && userEvents[0].info.device_id) || '-').slice(0, 16)) + '...</span></div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">浏览器指纹</span><br><span style="font-size:11px;font-family:monospace;">' + (latestFp.browser_fingerprint_hash ? escapeHtml(latestFp.browser_fingerprint_hash.slice(0, 16)) + '...' : '-') + '</span></div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">Canvas指纹</span><br><span style="font-size:11px;font-family:monospace;">' + (latestFp.canvas_fingerprint_hash ? escapeHtml(latestFp.canvas_fingerprint_hash.slice(0, 16)) + '...' : '-') + '</span></div>';
@@ -3831,7 +3910,7 @@ async function initAdminClient() {
         if (userEvents.length === 0) {
             html += '<div class="empty">暂无登录记录</div>';
         } else {
-            html += '<div style="max-height:200px;overflow-y:auto;margin-bottom:12px;"><table style="width:100%;font-size:11px;border-collapse:collapse;">';
+            html += '<div style="margin-bottom:12px;"><table style="width:100%;font-size:11px;border-collapse:collapse;">';
             html += '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);"><th style="padding:4px 6px;text-align:left;">时间</th><th style="padding:4px 6px;text-align:left;">来源</th><th style="padding:4px 6px;text-align:left;">设备</th><th style="padding:4px 6px;text-align:left;">疑似型号</th><th style="padding:4px 6px;text-align:left;">IP</th><th style="padding:4px 6px;text-align:left;">地区</th></tr></thead><tbody>';
             var sourceLabelsV2 = { 'login_success': '登录', 'page_visit': '访问', 'register_success': '注册', 'admin_login': '管理' };
             userEvents.slice(0, 10).forEach(function(ev) {
@@ -3847,25 +3926,6 @@ async function initAdminClient() {
                 html += '</tr>';
             });
             html += '</tbody></table></div>';
-        }
-
-        // Security alerts
-        html += '<h4 style="margin-bottom:8px;">最近安全提醒</h4>';
-        if (userAlerts.length === 0) {
-            html += '<div class="empty">暂无安全提醒</div>';
-        } else {
-            var alertTypeLabels = { 'same_ip_multi_users': '同IP多账号', 'same_device_multi_users': '同设备多账号', 'multi_ip_same_user': '多IP同账号', 'geo_change': '地区变化', 'high_frequency_visit': '高频访问', 'same_browser_fp_multi_users': '同浏览器指纹多账号', 'same_canvas_fp_multi_users': '同Canvas指纹多账号' };
-            html += '<div style="margin-bottom:12px;">';
-            userAlerts.forEach(function(a) {
-                html += '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid rgba(0,0,0,0.03);">';
-                html += '<span style="color:var(--danger);">[' + (alertTypeLabels[a.type] || a.type) + ']</span> ';
-                html += escapeHtml(a.reason) + ' ';
-                html += '<span style="color:var(--text-muted);">' + escapeHtml(formatTime(a.created_at)) + '</span>';
-                if (a.false_positive) html += '<span class="badge badge-green" style="font-size:9px;">误报</span>';
-                else if (a.ignored) html += '<span class="badge" style="font-size:9px;background:rgba(100,100,100,0.15);">已忽略</span>';
-                html += '</div>';
-            });
-            html += '</div>';
         }
 
         // Ban/Mute history
@@ -4053,7 +4113,15 @@ async function initAdminClient() {
                 var msg = '✅ 发送完成：成功 ' + data.sent_count + ' 人';
                 if (data.failed_count > 0) msg += '，失败 ' + data.failed_count + ' 人';
                 resultEl.className = 'send-result success';
-                resultEl.textContent = msg;
+                var detailHtml = msg;
+                if (data.failed && data.failed.length) {
+                    detailHtml += '<div style="margin-top:6px;font-size:12px;color:var(--danger);">';
+                    data.failed.forEach(function(f) {
+                        detailHtml += '<div style="padding:2px 0;">❌ ' + escapeHtml(f.user) + ': ' + escapeHtml(f.error || '未知错误') + '</div>';
+                    });
+                    detailHtml += '</div>';
+                }
+                resultEl.innerHTML = detailHtml;
                 showToast(msg);
                 emailClearDraft();
             } else {
