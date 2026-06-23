@@ -18,10 +18,21 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SOURCE_DIR = process.env.IMAGE_SOURCE_DIR || path.resolve(__dirname, "../../uploads");
 
+function safeResolve(inputPath) {
+  const resolved = path.resolve(inputPath);
+  const relative = path.relative(SOURCE_DIR, resolved);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('路径越权：不允许访问 ' + SOURCE_DIR + ' 之外的目录');
+  }
+  return resolved;
+}
+
 function validateFile(filePath) {
-  if (!fs.existsSync(filePath)) throw new Error(`文件不存在: ${filePath}`);
+  const fp = safeResolve(filePath);
+  if (!fs.existsSync(fp)) throw new Error(`文件不存在: ${fp}`);
   const valid = [".jpg",".jpeg",".png",".webp",".avif",".tiff",".gif"];
-  if (!valid.includes(path.extname(filePath).toLowerCase())) throw new Error(`不支持的格式: ${path.extname(filePath)}`);
+  if (!valid.includes(path.extname(fp).toLowerCase())) throw new Error(`不支持的格式: ${path.extname(fp)}`);
+  return fp;
 }
 
 function fmtSize(b) {
@@ -33,8 +44,7 @@ function fmtSize(b) {
 const server = new McpServer({ name: "xtj-image-mcp", version: "1.0.0" });
 
 server.tool("image_analyze", "分析图片信息（尺寸、格式、文件大小、色彩空间等）", { filepath: z.string() }, async ({ filepath }) => {
-  const fp = path.resolve(filepath);
-  validateFile(fp);
+  const fp = validateFile(filepath);
   const meta = await sharp(fp).metadata();
   const size = fs.statSync(fp).size;
   const alphaText = meta.hasAlpha ? "是" : "否";
@@ -43,8 +53,7 @@ server.tool("image_analyze", "分析图片信息（尺寸、格式、文件大�
 });
 
 server.tool("image_compress", "压缩图片文件", { filepath: z.string(), quality: z.number().optional(), output_suffix: z.string().optional() }, async (args) => {
-  const fp = path.resolve(args.filepath);
-  validateFile(fp);
+  const fp = validateFile(args.filepath);
   const ext = path.extname(fp);
   const out = `${fp.slice(0, -ext.length)}${args.output_suffix||"_compressed"}${ext}`;
   const q = args.quality ?? 80;
@@ -56,8 +65,7 @@ server.tool("image_compress", "压缩图片文件", { filepath: z.string(), qual
 });
 
 server.tool("image_convert", "转换图片格式（WebP/AVIF/JPEG/PNG）", { filepath: z.string(), format: z.enum(["jpeg","png","webp","avif","tiff"]), quality: z.number().optional() }, async (args) => {
-  const fp = path.resolve(args.filepath);
-  validateFile(fp);
+  const fp = validateFile(args.filepath);
   const out = `${fp.slice(0, -path.extname(fp).length)}.${args.format}`;
   const q = args.quality ?? 85;
   let p = sharp(fp);
@@ -67,8 +75,7 @@ server.tool("image_convert", "转换图片格式（WebP/AVIF/JPEG/PNG）", { fil
 });
 
 server.tool("image_resize", "调整图片尺寸", { filepath: z.string(), width: z.number(), height: z.number().optional(), fit: z.enum(["cover","contain","fill","inside","outside"]).optional(), output_suffix: z.string().optional() }, async (args) => {
-  const fp = path.resolve(args.filepath);
-  validateFile(fp);
+  const fp = validateFile(args.filepath);
   const ext = path.extname(fp);
   const out = `${fp.slice(0,-ext.length)}${args.output_suffix||"_resized"}${ext}`;
   const r = { width: args.width };
@@ -79,8 +86,7 @@ server.tool("image_resize", "调整图片尺寸", { filepath: z.string(), width:
 });
 
 server.tool("image_generate_thumbnails", "生成多尺寸响应式缩略图", { filepath: z.string(), format: z.enum(["jpeg","webp","avif"]).optional(), quality: z.number().optional(), sizes: z.array(z.object({ width: z.number(), label: z.string() })).optional() }, async (args) => {
-  const fp = path.resolve(args.filepath);
-  validateFile(fp);
+  const fp = validateFile(args.filepath);
   const sizes = args.sizes || [{width:200,label:"sm"},{width:400,label:"md"},{width:800,label:"lg"}];
   const fmt = args.format || "webp";
   const q = args.quality ?? 80;
@@ -97,7 +103,7 @@ server.tool("image_generate_thumbnails", "生成多尺寸响应式缩略图", { 
 });
 
 server.tool("image_batch_optimize", "批量优化目录下所有图片", { directory: z.string(), quality: z.number().optional(), format: z.enum(["webp","avif","jpeg"]).optional(), max_width: z.number().optional(), glob: z.string().optional() }, async (args) => {
-  const dir = path.resolve(args.directory);
+  const dir = safeResolve(args.directory);
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error(`目录不存在: ${dir}`);
   const g = args.glob||"*.{jpg,jpeg,png,webp}";
   const exts = g.replace("{","").replace("}","").split(",").map(s=>path.extname(s.trim().replace("*","")).toLowerCase());

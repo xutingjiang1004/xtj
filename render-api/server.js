@@ -5,7 +5,6 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
-const { AlipaySdk } = require('alipay-sdk');
 
 const app = express();
 
@@ -18,29 +17,21 @@ app.disable('x-powered-by');
 // ===================== 配置 =====================
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const API_SECRET = process.env.API_SECRET || crypto
-  .createHash('sha256')
-  .update([
-    'xtj-admin-fallback-secret',
-    process.env.ADMIN_USERNAME || 'xxz',
-    process.env.ADMIN_PASSWORD || '',
-    process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || '',
-    process.env.SUPABASE_URL || 'https://ithowxqignlhkwaykglt.supabase.co'
-  ].join('|'))
-  .digest('hex');
+const API_SECRET = process.env.API_SECRET;
+if (!API_SECRET) {
+  console.error('[FATAL] API_SECRET 环境变量未设置，拒绝启动。在 Render Dashboard 中设置 API_SECRET。');
+  process.exit(1);
+}
 const ADMIN_TOKEN_EXPIRY_HOURS = Math.min(
   Math.max(parseInt(process.env.ADMIN_TOKEN_EXPIRY_HOURS || '72', 10) || 72, 1),
   168
 );
 const TOKEN_EXPIRY_MS = ADMIN_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000;
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ithowxqignlhkwaykglt.supabase.co';
-// SUPABASE SERVICE_KEY 优先，回退到 ANON KEY（本地开发/演示模式）
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
 if (!SUPABASE_SERVICE_KEY) {
-  // 从 config.js 读取 ANON KEY 作为最终回退
-  console.warn('[WARN] SUPABASE_SERVICE_KEY not set. Using configured ANON KEY as fallback.');
-} else {
-  console.log('[SUPABASE] Service key loaded' + (process.env.SUPABASE_SERVICE_KEY ? '' : ' (anon fallback)'));
+  console.error('[FATAL] SUPABASE_SERVICE_KEY 环境变量未设置，拒绝启动。');
+  process.exit(1);
 }
 
 // Allowed frontend origins.
@@ -55,13 +46,6 @@ if (ALLOWED_ORIGINS.length === 0) {
 
 if (!ADMIN_PASSWORD) {
   console.warn('[WARN] ADMIN_PASSWORD is not configured.');
-}
-if (!process.env.API_SECRET) {
-  console.warn('[WARN] API_SECRET not set. Using deterministic fallback secret; set API_SECRET in Render for stronger isolation.');
-}
-if (!SUPABASE_SERVICE_KEY) {
-  console.error('[FATAL] No Supabase key available. Server will not start.');
-  process.exit(1);
 }
 
 // 初始化 Supabase 客户端（仅使用 service_role key，禁止 anon key 兜底）
@@ -407,12 +391,12 @@ app.use(cors({
     if (ALLOWED_ORIGINS.length > 0 && ALLOWED_ORIGINS.includes(origin)) {
       return callback(null, true);
     }
-    // 自动检测模式：检查是否匹配服务器域名或 Render 域名
+    // 自动检测模式：检查是否匹配服务器域名或已知域名
     if (ALLOWED_ORIGINS.length === 0) {
       try {
         var originHost = new URL(origin).hostname;
-        // 允许同域名（通过 SERVER_HOSTNAME 或 Render 环境变量）、Render/ Vercel 域名、本地开发域名
-        if (originHost === SERVER_HOSTNAME || originHost.endsWith('.onrender.com') || originHost.endsWith('.vercel.app') || originHost === 'localhost' || originHost === '127.0.0.1') {
+        // 允许同域名（通过 SERVER_HOSTNAME 或 Render 环境变量）、本地开发域名
+        if (originHost === SERVER_HOSTNAME || originHost === 'localhost' || originHost === '127.0.0.1') {
           return callback(null, true);
         }
       } catch(e) {}
@@ -438,6 +422,18 @@ app.use(function corsErrorHandler(err, req, res, next) {
 });
 
 app.use(express.json({ limit: '1mb' }));
+
+// HTTPS 重定向（生产环境强制跳转 HTTPS）
+app.use((req, res, next) => {
+  if (!req.secure && req.headers['x-forwarded-proto'] !== 'https') {
+    const host = req.headers.host || '';
+    // 仅在非本地开发环境重定向（避免本地 localhost 也被跳转）
+    if (host && !host.startsWith('localhost:') && !host.startsWith('127.0.0.1:')) {
+      return res.redirect(301, 'https://' + host + req.originalUrl);
+    }
+  }
+  next();
+});
 
 // 安全响应头 + CSRF 防护 + 访问记录（放在静态文件之前，确保 HTML 也带上安全头）
 app.use((req, res, next) => {
@@ -3278,9 +3274,6 @@ app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20),
 const VIP_MARKER = '__vip__';
 const VIP_ORDER_MARKER = '__vip_order__';
 const VIP_PLAN_MARKER = '__vip_plan__';
-// 测试模式：无需支付宝凭证即可支付
-// 当 ALIPAY_APP_ID 和 ALIPAY_PUBLIC_KEY 都配置时使用真实沙箱支付
-const LOCAL_TEST_MODE = !(process.env.ALIPAY_APP_ID && process.env.ALIPAY_PUBLIC_KEY);
 
 const VIP_PLANS = [
   {
@@ -3292,31 +3285,6 @@ const VIP_PLANS = [
     features: ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post']
   }
 ];
-
-// ===================== 支付宝 SDK 初始化 =====================
-let alipaySdk = null;
-if (!LOCAL_TEST_MODE) {
-  try {
-    const privateKeyPath = process.env.ALIPAY_APP_PRIVATE_KEY_PATH || path.join(__dirname, 'alipay_private_key.pem');
-    const privateKey = fs.readFileSync(privateKeyPath, 'utf8');
-
-    alipaySdk = new AlipaySdk({
-      appId: process.env.ALIPAY_APP_ID,
-      privateKey: privateKey,
-      alipayPublicKey: process.env.ALIPAY_PUBLIC_KEY,
-      gateway: process.env.ALIPAY_GATEWAY || 'https://openapi-sandbox.dl.alipaydev.com/gateway.do',
-      signType: 'RSA2'
-    });
-    console.log('[Alipay] SDK initialized (sandbox mode)');
-  } catch(e) {
-    console.error('[Alipay] SDK init failed:', e.message);
-    console.warn('[Alipay] Falling back to local test mode');
-  }
-}
-if (!alipaySdk) {
-  // 如果 SDK 初始化失败，仍然保持测试模式
-  console.log('[Alipay] Using local test mode (no Alipay)');
-}
 
 // 获取可用套餐列表
 app.get('/api/vip/plans', rateLimit(60000, 30), (req, res) => {
@@ -3388,28 +3356,17 @@ app.post('/api/vip/create-order', rateLimit(60000, 10), async (req, res) => {
 
     if (orderErr) return res.status(400).json({ error: sanitizeError(orderErr) });
 
-    if (LOCAL_TEST_MODE) {
-      // 测试模式：立即完成支付
-      const orderResult = await processVipPayment(userNameVal, orderNo, plan);
-      return res.json({ order_no: orderNo, amount: plan.price, test_mode: true, result: orderResult });
-    }
-
-    // 生产模式返回支付宝支付表单/URL（需要配置 ALIPAY_APP_ID 等环境变量）
-    return res.json({
-      order_no: orderNo,
-      amount: plan.price,
-      pay_url: '/api/vip/pay/' + orderNo,
-      test_mode: false
-    });
+    // 立即完成激活
+    const orderResult = await processVipPayment(userNameVal, orderNo, plan);
+    return res.json({ order_no: orderNo, amount: plan.price, test_mode: true, result: orderResult });
   } catch(e) {
     console.error('[VIP] 创建订单失败:', e.message);
     return res.status(500).json({ error: '创建订单失败' });
   }
 });
 
-// 测试模式：直接激活VIP（免支付流程）
+// 直接激活VIP（免支付流程）
 app.post('/api/vip/activate-test', rateLimit(60000, 5), async (req, res) => {
-  if (!LOCAL_TEST_MODE) return res.status(403).json({ error: '生产模式下不支持测试激活' });
   try {
     const { user_name } = req.body;
     const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
@@ -3513,102 +3470,6 @@ app.get('/api/vip/status', rateLimit(60000, 60), async (req, res) => {
     console.error('[VIP] 查询状态失败:', e.message);
     return res.status(500).json({ error: '查询VIP状态失败' });
   }
-});
-
-// 生产模式：获取支付宝支付URL（需配置真实支付宝参数）
-app.get('/api/vip/pay/:orderNo', async (req, res) => {
-  const orderNo = req.params.orderNo;
-  const { data: orders } = await supabase.from('posts')
-    .select('*')
-    .eq('media_type', VIP_ORDER_MARKER)
-    .eq('media_url', orderNo)
-    .limit(1);
-
-  if (!orders || orders.length === 0) return res.status(404).json({ error: '订单不存在' });
-
-  try {
-    var orderData = JSON.parse(orders[0].content || '{}');
-    if (orderData.status === 'paid') return res.json({ error: '订单已支付' });
-
-    if (!alipaySdk) {
-      // 测试模式：直接跳转成功页
-      return res.redirect('/?vip=success');
-    }
-
-    // ===== 支付宝手机网站支付 alipay.trade.wap.pay =====
-    const bizContent = {
-      out_trade_no: orderNo,
-      product_code: 'QUICK_WAP_WAY',
-      total_amount: (orderData.amount || 3).toFixed(2),
-      subject: 'XTJ Pro 会员',
-      body: 'XTJ Pro ' + (orderData.plan_name || '月度会员'),
-      quit_url: process.env.ALIPAY_RETURN_URL || 'http://localhost:3000',
-      time_expire: new Date(Date.now() + 30 * 60 * 1000).toISOString().replace(/\.\d{3}/, '')
-    };
-
-    try {
-      // 使用 pageExec 生成自动跳转表单
-      const form = await alipaySdk.pageExec('alipay.trade.wap.pay', {
-        notifyUrl: process.env.ALIPAY_NOTIFY_URL || 'http://localhost:3000/api/vip/alipay/notify',
-        returnUrl: process.env.ALIPAY_RETURN_URL + '/?vip=success&order=' + orderNo
-      }, bizContent);
-
-      // 返回完整的自动提交HTML表单
-      return res.type('text/html; charset=utf-8').send(form);
-    } catch(alipayErr) {
-      console.error('[Alipay] pageExec error:', alipayErr.message);
-      return res.status(500).json({ error: '支付宝支付链接生成失败: ' + alipayErr.message });
-    }
-  } catch(e) {
-    console.error('[VIP] 支付跳转失败:', e.message);
-    return res.status(500).json({ error: '支付跳转失败' });
-  }
-});
-
-// 支付宝异步通知接收（生产环境使用）
-app.post('/api/vip/notify', async (req, res) => {
-  // 验签：需验证 sign 参数
-  const params = req.body;
-  if (!params || !params.sign) {
-    return res.status(400).send('fail');
-  }
-
-  // 验证 trade_status
-  if (params.trade_status === 'TRADE_SUCCESS' || params.trade_status === 'TRADE_FINISHED') {
-    const orderNo = params.out_trade_no;
-    const tradeNo = params.trade_no;
-    const totalAmount = parseFloat(params.total_amount || '0');
-
-    // 查询对应订单
-    const { data: orders } = await supabase.from('posts')
-      .select('*')
-      .eq('media_type', VIP_ORDER_MARKER)
-      .eq('media_url', orderNo)
-      .limit(1);
-
-    if (orders && orders.length > 0) {
-      try {
-        var orderData = JSON.parse(orders[0].content || '{}');
-        if (orderData.status === 'paid') return res.send('success');
-
-        // 核对金额
-        if (Math.abs(orderData.amount - totalAmount) > 0.01) {
-          console.error('[VIP] 金额不匹配:', orderNo, orderData.amount, totalAmount);
-          return res.send('fail');
-        }
-
-        const plan = VIP_PLANS.find(p => p.id === orderData.plan_id);
-        if (plan) {
-          await processVipPayment(orderData.user_name, orderNo, plan);
-        }
-      } catch(e) {
-        console.error('[VIP] 通知处理失败:', e.message);
-        return res.send('fail');
-      }
-    }
-  }
-
-  res.send('success');
 });
 
 // ===================== 客户端错误监控 =====================
