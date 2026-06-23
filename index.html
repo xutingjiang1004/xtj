@@ -1103,7 +1103,15 @@
                         <span id="vipPayBtnText">立即开通 ¥3</span>
                     </button>
                 </div>
-                <div class="vip-modal-footer">
+                <!-- Pro 赠送活动区 -->
+                <div id="proGiftSection" style="border-top:1px solid rgba(0,0,0,0.08);margin-top:16px;padding-top:12px;display:none;">
+                    <div style="font-size:13px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                        免费领 Pro
+                    </div>
+                    <div id="proGiftList" style="display:flex;flex-direction:column;gap:8px;"></div>
+                </div>
+                <div class="vip-modal-footer" id="vipFooter">
                     <span class="vip-modal-footer-text" id="vipFooterText">
                         <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" style="vertical-align:-1px;margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                         订阅即表示同意服务条款

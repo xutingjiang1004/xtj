@@ -533,6 +533,7 @@ const ADMIN_NAME = "xxz";
                 btn.disabled = false;
                 if (cancelArea) cancelArea.style.display = 'none';
             }
+            loadProGiftCampaigns();
         }
 
         async function handleVipPurchase() {
@@ -570,6 +571,70 @@ const ADMIN_NAME = "xxz";
             showToast('激活失败，请重试');
             if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通'; }
         }
+
+        // 加载可领取的 Pro 赠送活动
+        async function loadProGiftCampaigns() {
+            var section = document.getElementById('proGiftSection');
+            var list = document.getElementById('proGiftList');
+            if (!section || !list || !currentUser) return;
+            try {
+                var resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), { signal: AbortSignal.timeout(8000) });
+                var data = await resp.json();
+                var gifts = data.gifts || [];
+                var available = gifts.filter(function(g) { return !g.already_claimed; });
+                if (!available.length && !gifts.length) { section.style.display = 'none'; return; }
+                section.style.display = 'block';
+                list.innerHTML = gifts.map(function(g) {
+                    var card = '<div style="background:rgba(240,192,64,0.08);border:1px solid rgba(240,192,64,0.2);border-radius:8px;padding:10px 12px;">';
+                    card += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+                    card += '<div style="flex:1;">';
+                    card += '<div style="font-weight:600;font-size:13px;">' + escapeHtml(g.title) + '</div>';
+                    if (g.description) card += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + escapeHtml(g.description) + '</div>';
+                    card += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">有效期 ' + g.duration_days + ' 天</div>';
+                    card += '</div>';
+                    if (g.already_claimed) {
+                        card += '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap;padding:4px 10px;">✅ 已领取</span>';
+                    } else {
+                        card += '<button class="btn-sm" style="background:var(--accent);color:#fff;border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap;" onclick="claimProGift(\'' + g.id + '\')">免费领取</button>';
+                    }
+                    card += '</div></div>';
+                    return card;
+                }).join('');
+            } catch(e) {
+                section.style.display = 'none';
+            }
+        }
+
+        // 领取 Pro 赠送活动
+        window.claimProGift = async function(giftId) {
+            if (!currentUser) { showToast('请先登录'); return; }
+            try {
+                var resp = await fetch(API_BASE + '/api/pro-gifts/claim', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_name: currentUser, gift_id: giftId })
+                });
+                var data = await resp.json();
+                if (data.ok) {
+                    showToast('🎉 Pro 已激活至 ' + new Date(data.expire_at).toLocaleDateString());
+                    // 刷新VIP状态和UI
+                    if (typeof window.__xtjSaveLocalVip === 'function') {
+                        window.__xtjSaveLocalVip(data);
+                    }
+                    await ensureVipStatusFresh(true);
+                    updateVipUI();
+                    updateVipModalUI();
+                    if (typeof window.__xtjApplyProTheme === 'function') {
+                        window.__xtjApplyProTheme(true);
+                    }
+                    loadProGiftCampaigns();
+                } else {
+                    showToast(data.error || '领取失败', 'error');
+                }
+            } catch(e) {
+                showToast('领取失败: ' + e.message, 'error');
+            }
+        };
 
         window.openVipModal = openVipModal;
         window.handleVipPurchase = handleVipPurchase;
@@ -8238,6 +8303,9 @@ function renderProfileActivityList(kind) {
                     content: `
                         <h4>全量安全审计修复、设备识别大幅升级、聊天头像即时更新</h4>
                         <ul>
+                            <li><b>Pro 赠送活动系统</b>：管理员后台创建/编辑/发布 Pro 赠送活动，用户一键免费领取</li>
+                            <li><b>Pro 历史记录系统</b>：后台新增「Pro记录」子标签，展示用户开通次数/来源/时间线</li>
+                            <li>Pro 领取庆祝动画重做：暗色渐变卡片，显示来源信息，GSAP 分段入场</li>
                             <li><b>【安全】</b>XSS 高危漏洞修复（safeJsStr 全转义 + 注册字符限制）</li>
                             <li><b>【安全】</b>Storage 路径遍历防护、后端错误信息不返回前端</li>
                             <li><b>【安全】</b>RateLimit 边界修复、fetch 超时保护、currentUser TDZ 修复</li>

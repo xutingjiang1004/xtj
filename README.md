@@ -73,6 +73,8 @@ npm start
 
 ### v0.85
 
+- **Pro 赠送活动系统**：管理员后台创建/编辑/发布 Pro 赠送活动，用户一键免费领取，每个活动限领一次；后台完整历史记录（来源/时间/次数）
+- Pro 领取庆祝动画重做：暗色渐变卡片、来源展示、GSAP 分段入场
 - 全量安全审计修复：XSS 高危漏洞修复（safeJsStr 全转义 + 注册字符限制）、Storage 路径遍历防护、后端错误信息不返回前端、RateLimit 边界修复、currentUser TDZ 修复、fetch 超时保护
 - 设备型号识别全面升级：新增 UA 标识符映射表（30+ 型号），15 Pro Max 不再误判为 16 Plus
 - 聊天列表头像即时更新：hydrateDockChatAvatars 改为全量检查，去掉 dockChatActiveUser 限制

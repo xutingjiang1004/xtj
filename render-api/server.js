@@ -3604,6 +3604,375 @@ app.get('/api/vip/status', rateLimit(60000, 60), async (req, res) => {
   }
 });
 
+// ===================== Pro 赠送活动管理 =====================
+const PRO_GIFT_MARKER = '__pro_gift__';
+const PRO_GIFT_CLAIM_MARKER = '__pro_gift_claim__';
+const DEFAULT_GIFT_FEATURES = ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'];
+
+// 管理员：获取全部 Pro 赠送活动
+app.get('/admin/pro-gifts', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('posts')
+      .select('id, user_name, content, created_at')
+      .eq('media_type', PRO_GIFT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    const gifts = (data || []).map(function(row) {
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      return {
+        id: row.id,
+        created_by: row.user_name,
+        created_at: row.created_at,
+        title: info.title || '',
+        description: info.description || '',
+        features: info.features || DEFAULT_GIFT_FEATURES,
+        duration_days: info.duration_days || 30,
+        claim_expire_at: info.claim_expire_at || '',
+        is_published: !!info.is_published,
+        published_at: info.published_at || ''
+      };
+    });
+    return res.json({ ok: true, gifts: gifts });
+  } catch(e) {
+    console.error('[ProGift] 查询失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// 管理员：创建/编辑 Pro 赠送活动
+app.post('/admin/pro-gifts/save', verifyToken, rateLimit(60000, 20), async (req, res) => {
+  try {
+    var { id, title, description, features, duration_days, claim_expire_at } = req.body;
+    var titleVal = String(title || '').trim().slice(0, 100);
+    var descVal = String(description || '').trim().slice(0, 500);
+    if (!titleVal) return res.status(400).json({ error: '请输入活动标题' });
+    if (!duration_days || duration_days < 1 || duration_days > 3650) return res.status(400).json({ error: '有效期1-3650天' });
+    var featuresArr = Array.isArray(features) && features.length ? features : DEFAULT_GIFT_FEATURES;
+    var info = {
+      title: titleVal,
+      description: descVal,
+      features: featuresArr,
+      duration_days: Math.min(3650, Math.max(1, parseInt(duration_days) || 30)),
+      claim_expire_at: claim_expire_at || '',
+      is_published: false,
+      updated_at: new Date().toISOString()
+    };
+    const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
+    if (id) {
+      // 编辑已有的
+      var { data: existing } = await supabase.from('posts')
+        .select('content').eq('id', id).eq('media_type', PRO_GIFT_MARKER).maybeSingle();
+      if (!existing) return res.status(404).json({ error: '活动不存在' });
+      var oldInfo = {};
+      try { oldInfo = JSON.parse(existing.content || '{}'); } catch(e) {}
+      // 保留原发布状态
+      info.is_published = !!oldInfo.is_published;
+      info.published_at = oldInfo.published_at || '';
+      info.created_at = oldInfo.created_at || new Date().toISOString();
+      var { error: updateErr } = await supabase.from('posts')
+        .update({ content: JSON.stringify(info) })
+        .eq('id', id);
+      if (updateErr) return res.status(400).json({ error: sanitizeError(updateErr) });
+    } else {
+      // 新建
+      info.created_at = new Date().toISOString();
+      var { error: insertErr } = await supabase.from('posts').insert([{
+        user_name: ADMIN_USERNAME,
+        media_type: PRO_GIFT_MARKER,
+        content: JSON.stringify(info),
+        actor_key: 'pro_gift_' + Date.now()
+      }]);
+      if (insertErr) return res.status(400).json({ error: sanitizeError(insertErr) });
+    }
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[ProGift] 保存失败:', e.message);
+    return res.status(500).json({ error: '保存失败' });
+  }
+});
+
+// 管理员：发布/取消发布 Pro 赠送活动
+app.post('/admin/pro-gifts/toggle-publish', verifyToken, rateLimit(60000, 20), async (req, res) => {
+  try {
+    var { id, publish } = req.body;
+    if (!id) return res.status(400).json({ error: '缺少活动ID' });
+    var { data: existing } = await supabase.from('posts')
+      .select('content').eq('id', id).eq('media_type', PRO_GIFT_MARKER).maybeSingle();
+    if (!existing) return res.status(404).json({ error: '活动不存在' });
+    var info = {};
+    try { info = JSON.parse(existing.content || '{}'); } catch(e) {}
+    info.is_published = !!publish;
+    if (publish && !info.published_at) info.published_at = new Date().toISOString();
+    info.updated_at = new Date().toISOString();
+    var { error: updateErr } = await supabase.from('posts')
+      .update({ content: JSON.stringify(info) })
+      .eq('id', id);
+    if (updateErr) return res.status(400).json({ error: sanitizeError(updateErr) });
+    return res.json({ ok: true, is_published: !!publish, published_at: info.published_at });
+  } catch(e) {
+    console.error('[ProGift] 发布操作失败:', e.message);
+    return res.status(500).json({ error: '操作失败' });
+  }
+});
+
+// 管理员：删除 Pro 赠送活动
+app.post('/admin/pro-gifts/delete', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var { id } = req.body;
+    if (!id) return res.status(400).json({ error: '缺少活动ID' });
+    var { error } = await supabase.from('posts')
+      .delete().eq('id', id).eq('media_type', PRO_GIFT_MARKER);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[ProGift] 删除失败:', e.message);
+    return res.status(500).json({ error: '删除失败' });
+  }
+});
+
+// 用户：获取可领取的 Pro 赠送活动
+app.get('/api/pro-gifts/available', rateLimit(60000, 30), async (req, res) => {
+  try {
+    var userName = String(req.query.user_name || '').trim();
+    if (!userName) return res.status(400).json({ error: '缺少用户名' });
+    var now = new Date().toISOString();
+    var { data: gifts } = await supabase.from('posts')
+      .select('id, content, created_at')
+      .eq('media_type', PRO_GIFT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    var available = [];
+    var claimedIds = [];
+    // 查用户已领取记录
+    var { data: claims } = await supabase.from('posts')
+      .select('media_url')
+      .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+      .eq('user_name', userName)
+      .limit(200);
+    if (claims) {
+      claims.forEach(function(c) { if (c.media_url) claimedIds.push(c.media_url); });
+    }
+    (gifts || []).forEach(function(g) {
+      var info = {};
+      try { info = JSON.parse(g.content || '{}'); } catch(e) {}
+      if (!info.is_published) return;
+      if (info.claim_expire_at && info.claim_expire_at < now) return;
+      var alreadyClaimed = claimedIds.indexOf(String(g.id)) >= 0;
+      available.push({
+        id: g.id,
+        title: info.title || '',
+        description: info.description || '',
+        features: info.features || DEFAULT_GIFT_FEATURES,
+        duration_days: info.duration_days || 30,
+        claim_expire_at: info.claim_expire_at || '',
+        published_at: info.published_at || '',
+        already_claimed: alreadyClaimed
+      });
+    });
+    return res.json({ ok: true, gifts: available });
+  } catch(e) {
+    console.error('[ProGift] 查询可用活动失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// 用户：领取 Pro 赠送活动
+app.post('/api/pro-gifts/claim', rateLimit(60000, 10), async (req, res) => {
+  try {
+    var { user_name, gift_id } = req.body;
+    var userNameVal = String(user_name || '').trim();
+    var giftId = String(gift_id || '').trim();
+    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
+    if (!giftId) return res.status(400).json({ error: '缺少活动ID' });
+    var now = new Date();
+    var nowISO = now.toISOString();
+    // 查活动是否存在且已发布
+    var { data: gift } = await supabase.from('posts')
+      .select('content').eq('id', giftId).eq('media_type', PRO_GIFT_MARKER).maybeSingle();
+    if (!gift) return res.status(404).json({ error: '活动不存在' });
+    var giftInfo = {};
+    try { giftInfo = JSON.parse(gift.content || '{}'); } catch(e) {}
+    if (!giftInfo.is_published) return res.status(400).json({ error: '活动未发布' });
+    if (giftInfo.claim_expire_at && giftInfo.claim_expire_at < nowISO) return res.status(400).json({ error: '活动已过期' });
+    // 查是否已领取过
+    var { data: existingClaim } = await supabase.from('posts')
+      .select('id').eq('media_type', PRO_GIFT_CLAIM_MARKER)
+      .eq('user_name', userNameVal)
+      .eq('media_url', giftId)
+      .maybeSingle();
+    if (existingClaim) return res.status(400).json({ error: '已领取过此活动' });
+    var durationDays = giftInfo.duration_days || 30;
+    var expireAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+    var features = giftInfo.features || DEFAULT_GIFT_FEATURES;
+    // 写入领取记录
+    var claimContent = JSON.stringify({
+      campaign_id: giftId,
+      campaign_title: giftInfo.title || '',
+      user_name: userNameVal,
+      claimed_at: nowISO,
+      vip_expire_at: expireAt,
+      features: features,
+      duration_days: durationDays
+    });
+    var { error: claimErr } = await supabase.from('posts').insert([{
+      user_name: userNameVal,
+      media_type: PRO_GIFT_CLAIM_MARKER,
+      media_url: giftId,
+      content: claimContent,
+      actor_key: 'pro_claim_' + Date.now()
+    }]);
+    if (claimErr) return res.status(400).json({ error: sanitizeError(claimErr) });
+    // 写入 VIP 激活记录（复用现有VIP系统）
+    var vipContent = JSON.stringify({
+      plan_id: 'pro_gift_' + giftId,
+      plan_name: 'XTJ Pro (' + (giftInfo.title || '赠送') + ')',
+      price: 0,
+      is_active: true,
+      order_no: 'GIFT_' + Date.now(),
+      start_at: nowISO,
+      expire_at: expireAt,
+      features: features,
+      activated_at: nowISO,
+      source: 'pro_gift'
+    });
+    var { error: vipErr } = await supabase.from('posts').insert([{
+      user_name: userNameVal,
+      media_type: VIP_MARKER,
+      media_url: 'pro_monthly',
+      content: vipContent,
+      actor_key: 'vip_' + Date.now()
+    }]);
+    if (vipErr) {
+      console.warn('[ProGift] VIP记录写入失败:', vipErr.message);
+    }
+    return res.json({
+      ok: true,
+      user_name: userNameVal,
+      plan_name: 'XTJ Pro (' + (giftInfo.title || '赠送') + ')',
+      expire_at: expireAt,
+      is_active: true,
+      features: features,
+      source: 'pro_gift'
+    });
+  } catch(e) {
+    console.error('[ProGift] 领取失败:', e.message);
+    return res.status(500).json({ error: '领取失败' });
+  }
+});
+
+// 管理员：获取全部 Pro 激活/领取历史记录
+app.get('/admin/pro-gifts/history', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    // 查询所有 VIP 激活记录
+    var { data: vipRecords } = await supabase.from('posts')
+      .select('user_name, content, media_type, media_url, created_at')
+      .eq('media_type', VIP_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    // 查询所有 Pro 赠送领取记录
+    var { data: claimRecords } = await supabase.from('posts')
+      .select('user_name, content, media_type, media_url, created_at')
+      .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(500);
+    // 查询所有订单记录 (paid)
+    var { data: orderRecords } = await supabase.from('posts')
+      .select('user_name, content, media_type, media_url, created_at')
+      .eq('media_type', VIP_ORDER_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    var records = [];
+
+    // 处理 VIP 激活记录
+    (vipRecords || []).forEach(function(row) {
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      var source = info.source || 'unknown';
+      var sourceLabel = '其他';
+      if (source === 'pro_gift') sourceLabel = '免费赠送';
+      else if (source === 'frontend_direct') sourceLabel = '自主开通';
+      else if (source === 'paid' || source === 'payment') sourceLabel = '付费购买';
+      records.push({
+        type: 'vip_activation',
+        user_name: row.user_name,
+        source: source,
+        source_label: sourceLabel,
+        activated_at: info.activated_at || info.start_at || row.created_at,
+        expire_at: info.expire_at || '',
+        plan_name: info.plan_name || 'XTJ Pro',
+        price: info.price || 0,
+        features: info.features || [],
+        created_at: row.created_at
+      });
+    });
+
+    // 处理领取记录
+    (claimRecords || []).forEach(function(row) {
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      records.push({
+        type: 'gift_claim',
+        user_name: row.user_name,
+        source: 'pro_gift',
+        source_label: '免费赠送',
+        gift_id: info.campaign_id || row.media_url,
+        gift_title: info.campaign_title || '',
+        activated_at: info.claimed_at || row.created_at,
+        expire_at: info.vip_expire_at || '',
+        duration_days: info.duration_days || 0,
+        features: info.features || [],
+        created_at: row.created_at
+      });
+    });
+
+    // 处理订单 (支付记录)
+    (orderRecords || []).forEach(function(row) {
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      if (info.status === 'paid') {
+        records.push({
+          type: 'order_paid',
+          user_name: row.user_name,
+          source: 'paid',
+          source_label: '付费购买',
+          order_no: info.order_no || row.media_url,
+          amount: info.amount || 0,
+          paid_at: info.paid_at || row.created_at,
+          created_at: row.created_at
+        });
+      }
+    });
+
+    // 按时间倒序排列
+    records.sort(function(a, b) {
+      var ta = a.activated_at || a.paid_at || a.created_at || '';
+      var tb = b.activated_at || b.paid_at || b.created_at || '';
+      return tb.localeCompare(ta);
+    });
+
+    // 统计每个用户的 Pro 次数和来源
+    var userStats = {};
+    records.forEach(function(r) {
+      var un = r.user_name;
+      if (!userStats[un]) userStats[un] = { count: 0, sources: [], first_at: '', last_at: '', last_expire: '' };
+      userStats[un].count++;
+      if (!userStats[un].sources.includes(r.source_label)) userStats[un].sources.push(r.source_label);
+      var t = r.activated_at || r.paid_at || r.created_at || '';
+      if (t && (!userStats[un].first_at || t < userStats[un].first_at)) userStats[un].first_at = t;
+      if (t && (!userStats[un].last_at || t > userStats[un].last_at)) userStats[un].last_at = t;
+      if (r.expire_at && (!userStats[un].last_expire || r.expire_at > userStats[un].last_expire)) userStats[un].last_expire = r.expire_at;
+    });
+
+    return res.json({ ok: true, records: records, user_stats: userStats });
+  } catch(e) {
+    console.error('[ProGift] 查询历史失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
 // ===================== 客户端错误监控 =====================
 app.post('/api/client-error-log', rateLimit(60000, 30), async (req, res) => {
   try {
