@@ -1460,7 +1460,11 @@ async function initAdminClient() {
         }
     }
 
+    var adminSessionRestoreStarted = false;
+
     async function restoreAdminSessionOnReady() {
+        if (adminSessionRestoreStarted) return;
+        adminSessionRestoreStarted = true;
         applySavedAdminTheme();
         try {
             var restored = await tryRestoreAdminSession();
