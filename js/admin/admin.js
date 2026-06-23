@@ -15,6 +15,37 @@
     var TAB_KEY = "xtj_admin_tab";
     var ADMIN = '';
 
+
+    // 根据 iOS/Safari 可见参数推测 iPhone 疑似型号；仅供管理员后台辅助判断，非精确识别
+    function getPossibleDeviceModel(info) {
+        info = info || {};
+        var meta = info.device_meta || info;
+        var ua = String(info.user_agent || meta.user_agent || '');
+        var platform = String(meta.platform || info.platform || '');
+        var maxTouchPoints = Number(meta.max_touch_points || info.max_touch_points || 0);
+        var sw = Number(meta.screen_width || info.screen_width || (meta.screen && String(meta.screen).split('x')[0])) || 0;
+        var sh = Number(meta.screen_height || info.screen_height || (meta.screen && String(meta.screen).split('x')[1])) || 0;
+        var dpr = Number(meta.device_pixel_ratio || meta.dpr || info.device_pixel_ratio || info.dpr) || 0;
+        var isIPhone = /iPhone/i.test(ua) || String(info.device_type || '').toLowerCase() === 'iphone' || (/Mac/i.test(platform) && maxTouchPoints > 1 && Math.min(sw, sh) < 600);
+        if (!isIPhone) return '';
+        var key = Math.min(sw, sh) + 'x' + Math.max(sw, sh) + '@' + (dpr || '');
+        var modelMap = {
+            '440x956@3': '疑似 iPhone 16 Pro Max / iPhone 17 Pro Max',
+            '402x874@3': '疑似 iPhone 16 Pro / iPhone 17 / iPhone 17 Pro',
+            '393x852@3': '疑似 iPhone 14 Pro / iPhone 15 / iPhone 15 Pro / iPhone 16',
+            '430x932@3': '疑似 iPhone 14 Pro Max / iPhone 15 Plus / iPhone 15 Pro Max / iPhone 16 Plus',
+            '428x926@3': '疑似 iPhone 12 Pro Max / iPhone 13 Pro Max / iPhone 14 Plus',
+            '390x844@3': '疑似 iPhone 12 / iPhone 12 Pro / iPhone 13 / iPhone 13 Pro / iPhone 14',
+            '375x812@3': '疑似 iPhone X / iPhone XS / iPhone 11 Pro / iPhone 12 mini / iPhone 13 mini',
+            '414x896@3': '疑似 iPhone XS Max / iPhone 11 Pro Max',
+            '414x896@2': '疑似 iPhone XR / iPhone 11',
+            '414x736@3': '疑似 iPhone 6 Plus / 6s Plus / 7 Plus / 8 Plus',
+            '375x667@2': '疑似 iPhone 6 / 6s / 7 / 8 / SE（第 2/3 代）',
+            '320x568@2': '疑似 iPhone 5 / 5s / SE（第 1 代）'
+        };
+        return modelMap[key] || 'iPhone（型号不可确定）';
+    }
+
     // ===================== API_BASE 安全检测 =====================
     // 取全局配置，若未配置则拒绝进入管理后台
     var API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || "";
@@ -3451,6 +3482,7 @@
             '<th style="padding:6px 8px;text-align:left;">登录时间</th>' +
             '<th style="padding:6px 8px;text-align:left;">来源</th>' +
             '<th style="padding:6px 8px;text-align:left;">设备类型</th>' +
+            '<th style="padding:6px 8px;text-align:left;">疑似型号</th>' +
             '<th style="padding:6px 8px;text-align:left;">系统</th>' +
             '<th style="padding:6px 8px;text-align:left;">浏览器</th>' +
             '<th style="padding:6px 8px;text-align:left;">IP</th>' +
@@ -3463,6 +3495,7 @@
             var srcLabel = sourceLabels[ev.info.source] || '登录记录';
             var locText = (ev.info.ip_location && ev.info.ip_location.text) ? escapeHtml(ev.info.ip_location.text) : '暂未解析';
             var fullIp = ev.info.ip || '-';
+            var possibleModel = ev.info.possible_device_model || (ev.info.device_meta && ev.info.device_meta.possible_device_model) || getPossibleDeviceModel(ev.info) || '-（需重新登录后记录）';
             var fpShort = '-';
             if (ev.info.browser_fingerprint_hash) fpShort = escapeHtml(ev.info.browser_fingerprint_hash.slice(0, 10)) + '...';
             else if (ev.info.canvas_fingerprint_hash) fpShort = 'C:' + escapeHtml(ev.info.canvas_fingerprint_hash.slice(0, 10)) + '...';
@@ -3470,6 +3503,7 @@
                 '<td style="padding:6px 8px;">' + (loginTime ? escapeHtml(formatTime(loginTime)) : '-') + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(srcLabel) + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.device_type || '-') + '</td>' +
+                '<td style="padding:6px 8px;">' + escapeHtml(possibleModel) + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.os || '-') + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.browser || '-') + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(fullIp) + '</td>' +
@@ -3653,14 +3687,16 @@
             html += '<div class="empty">暂无登录记录</div>';
         } else {
             html += '<div style="max-height:200px;overflow-y:auto;margin-bottom:12px;"><table style="width:100%;font-size:11px;border-collapse:collapse;">';
-            html += '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);"><th style="padding:4px 6px;text-align:left;">时间</th><th style="padding:4px 6px;text-align:left;">来源</th><th style="padding:4px 6px;text-align:left;">设备</th><th style="padding:4px 6px;text-align:left;">IP</th><th style="padding:4px 6px;text-align:left;">地区</th></tr></thead><tbody>';
+            html += '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);"><th style="padding:4px 6px;text-align:left;">时间</th><th style="padding:4px 6px;text-align:left;">来源</th><th style="padding:4px 6px;text-align:left;">设备</th><th style="padding:4px 6px;text-align:left;">疑似型号</th><th style="padding:4px 6px;text-align:left;">IP</th><th style="padding:4px 6px;text-align:left;">地区</th></tr></thead><tbody>';
             var sourceLabelsV2 = { 'login_success': '登录', 'page_visit': '访问', 'register_success': '注册', 'admin_login': '管理' };
             userEvents.slice(0, 10).forEach(function(ev) {
                 var lt = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
+                var vm = ev.info.possible_device_model || (ev.info.device_meta && ev.info.device_meta.possible_device_model) || getPossibleDeviceModel(ev.info) || '-（需重新登录后记录）';
                 html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.03);">';
                 html += '<td style="padding:4px 6px;">' + (lt ? escapeHtml(formatTime(lt)) : '-') + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(sourceLabelsV2[ev.info.source] || ev.info.source || '-') + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(((ev.info.device_type || '') + ' ' + (ev.info.os || '')).slice(0, 20)) + '</td>';
+                html += '<td style="padding:4px 6px;">' + escapeHtml(vm) + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(ev.info.ip || '-') + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml((ev.info.ip_location && ev.info.ip_location.text) || '-') + '</td>';
                 html += '</tr>';
