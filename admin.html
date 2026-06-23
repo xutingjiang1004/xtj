@@ -79,21 +79,24 @@
 
     .dashboard { display: none; }
     .dash-header {
-        display: flex; align-items: center; justify-content: space-between;
+        display: flex; align-items: flex-start; justify-content: space-between;
         padding: 16px 24px; background: var(--card-bg);
         border-bottom: 1px solid var(--border);
         backdrop-filter: blur(20px); position: sticky; top: 0; z-index: 10;
-        flex-wrap: nowrap; gap: 8px;
+        flex-wrap: wrap; gap: 8px;
     }
     .dash-header h1 { font-size: 18px; }
     .dash-header .dh-right {
         display: flex;
         align-items: center;
         gap: 8px;
-        flex: 1 1 auto;
-        min-width: 0;
-        flex-wrap: nowrap;
-        overflow-x: auto;
+        row-gap: 8px;
+        width: 100%;
+        flex: 1 1 100%;
+        flex-wrap: wrap;
+        overflow-x: visible;
+        overflow-y: visible;
+        max-height: none;
         scrollbar-width: none;
     }
     .dash-header .dh-right::-webkit-scrollbar { display: none; }
@@ -523,7 +526,7 @@
         -webkit-backdrop-filter: blur(8px) saturate(1.08);
     }
     .admin-detail-dialog {
-        width: min(92vw, 620px);
+        width: min(96vw, 980px);
         max-height: 82vh;
         padding: 0 !important;
         display: flex;
@@ -570,6 +573,14 @@
     }
     .admin-user-detail-content {
         padding: 0;
+    }
+    #userLoginDetail > .card > div,
+    .admin-user-detail-content {
+        overflow-x: auto;
+    }
+    .admin-user-detail-content table,
+    #userLoginDetail table {
+        min-width: 920px;
     }
     [data-theme="dark"] .admin-detail-overlay {
         background: rgba(0, 0, 0, 0.26) !important;
@@ -618,7 +629,7 @@
 
     @media (max-width: 640px) {
         .dash-header { flex-direction: column; align-items: flex-start; }
-        .dash-header .dh-right { width: 100%; overflow-x: auto; flex-wrap: nowrap; }
+        .dash-header .dh-right { width: 100%; flex-wrap: wrap; overflow-x: visible; }
         .stats-row { grid-template-columns: repeat(2,1fr); }
         .stat-box .val { font-size: 20px; }
         .dash-content { padding: 12px; }
