@@ -1,5 +1,6 @@
 .vercel
 .env
 node_modules/
+.trae/
 *.log
 .DS_Store

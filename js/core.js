@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -1245,7 +1245,7 @@ const ADMIN_NAME = "xxz";
                 return data;
             }
 
-            async function saveUserInfo(name, isNewUser) {
+            async function saveUserInfo(name, isNewUser, email) {
                 try {
                     var regTime = null;
 
@@ -1283,6 +1283,7 @@ const ADMIN_NAME = "xxz";
                     }
 
                     var userInfo = { reg_time: regTime, last_login: new Date().toISOString() };
+                    if (email) userInfo.email = email;
                     var contentStr = JSON.stringify(userInfo);
 
                     // 尝试 UPDATE 已有记录（保留旧 reg_time，只更新 last_login）
@@ -1300,7 +1301,9 @@ const ADMIN_NAME = "xxz";
                             try {
                                 var oldParsed = JSON.parse(oldContent);
                                 if (oldParsed.reg_time) merged.reg_time = oldParsed.reg_time;
+                                if (oldParsed.email) merged.email = oldParsed.email;
                             } catch(e) {}
+                            if (email) merged.email = email;
                             var updRes = await sb.from("posts")
                                 .update({ content: JSON.stringify(merged) })
                                 .eq("id", latest.data[0].id);
@@ -1449,14 +1452,19 @@ const ADMIN_NAME = "xxz";
                 if (e.key === 'Enter') doRegister();
             });
             document.getElementById('regNickInp').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') document.getElementById('regEmailInp').focus();
+            });
+            document.getElementById('regEmailInp').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') document.getElementById('regPwInp').focus();
             });
             async function doRegister() {
                 const name = document.getElementById("regNickInp").value.trim();
                 const pw = document.getElementById("regPwInp").value;
+                const email = document.getElementById("regEmailInp").value.trim();
                 if (!name) { showToast("请输入昵称"); return; }
                 if (!pw) { showToast("请输入密码"); return; }
                 if (pw.length < 6) { showToast("密码至少6位"); return; }
+                if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }
 
                 const btn = document.getElementById("registerSubmitBtn");
                 btn.disabled = true;
@@ -1498,7 +1506,7 @@ const ADMIN_NAME = "xxz";
                     closeModal('registerModal');
                     
                     // 濞ｅ洦绻傞悺銊╂偨閵婏箑鐓曟繛澶堝妼閸炶姤绌遍鐟板⒉濞?
-                    await saveUserInfo(name, true);
+                    await saveUserInfo(name, true, email);
                     
                     await initUI();
                     initialLoad(true);
