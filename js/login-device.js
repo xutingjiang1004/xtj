@@ -19,12 +19,12 @@
         return fetch(API_BASE + '/api/security-settings')
             .then(function(res) { return res.json(); })
             .then(function(data) {
-                cachedSecuritySettings = (data && data.settings) || { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
+                cachedSecuritySettings = (data && data.settings) || { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: true };
                 settingsLastFetch = now;
                 return cachedSecuritySettings;
             })
             .catch(function() {
-                return { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
+                return { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: true };
             });
     }
 
@@ -217,6 +217,104 @@
         }
     }
 
+    // WebGL 指纹 hash（GPU 型号 + 渲染器，跨浏览器稳定）
+    function getWebglFingerprint() {
+        try {
+            var canvas = document.createElement('canvas');
+            canvas.width = 256;
+            canvas.height = 256;
+            var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            if (!gl) return null;
+
+            var debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+            if (!debugInfo) return null;
+
+            var renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '';
+            var vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '';
+
+            var extensions = [];
+            try {
+                var exts = gl.getSupportedExtensions() || [];
+                extensions = exts.sort();
+            } catch(ex) {}
+
+            var raw = [renderer, vendor, extensions.join(',')].join('|');
+            if (!raw || raw.length < 10) return null;
+
+            if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+                var encoder = new TextEncoder();
+                var data = encoder.encode(raw);
+                return crypto.subtle.digest('SHA-256', data).then(function(hashBuffer) {
+                    var hashArray = Array.from(new Uint8Array(hashBuffer));
+                    return hashArray.map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+                }).catch(function() {
+                    return null;
+                });
+            }
+            return null;
+        } catch(e) {
+            return null;
+        }
+    }
+
+    // WebGL 元数据（原始 GPU 信息，仅管理员可见）
+    function getWebglMeta() {
+        try {
+            var canvas = document.createElement('canvas');
+            var gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            if (!gl) return null;
+            var debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+            if (!debugInfo) return null;
+            return {
+                gpu_renderer: String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '').slice(0, 200),
+                gpu_vendor: String(gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '').slice(0, 100)
+            };
+        } catch(e) {
+            return null;
+        }
+    }
+
+    // WebRTC 本地 IP 检测（内网IP，超时2s）
+    function getWebRtcLocalIps() {
+        return new Promise(function(resolve) {
+            var ips = [];
+            var done = false;
+            var timer = setTimeout(function() { if (!done) { done = true; resolve(ips.length ? ips : null); } }, 2000);
+
+            try {
+                var RTCPeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;
+                if (!RTCPeerConnection) { clearTimeout(timer); resolve(null); return; }
+
+                var pc = new RTCPeerConnection({ iceServers: [] });
+                pc.createDataChannel('');
+                pc.createOffer().then(function(offer) { pc.setLocalDescription(offer); }).catch(function() {
+                    if (!done) { done = true; clearTimeout(timer); resolve(null); }
+                });
+                pc.onicecandidate = function(e) {
+                    if (!e || !e.candidate || !e.candidate.candidate) {
+                        if (!done) { done = true; clearTimeout(timer); resolve(ips.length ? ips : null); }
+                        return;
+                    }
+                    var candidate = e.candidate.candidate;
+                    var match = candidate.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
+                    if (match) {
+                        var localIp = match[0];
+                        if (ips.indexOf(localIp) === -1 && localIp !== '0.0.0.0' && localIp !== '127.0.0.1') {
+                            ips.push(localIp);
+                        }
+                    }
+                };
+                pc.onicegatheringstatechange = function() {
+                    if (pc.iceGatheringState === 'complete' && !done) {
+                        done = true; clearTimeout(timer); resolve(ips.length ? ips : null);
+                    }
+                };
+            } catch(e) {
+                if (!done) { done = true; clearTimeout(timer); resolve(null); }
+            }
+        });
+    }
+
     // 检查冷却（10s 内存级别）
     function isInCooldown(sentKey) {
         var lastAt = lastSendAtByKey[sentKey] || 0;
@@ -266,27 +364,42 @@
                 if (!settings.record_device) bodyObj.device_meta = null;
                 var browserFpPromise = settings.browser_fingerprint ? getBrowserFingerprint() : null;
                 var canvasFpPromise = settings.canvas_fingerprint ? getCanvasFingerprint() : null;
+                var webglFpPromise = settings.webgl_fingerprint ? getWebglFingerprint() : null;
+                var webglMeta = (settings.webgl_fingerprint || settings.advanced_fingerprint) ? getWebglMeta() : null;
+                var webRtcPromise = settings.webrtc_local_ip ? getWebRtcLocalIps() : null;
 
-                if (browserFpPromise && browserFpPromise.then) {
-                    browserFpPromise.then(function(hash) {
-                        if (hash) bodyObj.browser_fingerprint_hash = hash;
-                        if (canvasFpPromise && canvasFpPromise.then) {
-                            canvasFpPromise.then(function(cHash) {
-                                if (cHash) bodyObj.canvas_fingerprint_hash = cHash;
-                                sendReq();
-                            }).catch(function() { sendReq(); });
-                        } else {
-                            sendReq();
-                        }
-                    }).catch(function() { sendReq(); });
-                } else if (canvasFpPromise && canvasFpPromise.then) {
-                    canvasFpPromise.then(function(cHash) {
-                        if (cHash) bodyObj.canvas_fingerprint_hash = cHash;
+                // 始终采集时钟偏移（轻量，不涉及隐私）
+                var clockOffset = Date.now();
+
+                // 收集所有异步指纹，然后统一发送
+                var collectAndSend = function() {
+                    // 收集已完成的指纹
+                    if (webglMeta) bodyObj.webgl_meta = webglMeta;
+                    // 将指纹 Promise 转为统一收集
+                    var promises = [];
+
+                    if (browserFpPromise && browserFpPromise.then) {
+                        promises.push(browserFpPromise.then(function(h) { if (h) bodyObj.browser_fingerprint_hash = h; }));
+                    }
+                    if (canvasFpPromise && canvasFpPromise.then) {
+                        promises.push(canvasFpPromise.then(function(h) { if (h) bodyObj.canvas_fingerprint_hash = h; }));
+                    }
+                    if (webglFpPromise && webglFpPromise.then) {
+                        promises.push(webglFpPromise.then(function(h) { if (h) bodyObj.webgl_fingerprint_hash = h; }));
+                    }
+                    if (webRtcPromise && webRtcPromise.then) {
+                        promises.push(webRtcPromise.then(function(ips) { if (ips) bodyObj.webrtc_local_ips = ips; }));
+                    }
+
+                    bodyObj.clock_offset = clockOffset;
+
+                    if (promises.length > 0) {
+                        Promise.all(promises).then(function() { sendReq(); }).catch(function() { sendReq(); });
+                    } else {
                         sendReq();
-                    }).catch(function() { sendReq(); });
-                } else {
-                    sendReq();
-                }
+                    }
+                };
+                collectAndSend();
             }).catch(function() { sendReq(); });
         } catch(e) {}
     }
