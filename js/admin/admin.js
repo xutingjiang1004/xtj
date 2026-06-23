@@ -2557,6 +2557,9 @@
         h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.record_device ? 'checked' : '') + ' onchange="saveSecuritySetting(\'record_device\',this.checked)" /> 基础设备记录</label></div>';
         h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.browser_fingerprint ? 'checked' : '') + ' onchange="saveSecuritySetting(\'browser_fingerprint\',this.checked)" /> 浏览器指纹 Hash</label></div>';
         h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.canvas_fingerprint ? 'checked' : '') + ' onchange="saveSecuritySetting(\'canvas_fingerprint\',this.checked)" /> Canvas 指纹 Hash</label></div>';
+        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.webgl_fingerprint ? 'checked' : '') + ' onchange="saveSecuritySetting(\'webgl_fingerprint\',this.checked)" /> WebGL 指纹 (GPU)</label></div>';
+        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.webrtc_local_ip ? 'checked' : '') + ' onchange="saveSecuritySetting(\'webrtc_local_ip\',this.checked)" /> WebRTC 内网IP检测</label></div>';
+        h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.advanced_fingerprint ? 'checked' : '') + ' onchange="saveSecuritySetting(\'advanced_fingerprint\',this.checked)" /> 增强指纹 (GPU+内网IP)</label></div>';
         h += '<div><label style="display:flex;align-items:center;gap:8px;cursor:pointer;"><input type="checkbox" ' + (securitySettings.security_alerts ? 'checked' : '') + ' onchange="saveSecuritySetting(\'security_alerts\',this.checked)" /> 安全提醒生成</label></div>';
         h += '</div></div>';
 
@@ -3487,6 +3490,7 @@
             '<th style="padding:6px 8px;text-align:left;">浏览器</th>' +
             '<th style="padding:6px 8px;text-align:left;">IP</th>' +
             '<th style="padding:6px 8px;text-align:left;">地区</th>' +
+            '<th style="padding:6px 8px;text-align:left;">ASN/ISP</th>' +
             '<th style="padding:6px 8px;text-align:left;">指纹Hash</th>' +
             '</tr></thead><tbody>';
 
@@ -3496,8 +3500,16 @@
             var locText = (ev.info.ip_location && ev.info.ip_location.text) ? escapeHtml(ev.info.ip_location.text) : '暂未解析';
             var fullIp = ev.info.ip || '-';
             var possibleModel = ev.info.possible_device_model || (ev.info.device_meta && ev.info.device_meta.possible_device_model) || getPossibleDeviceModel(ev.info) || '-（需重新登录后记录）';
+            var asnIsp = '-';
+            if (ev.info.asn_info && ev.info.asn_info.isp) {
+                asnIsp = escapeHtml(ev.info.asn_info.isp.slice(0, 20));
+                if (ev.info.asn_info.is_proxy) asnIsp += ' <span style="color:var(--warning);">[代理]</span>';
+                if (ev.info.asn_info.is_hosting) asnIsp += ' <span style="color:var(--danger);">[机房]</span>';
+                if (ev.info.asn_info.is_mobile) asnIsp += ' [移动]';
+            }
             var fpShort = '-';
-            if (ev.info.browser_fingerprint_hash) fpShort = escapeHtml(ev.info.browser_fingerprint_hash.slice(0, 10)) + '...';
+            if (ev.info.webgl_fingerprint_hash) fpShort = 'W:' + escapeHtml(ev.info.webgl_fingerprint_hash.slice(0, 10)) + '...';
+            else if (ev.info.browser_fingerprint_hash) fpShort = 'B:' + escapeHtml(ev.info.browser_fingerprint_hash.slice(0, 10)) + '...';
             else if (ev.info.canvas_fingerprint_hash) fpShort = 'C:' + escapeHtml(ev.info.canvas_fingerprint_hash.slice(0, 10)) + '...';
             html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.05);">' +
                 '<td style="padding:6px 8px;">' + (loginTime ? escapeHtml(formatTime(loginTime)) : '-') + '</td>' +
@@ -3508,6 +3520,7 @@
                 '<td style="padding:6px 8px;">' + escapeHtml(ev.info.browser || '-') + '</td>' +
                 '<td style="padding:6px 8px;">' + escapeHtml(fullIp) + '</td>' +
                 '<td style="padding:6px 8px;">' + locText + '</td>' +
+                '<td style="padding:6px 8px;font-size:11px;">' + asnIsp + '</td>' +
                 '<td style="padding:6px 8px;font-size:11px;font-family:monospace;">' + fpShort + '</td>' +
                 '</tr>';
         });
@@ -3671,6 +3684,16 @@
         html += '<div><span style="font-size:11px;color:var(--text-muted);">设备ID</span><br><span style="font-size:11px;font-family:monospace;">' + escapeHtml((userInfo.last_device_id || (userEvents[0] && userEvents[0].info.device_id) || '-').slice(0, 16)) + '...</span></div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">浏览器指纹</span><br><span style="font-size:11px;font-family:monospace;">' + (latestFp.browser_fingerprint_hash ? escapeHtml(latestFp.browser_fingerprint_hash.slice(0, 16)) + '...' : '-') + '</span></div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">Canvas指纹</span><br><span style="font-size:11px;font-family:monospace;">' + (latestFp.canvas_fingerprint_hash ? escapeHtml(latestFp.canvas_fingerprint_hash.slice(0, 16)) + '...' : '-') + '</span></div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">WebGL指纹</span><br><span style="font-size:11px;font-family:monospace;">' + (latestFp.webgl_fingerprint_hash ? escapeHtml(latestFp.webgl_fingerprint_hash.slice(0, 16)) + '...' : '-') + '</span></div>';
+        if (latestFp.webgl_meta) {
+            html += '<div><span style="font-size:11px;color:var(--text-muted);">GPU</span><br><span style="font-size:10px;font-family:monospace;word-break:break-all;">' + escapeHtml((latestFp.webgl_meta.gpu_renderer || '').slice(0, 40)) + '</span></div>';
+        }
+        if (latestFp.asn_info && latestFp.asn_info.isp) {
+            html += '<div><span style="font-size:11px;color:var(--text-muted);">运营商</span><br><span style="font-size:11px;">' + escapeHtml(latestFp.asn_info.isp.slice(0, 30)) + '</span></div>';
+        }
+        if (latestFp.webrtc_local_ips && latestFp.webrtc_local_ips.length) {
+            html += '<div><span style="font-size:11px;color:var(--text-muted);">内网IP</span><br><span style="font-size:10px;font-family:monospace;">' + escapeHtml(latestFp.webrtc_local_ips.slice(0, 3).join(', ')) + '</span></div>';
+        }
         html += '</div>';
 
         // Activity stats

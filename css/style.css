@@ -2003,6 +2003,33 @@
         }
         .stat-two-col .stat-section-title { padding-top: 0; }
 
+        /* 点赞/评论弹窗：去掉 stat-col 外层卡片边框和背景，保持与总动态/总浏览一致 */
+        #statModal .stat-two-col .stat-col {
+            padding: 0;
+            border-radius: 0;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            backdrop-filter: none;
+            -webkit-backdrop-filter: none;
+        }
+        /* 点赞和评论弹窗专用：stat-col--bare 完全去除外层卡片容器样式 */
+        #statModal .stat-two-col--bare,
+        #statModal .stat-two-col--bare .stat-col--bare,
+        #statModal .stat-two-col .stat-col.stat-col--bare,
+        #profileActivityModal .stat-two-col--bare,
+        #profileActivityModal .stat-two-col--bare .stat-col--bare,
+        #profileActivityModal .stat-two-col .stat-col.stat-col--bare {
+            padding: 0 !important;
+            border-radius: 0 !important;
+            background: transparent !important;
+            background-color: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+        }
+
         .post-detail-header {
             display: flex;
             justify-content: space-between;
