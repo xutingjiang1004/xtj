@@ -1,6 +1,6 @@
 # XTJ
 
-当前版本：`v0.84`
+当前版本：`v0.85`
 
 
 
@@ -70,6 +70,20 @@ npm start
 - 后端入口：`render-api/server.js`
 
 ## 最近重点更新
+
+### v0.85
+
+- 全量安全审计修复：XSS 高危漏洞修复（safeJsStr 全转义 + 注册字符限制）、Storage 路径遍历防护、后端错误信息不返回前端、RateLimit 边界修复、currentUser TDZ 修复、fetch 超时保护
+- 设备型号识别全面升级：新增 UA 标识符映射表（30+ 型号），15 Pro Max 不再误判为 16 Plus
+- 聊天列表头像即时更新：hydrateDockChatAvatars 改为全量检查，去掉 dockChatActiveUser 限制
+- 地区中文显示：China·Guangdong·Guangzhou → 广东广州
+- 用户详情卡片数据回填：最近访问/IP/地区/设备从登录事件自动回填，去掉安全提醒区块
+- 举报弹窗 × 按钮独立样式修复
+- 点赞/评论记录显示被操作人
+- 未登录用户隐藏三大数据版块
+- 管理员登出清理定时器与事件监听
+- 邮箱发件地址修正确认
+- 详细变更见 CHANGELOG.md
 
 ### v0.84
 
@@ -158,7 +172,7 @@ npm start
 每次发版建议至少同步这三处：
 
 1. `CHANGELOG.md`
-2. `index.html` 中关于页版本号
+2. `index.html` 中关于页版本号（当前 `v0.85`）
 3. `js/core.js` 中站内 changelog 数据
 
 这样可以避免“仓库版本、站内版本、关于页版本”再次分裂。

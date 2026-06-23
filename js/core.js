@@ -163,7 +163,7 @@ const ADMIN_NAME = "xxz";
         }
 
         function touchUserSession(force) {
-            var userName = String(window.currentUser || currentUser || "").trim();
+            var userName = String(window.currentUser || window._lastKnownUser || "").trim();
             if (!userName) return;
             var now = Date.now();
             if (!force && lastUserSessionWriteAt && (now - lastUserSessionWriteAt) < USER_SESSION_TOUCH_INTERVAL_MS) return;
@@ -180,6 +180,7 @@ const ADMIN_NAME = "xxz";
 
         let currentUser = restoreCurrentUserFromSession();
         window.currentUser = currentUser;
+        window._lastKnownUser = currentUser;
 
         var statsEl = document.getElementById('statsSection');
         if (statsEl && !currentUser) statsEl.style.display = 'none';
@@ -437,7 +438,10 @@ const ADMIN_NAME = "xxz";
             // 尝试API查询
             try {
                 var url = API_BASE + '/api/vip/status?user_name=' + encodeURIComponent(currentUser);
-                var resp = await fetch(url);
+                var vc = new AbortController();
+                var vt = setTimeout(function() { vc.abort(); }, 8000);
+                var resp = await fetch(url, { signal: vc.signal });
+                clearTimeout(vt);
                 var data = await resp.json();
                 var apiIsVip = data.is_vip === true;
                 // 防止 API 返回 true 但实际已过期：检查 active_vip.expire_at
@@ -1473,6 +1477,8 @@ const ADMIN_NAME = "xxz";
                 const pw = document.getElementById("regPwInp").value;
                 const email = document.getElementById("regEmailInp").value.trim();
                 if (!name) { showToast("请输入昵称"); return; }
+                if (name.length < 2 || name.length > 20) { showToast("昵称长度2-20个字符"); return; }
+                if (!/^[\u4e00-\u9fa5a-zA-Z0-9_]+$/.test(name)) { showToast("昵称仅支持中英文、数字和下划线"); return; }
                 if (!pw) { showToast("请输入密码"); return; }
                 if (pw.length < 6) { showToast("密码至少6位"); return; }
                 if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }
@@ -8226,6 +8232,43 @@ function renderProfileActivityList(kind) {
 
             // 版本更新日志
             const changelogData = [
+                {
+                    version: 'v0.85',
+                    date: '2026-06-23',
+                    content: `
+                        <h4>全量安全审计修复、设备识别大幅升级、聊天头像即时更新</h4>
+                        <ul>
+                            <li><b>【安全】</b>XSS 高危漏洞修复（safeJsStr 全转义 + 注册字符限制）</li>
+                            <li><b>【安全】</b>Storage 路径遍历防护、后端错误信息不返回前端</li>
+                            <li><b>【安全】</b>RateLimit 边界修复、fetch 超时保护、currentUser TDZ 修复</li>
+                            <li><b>【安全】</b><code>window.sb</code> 不再被 admin.js 删除，前后台可共存</li>
+                            <li>设备型号识别升级：新增 UA 标识符映射表，15 Pro Max 不再误判为 16 Plus</li>
+                            <li>聊天列表头像即时更新：全量检查头像并刷新列表 DOM</li>
+                            <li>地区中文显示：<code>China·Guangdong·Guangzhou</code> → 广东广州</li>
+                            <li>用户详情卡片数据回填：最近访问/IP/地区/设备从登录事件自动回填</li>
+                            <li>用户详情弹窗去掉最近安全提醒区块</li>
+                            <li>举报弹窗 × 按钮独立样式修复</li>
+                            <li>点赞/评论记录显示被操作人（xxz 点赞了 yy 的内容）</li>
+                            <li>未登录用户隐藏帖子页三大数据版块</li>
+                            <li>管理员登出清理定时器与事件监听</li>
+                            <li>邮箱发件地址修正：Resend 免费版强制使用 onboarding@resend.dev</li>
+                            <li>管理员邮箱发送结果展示详细失败原因</li>
+                        </ul>
+                        <h4>优化</h4>
+                        <ul>
+                            <li>设备识别链路重做：UA 标识符优先，分辨率推断降级为兜底</li>
+                            <li>注册入口增加字符集与长度双重校验</li>
+                            <li>设备详情弹出卡从内联展开改为 860px 模态框</li>
+                            <li>后台登出时完整清理定时器与事件监听</li>
+                        </ul>
+                        <h4>Remade</h4>
+                        <ul>
+                            <li>重做设备型号识别引擎：UA 标识符映射优先</li>
+                            <li>重做聊天列表头像更新机制：每次全量刷新</li>
+                            <li>重做后台会话管理：登出时完整清理</li>
+                        </ul>
+                    `
+                },
                 {
                     version: 'v0.84',
                     date: '2026-06-22',
