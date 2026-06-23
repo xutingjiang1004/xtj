@@ -101,6 +101,9 @@
     }
     .dash-header .dh-right::-webkit-scrollbar { display: none; }
     .dash-header .dh-right button {
+        --tab-icon-color: #059669;
+        --tab-icon-bg: rgba(5,150,105,0.10);
+        --tab-icon-bg-hover: rgba(5,150,105,0.16);
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -166,23 +169,72 @@
         display: none !important;
     }
     .admin-tab-icon {
-        width: 16px;
-        height: 16px;
+        width: 22px;
+        height: 22px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        flex: 0 0 16px;
-        color: currentColor;
+        flex: 0 0 22px;
+        border-radius: 8px;
+        background: var(--tab-icon-bg);
+        color: var(--tab-icon-color);
+        transition:
+            background-color 0.16s ease,
+            color 0.16s ease,
+            transform 0.16s ease;
     }
     .admin-tab-icon svg {
-        width: 16px;
-        height: 16px;
+        width: 15px;
+        height: 15px;
         display: block;
         stroke: currentColor;
         stroke-width: 2;
         fill: none;
         stroke-linecap: round;
         stroke-linejoin: round;
+    }
+    .dash-header .dh-right button:hover .admin-tab-icon {
+        background: var(--tab-icon-bg-hover);
+        transform: scale(1.06);
+    }
+    .dash-header .dh-right button.active .admin-tab-icon {
+        background: var(--tab-icon-color);
+        color: #fff;
+        transform: none;
+    }
+    #tabAnnBtn { --tab-icon-color: #ea7a22; --tab-icon-bg: rgba(234,122,34,0.12); --tab-icon-bg-hover: rgba(234,122,34,0.18); }
+    #tabStatsBtn { --tab-icon-color: #2f6df6; --tab-icon-bg: rgba(47,109,246,0.12); --tab-icon-bg-hover: rgba(47,109,246,0.18); }
+    #tabUsersBtn { --tab-icon-color: #1f9d5a; --tab-icon-bg: rgba(31,157,90,0.12); --tab-icon-bg-hover: rgba(31,157,90,0.18); }
+    #tabSecurityBtn { --tab-icon-color: #5b6cf0; --tab-icon-bg: rgba(91,108,240,0.12); --tab-icon-bg-hover: rgba(91,108,240,0.18); }
+    #tabAuditBtn { --tab-icon-color: #0fa6b8; --tab-icon-bg: rgba(15,166,184,0.12); --tab-icon-bg-hover: rgba(15,166,184,0.18); }
+    #tabErrorLogBtn { --tab-icon-color: #ea5b3a; --tab-icon-bg: rgba(234,91,58,0.12); --tab-icon-bg-hover: rgba(234,91,58,0.18); }
+    #tabPostsBtn { --tab-icon-color: #149a8a; --tab-icon-bg: rgba(20,154,138,0.12); --tab-icon-bg-hover: rgba(20,154,138,0.18); }
+    #tabLikesBtn { --tab-icon-color: #e85b96; --tab-icon-bg: rgba(232,91,150,0.12); --tab-icon-bg-hover: rgba(232,91,150,0.18); }
+    #tabCommentsBtn { --tab-icon-color: #4f9ef8; --tab-icon-bg: rgba(79,158,248,0.12); --tab-icon-bg-hover: rgba(79,158,248,0.18); }
+    #tabReportsBtn { --tab-icon-color: #f08a24; --tab-icon-bg: rgba(240,138,36,0.12); --tab-icon-bg-hover: rgba(240,138,36,0.18); }
+    #tabBansBtn { --tab-icon-color: #db4258; --tab-icon-bg: rgba(219,66,88,0.12); --tab-icon-bg-hover: rgba(219,66,88,0.18); }
+    #tabMutesBtn { --tab-icon-color: #8a59d9; --tab-icon-bg: rgba(138,89,217,0.12); --tab-icon-bg-hover: rgba(138,89,217,0.18); }
+    #tabBlacklistBtn { --tab-icon-color: #8d4f5f; --tab-icon-bg: rgba(141,79,95,0.12); --tab-icon-bg-hover: rgba(141,79,95,0.18); }
+    #tabPhotosBtn { --tab-icon-color: #14a089; --tab-icon-bg: rgba(20,160,137,0.12); --tab-icon-bg-hover: rgba(20,160,137,0.18); }
+    .dash-header .dh-right button[onclick="toggleTheme()"] {
+        --tab-icon-color: #d6a414;
+        --tab-icon-bg: rgba(214,164,20,0.12);
+        --tab-icon-bg-hover: rgba(214,164,20,0.18);
+    }
+    .dash-header .dh-right button.danger {
+        --tab-icon-color: #df4663;
+        --tab-icon-bg: rgba(223,70,99,0.12);
+        --tab-icon-bg-hover: rgba(223,70,99,0.18);
+    }
+    [data-theme="dark"] .dash-header .dh-right button .admin-tab-icon {
+        background: rgba(255,255,255,0.08);
+    }
+    [data-theme="dark"] .dash-header .dh-right button:hover .admin-tab-icon {
+        background: var(--tab-icon-bg-hover);
+    }
+    [data-theme="dark"] .dash-header .dh-right button.active .admin-tab-icon {
+        color: #fff;
+        filter: saturate(1.05) brightness(1.02);
     }
     .admin-tab-label { line-height: 1; display: inline-block; }
     .notif-badge {
