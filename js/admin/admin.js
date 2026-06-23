@@ -4034,6 +4034,9 @@ async function initAdminClient() {
         resultEl.className = '';
         resultEl.textContent = '';
 
+        var abortCtrl = new AbortController();
+        var abortTmr = setTimeout(function() { abortCtrl.abort(); }, 30000);
+
         try {
             var res = await fetch(API_BASE + '/admin/send-email', {
                 method: 'POST',
@@ -4041,8 +4044,10 @@ async function initAdminClient() {
                     'Content-Type': 'application/json',
                     'Authorization': 'Bearer ' + getToken()
                 },
-                body: JSON.stringify({ recipients: recipients, subject: subject, content: content, content_type: 'text' })
+                body: JSON.stringify({ recipients: recipients, subject: subject, content: content, content_type: 'text' }),
+                signal: abortCtrl.signal
             });
+            clearTimeout(abortTmr);
             var data = await res.json();
             if (data.ok) {
                 var msg = '✅ 发送完成：成功 ' + data.sent_count + ' 人';
@@ -4057,8 +4062,13 @@ async function initAdminClient() {
             }
         } catch(e) {
             resultEl.className = 'send-result error';
-            resultEl.textContent = '发送异常: ' + e.message;
+            if (e.name === 'AbortError') {
+                resultEl.textContent = '发送超时：连接SMTP服务器失败，请检查配置';
+            } else {
+                resultEl.textContent = '发送异常: ' + e.message;
+            }
         } finally {
+            clearTimeout(abortTmr);
             btn.disabled = false;
             btn.textContent = '📤 发送邮件';
         }
