@@ -4199,6 +4199,7 @@ function renderProfileActivityList(kind) {
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
 
                 feed.innerHTML = visiblePosts.length ? visiblePosts.map(function(post) {
+                    const p = normalizePost(post);
                     const pLikes = likeMap[p.id] || [];
                     const pComms = commentMap[p.id] || [];
                     const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
