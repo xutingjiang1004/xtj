@@ -116,10 +116,14 @@
     }
 
     // ===================== Session 超时管理（30分钟无操作自动登出） =====================
-    var SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30分钟
+    var ADMIN_SESSION_TTL_MS = 72 * 60 * 60 * 1000; // 72小时
+    var SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24小时无操作自动退出
     var lastActivityTime = Date.now();
+    var sessionTimeoutMonitorStarted = false;
     function resetActivityTimer() { lastActivityTime = Date.now(); }
     function startSessionTimeoutMonitor() {
+        if (sessionTimeoutMonitorStarted) return;
+        sessionTimeoutMonitorStarted = true;
         ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(function(evt) {
             document.addEventListener(evt, resetActivityTimer, { passive: true });
         });
@@ -409,7 +413,7 @@
             var raw = localStorage.getItem(SESSION_KEY);
             if (!raw) return false;
             var s = JSON.parse(raw);
-            return (Date.now() - s.t) < 2 * 60 * 60 * 1000;
+            return !!s && (Date.now() - Number(s.t || 0)) < ADMIN_SESSION_TTL_MS;
         } catch(e) { return false; }
     }
 
@@ -465,12 +469,13 @@
         }, true);
     }
 
-    async function initAdminClient() {
+async function initAdminClient() {
         document.getElementById('loginWrap').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
+        resetActivityTimer();
         saveSession();
         ensureRegisterAlertBadge();
-        startSessionTimeoutMonitor(); // 启动30分钟无操作自动登出
+        startSessionTimeoutMonitor(); // 启动 24 小时无操作自动退出
         installAdminTabDoubleClickRefresh(); // 启动双击 Tab 刷新
         
         var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos'];
@@ -1437,9 +1442,13 @@
         if (hasApiToken()) {
             try {
                 await apiCall('GET', '/admin/verify');
-                initAdminClient();
+                await initAdminClient();
             } catch(e) {
                 clearSession();
+                try {
+                    document.getElementById('dashboard').style.display = 'none';
+                    document.getElementById('loginWrap').style.display = 'flex';
+                } catch (_) {}
             }
         }
     })();

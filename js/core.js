@@ -79,13 +79,102 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
     window.xtjMagicLoadingHtml = window.__xtjFallbackLoadingHtml;
 }
 
-            const ADMIN_NAME = "xxz";
+const ADMIN_NAME = "xxz";
             const ADMIN_TOKEN_KEY = "xtj_admin_token";
             const AVATAR_CACHE_KEY = "xtj_avatars";
+            const USER_SESSION_KEY = "xtj_user_session";
+            const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+            const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
             let avatarCache = {};
+            let lastUserSessionWriteAt = 0;
 
-        let currentUser;
-        try { currentUser = localStorage.getItem("xtj_user") || ""; } catch(e) { currentUser = ""; }
+        function readUserSession() {
+            try {
+                var raw = localStorage.getItem(USER_SESSION_KEY);
+                if (!raw) return null;
+                var parsed = JSON.parse(raw);
+                return parsed && typeof parsed === "object" ? parsed : null;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function writeUserSession(userName, options) {
+            var name = String(userName || "").trim();
+            if (!name) return null;
+            var now = Date.now();
+            var existing = readUserSession();
+            var resetLoginAt = !!(options && options.resetLoginAt);
+            var loginAt = resetLoginAt ? now : Number(existing && existing.user_name === name ? existing.login_at : 0);
+            if (!Number.isFinite(loginAt) || loginAt <= 0) loginAt = now;
+            var next = {
+                user_name: name,
+                login_at: loginAt,
+                last_active_at: now
+            };
+            try { localStorage.setItem(USER_SESSION_KEY, JSON.stringify(next)); } catch (e) {}
+            try { localStorage.setItem("xtj_user", name); } catch (e) {}
+            lastUserSessionWriteAt = now;
+            return next;
+        }
+
+        function clearUserSessionStorage() {
+            try { localStorage.removeItem(USER_SESSION_KEY); } catch (e) {}
+            try { localStorage.removeItem("xtj_user"); } catch (e) {}
+            try { localStorage.removeItem("xtj_pw_hash"); } catch (e) {}
+            lastUserSessionWriteAt = 0;
+        }
+
+        function restoreCurrentUserFromSession() {
+            var now = Date.now();
+            var session = readUserSession();
+            if (!session) {
+                var legacyUser = "";
+                try { legacyUser = localStorage.getItem("xtj_user") || ""; } catch (e) { legacyUser = ""; }
+                legacyUser = String(legacyUser || "").trim();
+                if (legacyUser) {
+                    writeUserSession(legacyUser, { resetLoginAt: true });
+                    return legacyUser;
+                }
+                return "";
+            }
+            var userName = String(session.user_name || "").trim();
+            var lastActiveAt = Number(session.last_active_at || 0);
+            if (!userName || !Number.isFinite(lastActiveAt) || lastActiveAt <= 0 || (now - lastActiveAt) > USER_SESSION_TTL_MS) {
+                clearUserSessionStorage();
+                return "";
+            }
+            var loginAt = Number(session.login_at || 0);
+            if (!Number.isFinite(loginAt) || loginAt <= 0) loginAt = lastActiveAt;
+            try {
+                localStorage.setItem(USER_SESSION_KEY, JSON.stringify({
+                    user_name: userName,
+                    login_at: loginAt,
+                    last_active_at: now
+                }));
+                localStorage.setItem("xtj_user", userName);
+            } catch (e) {}
+            lastUserSessionWriteAt = now;
+            return userName;
+        }
+
+        function touchUserSession(force) {
+            var userName = String(window.currentUser || currentUser || "").trim();
+            if (!userName) return;
+            var now = Date.now();
+            if (!force && lastUserSessionWriteAt && (now - lastUserSessionWriteAt) < USER_SESSION_TOUCH_INTERVAL_MS) return;
+            writeUserSession(userName, { resetLoginAt: false });
+        }
+
+        window.touchUserSession = touchUserSession;
+        document.addEventListener("visibilitychange", function () {
+            if (!document.hidden) touchUserSession(false);
+        });
+        window.addEventListener("focus", function () {
+            touchUserSession(false);
+        });
+
+        let currentUser = restoreCurrentUserFromSession();
         window.currentUser = currentUser;
 
         // 记录用户访问到后端统计（API优先，Supabase直连兜底）
@@ -1325,12 +1414,12 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
                             return;
                         }
                         localStorage.setItem("xtj_pw_hash", authRec.media_url);
-                        localStorage.removeItem(ADMIN_TOKEN_KEY);
                     }
 
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
+                    writeUserSession(currentUser, { resetLoginAt: true });
                     try {
                         if (typeof window.logLoginEventSafe === "function" && name !== ADMIN_NAME) {
                             window.logLoginEventSafe(name);
@@ -1399,6 +1488,7 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
                     localStorage.setItem("xtj_pw_hash", pwHash);
+                    writeUserSession(currentUser, { resetLoginAt: true });
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
                             window.logLoginEventSafe(name, "register_success");
@@ -1847,9 +1937,7 @@ if (typeof window.xtjMagicLoadingHtml !== 'function') {
             window.doLogout = async function () {
                 currentUser = "";
                 window.currentUser = currentUser;
-                localStorage.removeItem("xtj_user");
-                localStorage.removeItem("xtj_pw_hash");
-                localStorage.removeItem(ADMIN_TOKEN_KEY);
+                clearUserSessionStorage();
                 localStorage.removeItem(CACHE_KEY);
                 document.getElementById("loginNickInp").value = "";
                 document.getElementById("loginPwInp").value = "";
@@ -2758,6 +2846,7 @@ function renderProfileActivityList(kind) {
                         await sb.from("likes").insert([optimisticLikeRecord]);
                         createHeartParticles(btn);
                     }
+                    touchUserSession(false);
                     scheduleLikeStatRefresh();
                     if (currentDockTab === 'profile' && typeof loadProfileActivity === 'function') {
                         loadProfileActivity(true);
@@ -2922,6 +3011,7 @@ function renderProfileActivityList(kind) {
                 try {
                     const { error } = await sb.from("comments").insert([{ post_id: activePostId, user_name: currentUser, content, actor_key: deviceId }]);
                     if (error) throw error;
+                    touchUserSession(false);
                     closeModal("commentModal");
                     showToast("评论成功");
                     var scrollEl = document.getElementById('panelPosts');
@@ -5280,6 +5370,7 @@ function renderProfileActivityList(kind) {
                         showToast("发布失败: " + ((insertRes.error && insertRes.error.message) || "未知错误"));
                         return;
                     }
+                    touchUserSession(false);
                     clearFeedCache();
                     resetPostComposer();
                     if (typeof window.resetPostPreview === "function") window.resetPostPreview();
@@ -6727,6 +6818,7 @@ function renderProfileActivityList(kind) {
                     if (btn) triggerTabAnimation(btn, tab);
                 }
                 const now = Date.now();
+                touchUserSession(false);
                 
                 // 濡澁鎷烽弻銉︽Ц閸氾附妲搁崣灞藉毊鍒烽敓鏂ゆ嫹锟?00ms鍐呭啀锟斤紕鍋ｉ崙璇叉倱娑擃澁鎷穞ab锟?
                 const isDoubleTap = (tab === currentDockTab) && lastTabTapTime[tab] && (now - lastTabTapTime[tab] < 300);
@@ -7464,6 +7556,7 @@ function renderProfileActivityList(kind) {
                         .select("id, user_name, media_url, content, created_at, views, actor_key")
                         .single();
                     if (error) throw error;
+                    touchUserSession(false);
                     clearDockChatFilePreview(false);
                     replaceDockChatCacheMessage(targetUser, tempId, insertedMessage || optimisticMessage);
                     if (dockChatActiveUser === targetUser) renderDockMessages(targetUser, _chatCache[getDockChatCacheKey(targetUser)] || [], true);
