@@ -3495,7 +3495,7 @@
             var srcLabel = sourceLabels[ev.info.source] || '登录记录';
             var locText = (ev.info.ip_location && ev.info.ip_location.text) ? escapeHtml(ev.info.ip_location.text) : '暂未解析';
             var fullIp = ev.info.ip || '-';
-            var possibleModel = ev.info.possible_device_model || (ev.info.device_meta && ev.info.device_meta.possible_device_model) || getPossibleDeviceModel(ev.info) || '-';
+            var possibleModel = ev.info.possible_device_model || (ev.info.device_meta && ev.info.device_meta.possible_device_model) || getPossibleDeviceModel(ev.info) || '-（需重新登录后记录）';
             var fpShort = '-';
             if (ev.info.browser_fingerprint_hash) fpShort = escapeHtml(ev.info.browser_fingerprint_hash.slice(0, 10)) + '...';
             else if (ev.info.canvas_fingerprint_hash) fpShort = 'C:' + escapeHtml(ev.info.canvas_fingerprint_hash.slice(0, 10)) + '...';
@@ -3687,14 +3687,16 @@
             html += '<div class="empty">暂无登录记录</div>';
         } else {
             html += '<div style="max-height:200px;overflow-y:auto;margin-bottom:12px;"><table style="width:100%;font-size:11px;border-collapse:collapse;">';
-            html += '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);"><th style="padding:4px 6px;text-align:left;">时间</th><th style="padding:4px 6px;text-align:left;">来源</th><th style="padding:4px 6px;text-align:left;">设备</th><th style="padding:4px 6px;text-align:left;">IP</th><th style="padding:4px 6px;text-align:left;">地区</th></tr></thead><tbody>';
+            html += '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);"><th style="padding:4px 6px;text-align:left;">时间</th><th style="padding:4px 6px;text-align:left;">来源</th><th style="padding:4px 6px;text-align:left;">设备</th><th style="padding:4px 6px;text-align:left;">疑似型号</th><th style="padding:4px 6px;text-align:left;">IP</th><th style="padding:4px 6px;text-align:left;">地区</th></tr></thead><tbody>';
             var sourceLabelsV2 = { 'login_success': '登录', 'page_visit': '访问', 'register_success': '注册', 'admin_login': '管理' };
             userEvents.slice(0, 10).forEach(function(ev) {
                 var lt = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
+                var vm = ev.info.possible_device_model || (ev.info.device_meta && ev.info.device_meta.possible_device_model) || getPossibleDeviceModel(ev.info) || '-（需重新登录后记录）';
                 html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.03);">';
                 html += '<td style="padding:4px 6px;">' + (lt ? escapeHtml(formatTime(lt)) : '-') + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(sourceLabelsV2[ev.info.source] || ev.info.source || '-') + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(((ev.info.device_type || '') + ' ' + (ev.info.os || '')).slice(0, 20)) + '</td>';
+                html += '<td style="padding:4px 6px;">' + escapeHtml(vm) + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(ev.info.ip || '-') + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml((ev.info.ip_location && ev.info.ip_location.text) || '-') + '</td>';
                 html += '</tr>';

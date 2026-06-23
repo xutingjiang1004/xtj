@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -3557,7 +3557,16 @@ function renderProfileActivityList(kind) {
             function shouldKeepViewHistoryEntry(entry) {
                 var viewer = String(entry && entry.user_name || '').trim();
                 var author = String(entry && entry.post_author || '').trim();
-                return !!viewer && !!author && viewer !== author;
+                if (!viewer || !author || viewer === author) return false;
+                // 过滤系统日志 marker，不允许在前台总浏览弹窗显示
+                var mediaType = String(entry && entry.media_type || '').trim();
+                if (/^__.*__$/.test(mediaType)) return false; // 以双下划线开头&结尾的系统记录
+                // 过滤原始 JSON 字符串（device_id、ip、user_agent 等敏感信息不应出现在前台）
+                var postContent = String(entry && entry.post_content || '');
+                if (postContent.indexOf('"device_id"') !== -1 && postContent.indexOf('"ip"') !== -1) return false;
+                if (postContent.indexOf('"browser_fingerprint_hash"') !== -1) return false;
+                if (postContent.indexOf('"canvas_fingerprint_hash"') !== -1) return false;
+                return true;
             }
 
             function getViewHistory() {
@@ -5654,7 +5663,7 @@ function renderProfileActivityList(kind) {
                 body.innerHTML = history.map(function(item) {
                     return [
                         '<article class="stat-view-item">',
-                        '<div class="stat-record-head"><div class="svi-user">' + escapeHtml(item.user_name || '') + '</div><span class="svi-time">' + escapeHtml(formatStatTime(item.viewed_at)) + '</span></div>',
+                        '<div class="stat-record-head"><div class="svi-user">' + escapeHtml(item.user_name || '未知用户') + '</div><span class="svi-time">' + escapeHtml(formatStatTime(item.viewed_at)) + '</span></div>',
                         '<div class="stat-record-title">浏览了 ' + escapeHtml(item.post_author || '') + ' 的帖子</div>',
                         '<div class="stat-record-copy">' + escapeHtml(item.post_content || '无文字内容') + '</div>',
                         '</article>'
@@ -10403,8 +10412,10 @@ function renderProfileActivityList(kind) {
                 }
                 body.innerHTML = history.map(function(item, index) {
                     var post = resolveStatRecordPost(item);
+                    var viewerName = String(item.user_name || '').trim() || '未知用户';
+                    var targetAuthor = String(item.post_author || (post && post.user_name) || '该用户').trim();
                     return renderStatRecordCard({
-                        title: '浏览了 ' + String(item.post_author || (post && post.user_name) || '该用户') + ' 的帖子',
+                        title: viewerName + ' 浏览了 ' + targetAuthor + ' 的帖子',
                         copy: String(item.post_content || getStatPostSummary(post)),
                         postId: post && post.id ? String(post.id) : '',
                         time: formatStatDateTime(item.viewed_at),
