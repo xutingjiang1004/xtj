@@ -425,7 +425,7 @@
                     </div>
                 </div>
 
-                <div class="stats">
+                <div class="stats" id="statsSection">
                     <div class="stat-card glass" onclick="openStatDetail('posts')" title="点击查看详情"><b id="sPosts">0</b><span>总动态</span></div>
                     <div class="stat-card glass" onclick="openStatDetail('views')" title="点击查看详情"><b id="sViews">0</b><span>总浏览</span></div>
                     <div class="stat-card glass" onclick="openStatDetail('likes')" title="点击查看详情"><b id="sLikes">0</b><span>点赞和评论</span></div>
@@ -1165,7 +1165,7 @@
                     <button class="report-view-tab" id="reportRecordsViewBtn" onclick="switchReportView('records')" aria-selected="false">举报记录</button>
                     <button class="report-records-btn" id="reportRecordsToggleBtn" onclick="toggleReportRecords()" aria-label="打开举报记录">📋 浮动</button>
                 </div>
-                <button class="btn btn-ghost" onclick="closeReportModal()" style="padding:4px 12px; font-size:16px;">✕</button>
+                <button class="report-modal-close" onclick="closeReportModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted);padding:6px 12px;line-height:1;border-radius:6px;" aria-label="关闭">✕</button>
             </div>
             <div class="report-modal-content">
                 <!-- 举报表单 -->
