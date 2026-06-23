@@ -2295,9 +2295,12 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
 
 // 用户提交举报
 app.post('/api/report', rateLimit(60000, 5), async (req, res) => {
-  const { reporter_name, target_type, target_id, target_user, report_category, report_reason } = req.body;
+  const { reporter_name, password_hash, target_type, target_id, target_user, report_category, report_reason } = req.body;
   if (!reporter_name || !target_type || !target_id || !report_category) {
     return res.status(400).json({ error: '缺少必要参数' });
+  }
+  if (!password_hash) {
+    return res.status(401).json({ error: '缺少身份验证' });
   }
   const reporterVal = validateString(reporter_name, MAX_USERNAME_LEN, '举报人');
   if (reporterVal && reporterVal.error) return res.status(400).json({ error: reporterVal.error });
@@ -2305,14 +2308,17 @@ app.post('/api/report', rateLimit(60000, 5), async (req, res) => {
   const reasonVal = validateString(report_reason, MAX_REASON_LEN, '举报原因');
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
   
-  // 验证举报人账号存在
-  const { data: userCheck } = await supabase.from('posts')
-    .select('id')
+  // 验证举报人身份
+  const { data: authRec } = await supabase.from('posts')
+    .select('media_url')
     .eq('user_name', reporterVal)
     .eq('media_type', AUTH_MARKER)
-    .limit(1);
-  if (!userCheck || userCheck.length === 0) {
+    .maybeSingle();
+  if (!authRec) {
     return res.status(400).json({ error: '举报人账号不存在' });
+  }
+  if (authRec.media_url !== password_hash) {
+    return res.status(403).json({ error: '身份验证失败' });
   }
   
   const reportContent = JSON.stringify({
@@ -3328,6 +3334,13 @@ app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req
 
 // 发送邮件
 app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res) => {
+  var timedOut = false;
+  var tmr = setTimeout(function() {
+    timedOut = true;
+    if (!res.headersSent) {
+      try { return res.status(504).json({ error: '发送邮件超时，请检查SMTP配置或稍后重试' }); } catch(e) {}
+    }
+  }, 25000);
   try {
     const { recipients, subject, content, content_type } = req.body;
     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
@@ -3355,9 +3368,11 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
       host: SMTP_HOST,
       port: SMTP_PORT,
       secure: SMTP_PORT === 465,
-      auth: { user: SMTP_USER, pass: SMTP_PASS }
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+      connectionTimeout: 8000,
+      greetingTimeout: 8000,
+      socketTimeout: 10000
     });
-    await transporter.verify();
     const sent = [];
     const failed = [];
     for (const r of recipients) {
@@ -3383,7 +3398,12 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     });
   } catch (e) {
     console.error('[Email API] 发送邮件失败:', e.message);
+    if (e.code === 'ESOCKET' || e.code === 'ETIMEDOUT') {
+      return res.status(504).json({ error: '连接SMTP服务器超时，请检查SMTP_HOST/SMTP_PORT配置' });
+    }
     return res.status(500).json({ error: '发送邮件失败: ' + e.message });
+  } finally {
+    clearTimeout(tmr);
   }
 });
 
