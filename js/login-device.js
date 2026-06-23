@@ -76,6 +76,7 @@
 
 
     // 根据 iOS/Safari 暴露的屏幕参数推测 iPhone 疑似型号（非精确识别）
+    // 结合 iOS 版本号缩小猜测范围
     function getPossibleDeviceModel(info) {
         info = info || {};
         var ua = String(info.user_agent || (navigator && navigator.userAgent) || '');
@@ -90,21 +91,90 @@
         var shortSide = Math.min(sw, sh);
         var longSide = Math.max(sw, sh);
         var key = shortSide + 'x' + longSide + '@' + (dpr || '');
+        var iosVer = getIosMajorVersion(ua);
         var modelMap = {
-            '440x956@3': '疑似 iPhone 16 Pro Max / iPhone 17 Pro Max',
-            '402x874@3': '疑似 iPhone 16 Pro / iPhone 17 / iPhone 17 Pro',
-            '393x852@3': '疑似 iPhone 14 Pro / iPhone 15 / iPhone 15 Pro / iPhone 16',
-            '430x932@3': '疑似 iPhone 14 Pro Max / iPhone 15 Plus / iPhone 15 Pro Max / iPhone 16 Plus',
-            '428x926@3': '疑似 iPhone 12 Pro Max / iPhone 13 Pro Max / iPhone 14 Plus',
-            '390x844@3': '疑似 iPhone 12 / iPhone 12 Pro / iPhone 13 / iPhone 13 Pro / iPhone 14',
-            '375x812@3': '疑似 iPhone X / iPhone XS / iPhone 11 Pro / iPhone 12 mini / iPhone 13 mini',
-            '414x896@3': '疑似 iPhone XS Max / iPhone 11 Pro Max',
-            '414x896@2': '疑似 iPhone XR / iPhone 11',
-            '414x736@3': '疑似 iPhone 6 Plus / 6s Plus / 7 Plus / 8 Plus',
-            '375x667@2': '疑似 iPhone 6 / 6s / 7 / 8 / SE（第 2/3 代）',
-            '320x568@2': '疑似 iPhone 5 / 5s / SE（第 1 代）'
+            '440x956@3': function() {
+                if (iosVer !== null && iosVer < 19) return 'iPhone 16 Pro Max';
+                return 'iPhone 16 Pro Max / iPhone 17 Pro Max';
+            },
+            '402x874@3': function() {
+                if (iosVer !== null && iosVer < 19) return 'iPhone 16 Pro';
+                if (iosVer !== null && iosVer >= 19) return 'iPhone 17 / iPhone 17 Pro';
+                return 'iPhone 16 Pro / iPhone 17 / iPhone 17 Pro';
+            },
+            '393x852@3': function() {
+                if (iosVer !== null && iosVer === 16) return 'iPhone 14 Pro';
+                if (iosVer !== null && iosVer === 17) return 'iPhone 15 / iPhone 15 Pro';
+                if (iosVer !== null && iosVer >= 18) return 'iPhone 16';
+                return 'iPhone 14 Pro / iPhone 15 / iPhone 15 Pro / iPhone 16';
+            },
+            '430x932@3': function() {
+                if (iosVer !== null && iosVer === 16) return 'iPhone 14 Pro Max';
+                if (iosVer !== null && iosVer === 17) return 'iPhone 15 Plus / iPhone 15 Pro Max';
+                if (iosVer !== null && iosVer >= 18) return 'iPhone 16 Plus';
+                return 'iPhone 14 Pro Max / iPhone 15 Plus / iPhone 15 Pro Max / iPhone 16 Plus';
+            },
+            '428x926@3': function() {
+                if (iosVer !== null && iosVer <= 15) return 'iPhone 12 Pro Max / iPhone 13 Pro Max';
+                if (iosVer !== null && iosVer >= 16) return 'iPhone 14 Plus';
+                return 'iPhone 12 Pro Max / iPhone 13 Pro Max / iPhone 14 Plus';
+            },
+            '390x844@3': function() {
+                if (iosVer !== null && iosVer <= 14) return 'iPhone 12 / iPhone 12 Pro';
+                if (iosVer !== null && iosVer === 15) return 'iPhone 13 / iPhone 13 Pro';
+                if (iosVer !== null && iosVer >= 16) return 'iPhone 14';
+                return 'iPhone 12 / iPhone 12 Pro / iPhone 13 / iPhone 13 Pro / iPhone 14';
+            },
+            '375x812@3': function() {
+                if (iosVer !== null && iosVer <= 11) return 'iPhone X';
+                if (iosVer !== null && iosVer === 12) return 'iPhone XS';
+                if (iosVer !== null && iosVer === 13) return 'iPhone 11 Pro';
+                if (iosVer !== null && iosVer === 14) return 'iPhone 12 mini';
+                if (iosVer !== null && iosVer >= 15) return 'iPhone 13 mini';
+                return 'iPhone X / iPhone XS / iPhone 11 Pro / iPhone 12 mini / iPhone 13 mini';
+            },
+            '414x896@3': function() {
+                if (iosVer !== null && iosVer <= 12) return 'iPhone XS Max';
+                if (iosVer !== null && iosVer >= 13) return 'iPhone 11 Pro Max';
+                return 'iPhone XS Max / iPhone 11 Pro Max';
+            },
+            '414x896@2': function() {
+                if (iosVer !== null && iosVer <= 12) return 'iPhone XR';
+                if (iosVer !== null && iosVer >= 13) return 'iPhone 11';
+                return 'iPhone XR / iPhone 11';
+            },
+            '414x736@3': 'iPhone 6 Plus / 6s Plus / 7 Plus / 8 Plus',
+            '375x667@2': 'iPhone 6 / 6s / 7 / 8 / SE（第 2/3 代）',
+            '320x568@2': 'iPhone 5 / 5s / SE（第 1 代）'
         };
-        return modelMap[key] || 'iPhone（型号不可确定）';
+        var matcher = modelMap[key];
+        if (typeof matcher === 'function') return matcher();
+        return matcher || 'iPhone（型号不可确定）';
+    }
+
+    // 从 User-Agent 提取 iOS 主版本号
+    function getIosMajorVersion(ua) {
+        var match = ua.match(/iPhone OS (\d+)_/);
+        if (match) return parseInt(match[1], 10);
+        return null;
+    }
+
+    // 精确设备型号（通过 UA Client Hints API，仅 Chromium 浏览器支持）
+    function getExactDeviceModel() {
+        try {
+            if (typeof navigator !== 'undefined' && navigator.userAgentData && typeof navigator.userAgentData.getHighEntropyValues === 'function') {
+                return navigator.userAgentData.getHighEntropyValues(['model'])
+                    .then(function(hints) {
+                        if (!hints) return null;
+                        var model = hints.model || '';
+                        return model && model !== '' ? model : null;
+                    })
+                    .catch(function() {
+                        return null;
+                    });
+            }
+        } catch(e) {}
+        return null;
     }
 
     // 设备元信息（仅基础信息，不做跨站追踪）
@@ -370,6 +440,9 @@
 
                 // 始终采集时钟偏移（轻量，不涉及隐私）
 
+                // 始终采集精确设备型号（UA Client Hints / 无成本的异步 API）
+                var exactModelPromise = getExactDeviceModel();
+
                 // 收集所有异步指纹，然后统一发送
                 var collectAndSend = function() {
                     // 收集已完成的指纹
@@ -389,7 +462,9 @@
                     if (webRtcPromise && webRtcPromise.then) {
                         promises.push(webRtcPromise.then(function(ips) { if (ips) bodyObj.webrtc_local_ips = ips; }));
                     }
-
+                    if (exactModelPromise && exactModelPromise.then) {
+                        promises.push(exactModelPromise.then(function(m) { if (m) bodyObj.exact_device_model = m; }));
+                    }
 
                     if (promises.length > 0) {
                         Promise.all(promises).then(function() { sendReq(); }).catch(function() { sendReq(); });
