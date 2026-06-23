@@ -1,0 +1,40 @@
+{
+  "mcpServers": {
+    "xtj-admin": {
+      "label": "XTJ 管理后台",
+      "description": "AI 驱动的 XTJ 管理后台控制 — 用户管理、内容管理、安全中心、数据统计、举报处理等 30+ 操作",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp-servers/xtj-admin/server.js"],
+      "env": {
+        "XTJ_API_BASE": "https://xtj.onrender.com"
+      }
+    },
+    "xtj-image": {
+      "label": "XTJ 图片优化",
+      "description": "AI 驱动的图片优化 — 压缩/格式转换(WebP/AVIF)/缩放/批量优化/缩略图生成",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp-servers/xtj-image/server.js"]
+    },
+    "xtj-email": {
+      "label": "XTJ 邮件通知",
+      "description": "AI 驱动的邮件发送 — 支持 SendGrid / SMTP，可发送安全警报、通知等",
+      "command": "node",
+      "args": ["${workspaceFolder}/mcp-servers/xtj-email/server.js"],
+      "env": {
+        "FROM_EMAIL": "",
+        "FROM_NAME": "XTJ 通知",
+        "ADMIN_NOTIFY_EMAIL": ""
+      }
+    },
+    "filesystem": {
+      "label": "文件系统",
+      "description": "项目文件的 AI 读写管理",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "${workspaceFolder}"
+      ]
+    }
+  }
+}

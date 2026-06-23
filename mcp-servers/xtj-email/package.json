@@ -1,0 +1,15 @@
+{
+  "name": "xtj-email-mcp",
+  "version": "1.0.0",
+  "description": "XTJ 邮件发送 MCP Server - 支持 SendGrid / Resend / SMTP 发送通知邮件",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.8.0",
+    "@sendgrid/mail": "^8.1.4",
+    "nodemailer": "^6.9.16"
+  }
+}
