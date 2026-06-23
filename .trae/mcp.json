@@ -1,5 +1,16 @@
 {
   "mcpServers": {
+    "supabase": {
+      "label": "Supabase 数据库",
+      "description": "AI 驱动的 Supabase 项目管理 — 数据库查询、表结构、Edge Functions、日志、分支管理等",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--access-token",
+        "sb_publishable_RFqxlLe3nKnbs_PUHrJjpg_AUVaOGbu"
+      ]
+    },
     "xtj-admin": {
       "label": "XTJ 管理后台",
       "description": "AI 驱动的 XTJ 管理后台控制 — 用户管理、内容管理、安全中心、数据统计、举报处理等 30+ 操作",
