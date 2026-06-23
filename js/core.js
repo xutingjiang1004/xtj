@@ -118,9 +118,13 @@ const ADMIN_NAME = "xxz";
             return next;
         }
 
+        // 一次性迁移：将 localStorage 的 xtj_pw_hash 复制到 sessionStorage（CRIT-4 安全修复）
+        try { if (localStorage.getItem('xtj_pw_hash') && !sessionStorage.getItem('xtj_pw_hash')) sessionStorage.setItem('xtj_pw_hash', localStorage.getItem('xtj_pw_hash')); } catch(e) {}
+
         function clearUserSessionStorage() {
             try { localStorage.removeItem(USER_SESSION_KEY); } catch (e) {}
             try { localStorage.removeItem("xtj_user"); } catch (e) {}
+            try { sessionStorage.removeItem("xtj_pw_hash"); } catch (e) {}
             try { localStorage.removeItem("xtj_pw_hash"); } catch (e) {}
             lastUserSessionWriteAt = 0;
         }
@@ -186,7 +190,7 @@ const ADMIN_NAME = "xxz";
                     fetch(API_BASE + '/api/log-user-visit', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_name: userName, password_hash: localStorage.getItem("xtj_pw_hash") || "" })
+                        body: JSON.stringify({ user_name: userName, password_hash: sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "" })
                     }).catch(function(){});
                 } catch(e) {}
             } else if (sb && !_visitLoggedToday) {
@@ -630,11 +634,13 @@ const ADMIN_NAME = "xxz";
             var scripts = [
                 'js/photo-wall/data.min.js?v=20260618_2',
                 'js/photo-wall/render.min.js?v=20260618_2',
-                'js/photo-wall/preview.min.js?v=20260620_2',
-                'js/photo-wall/preview-hotfix.js?v=20260620_2',
                 'js/photo-wall/photo-wall.min.js?v=20260618_2'
             ];
             _photoWallLoading = new Promise(function(resolve, reject) {
+                function safeReject(err) {
+                    _photoWallLoading = null;
+                    reject(err);
+                }
                 function loadNext(idx) {
                     if (idx >= scripts.length) {
                         _photoWallLoaded = true;
@@ -655,14 +661,14 @@ const ADMIN_NAME = "xxz";
                         });
                         existing.addEventListener('error', function onError() {
                             existing.removeEventListener('error', onError);
-                            reject(new Error('Failed to load ' + scripts[idx]));
+                            safeReject(new Error('Failed to load ' + scripts[idx]));
                         });
                         return;
                     }
                     var s = document.createElement('script');
                     s.src = scripts[idx];
                     s.onload = function() { s.dataset.xtjLoaded = '1'; loadNext(idx + 1); };
-                    s.onerror = function() { reject(new Error('Failed to load ' + scripts[idx])); };
+                    s.onerror = function() { safeReject(new Error('Failed to load ' + scripts[idx])); };
                     document.body.appendChild(s);
                 }
                 loadNext(0);
@@ -1417,6 +1423,8 @@ const ADMIN_NAME = "xxz";
                             return;
                         }
                         localStorage.setItem("xtj_pw_hash", authRec.media_url);
+                        // 用户登录时同步 xtj_pw_hash 到 sessionStorage（安全迁移）
+                        try { sessionStorage.setItem("xtj_pw_hash", authRec.media_url); } catch(e) {}
                     }
 
                     currentUser = name;
@@ -1496,6 +1504,7 @@ const ADMIN_NAME = "xxz";
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
                     localStorage.setItem("xtj_pw_hash", pwHash);
+                    try { sessionStorage.setItem("xtj_pw_hash", pwHash); } catch(e) {}
                     writeUserSession(currentUser, { resetLoginAt: true });
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
@@ -3409,63 +3418,34 @@ function renderProfileActivityList(kind) {
             window.openPostImagePreview = openPostImagePreview;
 
             window.openImageViewer = function (src, triggerEl) {
+                function fallbackOpen() {
+                    if (typeof window.forceClosePhotoPreview === 'function') {
+                        try { window.forceClosePhotoPreview(); } catch (e) {}
+                    } else if (typeof window.closePhotoPreview === 'function') {
+                        try { window.closePhotoPreview(); } catch (e) {}
+                    }
+                    const viewer = document.getElementById('imgViewer');
+                    const img = document.getElementById('ivImg');
+                    const wrapper = document.getElementById('ivWrapper');
+                    ivResetZoom(true);
+                    img.src = src;
+                    wrapper.classList.add('open-anim');
+                    img.classList.add('instant');
+                    void img.offsetWidth;
+                    img.classList.remove('instant');
+                    viewer.classList.add('active');
+                    document.body.style.overflow = 'hidden';
+                }
                 if (typeof window.openPhotoPreview !== 'function' && typeof ensurePhotoWallLoaded === 'function') {
                     ensurePhotoWallLoaded().then(function() {
-                        if (!openPostImagePreview(src, triggerEl)) {
-                            if (typeof window.forceClosePhotoPreview === 'function') {
-                                try { window.forceClosePhotoPreview(); } catch (e) {}
-                            } else if (typeof window.closePhotoPreview === 'function') {
-                                try { window.closePhotoPreview(); } catch (e) {}
-                            }
-                            const viewer = document.getElementById('imgViewer');
-                            const img = document.getElementById('ivImg');
-                            const wrapper = document.getElementById('ivWrapper');
-                            ivResetZoom(true);
-                            img.src = src;
-                            wrapper.classList.add('open-anim');
-                            img.classList.add('instant');
-                            void img.offsetWidth;
-                            img.classList.remove('instant');
-                            viewer.classList.add('active');
-                            document.body.style.overflow = 'hidden';
-                        }
+                        if (!openPostImagePreview(src, triggerEl)) fallbackOpen();
                     }).catch(function() {
-                        if (typeof window.forceClosePhotoPreview === 'function') {
-                            try { window.forceClosePhotoPreview(); } catch (e) {}
-                        } else if (typeof window.closePhotoPreview === 'function') {
-                            try { window.closePhotoPreview(); } catch (e) {}
-                        }
-                        const viewer = document.getElementById('imgViewer');
-                        const img = document.getElementById('ivImg');
-                        const wrapper = document.getElementById('ivWrapper');
-                        ivResetZoom(true);
-                        img.src = src;
-                        wrapper.classList.add('open-anim');
-                        img.classList.add('instant');
-                        void img.offsetWidth;
-                        img.classList.remove('instant');
-                        viewer.classList.add('active');
-                        document.body.style.overflow = 'hidden';
+                        fallbackOpen();
                     });
                     return;
                 }
                 if (openPostImagePreview(src, triggerEl)) return;
-                if (typeof window.forceClosePhotoPreview === 'function') {
-                    try { window.forceClosePhotoPreview(); } catch (e) {}
-                } else if (typeof window.closePhotoPreview === 'function') {
-                    try { window.closePhotoPreview(); } catch (e) {}
-                }
-                const viewer = document.getElementById('imgViewer');
-                const img = document.getElementById('ivImg');
-                const wrapper = document.getElementById('ivWrapper');
-                ivResetZoom(true);
-                img.src = src;
-                wrapper.classList.add('open-anim');
-                img.classList.add('instant');
-                void img.offsetWidth;
-                img.classList.remove('instant');
-                viewer.classList.add('active');
-                document.body.style.overflow = 'hidden';
+                fallbackOpen();
             };
 
             window.closeImageViewer = function () {
