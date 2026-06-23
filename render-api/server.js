@@ -1267,7 +1267,7 @@ function verifyToken(req, res, next) {
 
 // ===================== 健康检查 ======================
 app.get('/health', (req, res) => {
-  res.status(200).type('text/plain').send('ok');
+  res.json({ ok: true });
 });
 
 // ===================== 管理员登录 ======================
@@ -1427,7 +1427,7 @@ app.delete('/admin/post/:id', verifyToken, async (req, res) => {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
     var parts = token.split('.');
     if (parts.length >= 2) {
-      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      var payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
       auditUser = payload.user || 'unknown';
     }
   } catch(e) {}
@@ -1476,12 +1476,22 @@ async function addReportNotification(reportId, action, message) {
 
 // ===================== 举报通知查询 API ======================
 app.get('/api/report/notifications', async (req, res) => {
-  const { user } = req.query;
-  if (!user) return res.status(400).json({ error: '缺少用户名' });
+  const userName = req.query.user_name;
+  const password_hash = req.query.password_hash;
+  if (!userName) return res.status(400).json({ error: '缺少用户名' });
+  if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
+  const { data: authRec } = await supabase.from('posts')
+    .select('media_url')
+    .eq('user_name', userName)
+    .eq('media_type', AUTH_MARKER)
+    .maybeSingle();
+  if (!authRec || authRec.media_url !== password_hash) {
+    return res.status(403).json({ error: '身份验证失败' });
+  }
   try {
     const { data, error } = await supabase.from('posts')
       .select('id, content')
-      .eq('user_name', user)
+      .eq('user_name', userName)
       .eq('media_type', '__report__')
       .order('created_at', { ascending: false })
       .limit(160);
@@ -1500,12 +1510,21 @@ app.get('/api/report/notifications', async (req, res) => {
 });
 
 app.post('/api/report/notifications/mark-read', async (req, res) => {
-  const { user } = req.body;
-  if (!user) return res.status(400).json({ error: '缺少用户名' });
+  const { user_name, password_hash } = req.body;
+  if (!user_name) return res.status(400).json({ error: '缺少用户名' });
+  if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
+  const { data: authRec } = await supabase.from('posts')
+    .select('media_url')
+    .eq('user_name', user_name)
+    .eq('media_type', AUTH_MARKER)
+    .maybeSingle();
+  if (!authRec || authRec.media_url !== password_hash) {
+    return res.status(403).json({ error: '身份验证失败' });
+  }
   try {
     const { data, error } = await supabase.from('posts')
       .select('id, content')
-      .eq('user_name', user)
+      .eq('user_name', user_name)
       .eq('media_type', '__report__');
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     for (var i = 0; i < (data || []).length; i++) {
@@ -1539,7 +1558,7 @@ app.delete('/admin/photo/:id', verifyToken, async (req, res) => {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
     var parts = token.split('.');
     if (parts.length >= 2) {
-      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      var payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
       auditUser = payload.user || 'unknown';
     }
   } catch(e) {}
@@ -1646,7 +1665,7 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
     var parts = token.split('.');
     if (parts.length >= 2) {
-      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      var payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
       auditUser = payload.user || 'unknown';
     }
   } catch(e) {}
@@ -1659,7 +1678,7 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
   const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
   if (userNameVal && userNameVal.error) return res.status(400).json({ error: userNameVal.error });
   if (isProtectedAdminTarget(userNameVal)) return res.status(403).json({ error: 'Operation not allowed for admin user' });
-  const reasonVal = validateString(reason, MAX_REASON_LEN, '鍘熷洜');
+  const reasonVal = validateString(reason, MAX_REASON_LEN, '原因');
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
   
   const banType = durationHoursVal === 0 ? 'permanent' : 'temporary';
@@ -1674,7 +1693,7 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
     if (activeBan) return res.status(409).json({ error: '该用户已被拉黑封禁' });
     
     const { error } = await supabase.from('bans').update({
-      ban_reason: reasonVal || '杩濆弽绀惧尯瑙勫畾',
+      ban_reason: reasonVal || '违反社区规定',
       ban_duration_hours: durationHoursVal,
       ban_type: banType,
       banned_by: ADMIN_USERNAME,
@@ -1685,14 +1704,14 @@ app.post('/admin/ban', verifyToken, rateLimit(60000, 30), async (req, res) => {
     if (error) return res.status(400).json({ error: sanitizeError(error) });
   } else {
     const { error } = await supabase.from('bans').insert([{
-      user_name: userNameVal, ban_type: banType, ban_reason: reasonVal || '杩濆弽绀惧尯瑙勫畾',
+      user_name: userNameVal, ban_type: banType, ban_reason: reasonVal || '违反社区规定',
       ban_duration_hours: durationHoursVal,
       banned_by: ADMIN_USERNAME, expires_at: expiresAt, is_active: true
     }]);
     if (error) {
       if (error.code === '23505') {
         const { error: updErr } = await supabase.from('bans').update({
-          ban_reason: reasonVal || '杩濆弽绀惧尯瑙勫畾',
+          ban_reason: reasonVal || '违反社区规定',
           ban_duration_hours: durationHoursVal,
           ban_type: banType,
           banned_by: ADMIN_USERNAME,
@@ -1717,7 +1736,7 @@ app.put('/admin/ban/:id/lift', verifyToken, async (req, res) => {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
     var parts = token.split('.');
     if (parts.length >= 2) {
-      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      var payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
       auditUser = payload.user || 'unknown';
     }
   } catch(e) {}
@@ -1743,7 +1762,7 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
     var parts = token.split('.');
     if (parts.length >= 2) {
-      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      var payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
       auditUser = payload.user || 'unknown';
     }
   } catch(e) {}
@@ -1755,7 +1774,7 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
   
   const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
   if (userNameVal && userNameVal.error) return res.status(400).json({ error: userNameVal.error });
-  const reasonVal = validateString(reason, MAX_REASON_LEN, '鍘熷洜');
+  const reasonVal = validateString(reason, MAX_REASON_LEN, '原因');
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
   if (isProtectedAdminTarget(userNameVal)) return res.status(403).json({ error: 'Operation not allowed for admin user' });
   
@@ -1766,7 +1785,7 @@ app.post('/admin/mute', verifyToken, rateLimit(60000, 30), async (req, res) => {
   
   const { error } = await supabase.from('mutes').insert([{
     user_name: userNameVal,
-    reason: reasonVal || '杩濆弽绀惧尯瑙勫畾',
+    reason: reasonVal || '违反社区规定',
     duration_hours: durationHoursVal,
     muted_by: ADMIN_USERNAME,
     expires_at: expiresAt,
@@ -1784,7 +1803,7 @@ app.put('/admin/mute/:id/lift', verifyToken, async (req, res) => {
     var token = (req.headers.authorization || '').replace('Bearer ', '');
     var parts = token.split('.');
     if (parts.length >= 2) {
-      var payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+      var payload = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
       auditUser = payload.user || 'unknown';
     }
   } catch(e) {}
@@ -1813,7 +1832,7 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
   
   const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
   if (userNameVal && userNameVal.error) return res.status(400).json({ error: userNameVal.error });
-  const reasonVal = validateString(reason, MAX_REASON_LEN, '鍘熷洜');
+  const reasonVal = validateString(reason, MAX_REASON_LEN, '原因');
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
   if (isProtectedAdminTarget(userNameVal)) return res.status(403).json({ error: 'Operation not allowed for admin user' });
   
@@ -1828,7 +1847,7 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
     if (activeEntry) return res.status(409).json({ error: '该用户已在黑名单中' });
     
     const { error } = await supabase.from('blacklist').update({
-      reason: reasonVal || '杩濆弽绀惧尯瑙勫畾',
+      reason: reasonVal || '违反社区规定',
       duration_hours: durationHoursVal,
       added_by: ADMIN_USERNAME,
       expires_at: expiresAt,
@@ -1839,7 +1858,7 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
   } else {
     const { error } = await supabase.from('blacklist').insert([{
       user_name: userNameVal,
-      reason: reasonVal || '杩濆弽绀惧尯瑙勫畾',
+      reason: reasonVal || '违反社区规定',
       duration_hours: durationHoursVal,
       added_by: ADMIN_USERNAME,
       expires_at: expiresAt,
