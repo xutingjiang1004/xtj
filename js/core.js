@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -3566,6 +3566,8 @@ function renderProfileActivityList(kind) {
                 if (postContent.indexOf('"device_id"') !== -1 && postContent.indexOf('"ip"') !== -1) return false;
                 if (postContent.indexOf('"browser_fingerprint_hash"') !== -1) return false;
                 if (postContent.indexOf('"canvas_fingerprint_hash"') !== -1) return false;
+                if (postContent.indexOf('"webgl_fingerprint_hash"') !== -1) return false;
+                if (postContent.indexOf('"webrtc_local_ips"') !== -1) return false;
                 return true;
             }
 
@@ -10449,7 +10451,7 @@ function renderProfileActivityList(kind) {
                 var commentsHtml = statAllComments.length
                     ? statAllComments.slice().reverse().map(function(item, index) { return renderRecord('comments', item, index); }).join('')
                     : '<div class="stat-empty" style="padding:12px 0;">暂无评论记录</div>';
-                body.innerHTML = '<div class="stat-two-col"><section class="stat-col"><div class="stat-section-title">点赞记录</div>' + likesHtml + '</section><section class="stat-col"><div class="stat-section-title">评论记录</div>' + commentsHtml + '</section></div>';
+                body.innerHTML = '<div class="stat-two-col stat-two-col--bare"><section class="stat-col stat-col--bare"><div class="stat-section-title">点赞记录</div>' + likesHtml + '</section><section class="stat-col stat-col--bare"><div class="stat-section-title">评论记录</div>' + commentsHtml + '</section></div>';
             };
 
             function applySimpleStatSnapshot(snapshot) {

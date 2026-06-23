@@ -652,12 +652,12 @@ async function resolveIpLocation(ip) {
     async function() {
       var controller = new AbortController();
       var timeout = setTimeout(function() { controller.abort(); }, 2000);
-      var resp = await fetch('http://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query', { signal: controller.signal });
+      var resp = await fetch('http://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query,as,org,isp,mobile,proxy,hosting', { signal: controller.signal });
       clearTimeout(timeout);
       if (!resp.ok) throw new Error('ip-api.com HTTP ' + resp.status);
       var data = await resp.json();
       if (data.status !== 'success') throw new Error('ip-api.com status: ' + data.status);
-      return { country: data.country || '', region: data.regionName || '', city: data.city || '' };
+      return { country: data.country || '', region: data.regionName || '', city: data.city || '', asn: data.as || '', isp: data.isp || '', org: data.org || '', is_mobile: !!data.mobile, is_proxy: !!data.proxy, is_hosting: !!data.hosting };
     },
     async function() {
       var controller = new AbortController();
@@ -689,7 +689,13 @@ async function resolveIpLocation(ip) {
         country: result.country,
         region: result.region,
         city: result.city,
-        text: parts.length > 0 ? parts.join(' · ') : '未知'
+        text: parts.length > 0 ? parts.join(' · ') : '未知',
+        asn: result.asn || '',
+        isp: result.isp || '',
+        org: result.org || '',
+        is_mobile: result.is_mobile || false,
+        is_proxy: result.is_proxy || false,
+        is_hosting: result.is_hosting || false
       };
     } catch(e) {
       console.warn('[IP] 解析源 ' + (i + 1) + ' 失败:', e.message || e);
@@ -2694,7 +2700,7 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
 // ===================== 登录设备/IP 记录（前端调用） =====================
 app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
   try {
-    const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source, device_meta, browser_fingerprint_hash, canvas_fingerprint_hash } = req.body;
+    const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source, device_meta, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips, clock_offset } = req.body;
 
     const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
     const srcVal = VALID_SOURCES.includes(source) ? source : 'login_success';
@@ -2726,7 +2732,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     try { ipLocation = await resolveIpLocation(ip); } catch(e) {}
 
     // 加载安全设置，按开关决定是否写入
-    var securitySettings = { record_device: true, browser_fingerprint: true, canvas_fingerprint: true };
+    var securitySettings = { record_device: true, browser_fingerprint: true, canvas_fingerprint: true, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false };
     try {
       var { data: settingsData } = await supabase.from('posts')
         .select('content')
@@ -2738,6 +2744,9 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
         if (typeof parsed.record_device === 'boolean') securitySettings.record_device = parsed.record_device;
         if (typeof parsed.browser_fingerprint === 'boolean') securitySettings.browser_fingerprint = parsed.browser_fingerprint;
         if (typeof parsed.canvas_fingerprint === 'boolean') securitySettings.canvas_fingerprint = parsed.canvas_fingerprint;
+        if (typeof parsed.webgl_fingerprint === 'boolean') securitySettings.webgl_fingerprint = parsed.webgl_fingerprint;
+        if (typeof parsed.webrtc_local_ip === 'boolean') securitySettings.webrtc_local_ip = parsed.webrtc_local_ip;
+        if (typeof parsed.advanced_fingerprint === 'boolean') securitySettings.advanced_fingerprint = parsed.advanced_fingerprint;
       }
     } catch(e) {}
 
@@ -2749,6 +2758,49 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     }
     var finalBrowserFp = securitySettings.browser_fingerprint ? (browser_fingerprint_hash || null) : null;
     var finalCanvasFp = securitySettings.canvas_fingerprint ? (canvas_fingerprint_hash || null) : null;
+    var finalWebglFp = securitySettings.webgl_fingerprint ? (webgl_fingerprint_hash || null) : null;
+    var finalWebglMeta = securitySettings.webgl_fingerprint ? (webgl_meta || null) : null;
+    var finalWebrtcIps = securitySettings.webrtc_local_ip ? (webrtc_local_ips || null) : null;
+    var finalClockOffset = typeof clock_offset === 'number' ? clock_offset : null;
+
+    // HTTP Header 顺序指纹（记录 header 名称的排列顺序）
+    var httpHeaderFingerprint = null;
+    try {
+      if (req.rawHeaders && req.rawHeaders.length > 0) {
+        var headerNames = [];
+        for (var hi = 0; hi < req.rawHeaders.length; hi += 2) {
+          headerNames.push(String(req.rawHeaders[hi] || '').toLowerCase());
+        }
+        httpHeaderFingerprint = headerNames.join(',');
+      }
+    } catch(e) {}
+
+    // TLS 指纹（尝试获取，云平台可能不可用）
+    var tlsInfo = null;
+    try {
+      var socket = req.socket || req.connection;
+      if (socket && socket.getCipher && socket.getCipher()) {
+        var cipher = socket.getCipher();
+        tlsInfo = {
+          name: cipher.name || '',
+          version: cipher.version || '',
+          protocol: (socket.getProtocol && socket.getProtocol()) || ''
+        };
+      }
+    } catch(e) {}
+
+    // 确定最终 ASN/ISP 信息
+    var asnInfo = null;
+    if (ipLocation && (ipLocation.asn || ipLocation.isp || ipLocation.is_proxy || ipLocation.is_hosting)) {
+      asnInfo = {
+        asn: ipLocation.asn || '',
+        isp: ipLocation.isp || '',
+        org: ipLocation.org || '',
+        is_mobile: ipLocation.is_mobile || false,
+        is_proxy: ipLocation.is_proxy || false,
+        is_hosting: ipLocation.is_hosting || false
+      };
+    }
 
     // 写入 posts 表（短期方案，不新建表）
     const { error } = await supabase.from('posts').insert([{
@@ -2768,7 +2820,14 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
         source: srcVal,
         device_meta: finalDeviceMeta,
         browser_fingerprint_hash: finalBrowserFp,
-        canvas_fingerprint_hash: finalCanvasFp
+        canvas_fingerprint_hash: finalCanvasFp,
+        webgl_fingerprint_hash: finalWebglFp,
+        webgl_meta: finalWebglMeta,
+        webrtc_local_ips: finalWebrtcIps,
+        clock_offset: finalClockOffset,
+        asn_info: asnInfo,
+        http_header_fp: httpHeaderFingerprint,
+        tls_info: tlsInfo
       }),
       actor_key: 'login_' + Date.now() + '_' + random
     }]);
@@ -2835,19 +2894,22 @@ app.get('/api/security-settings', rateLimit(60000, 60), async (req, res) => {
       .eq('media_type', ADMIN_META_MARKER)
       .eq('media_url', 'security_settings')
       .maybeSingle();
-    var settings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
+    var settings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: true };
     if (data && data.content) {
       try {
         var parsed = JSON.parse(data.content);
         if (parsed.record_device !== undefined) settings.record_device = parsed.record_device;
         if (parsed.browser_fingerprint !== undefined) settings.browser_fingerprint = parsed.browser_fingerprint;
         if (parsed.canvas_fingerprint !== undefined) settings.canvas_fingerprint = parsed.canvas_fingerprint;
+        if (parsed.webgl_fingerprint !== undefined) settings.webgl_fingerprint = parsed.webgl_fingerprint;
+        if (parsed.webrtc_local_ip !== undefined) settings.webrtc_local_ip = parsed.webrtc_local_ip;
+        if (parsed.advanced_fingerprint !== undefined) settings.advanced_fingerprint = parsed.advanced_fingerprint;
         if (parsed.security_alerts !== undefined) settings.security_alerts = parsed.security_alerts;
       } catch(e) {}
     }
     return res.json({ settings: settings });
   } catch(e) {
-    return res.json({ settings: { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true } });
+    return res.json({ settings: { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: true } });
   }
 });
 
@@ -2989,7 +3051,7 @@ app.get('/admin/security-settings', verifyToken, rateLimit(60000, 20), async (re
       .eq('media_type', ADMIN_META_MARKER)
       .eq('media_url', 'security_settings')
       .maybeSingle();
-    var settings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, security_alerts: true };
+    var settings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false, security_alerts: true };
     if (data && data.content) {
       try { var parsed = JSON.parse(data.content); Object.assign(settings, parsed); } catch(e) {}
     }
@@ -3002,11 +3064,14 @@ app.get('/admin/security-settings', verifyToken, rateLimit(60000, 20), async (re
 
 app.post('/admin/security-settings', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    var { record_device, browser_fingerprint, canvas_fingerprint, security_alerts } = req.body;
+    var { record_device, browser_fingerprint, canvas_fingerprint, webgl_fingerprint, webrtc_local_ip, advanced_fingerprint, security_alerts } = req.body;
     var settings = {};
     if (typeof record_device === 'boolean') settings.record_device = record_device;
     if (typeof browser_fingerprint === 'boolean') settings.browser_fingerprint = browser_fingerprint;
     if (typeof canvas_fingerprint === 'boolean') settings.canvas_fingerprint = canvas_fingerprint;
+    if (typeof webgl_fingerprint === 'boolean') settings.webgl_fingerprint = webgl_fingerprint;
+    if (typeof webrtc_local_ip === 'boolean') settings.webrtc_local_ip = webrtc_local_ip;
+    if (typeof advanced_fingerprint === 'boolean') settings.advanced_fingerprint = advanced_fingerprint;
     if (typeof security_alerts === 'boolean') settings.security_alerts = security_alerts;
 
     var { data: existing } = await supabase.from('posts')
