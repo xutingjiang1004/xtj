@@ -1200,11 +1200,15 @@ function rateLimit(windowMs, maxRequests) {
 
 // ===================== Token 管理（无状态签名令牌，服务重启不掉登录） =====================
 const adminTokens = new Map(); // token -> { expiresAt }（仅用于延长有效期跟踪）
+const revokedTokens = new Map(); // token -> expiry（主动退出的令牌，过期前拒绝使用）
 // 每10分钟清理过期 token
 setInterval(function() {
   var now = Date.now();
   adminTokens.forEach(function(session, token) {
     if (now > session.expiresAt) adminTokens.delete(token);
+  });
+  revokedTokens.forEach(function(expiry, token) {
+    if (now > expiry) revokedTokens.delete(token);
   });
 }, 600000);
 
@@ -1245,6 +1249,10 @@ function verifyToken(req, res, next) {
   // 优先验证无状态签名（服务重启后仍然有效）
   var payload = verifySignedToken(token);
   if (payload) {
+    // 检查是否已主动登出
+    if (revokedTokens.has(token)) {
+      return res.status(401).json({ error: '令牌已注销，请重新登录' });
+    }
     req.adminToken = token;
     return next();
   }
@@ -1271,10 +1279,10 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   const { username, password } = req.body;
   
   if (!username || !password) {
-    return res.status(400).json({ error: '璇疯緭鍏ヨ处鍙峰拰瀵嗙爜' });
+    return res.status(400).json({ error: '请输入账号和密码' });
   }
   
-  // 杈撳叆闀垮害鏍￠獙
+  // 输入长度校验
   if (username.length > MAX_USERNAME_LEN) {
     return res.status(400).json({ error: '账号格式不正确' });
   }
@@ -1307,7 +1315,7 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   return res.json({ ok: true, token, username: ADMIN_USERNAME });
 });
 
-// 楠岃瘉 token 鏄惁鏈夋晥
+// 验证 token 是否有效
 app.get('/admin/verify', verifyToken, (req, res) => {
   return res.json({ ok: true });
 });
@@ -1315,6 +1323,11 @@ app.get('/admin/verify', verifyToken, (req, res) => {
 // 管理员登出
 app.post('/admin/logout', verifyToken, (req, res) => {
   adminTokens.delete(req.adminToken);
+  // 将签名 token 加入吊销列表，记录其过期时间防止重用
+  var payload = verifySignedToken(req.adminToken);
+  if (payload) {
+    revokedTokens.set(req.adminToken, payload.exp);
+  }
   return res.json({ ok: true });
 });
 
