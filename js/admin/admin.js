@@ -166,10 +166,7 @@
     }
 
     // 禁止创建 Supabase 直连客户端 — 所有管理操作必须通过 API_BASE
-    // 移除 window.sb 避免其他代码意外使用
-    if (window.sb) {
-        delete window.sb;
-    }
+    // 不移除 window.sb，避免影响前台页面功能
 
     // ===================== Token 管理（前后端共享，仅用于 API 鉴权） =====================
     var TOKEN_SALT = 'xtj_7k3m';
@@ -221,6 +218,8 @@
     var SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24小时无操作自动退出
     var lastActivityTime = Date.now();
     var sessionTimeoutMonitorStarted = false;
+    var _adminSessionTimer = null;
+    var _adminReportPollTimer = null;
     function resetActivityTimer() { lastActivityTime = Date.now(); }
     function startSessionTimeoutMonitor() {
         if (sessionTimeoutMonitorStarted) return;
@@ -228,7 +227,7 @@
         ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(function(evt) {
             document.addEventListener(evt, resetActivityTimer, { passive: true });
         });
-        setInterval(function() {
+        _adminSessionTimer = setInterval(function() {
             if (Date.now() - lastActivityTime > SESSION_TIMEOUT_MS) {
                 console.warn('[admin] 会话超时，自动登出');
                 window.doAdminLogout();
@@ -449,7 +448,11 @@
         var token = getToken();
         if (token) opts.headers['Authorization'] = 'Bearer ' + token;
         if (body) opts.body = JSON.stringify(body);
-        var res = await fetch(API_BASE + path, opts);
+        var ac = new AbortController();
+        var at = setTimeout(function() { ac.abort(); }, 30000);
+        opts.signal = ac.signal;
+        var res;
+        try { res = await fetch(API_BASE + path, opts); } finally { clearTimeout(at); }
         var data = await res.json();
         if (res.status === 401) {
             clearSession();
@@ -620,7 +623,7 @@ async function initAdminClient() {
         startRegisterAlertPolling();
 
         // 启动举报轮询（每 30 秒检查新举报）
-        setInterval(async function() {
+        _adminReportPollTimer = setInterval(async function() {
             var prevLen = reportsData.length;
             await loadReportsData();
             if (currentTab === 'reports' && reportsData.length !== prevLen) {
@@ -686,6 +689,12 @@ async function initAdminClient() {
             }).catch(function() {});
         }
         stopRegisterAlertPolling();
+        // 清理定时器和事件监听
+        if (_adminSessionTimer) { clearInterval(_adminSessionTimer); _adminSessionTimer = null; }
+        if (_adminReportPollTimer) { clearInterval(_adminReportPollTimer); _adminReportPollTimer = null; }
+        ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(function(evt) {
+            document.removeEventListener(evt, resetActivityTimer);
+        });
         allPosts = []; allLikes = []; allComments = []; allUsers = [];
         annList = [];
         clearSession();
@@ -816,6 +825,11 @@ async function initAdminClient() {
         var d = document.createElement('div');
         d.textContent = s || '';
         return d.innerHTML;
+    }
+
+    function safeJsStr(s) {
+        if (!s) return '';
+        return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/</g, '\\x3C').replace(/>/g, '\\x3E').replace(/\n/g, '\\n');
     }
 
     function maskIp(ip) {
@@ -1231,7 +1245,7 @@ async function initAdminClient() {
                 var isAdmin = u.name === ADMIN;
                 var isBanned = bansData.some(function(b) { return b.user_name === u.name && b.is_active; });
                 var isMuted = mutesData.some(function(m) { return m.user_name === u.name && m.is_active; });
-                var safeName = u.name.replace(/'/g, "\\'");
+                var safeName = safeJsStr(u.name);
 
                 // 最近登录设备 & IP
                 var userEvents = allLoginEvents.filter(function(ev) { return ev.user_name === u.name; }).map(function(ev) {
@@ -2994,7 +3008,7 @@ async function initAdminClient() {
                             regionCell = escapeHtml(lc.ip_location.text);
                         }
                         latestLoginTime = lc.login_at || latestEvent.created_at || '';
-                        var escapedName = u.name.replace(/'/g, "\\'");
+                        var escapedName = safeJsStr(u.name);
                         deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + escapedName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceText + '</a>';
                     } catch(ex) {}
                 }
