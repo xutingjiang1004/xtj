@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -1512,16 +1512,16 @@ const ADMIN_NAME = "xxz";
                 }
             }
 
-            // ========== 查看鍏兼湹绮敤鎴疯祫鏂欏崱锟?==========
+            // ========== 查看用户资料卡 ==========
             let upcTargetUser = null;
 
             window.openUserProfile = async function(userName) {
                 upcTargetUser = userName;
                 document.getElementById('upcName').textContent = userName;
-                document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細加载涓?..';
+                document.getElementById('upcLogin').textContent = '最近登录：加载中...';
                 
                 var avatarEl = document.getElementById('upcAvatar');
-                // localStorage鏉冿拷鈻夐敓鏂ゆ嫹閿熸枻鎷烽敍姘秼閸撳秶鏁ら幋宄板帥濡澁鎷烽弻銉︽拱閸︽壆绱﹂敓?
+                // localStorage 取头像缓存，失败用字母占位
                 var showAvatar = avatarCache[userName];
                 if (!showAvatar && userName === currentUser) {
                     try {
@@ -1604,16 +1604,16 @@ const ADMIN_NAME = "xxz";
                             if (info.last_login) {
                                 document.getElementById('upcLogin').textContent = '最近登录：' + new Date(info.last_login).toLocaleString();
                             } else {
-                                document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細-';
+                                document.getElementById('upcLogin').textContent = '最近登录：-';
                             }
                         } catch(e) {
-                            document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細-';
+                            document.getElementById('upcLogin').textContent = '最近登录：-';
                         }
                     } else {
-                        document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細-';
+                        document.getElementById('upcLogin').textContent = '最近登录：-';
                     }
                 } catch(e) {
-                    document.getElementById('upcLogin').textContent = '鏈€杩戠櫥褰曪細加载失败';
+                    document.getElementById('upcLogin').textContent = '最近登录：加载失败';
                 }
             };
 
@@ -4035,12 +4035,12 @@ function renderProfileActivityList(kind) {
                     };
                 });
 
-                // 闁衡偓閸洘鑲犻柟纰樺亾闁哄牆顦垫付鐟曚礁銇斿儚鐨勶拷锟斤箑鐓曢柛?
+                // 收集所有需要加载头像的用户名，去重后批量请求
                 const allUsers = new Set();
                 visiblePosts.forEach(p => allUsers.add(p.user_name));
                 comments.forEach(c => allUsers.add(c.user_name));
 
-                // 缂佹稑顦欢鐔稿緞閺夋垵鍓奸柛鏃傚Ь濞村洨鈧拷灞惧灇閸氾拷鈥虫櫃婵炴挸寮堕悡?
+                // 先收集所有需要头像的用户名，再批量加载头像并渲染
                 // 先渲染内容（此时头像为字母占位），再后台加载真实头像并更新 DOM
                 const firstPage = visiblePosts.slice(0, FEED_PAGE_SIZE);
                 feedPage = 1;
@@ -4098,7 +4098,7 @@ function renderProfileActivityList(kind) {
                 if (uncached.length === 0) return;
                 try {
                     var allData = [];
-                    var batchSize = 80; // Supabase .in() 闁哄牃鍋撳鑸垫皑瀹?0涓」锛岋拷?0娴ｆ瑩锟?
+                    var batchSize = 80; // Supabase .in() 限制最多 100 个项目，取 80 稳妥
                     for (var i = 0; i < uncached.length; i += batchSize) {
                         var batch = uncached.slice(i, i + batchSize);
                         var { data: batchData } = await sb.from("posts")
@@ -4323,7 +4323,7 @@ function renderProfileActivityList(kind) {
                   `:''}
                 </div>
               `;
-                }).join('') : `<div class="loading">蹇潵发布绗竴鏉″姩鎬佸惂~</div>`;
+                }).join('') : `<div class="loading">快来发布第一条动态吧~</div>`;
 
                 initPostScrollAnimation();
             }
@@ -6066,7 +6066,7 @@ function renderProfileActivityList(kind) {
                 }).catch(function() {});
             }
 
-            // ===================== 闁氨鐓＄化鑽ょ埠 =====================
+            // ===================== 帖子渲染函数 =====================
             let activeNotifications = [];
 
             function showNotification(userName, message) {
@@ -6882,7 +6882,7 @@ function renderProfileActivityList(kind) {
                             isRefreshing[tab] = false;
                             window.showToast('刷新完成');
                         } else if (tab === 'profile') {
-                            // 涓汉椤靛埛??
+                            // 个人页刷新
                             window.showToast('正在刷新...');
                             syncProfileUser();
                             if (currentUser) loadUserAvatar();
@@ -6891,14 +6891,14 @@ function renderProfileActivityList(kind) {
                             window.showToast('刷新完成');
                         }
                     } else {
-                        // 鍗曞嚮锛氭墽琛岃繑锟?鍥為《鎿嶄綔
+                        // 单击：执行返回顶部操作
                         lastTabTapCount[tab] = 1;
                         if (tab === 'posts') {
-                            // 帖子椤碉細鍥炲埌顶部
+                            // 帖子页：回到顶部
                             const panel = document.getElementById('panelPosts');
                             if (panel) panel.scrollTo({ top: 0, behavior: 'smooth' });
                         } else if (tab === 'chat') {
-                            // 閿熸枻鎷烽敓鏂ゆ嫹妞ょ绱版俊鍌涚亯閸︺劌顕瘽涓紝返回鑱婏拷鈺佸灙鐞涱煉绱遍崥锕€鍨崶鐐插煂妞ゅ爼锟?
+                            // 聊天页：如果在对话中则返回列表，否则回到顶部
                             if (dockChatActiveUser) {
                                 dockChatGoBack();
                             } else {
@@ -9783,7 +9783,7 @@ function renderProfileActivityList(kind) {
                 loadFeed = window.loadFeed = function(forceRefresh) {
                     var r = orig.apply(this, arguments);
                     var feed = document.getElementById('feed');
-                    if (feed && /loading-spinner|loading-text|鍐呭加载涓?../.test(feed.innerHTML || '')) {
+                    if (feed && /loading-spinner|loading-text|内容加载中/.test(feed.innerHTML || '')) {
                         feed.innerHTML = magicHtml();
                         if (window.initAllSpringLoaders) {
                             window.initAllSpringLoaders(feed);
@@ -9799,7 +9799,7 @@ function renderProfileActivityList(kind) {
                 openChat = window.openChat = function(userName) {
                     var r = origChat.apply(this, arguments);
                     var el = document.getElementById('dockChatMessages');
-                    if (el && (el.querySelector('.chat-empty') || /加载涓?../.test(el.textContent || ''))) {
+                    if (el && (el.querySelector('.chat-empty') || /加载中/.test(el.textContent || ''))) {
                         renderChatLoadingState(el, { title: '加载中..', variant: 'chat-detail' });
                     }
                     return r;
@@ -9812,7 +9812,7 @@ function renderProfileActivityList(kind) {
                 openPostDetail = window.openPostDetail = function(postId) {
                     var r = origPd.apply(this, arguments);
                     var body = document.getElementById('postDetailBody');
-                    if (body && /loading-spinner|loading-text|加载涓?../.test(body.innerHTML || '')) {
+                    if (body && /loading-spinner|loading-text|加载中/.test(body.innerHTML || '')) {
                         body.innerHTML = magicHtml();
                         if (window.initAllSpringLoaders) {
                             window.initAllSpringLoaders(body);
@@ -9828,7 +9828,7 @@ function renderProfileActivityList(kind) {
                 openStatDetail = window.openStatDetail = function(type) {
                     var r = origSd.apply(this, arguments);
                     var body = document.getElementById('statModalBody');
-                    if (body && /loading-spinner|loading-text|加载涓?../.test(body.innerHTML || '')) {
+                    if (body && /loading-spinner|loading-text|加载中/.test(body.innerHTML || '')) {
                         body.innerHTML = magicHtml();
                         if (window.initAllSpringLoaders) {
                             window.initAllSpringLoaders(body);
