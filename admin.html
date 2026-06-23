@@ -85,43 +85,107 @@
         flex-wrap: wrap; gap: 8px;
     }
     .dash-header h1 { font-size: 18px; }
-    .dash-header .dh-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .dash-header button {
-        padding: 6px 18px; border-radius: 12px; border: 1px solid var(--border);
-        background: rgba(255,255,255,0.1); cursor: pointer; font-size: 13px;
-        color: var(--text); white-space: nowrap; flex-shrink: 0;
+    .dash-header .dh-right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+    .dash-header .dh-right button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        height: 34px;
+        min-height: 34px;
+        padding: 0 12px;
+        line-height: 1;
+        box-sizing: border-box;
+        flex: 0 0 auto;
+        white-space: nowrap;
+        vertical-align: middle;
+        border: 1px solid var(--border);
+        border-width: 1px;
+        border-radius: 12px;
+        background: rgba(255,255,255,0.1);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--text);
+        position: relative;
+        overflow: visible;
         transition:
-            transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-            box-shadow 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-            background 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-            border-color 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-            color 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-        transform: translateY(0) scale(1);
-        box-shadow: 0 8px 18px rgba(26, 71, 48, 0.08);
+            background-color 0.16s ease,
+            border-color 0.16s ease,
+            color 0.16s ease,
+            opacity 0.16s ease !important;
     }
-    .dash-header button:hover {
+    .dash-header .dh-right button,
+    .dash-header .dh-right button:hover,
+    .dash-header .dh-right button:active,
+    .dash-header .dh-right button.active,
+    .dash-header .dh-right button.xtj-btn-pressing,
+    .dash-header .dh-right button.xtj-btn-release,
+    .dash-header .dh-right button.xtj-btn-clicked {
+        transform: none !important;
+        animation: none !important;
+        will-change: auto !important;
+        box-shadow: none !important;
+        height: 34px;
+        min-height: 34px;
+        padding: 0 12px;
+        border-width: 1px;
+        font-size: 13px;
+        font-weight: 600;
+    }
+    .dash-header .dh-right button:hover {
         background: rgba(255,255,255,0.18);
-        transform: translateY(-1px);
-        box-shadow: 0 12px 22px rgba(26, 71, 48, 0.12);
+        border-color: rgba(5,150,105,0.18);
     }
-    .dash-header button.active { background: var(--primary); color: white; border-color: var(--primary); }
-    .dash-header button.danger { color: var(--danger); border-color: rgba(255,59,96,0.3); }
+    .dash-header .dh-right button.active {
+        background: rgba(5,150,105,0.12);
+        color: var(--primary);
+        border-color: rgba(5,150,105,0.28);
+    }
+    .dash-header .dh-right button.danger { color: var(--danger); border-color: rgba(255,59,96,0.3); }
+    .dash-header .dh-right button:active {
+        background: rgba(255,255,255,0.18);
+        border-color: rgba(5,150,105,0.22);
+    }
+    .dash-header .dh-right button .xtj-btn-ripple,
+    .dash-header .dh-right .xtj-btn-ripple {
+        display: none !important;
+    }
+    .admin-tab-icon {
+        width: 16px;
+        height: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 16px;
+        color: currentColor;
+    }
+    .admin-tab-icon svg {
+        width: 16px;
+        height: 16px;
+        display: block;
+        stroke: currentColor;
+        stroke-width: 2;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+    }
+    .admin-tab-label { line-height: 1; display: inline-block; }
     .notif-badge {
         position: absolute; top: -8px; right: -8px; min-width: 18px; height: 18px;
         padding: 0 5px; border-radius: 9px; background: #ef4444; color: #fff;
         font-size: 11px; font-weight: 700; line-height: 18px; text-align: center;
         box-shadow: 0 2px 6px rgba(239,68,68,0.5); pointer-events: none; z-index: 100;
     }
-    .dash-header button:active {
-        transform: translateY(0) scale(0.965);
-        box-shadow: 0 6px 14px rgba(26, 71, 48, 0.08);
-        transition-duration: 0.12s;
-    }
-
     .dash-content { padding: 20px 24px; max-width: 1200px; margin: 0 auto; }
     .tab-panel { display: none; }
-    .tab-panel.active { display: block; animation: fadeIn 0.35s ease; }
-    @keyframes fadeIn { 0%{opacity:0;transform:translateY(8px)} 100%{opacity:1;transform:translateY(0)} }
+    .tab-panel.active { display: block; animation: adminPanelFade 0.12s ease both; }
+    @keyframes adminPanelFade { from { opacity: 0; } to { opacity: 1; } }
 
     .card {
         background: var(--card-bg); border: 1px solid var(--border);
@@ -1258,21 +1322,21 @@
     <div class="dash-header">
         <h1>⚙️ xtj 管理后台</h1>
         <div class="dh-right">
-            <button id="tabAnnBtn" class="active" onclick="switchTab('ann')">📢 公告管理</button>
-            <button id="tabStatsBtn" onclick="switchTab('stats')">📊 数据统计</button>
-            <button id="tabUsersBtn" onclick="switchTab('users')">👥 用户数据</button>
-            <button id="tabSecurityBtn" onclick="switchTab('security')">🛡️ 安全中心</button>
-            <button id="tabAuditBtn" onclick="switchTab('audit')">📋 操作审计</button>
-            <button id="tabErrorLogBtn" onclick="switchTab('errorlog')">🐛 错误日志</button>
-            <button id="tabPostsBtn" onclick="switchTab('posts')">📝 帖子管理</button>
-            <button id="tabLikesBtn" onclick="switchTab('likes')">❤️ 点赞数据</button>
-            <button id="tabCommentsBtn" onclick="switchTab('comments')">💬 评论数据</button>
-            <button id="tabReportsBtn" onclick="switchTab('reports')" style="position:relative;overflow:visible">🚨 举报管理<span id="reportBadge" class="notif-badge" style="display:none">0</span></button>
-            <button id="tabBansBtn" onclick="switchTab('bans')">🔒 拉黑封禁</button>
-            <button id="tabMutesBtn" onclick="switchTab('mutes')">🤐 禁言管理</button>
-            <button id="tabBlacklistBtn" onclick="switchTab('blacklist')">🚫 黑名单</button>
-            <button id="tabPhotosBtn" onclick="switchTab('photos')">📷 照片管理</button>
-            <button onclick="toggleTheme()" title="切换主题">🌓</button>
+            <button id="tabAnnBtn" class="active" onclick="switchTab('ann')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11v2"/><path d="M6 9.5v5L16 18V6L6 9.5z"/><path d="M16 9a4 4 0 0 1 0 6"/><path d="M6 14.5 7.5 19h2.5"/></svg></span><span class="admin-tab-label">公告管理</span></button>
+            <button id="tabStatsBtn" onclick="switchTab('stats')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20h16"/><path d="M7 16v-5"/><path d="M12 16V8"/><path d="M17 16V4"/></svg></span><span class="admin-tab-label">数据统计</span></button>
+            <button id="tabUsersBtn" onclick="switchTab('users')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="3"/><path d="M20 21v-2a4 4 0 0 0-3-3.87"/><path d="M15 4.13a3 3 0 0 1 0 5.74"/></svg></span><span class="admin-tab-label">用户数据</span></button>
+            <button id="tabSecurityBtn" onclick="switchTab('security')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 5 3.5 8 7 9 3.5-1 7-4 7-9V6l-7-3z"/><path d="m9 12 2 2 4-4"/></svg></span><span class="admin-tab-label">安全中心</span></button>
+            <button id="tabAuditBtn" onclick="switchTab('audit')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 3h6"/><path d="M10 6H8a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2"/><path d="M9 12h6"/><path d="M9 16h4"/><rect x="9" y="2" width="6" height="4" rx="1"/></svg></span><span class="admin-tab-label">操作审计</span></button>
+            <button id="tabErrorLogBtn" onclick="switchTab('errorlog')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 3 1 2"/><path d="m16 3-1 2"/><path d="M9 9h.01"/><path d="M15 9h.01"/><path d="M8 13h8"/><path d="M5 10a7 7 0 0 1 14 0v5a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3v-5z"/></svg></span><span class="admin-tab-label">错误日志</span></button>
+            <button id="tabPostsBtn" onclick="switchTab('posts')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 3h5v5"/><path d="M10 14 19 5"/><path d="M5 7a2 2 0 0 1 2-2h4"/><path d="M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg></span><span class="admin-tab-label">帖子管理</span></button>
+            <button id="tabLikesBtn" onclick="switchTab('likes')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 20-1.4-1.3C5.4 14 2 10.9 2 7.1 2 4.8 3.8 3 6.1 3c1.4 0 2.8.7 3.9 1.9C11.1 3.7 12.5 3 13.9 3 16.2 3 18 4.8 18 7.1c0 3.8-3.4 6.9-8.6 11.6L12 20z"/></svg></span><span class="admin-tab-label">点赞数据</span></button>
+            <button id="tabCommentsBtn" onclick="switchTab('comments')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg></span><span class="admin-tab-label">评论数据</span></button>
+            <button id="tabReportsBtn" onclick="switchTab('reports')" style="position:relative;overflow:visible"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4 3 20h18L12 4z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span><span class="admin-tab-label">举报管理</span><span id="reportBadge" class="notif-badge" style="display:none">0</span></button>
+            <button id="tabBansBtn" onclick="switchTab('bans')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><span class="admin-tab-label">拉黑封禁</span></button>
+            <button id="tabMutesBtn" onclick="switchTab('mutes')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m17 9 4 6"/><path d="m21 9-4 6"/></svg></span><span class="admin-tab-label">禁言管理</span></button>
+            <button id="tabBlacklistBtn" onclick="switchTab('blacklist')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.5 8.5 7 7"/></svg></span><span class="admin-tab-label">黑名单</span></button>
+            <button id="tabPhotosBtn" onclick="switchTab('photos')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h4l2-2h4l2 2h4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><circle cx="12" cy="12" r="3.5"/></svg></span><span class="admin-tab-label">照片管理</span></button>
+            <button onclick="toggleTheme()" title="切换主题">主题</button>
             <button class="danger" onclick="confirmLogout()">退出</button>
         </div>
     </div>
