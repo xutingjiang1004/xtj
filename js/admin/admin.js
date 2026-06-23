@@ -3428,6 +3428,28 @@ async function initAdminClient() {
         document.body.appendChild(modal);
     };
 
+    // 登录记录设备型号文案（不显示“需重新登录后记录”）
+    function getLoginRecordModelText(info) {
+        info = info || {};
+        var savedModel = info.possible_device_model || (info.device_meta && info.device_meta.possible_device_model);
+        if (savedModel) return savedModel;
+
+        var deviceType = String(info.device_type || '').toLowerCase();
+        var ua = String(info.user_agent || '');
+        var meta = info.device_meta || {};
+        var platform = String(meta.platform || info.platform || '');
+
+        var isIPhone = deviceType.indexOf('iphone') >= 0 || /iPhone/i.test(ua);
+        if (isIPhone) {
+            return getPossibleDeviceModel(info) || 'iPhone（型号不可确定）';
+        }
+
+        var isDesktop = deviceType.indexOf('desktop') >= 0 || /Windows|Macintosh|Linux/i.test(ua) || /Win|Mac|Linux/i.test(platform);
+        if (isDesktop) return '-';
+
+        return '-';
+    }
+
     // 登录设备详情展示
     window.showUserLoginDetail = function(userName) {
         var box = document.getElementById('userLoginDetail');
@@ -3545,7 +3567,7 @@ async function initAdminClient() {
             var srcLabel = sourceLabels[ev.info.source] || '登录记录';
             var locText = (ev.info.ip_location && ev.info.ip_location.text) ? escapeHtml(ev.info.ip_location.text) : '暂未解析';
             var fullIp = ev.info.ip || '-';
-            var possibleModel = ev.info.possible_device_model || (ev.info.device_meta && ev.info.device_meta.possible_device_model) || getPossibleDeviceModel(ev.info) || '-（需重新登录后记录）';
+            var possibleModel = getLoginRecordModelText(ev.info);
             var asnIsp = '-';
             if (ev.info.asn_info && ev.info.asn_info.isp) {
                 asnIsp = escapeHtml(ev.info.asn_info.isp.slice(0, 20));
@@ -3760,7 +3782,7 @@ async function initAdminClient() {
             var sourceLabelsV2 = { 'login_success': '登录', 'page_visit': '访问', 'register_success': '注册', 'admin_login': '管理' };
             userEvents.slice(0, 10).forEach(function(ev) {
                 var lt = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
-                var vm = ev.info.possible_device_model || (ev.info.device_meta && ev.info.device_meta.possible_device_model) || getPossibleDeviceModel(ev.info) || '-（需重新登录后记录）';
+                var vm = getLoginRecordModelText(ev.info);
                 html += '<tr style="border-bottom:1px solid rgba(0,0,0,0.03);">';
                 html += '<td style="padding:4px 6px;">' + (lt ? escapeHtml(formatTime(lt)) : '-') + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(sourceLabelsV2[ev.info.source] || ev.info.source || '-') + '</td>';
