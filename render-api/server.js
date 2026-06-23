@@ -28,7 +28,11 @@ const API_SECRET = process.env.API_SECRET || crypto
     process.env.SUPABASE_URL || 'https://ithowxqignlhkwaykglt.supabase.co'
   ].join('|'))
   .digest('hex');
-const TOKEN_EXPIRY_MS = 2 * 60 * 60 * 1000; // 2 hours
+const ADMIN_TOKEN_EXPIRY_HOURS = Math.min(
+  Math.max(parseInt(process.env.ADMIN_TOKEN_EXPIRY_HOURS || '72', 10) || 72, 1),
+  168
+);
+const TOKEN_EXPIRY_MS = ADMIN_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000;
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ithowxqignlhkwaykglt.supabase.co';
 // SUPABASE SERVICE_KEY 优先，回退到 ANON KEY（本地开发/演示模式）
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
