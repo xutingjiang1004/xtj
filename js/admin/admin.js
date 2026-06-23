@@ -1622,7 +1622,7 @@ async function initAdminClient() {
         var typeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
         var statusLabel = r.status === 'pending' ? '待处理' : r.status === 'actioned' ? '已处理' : r.status === 'dismissed' ? '已驳回' : r.status;
         
-        var html = '<h3 style="margin:0 0 16px;">举报详情</h3>';
+        var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><h3 style="margin:0;">举报详情</h3><button onclick="this.closest(\'.report-detail-modal\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;">×</button></div>';
         html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:16px;">';
         html += '<div><strong>举报人：</strong>' + escapeHtml(r.reporter_name) + '</div>';
         html += '<div><strong>被举报人：</strong>' + escapeHtml(r.target_user || '-') + '</div>';
@@ -3445,7 +3445,7 @@ async function initAdminClient() {
         var typeLabel = r.target_type === 'photo' ? '照片墙' : '帖子';
         var statusLabel = r.status === 'pending' ? '待处理' : r.status === 'actioned' ? '已处理' : r.status === 'dismissed' ? '已驳回' : r.status;
 
-        var html = '<h3 style="margin:0 0 16px;">举报详情</h3>';
+        var html = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><h3 style="margin:0;">举报详情</h3><button onclick="this.closest(\'.report-detail-modal\').remove()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;">×</button></div>';
         html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;margin-bottom:16px;">';
         html += '<div><strong>举报人：</strong>' + escapeHtml(r.reporter_name || '-') + '</div>';
         html += '<div><strong>被举报人：</strong>' + escapeHtml(r.target_user || '-') + '</div>';
@@ -3890,7 +3890,10 @@ async function initAdminClient() {
     // ===================== 邮件通知标签页 =====================
     window.renderEmailTab = function(el) {
         el.innerHTML = '<div class="email-section card"><h3>📧 邮件通知</h3>' +
-            '<p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">选择收件人，编辑邮件内容后发送。支持批量发送和单独发送。</p>' +
+            '<p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">选择收件人，编辑邮件内容后发送。支持批量发送和单独发送。标题和内容会自动保存草稿，切换页面不会丢失。</p>' +
+            '<div id="emailDraftBar" style="display:none;padding:8px 12px;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.3);border-radius:8px;margin-bottom:10px;font-size:13px;align-items:center;gap:8px;">' +
+            '💾 你有未发送的草稿 <button class="btn-sm" onclick="emailRestoreDraft()" style="margin-left:8px;">恢复草稿</button>' +
+            '<button class="btn-sm" onclick="emailClearDraft()" style="margin-left:4px;">放弃</button></div>' +
             '<div id="emailUserListWrap"><div class="empty">正在加载用户列表...</div></div>' +
             '<div id="emailFormWrap" style="display:none;">' +
             '<div class="batch-bar">' +
@@ -3898,14 +3901,64 @@ async function initAdminClient() {
             '<span style="font-size:12px;color:var(--text-muted);" id="emailSelectedCount">已选 0 人</span>' +
             '<span style="font-size:12px;color:var(--text-muted);" id="emailTotalCount"></span>' +
             '</div>' +
-            '<div class="form-group"><label>邮件主题</label><input id="emailSubjectInp" placeholder="输入邮件主题" /></div>' +
-            '<div class="form-group"><label>邮件内容</label><textarea id="emailContentInp" placeholder="输入邮件内容...&#10;支持换行，发送时将转为 HTML 格式"></textarea></div>' +
+            '<div class="form-group"><label>邮件主题</label><input id="emailSubjectInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件主题" /></div>' +
+            '<div class="form-group"><label>邮件内容</label><textarea id="emailContentInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件内容...&#10;支持换行，发送时将转为 HTML 格式"></textarea></div>' +
             '<button class="btn-sm primary" onclick="emailSend()" id="emailSendBtn">📤 发送邮件</button>' +
             '<div id="emailResult"></div>' +
             '</div></div>';
 
+        // 检查是否有草稿
+        var draftSubject = sessionStorage.getItem('xtj_email_draft_subject');
+        var draftContent = sessionStorage.getItem('xtj_email_draft_content');
+        if (draftSubject || draftContent) {
+            var bar = document.getElementById('emailDraftBar');
+            if (bar) bar.style.display = 'flex';
+        }
+
         loadEmailUsers();
     };
+
+    window.emailAutoSaveDraft = function() {
+        var sub = (document.getElementById('emailSubjectInp') || {}).value || '';
+        var con = (document.getElementById('emailContentInp') || {}).value || '';
+        try {
+            if (sub) sessionStorage.setItem('xtj_email_draft_subject', sub);
+            else sessionStorage.removeItem('xtj_email_draft_subject');
+            if (con) sessionStorage.setItem('xtj_email_draft_content', con);
+            else sessionStorage.removeItem('xtj_email_draft_content');
+            // 有草稿时显示恢复栏
+            var bar = document.getElementById('emailDraftBar');
+            if (bar) {
+                if (sub || con) { bar.style.display = 'flex'; } else { bar.style.display = 'none'; }
+            }
+        } catch(e) {}
+    };
+
+    window.emailRestoreDraft = function() {
+        var sub = sessionStorage.getItem('xtj_email_draft_subject');
+        var con = sessionStorage.getItem('xtj_email_draft_content');
+        var subInp = document.getElementById('emailSubjectInp');
+        var conInp = document.getElementById('emailContentInp');
+        if (subInp && sub) subInp.value = sub;
+        if (conInp && con) conInp.value = con;
+        emailUpdateDraftBarVisibility();
+    };
+
+    window.emailClearDraft = function() {
+        try {
+            sessionStorage.removeItem('xtj_email_draft_subject');
+            sessionStorage.removeItem('xtj_email_draft_content');
+        } catch(e) {}
+        emailUpdateDraftBarVisibility();
+    };
+
+    function emailUpdateDraftBarVisibility() {
+        var bar = document.getElementById('emailDraftBar');
+        if (!bar) return;
+        var sub = sessionStorage.getItem('xtj_email_draft_subject');
+        var con = sessionStorage.getItem('xtj_email_draft_content');
+        bar.style.display = (sub || con) ? 'flex' : 'none';
+    }
 
     window.loadEmailUsers = async function() {
         var wrap = document.getElementById('emailUserListWrap');
@@ -3997,6 +4050,7 @@ async function initAdminClient() {
                 resultEl.className = 'send-result success';
                 resultEl.textContent = msg;
                 showToast(msg);
+                emailClearDraft();
             } else {
                 resultEl.className = 'send-result error';
                 resultEl.textContent = '发送失败: ' + (data.error || '未知错误');

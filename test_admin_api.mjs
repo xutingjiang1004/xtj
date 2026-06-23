@@ -1,11 +1,18 @@
-const API = 'https://xtj.onrender.com';
+const API = process.env.API_BASE || 'https://xtj.onrender.com';
+const USERNAME = process.env.ADMIN_USERNAME || 'xxz';
+const PASSWORD = process.env.ADMIN_PASSWORD;
+
+if (!PASSWORD) {
+  console.error('请设置环境变量 ADMIN_PASSWORD 再运行此脚本');
+  process.exit(1);
+}
 
 async function main() {
   // 1. Login
   const loginRes = await fetch(API + '/admin/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'xxz', password: 'xxz123456' })
+    body: JSON.stringify({ username: USERNAME, password: PASSWORD })
   });
   const loginData = await loginRes.json();
   const token = loginData.token;
