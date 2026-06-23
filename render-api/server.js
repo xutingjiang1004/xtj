@@ -1186,7 +1186,7 @@ function rateLimit(windowMs, maxRequests) {
     res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - record.count));
     res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetAt / 1000));
 
-    if (record.count > maxRequests) {
+    if (record.count >= maxRequests) {
       logAttack(key, 'RATE_LIMIT', req.method + ' ' + req.path);
       return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
     }
@@ -1637,6 +1637,7 @@ app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
         var parsed = new URL(photo.media_url);
         var match = parsed.pathname.match(/\/object\/public\/uploads\/(.*)$/) || parsed.pathname.match(/\/uploads\/(.*)$/);
         storagePath = match && match[1] ? decodeURIComponent(match[1]) : null;
+        if (storagePath && storagePath.indexOf('..') >= 0) storagePath = null;
       } catch(_) {}
     }
     if (storagePath) {
@@ -2029,7 +2030,7 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
     });
   } catch(e) {
     console.error('[admin] 删除用户失败:', e.message || e);
-    return res.status(500).json({ error: '删除用户失败: ' + (e.message || '服务器错误') });
+    return res.status(500).json({ error: '删除用户失败' });
   }
 });
 
@@ -3298,8 +3299,6 @@ app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20),
 // ===================== 管理员邮件通知 API =====================
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const RESEND_FROM = process.env.FROM_EMAIL || 'onboarding@resend.dev';
-
-// 获取有邮箱的用户列表
 app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
     const { data, error } = await supabase.from('posts')
@@ -3371,7 +3370,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            from: 'XTJ 管理员 <' + RESEND_FROM + '>',
+            from: 'XTJ 管理员 <onboarding@resend.dev>',
             to: [r.email],
             subject: subjectVal,
             text: bodyText,
@@ -3385,7 +3384,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
           failed.push({ user: r.user_name || r.email, error: 'HTTP ' + mailRes.status + ': ' + mailErr });
         }
       } catch (e) {
-        failed.push({ user: r.user_name || r.email, error: e.message });
+        failed.push({ user: r.user_name || r.email, error: '发送异常: ' + e.message });
       }
     }
     return res.json({
@@ -3397,7 +3396,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     });
   } catch (e) {
     console.error('[Email API] 发送邮件失败:', e.message);
-    return res.status(500).json({ error: '发送邮件失败: ' + e.message });
+    return res.status(500).json({ error: '发送邮件失败' });
   } finally {
     clearTimeout(tmr);
   }
