@@ -211,6 +211,7 @@
       if (typeof window.loadPhotoWallData === 'function') await window.loadPhotoWallData(true);
       if (typeof window.renderPhotoWallWithoutReload === 'function') window.renderPhotoWallWithoutReload();
       else if (typeof window.renderPhotoWall === 'function') await window.renderPhotoWall();
+      if (ok && typeof window.touchUserSession === 'function') window.touchUserSession(false);
       if (ok) toast('已上传 ' + ok + ' 张照片' + (fail ? '，失败 ' + fail + ' 张' : ''));
       else toast(firstError || '上传失败');
     } finally {
