@@ -502,7 +502,7 @@
             saveCurrentTab();
             showToast('正在刷新数据...', 'info');
 
-            var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','audit','errorlog','blacklist'];
+            var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist'];
             allTabs.forEach(function(t) {
                 var panel = document.getElementById('tab' + getTabDomName(t));
                 var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
@@ -1090,6 +1090,7 @@ async function initAdminClient() {
             case 'mutes': renderMutesTab(el); break;
             case 'blacklist': renderBlacklistTab(el); break;
             case 'photos': renderPhotosTab(el); break;
+            case 'email': renderEmailTab(el); break;
         }
     }
 
@@ -3008,7 +3009,7 @@ async function initAdminClient() {
 
     window.switchTab = async function(tab) {
         var normalized = tab === 'blacklist' ? 'bans' : tab;
-        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','audit','errorlog','blacklist'];
+        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist'];
         currentTab = normalized;
         saveCurrentTab();
         if (normalized === 'users') {
@@ -3884,5 +3885,128 @@ async function initAdminClient() {
 
         // Show in modal
         showModal('用户详情', html);
+    };
+
+    // ===================== 邮件通知标签页 =====================
+    window.renderEmailTab = function(el) {
+        el.innerHTML = '<div class="email-section card"><h3>📧 邮件通知</h3>' +
+            '<p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">选择收件人，编辑邮件内容后发送。支持批量发送和单独发送。</p>' +
+            '<div id="emailUserListWrap"><div class="empty">正在加载用户列表...</div></div>' +
+            '<div id="emailFormWrap" style="display:none;">' +
+            '<div class="batch-bar">' +
+            '<button class="btn-sm" onclick="emailToggleAll()">全选/反选</button>' +
+            '<span style="font-size:12px;color:var(--text-muted);" id="emailSelectedCount">已选 0 人</span>' +
+            '<span style="font-size:12px;color:var(--text-muted);" id="emailTotalCount"></span>' +
+            '</div>' +
+            '<div class="form-group"><label>邮件主题</label><input id="emailSubjectInp" placeholder="输入邮件主题" /></div>' +
+            '<div class="form-group"><label>邮件内容</label><textarea id="emailContentInp" placeholder="输入邮件内容...&#10;支持换行，发送时将转为 HTML 格式"></textarea></div>' +
+            '<button class="btn-sm primary" onclick="emailSend()" id="emailSendBtn">📤 发送邮件</button>' +
+            '<div id="emailResult"></div>' +
+            '</div></div>';
+
+        loadEmailUsers();
+    };
+
+    window.loadEmailUsers = async function() {
+        var wrap = document.getElementById('emailUserListWrap');
+        var formWrap = document.getElementById('emailFormWrap');
+        if (!wrap) return;
+        try {
+            var res = await fetch(API_BASE + '/admin/users-with-email', {
+                headers: { 'Authorization': 'Bearer ' + getToken() }
+            });
+            if (!res.ok) {
+                wrap.innerHTML = '<div class="empty">加载失败（' + res.status + '）</div>';
+                return;
+            }
+            var data = await res.json();
+            if (!data.users || data.users.length === 0) {
+                wrap.innerHTML = '<div class="empty">暂无用户填写邮箱</div>';
+                return;
+            }
+            var h = '<div class="user-list" id="emailUserList">';
+            data.users.forEach(function(u) {
+                var safeName = escapeHtml(u.user_name);
+                var safeEmail = escapeHtml(u.email);
+                h += '<label class="user-item"><input type="checkbox" class="email-checkbox" data-email="' + safeEmail + '" data-name="' + safeName + '" />' +
+                    '<span class="user-name">' + safeName + '</span>' +
+                    '<span class="user-email">' + safeEmail + '</span></label>';
+            });
+            h += '</div>';
+            wrap.innerHTML = h;
+            document.getElementById('emailTotalCount').textContent = '共 ' + data.users.length + ' 人';
+            formWrap.style.display = 'block';
+            // 为 checkbox 添加 change 事件
+            document.querySelectorAll('.email-checkbox').forEach(function(cb) {
+                cb.addEventListener('change', emailUpdateCount);
+            });
+            emailUpdateCount();
+        } catch(e) {
+            wrap.innerHTML = '<div class="empty">加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    };
+
+    window.emailUpdateCount = function() {
+        var checked = document.querySelectorAll('.email-checkbox:checked').length;
+        var el = document.getElementById('emailSelectedCount');
+        if (el) el.textContent = '已选 ' + checked + ' 人';
+    };
+
+    window.emailToggleAll = function() {
+        var cbs = document.querySelectorAll('.email-checkbox');
+        var someUnchecked = Array.from(cbs).some(function(cb) { return !cb.checked; });
+        cbs.forEach(function(cb) { cb.checked = someUnchecked; });
+        emailUpdateCount();
+    };
+
+    window.emailSend = async function() {
+        var btn = document.getElementById('emailSendBtn');
+        var resultEl = document.getElementById('emailResult');
+        var subject = document.getElementById('emailSubjectInp').value.trim();
+        var content = document.getElementById('emailContentInp').value.trim();
+
+        if (!subject) { showToast('请输入邮件主题'); return; }
+        if (!content) { showToast('请输入邮件内容'); return; }
+
+        var checkedCbs = document.querySelectorAll('.email-checkbox:checked');
+        if (checkedCbs.length === 0) { showToast('请至少选择一个收件人'); return; }
+
+        var recipients = [];
+        checkedCbs.forEach(function(cb) {
+            recipients.push({ email: cb.dataset.email, user_name: cb.dataset.name });
+        });
+
+        btn.disabled = true;
+        btn.textContent = '⏳ 发送中...';
+        resultEl.className = '';
+        resultEl.textContent = '';
+
+        try {
+            var res = await fetch(API_BASE + '/admin/send-email', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + getToken()
+                },
+                body: JSON.stringify({ recipients: recipients, subject: subject, content: content, content_type: 'text' })
+            });
+            var data = await res.json();
+            if (data.ok) {
+                var msg = '✅ 发送完成：成功 ' + data.sent_count + ' 人';
+                if (data.failed_count > 0) msg += '，失败 ' + data.failed_count + ' 人';
+                resultEl.className = 'send-result success';
+                resultEl.textContent = msg;
+                showToast(msg);
+            } else {
+                resultEl.className = 'send-result error';
+                resultEl.textContent = '发送失败: ' + (data.error || '未知错误');
+            }
+        } catch(e) {
+            resultEl.className = 'send-result error';
+            resultEl.textContent = '发送异常: ' + e.message;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '📤 发送邮件';
+        }
     };
 })();
