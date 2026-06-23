@@ -795,12 +795,12 @@ async function initAdminClient() {
     function mergeAdminUserInfo(base, next) {
         var left = base || {};
         var right = next || {};
-        return {
-            reg_time: pickEarlierAdminIso(left.reg_time, right.reg_time),
-            auth_created_at: pickEarlierAdminIso(left.auth_created_at, right.auth_created_at),
-            last_login: pickLaterAdminIso(left.last_login, right.last_login),
-            last_visit: pickLaterAdminIso(left.last_visit, right.last_visit)
-        };
+        var merged = Object.assign({}, left, right);
+        merged.reg_time = pickEarlierAdminIso(left.reg_time, right.reg_time);
+        merged.auth_created_at = pickEarlierAdminIso(left.auth_created_at, right.auth_created_at);
+        merged.last_login = pickLaterAdminIso(left.last_login, right.last_login);
+        merged.last_visit = pickLaterAdminIso(left.last_visit, right.last_visit);
+        return merged;
     }
 
     function getSelectableAdminUsers() {
@@ -1462,30 +1462,33 @@ async function initAdminClient() {
 
     var adminSessionRestoreStarted = false;
 
-    async function restoreAdminSessionOnReady() {
-        if (adminSessionRestoreStarted) return;
-        adminSessionRestoreStarted = true;
-        applySavedAdminTheme();
-        try {
-            var restored = await tryRestoreAdminSession();
-            if (!restored) {
-                document.getElementById('loginWrap').style.display = 'flex';
-                document.getElementById('dashboard').style.display = 'none';
-            }
-        } catch (e) {
-            clearSession();
-            document.getElementById('loginWrap').style.display = 'flex';
-            document.getElementById('dashboard').style.display = 'none';
+    (function bootAdminSessionRestore() {
+        function runRestore() {
+            if (adminSessionRestoreStarted) return;
+            adminSessionRestoreStarted = true;
+            applySavedAdminTheme();
+            tryRestoreAdminSession().then(function(restored) {
+                if (!restored) {
+                    try {
+                        document.getElementById('loginWrap').style.display = 'flex';
+                        document.getElementById('dashboard').style.display = 'none';
+                    } catch (e) {}
+                }
+            }).catch(function() {
+                clearSession();
+                try {
+                    document.getElementById('loginWrap').style.display = 'flex';
+                    document.getElementById('dashboard').style.display = 'none';
+                } catch (e) {}
+            });
         }
-    }
 
-    document.addEventListener('DOMContentLoaded', async function() {
-        await restoreAdminSessionOnReady();
-    });
-
-    if (document.readyState !== 'loading') {
-        restoreAdminSessionOnReady();
-    }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', runRestore, { once: true });
+            return;
+        }
+        runRestore();
+    })();
 
     var reportsData = [];
 
