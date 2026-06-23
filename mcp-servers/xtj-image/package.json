@@ -1,0 +1,14 @@
+{
+  "name": "xtj-image-mcp",
+  "version": "1.0.0",
+  "description": "XTJ 图片优化 MCP Server - 自动压缩、转换格式、调整尺寸",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.8.0",
+    "sharp": "^0.34.5"
+  }
+}

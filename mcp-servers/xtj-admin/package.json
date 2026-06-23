@@ -1,0 +1,14 @@
+{
+  "name": "xtj-admin-mcp",
+  "version": "1.0.0",
+  "description": "XTJ Admin API MCP Server - AI驱动的XTJ管理后台控制",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.8.0",
+    "node-fetch": "^3.3.2"
+  }
+}
