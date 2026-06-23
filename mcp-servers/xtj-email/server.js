@@ -24,8 +24,21 @@ const PROVIDER = process.env.EMAIL_PROVIDER || "sendgrid";
 const FROM_EMAIL = process.env.FROM_EMAIL || "";
 const FROM_NAME = process.env.FROM_NAME || "XTJ 通知";
 const ADMIN_EMAIL = process.env.ADMIN_NOTIFY_EMAIL || "";
+// 白名单：逗号分隔的邮箱或域名（如 "a@x.com,*.x.com"），空则只允许发给管理员
+const ALLOWED_RECIPIENTS = (process.env.ALLOWED_RECIPIENTS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 
 if (!FROM_EMAIL) { console.error("[xtj-email-mcp] 请设置 FROM_EMAIL"); process.exit(1); }
+
+function isRecipientAllowed(to) {
+  if (!ALLOWED_RECIPIENTS.length) return to.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  return ALLOWED_RECIPIENTS.some(r => {
+    if (r.includes('*')) {
+      const domain = r.replace('*.', '');
+      return to.toLowerCase().endsWith('@' + domain);
+    }
+    return to.toLowerCase() === r;
+  });
+}
 
 let sendFn = null;
 
@@ -51,6 +64,7 @@ const server = new McpServer({ name: "xtj-email-mcp", version: "1.0.0" });
 server.tool("send_email", "发送邮件（文本或 HTML）", { to: z.string(), subject: z.string(), text: z.string().optional(), html: z.string().optional() }, async (args) => {
   await initProvider();
   if (!args.text && !args.html) throw new Error("请提供 text 或 html");
+  if (!isRecipientAllowed(args.to)) throw new Error('收件人不在白名单中');
   const html = args.html || args.text.split("\n").map(l=>`<p>${esc(l)}</p>`).join("");
   const text = args.text || args.html.replace(/<[^>]*>/g,"");
   await sendFn({ to: args.to, subject: args.subject, text, html });
@@ -70,6 +84,7 @@ server.tool("send_security_alert", "发送安全警报邮件给管理员", { ale
 
 server.tool("send_test_email", "发送测试邮件验证配置", { to: z.string() }, async ({ to }) => {
   await initProvider();
+  if (!isRecipientAllowed(to)) throw new Error('收件人不在白名单中');
   await sendFn({ to, subject: "XTJ 邮件配置测试", text: `测试邮件\n配置正常 ✅\n时间: ${new Date().toLocaleString("zh-CN")}`, html: `<h2>✅ XTJ 邮件配置测试</h2><p>如果看到此邮件说明配置正常。</p><p>${new Date().toLocaleString("zh-CN")}</p>` });
   return { content: [{ type: "text", text: `✅ 测试邮件已发送到 ${to}` }] };
 });
