@@ -115,7 +115,7 @@
         return salt + ':' + hash;
     }
 
-    // ===================== Session 超时管理（30分钟无操作自动登出） =====================
+    // ===================== Session 超时管理（24小时无操作自动登出） =====================
     var ADMIN_SESSION_TTL_MS = 72 * 60 * 60 * 1000; // 72小时
     var SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24小时无操作自动退出
     var lastActivityTime = Date.now();
@@ -419,6 +419,26 @@
 
     function hasApiToken() {
         return !!getToken();
+    }
+
+    async function tryRestoreAdminSession() {
+        if (!API_BASE || !hasApiToken() || !hasSession()) {
+            clearSession();
+            return false;
+        }
+
+        try {
+            var res = await apiCall('GET', '/admin/verify');
+            if (res && res.ok === true) {
+                await initAdminClient();
+                return true;
+            }
+            clearSession();
+        } catch (e) {
+            clearSession();
+        }
+
+        return false;
     }
 
     // 安全说明：不再创建 Supabase 客户端，所有管理操作通过 API_BASE 执行
@@ -1433,25 +1453,35 @@ async function initAdminClient() {
         else { html.setAttribute('data-theme', 'dark'); localStorage.setItem('xtj-admin-theme', 'dark'); }
     };
 
-    (async function() {
+    function applySavedAdminTheme() {
         var saved = localStorage.getItem('xtj-admin-theme');
         if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.setAttribute('data-theme', 'dark');
         }
+    }
 
-        if (hasApiToken()) {
-            try {
-                await apiCall('GET', '/admin/verify');
-                await initAdminClient();
-            } catch(e) {
-                clearSession();
-                try {
-                    document.getElementById('dashboard').style.display = 'none';
-                    document.getElementById('loginWrap').style.display = 'flex';
-                } catch (_) {}
+    async function restoreAdminSessionOnReady() {
+        applySavedAdminTheme();
+        try {
+            var restored = await tryRestoreAdminSession();
+            if (!restored) {
+                document.getElementById('loginWrap').style.display = 'flex';
+                document.getElementById('dashboard').style.display = 'none';
             }
+        } catch (e) {
+            clearSession();
+            document.getElementById('loginWrap').style.display = 'flex';
+            document.getElementById('dashboard').style.display = 'none';
         }
-    })();
+    }
+
+    document.addEventListener('DOMContentLoaded', async function() {
+        await restoreAdminSessionOnReady();
+    });
+
+    if (document.readyState !== 'loading') {
+        restoreAdminSessionOnReady();
+    }
 
     var reportsData = [];
 
