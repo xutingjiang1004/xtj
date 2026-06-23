@@ -28,13 +28,18 @@
     },
     "xtj-email": {
       "label": "XTJ 邮件通知",
-      "description": "AI 驱动的邮件发送 — 支持 SendGrid / SMTP，可发送安全警报、通知等",
+      "description": "AI 驱动的邮件发送 — QQ 邮箱 SMTP，安全警报、通知等",
       "command": "node",
       "args": ["${workspaceFolder}/mcp-servers/xtj-email/server.js"],
       "env": {
-        "FROM_EMAIL": "",
+        "EMAIL_PROVIDER": "smtp",
+        "SMTP_HOST": "smtp.qq.com",
+        "SMTP_PORT": "587",
+        "SMTP_USER": "3347606286@qq.com",
+        "SMTP_PASS": "fadskwtcdcqfcjie",
+        "FROM_EMAIL": "3347606286@qq.com",
         "FROM_NAME": "XTJ 通知",
-        "ADMIN_NOTIFY_EMAIL": ""
+        "ADMIN_NOTIFY_EMAIL": "3347606286@qq.com"
       }
     },
     "filesystem": {
