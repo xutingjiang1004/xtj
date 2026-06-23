@@ -3270,6 +3270,104 @@ app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20),
   }
 });
 
+// ===================== 管理员邮件通知 API =====================
+const SMTP_HOST = process.env.SMTP_HOST || 'smtp.qq.com';
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587', 10);
+const SMTP_USER = process.env.SMTP_USER || '';
+const SMTP_PASS = process.env.SMTP_PASS || '';
+const SMTP_FROM = process.env.FROM_EMAIL || SMTP_USER || 'noreply@xtj.app';
+
+// 获取有邮箱的用户列表
+app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('posts')
+      .select('user_name, content, created_at')
+      .eq('media_type', '__user_info__')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    const users = [];
+    (data || []).forEach(function(row) {
+      try {
+        const info = JSON.parse(row.content || '{}');
+        if (info.email) {
+          users.push({
+            user_name: row.user_name,
+            email: info.email,
+            reg_time: info.reg_time || row.created_at,
+            last_login: info.last_login
+          });
+        }
+      } catch(e) {}
+    });
+    return res.json({ users, total: users.length });
+  } catch (e) {
+    console.error('[Email API] 获取用户邮箱列表失败:', e.message);
+    return res.status(500).json({ error: '获取用户邮箱列表失败' });
+  }
+});
+
+// 发送邮件
+app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res) => {
+  try {
+    const { recipients, subject, content, content_type } = req.body;
+    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
+      return res.status(400).json({ error: '请至少选择一个收件人' });
+    }
+    if (!subject || !subject.trim()) {
+      return res.status(400).json({ error: '请输入邮件主题' });
+    }
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: '请输入邮件内容' });
+    }
+    const MAX_RECIPIENTS = 100;
+    if (recipients.length > MAX_RECIPIENTS) {
+      return res.status(400).json({ error: '单次最多发送 ' + MAX_RECIPIENTS + ' 人' });
+    }
+    const subjectVal = subject.trim().slice(0, 200);
+    const isHtml = content_type === 'html';
+    const bodyText = isHtml ? content.replace(/<[^>]*>/g, '') : content;
+    const bodyHtml = isHtml ? content : content.split('\n').map(function(l) { return '<p>' + l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p>'; }).join('');
+    if (!SMTP_USER || !SMTP_PASS) {
+      return res.status(500).json({ error: 'SMTP 未配置，请在环境变量中设置 SMTP_USER 和 SMTP_PASS' });
+    }
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_PORT === 465,
+      auth: { user: SMTP_USER, pass: SMTP_PASS }
+    });
+    await transporter.verify();
+    const sent = [];
+    const failed = [];
+    for (const r of recipients) {
+      try {
+        await transporter.sendMail({
+          from: '"XTJ 管理员" <' + SMTP_FROM + '>',
+          to: r.email,
+          subject: subjectVal,
+          text: bodyText,
+          html: bodyHtml
+        });
+        sent.push(r.user_name || r.email);
+      } catch (e) {
+        failed.push({ user: r.user_name || r.email, error: e.message });
+      }
+    }
+    return res.json({
+      ok: true,
+      sent_count: sent.length,
+      failed_count: failed.length,
+      sent: sent,
+      failed: failed
+    });
+  } catch (e) {
+    console.error('[Email API] 发送邮件失败:', e.message);
+    return res.status(500).json({ error: '发送邮件失败: ' + e.message });
+  }
+});
+
 // ===================== VIP 会员 API =====================
 const VIP_MARKER = '__vip__';
 const VIP_ORDER_MARKER = '__vip_order__';
