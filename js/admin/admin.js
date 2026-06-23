@@ -115,11 +115,15 @@
         return salt + ':' + hash;
     }
 
-    // ===================== Session 超时管理（30分钟无操作自动登出） =====================
-    var SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30分钟
+    // ===================== Session 超时管理（24小时无操作自动登出） =====================
+    var ADMIN_SESSION_TTL_MS = 72 * 60 * 60 * 1000; // 72小时
+    var SESSION_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24小时无操作自动退出
     var lastActivityTime = Date.now();
+    var sessionTimeoutMonitorStarted = false;
     function resetActivityTimer() { lastActivityTime = Date.now(); }
     function startSessionTimeoutMonitor() {
+        if (sessionTimeoutMonitorStarted) return;
+        sessionTimeoutMonitorStarted = true;
         ['click', 'keydown', 'scroll', 'mousemove', 'touchstart'].forEach(function(evt) {
             document.addEventListener(evt, resetActivityTimer, { passive: true });
         });
@@ -409,12 +413,32 @@
             var raw = localStorage.getItem(SESSION_KEY);
             if (!raw) return false;
             var s = JSON.parse(raw);
-            return (Date.now() - s.t) < 2 * 60 * 60 * 1000;
+            return !!s && (Date.now() - Number(s.t || 0)) < ADMIN_SESSION_TTL_MS;
         } catch(e) { return false; }
     }
 
     function hasApiToken() {
         return !!getToken();
+    }
+
+    async function tryRestoreAdminSession() {
+        if (!API_BASE || !hasApiToken() || !hasSession()) {
+            clearSession();
+            return false;
+        }
+
+        try {
+            var res = await apiCall('GET', '/admin/verify');
+            if (res && res.ok === true) {
+                await initAdminClient();
+                return true;
+            }
+            clearSession();
+        } catch (e) {
+            clearSession();
+        }
+
+        return false;
     }
 
     // 安全说明：不再创建 Supabase 客户端，所有管理操作通过 API_BASE 执行
@@ -465,12 +489,13 @@
         }, true);
     }
 
-    async function initAdminClient() {
+async function initAdminClient() {
         document.getElementById('loginWrap').style.display = 'none';
         document.getElementById('dashboard').style.display = 'block';
+        resetActivityTimer();
         saveSession();
         ensureRegisterAlertBadge();
-        startSessionTimeoutMonitor(); // 启动30分钟无操作自动登出
+        startSessionTimeoutMonitor(); // 启动 24 小时无操作自动退出
         installAdminTabDoubleClickRefresh(); // 启动双击 Tab 刷新
         
         var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos'];
@@ -1428,21 +1453,39 @@
         else { html.setAttribute('data-theme', 'dark'); localStorage.setItem('xtj-admin-theme', 'dark'); }
     };
 
-    (async function() {
+    function applySavedAdminTheme() {
         var saved = localStorage.getItem('xtj-admin-theme');
         if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
             document.documentElement.setAttribute('data-theme', 'dark');
         }
+    }
 
-        if (hasApiToken()) {
-            try {
-                await apiCall('GET', '/admin/verify');
-                initAdminClient();
-            } catch(e) {
-                clearSession();
+    var adminSessionRestoreStarted = false;
+
+    async function restoreAdminSessionOnReady() {
+        if (adminSessionRestoreStarted) return;
+        adminSessionRestoreStarted = true;
+        applySavedAdminTheme();
+        try {
+            var restored = await tryRestoreAdminSession();
+            if (!restored) {
+                document.getElementById('loginWrap').style.display = 'flex';
+                document.getElementById('dashboard').style.display = 'none';
             }
+        } catch (e) {
+            clearSession();
+            document.getElementById('loginWrap').style.display = 'flex';
+            document.getElementById('dashboard').style.display = 'none';
         }
-    })();
+    }
+
+    document.addEventListener('DOMContentLoaded', async function() {
+        await restoreAdminSessionOnReady();
+    });
+
+    if (document.readyState !== 'loading') {
+        restoreAdminSessionOnReady();
+    }
 
     var reportsData = [];
 
