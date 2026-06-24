@@ -1324,6 +1324,7 @@ async function persistRevokedToken(token, expiresAt) {
       media_url: crypto.createHash('sha256').update(token).digest('hex'),
       user_name: ADMIN_USERNAME
     }]);
+    revokedTokenHashes.add(crypto.createHash('sha256').update(token).digest('hex'));
   } catch(e) { console.warn('[Revoke] 持久化撤销失败:', e.message); }
 }
 
@@ -1331,7 +1332,7 @@ async function loadRevokedTokenHashes() {
   try {
     var now = new Date().toISOString();
     var { data } = await supabase.from('posts')
-      .select('media_url, content')
+      .select('id, media_url, content')
       .eq('media_type', REVOKED_TOKEN_MARKER)
       .not('media_url', 'is', null);
     (data || []).forEach(function(row) {
@@ -1446,13 +1447,13 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
       httpOnly: true,
       secure: true,
       sameSite: 'Strict',
-      maxAge: ADMIN_TOKEN_EXPIRY_HOURS * 3600,
+      maxAge: ADMIN_TOKEN_EXPIRY_HOURS * 60 * 60 * 1000,
       path: '/'
     };
     res.cookie('xtj_admin_token', token, cookieOpts);
   } catch(e) {}
 
-  return res.json({ ok: true, token, username: ADMIN_USERNAME });
+  return res.json({ ok: true, username: ADMIN_USERNAME });
 });
 
 // ===================== 用户 Token 认证（JWT 替代 password_hash） =====================
@@ -1464,13 +1465,26 @@ async function authenticateUser(req, res, next) {
   if (token) {
     var payload = verifyUserToken(token);
     if (payload && payload.user_name) {
+      // 确认该用户仍存在于系统中
+      try {
+        var { data: userExists } = await supabase.from('posts')
+          .select('id')
+          .eq('user_name', payload.user_name)
+          .eq('media_type', AUTH_MARKER)
+          .maybeSingle();
+        if (!userExists) {
+          return res.status(401).json({ error: '用户不存在或已注销' });
+        }
+      } catch(e) {
+        return res.status(500).json({ error: '认证查询失败' });
+      }
       req.userName = payload.user_name;
       return next();
     }
   }
 
   // 兼容旧 password_hash（逐步废弃）
-  var password_hash = req.body.password_hash || req.query.password_hash || '';
+  var password_hash = req.body.password_hash || '';
   var userName = req.body.user_name || req.query.user_name || req.body.reporter_name || '';
   var userNameVal = validateString(userName, MAX_USERNAME_LEN, '用户名');
   if (!userNameVal || !password_hash) {
@@ -1562,14 +1576,11 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
     // 每次加载管理后台数据时，先检查并自动解除过期记录
     autoExpireOverdueRecords().catch(function() {});
 
-    const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes, annRes] = await Promise.all([
+    const [postRes, likeRes, commRes, banRes, annRes] = await Promise.all([
       supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', CLIENT_ERROR_MARKER).neq('media_type', AUDIT_LOG_MARKER).order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
-      supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500),
       supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500),
-      supabase.from('mutes').select('*').order('created_at', { ascending: false }).limit(500),
-      supabase.from('blacklist').select('*').order('created_at', { ascending: false }).limit(500),
       supabase.from('posts').select('*').eq('media_type', '__ann__').order('created_at', { ascending: false }).limit(500)
     ]);
     
@@ -1577,10 +1588,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
       posts: postRes.data || [],
       likes: likeRes.data || [],
       comments: commRes.data || [],
-      reports: reportRes.data || [],
       bans: banRes.data || [],
-      mutes: muteRes.data || [],
-      blacklist: blacklistRes.data || [],
       announcements: annRes.data || []
     });
   } catch (e) {
