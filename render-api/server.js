@@ -10,6 +10,19 @@ try { nodemailer = require('nodemailer'); } catch(e) {}
 
 const app = express();
 
+// 简单 cookie 解析中间件
+app.use((req, res, next) => {
+  req.cookies = {};
+  var cookieHeader = req.headers.cookie || '';
+  cookieHeader.split(';').forEach(function(pair) {
+    var idx = pair.indexOf('=');
+    if (idx > 0) {
+      req.cookies[pair.slice(0, idx).trim()] = pair.slice(idx + 1).trim();
+    }
+  });
+  next();
+});
+
 // 信任反向代理（Render 会设置 X-Forwarded-For）
 app.set('trust proxy', 1);
 
@@ -79,9 +92,9 @@ function getMailTransporter() {
     port: parseInt(mailTransporterPort),
     secure: isSecure,
     auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
-    connectionTimeout: 30000,
-    greetingTimeout: 30000,
-    socketTimeout: 30000
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 15000
   });
   return mailTransporter;
 }
@@ -325,19 +338,25 @@ function buildRegisteredUsersByDate(authMap) {
   return dateMap;
 }
 
-async function getAdminMetaRecord() {
-  const { data, error } = await supabase.from('posts')
+async function getAdminMetaRecord(mediaUrl) {
+  var query = supabase.from('posts')
     .select('id, content, created_at')
     .eq('media_type', ADMIN_META_MARKER)
-    .eq('user_name', ADMIN_USERNAME)
-    .order('created_at', { ascending: false })
-    .limit(1);
+    .eq('user_name', ADMIN_USERNAME);
+  if (mediaUrl) query = query.eq('media_url', mediaUrl);
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(1);
   if (error) throw error;
   return data && data.length ? data[0] : null;
 }
 
-async function saveAdminMetaFields(fields) {
-  const existing = await getAdminMetaRecord();
+async function saveAdminMetaFields(fields, mediaUrl) {
+  var query = supabase.from('posts')
+    .select('id, content, created_at')
+    .eq('media_type', ADMIN_META_MARKER)
+    .eq('user_name', ADMIN_USERNAME);
+  if (mediaUrl) query = query.eq('media_url', mediaUrl);
+  const { data: existingRows } = await query.order('created_at', { ascending: false }).limit(1);
+  var existing = existingRows && existingRows.length ? existingRows[0] : null;
   const nextContent = Object.assign({}, safeJsonParse(existing && existing.content), fields || {});
   if (existing && existing.id) {
     const { error } = await supabase.from('posts')
@@ -346,12 +365,14 @@ async function saveAdminMetaFields(fields) {
     if (error) throw error;
     return { id: existing.id, content: nextContent };
   }
-  const { data, error } = await supabase.from('posts').insert([{
+  var insertPayload = {
     user_name: ADMIN_USERNAME,
     content: JSON.stringify(nextContent),
     media_type: ADMIN_META_MARKER,
     actor_key: ADMIN_META_MARKER
-  }]).select('id, content').limit(1);
+  };
+  if (mediaUrl) insertPayload.media_url = mediaUrl;
+  const { data, error } = await supabase.from('posts').insert([insertPayload]).select('id, content').limit(1);
   if (error) throw error;
   return data && data.length ? data[0] : { id: null, content: nextContent };
 }
@@ -688,7 +709,7 @@ async function resolveIpLocation(ip) {
     async function() {
       var controller = new AbortController();
       var timeout = setTimeout(function() { controller.abort(); }, 2000);
-      var resp = await fetch('http://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query,as,org,isp,mobile,proxy,hosting', { signal: controller.signal });
+      var resp = await fetch('https://ip-api.com/json/' + encodeURIComponent(ip) + '?fields=status,country,regionName,city,query,as,org,isp,mobile,proxy,hosting', { signal: controller.signal });
       clearTimeout(timeout);
       if (!resp.ok) throw new Error('ip-api.com HTTP ' + resp.status);
       var data = await resp.json();
@@ -1244,22 +1265,19 @@ setInterval(function() {
   });
 }, 600000);
 
-// 生成无状态签名 token：base64(expiry) + '.' + HMAC
-function signToken() {
-  const payload = JSON.stringify({ exp: Date.now() + TOKEN_EXPIRY_MS, user: ADMIN_USERNAME });
-  const b64 = Buffer.from(payload).toString('base64url');
+// 生成签名 token：base64(payload) + '.' + HMAC
+function _signPayload(payload) {
+  const b64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = crypto.createHmac('sha256', API_SECRET).update(b64).digest('base64url');
   return b64 + '.' + sig;
 }
 
-// 验证无状态 token（优先于 Map 检查）
-function verifySignedToken(token) {
+function _verifyToken(token) {
   try {
     var parts = token.split('.');
     if (parts.length !== 2) return null;
     var b64 = parts[0], sig = parts[1];
     var expectedSig = crypto.createHmac('sha256', API_SECRET).update(b64).digest('base64url');
-    // timingSafeEqual 防止时序攻击
     var sigBuf = Buffer.from(sig);
     var expBuf = Buffer.from(expectedSig);
     if (sigBuf.length !== expBuf.length) return null;
@@ -1270,26 +1288,104 @@ function verifySignedToken(token) {
   } catch(e) { return null; }
 }
 
+function signToken() {
+  return _signPayload({ exp: Date.now() + TOKEN_EXPIRY_MS, user: ADMIN_USERNAME });
+}
+
+function verifySignedToken(token) {
+  return _verifyToken(token);
+}
+
+function signUserToken(userName, expireHours) {
+  var USER_TOKEN_EXPIRY_MS = (expireHours || 720) * 60 * 60 * 1000;
+  return _signPayload({ exp: Date.now() + USER_TOKEN_EXPIRY_MS, user_name: userName, type: 'user' });
+}
+
+function verifyUserToken(token) {
+  var payload = _verifyToken(token);
+  if (!payload || payload.type !== 'user' || !payload.user_name) return null;
+  return payload;
+}
+
+function _getTokenFromRequest(req) {
+  var authHeader = req.headers.authorization || '';
+  if (authHeader.startsWith('Bearer ')) return authHeader.slice(7);
+  return '';
+}
+
+// ===== 吊销 token 持久化 =====
+const REVOKED_TOKEN_MARKER = '__revoked_token__';
+
+async function persistRevokedToken(token, expiresAt) {
+  try {
+    await supabase.from('posts').insert([{
+      content: JSON.stringify({ token_hash: crypto.createHash('sha256').update(token).digest('hex'), expires_at: expiresAt }),
+      media_type: REVOKED_TOKEN_MARKER,
+      media_url: crypto.createHash('sha256').update(token).digest('hex'),
+      user_name: ADMIN_USERNAME
+    }]);
+  } catch(e) { console.warn('[Revoke] 持久化撤销失败:', e.message); }
+}
+
+async function loadRevokedTokenHashes() {
+  try {
+    var now = new Date().toISOString();
+    var { data } = await supabase.from('posts')
+      .select('media_url, content')
+      .eq('media_type', REVOKED_TOKEN_MARKER)
+      .not('media_url', 'is', null);
+    (data || []).forEach(function(row) {
+      try {
+        var info = JSON.parse(row.content || '{}');
+        if (info.expires_at && new Date(info.expires_at).getTime() > Date.now()) {
+          revokedTokenHashes.add(row.media_url);
+        }
+      } catch(e) {}
+    });
+    // 清理过期吊销记录
+    for (var i = 0; i < (data || []).length; i++) {
+      try {
+        var r = data[i];
+        var info = JSON.parse(r.content || '{}');
+        if (info.expires_at && new Date(info.expires_at).getTime() <= Date.now()) {
+          supabase.from('posts').delete().eq('id', r.id).then(function(){}).catch(function(){});
+        }
+      } catch(e) {}
+    }
+  } catch(e) { console.warn('[Revoke] 加载吊销列表失败:', e.message); }
+}
+
+var revokedTokenHashes = new Set();
+loadRevokedTokenHashes().catch(function(){});
+
+function isTokenRevoked(token) {
+  if (revokedTokens.has(token)) return true;
+  var hash = crypto.createHash('sha256').update(token).digest('hex');
+  return revokedTokenHashes.has(hash);
+}
+
 function verifyToken(req, res, next) {
-  const authHeader = req.headers.authorization || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  var token = _getTokenFromRequest(req);
+
+  // 从 HttpOnly Cookie 读取（优先级高于 Authorization header）
+  if (!token && req.cookies && req.cookies.xtj_admin_token) {
+    token = req.cookies.xtj_admin_token;
+  }
 
   if (!token) {
     return res.status(401).json({ error: '未提供认证令牌' });
   }
 
-  // 优先验证无状态签名（服务重启后仍然有效）
+  if (isTokenRevoked(token)) {
+    return res.status(401).json({ error: '令牌已注销，请重新登录' });
+  }
+
   var payload = verifySignedToken(token);
   if (payload) {
-    // 检查是否已主动登出
-    if (revokedTokens.has(token)) {
-      return res.status(401).json({ error: '令牌已注销，请重新登录' });
-    }
     req.adminToken = token;
     return next();
   }
 
-  // 回退到内存 Map（兼容旧 token）
   const session = adminTokens.get(token);
   if (!session || Date.now() > session.expiresAt) {
     adminTokens.delete(token);
@@ -1344,7 +1440,80 @@ app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   // 记录管理员登录设备/IP
   logAdminLoginEvent(req).catch(function(){});
 
+  // 设置 HttpOnly Secure SameSite Cookie（XSS 无法窃取）
+  try {
+    var cookieOpts = {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'Strict',
+      maxAge: ADMIN_TOKEN_EXPIRY_HOURS * 3600,
+      path: '/'
+    };
+    res.cookie('xtj_admin_token', token, cookieOpts);
+  } catch(e) {}
+
   return res.json({ ok: true, token, username: ADMIN_USERNAME });
+});
+
+// ===================== 用户 Token 认证（JWT 替代 password_hash） =====================
+const USER_TOKEN_HEADER_HOURS = 720; // 用户 token 有效期 30 天
+
+async function authenticateUser(req, res, next) {
+  // 优先验证 Authorization header 中的用户 token
+  var token = _getTokenFromRequest(req);
+  if (token) {
+    var payload = verifyUserToken(token);
+    if (payload && payload.user_name) {
+      req.userName = payload.user_name;
+      return next();
+    }
+  }
+
+  // 兼容旧 password_hash（逐步废弃）
+  var password_hash = req.body.password_hash || req.query.password_hash || '';
+  var userName = req.body.user_name || req.query.user_name || req.body.reporter_name || '';
+  var userNameVal = validateString(userName, MAX_USERNAME_LEN, '用户名');
+  if (!userNameVal || !password_hash) {
+    return res.status(401).json({ error: '缺少身份验证' });
+  }
+  try {
+    var { data: authRec } = await supabase.from('posts')
+      .select('media_url')
+      .eq('user_name', userNameVal)
+      .eq('media_type', AUTH_MARKER)
+      .maybeSingle();
+    if (!authRec || authRec.media_url !== password_hash) {
+      return res.status(403).json({ error: '身份验证失败' });
+    }
+    req.userName = userNameVal;
+    next();
+  } catch(e) {
+    return res.status(500).json({ error: '认证查询失败' });
+  }
+}
+
+// 用户登录/获取 token（用 password_hash 换取 JWT token）
+app.post('/api/user/login', rateLimit(60000, 10), async (req, res) => {
+  try {
+    var { user_name, password_hash } = req.body;
+    var userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
+    if (!userNameVal || !password_hash) {
+      return res.status(400).json({ error: '缺少用户名或密码' });
+    }
+    var { data: authRec } = await supabase.from('posts')
+      .select('media_url')
+      .eq('user_name', userNameVal)
+      .eq('media_type', AUTH_MARKER)
+      .maybeSingle();
+    if (!authRec || authRec.media_url !== password_hash) {
+      return res.status(401).json({ error: '账号或密码错误' });
+    }
+    var token = signUserToken(userNameVal);
+    return res.json({ ok: true, token: token, user_name: userNameVal });
+  } catch(e) {
+    console.error('[API] 用户登录失败:', e.message);
+    return res.status(500).json({ error: '登录失败' });
+  }
 });
 
 // 验证 token 是否有效
@@ -1354,12 +1523,13 @@ app.get('/admin/verify', verifyToken, (req, res) => {
 
 // 管理员登出
 app.post('/admin/logout', verifyToken, (req, res) => {
-  adminTokens.delete(req.adminToken);
-  // 将签名 token 加入吊销列表，记录其过期时间防止重用
-  var payload = verifySignedToken(req.adminToken);
-  if (payload) {
-    revokedTokens.set(req.adminToken, payload.exp);
-  }
+  var token = req.adminToken;
+  adminTokens.delete(token);
+  var payload = verifySignedToken(token);
+  var exp = payload ? payload.exp : Date.now() + TOKEN_EXPIRY_MS;
+  revokedTokens.set(token, exp);
+  persistRevokedToken(token, exp).catch(function(){});
+  res.clearCookie('xtj_admin_token', { path: '/' });
   return res.json({ ok: true });
 });
 
@@ -1511,19 +1681,8 @@ async function addReportNotification(reportId, action, message) {
 }
 
 // ===================== 举报通知查询 API ======================
-app.get('/api/report/notifications', async (req, res) => {
-  const userName = req.query.user_name;
-  const password_hash = req.query.password_hash;
-  if (!userName) return res.status(400).json({ error: '缺少用户名' });
-  if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
-  const { data: authRec } = await supabase.from('posts')
-    .select('media_url')
-    .eq('user_name', userName)
-    .eq('media_type', AUTH_MARKER)
-    .maybeSingle();
-  if (!authRec || authRec.media_url !== password_hash) {
-    return res.status(403).json({ error: '身份验证失败' });
-  }
+app.get('/api/report/notifications', authenticateUser, async (req, res) => {
+  const userName = req.userName;
   try {
     const { data, error } = await supabase.from('posts')
       .select('id, content')
@@ -1545,18 +1704,8 @@ app.get('/api/report/notifications', async (req, res) => {
   } catch(e) { return res.status(500).json({ error: '查询失败' }); }
 });
 
-app.post('/api/report/notifications/mark-read', async (req, res) => {
-  const { user_name, password_hash } = req.body;
-  if (!user_name) return res.status(400).json({ error: '缺少用户名' });
-  if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
-  const { data: authRec } = await supabase.from('posts')
-    .select('media_url')
-    .eq('user_name', user_name)
-    .eq('media_type', AUTH_MARKER)
-    .maybeSingle();
-  if (!authRec || authRec.media_url !== password_hash) {
-    return res.status(403).json({ error: '身份验证失败' });
-  }
+app.post('/api/report/notifications/mark-read', authenticateUser, async (req, res) => {
+  const userName = req.userName;
   try {
     const { data, error } = await supabase.from('posts')
       .select('id, content')
@@ -1626,13 +1775,20 @@ app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
     const { photoId, username, password_hash, currentUser } = req.body;
     if (!photoId) return res.status(400).json({ error: '缺少照片ID' });
     if (!username) return res.status(400).json({ error: '缺少用户名' });
-    if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
 
-    // 判断是否为管理员（xxz）执行删除
+    // 优先验证 token（兼容旧 password_hash）
+    var token = _getTokenFromRequest(req);
+    var tokenUser = null;
+    if (token) {
+      var payload = verifyUserToken(token);
+      if (payload && payload.user_name) tokenUser = payload.user_name;
+    }
+
     const isAdmin = currentUser === ADMIN_USERNAME;
 
     if (isAdmin) {
-      // 管理员：验证管理员身份标记
+      // 管理员：使用 password_hash 验证管理员身份标记（非 JWT admin token）
+      if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
       const { data: adminAuth } = await supabase.from('posts')
         .select('media_url')
         .eq('user_name', ADMIN_USERNAME)
@@ -1641,15 +1797,19 @@ app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
       if (!adminAuth || adminAuth.media_url !== password_hash) {
         return res.status(403).json({ error: '管理员身份验证失败' });
       }
-      // 管理员可删除任意照片，跳过所有者校验
     } else {
-      // 普通用户：验证用户身份标记
-      const { data: authRec } = await supabase.from('posts')
-        .select('media_url')
-        .eq('user_name', username)
-        .eq('media_type', AUTH_MARKER)
-        .maybeSingle();
-      if (!authRec || authRec.media_url !== password_hash) {
+      // 普通用户：优先使用 token 认证，回退到 password_hash
+      if (!tokenUser) {
+        if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
+        const { data: authRec } = await supabase.from('posts')
+          .select('media_url')
+          .eq('user_name', username)
+          .eq('media_type', AUTH_MARKER)
+          .maybeSingle();
+        if (!authRec || authRec.media_url !== password_hash) {
+          return res.status(403).json({ error: '身份验证失败' });
+        }
+      } else if (tokenUser !== username) {
         return res.status(403).json({ error: '身份验证失败' });
       }
 
@@ -2331,32 +2491,16 @@ app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
 });
 
 // 用户提交举报
-app.post('/api/report', rateLimit(60000, 5), async (req, res) => {
-  const { reporter_name, password_hash, target_type, target_id, target_user, report_category, report_reason } = req.body;
-  if (!reporter_name || !target_type || !target_id || !report_category) {
+app.post('/api/report', rateLimit(60000, 5), authenticateUser, async (req, res) => {
+  const { reporter_name, target_type, target_id, target_user, report_category, report_reason } = req.body;
+  const reporterVal = req.userName;
+  if (!reporterVal || !target_type || !target_id || !report_category) {
     return res.status(400).json({ error: '缺少必要参数' });
   }
-  if (!password_hash) {
-    return res.status(401).json({ error: '缺少身份验证' });
-  }
-  const reporterVal = validateString(reporter_name, MAX_USERNAME_LEN, '举报人');
-  if (reporterVal && reporterVal.error) return res.status(400).json({ error: reporterVal.error });
   const targetUserVal = validateString(target_user, MAX_USERNAME_LEN, '被举报用户');
   const reasonVal = validateString(report_reason, MAX_REASON_LEN, '举报原因');
+  if (targetUserVal && targetUserVal.error) return res.status(400).json({ error: targetUserVal.error });
   if (reasonVal && reasonVal.error) return res.status(400).json({ error: reasonVal.error });
-  
-  // 验证举报人身份
-  const { data: authRec } = await supabase.from('posts')
-    .select('media_url')
-    .eq('user_name', reporterVal)
-    .eq('media_type', AUTH_MARKER)
-    .maybeSingle();
-  if (!authRec) {
-    return res.status(400).json({ error: '举报人账号不存在' });
-  }
-  if (authRec.media_url !== password_hash) {
-    return res.status(403).json({ error: '身份验证失败' });
-  }
   
   const reportContent = JSON.stringify({
     target_type: String(target_type).slice(0, 20),
@@ -2377,21 +2521,8 @@ app.post('/api/report', rateLimit(60000, 5), async (req, res) => {
 });
 
 // 用户查看自己的举报
-app.get('/api/my-reports', rateLimit(60000, 20), async (req, res) => {
-  const userName = req.query.user_name;
-  const password_hash = req.query.password_hash;
-  if (!userName) return res.status(400).json({ error: '缺少用户名' });
-  if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
-
-  // 验证密码 hash
-  const { data: authRec } = await supabase.from('posts')
-    .select('media_url')
-    .eq('user_name', userName)
-    .eq('media_type', AUTH_MARKER)
-    .maybeSingle();
-  if (!authRec || authRec.media_url !== password_hash) {
-    return res.status(403).json({ error: '身份验证失败' });
-  }
+app.get('/api/my-reports', rateLimit(60000, 20), authenticateUser, async (req, res) => {
+  const userName = req.userName;
   const { data, error } = await supabase.from('posts')
     .select('*')
     .eq('media_type', REPORT_MARKER)
@@ -2722,27 +2853,13 @@ app.post('/admin/stats/refresh', verifyToken, (req, res) => {
 });
 
 // ===================== 用户访问日志（前端调用） =====================
-app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
+app.post('/api/log-user-visit', rateLimit(60000, 30), authenticateUser, async (req, res) => {
   try {
-    const { user_name, password_hash } = req.body;
-    const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
-    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
-
-    // 验证密码 hash
-    if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
-    const { data: authRec } = await supabase.from('posts')
-      .select('media_url')
-      .eq('user_name', userNameVal)
-      .eq('media_type', AUTH_MARKER)
-      .maybeSingle();
-    if (!authRec || authRec.media_url !== password_hash) {
-      return res.status(403).json({ error: '身份验证失败' });
-    }
+    const userNameVal = req.userName;
 
     const today = new Date().toISOString().slice(0, 10);
     const now = new Date().toISOString();
 
-    // 记录用户访问（用 __user_visit__ 标记，区别于 IP 级别的 __visit__）
     await supabase.from('posts').insert([{
       user_name: userNameVal,
       content: JSON.stringify({ date: today }),
@@ -2773,29 +2890,17 @@ app.post('/api/log-user-visit', rateLimit(60000, 30), async (req, res) => {
 });
 
 // ===================== 登录设备/IP 记录（前端调用） =====================
-app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
+app.post('/api/log-login-event', rateLimit(60000, 30), authenticateUser, async (req, res) => {
   try {
-    const { user_name, password_hash, device_id, device_type, os, browser, user_agent, source, device_meta, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips } = req.body;
+    const { device_id, device_type, os, browser, user_agent, source, device_meta, exact_device_model, browser_fingerprint_hash, canvas_fingerprint_hash, webgl_fingerprint_hash, webgl_meta, webrtc_local_ips } = req.body;
 
     const VALID_SOURCES = ['login_success', 'page_visit', 'register_success'];
     const srcVal = VALID_SOURCES.includes(source) ? source : 'login_success';
 
-    const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
-    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
+    const userNameVal = req.userName;
 
     const deviceIdVal = validateString(device_id, 120, '设备ID');
     if (!deviceIdVal) return res.status(400).json({ error: '缺少设备ID' });
-
-    // 验证密码 hash（与 /api/log-user-visit 相同验证方式）
-    if (!password_hash) return res.status(401).json({ error: '缺少身份验证' });
-    const { data: authRec } = await supabase.from('posts')
-      .select('media_url')
-      .eq('user_name', userNameVal)
-      .eq('media_type', AUTH_MARKER)
-      .maybeSingle();
-    if (!authRec || authRec.media_url !== password_hash) {
-      return res.status(403).json({ error: '身份验证失败' });
-    }
 
     // IP 由后端获取，前端不允许传 ip
     const ip = getClientIp(req);
@@ -2807,7 +2912,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
     try { ipLocation = await resolveIpLocation(ip); } catch(e) {}
 
     // 加载安全设置，按开关决定是否写入
-    var securitySettings = { record_device: true, browser_fingerprint: true, canvas_fingerprint: true, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false };
+    var securitySettings = { record_device: true, browser_fingerprint: false, canvas_fingerprint: false, webgl_fingerprint: false, webrtc_local_ip: false, advanced_fingerprint: false };
     try {
       var { data: settingsData } = await supabase.from('posts')
         .select('content')
@@ -2898,6 +3003,7 @@ app.post('/api/log-login-event', rateLimit(60000, 30), async (req, res) => {
         login_at: loginAt,
         source: srcVal,
         device_meta: finalDeviceMeta,
+        exact_device_model: exact_device_model || null,
         browser_fingerprint_hash: finalBrowserFp,
         canvas_fingerprint_hash: finalCanvasFp,
         webgl_fingerprint_hash: finalWebglFp,
@@ -3299,7 +3405,7 @@ app.get('/admin/stats/users', verifyToken, rateLimit(60000, 10), async (req, res
 app.get('/admin/users/register-alerts', verifyToken, rateLimit(60000, 20), async (req, res) => {
   try {
     const [metaRecord, authRows] = await Promise.all([
-      getAdminMetaRecord(),
+      getAdminMetaRecord('register_alerts'),
       fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at')
     ]);
     const meta = safeJsonParse(metaRecord && metaRecord.content);
@@ -3324,7 +3430,7 @@ app.get('/admin/users/register-alerts', verifyToken, rateLimit(60000, 20), async
 app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20), async (req, res) => {
   try {
     const nowIso = new Date().toISOString();
-    await saveAdminMetaFields({ last_seen_register_alert_at: nowIso });
+    await saveAdminMetaFields({ last_seen_register_alert_at: nowIso }, 'register_alerts');
     return res.json({ ok: true, last_seen_at: nowIso });
   } catch (e) {
     console.error('[API] 新用户注册提醒已读写入失败:', e.message);
@@ -3367,13 +3473,11 @@ app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req
 
 // 发送邮件（Gmail SMTP）
 app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res) => {
-  var timedOut = false;
   var tmr = setTimeout(function() {
-    timedOut = true;
     if (!res.headersSent) {
-      try { return res.status(504).json({ error: '发送邮件超时，请稍后重试' }); } catch(e) {}
+      try { return res.status(504).json({ error: 'SMTP 服务器无响应（28s），如果部署在 Render 免费实例，可能是 Render 封锁了出站 SMTP 端口。建议换用 SendGrid/Brevo 等 HTTPS API 邮件服务。' }); } catch(e) {}
     }
-  }, 55000);
+  }, 28000);
   try {
     const { recipients, subject, content, content_type } = req.body;
     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
@@ -3397,6 +3501,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     if (!transporter) {
       return res.status(500).json({ error: '邮件服务未配置，请在 Render Dashboard 设置 GMAIL_USER 和 GMAIL_APP_PASSWORD' });
     }
+    var usedPort = mailTransporterPort;
     const sent = [];
     const failed = [];
     for (const r of recipients) {
@@ -3410,21 +3515,24 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
         });
         sent.push(r.user_name || r.email);
       } catch (e) {
-        // 连接超时/失败时，自动尝试回退到 587 STARTTLS
-        if (mailTransporterPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
+        console.error('[Email] 发送给 ' + r.email + ' 失败 (端口' + usedPort + '): ' + (e.code || '') + ' - ' + e.message);
+        if (usedPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
           try {
-            mailTransporterPort = '587';
+            usedPort = '587';
+            console.log('[Email] 465 连接失败，回退到 587 STARTTLS');
             mailTransporter = nodemailer.createTransport({
               host: 'smtp.gmail.com',
               port: 587,
               secure: false,
               requireTLS: true,
               auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
-              connectionTimeout: 30000,
-              greetingTimeout: 30000,
-              socketTimeout: 30000
+              connectionTimeout: 10000,
+              greetingTimeout: 10000,
+              socketTimeout: 10000
             });
-            await mailTransporter.sendMail({
+            transporter = mailTransporter;
+            mailTransporterPort = '587';
+            await transporter.sendMail({
               from: '"XTJ 管理员" <' + GMAIL_USER + '>',
               to: r.email,
               subject: subjectVal,
@@ -3432,13 +3540,16 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
               html: bodyHtml
             });
             sent.push(r.user_name || r.email);
-            return;
-          } catch(e2) {}
+            continue;
+          } catch(e2) {
+            console.error('[Email] 587 回退也失败: ' + (e2.code || '') + ' - ' + e2.message);
+            failed.push({ user: r.user_name || r.email, error: '465/587 均连接失败: ' + e2.message });
+            continue;
+          }
         }
         failed.push({ user: r.user_name || r.email, error: '发送失败: ' + e.message });
       }
     }
-    // 保存发送记录
     try {
       await supabase.from('posts').insert([{
         user_name: ADMIN_USERNAME,
@@ -3454,6 +3565,19 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
       }]);
     } catch(e) {
       console.warn('[Email] 保存发送记录失败:', e.message);
+    }
+    if (sent.length === 0 && failed.length > 0) {
+      var firstErr = failed[0].error || '';
+      if (firstErr.indexOf('connect') > -1 || firstErr.indexOf('timeout') > -1 || firstErr.indexOf('ETIMEDOUT') > -1) {
+        return res.json({
+          ok: false,
+          sent_count: 0,
+          failed_count: failed.length,
+          sent: sent,
+          failed: failed,
+          hint: 'SMTP 端口可能被云平台封锁。建议换用 SendGrid（100封/天免费，走 HTTPS 443 端口）：注册 https://sendgrid.com → 创建 API Key → 在 Render 环境变量设 SENDGRID_API_KEY'
+        });
+      }
     }
     return res.json({
       ok: true,
