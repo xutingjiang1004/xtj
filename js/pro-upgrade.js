@@ -1,12 +1,9 @@
-(function() {
+﻿(function() {
   'use strict';
   if (window.__xtjProUpgradeLoaded) return;
   window.__xtjProUpgradeLoaded = true;
 
   var VIP_MARKER = '__vip__';
-  var VIP_PLAN_ID = 'pro_monthly';
-  var VIP_DURATION_DAYS = 30;
-  var VIP_PRICE = 3;
   var LOCAL_VIP_KEY = 'xtj_local_vip';
 
   function getLocalVip() {
@@ -46,63 +43,9 @@
     clearLocalVip();
   };
 
-  window.__xtjDirectPurchasePro = async function(userName) {
-    if (!userName) return { ok: false, error: '未登录' };
-
-    var now = new Date();
-    var expireAt = new Date(now.getTime() + VIP_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    var orderNo = 'XTJ_DIRECT_' + Date.now() + '_' + String(Math.random()).slice(2, 8);
-
-    try {
-      if (window.sb) {
-        var vipContent = JSON.stringify({
-          plan_id: VIP_PLAN_ID,
-          plan_name: 'XTJ Pro',
-          price: VIP_PRICE,
-          is_active: true,
-          order_no: orderNo,
-          start_at: now.toISOString(),
-          expire_at: expireAt,
-          features: ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'],
-          activated_at: now.toISOString(),
-          source: 'frontend_direct'
-        });
-        var { error } = await window.sb.from('posts').insert([{
-          user_name: userName,
-          content: vipContent,
-          media_type: VIP_MARKER,
-          media_url: VIP_PLAN_ID,
-          actor_key: 'vip_direct_' + Date.now()
-        }]);
-        if (error) console.warn('[Pro] Supabase insert failed (non-fatal):', error.message);
-      } else {
-        console.warn('[Pro] window.sb not available, local-only activation');
-      }
-    } catch(e) {
-      console.warn('[Pro] Supabase insert error (non-fatal):', e.message);
-    }
-
-    var vipInfo = {
-      ok: true,
-      user_name: userName,
-      plan_name: 'XTJ Pro',
-      expire_at: expireAt,
-      is_active: true,
-      features: ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'],
-      activated_at: now.toISOString()
-    };
-
-    window.__xtjSaveLocalVip({
-      user_name: userName,
-      plan_name: 'XTJ Pro',
-      expire_at: expireAt,
-      is_active: true,
-      features: vipInfo.features,
-      activated_at: now.toISOString()
-    });
-
-    // console.log('[Pro] VIP activated locally for', userName);
-    return vipInfo;
+  // deprecated: frontend direct Pro activation disabled, Pro can only be granted by admin campaigns.
+  window.__xtjDirectPurchasePro = async function() {
+    return { ok: false, error: 'frontend direct Pro activation disabled' };
   };
 
   window.__xtjQueryVipStatus = async function(userName) {
@@ -151,84 +94,64 @@
     var existing = document.getElementById('proCelebrationOverlay');
     if (existing) existing.remove();
 
-    // Determine source label
-    var sourceLabel = '自主开通';
-    var sourceIcon = '🆓';
-    if (vipInfo.source === 'pro_gift') {
-      sourceLabel = '免费赠送';
-      sourceIcon = '🎁';
-    } else if (vipInfo.source === 'paid' || vipInfo.source === 'payment') {
-      sourceLabel = '付费购买';
-      sourceIcon = '💳';
-    } else if (vipInfo.source === 'frontend_direct') {
-      sourceLabel = '自主开通';
-      sourceIcon = '🆓';
-    }
-
     var overlay = document.createElement('div');
     overlay.id = 'proCelebrationOverlay';
     overlay.className = 'pro-celebration-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);';
     overlay.innerHTML = [
-      '<canvas id="proCelebrationCanvas" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;"></canvas>',
-      '<div class="pro-celebration-card" style="position:relative;background:linear-gradient(145deg,#1a1a2e,#16213e);border:1px solid rgba(245,158,11,0.3);border-radius:20px;padding:32px 28px;max-width:380px;width:90%;text-align:center;box-shadow:0 0 60px rgba(245,158,11,0.15),0 20px 60px rgba(0,0,0,0.5);color:#fff;overflow:hidden;">',
-      '  <div style="position:absolute;top:-80px;right:-80px;width:200px;height:200px;background:radial-gradient(circle,rgba(245,158,11,0.15),transparent 70%);border-radius:50%;pointer-events:none;"></div>',
-      '  <div style="position:absolute;bottom:-60px;left:-60px;width:160px;height:160px;background:radial-gradient(circle,rgba(245,158,11,0.1),transparent 70%);border-radius:50%;pointer-events:none;"></div>',
-      '  <div class="pro-celebration-icon" style="position:relative;display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#f59e0b,#d97706);box-shadow:0 0 30px rgba(245,158,11,0.4);margin-bottom:12px;">',
-      '    <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#fff" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#fff"/></svg>',
+      '<div class="pro-celebration-bg"></div>',
+      '<canvas id="proCelebrationCanvas"></canvas>',
+      '<div class="pro-celebration-card">',
+      '  <div class="pro-celebration-icon">',
+      '    <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5">',
+      '      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#f59e0b" stroke="#f59e0b"/>',
+      '    </svg>',
       '  </div>',
-      '  <div class="pro-celebration-title" style="font-size:22px;font-weight:700;margin-bottom:4px;background:linear-gradient(135deg,#fbbf24,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">🎉 恭喜升级 Pro！</div>',
-      '  <div class="pro-celebration-sub" style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:16px;">您已成功开启 XTJ Pro 会员之旅</div>',
-      '  <div class="pro-celebration-info" style="background:rgba(255,255,255,0.06);border-radius:12px;padding:12px;margin-bottom:16px;">',
-      '    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left;">',
-      '      <div style="font-size:11px;color:rgba(255,255,255,0.4);">会员</div><div style="font-size:13px;font-weight:600;text-align:right;">XTJ Pro</div>',
-      '      <div style="font-size:11px;color:rgba(255,255,255,0.4);">来源</div><div style="font-size:13px;font-weight:600;text-align:right;">' + sourceIcon + ' ' + sourceLabel + '</div>',
-      '      <div style="font-size:11px;color:rgba(255,255,255,0.4);">有效期至</div><div style="font-size:13px;font-weight:600;text-align:right;">' + (vipInfo.expire_at ? new Date(vipInfo.expire_at).toLocaleDateString('zh-CN', {year:'numeric',month:'long',day:'numeric'}) : '30天') + '</div>',
-      '    </div>',
+      '  <div class="pro-celebration-title">🎉 恭喜升级 Pro！</div>',
+      '  <div class="pro-celebration-sub">您已成功开通 XTJ Pro 会员</div>',
+      '  <div class="pro-celebration-info">',
+      '    <div class="pro-celebration-info-item"><span class="pro-celebration-info-label">会员</span><span class="pro-celebration-info-value">XTJ Pro</span></div>',
+      '    <div class="pro-celebration-info-item"><span class="pro-celebration-info-label">有效期</span><span class="pro-celebration-info-value" id="proCelebrationExpiry">' + (vipInfo.expire_at ? new Date(vipInfo.expire_at).toLocaleDateString('zh-CN') : '30天') + '</span></div>',
+      '    <div class="pro-celebration-info-item"><span class="pro-celebration-info-label">费用</span><span class="pro-celebration-info-value">¥' + (vipInfo.price || 3) + '/月</span></div>',
       '  </div>',
-      '  <div class="pro-celebration-features" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:16px;">',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">👑 身份标识</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">📸 无限照片墙</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">⬆️ 200MB文件</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">🎨 Pro主题</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">📌 帖子置顶</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">✨ 动态特效</div>',
+      '  <div class="pro-celebration-features">',
+      '    <div class="pro-celebration-feature"><span class="pcf-icon">👑</span><span>专属身份标识</span></div>',
+      '    <div class="pro-celebration-feature"><span class="pcf-icon">📸</span><span>照片墙无限上传</span></div>',
+      '    <div class="pro-celebration-feature"><span class="pcf-icon">⬆️</span><span>200MB 大文件</span></div>',
+      '    <div class="pro-celebration-feature"><span class="pcf-icon">🎨</span><span>Pro 专属主题</span></div>',
+      '    <div class="pro-celebration-feature"><span class="pcf-icon">📌</span><span>帖子置顶特权</span></div>',
+      '    <div class="pro-celebration-feature"><span class="pcf-icon">✨</span><span>动态特效</span></div>',
       '  </div>',
-      '  <button class="pro-celebration-btn" id="proCelebrationBtn" style="width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;box-shadow:0 4px 15px rgba(245,158,11,0.3);">开始体验 Pro →</button>',
+      '  <button class="pro-celebration-btn" id="proCelebrationBtn">开始体验 Pro</button>',
       '</div>'
     ].join('');
     document.body.appendChild(overlay);
 
     var btn = document.getElementById('proCelebrationBtn');
     btn.onclick = function() {
-      overlay.style.transition = 'opacity 0.4s,transform 0.4s';
-      overlay.style.opacity = '0';
-      overlay.style.transform = 'scale(0.95)';
-      setTimeout(function() { overlay.remove(); }, 450);
+      overlay.classList.add('pro-celebration-exit');
+      setTimeout(function() { overlay.remove(); }, 600);
     };
-    btn.onmouseenter = function() { btn.style.transform = 'translateY(-2px)'; btn.style.boxShadow = '0 6px 20px rgba(245,158,11,0.4)'; };
-    btn.onmouseleave = function() { btn.style.transform = ''; btn.style.boxShadow = '0 4px 15px rgba(245,158,11,0.3)'; };
 
     overlay.addEventListener('click', function(e) {
       if (e.target === overlay) {
-        overlay.style.transition = 'opacity 0.4s,transform 0.4s';
-        overlay.style.opacity = '0';
-        overlay.style.transform = 'scale(0.95)';
-        setTimeout(function() { overlay.remove(); }, 450);
+        overlay.classList.add('pro-celebration-exit');
+        setTimeout(function() { overlay.remove(); }, 600);
       }
     });
 
     var card = overlay.querySelector('.pro-celebration-card');
     if (typeof gsap !== 'undefined') {
       var tl = gsap.timeline({ defaults: { ease: 'power4.out' } });
-      tl.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.35 }, 0);
-      tl.fromTo(card, { y: 80, opacity: 0, scale: 0.85 }, { y: 0, opacity: 1, scale: 1, duration: 0.7, ease: 'back.out(1.5)' }, 0.15);
-      tl.fromTo('.pro-celebration-icon', { scale: 0, rotation: -45 }, { scale: 1, rotation: 0, duration: 0.5, ease: 'back.out(2.5)' }, 0.2);
+      tl.fromTo(overlay, { opacity: 0 }, { opacity: 1, duration: 0.4 }, 0);
+      tl.fromTo('.pro-celebration-bg', { scale: 0, opacity: 1 }, { scale: 3, opacity: 0.15, duration: 1.2, ease: 'power2.out' }, 0);
+      tl.fromTo(card, { y: 60, opacity: 0, scale: 0.9 }, { y: 0, opacity: 1, scale: 1, duration: 0.6 }, 0.2);
+      tl.fromTo('.pro-celebration-icon', { scale: 0, rotation: -30 }, { scale: 1, rotation: 0, duration: 0.5, ease: 'back.out(2)' }, 0.25);
       tl.fromTo('.pro-celebration-title', { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4 }, 0.35);
-      tl.fromTo('.pro-celebration-sub', { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 0.42);
-      tl.fromTo('.pro-celebration-info', { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 0.5);
-      tl.fromTo('.pro-celebration-features > div', { y: 10, opacity: 0, scale: 0.9 }, { y: 0, opacity: 1, scale: 1, duration: 0.3, stagger: 0.04 }, 0.52);
-      tl.fromTo('.pro-celebration-btn', { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.35 }, 0.6);
+      tl.fromTo('.pro-celebration-sub', { y: 16, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4 }, 0.42);
+      tl.fromTo('.pro-celebration-info', { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4 }, 0.5);
+      tl.fromTo('.pro-celebration-features', { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4 }, 0.55);
+      tl.fromTo('.pro-celebration-btn', { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4 }, 0.6);
+      tl.fromTo('.pro-celebration-feature', { y: 8, opacity: 0 }, { y: 0, opacity: 1, duration: 0.3, stagger: 0.06 }, 0.58);
     } else {
       overlay.style.opacity = '1';
       card.style.opacity = '1';
