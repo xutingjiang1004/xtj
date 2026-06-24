@@ -454,6 +454,7 @@
         var ac = new AbortController();
         var at = setTimeout(function() { ac.abort(); }, 30000);
         opts.signal = ac.signal;
+        opts.credentials = 'same-origin';
         var res;
         try { res = await fetch(API_BASE + path, opts); } finally { clearTimeout(at); }
         var data = await res.json();
@@ -465,7 +466,7 @@
             } catch (e) {}
         }
         if (!res.ok) throw new Error(data.error || '请求失败 (' + res.status + ')');
-        if (hasApiToken()) saveSession();
+        saveSession();
         return data;
     }
 
@@ -529,7 +530,7 @@
     }
 
     async function tryRestoreAdminSession() {
-        if (!API_BASE || !hasApiToken() || !hasSession()) {
+        if (!API_BASE || !hasSession()) {
             clearSession();
             return false;
         }
@@ -625,11 +626,6 @@ async function initAdminClient() {
         }
         startRegisterAlertPolling();
 
-        setTimeout(function() {
-            var lazyTabs = ['users', 'security', 'audit', 'errorlog', 'photos'];
-            lazyTabs.forEach(function(t) { loadTabDataIfNeeded(t); });
-        }, 500);
-
         _adminReportPollTimer = setInterval(async function() {
             var prevLen = reportsData.length;
             await loadReportsData();
@@ -672,7 +668,6 @@ async function initAdminClient() {
                 btn.textContent = '登录';
                 return;
             }
-            setToken(data.token);
             ADMIN = name;
             await initAdminClient();
         } catch(e) {
@@ -739,10 +734,7 @@ async function initAdminClient() {
             annList = apiData.announcements || [];
             allLikes = apiData.likes || [];
             allComments = apiData.comments || [];
-            updateReportBadge();
             bansData = apiData.bans || [];
-            mutesData = apiData.mutes || [];
-            blacklistData = apiData.blacklist || [];
             adminTabDataLoaded.posts = true;
             adminTabDataLoaded.likes = true;
             adminTabDataLoaded.comments = true;
@@ -852,6 +844,14 @@ async function initAdminClient() {
             } else if (dataType === 'photos') {
                 await loadPhotosAdminData();
                 adminTabDataLoaded.photos = true;
+            } else if (dataType === 'reports') {
+                var reportRes = await apiCall('GET', '/admin/reports');
+                var rawReportList = reportRes.data || [];
+                adminTabDataLoaded.reports = true;
+            } else if (dataType === 'mutes') {
+                var muteRes = await apiCall('GET', '/admin/mutes');
+                var rawMuteList = muteRes.data || [];
+                adminTabDataLoaded.mutes = true;
             }
         } catch(e) {
             console.warn('[admin] 懒加载数据失败:', dataType, e.message);
@@ -1405,10 +1405,7 @@ async function initAdminClient() {
                 annList = apiData.announcements || [];
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
-                updateReportBadge();
                 bansData = apiData.bans || [];
-                mutesData = apiData.mutes || [];
-                blacklistData = apiData.blacklist || [];
             } catch(e) {}
         }
         var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__' && p.media_type !== REPORT_MARKER; });
@@ -3184,10 +3181,7 @@ async function initAdminClient() {
                 });
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
-                updateReportBadge();
                 bansData = apiData.bans || [];
-                mutesData = apiData.mutes || [];
-                blacklistData = apiData.blacklist || [];
             } catch(e) {}
         }
         var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__' && p.media_type !== REPORT_MARKER; });
