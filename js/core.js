@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -10,11 +10,7 @@
             const SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
             var API_BASE = XTJ_RUNTIME_CONFIG.API_BASE;
             var sb;
-            // ★ 修复 M6：检查配置完整性，避免静默失败
-            if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-                console.error('[XTJ] Supabase 配置缺失，请检查 config.js 或环境变量');
-                sb = null;
-            } else if (typeof window.supabase !== 'undefined') {
+            if (typeof window.supabase !== 'undefined') {
                 sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             } else {
                 console.error('Supabase SDK not loaded');
@@ -89,28 +85,6 @@ const ADMIN_NAME = "xxz";
             const USER_SESSION_KEY = "xtj_user_session";
             const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
             const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
-            var USER_TOKEN_KEY = 'xtj_user_token';
-            var USER_TOKEN_TS_KEY = 'xtj_user_token_ts';
-
-            function getUserToken() {
-                var token = sessionStorage.getItem(USER_TOKEN_KEY) || localStorage.getItem(USER_TOKEN_KEY);
-                return token || '';
-            }
-
-            function setUserToken(token) {
-                if (token) {
-                    sessionStorage.setItem(USER_TOKEN_KEY, token);
-                    localStorage.setItem(USER_TOKEN_KEY, token);
-                    localStorage.setItem(USER_TOKEN_TS_KEY, Date.now());
-                }
-            }
-
-            function clearUserToken() {
-                try { sessionStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
-                try { localStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
-                try { localStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
-            }
-
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
 
@@ -189,7 +163,7 @@ const ADMIN_NAME = "xxz";
         }
 
         function touchUserSession(force) {
-            var userName = String(window.currentUser || window._lastKnownUser || "").trim();
+            var userName = String(window.currentUser || currentUser || "").trim();
             if (!userName) return;
             var now = Date.now();
             if (!force && lastUserSessionWriteAt && (now - lastUserSessionWriteAt) < USER_SESSION_TOUCH_INTERVAL_MS) return;
@@ -206,10 +180,6 @@ const ADMIN_NAME = "xxz";
 
         let currentUser = restoreCurrentUserFromSession();
         window.currentUser = currentUser;
-        window._lastKnownUser = currentUser;
-
-        var statsEl = document.getElementById('statsSection');
-        if (statsEl && !currentUser) statsEl.style.display = 'none';
 
         // 记录用户访问到后端统计（API优先，Supabase直连兜底）
         var _visitLoggedToday = false;
@@ -217,15 +187,10 @@ const ADMIN_NAME = "xxz";
             if (!userName) return;
             if (typeof API_BASE !== 'undefined' && API_BASE) {
                 try {
-                    var userToken = getUserToken();
-                    var headers = { 'Content-Type': 'application/json' };
-                    if (userToken) headers['Authorization'] = 'Bearer ' + userToken;
-                    var body = { user_name: userName };
-                    if (!userToken) {
-                        body.password_hash = sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "";
-                    }
                     fetch(API_BASE + '/api/log-user-visit', {
-                        method: 'POST', headers: headers, body: JSON.stringify(body)
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_name: userName, password_hash: sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "" })
                     }).catch(function(){});
                 } catch(e) {}
             } else if (sb && !_visitLoggedToday) {
@@ -310,25 +275,6 @@ const ADMIN_NAME = "xxz";
         const postDwellTimers = new Map();
         const POST_DWELL_THRESHOLD = 0.5;
         const POST_DWELL_DELAY = 1200;
-
-        // ★ 修复 M4：页面卸载 / 面板切换时清理 Observer 和 Timer
-        function cleanupObservers() {
-            if (postVisibilityObserver) {
-                try { postVisibilityObserver.disconnect(); } catch(e) {}
-                postVisibilityObserver = null;
-            }
-            if (postDwellObserver) {
-                try { postDwellObserver.disconnect(); } catch(e) {}
-                postDwellObserver = null;
-            }
-            postDwellTimers.forEach(function(timerId, postId) {
-                clearTimeout(timerId);
-            });
-            postDwellTimers.clear();
-        }
-        window.addEventListener('beforeunload', cleanupObservers);
-        // 在面板切换时也清理（由 switchTab 调用）
-        window.__xtjCleanupObservers = cleanupObservers;
         function primePostReveal(nodes) {
             Array.from(nodes || []).forEach(function(post, index) {
                 if (!post || post.classList.contains('visible')) return;
@@ -395,7 +341,7 @@ const ADMIN_NAME = "xxz";
                 getPostDwellObserver().observe(post);
             });
         }
-        const CACHE_KEY = "xtj_feed_cache_v4";
+        const CACHE_KEY = "xtj_feed_cache_v3";
         const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
 
         const POST_METADATA_MARKER = "__xtj_post_v2__";
@@ -453,15 +399,14 @@ const ADMIN_NAME = "xxz";
                 }
             }
             if (__vipStatus.is_vip !== true) return false;
+            // 双重校验：即使 is_vip 标记为 true，也要检查 expire_at 是否过期
             var info = __vipStatus.vip_info;
-            if (!info || !info.expire_at) {
-                __vipStatus.is_vip = false;
-                return false;
-            }
-            var expireTs = new Date(info.expire_at).getTime();
-            if (!isNaN(expireTs) && expireTs <= Date.now()) {
-                __vipStatus.is_vip = false;
-                return false;
+            if (info && info.expire_at) {
+                var expireTs = new Date(info.expire_at).getTime();
+                if (!isNaN(expireTs) && expireTs <= Date.now()) {
+                    __vipStatus.is_vip = false;  // 过期自动降级
+                    return false;
+                }
             }
             return true;
         }
@@ -489,20 +434,14 @@ const ADMIN_NAME = "xxz";
             // 尝试API查询
             try {
                 var url = API_BASE + '/api/vip/status?user_name=' + encodeURIComponent(currentUser);
-                var vc = new AbortController();
-                var vt = setTimeout(function() { vc.abort(); }, 8000);
-                var resp = await fetch(url, { signal: vc.signal });
-                clearTimeout(vt);
+                var resp = await fetch(url);
                 var data = await resp.json();
                 var apiIsVip = data.is_vip === true;
-                if (apiIsVip) {
-                    if (!data.active_vip || !data.active_vip.expire_at) {
-                        apiIsVip = false;
-                    } else {
-                        var apiExpireTs = new Date(data.active_vip.expire_at).getTime();
-                        if (!isNaN(apiExpireTs) && apiExpireTs <= Date.now()) {
-                            apiIsVip = false;
-                        }
+                // 防止 API 返回 true 但实际已过期：检查 active_vip.expire_at
+                if (apiIsVip && data.active_vip && data.active_vip.expire_at) {
+                    var apiExpireTs = new Date(data.active_vip.expire_at).getTime();
+                    if (!isNaN(apiExpireTs) && apiExpireTs <= Date.now()) {
+                        apiIsVip = false;  // API 标记 VIP 但 expire_at 已过期 → 降级
                     }
                 }
                 __vipStatus.is_vip = apiIsVip;
@@ -560,34 +499,83 @@ const ADMIN_NAME = "xxz";
                     }
                 }
             } else {
-                if (badge) { badge.textContent = '开通'; badge.className = 'xtj-vip-card-badge'; }
-                if (sub) sub.textContent = '¥3/月 · 解锁更多特权';
+                if (badge) { badge.textContent = '领取'; badge.className = 'xtj-vip-card-badge'; }
+                if (sub) sub.textContent = '仅支持活动领取';
             }
             // 刷新帖子列表以显示VIP徽章
             if (typeof refreshFeedDisplay === 'function') refreshFeedDisplay();
         }
 
+        function ensureVipModalLayout() {
+            var planCard = document.getElementById('vipPlanCard');
+            if (!planCard) return;
+            var planPrice = planCard.querySelector('.vip-plan-price');
+            if (planPrice) {
+                planPrice.className = 'vip-plan-price vip-plan-price--textonly';
+                planPrice.innerHTML = '<span class="vip-plan-amount">活动领取</span>';
+            }
+            var planName = planCard.querySelector('.vip-plan-name');
+            if (planName) planName.textContent = 'XTJ Pro 会员';
+            var planDesc = planCard.querySelector('.vip-plan-desc');
+            if (planDesc) planDesc.textContent = '仅展示管理员已发布且当前有效的 XTJ Pro 活动';
+            var featureIcons = ['👑', '📸', '⬆️', '🎨', '📌', '✨'];
+            var featureTexts = ['Pro 身份标识', '照片墙无限上传', '大文件上传（最高 200MB）', 'Pro 专属主题', '帖子置顶特权', '头像与资料特效'];
+            var featureItems = planCard.querySelectorAll('.vip-plan-feature');
+            featureItems.forEach(function(item, index) {
+                var iconEl = item.querySelector('.vip-plan-feature-icon');
+                var textEl = item.querySelector('.vip-plan-feature-text');
+                if (iconEl && featureIcons[index]) iconEl.textContent = featureIcons[index];
+                if (textEl && featureTexts[index]) textEl.textContent = featureTexts[index];
+            });
+            var payBtn = document.getElementById('vipPayBtn');
+            var cancelBtn = document.getElementById('vipCancelBtn');
+            if (payBtn) payBtn.onclick = handleVipPurchase;
+            if (cancelBtn) cancelBtn.textContent = '取消领取';
+            var body = document.querySelector('#vipModal .vip-modal-body');
+            var footer = document.querySelector('#vipModal .vip-modal-footer');
+            if (body && footer && !document.getElementById('proGiftSection')) {
+                var section = document.createElement('section');
+                section.className = 'pro-gift-section';
+                section.id = 'proGiftSection';
+                section.style.display = 'none';
+                section.innerHTML = [
+                    '<div class="pro-gift-section-head">',
+                    '<h4>XTJ Pro 会员领取</h4>',
+                    '<span>仅显示已发布活动</span>',
+                    '</div>',
+                    '<div class="pro-gift-list" id="proGiftList"><div class="pro-gift-empty">加载中...</div></div>'
+                ].join('');
+                body.insertBefore(section, footer);
+            }
+        }
+
         function openVipModal() {
             if (!currentUser) { showToast('请先登录'); return; }
+            ensureVipModalLayout();
             openModal('vipModal');
             updateVipModalUI();
+            loadProGiftCampaigns();
         }
 
         function updateVipModalUI() {
             var btn = document.getElementById('vipPayBtn');
             var btnText = document.getElementById('vipPayBtnText');
             var cancelArea = document.getElementById('vipCancelArea');
+            var footerText = document.getElementById('vipFooterText');
             if (!btn) return;
             if (__vipStatus.is_vip) {
-                btnText.textContent = '✅ 已是VIP会员';
+                btnText.textContent = '已开通 XTJ Pro';
                 btn.disabled = true;
+                btn.classList.add('is-disabled');
                 if (cancelArea) cancelArea.style.display = '';
+                if (footerText) footerText.textContent = '当前 XTJ Pro 状态已生效，可在底部取消领取。';
             } else {
-                btnText.textContent = '立即开通 ¥3';
+                btnText.textContent = '查看可领取活动';
                 btn.disabled = false;
+                btn.classList.remove('is-disabled');
                 if (cancelArea) cancelArea.style.display = 'none';
+                if (footerText) footerText.textContent = '仅显示管理员已发布且当前有效的 XTJ Pro 活动。';
             }
-            loadProGiftCampaigns();
         }
 
         async function handleVipPurchase() {
@@ -596,147 +584,25 @@ const ADMIN_NAME = "xxz";
 
             var btn = document.getElementById('vipPayBtn');
             var btnText = document.getElementById('vipPayBtnText');
-            if (btn) { btn.classList.add('loading'); btn.disabled = true; btnText.textContent = '激活中...'; }
-
-            // 直接前端激活Pro，所有用户免费开通
-            if (typeof window.__xtjDirectPurchasePro === 'function') {
-                try {
-                    var pResult = await window.__xtjDirectPurchasePro(currentUser);
-                    if (pResult.ok) {
-                        __vipStatus.is_vip = true;
-                        __vipStatus.vip_info = pResult;
-                        updateVipUI();
-                        updateVipModalUI();
-                        closeModal('vipModal');
-                        if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通'; }
-                        setTimeout(function() {
-                            if (typeof window.__xtjShowProCelebration === 'function') {
-                                window.__xtjShowProCelebration(pResult);
-                            }
-                            if (typeof window.__xtjApplyProTheme === 'function') {
-                                window.__xtjApplyProTheme(true);
-                            }
-                        }, 300);
-                        return;
-                    }
-                } catch(e) { console.error('[VIP] 激活失败:', e); }
-            }
-
-            showToast('激活失败，请重试');
-            if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通'; }
-        }
-
-        // 加载可领取的 Pro 赠送活动
-        async function loadProGiftCampaigns() {
-            var section = document.getElementById('proGiftSection');
-            var list = document.getElementById('proGiftList');
-            if (!section || !list || !currentUser) return;
+            if (btn) { btn.classList.add('loading'); btn.disabled = true; btnText.textContent = '加载活动中...'; }
             try {
-                var resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), { signal: AbortSignal.timeout(8000) });
-                var data = await resp.json();
-                var gifts = data.gifts || [];
-                if (!gifts.length) { section.style.display = 'none'; return; }
-                section.style.display = 'block';
-                list.innerHTML = gifts.map(function(g) {
-                    var cardClass = 'pro-gift-card' + (g.already_claimed ? ' claimed' : '');
-                    var durationText = g.duration_days + ' 天 Pro';
-                    if (g.claim_expire_at) {
-                        var expireDate = new Date(g.claim_expire_at);
-                        if (expireDate > new Date()) {
-                            var daysLeft = Math.ceil((expireDate - new Date()) / (1000 * 60 * 60 * 24));
-                            durationText += ' · 还剩 ' + daysLeft + ' 天';
-                        }
-                    }
-                    var card = '<div class="' + cardClass + '" data-gift-id="' + g.id + '">';
-                    card += '<div class="pro-gift-card-main">';
-                    card += '<div class="pro-gift-card-info">';
-                    card += '<div class="pro-gift-card-title">' + escapeHtml(g.title) + '</div>';
-                    if (g.description) {
-                        card += '<div class="pro-gift-card-desc">' + escapeHtml(g.description) + '</div>';
-                    }
-                    card += '<div class="pro-gift-card-meta">';
-                    card += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-                    card += durationText;
-                    card += '</div>';
-                    card += '</div>';
-                    if (g.already_claimed) {
-                        card += '<div class="pro-gift-claimed-badge">';
-                        card += '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
-                        card += '已领取';
-                        card += '</div>';
-                    } else {
-                        card += '<button class="pro-gift-claim-btn" data-gift-id="' + g.id + '" onclick="claimProGift(\'' + g.id + '\')">免费领取</button>';
-                    }
-                    card += '</div></div>';
-                    return card;
-                }).join('');
-            } catch(e) {
-                section.style.display = 'none';
-            }
-        }
-
-        // 领取 Pro 赠送活动
-        window.claimProGift = async function(giftId) {
-            if (!currentUser) { showToast('请先登录'); return; }
-            var btn = document.querySelector('.pro-gift-claim-btn[data-gift-id="' + giftId + '"]');
-            var card = document.querySelector('.pro-gift-card[data-gift-id="' + giftId + '"]');
-            if (btn) {
-                btn.classList.add('loading');
-                btn.textContent = '领取中...';
-            }
-            try {
-                var resp = await fetch(API_BASE + '/api/pro-gifts/claim', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_name: currentUser, gift_id: giftId })
-                });
-                var data = await resp.json();
-                if (data.ok) {
-                    // 更新卡片状态
-                    if (card) {
-                        card.classList.add('claimed');
-                        if (btn) btn.remove();
-                        var infoDiv = card.querySelector('.pro-gift-card-info');
-                        if (infoDiv && infoDiv.parentNode) {
-                            var badge = document.createElement('div');
-                            badge.className = 'pro-gift-claimed-badge';
-                            badge.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>已领取';
-                            infoDiv.parentNode.insertBefore(badge, infoDiv.nextSibling);
-                        }
-                    }
-                    showToast('🎉 Pro 已激活至 ' + new Date(data.expire_at).toLocaleDateString());
-                    // 刷新VIP状态和UI
-                    if (typeof window.__xtjSaveLocalVip === 'function') {
-                        window.__xtjSaveLocalVip(data);
-                    }
-                    ensureVipStatusFresh(true);
-                    updateVipUI();
-                    updateVipModalUI();
-                    if (typeof window.__xtjApplyProTheme === 'function') {
-                        window.__xtjApplyProTheme(true);
-                    }
-                    // 弹出庆祝动画
-                    setTimeout(function() {
-                        if (typeof window.__xtjShowProCelebration === 'function') {
-                            window.__xtjShowProCelebration(data);
-                        }
-                    }, 300);
-                    loadProGiftCampaigns();
-                } else {
-                    if (btn) {
-                        btn.classList.remove('loading');
-                        btn.textContent = '免费领取';
-                    }
-                    showToast(data.error || '领取失败', 'error');
+                var gifts = await loadProGiftCampaigns(true);
+                var section = document.getElementById('proGiftSection');
+                if (section && typeof section.scrollIntoView === 'function') {
+                    section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 }
-            } catch(e) {
+                showToast(gifts.length ? '请在下方选择活动领取' : '暂无可领取活动');
+            } catch (e) {
+                console.error('[VIP] load campaigns failed:', e);
+                showToast('活动加载失败，请稍后重试');
+            } finally {
                 if (btn) {
                     btn.classList.remove('loading');
-                    btn.textContent = '免费领取';
+                    btn.disabled = __vipStatus.is_vip;
+                    btnText.textContent = __vipStatus.is_vip ? '已开通 XTJ Pro' : '查看可领取活动';
                 }
-                showToast('领取失败: ' + e.message, 'error');
             }
-        };
+        }
 
         window.openVipModal = openVipModal;
         window.handleVipPurchase = handleVipPurchase;
@@ -789,8 +655,138 @@ const ADMIN_NAME = "xxz";
 
             // 4. 刷新帖子列表
             if (typeof refreshFeedDisplay === 'function') refreshFeedDisplay();
+            loadProGiftCampaigns(true).catch(function() {});
 
             showToast('已取消 Pro 订阅');
+        };
+
+        var proGiftCampaigns = [];
+        var proGiftClaimingId = '';
+
+        function isPublishedProGiftCampaign(campaign) {
+            if (!campaign || typeof campaign !== 'object') return false;
+            if (!(campaign.is_published === true || campaign.status === 'published')) return false;
+            if (campaign.is_active === false) return false;
+            var now = Date.now();
+            var startAt = campaign.start_at ? new Date(campaign.start_at).getTime() : NaN;
+            var endAt = campaign.end_at ? new Date(campaign.end_at).getTime() : NaN;
+            var claimExpireAt = campaign.claim_expire_at ? new Date(campaign.claim_expire_at).getTime() : NaN;
+            if (Number.isFinite(startAt) && startAt > now) return false;
+            if (Number.isFinite(endAt) && endAt < now) return false;
+            if (Number.isFinite(claimExpireAt) && claimExpireAt < now) return false;
+            return true;
+        }
+
+        function formatVipGiftDate(value) {
+            if (!value) return '';
+            var d = new Date(value);
+            if (isNaN(d.getTime())) return '';
+            return d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+        }
+
+        function renderProGiftCampaigns(list) {
+            var section = document.getElementById('proGiftSection');
+            var listEl = document.getElementById('proGiftList');
+            if (!section || !listEl) return;
+            var campaigns = Array.isArray(list) ? list.filter(isPublishedProGiftCampaign) : [];
+            proGiftCampaigns = campaigns;
+            section.style.display = '';
+            if (!campaigns.length) {
+                listEl.innerHTML = '<div class="pro-gift-empty">暂无可领取活动</div>';
+                return;
+            }
+            listEl.innerHTML = campaigns.map(function(campaign) {
+                var title = String(campaign.title || campaign.campaign_title || 'XTJ Pro 活动');
+                var desc = String(campaign.description || '管理员已发布 XTJ Pro 活动');
+                var durationDays = Number(campaign.duration_days || 30);
+                var expireText = formatVipGiftDate(campaign.claim_expire_at);
+                var claimed = !!campaign.already_claimed;
+                var currentId = String(campaign.id || campaign.campaign_id || '');
+                var isBusy = proGiftClaimingId && String(proGiftClaimingId) === currentId;
+                var buttonLabel = claimed ? '已领取' : (isBusy ? '领取中...' : '立即领取');
+                return [
+                    '<article class="pro-gift-card">',
+                    '<div class="pro-gift-card-main">',
+                    '<div class="pro-gift-card-title">' + escapeHtml(title) + '</div>',
+                    '<div class="pro-gift-card-desc">' + escapeHtml(desc) + '</div>',
+                    '<div class="pro-gift-card-meta">',
+                    '<span>' + escapeHtml(String(durationDays)) + ' 天权益</span>',
+                    expireText ? '<span>领取截止 ' + escapeHtml(expireText) + '</span>' : '',
+                    '</div>',
+                    '</div>',
+                    '<button type="button" class="pro-gift-claim-btn' + (claimed ? ' is-claimed' : '') + '" ' + (claimed || isBusy ? 'disabled' : '') + ' onclick="claimProGiftCampaign(\'' + safeJsStr(currentId) + '\', this)">' + escapeHtml(buttonLabel) + '</button>',
+                    '</article>'
+                ].join('');
+            }).join('');
+        }
+
+        async function loadProGiftCampaigns(forceRefresh) {
+            var section = document.getElementById('proGiftSection');
+            var listEl = document.getElementById('proGiftList');
+            if (!section || !listEl) return [];
+            section.style.display = '';
+            listEl.innerHTML = '<div class="pro-gift-empty">加载中...</div>';
+            if (!API_BASE) {
+                renderProGiftCampaigns([]);
+                return [];
+            }
+            try {
+                var url = API_BASE.replace(/\/+$/, '') + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser || '');
+                if (forceRefresh) url += '&_ts=' + Date.now();
+                var resp = await fetch(url, { credentials: 'omit' });
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                var payload = await resp.json();
+                var gifts = Array.isArray(payload && payload.gifts) ? payload.gifts : [];
+                renderProGiftCampaigns(gifts);
+                return gifts.filter(isPublishedProGiftCampaign);
+            } catch (e) {
+                console.warn('[VIP] load pro gifts failed', e);
+                renderProGiftCampaigns([]);
+                return [];
+            }
+        }
+
+        window.claimProGiftCampaign = async function(campaignId, btn) {
+            if (!currentUser) { showToast('请先登录'); return; }
+            var normalizedId = String(campaignId || '').trim();
+            if (!normalizedId) { showToast('活动信息无效'); return; }
+            if (!API_BASE) { showToast('活动服务暂不可用'); return; }
+            var originalText = btn ? btn.textContent : '';
+            try {
+                proGiftClaimingId = normalizedId;
+                if (btn) {
+                    btn.disabled = true;
+                    btn.textContent = '领取中...';
+                }
+                var resp = await fetch(API_BASE.replace(/\/+$/, '') + '/api/pro-gifts/claim', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_name: currentUser,
+                        campaign_id: normalizedId
+                    })
+                });
+                var payload = await resp.json().catch(function() { return {}; });
+                if (!resp.ok || !payload || payload.ok !== true) {
+                    throw new Error((payload && payload.error) || ('HTTP ' + resp.status));
+                }
+                await ensureVipStatusFresh(true);
+                updateVipUI();
+                updateVipModalUI();
+                await loadProGiftCampaigns(true);
+                if (typeof loadFeed === 'function') loadFeed(true);
+                if (typeof loadProfileActivity === 'function') loadProfileActivity(true);
+                showToast('XTJ Pro 领取成功');
+            } catch (e) {
+                console.error('[VIP] claim campaign failed', e);
+                showToast('领取失败: ' + (e && e.message ? e.message : '请稍后重试'));
+            } finally {
+                proGiftClaimingId = '';
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = originalText || '立即领取';
+                }
+            }
         };
 
         function clearFeedCache() {
@@ -906,6 +902,69 @@ const ADMIN_NAME = "xxz";
         }
         window.canViewPost = canViewPost;
 
+        var SYSTEM_POST_MEDIA_TYPES = [
+            AUTH_MARKER,
+            ADMIN_AUTH_MARKER,
+            ADMIN_META_MARKER,
+            DM_MARKER,
+            REPORT_MARKER,
+            "__avatar__",
+            "__user_info__",
+            "__photo_wall__",
+            "__visit__",
+            "__attack__",
+            "__user_visit__",
+            "__ann__",
+            "__vip__",
+            "__vip_order__",
+            "__vip_plan__",
+            "__pro_gift__",
+            "__pro_gift_claim__",
+            "__login_event__",
+            "__security_alert__",
+            "__admin_audit__",
+            "__client_error__",
+            "__email_sent__",
+            "__email_recipient_history__"
+        ];
+
+        function isSystemPostMediaType(mediaType) {
+            return SYSTEM_POST_MEDIA_TYPES.indexOf(String(mediaType || "")) >= 0;
+        }
+        window.isSystemPostMediaType = isSystemPostMediaType;
+
+        function applyVisiblePostQueryFilters(query) {
+            return query
+                .neq("media_type", AUTH_MARKER)
+                .neq("media_type", ADMIN_AUTH_MARKER)
+                .neq("media_type", ADMIN_META_MARKER)
+                .neq("media_type", DM_MARKER)
+                .neq("media_type", REPORT_MARKER)
+                .neq("media_type", "__avatar__")
+                .neq("media_type", "__user_info__")
+                .neq("media_type", "__photo_wall__")
+                .neq("media_type", "__visit__")
+                .neq("media_type", "__attack__")
+                .neq("media_type", "__user_visit__")
+                .neq("media_type", "__ann__")
+                .neq("media_type", "__vip__")
+                .neq("media_type", "__vip_order__")
+                .neq("media_type", "__vip_plan__")
+                .neq("media_type", "__pro_gift__")
+                .neq("media_type", "__pro_gift_claim__")
+                .neq("media_type", "__login_event__")
+                .neq("media_type", "__security_alert__")
+                .neq("media_type", "__admin_audit__")
+                .neq("media_type", "__client_error__")
+                .neq("media_type", "__email_sent__")
+                .neq("media_type", "__email_recipient_history__");
+        }
+
+        function isVisibleFeedPost(post) {
+            var normalized = normalizePost(post || {});
+            return !!normalized.user_name && !isSystemPostMediaType(normalized.media_type) && canViewPost(normalized);
+        }
+
         function canEditPost(post) {
             var p = normalizePost(post);
             return !!currentUser && (p.user_name === currentUser || isAdmin());
@@ -1002,7 +1061,7 @@ const ADMIN_NAME = "xxz";
 
             return sortPosts(normalizePosts(posts).filter(function(post) {
                 if (!post) return false;
-                if (post.media_type === AUTH_MARKER || post.media_type === ADMIN_AUTH_MARKER || post.media_type === ADMIN_META_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__visit__" || post.media_type === "__attack__" || post.media_type === "__user_visit__" || post.media_type === "__ann__" || post.media_type === "__vip__" || post.media_type === "__vip_order__" || post.media_type === "__email_sent__" || post.media_type === "__email_recipient_history__") return false;
+                if (isSystemPostMediaType(post.media_type)) return false;
                 if (!post.user_name) return false;
                 if (!canViewPost(post)) return false;
                 if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
@@ -1601,21 +1660,6 @@ const ADMIN_NAME = "xxz";
                         try { sessionStorage.setItem("xtj_pw_hash", authRec.media_url); } catch(e) {}
                     }
 
-                    // 获取 JWT token（替代 password_hash 认证）
-                    try {
-                        var _pwHash = sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "";
-                        if (_pwHash && API_BASE && name !== ADMIN_NAME) {
-                            var tokenRes = await fetch(API_BASE + '/api/user/login', {
-                                method: 'POST', headers: {'Content-Type':'application/json'},
-                                body: JSON.stringify({ user_name: name, password_hash: _pwHash })
-                            });
-                            if (tokenRes.ok) {
-                                var tokenData = await tokenRes.json();
-                                if (tokenData.token) setUserToken(tokenData.token);
-                            }
-                        }
-                    } catch(e) {}
-
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
@@ -1659,8 +1703,6 @@ const ADMIN_NAME = "xxz";
                 const pw = document.getElementById("regPwInp").value;
                 const email = document.getElementById("regEmailInp").value.trim();
                 if (!name) { showToast("请输入昵称"); return; }
-                if (name.length < 2 || name.length > 20) { showToast("昵称长度2-20个字符"); return; }
-                if (!/^[\u4e00-\u9fa5a-zA-Z0-9_]+$/.test(name)) { showToast("昵称仅支持中英文、数字和下划线"); return; }
                 if (!pw) { showToast("请输入密码"); return; }
                 if (pw.length < 6) { showToast("密码至少6位"); return; }
                 if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast("邮箱格式不正确"); return; }
@@ -1696,19 +1738,6 @@ const ADMIN_NAME = "xxz";
                     localStorage.setItem("xtj_user", currentUser);
                     localStorage.setItem("xtj_pw_hash", pwHash);
                     try { sessionStorage.setItem("xtj_pw_hash", pwHash); } catch(e) {}
-                    // 获取 JWT token（替代 password_hash 认证）
-                    try {
-                        if (API_BASE) {
-                            var _regTokenRes = await fetch(API_BASE + '/api/user/login', {
-                                method: 'POST', headers: {'Content-Type':'application/json'},
-                                body: JSON.stringify({ user_name: name, password_hash: pwHash })
-                            });
-                            if (_regTokenRes.ok) {
-                                var _regTokenData = await _regTokenRes.json();
-                                if (_regTokenData.token) setUserToken(_regTokenData.token);
-                            }
-                        }
-                    } catch(e) {}
                     writeUserSession(currentUser, { resetLoginAt: true });
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
@@ -2004,41 +2033,24 @@ const ADMIN_NAME = "xxz";
                 showToast('正在压缩并上传头像..');
                 
                 try {
+                    // 濞寸姾顕ф慨?閿涙岸鍣搁弸鍕礋閿熻緝杈炬嫹锟?Supabase Storage 闁?avatars/ 闁烩晩鍠栫紞?
                     const path = buildStorageUploadPath('avatars', file.name);
                     
-                    // 上传到 Supabase Storage
+                    // 上传锟?Supabase Storage
                     const { error: uploadErr } = await sb.storage.from('uploads').upload(path, file);
                     if (uploadErr) throw uploadErr;
                     
-                    // 获取 Public URL
+                    // 閼惧嘲锟?Public URL
                     const avatarUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
                     
-                    // ★ 修复 B2：先插入新头像记录，成功后再删除旧记录
-                    // 避免"旧头像已删但新头像插入失败"导致用户头像空
-                    var { error } = await sb.from("posts").insert([{
-                        user_name: currentUser,
-                        content: "用户头像",
-                        media_url: avatarUrl,
-                        media_type: "__avatar__",
-                        actor_key: "__avatar__"
-                    }]);
-                    
-                    if (error) {
-                        // 新头像插入失败——不删旧头像，保证用户至少有一个头像
-                        showToast('上传失败: ' + error.message);
-                        return;
-                    }
-                    
-                    // 新头像插入成功，安全删除旧头像记录
+                    // 删除閹碘偓閺堬拷顦ˇ鏉课涢顫粓闁稿秴绻楅鍥亹?
                     var oldIds = await sb.from("posts")
                         .select("id")
                         .eq("user_name", currentUser)
                         .eq("media_type", "__avatar__")
                         .eq("actor_key", "__avatar__");
-                    if (oldIds.data && oldIds.data.length > 1) {
+                    if (oldIds.data && oldIds.data.length > 0) {
                         for (var oi of oldIds.data) {
-                            // 跳过刚插入的新记录（用 media_url 匹配）
-                            if (String(oi.media_url) === String(avatarUrl)) continue;
                             try {
                                 await sb.rpc('delete_post_with_actor', {
                                     p_post_id: oi.id,
@@ -2048,8 +2060,21 @@ const ADMIN_NAME = "xxz";
                         }
                     }
                     
+                    var { error } = await sb.from("posts").insert([{
+                        user_name: currentUser,
+                        content: "用户头像",
+                        media_url: avatarUrl,
+                        media_type: "__avatar__",
+                        actor_key: "__avatar__"
+                    }]);
+                    
+                    if (error) {
+                        showToast('上传失败: ' + error.message);
+                        return;
+                    }
+                    
                     avatarCache[currentUser] = avatarUrl;
-                    // 保存到localStorage持久化存储
+                    // 保存鍒發ocalStorage鎸佷箙鍖栧瓨鍌?
                     try {
                         var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                         cachedAvatars[currentUser] = avatarUrl;
@@ -2163,23 +2188,7 @@ const ADMIN_NAME = "xxz";
                 currentUser = "";
                 window.currentUser = currentUser;
                 clearUserSessionStorage();
-                // ★ 修复 M5：停止限制轮询（避免内存泄漏）
-                stopRestrictionPolling();
-                // ★ 修复 M1：清理所有用户相关的 localStorage 缓存
-                // 避免用户A登出后用户B看到A的头像、VIP、已读消息等
-                var xtjKeys = [];
-                for (var i = 0; i < localStorage.length; i++) {
-                    var key = localStorage.key(i);
-                    if (key && (key.indexOf('xtj_') === 0 || key.indexOf('xtj-') === 0)) {
-                        xtjKeys.push(key);
-                    }
-                }
-                xtjKeys.forEach(function(k) {
-                    try { localStorage.removeItem(k); } catch(e) {}
-                });
-                // 也清理 sessionStorage 中的密码 hash
-                try { sessionStorage.removeItem("xtj_pw_hash"); } catch(e) {}
-                clearUserToken();
+                localStorage.removeItem(CACHE_KEY);
                 document.getElementById("loginNickInp").value = "";
                 document.getElementById("loginPwInp").value = "";
                 document.getElementById("regNickInp").value = "";
@@ -2242,24 +2251,7 @@ const ADMIN_NAME = "xxz";
             function isProfileActivityBlockedPost(post) {
                 if (!post) return true;
                 var normalized = normalizePost(post || {});
-                var mediaType = String(normalized.media_type || '');
-                return mediaType === AUTH_MARKER
-                    || mediaType === ADMIN_AUTH_MARKER
-                    || mediaType === ADMIN_META_MARKER
-                    || mediaType === DM_MARKER
-                    || mediaType === REPORT_MARKER
-                    || mediaType === '__avatar__'
-                    || mediaType === '__user_info__'
-                    || mediaType === '__photo_wall__'
-                    || mediaType === '__visit__'
-                    || mediaType === '__attack__'
-                    || mediaType === '__user_visit__'
-                    || mediaType === '__ann__'
-                    || mediaType === '__email_sent__'
-                    || mediaType === '__email_recipient_history__'
-                    || mediaType === '__vip__'
-                    || mediaType === '__vip_order__'
-                    || mediaType === '__vip_plan__';
+                return isSystemPostMediaType(normalized.media_type);
             }
 
             function repairProfileActivityText(value) {
@@ -2612,6 +2604,8 @@ function renderProfileActivityList(kind) {
                             .select('id', { count: 'exact', head: true })
                             .eq('user_name', currentUser)
                             .neq('media_type', AUTH_MARKER)
+                            .neq('media_type', ADMIN_AUTH_MARKER)
+                            .neq('media_type', ADMIN_META_MARKER)
                             .neq('media_type', DM_MARKER)
                             .neq('media_type', REPORT_MARKER)
                             .neq('media_type', '__avatar__')
@@ -2619,8 +2613,17 @@ function renderProfileActivityList(kind) {
                             .neq('media_type', '__photo_wall__')
                             .neq('media_type', '__visit__')
                             .neq('media_type', '__attack__')
+                            .neq('media_type', '__user_visit__')
                             .neq('media_type', '__ann__')
-                            .neq('media_type', ADMIN_META_MARKER),
+                            .neq('media_type', '__vip__')
+                            .neq('media_type', '__vip_order__')
+                            .neq('media_type', '__vip_plan__')
+                            .neq('media_type', '__pro_gift__')
+                            .neq('media_type', '__pro_gift_claim__')
+                            .neq('media_type', '__login_event__')
+                            .neq('media_type', '__security_alert__')
+                            .neq('media_type', '__admin_audit__')
+                            .neq('media_type', '__client_error__'),
                         sb.from('posts')
                             .select('id, content, created_at, media_type')
                             .eq('user_name', currentUser)
@@ -4070,7 +4073,9 @@ function renderProfileActivityList(kind) {
                 if (!forceRefresh) feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }).limit(500),
+                        applyVisiblePostQueryFilters(
+                            sb.from("posts").select("*")
+                        ).order("created_at", { ascending: false }).limit(500),
                         sb.from("comments").select("*").order("created_at").limit(2000),
                         sb.from("likes").select("*").limit(3000)
                     ]);
@@ -4085,7 +4090,7 @@ function renderProfileActivityList(kind) {
                     feedAllComments = data.comments;
                     feedAllLikes = data.likes;
                     // 閿熸枻鎷烽敓鏂ゆ嫹閺冭埖甯撻梽銈呫仈閸嶅繐鎷伴敓鐭紮鎷锋穱鈩冧紖閿熸枻鎷峰綍閿涘矂妲诲顣坅se64婢堆冩禈閹炬垹鍨巐ocalStorage
-                    const cachePosts = data.posts.filter(p => p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__report__' && p.media_type !== '__auth__' && p.media_type !== '__dm__' && p.media_type !== ADMIN_META_MARKER);
+                    const cachePosts = data.posts.filter(function(p) { return !isSystemPostMediaType(p && p.media_type); });
                     localStorage.setItem(CACHE_KEY, JSON.stringify({ data: { posts: cachePosts, comments: data.comments, likes: data.likes }, timestamp: now }));
                     await renderFeed(data);
                     // 閸氼垰濮╅弮鐘绘濠婃艾濮╅敓妗旇锟?
@@ -4127,7 +4132,7 @@ function renderProfileActivityList(kind) {
                 
                 const feed = document.getElementById('feed');
                 if (!feedVisiblePostsCache) {
-                    feedVisiblePostsCache = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.user_name);
+                    feedVisiblePostsCache = feedAllPosts.filter(isVisibleFeedPost);
                 }
                 const visiblePosts = feedVisiblePostsCache;
                 
@@ -4230,7 +4235,7 @@ function renderProfileActivityList(kind) {
 
             // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?532鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
             async function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.user_name);
+                const visiblePosts = posts.filter(isVisibleFeedPost);
                 feedVisiblePostsCache = visiblePosts; // 缓存
                 feedMapsCache = buildPostMaps(comments, likes); // 缓存
                 document.getElementById("sPosts").textContent = visiblePosts.length;
@@ -4361,18 +4366,12 @@ function renderProfileActivityList(kind) {
                 var safeName = username.replace(/'/g, "\\'");
                 // Pro 外圈：1) 帖子冻结的 pro_at_post；2) VIP 历史（post.created_at 在某 Pro 期间内）；3) 当前 VIP 状态
                 var isPro = false;
-        if (post) {
-            try {
-                var normalizedForAvatar = normalizePost(post);
-                var avatarMeta = normalizedForAvatar._contentMeta || {};
-                if (avatarMeta.pro_at_post === true) {
-                    if (normalizedForAvatar.user_name && normalizedForAvatar.created_at &&
-                        typeof window.__xtjIsUserProAt === 'function' &&
-                        window.__xtjIsUserProAt(normalizedForAvatar.user_name, normalizedForAvatar.created_at)) {
-                        isPro = true;
-                    }
-                }
-                if (!isPro && normalizedForAvatar.user_name && normalizedForAvatar.created_at &&
+                if (post) {
+                    try {
+                        var normalizedForAvatar = normalizePost(post);
+                        var avatarMeta = normalizedForAvatar._contentMeta || {};
+                        if (avatarMeta.pro_at_post === true) isPro = true;
+                        if (!isPro && normalizedForAvatar.user_name && normalizedForAvatar.created_at &&
                             typeof window.__xtjIsUserProAt === 'function' &&
                             window.__xtjIsUserProAt(normalizedForAvatar.user_name, normalizedForAvatar.created_at)) {
                             isPro = true;
@@ -4722,15 +4721,11 @@ function renderProfileActivityList(kind) {
             function buildPostBadges(post) {
                 var normalized = normalizePost(post);
                 var bits = [];
+                // Pro 标志：优先看帖子冻结的 pro_at_post
+                // 再看 VIP 历史（post.created_at 是否在该用户的某个 Pro 期间内）
+                // 再看当前 Pro 状态（防止元数据丢失时仍能显示）
                 var meta = normalized._contentMeta || {};
-                var isProPost = false;
-                if (meta.pro_at_post === true) {
-                    if (normalized.user_name && normalized.created_at &&
-                        typeof window.__xtjIsUserProAt === 'function' &&
-                        window.__xtjIsUserProAt(normalized.user_name, normalized.created_at)) {
-                        isProPost = true;
-                    }
-                }
+                var isProPost = meta.pro_at_post === true;
                 var isProByHistory = false;
                 if (!isProPost && normalized.user_name && normalized.created_at &&
                     typeof window.__xtjIsUserProAt === 'function' &&
@@ -5189,27 +5184,10 @@ function renderProfileActivityList(kind) {
             }
 
             function getFeedBasePostQuery() {
-                return sb.from("posts")
-                    .select("*")
-                    .neq("media_type", AUTH_MARKER)
-                    .neq("media_type", ADMIN_AUTH_MARKER)
-                    .neq("media_type", DM_MARKER)
-                    .neq("media_type", ADMIN_META_MARKER)
-                    .neq("media_type", REPORT_MARKER)
-                    .neq("media_type", "__avatar__")
-                    .neq("media_type", "__user_info__")
-                    .neq("media_type", "__photo_wall__")
-                    .neq("media_type", "__visit__")
-                    .neq("media_type", "__attack__")
-                    .neq("media_type", "__ann__")
-                    .neq("media_type", "__vip__")
-                    .neq("media_type", "__vip_order__")
-                    .neq("media_type", "__login_event__")
-                    .neq("media_type", "__security_alert__")
-                    .neq("media_type", "__admin_audit__")
-                    .neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__")
-        .order("created_at", { ascending: false });
-}
+                return applyVisiblePostQueryFilters(
+                    sb.from("posts").select("*")
+                ).order("created_at", { ascending: false });
+            }
 
             async function fetchFeedPageChunk(offset, requestId) {
                 var start = Math.max(0, Number(offset) || 0);
@@ -5371,8 +5349,9 @@ function renderProfileActivityList(kind) {
             async function syncFeedDataInBackground() {
                 var requestId = ++feedLoadRequestId;
                 try {
-                    var postRes = await sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__")
-  .order("created_at", { ascending: false });
+                    var postRes = await applyVisiblePostQueryFilters(
+                        sb.from("posts").select("*")
+                    ).order("created_at", { ascending: false });
                     if (requestId !== feedLoadRequestId) return false;
                     if (postRes.error) throw postRes.error;
                     feedAllPosts = normalizePosts(postRes.data || []);
@@ -5646,7 +5625,9 @@ function renderProfileActivityList(kind) {
                 try {
                     // Supabase 查询加 12s 兜底超时，避免永久 hang
                     const queries = [
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
+                        applyVisiblePostQueryFilters(
+                            sb.from("posts").select("*")
+                        ).order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
                     ];
@@ -5830,13 +5811,13 @@ function renderProfileActivityList(kind) {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     var results = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
-                    sb.from("comments").select("*").order("created_at"),
-                    sb.from("likes").select("*").order("created_at", { ascending: false })
+                        applyVisiblePostQueryFilters(
+                            sb.from("posts").select("*")
+                        ).order("created_at", { ascending: false }),
+                        sb.from("comments").select("*").order("created_at"),
+                        sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = normalizePosts(results[0].data || []).filter(function(post) {
-                        return post.media_type !== AUTH_MARKER && post.media_type !== ADMIN_AUTH_MARKER && post.media_type !== ADMIN_META_MARKER && post.media_type !== DM_MARKER && post.media_type !== REPORT_MARKER && post.media_type !== "__avatar__" && post.media_type !== "__user_info__" && post.media_type !== "__photo_wall__" && post.media_type !== "__visit__" && post.media_type !== "__attack__" && post.media_type !== "__user_visit__" && post.media_type !== "__ann__" && post.media_type !== "__login_event__" && post.media_type !== "__security_alert__" && post.media_type !== "__admin_audit__" && post.media_type !== "__client_error__" && post.media_type !== "__email_sent__" && post.media_type !== "__vip__" && post.media_type !== "__vip_order__" && canViewPost(post);
-                    });
+                    statAllPosts = normalizePosts(results[0].data || []).filter(isVisibleFeedPost);
                     statAllComments = results[1].data || [];
                     statAllLikes = results[2].data || [];
                     statCacheTime = Date.now();
@@ -5858,11 +5839,13 @@ function renderProfileActivityList(kind) {
                 if (Date.now() - statCacheTime < STAT_CACHE_DURATION) return;
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
-                    sb.from("comments").select("*").order("created_at"),
-                    sb.from("likes").select("*").order("created_at", { ascending: false })
+                        applyVisiblePostQueryFilters(
+                            sb.from("posts").select("*")
+                        ).order("created_at", { ascending: false }),
+                        sb.from("comments").select("*").order("created_at"),
+                        sb.from("likes").select("*").order("created_at", { ascending: false })
                     ]);
-                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p); });
+                    statAllPosts = normalizePosts(postRes.data || []).filter(isVisibleFeedPost);
                     var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
                     statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
                     statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
@@ -6226,7 +6209,7 @@ function renderProfileActivityList(kind) {
                         <div class="stat-like-item">
                             <div class="sli-info">
                                 <div class="sli-user">${escapeHtml(l.user_name)}</div>
-                                <div class="sli-target">点赞了 ${post && post.user_name ? escapeHtml(post.user_name) : '某用户'} 的内容：${postContent}</div>
+                                <div class="sli-target">点赞了这条内容：${postContent}</div>
                             </div>
                             <span class="sli-time">${new Date(l.created_at).toLocaleString()}</span>
                         </div>
@@ -6248,7 +6231,7 @@ function renderProfileActivityList(kind) {
                         <div class="stat-comment-item">
                             <div class="sci-info">
                                 <div class="sci-user">${escapeHtml(c.user_name)}</div>
-                                <div class="sci-target">评论了 ${post && post.user_name ? escapeHtml(post.user_name) : '某用户'}：${escapeHtml(c.content)}</div>
+                                <div class="sci-target">原帖：${postContent} 评论：${escapeHtml(c.content)}</div>
                             </div>
                             <span class="sci-time">${new Date(c.created_at).toLocaleString()}</span>
                         </div>
@@ -6274,12 +6257,14 @@ function renderProfileActivityList(kind) {
                 var type = statCurrentType;
                 if (!type) return;
                 Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
+                    applyVisiblePostQueryFilters(
+                        sb.from("posts").select("*")
+                    ).order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
                     var postRes = results[0], commRes = results[1], likeRes = results[2];
-                    statAllPosts = normalizePosts(postRes.data || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && canViewPost(p); });
+                    statAllPosts = normalizePosts(postRes.data || []).filter(isVisibleFeedPost);
                     var visiblePostIds = new Set(statAllPosts.map(function(p) { return String(p.id); }));
                     statAllComments = (commRes.data || []).filter(function(c) { return visiblePostIds.has(String(c.post_id)); });
                     statAllLikes = (likeRes.data || []).filter(function(l) { return visiblePostIds.has(String(l.post_id)); });
@@ -7361,7 +7346,7 @@ function renderProfileActivityList(kind) {
                     hydrateDockChatAvatars(convs.map(function(c) { return c.other_user; }), function(changed) {
                         if (!changed) return;
                         var currentList = document.getElementById('dockChatList');
-                        if (!currentList) return;
+                        if (!currentList || dockChatActiveUser) return;
                         renderDockChatConversationList(currentList, convs);
                     });
                 } catch(e) {
@@ -7371,7 +7356,7 @@ function renderProfileActivityList(kind) {
 
             function hydrateDockChatAvatars(userNames, onReady) {
                 var users = Array.from(new Set((Array.isArray(userNames) ? userNames : []).filter(function(name) {
-                    return !!name;
+                    return !!name && !avatarCache[name];
                 })));
                 if (!users.length) {
                     if (typeof onReady === 'function') onReady(false);
@@ -7394,9 +7379,8 @@ function renderProfileActivityList(kind) {
                                 changed = true;
                             }
                         });
-                        // 标记为已检查，即使没有变化也返回 true 供回调判断
-                        if (typeof onReady === 'function') onReady(changed || users.length > 0);
-                        return changed || users.length > 0;
+                        if (typeof onReady === 'function') onReady(changed);
+                        return changed;
                     })
                     .catch(function() {
                         if (typeof onReady === 'function') onReady(false);
@@ -8460,100 +8444,6 @@ function renderProfileActivityList(kind) {
 
             // 版本更新日志
             const changelogData = [
-                {
-                    version: 'v0.87',
-                    date: '2026-06-24',
-                    content: `
-                        <h4>安全修复</h4>
-                        <ul>
-                            <li><b>【严重】</b>邮件发送记录泄露到帖子首页：<code>__email_sent__</code> 全量加入所有 SQL 过滤链 + 客户端过滤链（共 21 处），刷新即消失</li>
-                            <li><b>Cookie maxAge 单位修复</b>：原来写的是秒（72秒过期），改为毫秒（72小时）</li>
-                            <li><b>管理员 token 不再暴露前端 localStorage</b>：/admin/login 不再返回 token，前端登录后不写 localStorage，全走 HttpOnly Cookie + credentials: same-origin</li>
-                            <li><b>吊销 token 持久化修复</b>：loadRevokedTokenHashes select 补 id 字段，清理时 r.id 存在；persistRevokedToken 后立即加入内存集合</li>
-                            <li><b>用户删除后旧 token 失效</b>：authenticateUser 额外查询 __auth__ 记录确认用户仍存在</li>
-                            <li><b>移除 query.password_hash</b>：authenticateUser 不再接受 URL query 传 password_hash，只允许 body/Authorization</li>
-                            <li><b>审计日志 operator 修复</b>：verifyToken 统一设置 req.adminUser</li>
-                        </ul>
-                        <h4>Bug 修复</h4>
-                        <ul>
-                            <li><b>Pro badge 过期显示修复</b>：isVipUser() 加强 expire_at 判断，updateVipStatus() 防止 API 返回空 active_vip 时错误标记为 Pro</li>
-                            <li><b>Pro 赠送创建新活动按钮</b>：添加 progift 懒加载映射，Cookie 适配后按钮可正常打开</li>
-                            <li><b>懒加载数据赋值修复</b>：reports 数据赋值到 reportsData、mutes 到 mutesData、新增 blacklist 分支</li>
-                            <li><b>page_visit 无 password_hash 不发送</b>：改为有 token 也能发送</li>
-                            <li><b>Cookie 登录后后台卡死</b>：loadAllData / fetchRegisterAlerts / renderPostsTab 等 5 处 getToken() 门禁全部移除</li>
-                            <li><b>退出登录不清理 Cookie</b>：doAdminLogout 无论有无 localStorage token 都请求 /admin/logout</li>
-                        </ul>
-                        <h4>新增</h4>
-                        <ul>
-                            <li><b>邮件历史邮箱账户</b>：发送邮件后自动保存收件人历史，管理员可点选/删除/清空</li>
-                            <li><b>邮箱后缀快速补全</b>：输入账号时实时显示 @qq.com / @163.com / @gmail.com 等 9 个后缀</li>
-                        </ul>
-                        <h4>性能</h4>
-                        <ul>
-                            <li>/admin/data 去掉 3 个重量级查询（reports/mutes/blacklist），改为按 tab 懒加载</li>
-                            <li>移除初始化 500ms 后自动预加载 users/security/audit/errorlog/photos</li>
-                            <li>邮件 SMTP 端口自动回退：465 SSL 失败自动重试 587 STARTTLS</li>
-                        </ul>
-                    `
-                },
-                {
-                    version: 'v0.86',
-                    date: '2026-06-23',
-                    content: `
-                        <h4>全面 Bug 修复 & 支付事务保护</h4>
-                        <ul>
-                            <li><b>VIP 支付事务保护</b>：先写 VIP 记录再更新订单状态，避免"付了钱没开通"</li>
-                            <li><b>头像上传回滚</b>：先插入新记录再删旧记录，防止头像丢失</li>
-                            <li><b>登出彻底清理</b>：遍历所有 xtj_* 前缀 localStorage，避免跨用户缓存泄露</li>
-                            <li><b>Observer 内存泄漏</b>：beforeunload 时 disconnect 所有 IntersectionObserver</li>
-                            <li><b>乱码修复立即生效</b>：_buildMjRegex IIFE 加载时执行，任意时机可用</li>
-                            <li><b>浏览器兼容</b>：deviceMemory / hardwareConcurrency 加 typeof 检查</li>
-                            <li>visitCache 改为 setTimeout 异步清理，不阻塞事件循环</li>
-                            <li>Supabase 初始化检查，无效时 sb = null</li>
-                            <li>desktop.css / core.js 等 query string 版本号升级</li>
-                        </ul>
-                    `
-                },
-                {
-                    version: 'v0.85',
-                    date: '2026-06-23',
-                    content: `
-                        <h4>全量安全审计修复、设备识别大幅升级、聊天头像即时更新</h4>
-                        <ul>
-                            <li><b>Pro 赠送活动系统</b>：管理员后台创建/编辑/发布 Pro 赠送活动，用户一键免费领取</li>
-                            <li><b>Pro 历史记录系统</b>：后台新增「Pro记录」子标签，展示用户开通次数/来源/时间线</li>
-                            <li>Pro 领取庆祝动画重做：暗色渐变卡片，显示来源信息，GSAP 分段入场</li>
-                            <li><b>【安全】</b>XSS 高危漏洞修复（safeJsStr 全转义 + 注册字符限制）</li>
-                            <li><b>【安全】</b>Storage 路径遍历防护、后端错误信息不返回前端</li>
-                            <li><b>【安全】</b>RateLimit 边界修复、fetch 超时保护、currentUser TDZ 修复</li>
-                            <li><b>【安全】</b><code>window.sb</code> 不再被 admin.js 删除，前后台可共存</li>
-                            <li>设备型号识别升级：新增 UA 标识符映射表，15 Pro Max 不再误判为 16 Plus</li>
-                            <li>聊天列表头像即时更新：全量检查头像并刷新列表 DOM</li>
-                            <li>地区中文显示：<code>China·Guangdong·Guangzhou</code> → 广东广州</li>
-                            <li>用户详情卡片数据回填：最近访问/IP/地区/设备从登录事件自动回填</li>
-                            <li>用户详情弹窗去掉最近安全提醒区块</li>
-                            <li>举报弹窗 × 按钮独立样式修复</li>
-                            <li>点赞/评论记录显示被操作人（xxz 点赞了 yy 的内容）</li>
-                            <li>未登录用户隐藏帖子页三大数据版块</li>
-                            <li>管理员登出清理定时器与事件监听</li>
-                            <li>邮箱发件地址修正：Resend 免费版强制使用 onboarding@resend.dev</li>
-                            <li>管理员邮箱发送结果展示详细失败原因</li>
-                        </ul>
-                        <h4>优化</h4>
-                        <ul>
-                            <li>设备识别链路重做：UA 标识符优先，分辨率推断降级为兜底</li>
-                            <li>注册入口增加字符集与长度双重校验</li>
-                            <li>设备详情弹出卡从内联展开改为 860px 模态框</li>
-                            <li>后台登出时完整清理定时器与事件监听</li>
-                        </ul>
-                        <h4>Remade</h4>
-                        <ul>
-                            <li>重做设备型号识别引擎：UA 标识符映射优先</li>
-                            <li>重做聊天列表头像更新机制：每次全量刷新</li>
-                            <li>重做后台会话管理：登出时完整清理</li>
-                        </ul>
-                    `
-                },
                 {
                     version: 'v0.84',
                     date: '2026-06-22',
@@ -9825,27 +9715,9 @@ function renderProfileActivityList(kind) {
 
             if (_reportType === 'post') {
                 try {
-                    sb.from('posts')
-                .select('id, user_name, content, media_url, media_type, created_at')
-                .neq('media_type', '__vip__')
-                .neq('media_type', '__vip_order__')
-                .neq('media_type', '__vip_plan__')
-                .neq('media_type', '__user_visit__')
-                .neq('media_type', '__avatar__')
-                .neq('media_type', '__user_info__')
-                .neq('media_type', '__visit__')
-                .neq('media_type', '__attack__')
-                .neq('media_type', '__ann__')
-                .neq('media_type', '__photo_wall__')
-                .neq('media_type', '__report__')
-                .neq('media_type', '__dm__')
-                .neq('media_type', '__auth__')
-                .neq('media_type', '__login_event__')
-                .neq('media_type', '__security_alert__')
-                .neq('media_type', '__admin_audit__')
-                .neq('media_type', '__client_error__')
-                .neq('media_type', '__email_sent__')
-                .neq('media_type', ADMIN_META_MARKER)
+                    applyVisiblePostQueryFilters(
+                        sb.from('posts').select('id, user_name, content, media_url, media_type, created_at')
+                    )
                         .order('created_at', { ascending: false })
                         .limit(200)
                         .then(function(res) {
@@ -10492,7 +10364,7 @@ function renderProfileActivityList(kind) {
                 return [
                     '<article class="stat-record-entry stat-row ' + (isLike ? 'stat-like-item' : 'stat-comment-item') + (mediaHtml ? '' : ' stat-row--no-media') + '"' + cardAttrs + ' style="--xtj-enter-delay:' + Math.min(index * 12, 48) + 'ms;">',
                     '<div class="stat-row-main">',
-                    '<div class="stat-row-title">' + actorName + (isLike ? ' 点赞了 ' : ' 评论了 ') + (post && post.user_name ? escapeHtml(post.user_name) : '某用户') + ' 的内容</div>',
+                    '<div class="stat-row-title">' + actorName + (isLike ? ' 点赞了这条帖子' : ' 评论了这条帖子') + '</div>',
                     '<div class="stat-row-copy"><div class="stat-record-summary">' + escapeHtml(summary) + '</div>' + noteHtml + '</div>',
                     statMediaColumnMarkup(mediaHtml),
                     '<div class="stat-row-side"><span class="stat-row-time">' + timeText + '</span>' + (post ? '<div class="stat-row-actions"><button type="button" class="stat-record-action" onclick="event.stopPropagation();' + detailOnclick + '">查看详情</button></div>' : '') + '</div>',
@@ -10851,7 +10723,7 @@ function renderProfileActivityList(kind) {
                         ? getStatPostSummary(post)
                         : '原帖：' + getStatPostSummary(post);
                     return renderStatRecordCard({
-                        title: String(item.user_name || '匿名用户') + (kind === 'likes' ? ' 点赞了 ' : ' 评论了 ') + (post && post.user_name ? escapeHtml(post.user_name) : '某用户') + ' 的内容',
+                        title: String(item.user_name || '匿名用户') + (kind === 'likes' ? ' 点赞了这条内容' : ' 评论了这条内容'),
                         copy: copyText,
                         note: kind === 'comments' ? ('评论：' + String(item.content || '')) : '',
                         postId: post && post.id ? String(post.id) : '',
@@ -10874,9 +10746,7 @@ function renderProfileActivityList(kind) {
                 var posts = Array.isArray(snapshot.posts) ? snapshot.posts : [];
                 var comments = Array.isArray(snapshot.comments) ? snapshot.comments : [];
                 var likes = Array.isArray(snapshot.likes) ? snapshot.likes : [];
-                var visiblePosts = normalizePosts(posts).filter(function(p) {
-                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p);
-                });
+                var visiblePosts = normalizePosts(posts).filter(isVisibleFeedPost);
                 var visiblePostIds = new Set(visiblePosts.map(function(post) { return String(post.id); }));
                 statAllPosts = visiblePosts;
                 statAllComments = comments.filter(function(item) { return item && visiblePostIds.has(String(item.post_id)); });
@@ -10886,7 +10756,9 @@ function renderProfileActivityList(kind) {
 
             async function fetchSimpleStatSnapshot() {
                 var result = await Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
+                    applyVisiblePostQueryFilters(
+                        sb.from("posts").select("*")
+                    ).order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]);
@@ -11143,9 +11015,7 @@ function renderProfileActivityList(kind) {
             }
 
             function applyStatSnapshot(posts, comments, likes) {
-                var visiblePosts = normalizePosts(Array.isArray(posts) ? posts : []).filter(function(p) {
-                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p);
-                });
+                var visiblePosts = normalizePosts(Array.isArray(posts) ? posts : []).filter(isVisibleFeedPost);
                 var visiblePostIds = new Set(visiblePosts.map(function(p) { return String(p.id); }));
                 statAllPosts = visiblePosts;
                 statAllComments = (Array.isArray(comments) ? comments : []).filter(function(c) {
@@ -11255,7 +11125,9 @@ function renderProfileActivityList(kind) {
                     setTimeout(function() { resolve(null); }, timeoutMs);
                 });
                 var request = Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
+                    applyVisiblePostQueryFilters(
+                        sb.from("posts").select("*")
+                    ).order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
