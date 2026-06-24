@@ -1577,7 +1577,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
     autoExpireOverdueRecords().catch(function() {});
 
     const [postRes, likeRes, commRes, banRes, annRes] = await Promise.all([
-      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', CLIENT_ERROR_MARKER).neq('media_type', AUDIT_LOG_MARKER).neq('media_type', '__email_sent__').order('created_at', { ascending: false }).limit(5000),
+      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', CLIENT_ERROR_MARKER).neq('media_type', AUDIT_LOG_MARKER).neq('media_type', '__email_sent__').neq('media_type', '__email_recipient_history__').order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500),
@@ -3701,23 +3701,32 @@ app.post('/admin/email-recipient-history', verifyToken, rateLimit(60000, 10), as
   }
 });
 
-// 删除指定的历史收件人
+// 删除指定的历史收件人（按 id 精确删除）
 app.post('/admin/email-recipient-history/delete', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
     var email = String(req.body.email || '').trim().toLowerCase();
     if (!email) return res.status(400).json({ error: '缺少邮箱' });
-    var { error } = await supabase.from('posts')
-      .delete()
+    var { data, error } = await supabase.from('posts')
+      .select('id, content')
       .eq('media_type', EMAIL_RECIPIENT_MARKER)
-      .eq('user_name', ADMIN_USERNAME)
-      .eq('content', JSON.stringify({ email: email }).replace(/"/g, '\\"'));
-    // 用 filter 匹配 content
-    await supabase.from('posts')
-      .delete()
-      .eq('media_type', EMAIL_RECIPIENT_MARKER)
-      .eq('user_name', ADMIN_USERNAME)
-      .filter('content', 'cs', '"' + email.replace(/"/g, '\\"') + '"');
-    return res.json({ ok: true });
+      .eq('user_name', ADMIN_USERNAME);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    var idsToDelete = [];
+    (data || []).forEach(function(row) {
+      try {
+        var info = JSON.parse(row.content || '{}');
+        if ((info.email || '').trim().toLowerCase() === email) {
+          idsToDelete.push(row.id);
+        }
+      } catch(e) {}
+    });
+    if (idsToDelete.length === 0) {
+      return res.json({ ok: true, deleted_count: 0 });
+    }
+    for (var di = 0; di < idsToDelete.length; di++) {
+      await supabase.from('posts').delete().eq('id', idsToDelete[di]).catch(function(){});
+    }
+    return res.json({ ok: true, deleted_count: idsToDelete.length });
   } catch(e) {
     console.error('[Email Recipient History] 删除失败:', e.message);
     return res.status(500).json({ error: '删除失败' });

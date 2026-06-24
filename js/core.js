@@ -1002,7 +1002,7 @@ const ADMIN_NAME = "xxz";
 
             return sortPosts(normalizePosts(posts).filter(function(post) {
                 if (!post) return false;
-                if (post.media_type === AUTH_MARKER || post.media_type === ADMIN_AUTH_MARKER || post.media_type === ADMIN_META_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__visit__" || post.media_type === "__attack__" || post.media_type === "__user_visit__" || post.media_type === "__ann__" || post.media_type === "__vip__" || post.media_type === "__vip_order__" || post.media_type === "__email_sent__") return false;
+                if (post.media_type === AUTH_MARKER || post.media_type === ADMIN_AUTH_MARKER || post.media_type === ADMIN_META_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__visit__" || post.media_type === "__attack__" || post.media_type === "__user_visit__" || post.media_type === "__ann__" || post.media_type === "__vip__" || post.media_type === "__vip_order__" || post.media_type === "__email_sent__" || post.media_type === "__email_recipient_history__") return false;
                 if (!post.user_name) return false;
                 if (!canViewPost(post)) return false;
                 if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
@@ -2256,6 +2256,7 @@ const ADMIN_NAME = "xxz";
                     || mediaType === '__user_visit__'
                     || mediaType === '__ann__'
                     || mediaType === '__email_sent__'
+                    || mediaType === '__email_recipient_history__'
                     || mediaType === '__vip__'
                     || mediaType === '__vip_order__'
                     || mediaType === '__vip_plan__';
@@ -4069,7 +4070,7 @@ function renderProfileActivityList(kind) {
                 if (!forceRefresh) feed.innerHTML = getXtjLoadingHtml('内容加载中..', '', 'feed');
                 try {
                     const [postRes, commRes, likeRes] = await Promise.all([
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").order("created_at", { ascending: false }).limit(500),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }).limit(500),
                         sb.from("comments").select("*").order("created_at").limit(2000),
                         sb.from("likes").select("*").limit(3000)
                     ]);
@@ -4126,7 +4127,7 @@ function renderProfileActivityList(kind) {
                 
                 const feed = document.getElementById('feed');
                 if (!feedVisiblePostsCache) {
-                    feedVisiblePostsCache = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.user_name);
+                    feedVisiblePostsCache = feedAllPosts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.user_name);
                 }
                 const visiblePosts = feedVisiblePostsCache;
                 
@@ -4229,7 +4230,7 @@ function renderProfileActivityList(kind) {
 
             // DEPRECATED_DO_NOT_EDIT ====== [瀹告彃绨惧锟?娑撳鏌熼敓?532鐞涘本婀侀敓鏂ゆ嫹閿熸枻鎷烽悧鍫熸拱 ======
             async function renderFeed({ posts, comments, likes }) {
-                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.user_name);
+                const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.user_name);
                 feedVisiblePostsCache = visiblePosts; // 缓存
                 feedMapsCache = buildPostMaps(comments, likes); // 缓存
                 document.getElementById("sPosts").textContent = visiblePosts.length;
@@ -4360,12 +4361,18 @@ function renderProfileActivityList(kind) {
                 var safeName = username.replace(/'/g, "\\'");
                 // Pro 外圈：1) 帖子冻结的 pro_at_post；2) VIP 历史（post.created_at 在某 Pro 期间内）；3) 当前 VIP 状态
                 var isPro = false;
-                if (post) {
-                    try {
-                        var normalizedForAvatar = normalizePost(post);
-                        var avatarMeta = normalizedForAvatar._contentMeta || {};
-                        if (avatarMeta.pro_at_post === true) isPro = true;
-                        if (!isPro && normalizedForAvatar.user_name && normalizedForAvatar.created_at &&
+        if (post) {
+            try {
+                var normalizedForAvatar = normalizePost(post);
+                var avatarMeta = normalizedForAvatar._contentMeta || {};
+                if (avatarMeta.pro_at_post === true) {
+                    if (normalizedForAvatar.user_name && normalizedForAvatar.created_at &&
+                        typeof window.__xtjIsUserProAt === 'function' &&
+                        window.__xtjIsUserProAt(normalizedForAvatar.user_name, normalizedForAvatar.created_at)) {
+                        isPro = true;
+                    }
+                }
+                if (!isPro && normalizedForAvatar.user_name && normalizedForAvatar.created_at &&
                             typeof window.__xtjIsUserProAt === 'function' &&
                             window.__xtjIsUserProAt(normalizedForAvatar.user_name, normalizedForAvatar.created_at)) {
                             isPro = true;
@@ -4715,11 +4722,15 @@ function renderProfileActivityList(kind) {
             function buildPostBadges(post) {
                 var normalized = normalizePost(post);
                 var bits = [];
-                // Pro 标志：优先看帖子冻结的 pro_at_post
-                // 再看 VIP 历史（post.created_at 是否在该用户的某个 Pro 期间内）
-                // 再看当前 Pro 状态（防止元数据丢失时仍能显示）
                 var meta = normalized._contentMeta || {};
-                var isProPost = meta.pro_at_post === true;
+                var isProPost = false;
+                if (meta.pro_at_post === true) {
+                    if (normalized.user_name && normalized.created_at &&
+                        typeof window.__xtjIsUserProAt === 'function' &&
+                        window.__xtjIsUserProAt(normalized.user_name, normalized.created_at)) {
+                        isProPost = true;
+                    }
+                }
                 var isProByHistory = false;
                 if (!isProPost && normalized.user_name && normalized.created_at &&
                     typeof window.__xtjIsUserProAt === 'function' &&
@@ -5637,7 +5648,7 @@ function renderProfileActivityList(kind) {
                 try {
                     // Supabase 查询加 12s 兜底超时，避免永久 hang
                     const queries = [
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").order("created_at", { ascending: false }),
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
                         sb.from("comments").select("*").order("created_at"),
                         sb.from("likes").select("*")
                     ];
