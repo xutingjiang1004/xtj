@@ -3483,9 +3483,20 @@ app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req
 var SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
 var GMAIL_GAS_URL = process.env.GMAIL_GAS_URL || ''; // Google Apps Script Web App URL（走 HTTPS 443，绕过 Render SMTP 端口封锁）
 
+async function fetchWithTimeout(url, options, timeoutMs) {
+  var controller = new AbortController();
+  var timer = setTimeout(function() { controller.abort(); }, timeoutMs || 15000);
+  var fetchOptions = Object.assign({}, options || {}, { signal: controller.signal });
+  try {
+    return await fetch(url, fetchOptions);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // SendGrid API 发送（HTTPS 443，不受云平台 SMTP 端口封锁影响）
 async function sendViaSendGrid(to, subject, text, html) {
-  var resp = await fetch('https://api.sendgrid.com/v3/mail/send', {
+  var resp = await fetchWithTimeout('https://api.sendgrid.com/v3/mail/send', {
     method: 'POST',
     headers: {
       'Authorization': 'Bearer ' + SENDGRID_API_KEY,
@@ -3500,7 +3511,7 @@ async function sendViaSendGrid(to, subject, text, html) {
         { type: 'text/html', value: html || '' }
       ]
     })
-  });
+  }, 15000);
   if (!resp.ok) {
     var body = await resp.text().catch(function(){ return ''; });
     throw new Error('SendGrid HTTP ' + resp.status + (body ? ': ' + body.slice(0, 200) : ''));
@@ -3515,11 +3526,11 @@ async function sendViaSendGrid(to, subject, text, html) {
 //     return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
 //   }
 async function sendViaGAS(to, subject, text, html) {
-  var resp = await fetch(GMAIL_GAS_URL, {
+  var resp = await fetchWithTimeout(GMAIL_GAS_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ to: to, subject: subject, text: text || '', html: html || '' })
-  });
+  }, 15000);
   if (!resp.ok) {
     var body = await resp.text().catch(function(){ return ''; });
     throw new Error('GAS HTTP ' + resp.status + (body ? ': ' + body.slice(0, 200) : ''));
