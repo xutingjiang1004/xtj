@@ -415,9 +415,14 @@
             // 发送请求（指纹异步采集）
             var sendReq = function() {
                 lastSendAtByKey[sentKey] = Date.now();
+                var headers = { 'Content-Type': 'application/json' };
+                if (typeof getUserToken === 'function') {
+                    var token = getUserToken();
+                    if (token) headers['Authorization'] = 'Bearer ' + token;
+                }
                 fetch(API_BASE + '/api/log-login-event', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: headers,
                     body: JSON.stringify(bodyObj)
                 }).then(function(res) {
                     if (res.ok && source === 'login_success') {
@@ -487,7 +492,11 @@
         } catch(e) {}
         var pwHash;
         try { pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch(e) { pwHash = ''; }
-        if (!pwHash) return;
+        var userToken = '';
+        if (typeof getUserToken === 'function') {
+            userToken = getUserToken();
+        }
+        if (!pwHash && !userToken) return;
         var src = source || 'login_success';
         // 设置页面访问冷却，避免登录成功后 15 秒内重复产生 page_visit
         var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
