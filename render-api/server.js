@@ -110,18 +110,22 @@ async function logAttack(ip, type, detail) {
 
 // 访问计数去重（同IP同天只计一次，按天自动清理）
 const visitCache = new Map(); // ip_date -> true
+let visitCacheCleanupTimeout = null;
 function shouldCountVisit(ip) {
   const today = new Date().toISOString().slice(0, 10);
   const key = ip + '_' + today;
   if (visitCache.has(key)) return false;
   visitCache.set(key, true);
-  // 每30分钟清理非今天的旧记录，避免full clear丢失去重数据
-  if (visitCache.size > 10000) {
-    var keysToDelete = [];
-    visitCache.forEach(function(_, k) {
-      if (!k.endsWith('_' + today)) keysToDelete.push(k);
-    });
-    keysToDelete.forEach(function(k) { visitCache.delete(k); });
+  // ★ 修复 M7：异步延迟清理，避免同步 forEach 阻塞事件循环
+  if (visitCache.size > 10000 && !visitCacheCleanupTimeout) {
+    visitCacheCleanupTimeout = setTimeout(function() {
+      visitCacheCleanupTimeout = null;
+      var keysToDelete = [];
+      visitCache.forEach(function(_, k) {
+        if (!k.endsWith('_' + today)) keysToDelete.push(k);
+      });
+      keysToDelete.forEach(function(k) { visitCache.delete(k); });
+    }, 100);
   }
   return true;
 }
@@ -3370,7 +3374,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            from: 'XTJ 管理员 <onboarding@resend.dev>',
+            from: 'XTJ 管理员 <' + RESEND_FROM + '>',
             to: [r.email],
             subject: subjectVal,
             text: bodyText,
@@ -3381,7 +3385,15 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
           sent.push(r.user_name || r.email);
         } else {
           var mailErr = await mailRes.text();
-          failed.push({ user: r.user_name || r.email, error: 'HTTP ' + mailRes.status + ': ' + mailErr });
+          // ★ 修复：Resend 测试域名只能给自己发邮件，给出明确指引
+          var errMsg = 'HTTP ' + mailRes.status + ': ' + mailErr;
+          if (mailRes.status === 403 && RESEND_FROM === 'onboarding@resend.dev') {
+            errMsg = 'Resend 测试域名限制：只能给 20051004xtj@gmail.com 发邮件。' +
+              '解决方法：1) 去 resend.com/domains 验证你的域名 ' +
+              '2) 在 Render Dashboard 设置 FROM_EMAIL=通知@你的域名 ' +
+              '3) 重启服务';
+          }
+          failed.push({ user: r.user_name || r.email, error: errMsg });
         }
       } catch (e) {
         failed.push({ user: r.user_name || r.email, error: '发送异常: ' + e.message });
@@ -3517,7 +3529,7 @@ app.post('/api/vip/activate-test', rateLimit(60000, 5), async (req, res) => {
   }
 });
 
-// 处理VIP支付完成
+// 处理VIP支付完成（修复：先写VIP记录再更新订单，保证数据一致性）
 async function processVipPayment(userName, orderNo, plan) {
   const now = new Date();
   const expireAt = new Date(now.getTime() + plan.duration_days * 24 * 60 * 60 * 1000).toISOString();
@@ -3533,7 +3545,19 @@ async function processVipPayment(userName, orderNo, plan) {
     activated_at: now.toISOString()
   });
 
-  // 更新订单状态
+  // ★ 修复 B1：先写VIP记录（"真金白银"），再更新订单状态（辅助记录）
+  // 如果VIP记录写入失败，订单仍为pending，用户可重试——不会出现"钱付了但VIP没开通"
+  const { error: vipErr } = await supabase.from('posts').insert([{
+    user_name: userName,
+    content: vipContent,
+    media_type: VIP_MARKER,
+    media_url: plan.id,
+    actor_key: 'vip_' + Date.now()
+  }]);
+
+  if (vipErr) throw vipErr;
+
+  // VIP记录写入成功后，再更新订单状态为paid
   const { data: orders } = await supabase.from('posts')
     .select('id')
     .eq('media_type', VIP_ORDER_MARKER)
@@ -3546,19 +3570,11 @@ async function processVipPayment(userName, orderNo, plan) {
       orderData.status = 'paid';
       orderData.paid_at = now.toISOString();
       await supabase.from('posts').update({ content: JSON.stringify(orderData) }).eq('id', orders[0].id);
-    } catch(e) {}
+    } catch(e) {
+      console.error('[VIP] 更新订单状态失败（VIP记录已写入）:', e.message);
+      // 订单状态更新失败不影响VIP生效——VIP记录已写入
+    }
   }
-
-  // 写入VIP记录
-  const { error: vipErr } = await supabase.from('posts').insert([{
-    user_name: userName,
-    content: vipContent,
-    media_type: VIP_MARKER,
-    media_url: plan.id,
-    actor_key: 'vip_' + Date.now()
-  }]);
-
-  if (vipErr) throw vipErr;
 
   return {
     ok: true,

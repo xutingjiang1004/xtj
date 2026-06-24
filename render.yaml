@@ -44,6 +44,14 @@ services:
       # CORS 白名单（逗号分隔，留空则自动检测）
       - key: ALLOWED_ORIGINS
         value: ""
+      
+      # ⚠️ Resend 邮件发送配置 — 在 Render Dashboard 手动设置
+      # 注册 https://resend.com → 验证域名 → 获取 API Key
+      - key: RESEND_API_KEY
+        sync: false
+      # 发件人邮箱（必须使用已验证的域名，如 通知@你的域名.com）
+      - key: FROM_EMAIL
+        sync: false
 
 # 部署后验证：
 # 1. 打开 https://你的服务名.onrender.com/health → 应返回 {"ok":true}
