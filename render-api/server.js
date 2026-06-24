@@ -1577,7 +1577,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
     autoExpireOverdueRecords().catch(function() {});
 
     const [postRes, likeRes, commRes, banRes, annRes] = await Promise.all([
-      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', CLIENT_ERROR_MARKER).neq('media_type', AUDIT_LOG_MARKER).order('created_at', { ascending: false }).limit(5000),
+      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', CLIENT_ERROR_MARKER).neq('media_type', AUDIT_LOG_MARKER).neq('media_type', '__email_sent__').order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500),
@@ -3574,6 +3574,21 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     } catch(e) {
       console.warn('[Email] 保存发送记录失败:', e.message);
     }
+    // 保存收件人到历史
+    try {
+      var histEmails = [];
+      recipients.forEach(function(r) {
+        var e = String(r.email || '').trim().toLowerCase();
+        if (e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && histEmails.indexOf(e) === -1) histEmails.push(e);
+      });
+      for (var hi = 0; hi < histEmails.length; hi++) {
+        await supabase.from('posts').insert([{
+          user_name: ADMIN_USERNAME,
+          content: JSON.stringify({ email: histEmails[hi], sent_at: new Date().toISOString() }),
+          media_type: '__email_recipient_history__'
+        }]).catch(function(){});
+      }
+    } catch(e) { console.warn('[Email] 保存收件人历史失败:', e.message); }
     if (sent.length === 0 && failed.length > 0) {
       var firstErr = failed[0].error || '';
       if (firstErr.indexOf('connect') > -1 || firstErr.indexOf('timeout') > -1 || firstErr.indexOf('ETIMEDOUT') > -1) {
@@ -3628,6 +3643,98 @@ app.get('/admin/email-history', verifyToken, rateLimit(60000, 10), async (req, r
   } catch(e) {
     console.error('[Email History] 查询失败:', e.message);
     return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// ===================== 管理员邮件收件人历史 API =====================
+const EMAIL_RECIPIENT_MARKER = '__email_recipient_history__';
+
+// 获取历史收件人
+app.get('/admin/email-recipient-history', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var limit = Math.min(parseInt(req.query.limit || '100'), 200);
+    var { data, error } = await supabase.from('posts')
+      .select('content, created_at')
+      .eq('media_type', EMAIL_RECIPIENT_MARKER)
+      .eq('user_name', ADMIN_USERNAME)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    var seen = new Set();
+    var recipients = [];
+    (data || []).forEach(function(row) {
+      try {
+        var info = JSON.parse(row.content || '{}');
+        var email = (info.email || '').trim().toLowerCase();
+        if (email && !seen.has(email)) {
+          seen.add(email);
+          recipients.push({ email: email, sent_at: info.sent_at || row.created_at });
+        }
+      } catch(e) {}
+    });
+    return res.json({ ok: true, recipients: recipients });
+  } catch(e) {
+    console.error('[Email Recipient History] 查询失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// 保存收件人到历史（去重，最大200条）
+app.post('/admin/email-recipient-history', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var emails = Array.isArray(req.body.emails) ? req.body.emails : [];
+    var saved = 0;
+    for (var i = 0; i < emails.length; i++) {
+      var email = String(emails[i] || '').trim().toLowerCase();
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) continue;
+      await supabase.from('posts').insert([{
+        user_name: ADMIN_USERNAME,
+        content: JSON.stringify({ email: email, sent_at: new Date().toISOString() }),
+        media_type: EMAIL_RECIPIENT_MARKER
+      }]).catch(function(){});
+      saved++;
+    }
+    return res.json({ ok: true, saved: saved });
+  } catch(e) {
+    console.error('[Email Recipient History] 保存失败:', e.message);
+    return res.status(500).json({ error: '保存失败' });
+  }
+});
+
+// 删除指定的历史收件人
+app.post('/admin/email-recipient-history/delete', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var email = String(req.body.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: '缺少邮箱' });
+    var { error } = await supabase.from('posts')
+      .delete()
+      .eq('media_type', EMAIL_RECIPIENT_MARKER)
+      .eq('user_name', ADMIN_USERNAME)
+      .eq('content', JSON.stringify({ email: email }).replace(/"/g, '\\"'));
+    // 用 filter 匹配 content
+    await supabase.from('posts')
+      .delete()
+      .eq('media_type', EMAIL_RECIPIENT_MARKER)
+      .eq('user_name', ADMIN_USERNAME)
+      .filter('content', 'cs', '"' + email.replace(/"/g, '\\"') + '"');
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[Email Recipient History] 删除失败:', e.message);
+    return res.status(500).json({ error: '删除失败' });
+  }
+});
+
+// 清空所有历史收件人
+app.post('/admin/email-recipient-history/clear', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    await supabase.from('posts')
+      .delete()
+      .eq('media_type', EMAIL_RECIPIENT_MARKER)
+      .eq('user_name', ADMIN_USERNAME);
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[Email Recipient History] 清空失败:', e.message);
+    return res.status(500).json({ error: '清空失败' });
   }
 });
 
