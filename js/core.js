@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -10,7 +10,11 @@
             const SUPABASE_ANON_KEY = XTJ_RUNTIME_CONFIG.SUPABASE_ANON_KEY;
             var API_BASE = XTJ_RUNTIME_CONFIG.API_BASE;
             var sb;
-            if (typeof window.supabase !== 'undefined') {
+            // ★ 修复 M6：检查配置完整性，避免静默失败
+            if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+                console.error('[XTJ] Supabase 配置缺失，请检查 config.js 或环境变量');
+                sb = null;
+            } else if (typeof window.supabase !== 'undefined') {
                 sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
             } else {
                 console.error('Supabase SDK not loaded');
@@ -279,6 +283,25 @@ const ADMIN_NAME = "xxz";
         const postDwellTimers = new Map();
         const POST_DWELL_THRESHOLD = 0.5;
         const POST_DWELL_DELAY = 1200;
+
+        // ★ 修复 M4：页面卸载 / 面板切换时清理 Observer 和 Timer
+        function cleanupObservers() {
+            if (postVisibilityObserver) {
+                try { postVisibilityObserver.disconnect(); } catch(e) {}
+                postVisibilityObserver = null;
+            }
+            if (postDwellObserver) {
+                try { postDwellObserver.disconnect(); } catch(e) {}
+                postDwellObserver = null;
+            }
+            postDwellTimers.forEach(function(timerId, postId) {
+                clearTimeout(timerId);
+            });
+            postDwellTimers.clear();
+        }
+        window.addEventListener('beforeunload', cleanupObservers);
+        // 在面板切换时也清理（由 switchTab 调用）
+        window.__xtjCleanupObservers = cleanupObservers;
         function primePostReveal(nodes) {
             Array.from(nodes || []).forEach(function(post, index) {
                 if (!post || post.classList.contains('visible')) return;
@@ -1874,33 +1897,17 @@ const ADMIN_NAME = "xxz";
                 showToast('正在压缩并上传头像..');
                 
                 try {
-                    // 濞寸姾顕ф慨?閿涙岸鍣搁弸鍕礋閿熻緝杈炬嫹锟?Supabase Storage 闁?avatars/ 闁烩晩鍠栫紞?
                     const path = buildStorageUploadPath('avatars', file.name);
                     
-                    // 上传锟?Supabase Storage
+                    // 上传到 Supabase Storage
                     const { error: uploadErr } = await sb.storage.from('uploads').upload(path, file);
                     if (uploadErr) throw uploadErr;
                     
-                    // 閼惧嘲锟?Public URL
+                    // 获取 Public URL
                     const avatarUrl = sb.storage.from('uploads').getPublicUrl(path).data.publicUrl;
                     
-                    // 删除閹碘偓閺堬拷顦ˇ鏉课涢顫粓闁稿秴绻楅鍥亹?
-                    var oldIds = await sb.from("posts")
-                        .select("id")
-                        .eq("user_name", currentUser)
-                        .eq("media_type", "__avatar__")
-                        .eq("actor_key", "__avatar__");
-                    if (oldIds.data && oldIds.data.length > 0) {
-                        for (var oi of oldIds.data) {
-                            try {
-                                await sb.rpc('delete_post_with_actor', {
-                                    p_post_id: oi.id,
-                                    p_actor_key: '__avatar__'
-                                });
-                            } catch(e) {}
-                        }
-                    }
-                    
+                    // ★ 修复 B2：先插入新头像记录，成功后再删除旧记录
+                    // 避免"旧头像已删但新头像插入失败"导致用户头像空
                     var { error } = await sb.from("posts").insert([{
                         user_name: currentUser,
                         content: "用户头像",
@@ -1910,12 +1917,32 @@ const ADMIN_NAME = "xxz";
                     }]);
                     
                     if (error) {
+                        // 新头像插入失败——不删旧头像，保证用户至少有一个头像
                         showToast('上传失败: ' + error.message);
                         return;
                     }
                     
+                    // 新头像插入成功，安全删除旧头像记录
+                    var oldIds = await sb.from("posts")
+                        .select("id")
+                        .eq("user_name", currentUser)
+                        .eq("media_type", "__avatar__")
+                        .eq("actor_key", "__avatar__");
+                    if (oldIds.data && oldIds.data.length > 1) {
+                        for (var oi of oldIds.data) {
+                            // 跳过刚插入的新记录（用 media_url 匹配）
+                            if (String(oi.media_url) === String(avatarUrl)) continue;
+                            try {
+                                await sb.rpc('delete_post_with_actor', {
+                                    p_post_id: oi.id,
+                                    p_actor_key: '__avatar__'
+                                });
+                            } catch(e) {}
+                        }
+                    }
+                    
                     avatarCache[currentUser] = avatarUrl;
-                    // 保存鍒發ocalStorage鎸佷箙鍖栧瓨鍌?
+                    // 保存到localStorage持久化存储
                     try {
                         var cachedAvatars = window.safeLocalStorageGetJSON(AVATAR_CACHE_KEY, {});
                         cachedAvatars[currentUser] = avatarUrl;
@@ -2029,7 +2056,22 @@ const ADMIN_NAME = "xxz";
                 currentUser = "";
                 window.currentUser = currentUser;
                 clearUserSessionStorage();
-                localStorage.removeItem(CACHE_KEY);
+                // ★ 修复 M5：停止限制轮询（避免内存泄漏）
+                stopRestrictionPolling();
+                // ★ 修复 M1：清理所有用户相关的 localStorage 缓存
+                // 避免用户A登出后用户B看到A的头像、VIP、已读消息等
+                var xtjKeys = [];
+                for (var i = 0; i < localStorage.length; i++) {
+                    var key = localStorage.key(i);
+                    if (key && (key.indexOf('xtj_') === 0 || key.indexOf('xtj-') === 0)) {
+                        xtjKeys.push(key);
+                    }
+                }
+                xtjKeys.forEach(function(k) {
+                    try { localStorage.removeItem(k); } catch(e) {}
+                });
+                // 也清理 sessionStorage 中的密码 hash
+                try { sessionStorage.removeItem("xtj_pw_hash"); } catch(e) {}
                 document.getElementById("loginNickInp").value = "";
                 document.getElementById("loginPwInp").value = "";
                 document.getElementById("regNickInp").value = "";
