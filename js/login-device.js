@@ -85,8 +85,8 @@
         var isIPhone = /iPhone/i.test(ua) || (/Mac/i.test(platform) && maxTouchPoints > 1 && Math.min(Number(info.screen_width) || 0, Number(info.screen_height) || 0) < 600);
         if (!isIPhone) return '';
 
-        var sw = Number(info.screen_width) || 0;
-        var sh = Number(info.screen_height) || 0;
+        var sw = Number(info.screen_width || info.visual_viewport_width || info.inner_width) || 0;
+        var sh = Number(info.screen_height || info.visual_viewport_height || info.inner_height) || 0;
         var dpr = Number(info.device_pixel_ratio) || 0;
         var shortSide = Math.min(sw, sh);
         var longSide = Math.max(sw, sh);
@@ -149,7 +149,7 @@
         };
         var matcher = modelMap[key];
         if (typeof matcher === 'function') return matcher();
-        return matcher || 'iPhone（型号不可确定）';
+        return matcher || '';
     }
 
     // 从 User-Agent 提取 iOS 主版本号
@@ -184,8 +184,13 @@
                 screen: (window.screen ? window.screen.width + 'x' + window.screen.height : 'unknown'),
                 screen_width: window.screen ? window.screen.width : null,
                 screen_height: window.screen ? window.screen.height : null,
+                screen_avail_width: window.screen ? window.screen.availWidth : null,
+                screen_avail_height: window.screen ? window.screen.availHeight : null,
                 inner_width: window.innerWidth || null,
                 inner_height: window.innerHeight || null,
+                visual_viewport_width: window.visualViewport ? window.visualViewport.width : null,
+                visual_viewport_height: window.visualViewport ? window.visualViewport.height : null,
+                orientation: window.screen && window.screen.orientation ? window.screen.orientation.type : null,
                 dpr: window.devicePixelRatio || 1,
                 device_pixel_ratio: window.devicePixelRatio || 1,
                 language: (navigator.language || navigator.userLanguage || 'unknown'),

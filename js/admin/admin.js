@@ -33,10 +33,16 @@
         var maxTouchPoints = Number(meta.max_touch_points || info.max_touch_points || 0);
         var sw = Number(meta.screen_width || info.screen_width || (meta.screen && String(meta.screen).split('x')[0])) || 0;
         var sh = Number(meta.screen_height || info.screen_height || (meta.screen && String(meta.screen).split('x')[1])) || 0;
+        if (!sw || !sh) {
+            sw = Number(meta.visual_viewport_width || info.visual_viewport_width) || Number(meta.inner_width || info.inner_width) || 0;
+            sh = Number(meta.visual_viewport_height || info.visual_viewport_height) || Number(meta.inner_height || info.inner_height) || 0;
+        }
         var dpr = Number(meta.device_pixel_ratio || meta.dpr || info.device_pixel_ratio || info.dpr) || 0;
         var isIPhone = /iPhone/i.test(ua) || String(info.device_type || '').toLowerCase() === 'iphone' || (/Mac/i.test(platform) && maxTouchPoints > 1 && Math.min(sw, sh) < 600);
         if (!isIPhone) return '';
+
         var key = Math.min(sw, sh) + 'x' + Math.max(sw, sh) + '@' + (dpr || '');
+        if (!sw || !sh) return '';
         var iosVer = getIosMajorVersion(ua);
         // 优先用 UA 中的设备型号标识符精确匹配
         var uaModel = (ua.match(/iPhone\d+,\d+/) || [''])[0];
@@ -144,7 +150,7 @@
         };
         var matcher = modelMap[key];
         if (typeof matcher === 'function') return matcher();
-        return matcher || 'iPhone（型号不可确定）';
+        return matcher || '';
     }
 
     // ===================== API_BASE 安全检测 =====================
@@ -572,6 +578,7 @@
             if (btn) btn.classList.add('active');
 
             await loadAllData(true);
+            await loadTabDataIfNeeded(normalized);
             renderTab(normalized);
             showToast('数据已刷新', 'success');
         } catch(e) {
@@ -621,6 +628,8 @@ async function initAdminClient() {
             var activeBtn = document.getElementById('tab' + getTabDomName(savedTab) + 'Btn');
             if (activePanel) activePanel.classList.add('active');
             if (activeBtn) activeBtn.classList.add('active');
+            await loadTabDataIfNeeded(savedTab);
+            await window.renderTab(savedTab);
         } else {
             await loadAllData();
         }
@@ -1179,25 +1188,7 @@ async function initAdminClient() {
     };
 
     function renderTab(tab) {
-        var el = document.getElementById('tab' + getTabDomName(tab));
-        if (!el) return;
-        switch(tab) {
-            case 'ann': renderAnnTab(el); break;
-            case 'stats': renderStatsTab(el); break;
-            case 'users': renderUsersTab(el); break;
-            case 'security': renderSecurityTab(el); break;
-            case 'audit': renderAuditTab(el); break;
-            case 'errorlog': renderErrorLogTab(el); break;
-            case 'posts': renderPostsTab(el); break;
-            case 'likes': renderLikesTab(el); break;
-            case 'comments': renderCommentsTab(el); break;
-            case 'reports': renderReportsTab(el); break;
-            case 'bans': renderBansTab(el); break;
-            case 'mutes': renderMutesTab(el); break;
-            case 'blacklist': renderBlacklistTab(el); break;
-            case 'photos': renderPhotosTab(el); break;
-            case 'email': renderEmailTab(el); break;
-        }
+        return window.renderTab(tab);
     }
 
     function renderAnnTab(el) {
@@ -3155,6 +3146,7 @@ async function initAdminClient() {
             case 'audit': renderAuditTab(el); break;
             case 'errorlog': renderErrorLogTab(el); break;
             case 'progift': renderProGiftTab(el); break;
+            case 'email': renderEmailTab(el); break;
         }
     };
 
@@ -3587,7 +3579,16 @@ async function initAdminClient() {
 
         var isIPhone = deviceType.indexOf('iphone') >= 0 || /iPhone/i.test(ua);
         if (isIPhone) {
-            return getPossibleDeviceModel(info) || 'iPhone（型号不可确定）';
+            var modelGuess = getPossibleDeviceModel(info);
+            if (modelGuess && modelGuess.indexOf('未匹配') !== 0) return modelGuess;
+            if (modelGuess) return modelGuess;
+            var sw = Number(meta.screen_width || info.screen_width) || 0;
+            var sh = Number(meta.screen_height || info.screen_height) || 0;
+            var dpr = Number(meta.device_pixel_ratio || info.device_pixel_ratio || meta.dpr || info.dpr) || 0;
+            if (sw && sh) {
+                return 'iPhone（未匹配尺寸：' + Math.min(sw, sh) + 'x' + Math.max(sw, sh) + '@' + dpr + '）';
+            }
+            return 'iPhone（Safari 不提供具体型号）';
         }
 
         var isDesktop = deviceType.indexOf('desktop') >= 0 || /Windows|Macintosh|Linux/i.test(ua) || /Win|Mac|Linux/i.test(platform);
@@ -3601,15 +3602,59 @@ async function initAdminClient() {
         if (!location) return '';
         var text = location.text || location;
         if (typeof text !== 'string') return '';
-        // 如果是英文格式 "Country · Province · City" 且国家是 China
         var parts = text.split(' · ');
-        if (parts.length >= 2 && parts[0].toLowerCase() === 'china') {
-            // 去掉国家，保留省份和城市
-            var result = parts.slice(1).join('');
-            return result || text;
+        var provinceMap = {
+            'Guangdong': '广东', 'Zhejiang': '浙江', 'Shanghai': '上海', 'Beijing': '北京',
+            'Jiangsu': '江苏', 'Fujian': '福建', 'Sichuan': '四川', 'Chongqing': '重庆',
+            'Hunan': '湖南', 'Hubei': '湖北', 'Henan': '河南', 'Hebei': '河北',
+            'Shandong': '山东', 'Shanxi': '山西', 'Shaanxi': '陕西', 'Anhui': '安徽',
+            'Jiangxi': '江西', 'Guangxi': '广西', 'Guizhou': '贵州', 'Yunnan': '云南',
+            'Hainan': '海南', 'Liaoning': '辽宁', 'Jilin': '吉林', 'Heilongjiang': '黑龙江',
+            'Inner Mongolia': '内蒙古', 'Xinjiang': '新疆', 'Tibet': '西藏',
+            'Ningxia': '宁夏', 'Qinghai': '青海', 'Gansu': '甘肃', 'Tianjin': '天津',
+            'Macau': '澳门', 'Macao': '澳门', 'Hong Kong': '香港', 'Taiwan': '台湾'
+        };
+        var cityMap = {
+            'Guangzhou': '广州', 'Shenzhen': '深圳', 'Hangzhou': '杭州', 'Ningbo': '宁波',
+            'Suzhou': '苏州', 'Nanjing': '南京', 'Wuxi': '无锡', 'Xiamen': '厦门',
+            'Fuzhou': '福州', 'Chengdu': '成都', 'Wuhan': '武汉', 'Changsha': '长沙',
+            'Zhengzhou': '郑州', 'Jinan': '济南', 'Qingdao': '青岛', 'Hefei': '合肥',
+            'Dongguan': '东莞', 'Foshan': '佛山', 'Zhuhai': '珠海', 'Shanghai': '上海',
+            'Beijing': '北京', 'Chongqing': '重庆', 'Tianjin': '天津'
+        };
+        var countryMap = {
+            'Japan': '日本', 'South Korea': '韩国', 'Singapore': '新加坡',
+            'United States': '美国', 'Thailand': '泰国', 'Malaysia': '马来西亚',
+            'United Kingdom': '英国', 'Canada': '加拿大', 'Australia': '澳大利亚',
+            'Germany': '德国', 'France': '法国', 'Italy': '意大利', 'Spain': '西班牙',
+            'Russia': '俄罗斯', 'Brazil': '巴西', 'India': '印度', 'Vietnam': '越南',
+            'Philippines': '菲律宾', 'Indonesia': '印度尼西亚'
+        };
+        var isChina = false;
+        var pp = parts.map(function(p) {
+            var trimmed = p.trim();
+            var lower = trimmed.toLowerCase();
+            if (lower === 'china' || lower === "people's republic of china" || lower === 'cn') {
+                isChina = true;
+                return '';
+            }
+            return trimmed;
+        }).filter(Boolean);
+        if (isChina && pp.length) {
+            var provinceName = provinceMap[pp[0]] || pp[0];
+            var cityName = pp.length > 1 ? (cityMap[pp[1]] || pp[1]) : '';
+            if (provinceName === cityName || (pp.length === 1 && (pp[0] === 'Shanghai' || pp[0] === 'Beijing' || pp[0] === 'Chongqing' || pp[0] === 'Tianjin'))) {
+                return provinceName;
+            }
+            return provinceName + (cityName || '');
         }
-        // 非中国地区，保持原样
-        return text;
+        if (parts.length === 1) {
+            return countryMap[parts[0].trim()] || parts[0].trim();
+        }
+        return parts.map(function(p) {
+            var trimmed = p.trim();
+            return countryMap[trimmed] || cityMap[trimmed] || provinceMap[trimmed] || trimmed;
+        }).join('');
     }
 
     // 登录设备详情展示
@@ -3723,7 +3768,7 @@ async function initAdminClient() {
         userEvents.forEach(function(ev) {
             var loginTime = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
             var srcLabel = sourceLabels[ev.info.source] || '登录记录';
-            var locText = (ev.info.ip_location && ev.info.ip_location.text) ? escapeHtml(ev.info.ip_location.text) : '暂未解析';
+            var locText = ev.info.ip_location ? escapeHtml(adminFormatLocation(ev.info.ip_location)) : '暂未解析';
             var fullIp = ev.info.ip || '-';
             var possibleModel = getLoginRecordModelText(ev.info);
             var asnIsp = '-';
@@ -3965,7 +4010,7 @@ async function initAdminClient() {
                 html += '<td style="padding:4px 6px;">' + escapeHtml(((ev.info.device_type || '') + ' ' + (ev.info.os || '')).slice(0, 20)) + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(vm) + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(ev.info.ip || '-') + '</td>';
-                html += '<td style="padding:4px 6px;">' + escapeHtml((ev.info.ip_location && ev.info.ip_location.text) || '-') + '</td>';
+                html += '<td style="padding:4px 6px;">' + escapeHtml((ev.info.ip_location ? adminFormatLocation(ev.info.ip_location) : '-')) + '</td>';
                 html += '</tr>';
             });
             html += '</tbody></table></div>';
@@ -4005,23 +4050,23 @@ async function initAdminClient() {
             '<span style="font-size:12px;color:var(--text-muted);" id="emailTotalCount"></span>' +
             '</div>' +
             '<div class="form-group" style="margin-bottom:8px;">' +
-            '<label style="display:flex;align-items:center;gap:6px;">手动输入邮箱 <span style="font-size:11px;color:var(--text-muted);font-weight:400;">（一行一个，或逗号分隔）</span></label>' +
+            '<label style="display:flex;align-items:center;gap:6px;">手动输入邮箱</label>' +
             '<div style="display:flex;gap:6px;">' +
-            '<textarea id="emailManualInp" rows="2" placeholder="例：user1@qq.com&#10;user2@gmail.com" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.1);font-size:13px;outline:none;resize:none;"></textarea>' +
+            '<textarea id="emailManualInp" rows="2" placeholder="输入邮箱地址" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.1);font-size:13px;outline:none;resize:none;"></textarea>' +
             '<button class="btn-sm" onclick="emailAddManual()" style="align-self:flex-end;">添加</button>' +
             '</div>' +
             '<div id="emailManualList" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;min-height:0;"></div>' +
             '<div id="emailSuffixList" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;min-height:0;"></div>' +
+            '<div style="margin-top:6px;"><h4 style="font-size:13px;margin:0 0 4px 0;">📇 历史邮箱账户</h4>' +
+            '<div id="emailRecipientHistory" style="display:flex;flex-wrap:wrap;gap:4px;min-height:24px;padding:2px 0;">加载中...</div>' +
+            '<button class="btn-sm" onclick="emailClearRecipientHistory()" style="margin-top:2px;font-size:11px;opacity:0.6;">清空历史</button></div>' +
             '</div>' +
             '<div class="form-group"><label>邮件主题</label><input id="emailSubjectInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件主题" /></div>' +
             '<div class="form-group"><label>邮件内容</label><textarea id="emailContentInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件内容...&#10;支持换行，发送时将转为 HTML 格式"></textarea></div>' +
             '<button class="btn-sm primary" onclick="emailSend()" id="emailSendBtn">📤 发送邮件</button>' +
             '<div id="emailResult"></div>' +
             '</div></div>' +
-            '<div class="card"><h4>📨 发送记录</h4><div id="emailHistoryWrap"><div class="empty" style="padding:12px;">正在加载...</div></div></div>' +
-            '<div class="card" style="margin-top:8px;"><h4>📇 历史邮箱账户</h4>' +
-            '<div id="emailRecipientHistory" style="display:flex;flex-wrap:wrap;gap:4px;min-height:30px;padding:4px 0;">加载中...</div>' +
-            '<button class="btn-sm" onclick="emailClearRecipientHistory()" style="margin-top:4px;font-size:11px;opacity:0.6;">清空历史</button></div>';
+            '<div class="card"><h4>📨 发送记录</h4><div id="emailHistoryWrap"><div class="empty" style="padding:12px;">正在加载...</div></div></div>';
 
         // 检查是否有草稿
         var draftSubject = sessionStorage.getItem('xtj_email_draft_subject');
@@ -4576,6 +4621,8 @@ async function initAdminClient() {
         var existing = document.getElementById('proGiftOverlay');
         if (existing) existing.remove();
         document.body.insertAdjacentHTML('beforeend', html);
+        var overlay = document.getElementById('proGiftOverlay');
+        if (overlay) overlay.classList.add('active');
     };
 
     window.closeProGiftEditor = function() {
@@ -4616,6 +4663,8 @@ async function initAdminClient() {
         var existing = document.getElementById('manualGiftOverlay');
         if (existing) existing.remove();
         document.body.insertAdjacentHTML('beforeend', html);
+        var overlay = document.getElementById('manualGiftOverlay');
+        if (overlay) overlay.classList.add('active');
     };
 
     window.closeManualGiftDialog = function() {
