@@ -608,11 +608,12 @@ function getPossibleDeviceModel(info) {
   var ua = String(info.user_agent || '');
   var platform = String(info.platform || '');
   var maxTouchPoints = Number(info.max_touch_points || 0);
-  var sw = Number(info.screen_width || (info.screen && String(info.screen).split('x')[0])) || 0;
-  var sh = Number(info.screen_height || (info.screen && String(info.screen).split('x')[1])) || 0;
+  var sw = Number(info.screen_width || info.visual_viewport_width || info.inner_width || (info.screen && String(info.screen).split('x')[0])) || 0;
+  var sh = Number(info.screen_height || info.visual_viewport_height || info.inner_height || (info.screen && String(info.screen).split('x')[1])) || 0;
   var dpr = Number(info.device_pixel_ratio || info.dpr) || 0;
   var isIPhone = /iPhone/i.test(ua) || (/Mac/i.test(platform) && maxTouchPoints > 1 && Math.min(sw, sh) < 600);
   if (!isIPhone) return '';
+  if (!sw || !sh) return '';
   var key = Math.min(sw, sh) + 'x' + Math.max(sw, sh) + '@' + (dpr || '');
   var modelMap = {
     '440x956@3': '疑似 iPhone 16 Pro Max / iPhone 17 Pro Max',
@@ -628,7 +629,7 @@ function getPossibleDeviceModel(info) {
     '375x667@2': '疑似 iPhone 6 / 6s / 7 / 8 / SE（第 2/3 代）',
     '320x568@2': '疑似 iPhone 5 / 5s / SE（第 1 代）'
   };
-  return modelMap[key] || 'iPhone（型号不可确定）';
+  return modelMap[key] || '';
 }
 
 // 记录管理员登录事件（静默，不影响登录流程）
