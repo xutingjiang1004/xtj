@@ -212,6 +212,7 @@
     #tabLikesBtn { --tab-icon-color: #e85b96; --tab-icon-bg: rgba(232,91,150,0.12); --tab-icon-bg-hover: rgba(232,91,150,0.18); }
     #tabCommentsBtn { --tab-icon-color: #4f9ef8; --tab-icon-bg: rgba(79,158,248,0.12); --tab-icon-bg-hover: rgba(79,158,248,0.18); }
     #tabReportsBtn { --tab-icon-color: #f08a24; --tab-icon-bg: rgba(240,138,36,0.12); --tab-icon-bg-hover: rgba(240,138,36,0.18); }
+    #tabProgiftBtn { --tab-icon-color: #7c55f2; --tab-icon-bg: rgba(124,85,242,0.12); --tab-icon-bg-hover: rgba(124,85,242,0.18); }
     #tabBansBtn { --tab-icon-color: #db4258; --tab-icon-bg: rgba(219,66,88,0.12); --tab-icon-bg-hover: rgba(219,66,88,0.18); }
     #tabMutesBtn { --tab-icon-color: #8a59d9; --tab-icon-bg: rgba(138,89,217,0.12); --tab-icon-bg-hover: rgba(138,89,217,0.18); }
     #tabBlacklistBtn { --tab-icon-color: #8d4f5f; --tab-icon-bg: rgba(141,79,95,0.12); --tab-icon-bg-hover: rgba(141,79,95,0.18); }
@@ -1415,6 +1416,7 @@
             <button id="tabLikesBtn" onclick="switchTab('likes')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 20-1.4-1.3C5.4 14 2 10.9 2 7.1 2 4.8 3.8 3 6.1 3c1.4 0 2.8.7 3.9 1.9C11.1 3.7 12.5 3 13.9 3 16.2 3 18 4.8 18 7.1c0 3.8-3.4 6.9-8.6 11.6L12 20z"/></svg></span><span class="admin-tab-label">点赞数据</span></button>
             <button id="tabCommentsBtn" onclick="switchTab('comments')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg></span><span class="admin-tab-label">评论数据</span></button>
             <button id="tabReportsBtn" onclick="switchTab('reports')" style="position:relative;overflow:visible"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4 3 20h18L12 4z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span><span class="admin-tab-label">举报管理</span><span id="reportBadge" class="notif-badge" style="display:none">0</span></button>
+            <button id="tabProgiftBtn" onclick="switchTab('progift')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M3 12h18"/><path d="M6 7h5a2 2 0 0 0 0-4H8a2 2 0 0 0-2 2v2z"/><path d="M18 7h-5a2 2 0 0 1 0-4h3a2 2 0 0 1 2 2v2z"/><rect x="5" y="12" width="14" height="9" rx="2"/></svg></span><span class="admin-tab-label">Pro赠送</span></button>
             <button id="tabBansBtn" onclick="switchTab('bans')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><span class="admin-tab-label">拉黑封禁</span></button>
             <button id="tabMutesBtn" onclick="switchTab('mutes')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m17 9 4 6"/><path d="m21 9-4 6"/></svg></span><span class="admin-tab-label">禁言管理</span></button>
             <button id="tabBlacklistBtn" onclick="switchTab('blacklist')"><span class="admin-tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.5 8.5 7 7"/></svg></span><span class="admin-tab-label">黑名单</span></button>
@@ -1432,6 +1434,7 @@
         <div class="tab-panel" id="tabLikes"></div>
         <div class="tab-panel" id="tabComments"></div>
         <div class="tab-panel" id="tabReports"></div>
+        <div class="tab-panel" id="tabProgift"></div>
         <div class="tab-panel" id="tabBans"></div>
         <div class="tab-panel" id="tabMutes"></div>
         <div class="tab-panel" id="tabBlacklist"></div>
