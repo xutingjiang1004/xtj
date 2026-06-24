@@ -3828,6 +3828,10 @@ async function verifyUserExists(userName) {
 // 创建订单
 app.post('/api/vip/create-order', rateLimit(60000, 10), async (req, res) => {
   try {
+    return res.status(403).json({
+      ok: false,
+      error: '暂未开放购买，请通过管理员活动领取'
+    });
     const { user_name, plan_id } = req.body;
     const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
     if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
@@ -3890,8 +3894,12 @@ app.post('/api/vip/create-order', rateLimit(60000, 10), async (req, res) => {
 });
 
 // 直接激活VIP（免支付流程）
+// ★ 安全修复：生产环境禁用本接口（需 ALLOW_TEST_VIP=1 显式开启），返回 404 避免接口探测
 app.post('/api/vip/activate-test', rateLimit(60000, 5), async (req, res) => {
   try {
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_TEST_VIP !== '1') {
+      return res.status(404).json({ error: '接口不存在' });
+    }
     const { user_name } = req.body;
     const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
     if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
@@ -4005,6 +4013,82 @@ const PRO_GIFT_MARKER = '__pro_gift__';
 const PRO_GIFT_CLAIM_MARKER = '__pro_gift_claim__';
 const DEFAULT_GIFT_FEATURES = ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'];
 
+function normalizeProGiftUsers(value) {
+  if (Array.isArray(value)) {
+    return Array.from(new Set(value.map(function(item) {
+      return String(item || '').trim();
+    }).filter(Boolean)));
+  }
+  if (typeof value === 'string') {
+    return Array.from(new Set(value.replace(/\uFF0C/g, ',').split(/[,\n]/).map(function(item) {
+      return String(item || '').trim();
+    }).filter(Boolean)));
+  }
+  return [];
+}
+
+function getProGiftAllowedUsers(campaign) {
+  if (!campaign || typeof campaign !== 'object') return [];
+  var merged = [];
+  ['allowed_users', 'exclusive_users', 'target_users'].forEach(function(key) {
+    merged = merged.concat(normalizeProGiftUsers(campaign[key]));
+  });
+  return Array.from(new Set(merged));
+}
+
+function isUserAllowedForProGift(campaign, userName) {
+  var normalizedUser = String(userName || '').trim();
+  if (!normalizedUser) return false;
+  var allowedUsers = getProGiftAllowedUsers(campaign);
+  var exclusive = campaign && campaign.exclusive === true;
+  if (!exclusive && !allowedUsers.length) return true;
+  return allowedUsers.indexOf(normalizedUser) >= 0;
+}
+
+function getProGiftClaimLimit(campaign) {
+  if (!campaign || typeof campaign !== 'object') return 0;
+  var raw = campaign.claim_limit != null ? campaign.claim_limit : (campaign.limit != null ? campaign.limit : campaign.max_claims);
+  var parsed = parseInt(raw, 10);
+  return parsed > 0 ? parsed : 0;
+}
+
+function isProGiftCampaignPublished(campaign) {
+  if (!campaign || typeof campaign !== 'object') return false;
+  return campaign.is_published === true || String(campaign.status || '').toLowerCase() === 'published';
+}
+
+function isProGiftCampaignActive(campaign) {
+  return !(campaign && campaign.is_active === false);
+}
+
+function isProGiftCampaignInTimeWindow(campaign, nowMs) {
+  var checkMs = nowMs || Date.now();
+  if (!campaign || typeof campaign !== 'object') return false;
+  if (campaign.start_at) {
+    var startMs = Date.parse(campaign.start_at);
+    if (Number.isFinite(startMs) && startMs > checkMs) return false;
+  }
+  if (campaign.end_at) {
+    var endMs = Date.parse(campaign.end_at);
+    if (Number.isFinite(endMs) && endMs < checkMs) return false;
+  }
+  if (campaign.claim_expire_at) {
+    var expireMs = Date.parse(campaign.claim_expire_at);
+    if (Number.isFinite(expireMs) && expireMs < checkMs) return false;
+  }
+  return true;
+}
+
+function getProGiftClaimCounts(claims) {
+  var counts = {};
+  (claims || []).forEach(function(row) {
+    var key = String(row && row.media_url || '').trim();
+    if (!key) return;
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  return counts;
+}
+
 // 管理员：获取全部 Pro 赠送活动
 app.get('/admin/pro-gifts', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
@@ -4014,9 +4098,24 @@ app.get('/admin/pro-gifts', verifyToken, rateLimit(60000, 10), async (req, res) 
       .order('created_at', { ascending: false })
       .limit(200);
     if (error) return res.status(400).json({ error: sanitizeError(error) });
+    var giftIds = (data || []).map(function(row) { return String(row.id || '').trim(); }).filter(Boolean);
+    var claimRows = [];
+    if (giftIds.length) {
+      var claimRowsResp = await supabase.from('posts')
+        .select('media_url')
+        .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+        .in('media_url', giftIds)
+        .limit(5000);
+      if (claimRowsResp.error) return res.status(400).json({ error: sanitizeError(claimRowsResp.error) });
+      claimRows = claimRowsResp.data || [];
+    }
+    var claimCounts = getProGiftClaimCounts(claimRows);
     const gifts = (data || []).map(function(row) {
       var info = {};
       try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      var rowId = String(row.id || '').trim();
+      var claimLimit = getProGiftClaimLimit(info);
+      var claimedCount = claimCounts[rowId] || 0;
       return {
         id: row.id,
         created_by: row.user_name,
@@ -4027,7 +4126,16 @@ app.get('/admin/pro-gifts', verifyToken, rateLimit(60000, 10), async (req, res) 
         duration_days: info.duration_days || 30,
         claim_expire_at: info.claim_expire_at || '',
         is_published: !!info.is_published,
-        published_at: info.published_at || ''
+        published_at: info.published_at || '',
+        start_at: info.start_at || '',
+        end_at: info.end_at || '',
+        is_active: info.is_active,
+        status: info.status || '',
+        exclusive: info.exclusive === true,
+        allowed_users: getProGiftAllowedUsers(info),
+        claim_limit: claimLimit,
+        claimed_count: claimedCount,
+        remaining_count: claimLimit > 0 ? Math.max(claimLimit - claimedCount, 0) : null
       };
     });
     return res.json({ ok: true, gifts: gifts });
@@ -4040,7 +4148,7 @@ app.get('/admin/pro-gifts', verifyToken, rateLimit(60000, 10), async (req, res) 
 // 管理员：创建/编辑 Pro 赠送活动
 app.post('/admin/pro-gifts/save', verifyToken, rateLimit(60000, 20), async (req, res) => {
   try {
-    var { id, title, description, features, duration_days, claim_expire_at } = req.body;
+    var { id, title, description, features, duration_days, claim_expire_at, start_at, end_at, is_active, status, exclusive, allowed_users, exclusive_users, target_users, claim_limit, limit, max_claims } = req.body;
     var titleVal = String(title || '').trim().slice(0, 100);
     var descVal = String(description || '').trim().slice(0, 500);
     if (!titleVal) return res.status(400).json({ error: '请输入活动标题' });
@@ -4055,6 +4163,17 @@ app.post('/admin/pro-gifts/save', verifyToken, rateLimit(60000, 20), async (req,
       is_published: false,
       updated_at: new Date().toISOString()
     };
+    if (start_at != null) info.start_at = start_at || '';
+    if (end_at != null) info.end_at = end_at || '';
+    if (is_active != null) info.is_active = is_active !== false;
+    if (status != null) info.status = status || '';
+    if (exclusive != null) info.exclusive = exclusive === true;
+    if (allowed_users != null) info.allowed_users = allowed_users;
+    if (exclusive_users != null) info.exclusive_users = exclusive_users;
+    if (target_users != null) info.target_users = target_users;
+    if (claim_limit != null) info.claim_limit = claim_limit;
+    if (limit != null) info.limit = limit;
+    if (max_claims != null) info.max_claims = max_claims;
     const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
     if (id) {
       // 编辑已有的
@@ -4067,6 +4186,17 @@ app.post('/admin/pro-gifts/save', verifyToken, rateLimit(60000, 20), async (req,
       info.is_published = !!oldInfo.is_published;
       info.published_at = oldInfo.published_at || '';
       info.created_at = oldInfo.created_at || new Date().toISOString();
+      if (start_at == null && oldInfo.start_at != null) info.start_at = oldInfo.start_at;
+      if (end_at == null && oldInfo.end_at != null) info.end_at = oldInfo.end_at;
+      if (is_active == null && oldInfo.is_active != null) info.is_active = oldInfo.is_active;
+      if (status == null && oldInfo.status != null) info.status = oldInfo.status;
+      if (exclusive == null && oldInfo.exclusive != null) info.exclusive = oldInfo.exclusive;
+      if (allowed_users == null && oldInfo.allowed_users != null) info.allowed_users = oldInfo.allowed_users;
+      if (exclusive_users == null && oldInfo.exclusive_users != null) info.exclusive_users = oldInfo.exclusive_users;
+      if (target_users == null && oldInfo.target_users != null) info.target_users = oldInfo.target_users;
+      if (claim_limit == null && oldInfo.claim_limit != null) info.claim_limit = oldInfo.claim_limit;
+      if (limit == null && oldInfo.limit != null) info.limit = oldInfo.limit;
+      if (max_claims == null && oldInfo.max_claims != null) info.max_claims = oldInfo.max_claims;
       var { error: updateErr } = await supabase.from('posts')
         .update({ content: JSON.stringify(info) })
         .eq('id', id);
@@ -4131,6 +4261,66 @@ app.post('/admin/pro-gifts/delete', verifyToken, rateLimit(60000, 10), async (re
 // 用户：获取可领取的 Pro 赠送活动
 app.get('/api/pro-gifts/available', rateLimit(60000, 30), async (req, res) => {
   try {
+    var requestUserName = String(req.query.user_name || '').trim();
+    if (!requestUserName) return res.status(400).json({ error: '缺少用户名' });
+    var nowMs = Date.now();
+    var giftRowsResp = await supabase.from('posts')
+      .select('id, content, created_at')
+      .eq('media_type', PRO_GIFT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (giftRowsResp.error) return res.status(400).json({ error: sanitizeError(giftRowsResp.error) });
+    var rawGiftRows = giftRowsResp.data || [];
+    var rawGiftIds = rawGiftRows.map(function(row) { return String(row.id || '').trim(); }).filter(Boolean);
+    var claimRows = [];
+    if (rawGiftIds.length) {
+      var claimRowsResp = await supabase.from('posts')
+        .select('media_url, user_name')
+        .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+        .in('media_url', rawGiftIds)
+        .limit(5000);
+      if (claimRowsResp.error) return res.status(400).json({ error: sanitizeError(claimRowsResp.error) });
+      claimRows = claimRowsResp.data || [];
+    }
+    var claimedCounts = getProGiftClaimCounts(claimRows);
+    var userClaimedMap = {};
+    claimRows.forEach(function(row) {
+      if (String(row.user_name || '').trim() !== requestUserName) return;
+      userClaimedMap[String(row.media_url || '').trim()] = true;
+    });
+    var availableGifts = rawGiftRows.map(function(row) {
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      var giftId = String(row.id || '').trim();
+      var claimLimit = getProGiftClaimLimit(info);
+      var claimedCount = claimedCounts[giftId] || 0;
+      var remainingCount = claimLimit > 0 ? Math.max(claimLimit - claimedCount, 0) : null;
+      return {
+        id: row.id,
+        title: info.title || '',
+        description: info.description || '',
+        features: info.features || DEFAULT_GIFT_FEATURES,
+        duration_days: info.duration_days || 30,
+        claim_expire_at: info.claim_expire_at || '',
+        published_at: info.published_at || '',
+        start_at: info.start_at || '',
+        end_at: info.end_at || '',
+        already_claimed: !!userClaimedMap[giftId],
+        claimed_count: claimedCount,
+        remaining_count: remainingCount,
+        allowed_users: getProGiftAllowedUsers(info),
+        is_published: info.is_published === true,
+        status: info.status || '',
+        is_active: info.is_active
+      };
+    }).filter(function(campaign) {
+      return isProGiftCampaignPublished(campaign)
+        && isProGiftCampaignActive(campaign)
+        && isProGiftCampaignInTimeWindow(campaign, nowMs)
+        && isUserAllowedForProGift(campaign, requestUserName)
+        && (campaign.remaining_count === null || campaign.remaining_count > 0);
+    });
+    return res.json({ ok: true, gifts: availableGifts });
     var userName = String(req.query.user_name || '').trim();
     if (!userName) return res.status(400).json({ error: '缺少用户名' });
     var now = new Date().toISOString();
@@ -4177,6 +4367,106 @@ app.get('/api/pro-gifts/available', rateLimit(60000, 30), async (req, res) => {
 // 用户：领取 Pro 赠送活动
 app.post('/api/pro-gifts/claim', rateLimit(60000, 10), async (req, res) => {
   try {
+    var claimUserName = String((req.body && req.body.user_name) || '').trim();
+    var claimGiftId = String(((req.body && req.body.campaign_id) || (req.body && req.body.gift_id) || '')).trim();
+    if (!claimUserName) return res.status(400).json({ error: '缺少用户名' });
+    if (!claimGiftId) return res.status(400).json({ error: '缺少活动ID' });
+    var userExistsForGift = await verifyUserExists(claimUserName);
+    if (!userExistsForGift) return res.status(400).json({ error: '用户不存在' });
+    var claimNow = new Date();
+    var claimNowIso = claimNow.toISOString();
+    var claimNowMs = claimNow.getTime();
+    var giftResp = await supabase.from('posts')
+      .select('id, content')
+      .eq('id', claimGiftId)
+      .eq('media_type', PRO_GIFT_MARKER)
+      .maybeSingle();
+    if (giftResp.error) return res.status(400).json({ error: sanitizeError(giftResp.error) });
+    if (!giftResp.data) return res.status(404).json({ error: '活动不存在' });
+    var giftPayload = {};
+    try { giftPayload = JSON.parse(giftResp.data.content || '{}'); } catch(e) {}
+    if (!isProGiftCampaignPublished(giftPayload)) return res.status(400).json({ error: '活动未发布' });
+    if (!isProGiftCampaignActive(giftPayload)) return res.status(400).json({ error: '活动未启用' });
+    if (!isProGiftCampaignInTimeWindow(giftPayload, claimNowMs)) return res.status(400).json({ error: '活动已过期或未开始' });
+    if (!isUserAllowedForProGift(giftPayload, claimUserName)) return res.status(403).json({ error: '当前用户不在活动名单中' });
+    var existingClaimResp = await supabase.from('posts')
+      .select('id')
+      .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+      .eq('user_name', claimUserName)
+      .eq('media_url', claimGiftId)
+      .maybeSingle();
+    if (existingClaimResp.error) return res.status(400).json({ error: sanitizeError(existingClaimResp.error) });
+    if (existingClaimResp.data) return res.status(400).json({ error: '已领取过该活动' });
+    var claimLimitForGift = getProGiftClaimLimit(giftPayload);
+    if (claimLimitForGift > 0) {
+      var claimCountResp = await supabase.from('posts')
+        .select('id', { count: 'exact', head: true })
+        .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+        .eq('media_url', claimGiftId);
+      if (claimCountResp.error) return res.status(400).json({ error: sanitizeError(claimCountResp.error) });
+      var claimedCountNow = claimCountResp.count || 0;
+      if (claimedCountNow >= claimLimitForGift) {
+        return res.status(400).json({ error: '活动领取名额已满' });
+      }
+    }
+    var claimDurationDays = Math.min(3650, Math.max(1, parseInt(giftPayload.duration_days, 10) || 30));
+    var claimExpireAt = new Date(claimNowMs + claimDurationDays * 24 * 60 * 60 * 1000).toISOString();
+    var claimFeatures = Array.isArray(giftPayload.features) && giftPayload.features.length ? giftPayload.features : DEFAULT_GIFT_FEATURES;
+    var claimContentPayload = JSON.stringify({
+      campaign_id: claimGiftId,
+      campaign_title: giftPayload.title || '',
+      user_name: claimUserName,
+      claimed_at: claimNowIso,
+      vip_expire_at: claimExpireAt,
+      features: claimFeatures,
+      duration_days: claimDurationDays
+    });
+    var insertedClaimResp = await supabase.from('posts').insert([{
+      user_name: claimUserName,
+      media_type: PRO_GIFT_CLAIM_MARKER,
+      media_url: claimGiftId,
+      content: claimContentPayload,
+      actor_key: 'pro_claim_' + Date.now()
+    }]).select('id').maybeSingle();
+    if (insertedClaimResp.error) return res.status(400).json({ error: sanitizeError(insertedClaimResp.error) });
+    var vipContentPayload = JSON.stringify({
+      plan_id: 'pro_gift_' + claimGiftId,
+      plan_name: 'XTJ Pro (' + (giftPayload.title || '赠送') + ')',
+      price: 0,
+      is_active: true,
+      order_no: 'GIFT_' + Date.now(),
+      start_at: claimNowIso,
+      expire_at: claimExpireAt,
+      features: claimFeatures,
+      activated_at: claimNowIso,
+      source: 'pro_gift'
+    });
+    var vipInsertResp = await supabase.from('posts').insert([{
+      user_name: claimUserName,
+      media_type: VIP_MARKER,
+      media_url: 'pro_monthly',
+      content: vipContentPayload,
+      actor_key: 'vip_' + Date.now()
+    }]);
+    if (vipInsertResp.error) {
+      try {
+        if (insertedClaimResp.data && insertedClaimResp.data.id) {
+          await supabase.from('posts').delete().eq('id', insertedClaimResp.data.id);
+        }
+      } catch (rollbackErr) {
+        console.error('[ProGift] rollback claim failed:', rollbackErr.message);
+      }
+      return res.status(500).json({ error: sanitizeError(vipInsertResp.error) });
+    }
+    return res.json({
+      ok: true,
+      user_name: claimUserName,
+      plan_name: 'XTJ Pro (' + (giftPayload.title || '赠送') + ')',
+      expire_at: claimExpireAt,
+      is_active: true,
+      features: claimFeatures,
+      source: 'pro_gift'
+    });
     var { user_name, gift_id } = req.body;
     var userNameVal = String(user_name || '').trim();
     var giftId = String(gift_id || '').trim();
