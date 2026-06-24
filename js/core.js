@@ -89,6 +89,28 @@ const ADMIN_NAME = "xxz";
             const USER_SESSION_KEY = "xtj_user_session";
             const USER_SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
             const USER_SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
+            var USER_TOKEN_KEY = 'xtj_user_token';
+            var USER_TOKEN_TS_KEY = 'xtj_user_token_ts';
+
+            function getUserToken() {
+                var token = sessionStorage.getItem(USER_TOKEN_KEY) || localStorage.getItem(USER_TOKEN_KEY);
+                return token || '';
+            }
+
+            function setUserToken(token) {
+                if (token) {
+                    sessionStorage.setItem(USER_TOKEN_KEY, token);
+                    localStorage.setItem(USER_TOKEN_KEY, token);
+                    localStorage.setItem(USER_TOKEN_TS_KEY, Date.now());
+                }
+            }
+
+            function clearUserToken() {
+                try { sessionStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
+                try { localStorage.removeItem(USER_TOKEN_KEY); } catch(e) {}
+                try { localStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
+            }
+
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
 
@@ -195,10 +217,15 @@ const ADMIN_NAME = "xxz";
             if (!userName) return;
             if (typeof API_BASE !== 'undefined' && API_BASE) {
                 try {
+                    var userToken = getUserToken();
+                    var headers = { 'Content-Type': 'application/json' };
+                    if (userToken) headers['Authorization'] = 'Bearer ' + userToken;
+                    var body = { user_name: userName };
+                    if (!userToken) {
+                        body.password_hash = sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "";
+                    }
                     fetch(API_BASE + '/api/log-user-visit', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_name: userName, password_hash: sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "" })
+                        method: 'POST', headers: headers, body: JSON.stringify(body)
                     }).catch(function(){});
                 } catch(e) {}
             } else if (sb && !_visitLoggedToday) {
@@ -1570,6 +1597,21 @@ const ADMIN_NAME = "xxz";
                         try { sessionStorage.setItem("xtj_pw_hash", authRec.media_url); } catch(e) {}
                     }
 
+                    // 获取 JWT token（替代 password_hash 认证）
+                    try {
+                        var _pwHash = sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "";
+                        if (_pwHash && API_BASE && name !== ADMIN_NAME) {
+                            var tokenRes = await fetch(API_BASE + '/api/user/login', {
+                                method: 'POST', headers: {'Content-Type':'application/json'},
+                                body: JSON.stringify({ user_name: name, password_hash: _pwHash })
+                            });
+                            if (tokenRes.ok) {
+                                var tokenData = await tokenRes.json();
+                                if (tokenData.token) setUserToken(tokenData.token);
+                            }
+                        }
+                    } catch(e) {}
+
                     currentUser = name;
                     window.currentUser = currentUser;
                     localStorage.setItem("xtj_user", currentUser);
@@ -1650,6 +1692,19 @@ const ADMIN_NAME = "xxz";
                     localStorage.setItem("xtj_user", currentUser);
                     localStorage.setItem("xtj_pw_hash", pwHash);
                     try { sessionStorage.setItem("xtj_pw_hash", pwHash); } catch(e) {}
+                    // 获取 JWT token（替代 password_hash 认证）
+                    try {
+                        if (API_BASE) {
+                            var _regTokenRes = await fetch(API_BASE + '/api/user/login', {
+                                method: 'POST', headers: {'Content-Type':'application/json'},
+                                body: JSON.stringify({ user_name: name, password_hash: pwHash })
+                            });
+                            if (_regTokenRes.ok) {
+                                var _regTokenData = await _regTokenRes.json();
+                                if (_regTokenData.token) setUserToken(_regTokenData.token);
+                            }
+                        }
+                    } catch(e) {}
                     writeUserSession(currentUser, { resetLoginAt: true });
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
@@ -2120,6 +2175,7 @@ const ADMIN_NAME = "xxz";
                 });
                 // 也清理 sessionStorage 中的密码 hash
                 try { sessionStorage.removeItem("xtj_pw_hash"); } catch(e) {}
+                clearUserToken();
                 document.getElementById("loginNickInp").value = "";
                 document.getElementById("loginPwInp").value = "";
                 document.getElementById("regNickInp").value = "";

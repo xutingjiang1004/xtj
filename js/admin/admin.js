@@ -171,6 +171,7 @@
     // ===================== Token 管理（前后端共享，仅用于 API 鉴权） =====================
     var TOKEN_SALT = 'xtj_7k3m';
 
+    // localStorage存储（非安全措施，仅防明文泄露）
     function _obfuscateToken(raw) {
         if (!raw) return '';
         var result = '';
@@ -238,6 +239,7 @@
     var allPosts = [], allLikes = [], allComments = [], allUsers = [], annList = [], allLoginEvents = [], allSecurityAlerts = [], allAuditLogs = [], allErrorLogs = [];
     var adminDataLoadedAt = 0;
     var adminDataLoading = false;
+    var adminTabDataLoaded = {};
     var searchUser = '', searchPost = '';
 
     function getTabDomName(tab) {
@@ -600,8 +602,8 @@ async function initAdminClient() {
         resetActivityTimer();
         saveSession();
         ensureRegisterAlertBadge();
-        startSessionTimeoutMonitor(); // 启动 24 小时无操作自动退出
-        installAdminTabDoubleClickRefresh(); // 启动双击 Tab 刷新
+        startSessionTimeoutMonitor();
+        installAdminTabDoubleClickRefresh();
         
         var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos'];
         var savedTab = localStorage.getItem(TAB_KEY);
@@ -623,7 +625,11 @@ async function initAdminClient() {
         }
         startRegisterAlertPolling();
 
-        // 启动举报轮询（每 30 秒检查新举报）
+        setTimeout(function() {
+            var lazyTabs = ['users', 'security', 'audit', 'errorlog', 'photos'];
+            lazyTabs.forEach(function(t) { loadTabDataIfNeeded(t); });
+        }, 500);
+
         _adminReportPollTimer = setInterval(async function() {
             var prevLen = reportsData.length;
             await loadReportsData();
@@ -698,6 +704,7 @@ async function initAdminClient() {
         });
         allPosts = []; allLikes = []; allComments = []; allUsers = [];
         annList = [];
+        adminTabDataLoaded = {}
         clearSession();
         document.getElementById('loginWrap').style.display = 'flex';
         document.getElementById('dashboard').style.display = 'none';
@@ -726,7 +733,6 @@ async function initAdminClient() {
             if (!API_BASE || !getToken()) {
                 throw new Error('API 未配置或未登录，拒绝加载数据');
             }
-            // 通过 API 加载数据（安全：仅服务端密钥可访问敏感数据）
             var apiData = await apiCall('GET', '/admin/data');
             var postData = apiData.posts || [];
                 allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER && p.media_type !== AUDIT_LOG_MARKER && p.media_type !== CLIENT_ERROR_MARKER; });
@@ -737,88 +743,118 @@ async function initAdminClient() {
             bansData = apiData.bans || [];
             mutesData = apiData.mutes || [];
             blacklistData = apiData.blacklist || [];
+            adminTabDataLoaded.posts = true;
+            adminTabDataLoaded.likes = true;
+            adminTabDataLoaded.comments = true;
+            adminTabDataLoaded.anns = true;
+            adminTabDataLoaded.bans = true;
+            adminTabDataLoaded.mutes = true;
 
             var userMap = {};
             allPosts.forEach(function(p) { userMap[p.user_name] = true; });
             allLikes.forEach(function(l) { userMap[l.user_name] = true; });
             allComments.forEach(function(c) { userMap[c.user_name] = true; });
             
-            // 加载用户信息（仅通过 API）
-            var userInfoList = [];
-            try { 
-                var userRes = await apiCall('GET', '/admin/users'); 
-                userInfoList = userRes.data || []; 
-            } catch(e) {
-                console.warn('[admin] 加载用户信息失败:', e.message);
-            }
-            
-            var userInfoMap = {};
-            userInfoList.forEach(function(ui) {
-                try {
-                    var info = JSON.parse(ui.content || '{}');
-                    userInfoMap[ui.user_name] = mergeAdminUserInfo(userInfoMap[ui.user_name], info);
-                    userMap[ui.user_name] = true;
-                } catch(e) {}
-            });
-            
             allUsers = Object.keys(userMap).sort().map(function(u) {
                 return {
                     name: u,
-                    info: userInfoMap[u] || null
+                    info: null
                 };
             });
-
-            // 加载登录事件记录
-            try {
-                var loginRes = await apiCall('GET', '/admin/login-events');
-                allLoginEvents = loginRes.data || [];
-            } catch(e) {
-                allLoginEvents = [];
-            }
-
-            // 加载安全提醒
-            try {
-                var secRes = await apiCall('GET', '/admin/security-alerts');
-                allSecurityAlerts = secRes.data || [];
-            } catch(e) {
-                allSecurityAlerts = [];
-            }
-
-            // 加载安全设置
-            try {
-                var settingsRes = await apiCall('GET', '/admin/security-settings');
-                if (settingsRes && settingsRes.settings) securitySettings = settingsRes.settings;
-            } catch(e) {}
-
-            // 加载审计日志
-            try {
-                var auditRes = await apiCall('GET', '/admin/audit-logs');
-                allAuditLogs = auditRes.data || [];
-            } catch(e) {
-                allAuditLogs = [];
-            }
-
-            // 加载错误日志
-            try {
-                var errorRes = await apiCall('GET', '/admin/error-logs');
-                allErrorLogs = errorRes.data || [];
-            } catch(e) {
-                allErrorLogs = [];
-            }
-
-            // 数据已经在 /admin/data 中加载，不需要单独加载
-            await loadPhotosAdminData();
 
             if (!keepTab) {
                 switchTab('ann');
             } else {
-                renderTab(currentTab);
+                await loadTabDataIfNeeded(currentTab);
+                window.renderTab(currentTab);
             }
             adminDataLoadedAt = Date.now();
         } catch(e) {
             showToast('数据加载失败，请刷新重试', 'error');
         } finally {
             adminDataLoading = false;
+        }
+    }
+
+    async function loadTabDataIfNeeded(tab) {
+        var normalized = tab === 'blacklist' ? 'bans' : tab;
+        var tabDataMap = {
+            'ann': { key: 'anns' },
+            'posts': { key: 'posts' },
+            'likes': { key: 'likes' },
+            'comments': { key: 'comments' },
+            'bans': { key: 'bans' },
+            'mutes': { key: 'mutes' },
+            'reports': { key: 'reports' },
+            'stats': { key: 'stats' },
+            'users': { key: 'users', loaders: ['users', 'logins'] },
+            'uservisit': { key: 'users', loaders: ['users', 'logins'] },
+            'security': { key: 'security-alerts', loaders: ['security-alerts', 'security-settings'] },
+            'audit': { key: 'audit-logs' },
+            'errorlog': { key: 'error-logs' },
+            'photos': { key: 'photos' },
+            'logins': { key: 'login-events' },
+            'errors': { key: 'error-logs' }
+        };
+        var info = tabDataMap[normalized];
+        if (!info) return;
+        if (info.loaders) {
+            for (var i = 0; i < info.loaders.length; i++) {
+                await _loadSingleDataType(info.loaders[i]);
+            }
+        } else {
+            await _loadSingleDataType(info.key);
+        }
+    }
+
+    async function _loadSingleDataType(dataType) {
+        if (adminTabDataLoaded[dataType]) return;
+        try {
+            if (dataType === 'users') {
+                var userRes = await apiCall('GET', '/admin/users');
+                var userInfoList = userRes.data || [];
+                var userMap = {};
+                allUsers.forEach(function(u) { userMap[u.name] = u; });
+                userInfoList.forEach(function(ui) {
+                    try {
+                        var info = JSON.parse(ui.content || '{}');
+                        var existing = userMap[ui.user_name];
+                        if (existing) {
+                            existing.info = mergeAdminUserInfo(existing.info, info);
+                        } else {
+                            var newUser = { name: ui.user_name, info: mergeAdminUserInfo(null, info) };
+                            allUsers.push(newUser);
+                            userMap[ui.user_name] = newUser;
+                        }
+                    } catch(e) {}
+                });
+                adminTabDataLoaded.users = true;
+            } else if (dataType === 'logins' || dataType === 'login-events') {
+                var loginRes = await apiCall('GET', '/admin/login-events');
+                allLoginEvents = loginRes.data || [];
+                adminTabDataLoaded['login-events'] = true;
+            } else if (dataType === 'security-alerts') {
+                var secRes = await apiCall('GET', '/admin/security-alerts');
+                allSecurityAlerts = secRes.data || [];
+                adminTabDataLoaded['security-alerts'] = true;
+            } else if (dataType === 'security-settings') {
+                var settingsRes = await apiCall('GET', '/admin/security-settings');
+                if (settingsRes && settingsRes.settings) securitySettings = settingsRes.settings;
+                adminTabDataLoaded['security-settings'] = true;
+            } else if (dataType === 'audit-logs') {
+                var auditRes = await apiCall('GET', '/admin/audit-logs');
+                allAuditLogs = auditRes.data || [];
+                adminTabDataLoaded['audit-logs'] = true;
+            } else if (dataType === 'error-logs') {
+                var errorRes = await apiCall('GET', '/admin/error-logs');
+                allErrorLogs = errorRes.data || [];
+                adminTabDataLoaded['error-logs'] = true;
+            } else if (dataType === 'photos') {
+                await loadPhotosAdminData();
+                adminTabDataLoaded.photos = true;
+            }
+        } catch(e) {
+            console.warn('[admin] 懒加载数据失败:', dataType, e.message);
         }
     }
 
@@ -3079,7 +3115,6 @@ async function initAdminClient() {
         if (normalized === 'users') {
             await markRegisterAlertsRead();
         }
-        // 切换到举报管理时清除红点
         if (normalized === 'reports') {
             var badge = document.getElementById('reportBadge');
             if (badge) badge.style.display = 'none';
@@ -3094,16 +3129,8 @@ async function initAdminClient() {
         var btn = document.getElementById('tab' + getTabDomName(normalized) + 'Btn');
         if (panel) panel.classList.add('active');
         if (btn) btn.classList.add('active');
+        await loadTabDataIfNeeded(normalized);
         window.renderTab(normalized);
-
-        // 后台刷新数据，刷新完成后重渲染当前 tab
-        if (!adminDataLoading) {
-            try {
-                await loadAllData(true);
-            } catch(e) {
-                showToast('刷新数据失败：' + e.message, 'error');
-            }
-        }
     };
 
     window.renderTab = function(tab) {
@@ -4196,6 +4223,18 @@ async function initAdminClient() {
                 resultEl.innerHTML = detailHtml;
                 showToast(msg);
                 emailClearDraft();
+            } else if (data.hint) {
+                resultEl.className = 'send-result error';
+                var hintHtml = '⚠️ 全部发送失败';
+                if (data.failed && data.failed.length) {
+                    hintHtml += '<div style="margin-top:6px;font-size:12px;">';
+                    data.failed.forEach(function(f) {
+                        hintHtml += '<div style="padding:2px 0;">❌ ' + escapeHtml(f.user) + ': ' + escapeHtml(f.error || '未知错误') + '</div>';
+                    });
+                    hintHtml += '</div>';
+                }
+                hintHtml += '<div style="margin-top:8px;padding:8px;background:rgba(47,109,246,0.06);border-radius:6px;font-size:12px;color:var(--text-secondary);">💡 ' + escapeHtml(data.hint) + '</div>';
+                resultEl.innerHTML = hintHtml;
             } else {
                 resultEl.className = 'send-result error';
                 resultEl.textContent = '发送失败: ' + (data.error || '未知错误');

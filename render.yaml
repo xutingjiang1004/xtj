@@ -45,12 +45,16 @@ services:
       - key: ALLOWED_ORIGINS
         value: ""
       
-      # ⚠️ Resend 邮件发送配置 — 在 Render Dashboard 手动设置
-      # 注册 https://resend.com → 验证域名 → 获取 API Key
-      - key: RESEND_API_KEY
+      # ⚠️ Gmail SMTP 邮件发送配置 — 在 Render Dashboard 手动设置
+      # Gmail 邮箱地址
+      - key: GMAIL_USER
         sync: false
-      # 发件人邮箱（必须使用已验证的域名，如 通知@你的域名.com）
-      - key: FROM_EMAIL
+      # Gmail 应用专用密码（非邮箱登录密码）
+      # 获取方式：https://myaccount.google.com/apppasswords → 选择"邮件" → 生成
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      # SMTP 端口（465=SSL 推荐，587=STARTTLS）
+      - key: SMTP_PORT
         sync: false
 
 # 部署后验证：
