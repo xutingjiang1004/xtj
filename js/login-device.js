@@ -516,7 +516,9 @@
                 deviceId = localStorage.getItem('xtj_device_id');
             } catch(e) { return; }
 
-            if (!userName || !passwordHash || !deviceId) return;
+            if (!userName || !deviceId) return;
+            var userToken = typeof getUserToken === 'function' ? getUserToken() : '';
+            if (!passwordHash && !userToken) return;
 
             // 15s localStorage 冷却
             var visitKey = 'xtj_login_visit_last_' + userName + '_' + deviceId;
