@@ -577,9 +577,10 @@
         backdrop-filter: blur(8px) saturate(1.08);
         -webkit-backdrop-filter: blur(8px) saturate(1.08);
     }
-    .admin-detail-dialog {
-        width: min(96vw, 980px);
-        max-height: 82vh;
+    .modal-dialog.admin-detail-dialog {
+        width: min(96vw, 1120px) !important;
+        max-width: 1120px !important;
+        max-height: min(86vh, 860px);
         padding: 0 !important;
         display: flex;
         flex-direction: column;
@@ -616,6 +617,8 @@
         flex: 1 1 auto;
         min-height: 0;
         overflow-y: auto;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
         padding: 16px 24px 24px;
         scrollbar-width: none;
         -ms-overflow-style: none;
@@ -625,6 +628,7 @@
     }
     .admin-user-detail-content {
         padding: 0;
+        min-width: 0;
     }
     #userLoginDetail > .card > div,
     .admin-user-detail-content {
@@ -632,15 +636,25 @@
     }
     .admin-user-detail-content table,
     #userLoginDetail table {
-        min-width: 920px;
+        min-width: 960px;
     }
     [data-theme="dark"] .admin-detail-overlay {
         background: rgba(0, 0, 0, 0.26) !important;
     }
-    [data-theme="dark"] .admin-detail-dialog {
+    [data-theme="dark"] .modal-dialog.admin-detail-dialog {
         background: rgba(30, 30, 45, 0.82);
         border-color: rgba(255,255,255,0.08);
         box-shadow: 0 22px 70px rgba(0, 0, 0, 0.32);
+    }
+    @media (max-width: 720px) {
+        .modal-dialog.admin-detail-dialog {
+            width: calc(100vw - 20px) !important;
+            max-width: none !important;
+            max-height: calc(100dvh - 20px);
+        }
+        .admin-detail-body {
+            padding: 12px 14px 18px;
+        }
     }
     .modal-dialog {
         background: var(--card-bg); border: 1px solid var(--border);

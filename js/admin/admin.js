@@ -10,10 +10,47 @@
     var SECURITY_ALERT_MARKER = '__security_alert__';
     var AUDIT_LOG_MARKER = '__admin_audit__';
     var CLIENT_ERROR_MARKER = '__client_error__';
+    var USER_VISIT_MARKER = '__user_visit__';
+    var LOGIN_EVENT_MARKER = '__login_event__';
+    var VIP_MARKER = '__vip__';
+    var VIP_ORDER_MARKER = '__vip_order__';
+    var VIP_PLAN_MARKER = '__vip_plan__';
+    var PRO_GIFT_MARKER = '__pro_gift__';
+    var PRO_GIFT_CLAIM_MARKER = '__pro_gift_claim__';
+    var EMAIL_SENT_MARKER = '__email_sent__';
+    var EMAIL_RECIPIENT_HISTORY_MARKER = '__email_recipient_history__';
     var SESSION_KEY = "xtj_admin_session";
     var TOKEN_KEY = "xtj_admin_token";
     var TAB_KEY = "xtj_admin_tab";
     var ADMIN = '';
+
+    function isSystemAdminPostMediaType(mediaType) {
+        var type = String(mediaType || '');
+        return [
+            AUTH_MARKER,
+            ADMIN_AUTH_MARKER,
+            DM_MARKER,
+            REPORT_MARKER,
+            '__avatar__',
+            '__user_info__',
+            '__photo_wall__',
+            '__visit__',
+            '__attack__',
+            USER_VISIT_MARKER,
+            ANN_MARKER,
+            VIP_MARKER,
+            VIP_ORDER_MARKER,
+            VIP_PLAN_MARKER,
+            PRO_GIFT_MARKER,
+            PRO_GIFT_CLAIM_MARKER,
+            LOGIN_EVENT_MARKER,
+            SECURITY_ALERT_MARKER,
+            AUDIT_LOG_MARKER,
+            CLIENT_ERROR_MARKER,
+            EMAIL_SENT_MARKER,
+            EMAIL_RECIPIENT_HISTORY_MARKER
+        ].indexOf(type) >= 0;
+    }
 
 
     // 根据 iOS/Safari 可见参数推测 iPhone 疑似型号；仅供管理员后台辅助判断，非精确识别
@@ -670,7 +707,7 @@ async function initAdminClient() {
             // 通过 API 加载数据（安全：仅服务端密钥可访问敏感数据）
             var apiData = await apiCall('GET', '/admin/data');
             var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER && p.media_type !== AUDIT_LOG_MARKER && p.media_type !== CLIENT_ERROR_MARKER; });
+                allPosts = postData.filter(function(p) { return !isSystemAdminPostMediaType(p && p.media_type); });
             annList = apiData.announcements || [];
             allLikes = apiData.likes || [];
             allComments = apiData.comments || [];
@@ -1200,8 +1237,8 @@ async function initAdminClient() {
                 if (latestLoginEvent) {
                     deviceCell = escapeHtml((latestLoginEvent.info.device_type || '?') + ' · ' + (latestLoginEvent.info.os || '?') + ' · ' + (latestLoginEvent.info.browser || '?'));
                     ipCell = escapeHtml(latestLoginEvent.info.ip || '-');
-                    if (latestLoginEvent.info.ip_location && latestLoginEvent.info.ip_location.text) {
-                        regionCellV1 = escapeHtml(latestLoginEvent.info.ip_location.text);
+                    if (latestLoginEvent.info.ip_location) {
+                        regionCellV1 = escapeHtml(getAdminLocationText(latestLoginEvent.info.ip_location));
                     }
                     latestLoginTimeV1 = latestLoginEvent.info.login_at || (latestLoginEvent.raw && latestLoginEvent.raw.created_at) || '';
                     deviceCell = '<a href="#" onclick="showUserLoginDetail(\'' + safeName + '\');return false;" style="color:var(--primary);text-decoration:underline;">' + deviceCell + '</a>';
@@ -1300,7 +1337,7 @@ async function initAdminClient() {
             try {
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
-                allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER && p.media_type !== AUDIT_LOG_MARKER && p.media_type !== CLIENT_ERROR_MARKER; });
+                allPosts = postData.filter(function(p) { return !isSystemAdminPostMediaType(p && p.media_type); });
                 annList = apiData.announcements || [];
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
@@ -1310,7 +1347,7 @@ async function initAdminClient() {
                 blacklistData = apiData.blacklist || [];
             } catch(e) {}
         }
-        var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__' && p.media_type !== REPORT_MARKER; });
+        var visiblePosts = allPosts.filter(function(p) { return !isSystemAdminPostMediaType(p && p.media_type); });
         var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
         h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
         var filtered = visiblePosts;
@@ -1349,7 +1386,7 @@ async function initAdminClient() {
 
     async function renderLikesTab(el) {
         if (API_BASE && getToken()) {
-            try { var apiData = await apiCall('GET', '/admin/data'); allLikes = apiData.likes || []; allPosts = (apiData.posts || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER; }); } catch(e) {}
+            try { var apiData = await apiCall('GET', '/admin/data'); allLikes = apiData.likes || []; allPosts = (apiData.posts || []).filter(function(p) { return !isSystemAdminPostMediaType(p && p.media_type); }); } catch(e) {}
         }
         var h = '<div class="card"><h3>点赞记录（' + allLikes.length + '条）</h3>';
         if (!allLikes.length) { h += '<div class="empty">暂无点赞数据</div>'; }
@@ -2940,8 +2977,8 @@ async function initAdminClient() {
                         var lc = JSON.parse(latestEvent.content || '{}');
                         var deviceText = escapeHtml((lc.device_type || '?') + ' · ' + (lc.os || '?') + ' · ' + (lc.browser || '?'));
                         ipCell = escapeHtml(lc.ip || '-');
-                        if (lc.ip_location && lc.ip_location.text) {
-                            regionCell = escapeHtml(lc.ip_location.text);
+                        if (lc.ip_location) {
+                            regionCell = escapeHtml(getAdminLocationText(lc.ip_location));
                         }
                         latestLoginTime = lc.login_at || latestEvent.created_at || '';
                         var escapedName = u.name.replace(/'/g, "\\'");
@@ -3087,7 +3124,7 @@ async function initAdminClient() {
             try {
                 var apiData = await apiCall('GET', '/admin/data');
                 allPosts = (apiData.posts || []).filter(function(p) {
-                    return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER;
+                    return !isSystemAdminPostMediaType(p && p.media_type);
                 });
                 allLikes = apiData.likes || [];
                 allComments = apiData.comments || [];
@@ -3097,7 +3134,7 @@ async function initAdminClient() {
                 blacklistData = apiData.blacklist || [];
             } catch(e) {}
         }
-        var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__' && p.media_type !== REPORT_MARKER; });
+        var visiblePosts = allPosts.filter(function(p) { return !isSystemAdminPostMediaType(p && p.media_type); });
         var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
         h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
         var filtered = visiblePosts;
@@ -3134,7 +3171,7 @@ async function initAdminClient() {
                 var apiData = await apiCall('GET', '/admin/data');
                 allLikes = apiData.likes || [];
                 allPosts = (apiData.posts || []).filter(function(p) {
-                    return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER;
+                    return !isSystemAdminPostMediaType(p && p.media_type);
                 });
             } catch(e) {}
         }
@@ -3504,6 +3541,116 @@ async function initAdminClient() {
     }
 
     // 登录设备详情展示
+    var ADMIN_LOCATION_MAP = {
+        'China': '中国',
+        'Guangdong': '广东',
+        'Guangzhou': '广州',
+        'Zhejiang': '浙江',
+        'Hangzhou': '杭州',
+        'Huzhou': '湖州',
+        'Shanghai': '上海',
+        'Beijing': '北京',
+        'Jiangsu': '江苏',
+        'Nanjing': '南京',
+        'Shenzhen': '深圳',
+        'Chengdu': '成都',
+        'Sichuan': '四川',
+        'Hong Kong': '香港',
+        'Macao': '澳门',
+        'Macau': '澳门',
+        'Singapore': '新加坡',
+        'South Korea': '韩国',
+        'Korea': '韩国',
+        'Seoul': '首尔',
+        'Japan': '日本',
+        'Tokyo': '东京'
+    };
+
+    function getLoginRecordModelText(info) {
+        info = info || {};
+        if (info.exact_device_model) return info.exact_device_model;
+        var savedModel = info.possible_device_model || (info.device_meta && info.device_meta.possible_device_model);
+        if (savedModel) return savedModel;
+        var deviceType = String(info.device_type || '').toLowerCase();
+        var ua = String(info.user_agent || '');
+        var meta = info.device_meta || {};
+        var platform = String(meta.platform || info.platform || '');
+        var isIPhone = deviceType.indexOf('iphone') >= 0 || /iPhone/i.test(ua);
+        if (isIPhone) return getPossibleDeviceModel(info) || 'iPhone（型号不可确定）';
+        var isDesktop = deviceType.indexOf('desktop') >= 0 || /Windows|Macintosh|Linux/i.test(ua) || /Win|Mac|Linux/i.test(platform);
+        if (isDesktop) return '-';
+        return '-';
+    }
+
+    function translateAdminLocationPart(value) {
+        var text = String(value || '').trim();
+        if (!text) return '';
+        return ADMIN_LOCATION_MAP[text] || text;
+    }
+
+    function parseAdminLocationString(text) {
+        var value = String(text || '').trim();
+        if (!value) return null;
+        var parts = value.split(/\s*[·路,|/]\s*/).map(function(part) {
+            return String(part || '').trim();
+        }).filter(Boolean);
+        if (!parts.length) return null;
+        return { country: parts[0] || '', region: parts[1] || '', city: parts[2] || '' };
+    }
+
+    function adminFormatLocation(location) {
+        if (!location) return '未知';
+        if (typeof location === 'object') {
+            if (location.display_text) return String(location.display_text);
+            if (location.localized_text) return String(location.localized_text);
+            var country = String(location.country || '').trim();
+            var region = String(location.region || '').trim();
+            var city = String(location.city || '').trim();
+            var zhCountry = translateAdminLocationPart(country);
+            var zhRegion = translateAdminLocationPart(region);
+            var zhCity = translateAdminLocationPart(city);
+            var isChina = /^(china|中国)$/i.test(country) || zhCountry === '中国';
+            var result = [];
+            if (isChina) {
+                if (zhRegion) result.push(zhRegion);
+                if (zhCity && zhCity !== zhRegion) result.push(zhCity);
+                if (!result.length && zhCountry) result.push(zhCountry);
+            } else {
+                if (zhCountry) result.push(zhCountry);
+                if (zhRegion && zhRegion !== zhCountry) result.push(zhRegion);
+                if (zhCity && zhCity !== zhRegion && zhCity !== zhCountry) result.push(zhCity);
+            }
+            if (result.length) return result.join(' · ');
+            if (location.text) return adminFormatLocation(String(location.text));
+            return '未知';
+        }
+        var parsed = parseAdminLocationString(location);
+        if (parsed) return adminFormatLocation(parsed);
+        return translateAdminLocationPart(location) || '未知';
+    }
+
+    function getAdminLocationText(location) {
+        if (!location) return '-';
+        if (typeof location === 'object') {
+            return String(location.display_text || location.localized_text || adminFormatLocation(location) || '-');
+        }
+        return adminFormatLocation(location);
+    }
+
+    function getAdminLocationHint(location) {
+        if (!location || typeof location !== 'object') return '';
+        var hints = [];
+        if (location.is_proxy || location.is_hosting) hints.push('代理/VPN/机房，位置可能不准');
+        if (location.is_mobile) hints.push('移动网络，位置可能偏移');
+        return hints.join('；');
+    }
+
+    function buildAdminLocationHtml(location) {
+        var text = getAdminLocationText(location);
+        var hint = getAdminLocationHint(location);
+        return escapeHtml(text || '未知') + (hint ? '<div style="margin-top:3px;font-size:11px;color:var(--text-muted);">' + escapeHtml(hint) + '</div>' : '');
+    }
+
     window.showUserLoginDetail = function(userName) {
         var box = document.getElementById('userLoginDetail');
         if (!box) return;
@@ -3606,7 +3753,7 @@ async function initAdminClient() {
             '<th style="padding:6px 8px;text-align:left;">登录时间</th>' +
             '<th style="padding:6px 8px;text-align:left;">来源</th>' +
             '<th style="padding:6px 8px;text-align:left;">设备类型</th>' +
-            '<th style="padding:6px 8px;text-align:left;">疑似型号</th>' +
+            '<th style="padding:6px 8px;text-align:left;">设备型号</th>' +
             '<th style="padding:6px 8px;text-align:left;">系统</th>' +
             '<th style="padding:6px 8px;text-align:left;">浏览器</th>' +
             '<th style="padding:6px 8px;text-align:left;">IP</th>' +
@@ -3618,7 +3765,7 @@ async function initAdminClient() {
         userEvents.forEach(function(ev) {
             var loginTime = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
             var srcLabel = sourceLabels[ev.info.source] || '登录记录';
-            var locText = (ev.info.ip_location && ev.info.ip_location.text) ? escapeHtml(ev.info.ip_location.text) : '暂未解析';
+            var locText = buildAdminLocationHtml(ev.info.ip_location || null);
             var fullIp = ev.info.ip || '-';
             var possibleModel = getLoginRecordModelText(ev.info);
             var asnIsp = '-';
@@ -3800,7 +3947,7 @@ async function initAdminClient() {
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近登录</span><br>' + escapeHtml(userInfo.last_login ? formatTime(userInfo.last_login) : '-') + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近访问</span><br>' + escapeHtml(userInfo.last_visit ? formatTime(userInfo.last_visit) : '-') + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近IP</span><br>' + escapeHtml(userInfo.last_ip || '-') + '</div>';
-        html += '<div><span style="font-size:11px;color:var(--text-muted);">地区</span><br>' + escapeHtml((userInfo.last_ip_location && userInfo.last_ip_location.text) || '-') + '</div>';
+        html += '<div><span style="font-size:11px;color:var(--text-muted);">地区</span><br>' + buildAdminLocationHtml(userInfo.last_ip_location || null) + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">最近设备</span><br>' + escapeHtml((userInfo.last_device || '-').slice(0, 40)) + '</div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">设备ID</span><br><span style="font-size:11px;font-family:monospace;">' + escapeHtml((userInfo.last_device_id || (userEvents[0] && userEvents[0].info.device_id) || '-').slice(0, 16)) + '...</span></div>';
         html += '<div><span style="font-size:11px;color:var(--text-muted);">浏览器指纹</span><br><span style="font-size:11px;font-family:monospace;">' + (latestFp.browser_fingerprint_hash ? escapeHtml(latestFp.browser_fingerprint_hash.slice(0, 16)) + '...' : '-') + '</span></div>';
@@ -3831,7 +3978,7 @@ async function initAdminClient() {
             html += '<div class="empty">暂无登录记录</div>';
         } else {
             html += '<div style="max-height:200px;overflow-y:auto;margin-bottom:12px;"><table style="width:100%;font-size:11px;border-collapse:collapse;">';
-            html += '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);"><th style="padding:4px 6px;text-align:left;">时间</th><th style="padding:4px 6px;text-align:left;">来源</th><th style="padding:4px 6px;text-align:left;">设备</th><th style="padding:4px 6px;text-align:left;">疑似型号</th><th style="padding:4px 6px;text-align:left;">IP</th><th style="padding:4px 6px;text-align:left;">地区</th></tr></thead><tbody>';
+            html += '<thead><tr style="border-bottom:1px solid rgba(0,0,0,0.1);"><th style="padding:4px 6px;text-align:left;">时间</th><th style="padding:4px 6px;text-align:left;">来源</th><th style="padding:4px 6px;text-align:left;">设备</th><th style="padding:4px 6px;text-align:left;">设备型号</th><th style="padding:4px 6px;text-align:left;">IP</th><th style="padding:4px 6px;text-align:left;">地区</th></tr></thead><tbody>';
             var sourceLabelsV2 = { 'login_success': '登录', 'page_visit': '访问', 'register_success': '注册', 'admin_login': '管理' };
             userEvents.slice(0, 10).forEach(function(ev) {
                 var lt = ev.info.login_at || (ev.raw && ev.raw.created_at) || '';
@@ -3842,7 +3989,7 @@ async function initAdminClient() {
                 html += '<td style="padding:4px 6px;">' + escapeHtml(((ev.info.device_type || '') + ' ' + (ev.info.os || '')).slice(0, 20)) + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(vm) + '</td>';
                 html += '<td style="padding:4px 6px;">' + escapeHtml(ev.info.ip || '-') + '</td>';
-                html += '<td style="padding:4px 6px;">' + escapeHtml((ev.info.ip_location && ev.info.ip_location.text) || '-') + '</td>';
+                html += '<td style="padding:4px 6px;">' + buildAdminLocationHtml(ev.info.ip_location || null) + '</td>';
                 html += '</tr>';
             });
             html += '</tbody></table></div>';

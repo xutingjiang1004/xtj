@@ -72,6 +72,13 @@ const LOGIN_EVENT_MARKER = '__login_event__';
 const SECURITY_ALERT_MARKER = '__security_alert__';
 const AUDIT_LOG_MARKER = '__admin_audit__';
 const CLIENT_ERROR_MARKER = '__client_error__';
+const VIP_MARKER = '__vip__';
+const VIP_ORDER_MARKER = '__vip_order__';
+const VIP_PLAN_MARKER = '__vip_plan__';
+const PRO_GIFT_MARKER = '__pro_gift__';
+const PRO_GIFT_CLAIM_MARKER = '__pro_gift_claim__';
+const EMAIL_SENT_MARKER = '__email_sent__';
+const EMAIL_RECIPIENT_HISTORY_MARKER = '__email_recipient_history__';
 const LOGIN_LOG_RETENTION_DAYS = 90;
 const SECURITY_LOG_RETENTION_DAYS = 90;
 const ERROR_LOG_RETENTION_DAYS = 30;
@@ -81,6 +88,33 @@ let statsCache = { data: null, ts: 0, pending: null };
 const STATS_CACHE_TTL = 60000; // 1分钟
 
 // 记录访问日志
+function applyPublicPostExclusions(query) {
+  return query
+    .neq('media_type', '__avatar__')
+    .neq('media_type', USER_INFO_MARKER)
+    .neq('media_type', '__photo_wall__')
+    .neq('media_type', '__ann__')
+    .neq('media_type', VIP_MARKER)
+    .neq('media_type', VIP_ORDER_MARKER)
+    .neq('media_type', VIP_PLAN_MARKER)
+    .neq('media_type', PRO_GIFT_MARKER)
+    .neq('media_type', PRO_GIFT_CLAIM_MARKER)
+    .neq('media_type', REPORT_MARKER)
+    .neq('media_type', DM_MARKER)
+    .neq('media_type', AUTH_MARKER)
+    .neq('media_type', ADMIN_AUTH_MARKER)
+    .neq('media_type', ADMIN_META_MARKER)
+    .neq('media_type', VISIT_MARKER)
+    .neq('media_type', ATTACK_MARKER)
+    .neq('media_type', USER_VISIT_MARKER)
+    .neq('media_type', LOGIN_EVENT_MARKER)
+    .neq('media_type', SECURITY_ALERT_MARKER)
+    .neq('media_type', CLIENT_ERROR_MARKER)
+    .neq('media_type', AUDIT_LOG_MARKER)
+    .neq('media_type', EMAIL_SENT_MARKER)
+    .neq('media_type', EMAIL_RECIPIENT_HISTORY_MARKER);
+}
+
 async function logVisit(ip) {
   try {
     const today = new Date().toISOString().slice(0, 10);
@@ -642,6 +676,63 @@ async function logAdminLoginEvent(req) {
 }
 
 // IP 地区解析（多源 fallback: ip-api.com → ipapi.co → ipwho.is）
+const IP_LOCATION_LOCALIZED_MAP = {
+  'China': '中国',
+  'Guangdong': '广东',
+  'Guangzhou': '广州',
+  'Zhejiang': '浙江',
+  'Hangzhou': '杭州',
+  'Huzhou': '湖州',
+  'Shanghai': '上海',
+  'Beijing': '北京',
+  'Jiangsu': '江苏',
+  'Nanjing': '南京',
+  'Shenzhen': '深圳',
+  'Chengdu': '成都',
+  'Sichuan': '四川',
+  'Hong Kong': '香港',
+  'Macao': '澳门',
+  'Macau': '澳门',
+  'Singapore': '新加坡',
+  'South Korea': '韩国',
+  'Korea': '韩国',
+  'Seoul': '首尔',
+  'Japan': '日本',
+  'Tokyo': '东京'
+};
+
+function localizeIpLocationPart(value) {
+  var text = String(value || '').trim();
+  if (!text) return '';
+  return IP_LOCATION_LOCALIZED_MAP[text] || text;
+}
+
+function buildIpLocationDisplay(country, region, city) {
+  var rawCountry = String(country || '').trim();
+  var rawRegion = String(region || '').trim();
+  var rawCity = String(city || '').trim();
+  var zhCountry = localizeIpLocationPart(rawCountry);
+  var zhRegion = localizeIpLocationPart(rawRegion);
+  var zhCity = localizeIpLocationPart(rawCity);
+  var isChina = /^(china|中国)$/i.test(rawCountry) || zhCountry === '中国';
+  var localizedParts = [];
+  if (isChina) {
+    if (zhRegion) localizedParts.push(zhRegion);
+    if (zhCity && zhCity !== zhRegion) localizedParts.push(zhCity);
+    if (!localizedParts.length && zhCountry) localizedParts.push(zhCountry);
+  } else {
+    if (zhCountry) localizedParts.push(zhCountry);
+    if (zhRegion && zhRegion !== zhCountry) localizedParts.push(zhRegion);
+    if (zhCity && zhCity !== zhRegion && zhCity !== zhCountry) localizedParts.push(zhCity);
+  }
+  var rawParts = [rawCountry, rawRegion, rawCity].filter(Boolean);
+  return {
+    text: rawParts.length ? rawParts.join(' · ') : '未知',
+    localized_text: localizedParts.length ? localizedParts.join(' · ') : (zhCountry || '未知'),
+    display_text: localizedParts.length ? localizedParts.join(' · ') : (rawParts.length ? rawParts.join(' · ') : '未知')
+  };
+}
+
 async function resolveIpLocation(ip) {
   if (!ip || ip === 'unknown') return null;
   if (ip.startsWith('127.') || ip.startsWith('10.') || ip.startsWith('192.168.')) return null;
@@ -684,11 +775,14 @@ async function resolveIpLocation(ip) {
   for (var i = 0; i < fetchers.length; i++) {
     try {
       var result = await fetchers[i]();
-      var parts = [result.country, result.region, result.city].filter(Boolean);
+      var locationText = buildIpLocationDisplay(result.country, result.region, result.city);
+      var parts = [locationText.display_text].filter(Boolean);
       return {
         country: result.country,
         region: result.region,
         city: result.city,
+        localized_text: locationText.localized_text,
+        display_text: locationText.display_text,
         text: parts.length > 0 ? parts.join(' · ') : '未知',
         asn: result.asn || '',
         isp: result.isp || '',
@@ -1357,7 +1451,9 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
     autoExpireOverdueRecords().catch(function() {});
 
     const [postRes, likeRes, commRes, reportRes, banRes, muteRes, blacklistRes, annRes] = await Promise.all([
-      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', CLIENT_ERROR_MARKER).neq('media_type', AUDIT_LOG_MARKER).order('created_at', { ascending: false }).limit(5000),
+      applyPublicPostExclusions(
+        supabase.from('posts').select('*')
+      ).order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('posts').select('*').eq('media_type', REPORT_MARKER).order('created_at', { ascending: false }).limit(500),
@@ -2416,13 +2512,9 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
       statsCache.pending = true;  // 简单锁标志
     }
     const [postsRes, authRowsRes, visitsRes, attacksRes, likesRes, commentsRes, photosRes] = await Promise.all([
-      buildSummaryQuery('posts', 'id, media_type, content, created_at', null, null, 'created_at')
-        .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
-        .neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__')
-        .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
-        .neq('media_type', AUTH_MARKER).neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER)
-        .neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER)
-        .neq('media_type', '__user_visit__').neq('media_type', LOGIN_EVENT_MARKER),
+      applyPublicPostExclusions(
+        buildSummaryQuery('posts', 'id, media_type, content, created_at', null, null, 'created_at')
+      ),
       buildSummaryQuery('posts', 'user_name, created_at', 'media_type', AUTH_MARKER, 'created_at'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
@@ -2566,12 +2658,9 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
     const [visitsRes, attacksRes, postsRes, commentsRes, likesRes, authRows] = await Promise.all([
       buildQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
       buildQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
-      buildQuery('posts', 'id, created_at', null, null, 'created_at')
-        .neq('media_type', '__avatar__').neq('media_type', USER_INFO_MARKER)
-        .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
-        .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER)
-        .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER)
-        .neq('media_type', USER_VISIT_MARKER).neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', AUDIT_LOG_MARKER).neq('media_type', CLIENT_ERROR_MARKER),
+      applyPublicPostExclusions(
+        buildQuery('posts', 'id, created_at', null, null, 'created_at')
+      ),
       buildQuery('comments', 'id, created_at', null, null, 'created_at'),
       buildQuery('likes', 'id, created_at', null, null, 'created_at'),
       fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at'),
@@ -3271,10 +3360,6 @@ app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20),
 });
 
 // ===================== VIP 会员 API =====================
-const VIP_MARKER = '__vip__';
-const VIP_ORDER_MARKER = '__vip_order__';
-const VIP_PLAN_MARKER = '__vip_plan__';
-
 const VIP_PLANS = [
   {
     id: 'pro_monthly',
@@ -3300,6 +3385,170 @@ async function verifyUserExists(userName) {
     .limit(1);
   return data && data.length > 0;
 }
+
+function safeParseProGiftContent(content) {
+  try {
+    var parsed = JSON.parse(content || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function isProGiftCampaignPublished(info) {
+  if (!info || typeof info !== 'object') return false;
+  if (!(info.is_published === true || info.status === 'published')) return false;
+  if (info.is_active === false) return false;
+  var now = Date.now();
+  var startAt = info.start_at ? new Date(info.start_at).getTime() : NaN;
+  var endAt = info.end_at ? new Date(info.end_at).getTime() : NaN;
+  var claimExpireAt = info.claim_expire_at ? new Date(info.claim_expire_at).getTime() : NaN;
+  if (Number.isFinite(startAt) && startAt > now) return false;
+  if (Number.isFinite(endAt) && endAt < now) return false;
+  if (Number.isFinite(claimExpireAt) && claimExpireAt < now) return false;
+  return true;
+}
+
+app.get('/api/pro-gifts/available', rateLimit(60000, 30), async (req, res) => {
+  try {
+    var userName = String(req.query.user_name || '').trim();
+    var campaignsRes = await supabase.from('posts')
+      .select('id, content, created_at, updated_at')
+      .eq('media_type', PRO_GIFT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (campaignsRes.error) return res.status(400).json({ error: sanitizeError(campaignsRes.error) });
+
+    var claimsByCampaign = {};
+    if (userName) {
+      var claimRes = await supabase.from('posts')
+        .select('content')
+        .eq('user_name', userName)
+        .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (claimRes && Array.isArray(claimRes.data)) {
+        claimRes.data.forEach(function(row) {
+          var info = safeParseProGiftContent(row.content);
+          var key = String(info.campaign_id || '').trim();
+          if (key) claimsByCampaign[key] = true;
+        });
+      }
+    }
+
+    var gifts = (campaignsRes.data || []).map(function(row) {
+      var info = safeParseProGiftContent(row.content);
+      return Object.assign({}, info, {
+        id: row.id,
+        created_at: info.created_at || row.created_at,
+        updated_at: info.updated_at || row.updated_at,
+        already_claimed: !!claimsByCampaign[String(row.id)]
+      });
+    }).filter(isProGiftCampaignPublished);
+
+    return res.json({ ok: true, gifts: gifts });
+  } catch (e) {
+    console.error('[PRO_GIFT] load available failed:', e.message || e);
+    return res.status(500).json({ error: '加载活动失败' });
+  }
+});
+
+app.post('/api/pro-gifts/claim', rateLimit(60000, 10), async (req, res) => {
+  try {
+    var userNameVal = validateString(req.body && req.body.user_name, MAX_USERNAME_LEN, '用户名');
+    var campaignId = String(req.body && req.body.campaign_id || '').trim();
+    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
+    if (!campaignId) return res.status(400).json({ error: '缺少活动 ID' });
+
+    var userExists = await verifyUserExists(userNameVal);
+    if (!userExists) return res.status(400).json({ error: '用户不存在' });
+
+    var campaignRes = await supabase.from('posts')
+      .select('id, content, created_at')
+      .eq('id', campaignId)
+      .eq('media_type', PRO_GIFT_MARKER)
+      .maybeSingle();
+    if (campaignRes.error) return res.status(400).json({ error: sanitizeError(campaignRes.error) });
+    if (!campaignRes.data) return res.status(404).json({ error: '活动不存在' });
+
+    var campaign = safeParseProGiftContent(campaignRes.data.content);
+    if (!isProGiftCampaignPublished(campaign)) {
+      return res.status(400).json({ error: '活动当前不可领取' });
+    }
+
+    var existingClaimRes = await supabase.from('posts')
+      .select('id, content')
+      .eq('user_name', userNameVal)
+      .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (existingClaimRes.error) return res.status(400).json({ error: sanitizeError(existingClaimRes.error) });
+    var hasClaimed = (existingClaimRes.data || []).some(function(row) {
+      var info = safeParseProGiftContent(row.content);
+      return String(info.campaign_id || '') === campaignId;
+    });
+    if (hasClaimed) {
+      return res.status(400).json({ error: '您已经领取过该活动' });
+    }
+
+    var claimedAt = new Date();
+    var durationDays = Math.max(parseInt(campaign.duration_days || '30', 10) || 30, 1);
+    var vipExpireAt = new Date(claimedAt.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
+    var features = Array.isArray(campaign.features) ? campaign.features : ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'];
+    var claimContent = JSON.stringify({
+      campaign_id: campaignId,
+      campaign_title: campaign.title || 'XTJ Pro 活动',
+      user_name: userNameVal,
+      claimed_at: claimedAt.toISOString(),
+      vip_expire_at: vipExpireAt,
+      features: features,
+      duration_days: durationDays
+    });
+    var vipContent = JSON.stringify({
+      plan_id: 'pro_gift',
+      plan_name: 'XTJ Pro',
+      price: 0,
+      is_active: true,
+      order_no: 'PROGIFT_' + Date.now() + '_' + String(Math.random()).slice(2, 8),
+      start_at: claimedAt.toISOString(),
+      expire_at: vipExpireAt,
+      features: features,
+      activated_at: claimedAt.toISOString(),
+      source: 'pro_gift',
+      campaign_id: campaignId,
+      campaign_title: campaign.title || 'XTJ Pro 活动'
+    });
+
+    var insertRes = await supabase.from('posts').insert([
+      {
+        user_name: userNameVal,
+        content: claimContent,
+        media_type: PRO_GIFT_CLAIM_MARKER,
+        media_url: campaignId,
+        actor_key: 'pro_gift_claim_' + Date.now()
+      },
+      {
+        user_name: userNameVal,
+        content: vipContent,
+        media_type: VIP_MARKER,
+        media_url: 'pro_gift',
+        actor_key: 'vip_pro_gift_' + Date.now()
+      }
+    ]);
+    if (insertRes.error) return res.status(400).json({ error: sanitizeError(insertRes.error) });
+
+    return res.json({
+      ok: true,
+      campaign_id: campaignId,
+      vip_expire_at: vipExpireAt,
+      features: features,
+      duration_days: durationDays
+    });
+  } catch (e) {
+    console.error('[PRO_GIFT] claim failed:', e.message || e);
+    return res.status(500).json({ error: '领取失败，请稍后重试' });
+  }
+});
 
 // 创建订单
 app.post('/api/vip/create-order', rateLimit(60000, 10), async (req, res) => {
