@@ -1,4 +1,4 @@
-(function() {
+﻿(function() {
     // ===================== 安全配置（从 window.XTJ_CONFIG 读取） =====================
     // 重要：禁止在本文件中硬编码 API_BASE
     // API_BASE 由 js/config.js 注入，或由 Render 部署环境动态设置
@@ -291,7 +291,7 @@
     }
 
     async function fetchRegisterAlerts() {
-        if (!API_BASE || !getToken()) return null;
+        if (!API_BASE) return null;
         try {
             return await apiCall('GET', '/admin/users/register-alerts');
         } catch (e) {
@@ -301,7 +301,7 @@
     }
 
     async function markRegisterAlertsRead() {
-        if (!API_BASE || !getToken() || registerAlertState.readInFlight) return false;
+        if (!API_BASE || registerAlertState.readInFlight) return false;
         registerAlertState.readInFlight = true;
         try {
             var res = await apiCall('POST', '/admin/users/register-alerts/read');
@@ -684,11 +684,11 @@ async function initAdminClient() {
     };
 
     window.doAdminLogout = function() {
-        if (API_BASE && getToken()) {
-            fetch(API_BASE + '/admin/logout', {
-                method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + getToken() }
-            }).catch(function() {});
+        if (API_BASE) {
+            var _token = getToken();
+            var _opts = { method: 'POST', credentials: 'same-origin' };
+            if (_token) _opts.headers = { 'Authorization': 'Bearer ' + _token };
+            fetch(API_BASE + '/admin/logout', _opts).catch(function() {});
         }
         stopRegisterAlertPolling();
         // 清理定时器和事件监听
@@ -725,10 +725,10 @@ async function initAdminClient() {
         if (adminDataLoading) return;
         adminDataLoading = true;
         try {
-            if (!API_BASE || !getToken()) {
-                throw new Error('API 未配置或未登录，拒绝加载数据');
-            }
-            var apiData = await apiCall('GET', '/admin/data');
+            if (!API_BASE) {
+            throw new Error('API 未配置或未登录，拒绝加载数据');
+        }
+        var apiData = await apiCall('GET', '/admin/data');
             var postData = apiData.posts || [];
                 allPosts = postData.filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__user_info__' && p.media_type !== SECURITY_ALERT_MARKER && p.media_type !== AUDIT_LOG_MARKER && p.media_type !== CLIENT_ERROR_MARKER; });
             annList = apiData.announcements || [];
@@ -778,6 +778,8 @@ async function initAdminClient() {
             'bans': { key: 'bans' },
             'mutes': { key: 'mutes' },
             'reports': { key: 'reports' },
+            'blacklist': { key: 'blacklist' },
+            'progift': { key: 'pro-gifts' },
             'stats': { key: 'stats' },
             'users': { key: 'users', loaders: ['users', 'logins'] },
             'uservisit': { key: 'users', loaders: ['users', 'logins'] },
@@ -846,12 +848,17 @@ async function initAdminClient() {
                 adminTabDataLoaded.photos = true;
             } else if (dataType === 'reports') {
                 var reportRes = await apiCall('GET', '/admin/reports');
-                var rawReportList = reportRes.data || [];
+                reportsData = reportRes.data || [];
+                updateReportBadge();
                 adminTabDataLoaded.reports = true;
             } else if (dataType === 'mutes') {
                 var muteRes = await apiCall('GET', '/admin/mutes');
-                var rawMuteList = muteRes.data || [];
+                mutesData = muteRes.data || [];
                 adminTabDataLoaded.mutes = true;
+            } else if (dataType === 'blacklist') {
+                var blacklistRes = await apiCall('GET', '/admin/blacklist');
+                blacklistData = blacklistRes.data || [];
+                adminTabDataLoaded.blacklist = true;
             }
         } catch(e) {
             console.warn('[admin] 懒加载数据失败:', dataType, e.message);
@@ -1397,7 +1404,7 @@ async function initAdminClient() {
     };
 
     async function renderPostsTab(el) {
-        if (API_BASE && getToken()) {
+        if (API_BASE) {
             try {
                 var apiData = await apiCall('GET', '/admin/data');
                 var postData = apiData.posts || [];
@@ -1446,7 +1453,7 @@ async function initAdminClient() {
     }
 
     async function renderLikesTab(el) {
-        if (API_BASE && getToken()) {
+        if (API_BASE) {
             try { var apiData = await apiCall('GET', '/admin/data'); allLikes = apiData.likes || []; allPosts = (apiData.posts || []).filter(function(p) { return p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== DM_MARKER; }); } catch(e) {}
         }
         var h = '<div class="card"><h3>点赞记录（' + allLikes.length + '条）</h3>';
@@ -1472,7 +1479,7 @@ async function initAdminClient() {
     }
 
     async function renderCommentsTab(el) {
-        if (API_BASE && getToken()) {
+        if (API_BASE) {
             try { var apiData = await apiCall('GET', '/admin/data'); allComments = apiData.comments || []; } catch(e) {}
         }
         var h = '<div class="card"><h3>评论记录（' + allComments.length + '条）</h3>';
@@ -1534,7 +1541,7 @@ async function initAdminClient() {
         
         showConfirm('删除公告', '您确定要删除此公告吗？\n\n' + (preview ? '公告内容：' + preview + '\n\n' : '') + '删除后所有用户将无法查看此公告，此操作不可恢复。', '确认删除', async function() {
             try {
-                if (API_BASE && getToken()) {
+                if (API_BASE) {
                     await apiCall('DELETE', '/admin/announcement/' + id);
                 } else {
                     var key = ann ? ann.actor_key : 'admin_' + Date.now();
@@ -1555,7 +1562,7 @@ async function initAdminClient() {
         
         showConfirm('删除帖子', '您确定要删除此帖子吗？\n\n' + (post ? '发布者：' + (post.user_name || '') + '\n' : '') + (preview ? '内容：' + preview + '\n\n' : '') + '删除后此帖子及相关的点赞和评论都会被移除，此操作不可恢复。', '确认删除', async function() {
             try {
-                if (API_BASE && getToken()) {
+                if (API_BASE) {
                     await apiCall('DELETE', '/admin/post/' + id);
                 } else {
                     var key = post ? post.actor_key : 'admin_' + Date.now();
@@ -1575,7 +1582,7 @@ async function initAdminClient() {
         
         showConfirm('删除评论', '您确定要删除此评论吗？\n\n' + (comment ? '发布者：' + (comment.user_name || '') + '\n' : '') + (preview ? '内容：' + preview + '\n\n' : '') + '评论将标记为删除，但记录会保留在数据库中。', '确认删除', async function() {
             try {
-                if (API_BASE && getToken()) {
+                if (API_BASE) {
                     await apiCall('DELETE', '/admin/comment/' + id);
                 } else {
                     var { data, error } = await sb.rpc('delete_comment_v2', { p_comment_id: id, p_deleted_by: ADMIN });
@@ -1777,7 +1784,7 @@ async function initAdminClient() {
         if (!r || !r.target_user) { showToast('无法确定被举报用户', 'error'); return; }
         showConfirm('封禁用户', '确认封禁用户 ' + r.target_user + '？\n\n选择封禁时长：', '确认封禁', async function() {
             try {
-                if (!API_BASE || !getToken()) {
+                if (!API_BASE) {
                     throw new Error('API 未配置，拒绝操作');
                 }
                 await apiCall('POST', '/admin/report/' + id + '/ban-user', { duration_hours: 72 });
@@ -2050,7 +2057,7 @@ async function initAdminClient() {
     // ===================== 黑名单管理 =====================
     async function loadBlacklistData() {
         try {
-            if (API_BASE && getToken()) {
+            if (API_BASE) {
                 var data = await apiCall('GET', '/admin/blacklist');
                 blacklistData = data.data || [];
             }
@@ -2277,7 +2284,7 @@ async function initAdminClient() {
         try {
             var summary, dailyData;
 
-            if (API_BASE && getToken()) {
+            if (API_BASE) {
                 // 通过后端 API
                 var dailyQuery = '/admin/stats/daily';
                 var summaryQuery = '/admin/stats';
@@ -2313,7 +2320,7 @@ async function initAdminClient() {
             if (window.statsDateStart || window.statsDateEnd) {
                 h += '<button onclick="window.statsDateStart=\'\';window.statsDateEnd=\'\';renderTab(\'stats\')">清除筛选</button>';
             }
-            if (API_BASE && getToken()) {
+            if (API_BASE) {
                 h += '<button class="btn-sm primary" style="margin-left:auto;" onclick="apiCall(\'POST\',\'/admin/stats/refresh\').then(function(){renderTab(\'stats\');}).catch(function(){})">刷新缓存</button>';
             }
             h += '</div></div>';
@@ -2461,7 +2468,7 @@ async function initAdminClient() {
         try {
             var attackData;
 
-            if (API_BASE && getToken()) {
+            if (API_BASE) {
                 attackData = await apiCall('GET', '/admin/stats/attacks?limit=200');
             }
 
@@ -2547,7 +2554,7 @@ async function initAdminClient() {
         try {
             var firewallData;
 
-            if (API_BASE && getToken()) {
+            if (API_BASE) {
                 // 分别获取CORS和CSRF拦截记录
                 var corsData = await apiCall('GET', '/admin/stats/attacks?limit=100&type=CORS');
                 var csrfData = await apiCall('GET', '/admin/stats/attacks?limit=100&type=CSRF');
@@ -2604,7 +2611,7 @@ async function initAdminClient() {
         try {
             var userData;
 
-            if (API_BASE && getToken()) {
+            if (API_BASE) {
                 userData = await apiCall('GET', '/admin/stats/users');
             }
 
@@ -3173,7 +3180,7 @@ async function initAdminClient() {
     }
 
     renderPostsTab = async function(el) {
-        if (API_BASE && getToken()) {
+        if (API_BASE) {
             try {
                 var apiData = await apiCall('GET', '/admin/data');
                 allPosts = (apiData.posts || []).filter(function(p) {
@@ -3216,7 +3223,7 @@ async function initAdminClient() {
     };
 
     renderLikesTab = async function(el) {
-        if (API_BASE && getToken()) {
+        if (API_BASE) {
             try {
                 var apiData = await apiCall('GET', '/admin/data');
                 allLikes = apiData.likes || [];
@@ -3309,7 +3316,7 @@ async function initAdminClient() {
         else el.appendChild(container);
         try {
             var userData;
-            if (API_BASE && getToken()) {
+            if (API_BASE) {
                 userData = await apiCall('GET', '/admin/stats/users');
             }
             if (!userData || !userData.users) {
@@ -3358,7 +3365,7 @@ async function initAdminClient() {
         el.innerHTML = skeletonHtml;
         try {
             var summary, dailyData;
-            if (API_BASE && getToken()) {
+            if (API_BASE) {
                 var dailyQuery = '/admin/stats/daily';
                 var summaryQuery = '/admin/stats';
                 if (window.statsDateStart) dailyQuery += '?start=' + window.statsDateStart;
@@ -3382,7 +3389,7 @@ async function initAdminClient() {
             h += '<span style="color:var(--text-muted);">至</span>';
             h += '<input type="date" id="statsDateEnd" value="' + escapeHtml(window.statsDateEnd) + '" onchange="window.statsDateEnd=this.value;renderTab(\'stats\')" title="结束日期">';
             if (window.statsDateStart || window.statsDateEnd) h += '<button onclick="window.statsDateStart=\'\';window.statsDateEnd=\'\';renderTab(\'stats\')">清除筛选</button>';
-            if (API_BASE && getToken()) h += '<button class="btn-sm primary" style="margin-left:auto;" onclick="apiCall(\'POST\',\'/admin/stats/refresh\').then(function(){renderTab(\'stats\');}).catch(function(){})">刷新缓存</button>';
+            if (API_BASE) h += '<button class="btn-sm primary" style="margin-left:auto;" onclick="apiCall(\'POST\',\'/admin/stats/refresh\').then(function(){renderTab(\'stats\');}).catch(function(){})">刷新缓存</button>';
             h += '</div></div>';
             h += '<div class="stats-row">';
             h += '<div class="stat-box"><div class="val">' + (summary.total_users || 0) + '</div><div class="lbl">用户数量</div></div>';
@@ -4005,13 +4012,17 @@ async function initAdminClient() {
             '<button class="btn-sm" onclick="emailAddManual()" style="align-self:flex-end;">添加</button>' +
             '</div>' +
             '<div id="emailManualList" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;min-height:0;"></div>' +
+            '<div id="emailSuffixList" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;min-height:0;"></div>' +
             '</div>' +
             '<div class="form-group"><label>邮件主题</label><input id="emailSubjectInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件主题" /></div>' +
             '<div class="form-group"><label>邮件内容</label><textarea id="emailContentInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件内容...&#10;支持换行，发送时将转为 HTML 格式"></textarea></div>' +
             '<button class="btn-sm primary" onclick="emailSend()" id="emailSendBtn">📤 发送邮件</button>' +
             '<div id="emailResult"></div>' +
             '</div></div>' +
-            '<div class="card"><h4>📨 发送记录</h4><div id="emailHistoryWrap"><div class="empty" style="padding:12px;">正在加载...</div></div></div>';
+            '<div class="card"><h4>📨 发送记录</h4><div id="emailHistoryWrap"><div class="empty" style="padding:12px;">正在加载...</div></div></div>' +
+            '<div class="card" style="margin-top:8px;"><h4>📇 历史邮箱账户</h4>' +
+            '<div id="emailRecipientHistory" style="display:flex;flex-wrap:wrap;gap:4px;min-height:30px;padding:4px 0;">加载中...</div>' +
+            '<button class="btn-sm" onclick="emailClearRecipientHistory()" style="margin-top:4px;font-size:11px;opacity:0.6;">清空历史</button></div>';
 
         // 检查是否有草稿
         var draftSubject = sessionStorage.getItem('xtj_email_draft_subject');
@@ -4023,6 +4034,8 @@ async function initAdminClient() {
 
         loadEmailUsers();
         loadEmailHistory();
+        loadEmailRecipientHistory();
+        setupEmailAutoComplete();
     };
 
     window.emailAutoSaveDraft = function() {
@@ -4275,6 +4288,110 @@ async function initAdminClient() {
         } catch(e) {
             wrap.innerHTML = '<div class="empty">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
+    };
+
+    var EMAIL_SUFFIXES = ['@qq.com','@163.com','@gmail.com','@outlook.com','@hotmail.com','@icloud.com','@foxmail.com','@126.com','@sina.com'];
+
+    window.emailUpdateSuffixes = function() {
+      var inp = document.getElementById('emailManualInp');
+      var list = document.getElementById('emailSuffixList');
+      if (!inp || !list) return;
+      var val = inp.value.trim();
+      var atIdx = val.indexOf('@');
+      var prefix = atIdx >= 0 ? val.substring(0, atIdx) : val;
+      var partialDomain = atIdx >= 0 ? val.substring(atIdx).toLowerCase() : '';
+      if (!prefix) { list.innerHTML = ''; return; }
+      var suggestions = [];
+      EMAIL_SUFFIXES.forEach(function(suf) {
+        var full = prefix + suf;
+        if (!partialDomain || suf.indexOf(partialDomain) === 0) {
+          suggestions.push({ display: full, full: full });
+        }
+      });
+      if (!suggestions.length) { list.innerHTML = ''; return; }
+      var h = '';
+      suggestions.forEach(function(s) {
+        h += '<span class="email-suffix-item" onclick="emailSelectSuggestion(\'' + s.full.replace(/'/g,"\\'") + '\')" style="cursor:pointer;padding:3px 8px;background:rgba(47,109,246,0.08);border:1px solid rgba(47,109,246,0.15);border-radius:6px;font-size:12px;">' + escapeHtml(s.display) + '</span>';
+      });
+      list.innerHTML = h;
+    };
+
+    window.emailSelectSuggestion = function(email) {
+      var inp = document.getElementById('emailManualInp');
+      if (!inp) return;
+      inp.value = email;
+      var list = document.getElementById('emailSuffixList');
+      if (list) list.innerHTML = '';
+      emailAddManual();
+    };
+
+    window.setupEmailAutoComplete = function() {
+      var inp = document.getElementById('emailManualInp');
+      if (inp) {
+        inp.addEventListener('input', window.emailUpdateSuffixes);
+      }
+    };
+
+    window.loadEmailRecipientHistory = async function() {
+      var wrap = document.getElementById('emailRecipientHistory');
+      if (!wrap) return;
+      try {
+        var data = await apiCall('GET', '/admin/email-recipient-history?limit=100');
+        var recipients = data.recipients || [];
+        if (!recipients.length) {
+          wrap.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">暂无历史邮箱</span>';
+          return;
+        }
+        var h = '';
+        recipients.forEach(function(r) {
+          h += '<span class="email-manual-tag" data-email="' + escapeHtml(r.email) + '" onclick="emailAddFromHistory(\'' + escapeHtml(r.email.replace(/'/g,"\\'")) + '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;">' + escapeHtml(r.email) + ' <span onclick="event.stopPropagation();emailDeleteRecipientHistory(\'' + escapeHtml(r.email.replace(/'/g,"\\'")) + '\')" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span></span>';
+        });
+        wrap.innerHTML = h;
+      } catch(e) {
+        wrap.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">加载失败</span>';
+      }
+    };
+
+    window.emailAddFromHistory = function(email) {
+      emailAddManualFromString(email);
+    };
+
+    window.emailAddManualFromString = function(email) {
+      var list = document.getElementById('emailManualList');
+      if (!list) return;
+      var existing = list.querySelectorAll('.email-manual-tag');
+      var dup = false;
+      existing.forEach(function(tag) {
+        if (tag.dataset.email === email) dup = true;
+      });
+      if (dup) { showToast('该邮箱已在列表中'); return; }
+      var tag = document.createElement('span');
+      tag.className = 'email-manual-tag';
+      tag.dataset.email = email;
+      tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;';
+      tag.innerHTML = email + ' <span onclick="emailRemoveManual(this)" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span>';
+      list.appendChild(tag);
+      emailUpdateCount();
+    };
+
+    window.emailDeleteRecipientHistory = async function(email) {
+      try {
+        await apiCall('POST', '/admin/email-recipient-history/delete', { email: email });
+        loadEmailRecipientHistory();
+      } catch(e) {
+        showToast('删除失败: ' + e.message, 'error');
+      }
+    };
+
+    window.emailClearRecipientHistory = async function() {
+      if (!confirm('确定清空所有历史邮箱账户？')) return;
+      try {
+        await apiCall('POST', '/admin/email-recipient-history/clear', {});
+        loadEmailRecipientHistory();
+        showToast('已清空');
+      } catch(e) {
+        showToast('清空失败: ' + e.message, 'error');
+      }
     };
 
     // ===================== Pro 赠送活动管理 =====================
