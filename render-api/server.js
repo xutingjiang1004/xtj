@@ -5,7 +5,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
-const nodemailer = require('nodemailer');
+var nodemailer = null;
+try { nodemailer = require('nodemailer'); } catch(e) {}
 
 const app = express();
 
@@ -61,13 +62,20 @@ const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || '';
 var mailTransporter = null;
 function getMailTransporter() {
   if (mailTransporter) return mailTransporter;
+  if (!nodemailer) {
+    console.warn('[MAIL] nodemailer 未安装，邮件功能不可用');
+    return null;
+  }
   if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
     console.warn('[MAIL] GMAIL_USER 或 GMAIL_APP_PASSWORD 未配置，邮件功能不可用');
     return null;
   }
   mailTransporter = nodemailer.createTransport({
     service: 'gmail',
-    auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD }
+    auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000
   });
   return mailTransporter;
 }
@@ -3320,6 +3328,8 @@ app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20),
 
 // ===================== 管理员邮件通知 API =====================
 // 使用 Gmail SMTP 发送，需在 Render 环境变量设置：GMAIL_USER / GMAIL_APP_PASSWORD
+const EMAIL_SENT_MARKER = '__email_sent__';
+
 app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
     const { data, error } = await supabase.from('posts')
@@ -3397,6 +3407,23 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
         failed.push({ user: r.user_name || r.email, error: '发送失败: ' + e.message });
       }
     }
+    // 保存发送记录
+    try {
+      await supabase.from('posts').insert([{
+        user_name: ADMIN_USERNAME,
+        media_type: EMAIL_SENT_MARKER,
+        content: JSON.stringify({
+          subject: subjectVal,
+          sent_count: sent.length,
+          failed_count: failed.length,
+          total_recipients: recipients.length,
+          sent_at: new Date().toISOString()
+        }),
+        actor_key: 'email_' + Date.now()
+      }]);
+    } catch(e) {
+      console.warn('[Email] 保存发送记录失败:', e.message);
+    }
     return res.json({
       ok: true,
       sent_count: sent.length,
@@ -3409,6 +3436,35 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     return res.status(500).json({ error: '发送邮件失败' });
   } finally {
     clearTimeout(tmr);
+  }
+});
+
+// 管理员：获取邮件发送历史
+app.get('/admin/email-history', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var limit = Math.min(parseInt(req.query.limit || '50'), 200);
+    var { data, error } = await supabase.from('posts')
+      .select('id, content, created_at')
+      .eq('media_type', EMAIL_SENT_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) return res.status(400).json({ error: sanitizeError(error) });
+    var records = (data || []).map(function(row) {
+      var info = {};
+      try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      return {
+        id: row.id,
+        subject: info.subject || '',
+        sent_count: info.sent_count || 0,
+        failed_count: info.failed_count || 0,
+        total_recipients: info.total_recipients || 0,
+        sent_at: info.sent_at || row.created_at
+      };
+    });
+    return res.json({ ok: true, records: records });
+  } catch(e) {
+    console.error('[Email History] 查询失败:', e.message);
+    return res.status(500).json({ error: '查询失败' });
   }
 });
 
@@ -3882,6 +3938,55 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), async (req, res) => {
   } catch(e) {
     console.error('[ProGift] 领取失败:', e.message);
     return res.status(500).json({ error: '领取失败' });
+  }
+});
+
+// 管理员：手动赠送 Pro 给指定用户
+app.post('/admin/pro-gifts/manual-gift', verifyToken, rateLimit(60000, 10), async (req, res) => {
+  try {
+    var { user_name, duration_days, features, reason } = req.body;
+    var userNameVal = String(user_name || '').trim();
+    if (!userNameVal) return res.status(400).json({ error: '请输入用户名' });
+    var days = Math.min(3650, Math.max(1, parseInt(duration_days) || 30));
+    var featuresArr = Array.isArray(features) && features.length ? features : DEFAULT_GIFT_FEATURES;
+    var reasonVal = String(reason || '管理员手动赠送').trim().slice(0, 200);
+    var now = new Date();
+    var nowISO = now.toISOString();
+    var expireAt = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+    // 写入 VIP 激活记录
+    var vipContent = JSON.stringify({
+      plan_id: 'admin_gift_' + Date.now(),
+      plan_name: 'XTJ Pro (管理员赠送)',
+      price: 0,
+      is_active: true,
+      order_no: 'ADMIN_GIFT_' + Date.now(),
+      start_at: nowISO,
+      expire_at: expireAt,
+      features: featuresArr,
+      activated_at: nowISO,
+      source: 'admin_gift',
+      reason: reasonVal
+    });
+    var { error: vipErr } = await supabase.from('posts').insert([{
+      user_name: userNameVal,
+      media_type: VIP_MARKER,
+      media_url: 'pro_monthly',
+      content: vipContent,
+      actor_key: 'vip_' + Date.now()
+    }]);
+    if (vipErr) return res.status(400).json({ error: sanitizeError(vipErr) });
+    return res.json({
+      ok: true,
+      user_name: userNameVal,
+      plan_name: 'XTJ Pro (管理员赠送)',
+      expire_at: expireAt,
+      is_active: true,
+      features: featuresArr,
+      source: 'admin_gift'
+    });
+  } catch(e) {
+    console.error('[ProGift] 手动赠送失败:', e.message);
+    return res.status(500).json({ error: '赠送失败' });
   }
 });
 

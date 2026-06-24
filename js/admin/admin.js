@@ -3981,7 +3981,8 @@ async function initAdminClient() {
             '<div class="form-group"><label>邮件内容</label><textarea id="emailContentInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件内容...&#10;支持换行，发送时将转为 HTML 格式"></textarea></div>' +
             '<button class="btn-sm primary" onclick="emailSend()" id="emailSendBtn">📤 发送邮件</button>' +
             '<div id="emailResult"></div>' +
-            '</div></div>';
+            '</div></div>' +
+            '<div class="card"><h4>📨 发送记录</h4><div id="emailHistoryWrap"><div class="empty" style="padding:12px;">正在加载...</div></div></div>';
 
         // 检查是否有草稿
         var draftSubject = sessionStorage.getItem('xtj_email_draft_subject');
@@ -3992,6 +3993,7 @@ async function initAdminClient() {
         }
 
         loadEmailUsers();
+        loadEmailHistory();
     };
 
     window.emailAutoSaveDraft = function() {
@@ -4158,6 +4160,36 @@ async function initAdminClient() {
         }
     };
 
+    // 加载邮件发送记录
+    window.loadEmailHistory = async function() {
+        var wrap = document.getElementById('emailHistoryWrap');
+        if (!wrap) return;
+        try {
+            var data = await apiCall('GET', '/admin/email-history?limit=30');
+            var records = data.records || [];
+            if (!records.length) {
+                wrap.innerHTML = '<div class="empty">暂无发送记录</div>';
+                return;
+            }
+            var h = '<div class="table-wrap" style="max-height:300px;overflow-y:auto;"><table><thead><tr style="position:sticky;top:0;z-index:1;"><th>时间</th><th>主题</th><th>收件人数</th><th>结果</th></tr></thead><tbody>';
+            records.forEach(function(r) {
+                var resultText = r.failed_count > 0
+                    ? '<span style="color:var(--danger);">' + r.sent_count + '/' + r.total_recipients + ' 失败' + r.failed_count + '</span>'
+                    : '<span style="color:var(--success);">✅ ' + r.sent_count + '/' + r.total_recipients + ' 全部成功</span>';
+                h += '<tr>';
+                h += '<td>' + formatTime(r.sent_at) + '</td>';
+                h += '<td>' + escapeHtml(r.subject) + '</td>';
+                h += '<td>' + (r.total_recipients || 0) + '</td>';
+                h += '<td>' + resultText + '</td>';
+                h += '</tr>';
+            });
+            h += '</tbody></table></div>';
+            wrap.innerHTML = h;
+        } catch(e) {
+            wrap.innerHTML = '<div class="empty">加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    };
+
     // ===================== Pro 赠送活动管理 =====================
     var _proGiftSubTab = 'activities';
     window.renderProGiftTab = async function(el) {
@@ -4174,7 +4206,7 @@ async function initAdminClient() {
         h += '<div id="proGiftSubContent"></div>';
         h += '</div>';
         el.innerHTML = h;
-        renderProGiftSubTab();
+        window.renderProGiftSubTab();
     };
 
     window.switchProGiftSubTab = function(tab) {
@@ -4184,7 +4216,7 @@ async function initAdminClient() {
         tabs.forEach(function(t) { t.classList.remove('active'); });
         var activeTab = document.querySelector('.pro-gift-tab[onclick*="\'' + tab + '\'"]');
         if (activeTab) activeTab.classList.add('active');
-        renderProGiftSubTab();
+        window.renderProGiftSubTab();
     };
 
     window.renderProGiftSubTab = async function renderProGiftSubTab() {
@@ -4481,6 +4513,63 @@ async function initAdminClient() {
             renderProGiftSubTab();
         } catch(e) {
             showToast('删除失败: ' + e.message, 'error');
+        }
+    };
+
+    // 手动赠送给用户弹窗
+    window.openManualGiftDialog = function() {
+        var html = '<div class="modal-overlay" id="manualGiftOverlay" onclick="closeManualGiftDialog()" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center;">';
+        html += '<div class="modal-content" onclick="event.stopPropagation()" style="background:var(--bg);border-radius:12px;padding:24px;max-width:480px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">';
+        html += '<h3 style="margin:0 0 16px;">🎁 手动赠送给用户</h3>';
+        html += '<div class="form-group"><label>用户名</label><input id="mgUserInp" placeholder="输入要赠送的用户名" /></div>';
+        html += '<div class="form-group"><label>有效期（天）</label><input id="mgDaysInp" type="number" min="1" max="3650" value="30" /></div>';
+        html += '<div class="form-group"><label>赠送原因（可选）</label><input id="mgReasonInp" placeholder="例：优秀内容贡献奖励" /></div>';
+        html += '<div class="form-group"><label>Pro 权限</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">';
+        var allFeatures = ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'];
+        var featureLabels = { 'vip_badge': 'VIP标识', 'photo_wall_unlimited': '不限照片墙', 'large_file_upload': '大文件上传', 'pin_post': '帖子置顶', 'custom_theme': 'Pro主题', 'profile_effects': '头像光效' };
+        allFeatures.forEach(function(f) {
+            html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="mgFeat_' + f + '" checked /> ' + (featureLabels[f] || f) + '</label>';
+        });
+        html += '</div></div>';
+        html += '<div style="display:flex;gap:8px;margin-top:16px;">';
+        html += '<button class="btn-primary" onclick="manualGiftSubmit()">🎁 确认赠送</button>';
+        html += '<button class="btn" onclick="closeManualGiftDialog()">取消</button></div>';
+        html += '</div></div>';
+        var existing = document.getElementById('manualGiftOverlay');
+        if (existing) existing.remove();
+        document.body.insertAdjacentHTML('beforeend', html);
+    };
+
+    window.closeManualGiftDialog = function() {
+        var el = document.getElementById('manualGiftOverlay');
+        if (el) el.remove();
+    };
+
+    window.manualGiftSubmit = async function() {
+        var userName = document.getElementById('mgUserInp').value.trim();
+        var days = parseInt(document.getElementById('mgDaysInp').value) || 30;
+        var reason = document.getElementById('mgReasonInp').value.trim();
+        if (!userName) { showToast('请输入用户名', 'error'); return; }
+        var features = [];
+        ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'].forEach(function(f) {
+            var cb = document.getElementById('mgFeat_' + f);
+            if (cb && cb.checked) features.push(f);
+        });
+        try {
+            var data = await apiCall('POST', '/admin/pro-gifts/manual-gift', {
+                user_name: userName,
+                duration_days: days,
+                features: features,
+                reason: reason || '管理员手动赠送'
+            });
+            if (data.ok) {
+                showToast('🎉 已成功赠送给 ' + userName + '，有效期至 ' + new Date(data.expire_at).toLocaleDateString());
+                closeManualGiftDialog();
+            } else {
+                showToast(data.error || '赠送失败', 'error');
+            }
+        } catch(e) {
+            showToast('赠送失败: ' + e.message, 'error');
         }
     };
 })();
