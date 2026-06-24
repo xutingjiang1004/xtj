@@ -11,153 +11,11 @@
    - 涓嶆敼鍙?Supabase / 鍙戝竷 / 鑱婂ぉ / 绛涢€?/ 寮圭獥 / 鐧诲綍
    ============================================================ */
 
-/* ---------- P1: dock-bar 鈫?宸︿晶绐勫浘鏍囨爮 ---------- */
 @media (min-width: 1024px) {
-
-  /* ==============================================================
-     1. app-container 鈥?鍏ㄥ锛岃В闄?640px 闄愬埗
-     ============================================================== */
   .app-container {
     max-width: 100% !important;
     margin: 0 !important;
   }
-
-  /* ==============================================================
-     2. dock-bar 鈥?fixed 宸︿晶绐勫浘鏍囨爮锛?6px锛?
-     鍙樉绀哄浘鏍囨寜閽紝搴曢儴绌虹櫧鍖哄煙閫忔槑銆屾墦閫氥€嶃€?
-     ============================================================== */
-  .dock-bar {
-    top: 0 !important;
-    bottom: 0 !important;
-    left: 0 !important;
-    right: auto !important;
-    width: 56px !important;
-
-    flex-direction: column !important;
-    justify-content: flex-start !important;
-    align-items: center !important;
-
-    gap: 8px !important;
-    padding: 12px 4px !important;
-    padding-top: calc(20px + env(safe-area-inset-top, 0px)) !important;
-
-    z-index: 100 !important;
-    overflow: visible !important;
-  }
-
-  /* ==============================================================
-     3. dock-panels 鈥?鍙充晶闈㈡澘鍋忕Щ
-     ============================================================== */
-  .dock-panels {
-    margin-left: 56px;
-  }
-
-  /* ==============================================================
-     4. dock-panel 鈥?绉婚櫎搴曢儴澶?padding
-     ============================================================== */
-  .dock-panel {
-    left: 0 !important;
-    top: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    padding-top: 24px !important;
-    padding-bottom: 24px !important;
-  }
-
-  .dock-panel#panelAi {
-    padding-top: 0 !important;
-  }
-
-  /* ==============================================================
-     5. dock-tab 鈥?鍥炬爣灞呬腑銆佺揣鍑?
-     鍙樉绀哄浘鏍囷紝闅愯棌鏂囧瓧锛堟偓娴椂鐢?title 鎻愮ず锛?
-     ============================================================== */
-  .dock-tab {
-    width: 44px !important;
-    max-width: 44px !important;
-    min-width: 44px !important;
-    flex-direction: column !important;
-    justify-content: center !important;
-    align-items: center !important;
-    gap: 0 !important;
-    padding: 8px 0 !important;
-    margin: 0 auto !important;
-    border-radius: 12px !important;
-    font-size: 0 !important;
-    transition: background 0.15s ease;
-  }
-
-  /* 闅愯棌鏂囧瓧鏍囩 */
-  .dock-tab .dt-label {
-    display: none !important;
-  }
-
-  /* AI 鎸夐挳 label 涔熼殣钘?*/
-  .dock-tab[data-tab="ai"] .dt-label {
-    display: none !important;
-  }
-
-  /* icon 灞呬腑 */
-  .dock-tab .dt-icon {
-    width: 28px;
-    height: 28px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 22px !important;
-  }
-
-  /* hover 寰儗鏅?*/
-  .dock-tab:hover {
-    background: rgba(128, 128, 128, 0.08) !important;
-  }
-
-  /* active 涓嶉澶栧姞鑳屾櫙锛堣鑳跺泭鏉ュ仛锛?*/
-  .dock-bar .dock-tab.active {
-    background: transparent !important;
-    font-weight: normal;
-  }
-
-  /* Desktop AI dock icon size */
-  .dock-tab[data-tab="ai"] .dt-icon {
-    width: 36px !important;
-    height: 36px !important;
-    min-width: 36px !important;
-    min-height: 36px !important;
-    flex: 0 0 36px !important;
-  }
-
-  .dock-tab[data-tab="ai"] .dt-icon .dt-svg {
-    width: 35px !important;
-    height: 35px !important;
-    min-width: 35px !important;
-    min-height: 35px !important;
-  }
-
-  /* ==============================================================
-     6. dock-indicator 鈥?妗岄潰绔珫鍚戣兌鍥?
-     璁剧疆 CSS transition 璁╃偣鍑诲垏鎹㈡椂鑳跺泭骞虫粦婊戝姩銆?
-     鎷栨嫿鏃?JS 璁?transition='none' 淇濊瘉鍗虫椂璺熸墜銆?
-     ============================================================== */
-  .dock-bar > .dock-indicator {
-    transition:
-      transform 0.32s cubic-bezier(0.25, 0.1, 0.25, 1),
-      width 0.28s cubic-bezier(0.25, 0.1, 0.25, 1),
-      height 0.28s cubic-bezier(0.25, 0.1, 0.25, 1),
-      opacity 0.2s ease;
-  }
-
-  /* 闅愯棌 liquid 瑁呴グ瀛愬厓绱狅紙绔栨潯涓瑙変笉鍗忚皟锛?*/
-  .dock-bar > .dock-indicator .dock-liquid-lens,
-  .dock-bar > .dock-indicator .dock-liquid-shine {
-    display: none !important;
-  }
-
-  /* ==============================================================
-     7. 鍔ㄧ敾灞?鈥?GSAP 鍔ㄧ敾淇濈暀
-     ============================================================== */
-  /* 涓嶉殣钘?.anim-layer */
 
 
   /* ==============================================================
@@ -977,17 +835,6 @@
     color: inherit;
   }
 
-  /* 5. 鏆楄壊涓婚涓嬬殑 dock-bar 鏇寸簿鑷?鈥?绾壊鏃犵幓鐠?*/
-  [data-theme="dark"] .dock-bar {
-    background: #0f1612 !important;
-  }
-  [data-theme="dark"] .dock-tab {
-    color: rgba(220, 230, 220, 0.85) !important;
-  }
-  [data-theme="dark"] .dock-tab:hover {
-    background: rgba(255, 255, 255, 0.06) !important;
-  }
-
   /* 6. 鏆楄壊涓婚涓?panel 鍐呭鍖洪€傞厤 */
   [data-theme="dark"] .dock-panels {
     background: var(--bg, #0a0e0c);
@@ -1092,33 +939,6 @@
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-  }
-
-  /* 9. iPad 妯睆 / 1024-1280 绐勫睆閫傞厤锛堜繚鐣?dock-bar 浣嗘洿绱у噾锛?*/
-  @media (min-width: 1024px) and (max-width: 1280px) {
-    .dock-bar {
-      width: 48px !important;
-    }
-    .dock-panels {
-      margin-left: 48px !important;
-    }
-    .dock-tab {
-      width: 38px !important;
-      max-width: 38px !important;
-      min-width: 38px !important;
-      padding: 6px 0 !important;
-    }
-    .dock-tab .dt-icon {
-      width: 24px !important;
-      height: 24px !important;
-      font-size: 20px !important;
-    }
-    #panelPosts .wrap {
-      grid-template-columns: minmax(0, 1fr) 260px !important;
-    }
-    #panelAi .photo-wall-grid {
-      grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-    }
   }
 
   /* 10. 瓒呭灞忥紙> 1920px锛夋斁瀹藉垪鏁?鈥?feed 淇濇寔鍗曞垪 */
