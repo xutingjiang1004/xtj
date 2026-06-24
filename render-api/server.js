@@ -3480,11 +3480,37 @@ app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req
   }
 });
 
-// 发送邮件（Gmail SMTP）
+var SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
+
+// SendGrid API 发送（HTTPS 443，不受云平台 SMTP 端口封锁影响）
+async function sendViaSendGrid(to, subject, text, html) {
+  var resp = await fetch('https://api.sendgrid.com/v3/mail/send', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + SENDGRID_API_KEY,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      personalizations: [{ to: [{ email: to }] }],
+      from: { email: GMAIL_USER, name: 'XTJ 管理员' },
+      subject: subject,
+      content: [
+        { type: 'text/plain', value: text || '' },
+        { type: 'text/html', value: html || '' }
+      ]
+    })
+  });
+  if (!resp.ok) {
+    var body = await resp.text().catch(function(){ return ''; });
+    throw new Error('SendGrid HTTP ' + resp.status + (body ? ': ' + body.slice(0, 200) : ''));
+  }
+}
+
+// 发送邮件（优先 SendGrid HTTPS API，其次 Gmail SMTP）
 app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res) => {
   var tmr = setTimeout(function() {
     if (!res.headersSent) {
-      try { return res.status(504).json({ error: 'SMTP 服务器无响应（28s），如果部署在 Render 免费实例，可能是 Render 封锁了出站 SMTP 端口。建议换用 SendGrid/Brevo 等 HTTPS API 邮件服务。' }); } catch(e) {}
+      try { return res.status(504).json({ error: '邮件服务无响应（28s），如果持续失败，请在 Render 环境变量设置 SENDGRID_API_KEY（走 HTTPS 443 端口，不受 SMTP 封锁影响）。' }); } catch(e) {}
     }
   }, 28000);
   try {
@@ -3506,26 +3532,52 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     const isHtml = content_type === 'html';
     const bodyText = isHtml ? content.replace(/<[^>]*>/g, '') : content;
     const bodyHtml = isHtml ? content : content.split('\n').map(function(l) { return '<p>' + l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p>'; }).join('');
-    var transporter = getMailTransporter();
-    if (!transporter) {
-      return res.status(500).json({ error: '邮件服务未配置，请在 Render Dashboard 设置 GMAIL_USER 和 GMAIL_APP_PASSWORD' });
+    var transporter = null;
+    if (!SENDGRID_API_KEY) {
+      transporter = getMailTransporter();
+      if (!transporter) {
+        return res.status(500).json({ error: '邮件服务未配置，请在 Render Dashboard 设置 GMAIL_USER 和 GMAIL_APP_PASSWORD' });
+      }
     }
     var usedPort = mailTransporterPort;
     const sent = [];
     const failed = [];
     for (const r of recipients) {
       try {
-        await transporter.sendMail({
-          from: '"XTJ 管理员" <' + GMAIL_USER + '>',
-          to: r.email,
-          subject: subjectVal,
-          text: bodyText,
-          html: bodyHtml
-        });
+        if (SENDGRID_API_KEY) {
+          await sendViaSendGrid(r.email, subjectVal, bodyText, bodyHtml);
+        } else {
+          await transporter.sendMail({
+            from: '"XTJ 管理员" <' + GMAIL_USER + '>',
+            to: r.email,
+            subject: subjectVal,
+            text: bodyText,
+            html: bodyHtml
+          });
+        }
         sent.push(r.user_name || r.email);
       } catch (e) {
-        console.error('[Email] 发送给 ' + r.email + ' 失败 (端口' + usedPort + '): ' + (e.code || '') + ' - ' + e.message);
-        if (usedPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
+        console.error('[Email] 发送给 ' + r.email + ' 失败: ' + (e.code || '') + ' - ' + e.message);
+        // SendGrid 失败或 SMTP 失败 → 尝试 SMTP 回退
+        if (SENDGRID_API_KEY) {
+          SENDGRID_API_KEY = '';
+          try {
+            var sgTransporter = getMailTransporter();
+            if (sgTransporter) {
+              await sgTransporter.sendMail({
+                from: '"XTJ 管理员" <' + GMAIL_USER + '>',
+                to: r.email,
+                subject: subjectVal,
+                text: bodyText,
+                html: bodyHtml
+              });
+              sent.push(r.user_name || r.email);
+              continue;
+            }
+          } catch(e2) {
+            console.error('[Email] SMTP 回退也失败: ' + (e2.code || '') + ' - ' + e2.message);
+          }
+        } else if (usedPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
           try {
             usedPort = '587';
             console.log('[Email] 465 连接失败，回退到 587 STARTTLS');
@@ -3556,7 +3608,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
             continue;
           }
         }
-        failed.push({ user: r.user_name || r.email, error: '发送失败: ' + e.message });
+        failed.push({ user: r.user_name || r.email, error: (SENDGRID_API_KEY ? 'SendGrid失败，SMTP也失败: ' : '发送失败: ') + e.message });
       }
     }
     try {
@@ -3599,7 +3651,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
           failed_count: failed.length,
           sent: sent,
           failed: failed,
-          hint: 'SMTP 端口可能被云平台封锁。建议换用 SendGrid（100封/天免费，走 HTTPS 443 端口）：注册 https://sendgrid.com → 创建 API Key → 在 Render 环境变量设 SENDGRID_API_KEY'
+          hint: 'HTTPS 443 端口也被封锁或 SendGrid 未配置。继续失败的话，重启 Render 实例试试。'
         });
       }
     }
