@@ -3481,6 +3481,7 @@ app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req
 });
 
 var SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
+var GMAIL_GAS_URL = process.env.GMAIL_GAS_URL || ''; // Google Apps Script Web App URL（走 HTTPS 443，绕过 Render SMTP 端口封锁）
 
 // SendGrid API 发送（HTTPS 443，不受云平台 SMTP 端口封锁影响）
 async function sendViaSendGrid(to, subject, text, html) {
@@ -3506,7 +3507,27 @@ async function sendViaSendGrid(to, subject, text, html) {
   }
 }
 
-// 发送邮件（优先 SendGrid HTTPS API，其次 Gmail SMTP）
+// Google Apps Script 邮件中转（HTTPS 443，绕过 Render SMTP 端口封锁）
+// 部署方法：script.google.com 新建项目，粘贴以下代码（修改 from 即可）后部署为 Web App：
+//   function doPost(e) {
+//     var d = JSON.parse(e.postData.contents);
+//     GmailApp.sendEmail(d.to, d.subject, d.text, { htmlBody: d.html, from: '你的Gmail@gmail.com' });
+//     return ContentService.createTextOutput(JSON.stringify({ok:true})).setMimeType(ContentService.MimeType.JSON);
+//   }
+async function sendViaGAS(to, subject, text, html) {
+  var resp = await fetch(GMAIL_GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to: to, subject: subject, text: text || '', html: html || '' })
+  });
+  if (!resp.ok) {
+    var body = await resp.text().catch(function(){ return ''; });
+    throw new Error('GAS HTTP ' + resp.status + (body ? ': ' + body.slice(0, 200) : ''));
+  }
+  return await resp.json().catch(function(){ return { ok: true }; });
+}
+
+// 发送邮件（优先 GAS HTTPS > SendGrid HTTPS > Gmail SMTP）
 app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res) => {
   try {
     const { recipients, subject, content, content_type } = req.body;
@@ -3528,10 +3549,10 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     const bodyText = isHtml ? content.replace(/<[^>]*>/g, '') : content;
     const bodyHtml = isHtml ? content : content.split('\n').map(function(l) { return '<p>' + l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p>'; }).join('');
     var transporter = null;
-    if (!SENDGRID_API_KEY) {
+    if (!SENDGRID_API_KEY && !GMAIL_GAS_URL) {
       transporter = getMailTransporter();
       if (!transporter) {
-        return res.status(500).json({ error: '邮件服务未配置，请在 Render Dashboard 设置 GMAIL_USER 和 GMAIL_APP_PASSWORD' });
+        return res.status(500).json({ error: '邮件服务未配置，请在 Render Dashboard 设置 GMAIL_GAS_URL（推荐）或 GMAIL_USER + GMAIL_APP_PASSWORD' });
       }
     }
 
@@ -3556,7 +3577,10 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     const failed = [];
     for (const r of recipients) {
       try {
-        if (SENDGRID_API_KEY) {
+        if (GMAIL_GAS_URL) {
+          // 优先 Google Apps Script（HTTPS 443，绕过 Render SMTP 端口封锁）
+          await sendViaGAS(r.email, subjectVal, bodyText, bodyHtml);
+        } else if (SENDGRID_API_KEY) {
           await sendViaSendGrid(r.email, subjectVal, bodyText, bodyHtml);
         } else {
           await transporter.sendMail({
@@ -3570,7 +3594,40 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
         sent.push(r.user_name || r.email);
       } catch (e) {
         console.error('[Email] 发送给 ' + r.email + ' 失败: ' + (e.code || '') + ' - ' + e.message);
-        if (SENDGRID_API_KEY) {
+        // GAS 失败 → 回退 SendGrid → 回退 SMTP
+        if (GMAIL_GAS_URL && SENDGRID_API_KEY) {
+          try {
+            console.log('[Email] GAS 失败，回退到 SendGrid');
+            await sendViaSendGrid(r.email, subjectVal, bodyText, bodyHtml);
+            sent.push(r.user_name || r.email);
+            continue;
+          } catch(e2) {
+            console.error('[Email] SendGrid 回退也失败: ' + e2.message);
+            failed.push({ user: r.user_name || r.email, error: 'GAS失败，SendGrid也失败: ' + e2.message });
+            continue;
+          }
+        }
+        if (GMAIL_GAS_URL && !SENDGRID_API_KEY) {
+          // GAS 失败且无 SendGrid，回退到 SMTP
+          try {
+            var gasFallbackT = getMailTransporter();
+            if (gasFallbackT) {
+              await gasFallbackT.sendMail({
+                from: '"XTJ 管理员" <' + GMAIL_USER + '>',
+                to: r.email,
+                subject: subjectVal,
+                text: bodyText,
+                html: bodyHtml
+              });
+              sent.push(r.user_name || r.email);
+              continue;
+            }
+          } catch(e2) {
+            console.error('[Email] SMTP 回退也失败: ' + (e2.code || '') + ' - ' + e2.message);
+          }
+        }
+        if (SENDGRID_API_KEY && !GMAIL_GAS_URL) {
+          // SendGrid 失败 → 回退到 SMTP
           SENDGRID_API_KEY = '';
           try {
             var sgTransporter = getMailTransporter();
@@ -3588,7 +3645,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
           } catch(e2) {
             console.error('[Email] SMTP 回退也失败: ' + (e2.code || '') + ' - ' + e2.message);
           }
-        } else if (usedPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
+        } else if (!GMAIL_GAS_URL && usedPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
           try {
             usedPort = '587';
             console.log('[Email] 465 连接失败，回退到 587 STARTTLS');
@@ -3619,7 +3676,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
             continue;
           }
         }
-        failed.push({ user: r.user_name || r.email, error: (SENDGRID_API_KEY ? 'SendGrid失败，SMTP也失败: ' : '发送失败: ') + e.message });
+        failed.push({ user: r.user_name || r.email, error: (GMAIL_GAS_URL ? 'GAS失败' : SENDGRID_API_KEY ? 'SendGrid失败，SMTP也失败: ' : '发送失败: ') + e.message });
       }
     }
     try {
