@@ -60,8 +60,9 @@ const supabase = createClient(
 const GMAIL_USER = process.env.GMAIL_USER || '';
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || '';
 var mailTransporter = null;
+var mailTransporterPort = null;
 function getMailTransporter() {
-  if (mailTransporter) return mailTransporter;
+  if (mailTransporter && mailTransporterPort) return mailTransporter;
   if (!nodemailer) {
     console.warn('[MAIL] nodemailer 未安装，邮件功能不可用');
     return null;
@@ -70,12 +71,17 @@ function getMailTransporter() {
     console.warn('[MAIL] GMAIL_USER 或 GMAIL_APP_PASSWORD 未配置，邮件功能不可用');
     return null;
   }
+  // 优先使用 465 SSL，如果连接失败在 sendMail 时自动回退到 587
+  mailTransporterPort = process.env.SMTP_PORT || '465';
+  var isSecure = mailTransporterPort === '465';
   mailTransporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: parseInt(mailTransporterPort),
+    secure: isSecure,
     auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000
   });
   return mailTransporter;
 }
@@ -3367,7 +3373,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     if (!res.headersSent) {
       try { return res.status(504).json({ error: '发送邮件超时，请稍后重试' }); } catch(e) {}
     }
-  }, 25000);
+  }, 55000);
   try {
     const { recipients, subject, content, content_type } = req.body;
     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
@@ -3404,6 +3410,31 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
         });
         sent.push(r.user_name || r.email);
       } catch (e) {
+        // 连接超时/失败时，自动尝试回退到 587 STARTTLS
+        if (mailTransporterPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
+          try {
+            mailTransporterPort = '587';
+            mailTransporter = nodemailer.createTransport({
+              host: 'smtp.gmail.com',
+              port: 587,
+              secure: false,
+              requireTLS: true,
+              auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+              connectionTimeout: 30000,
+              greetingTimeout: 30000,
+              socketTimeout: 30000
+            });
+            await mailTransporter.sendMail({
+              from: '"XTJ 管理员" <' + GMAIL_USER + '>',
+              to: r.email,
+              subject: subjectVal,
+              text: bodyText,
+              html: bodyHtml
+            });
+            sent.push(r.user_name || r.email);
+            return;
+          } catch(e2) {}
+        }
         failed.push({ user: r.user_name || r.email, error: '发送失败: ' + e.message });
       }
     }
