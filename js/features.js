@@ -98,7 +98,9 @@
     ['加载涓?', '加载中']
   ];
   var _mjBuilt=false,_mjRegex=null,_mjMap=null;
-  function _buildMjRegex(){var map={};var patterns=[];MOJIBAKE_PAIRS.forEach(function(p){if(p[0]!==p[1]&&p[0].length>0&&!map[p[0]]){map[p[0]]=p[1];patterns.push(p[0]);}});patterns.sort(function(a,b){return b.length-a.length;});var escaped=patterns.map(function(p){return p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');});_mjMap=map;_mjRegex=new RegExp(escaped.join('|'),'g');_mjBuilt=true;}
+  function _buildMjRegex(){_mjBuilt=true;var map={};var patterns=[];MOJIBAKE_PAIRS.forEach(function(p){if(p[0]!==p[1]&&p[0].length>0&&!map[p[0]]){map[p[0]]=p[1];patterns.push(p[0]);}});patterns.sort(function(a,b){return b.length-a.length;});var escaped=patterns.map(function(p){return p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');});_mjMap=map;_mjRegex=new RegExp(escaped.join('|'),'g');}
+  // ★ 修复 L1：在 fixText 调用前确保 _mjBuilt = true（先 build 再赋值）
+  _buildMjRegex();
 
   function esc(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;').replace(/'/g,'&#39;');}
   function waveTitle(v){var text=String(v||'加载中...');if(text==='加载中')text='加载中...';if(text!=='加载中...')return esc(text);return '<span class="xtj-loader-title-wave" aria-label="加载中...">'+Array.from(text).map(function(char,index){return '<span style="--wave-index:'+index+'" aria-hidden="true">'+esc(char)+'</span>';}).join('')+'</span>';}

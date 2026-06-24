@@ -71,6 +71,34 @@ npm start
 
 ## 最近重点更新
 
+### v0.86 - 2026-06-23 全面Bug修复
+
+**后端 (render-api/server.js)**：
+- **B1 VIP支付事务保护**：`processVipPayment` 先写VIP记录再更新订单状态，避免"钱付了VIP没开通"
+- **M7 visitCache清理优化**：改为 `setTimeout` 异步延迟清理，避免同步 `forEach` 阻塞事件循环
+
+**前端 (js/core.js)**：
+- **B2 头像上传回滚**：先插入新头像记录，成功后再删除旧记录，避免"旧头像删了新头像插入失败" → 头像空
+- **M1 doLogout彻底清理**：登出时遍历所有 `xtj_*` 前缀的 localStorage 键并清除，避免用户A登出后用户B看到A的缓存
+- **M4 Observer内存泄漏**：`cleanupObservers()` 函数在 `beforeunload` 时 disconnect 所有 IntersectionObserver 并清理定时器
+- **M5 restrictionPollTimer停止**：`doLogout` 时调用 `stopRestrictionPolling()` 避免轮询泄漏
+- **M6 Supabase初始化检查**：`createClient` 前检查 `SUPABASE_URL` 和 `SUPABASE_ANON_KEY` 是否有效，无效时 `sb = null` 并输出错误
+
+**前端 (js/features.js)**：
+- **L1 乱码修复初始化**：`_buildMjRegex()` 在 IIFE 加载时立即执行，确保 `window.xtjFixText` 在任意调用时机都可用
+
+**前端 (js/performance.js)**：
+- **L4 浏览器兼容性**：`navigator.deviceMemory` 和 `navigator.hardwareConcurrency` 加 `typeof` 检查，兼容 Safari/Firefox
+
+**前端 (js/photo-wall/upload-ui.js)**：
+- **L5 deviceId 回退确认**：已有 `window.deviceId || ('photo_' + Date.now())` 回退，无需修改
+
+**前端 (js/core-animations.js / js/ui-effects.js)**：
+- 确认所有 `gsap` 调用已有 `hasGSAP()` 守卫，`isDockTab` 为局部函数——无需修改
+
+**版本升级**：
+- `index.html` 中 `desktop.css`、`core.js`、`core-animations.js`、`features.js`、`ui-effects.js`、`performance.js` 全部升级 query string 版本号
+
 ### v0.85
 
 - **Pro 赠送活动系统**：管理员后台创建/编辑/发布 Pro 赠送活动，用户一键免费领取，每个活动限领一次；后台完整历史记录（来源/时间/次数）

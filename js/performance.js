@@ -20,8 +20,9 @@
         var reduced = false;
         try { coarse = window.matchMedia('(pointer: coarse)').matches; } catch (e) {}
         try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) {}
-        var mem = navigator.deviceMemory || 0;
-        var cores = navigator.hardwareConcurrency || 0;
+        // ★ 修复 L4：navigator.deviceMemory 和 hardwareConcurrency 在 Safari/Firefox 不可用
+        var mem = (typeof navigator.deviceMemory !== 'undefined') ? navigator.deviceMemory : 0;
+        var cores = (typeof navigator.hardwareConcurrency !== 'undefined') ? navigator.hardwareConcurrency : 0;
         var firefox = /firefox/i.test(navigator.userAgent || '');
 
         if (reduced || (coarse && (mem && mem <= 4 || cores && cores <= 6)) || (mem && mem <= 2) || (cores && cores <= 4)) {
