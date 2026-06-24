@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const nodemailer = require('nodemailer');
 
 const app = express();
 
@@ -53,6 +54,23 @@ const supabase = createClient(
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY
 );
+
+// ===================== Gmail SMTP 邮件配置 =====================
+const GMAIL_USER = process.env.GMAIL_USER || '';
+const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || '';
+var mailTransporter = null;
+function getMailTransporter() {
+  if (mailTransporter) return mailTransporter;
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+    console.warn('[MAIL] GMAIL_USER 或 GMAIL_APP_PASSWORD 未配置，邮件功能不可用');
+    return null;
+  }
+  mailTransporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD }
+  });
+  return mailTransporter;
+}
 
 // ===================== 输入校验 =====================
 const MAX_USERNAME_LEN = 50;
@@ -3301,8 +3319,7 @@ app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20),
 });
 
 // ===================== 管理员邮件通知 API =====================
-const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
-const RESEND_FROM = process.env.FROM_EMAIL || 'onboarding@resend.dev';
+// 使用 Gmail SMTP 发送，需在 Render 环境变量设置：GMAIL_USER / GMAIL_APP_PASSWORD
 app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
     const { data, error } = await supabase.from('posts')
@@ -3332,7 +3349,7 @@ app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req
   }
 });
 
-// 发送邮件
+// 发送邮件（Gmail SMTP）
 app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res) => {
   var timedOut = false;
   var tmr = setTimeout(function() {
@@ -3360,43 +3377,24 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     const isHtml = content_type === 'html';
     const bodyText = isHtml ? content.replace(/<[^>]*>/g, '') : content;
     const bodyHtml = isHtml ? content : content.split('\n').map(function(l) { return '<p>' + l.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p>'; }).join('');
-    if (!RESEND_API_KEY) {
-      return res.status(500).json({ error: 'Resend API Key 未配置，请在环境变量中设置 RESEND_API_KEY' });
+    var transporter = getMailTransporter();
+    if (!transporter) {
+      return res.status(500).json({ error: '邮件服务未配置，请在 Render Dashboard 设置 GMAIL_USER 和 GMAIL_APP_PASSWORD' });
     }
     const sent = [];
     const failed = [];
     for (const r of recipients) {
       try {
-        var mailRes = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer ' + RESEND_API_KEY,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            from: 'XTJ 管理员 <' + RESEND_FROM + '>',
-            to: [r.email],
-            subject: subjectVal,
-            text: bodyText,
-            html: bodyHtml
-          })
+        await transporter.sendMail({
+          from: '"XTJ 管理员" <' + GMAIL_USER + '>',
+          to: r.email,
+          subject: subjectVal,
+          text: bodyText,
+          html: bodyHtml
         });
-        if (mailRes.ok) {
-          sent.push(r.user_name || r.email);
-        } else {
-          var mailErr = await mailRes.text();
-          // ★ 修复：Resend 测试域名只能给自己发邮件，给出明确指引
-          var errMsg = 'HTTP ' + mailRes.status + ': ' + mailErr;
-          if (mailRes.status === 403 && RESEND_FROM === 'onboarding@resend.dev') {
-            errMsg = 'Resend 测试域名限制：只能给 20051004xtj@gmail.com 发邮件。' +
-              '解决方法：1) 去 resend.com/domains 验证你的域名 ' +
-              '2) 在 Render Dashboard 设置 FROM_EMAIL=通知@你的域名 ' +
-              '3) 重启服务';
-          }
-          failed.push({ user: r.user_name || r.email, error: errMsg });
-        }
+        sent.push(r.user_name || r.email);
       } catch (e) {
-        failed.push({ user: r.user_name || r.email, error: '发送异常: ' + e.message });
+        failed.push({ user: r.user_name || r.email, error: '发送失败: ' + e.message });
       }
     }
     return res.json({
@@ -3822,7 +3820,7 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), async (req, res) => {
     var durationDays = giftInfo.duration_days || 30;
     var expireAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
     var features = giftInfo.features || DEFAULT_GIFT_FEATURES;
-    // 写入领取记录
+    // 写入领取记录（先写，防重复领取）
     var claimContent = JSON.stringify({
       campaign_id: giftId,
       campaign_title: giftInfo.title || '',
@@ -3832,13 +3830,13 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), async (req, res) => {
       features: features,
       duration_days: durationDays
     });
-    var { error: claimErr } = await supabase.from('posts').insert([{
+    var { data: claimData, error: claimErr } = await supabase.from('posts').insert([{
       user_name: userNameVal,
       media_type: PRO_GIFT_CLAIM_MARKER,
       media_url: giftId,
       content: claimContent,
       actor_key: 'pro_claim_' + Date.now()
-    }]);
+    }]).select('id').maybeSingle();
     if (claimErr) return res.status(400).json({ error: sanitizeError(claimErr) });
     // 写入 VIP 激活记录（复用现有VIP系统）
     var vipContent = JSON.stringify({
@@ -3861,7 +3859,16 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), async (req, res) => {
       actor_key: 'vip_' + Date.now()
     }]);
     if (vipErr) {
-      console.warn('[ProGift] VIP记录写入失败:', vipErr.message);
+      // ★ 关键修复：VIP 写入失败时回滚领取记录，避免"已领取但没VIP"
+      console.warn('[ProGift] VIP记录写入失败，回滚领取记录:', vipErr.message);
+      try {
+        if (claimData && claimData.id) {
+          await supabase.from('posts').delete().eq('id', claimData.id);
+        }
+      } catch (rollbackErr) {
+        console.error('[ProGift] 回滚领取记录失败:', rollbackErr.message);
+      }
+      return res.status(500).json({ error: 'VIP激活失败，请重试' });
     }
     return res.json({
       ok: true,
@@ -3908,7 +3915,8 @@ app.get('/admin/pro-gifts/history', verifyToken, rateLimit(60000, 10), async (re
       try { info = JSON.parse(row.content || '{}'); } catch(e) {}
       var source = info.source || 'unknown';
       var sourceLabel = '其他';
-      if (source === 'pro_gift') sourceLabel = '免费赠送';
+      if (source === 'pro_gift') sourceLabel = '活动领取';
+      else if (source === 'admin_gift') sourceLabel = '管理员赠送';
       else if (source === 'frontend_direct') sourceLabel = '自主开通';
       else if (source === 'paid' || source === 'payment') sourceLabel = '付费购买';
       records.push({

@@ -388,6 +388,105 @@
     .btn-sm.del { color: var(--danger); border-color: rgba(255,59,96,0.3); }
     .btn-sm.del:hover { background: rgba(255,59,96,0.12); }
     .btn-sm.primary { background: var(--primary); color: white; border-color: var(--primary); }
+
+    /* Pro 赠送管理 */
+    .pro-gift-tabs {
+        display: flex; gap: 4px; margin-bottom: 16px;
+        border-bottom: 1px solid var(--border); padding-bottom: 8px;
+    }
+    .pro-gift-tab {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 6px 14px; border-radius: 10px; border: 1px solid transparent;
+        background: transparent; color: var(--text-muted);
+        font-size: 13px; cursor: pointer; font-weight: 500;
+        transition: all 0.2s ease;
+    }
+    .pro-gift-tab:hover {
+        background: rgba(255,255,255,0.08); color: var(--text);
+    }
+    .pro-gift-tab.active {
+        background: var(--primary); color: white;
+        box-shadow: 0 4px 12px rgba(var(--primary-rgb, 26, 115, 81), 0.3);
+    }
+    .status-badge {
+        display: inline-block; padding: 2px 8px; border-radius: 6px;
+        font-size: 11px; font-weight: 600;
+    }
+    .status-success { color: var(--success); background: rgba(5, 150, 105, 0.12); }
+    .status-muted { color: var(--text-muted); background: rgba(120, 120, 120, 0.12); }
+    .form-row {
+        display: flex; gap: 10px;
+    }
+    .feature-grid {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    }
+    .feature-item {
+        display: flex; align-items: center; gap: 6px;
+        font-size: 12px; cursor: pointer; padding: 6px 8px;
+        border-radius: 8px; background: rgba(255,255,255,0.04);
+        border: 1px solid var(--border);
+        transition: all 0.2s ease;
+    }
+    .feature-item:hover {
+        background: rgba(255,255,255,0.08);
+    }
+    .feature-item input { cursor: pointer; }
+
+    .modal-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+        z-index: 9999; display: flex; align-items: center; justify-content: center;
+        backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    .modal-box {
+        background: var(--bg); border-radius: 16px;
+        border: 1px solid var(--border);
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        max-width: 520px; width: 90%; max-height: 88vh;
+        display: flex; flex-direction: column;
+        overflow: hidden;
+    }
+    .modal-head {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 16px 20px; border-bottom: 1px solid var(--border);
+    }
+    .modal-head h3 { margin: 0; font-size: 15px; }
+    .modal-body {
+        padding: 18px 20px; overflow-y: auto; flex: 1;
+    }
+    .modal-btns {
+        display: flex; gap: 8px; justify-content: flex-end;
+        padding: 14px 20px; border-top: 1px solid var(--border);
+    }
+    .form-group { margin-bottom: 12px; }
+    .form-group label {
+        display: block; font-size: 12px; color: var(--text-muted);
+        margin-bottom: 5px; font-weight: 500;
+    }
+    .form-group input, .form-group textarea {
+        width: 100%; padding: 9px 12px; border-radius: 10px;
+        border: 1px solid var(--border); background: rgba(255,255,255,0.05);
+        color: var(--text); font-size: 13px; outline: none;
+        box-sizing: border-box;
+        transition: border-color 0.2s;
+    }
+    .form-group input:focus, .form-group textarea:focus {
+        border-color: var(--primary);
+    }
+    .form-group textarea { resize: vertical; min-height: 60px; }
+    .btn {
+        padding: 7px 16px; border-radius: 10px; border: 1px solid var(--border);
+        background: rgba(255,255,255,0.08); cursor: pointer; font-size: 13px;
+        color: var(--text); transition: all 0.2s ease;
+    }
+    .btn:hover { background: rgba(255,255,255,0.15); }
+    .btn.primary {
+        background: var(--primary); color: white; border-color: var(--primary);
+    }
+    .btn.primary:hover { filter: brightness(1.1); }
+    .btn.btn-ghost {
+        background: transparent; border-color: transparent; color: var(--text-muted);
+    }
+    .btn.btn-ghost:hover { color: var(--text); background: rgba(255,255,255,0.08); }
     .btn-sm:active {
         transform: translateY(0) scale(0.965);
         box-shadow: 0 6px 14px rgba(26, 71, 48, 0.08);
@@ -1451,6 +1550,6 @@
     </div>
 </div>
 
-<script defer src="js/admin/admin.js?v=20260623_email_tab"></script>
+<script defer src="js/admin/admin.js?v=20260624_progift"></script>
 </body>
 </html>

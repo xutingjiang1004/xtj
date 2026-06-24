@@ -43,7 +43,7 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.css?v=20260623_security_fix_1" />
+    <link rel="stylesheet" href="css/style.css?v=20260624_progift" />
     <style id="xtj-inline-hotfix-20260612">
         .dock-bar {
             position: fixed;
@@ -276,7 +276,7 @@
             -webkit-backdrop-filter: none !important;
         }
     </style>
-    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.css?v=20260623_bugfix" />
+    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.css?v=20260624_progift" />
     <link rel="stylesheet" href="css/ui-enhance.css?v=20260620_3">
 </head>
 <body>
@@ -1104,12 +1104,17 @@
                     </button>
                 </div>
                 <!-- Pro 赠送活动区 -->
-                <div id="proGiftSection" style="border-top:1px solid rgba(0,0,0,0.08);margin-top:16px;padding-top:12px;display:none;">
-                    <div style="font-size:13px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
-                        免费领 Pro
+                <div id="proGiftSection" class="pro-gift-section" style="display:none;">
+                    <div class="pro-gift-section-head">
+                        <div class="pro-gift-section-icon">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
+                        </div>
+                        <div class="pro-gift-section-title">
+                            <span class="pro-gift-section-badge">限时</span>
+                            免费领 Pro
+                        </div>
                     </div>
-                    <div id="proGiftList" style="display:flex;flex-direction:column;gap:8px;"></div>
+                    <div id="proGiftList" class="pro-gift-list"></div>
                 </div>
                 <div class="vip-modal-footer" id="vipFooter">
                     <span class="vip-modal-footer-text" id="vipFooterText">
@@ -1225,7 +1230,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
     <script defer src="js/config.js?v=2"></script>
     <script defer src="js/performance.js?v=20260623_1"></script>
-    <script defer src="js/core.js?v=20260623_bugfix"></script>
+    <script defer src="js/core.js?v=20260624_progift"></script>
     <script defer src="js/login-device.js?v=20260623_device_v2"></script>
     <script defer src="js/core-animations.js?v=20260623_1"></script>
     <script defer src="js/features.js?v=20260623_1"></script>
