@@ -3073,7 +3073,7 @@ async function initAdminClient() {
 
     window.switchTab = async function(tab) {
         var normalized = tab === 'blacklist' ? 'bans' : tab;
-        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist'];
+        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist','progift'];
         currentTab = normalized;
         saveCurrentTab();
         if (normalized === 'users') {
@@ -3977,6 +3977,14 @@ async function initAdminClient() {
             '<span style="font-size:12px;color:var(--text-muted);" id="emailSelectedCount">已选 0 人</span>' +
             '<span style="font-size:12px;color:var(--text-muted);" id="emailTotalCount"></span>' +
             '</div>' +
+            '<div class="form-group" style="margin-bottom:8px;">' +
+            '<label style="display:flex;align-items:center;gap:6px;">手动输入邮箱 <span style="font-size:11px;color:var(--text-muted);font-weight:400;">（一行一个，或逗号分隔）</span></label>' +
+            '<div style="display:flex;gap:6px;">' +
+            '<textarea id="emailManualInp" rows="2" placeholder="例：user1@qq.com&#10;user2@gmail.com" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:rgba(255,255,255,0.1);font-size:13px;outline:none;resize:none;"></textarea>' +
+            '<button class="btn-sm" onclick="emailAddManual()" style="align-self:flex-end;">添加</button>' +
+            '</div>' +
+            '<div id="emailManualList" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;min-height:0;"></div>' +
+            '</div>' +
             '<div class="form-group"><label>邮件主题</label><input id="emailSubjectInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件主题" /></div>' +
             '<div class="form-group"><label>邮件内容</label><textarea id="emailContentInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件内容...&#10;支持换行，发送时将转为 HTML 格式"></textarea></div>' +
             '<button class="btn-sm primary" onclick="emailSend()" id="emailSendBtn">📤 发送邮件</button>' +
@@ -4079,8 +4087,50 @@ async function initAdminClient() {
 
     window.emailUpdateCount = function() {
         var checked = document.querySelectorAll('.email-checkbox:checked').length;
+        var manualCount = document.querySelectorAll('#emailManualList .email-manual-tag').length;
+        var total = checked + manualCount;
         var el = document.getElementById('emailSelectedCount');
-        if (el) el.textContent = '已选 ' + checked + ' 人';
+        if (el) el.textContent = '已选 ' + total + ' 人';
+    };
+
+    // 添加手动输入的邮箱
+    window.emailAddManual = function() {
+        var inp = document.getElementById('emailManualInp');
+        var list = document.getElementById('emailManualList');
+        if (!inp || !list) return;
+        var raw = inp.value.trim();
+        if (!raw) { showToast('请输入邮箱地址', 'error'); return; }
+        // 按换行或逗号或分号分割
+        var emails = raw.split(/[\n,;，；]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+        var added = 0;
+        emails.forEach(function(email) {
+            // 简单验证邮箱格式
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return;
+            // 查重
+            var existing = list.querySelectorAll('.email-manual-tag');
+            var dup = false;
+            existing.forEach(function(tag) {
+                if (tag.dataset.email === email) dup = true;
+            });
+            if (dup) return;
+            var tag = document.createElement('span');
+            tag.className = 'email-manual-tag';
+            tag.dataset.email = email;
+            tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;';
+            tag.innerHTML = email + ' <span onclick="emailRemoveManual(this)" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span>';
+            list.appendChild(tag);
+            added++;
+        });
+        inp.value = '';
+        if (added === 0) { showToast('邮箱无效或已存在', 'error'); return; }
+        showToast('已添加 ' + added + ' 个邮箱');
+        emailUpdateCount();
+    };
+
+    window.emailRemoveManual = function(el) {
+        var tag = el.parentElement;
+        if (tag) tag.remove();
+        emailUpdateCount();
     };
 
     window.emailToggleAll = function() {
@@ -4100,11 +4150,15 @@ async function initAdminClient() {
         if (!content) { showToast('请输入邮件内容'); return; }
 
         var checkedCbs = document.querySelectorAll('.email-checkbox:checked');
-        if (checkedCbs.length === 0) { showToast('请至少选择一个收件人'); return; }
+        var manualTags = document.querySelectorAll('#emailManualList .email-manual-tag');
+        if (checkedCbs.length === 0 && manualTags.length === 0) { showToast('请至少选择一个收件人'); return; }
 
         var recipients = [];
         checkedCbs.forEach(function(cb) {
             recipients.push({ email: cb.dataset.email, user_name: cb.dataset.name });
+        });
+        manualTags.forEach(function(tag) {
+            recipients.push({ email: tag.dataset.email, user_name: tag.dataset.email });
         });
 
         btn.disabled = true;
