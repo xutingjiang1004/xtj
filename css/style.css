@@ -12481,6 +12481,161 @@ body.ios-chat-keyboard-open .chat-input-area {
   opacity: 0.7;
 }
 
+/* Pro 赠送活动区 */
+.pro-gift-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border, rgba(0,0,0,0.08));
+}
+.pro-gift-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.pro-gift-section-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(245,158,11,0.18), rgba(245,158,11,0.08));
+  color: #f59e0b;
+}
+.pro-gift-section-title {
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pro-gift-section-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  letter-spacing: 0.04em;
+}
+.pro-gift-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pro-gift-card {
+  position: relative;
+  border-radius: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(245,158,11,0.2);
+  background: linear-gradient(135deg, rgba(245,158,11,0.06), rgba(245,158,11,0.02));
+  transition: all 0.25s ease;
+  overflow: hidden;
+}
+.pro-gift-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(245,158,11,0.08), transparent);
+  transition: left 0.6s ease;
+}
+.pro-gift-card:hover::before {
+  left: 100%;
+}
+.pro-gift-card:hover {
+  border-color: rgba(245,158,11,0.35);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(245,158,11,0.08);
+}
+.pro-gift-card.claimed {
+  opacity: 0.5;
+  filter: grayscale(0.4);
+  pointer-events: none;
+}
+.pro-gift-card-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+.pro-gift-card-info {
+  flex: 1;
+  min-width: 0;
+}
+.pro-gift-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 3px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pro-gift-card-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pro-gift-card-meta {
+  font-size: 10px;
+  color: #f59e0b;
+  margin-top: 4px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pro-gift-card-meta svg {
+  width: 11px;
+  height: 11px;
+}
+.pro-gift-claim-btn {
+  flex-shrink: 0;
+  padding: 7px 16px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(245,158,11,0.25);
+}
+.pro-gift-claim-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(245,158,11,0.35);
+}
+.pro-gift-claim-btn:active {
+  transform: translateY(0);
+}
+.pro-gift-claim-btn.loading {
+  opacity: 0.7;
+  cursor: wait;
+  pointer-events: none;
+}
+.pro-gift-claimed-badge {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--success, #059669);
+  background: rgba(5,150,105,0.1);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* VIP 已激活标识（简洁简约版：透明 + 描边） */
 .xtj-vip-badge {
   display: inline-flex;

@@ -604,21 +604,37 @@ const ADMIN_NAME = "xxz";
                 var resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), { signal: AbortSignal.timeout(8000) });
                 var data = await resp.json();
                 var gifts = data.gifts || [];
-                var available = gifts.filter(function(g) { return !g.already_claimed; });
-                if (!available.length && !gifts.length) { section.style.display = 'none'; return; }
+                if (!gifts.length) { section.style.display = 'none'; return; }
                 section.style.display = 'block';
                 list.innerHTML = gifts.map(function(g) {
-                    var card = '<div style="background:rgba(240,192,64,0.08);border:1px solid rgba(240,192,64,0.2);border-radius:8px;padding:10px 12px;">';
-                    card += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-                    card += '<div style="flex:1;">';
-                    card += '<div style="font-weight:600;font-size:13px;">' + escapeHtml(g.title) + '</div>';
-                    if (g.description) card += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + escapeHtml(g.description) + '</div>';
-                    card += '<div style="font-size:10px;color:var(--text-muted);margin-top:2px;">有效期 ' + g.duration_days + ' 天</div>';
+                    var cardClass = 'pro-gift-card' + (g.already_claimed ? ' claimed' : '');
+                    var durationText = g.duration_days + ' 天 Pro';
+                    if (g.claim_expire_at) {
+                        var expireDate = new Date(g.claim_expire_at);
+                        if (expireDate > new Date()) {
+                            var daysLeft = Math.ceil((expireDate - new Date()) / (1000 * 60 * 60 * 24));
+                            durationText += ' · 还剩 ' + daysLeft + ' 天';
+                        }
+                    }
+                    var card = '<div class="' + cardClass + '" data-gift-id="' + g.id + '">';
+                    card += '<div class="pro-gift-card-main">';
+                    card += '<div class="pro-gift-card-info">';
+                    card += '<div class="pro-gift-card-title">' + escapeHtml(g.title) + '</div>';
+                    if (g.description) {
+                        card += '<div class="pro-gift-card-desc">' + escapeHtml(g.description) + '</div>';
+                    }
+                    card += '<div class="pro-gift-card-meta">';
+                    card += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+                    card += durationText;
+                    card += '</div>';
                     card += '</div>';
                     if (g.already_claimed) {
-                        card += '<span style="font-size:11px;color:var(--text-muted);white-space:nowrap;padding:4px 10px;">✅ 已领取</span>';
+                        card += '<div class="pro-gift-claimed-badge">';
+                        card += '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+                        card += '已领取';
+                        card += '</div>';
                     } else {
-                        card += '<button class="btn-sm" style="background:var(--accent);color:#fff;border:none;padding:5px 14px;border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap;" onclick="claimProGift(\'' + g.id + '\')">免费领取</button>';
+                        card += '<button class="pro-gift-claim-btn" data-gift-id="' + g.id + '" onclick="claimProGift(\'' + g.id + '\')">免费领取</button>';
                     }
                     card += '</div></div>';
                     return card;
@@ -631,6 +647,12 @@ const ADMIN_NAME = "xxz";
         // 领取 Pro 赠送活动
         window.claimProGift = async function(giftId) {
             if (!currentUser) { showToast('请先登录'); return; }
+            var btn = document.querySelector('.pro-gift-claim-btn[data-gift-id="' + giftId + '"]');
+            var card = document.querySelector('.pro-gift-card[data-gift-id="' + giftId + '"]');
+            if (btn) {
+                btn.classList.add('loading');
+                btn.textContent = '领取中...';
+            }
             try {
                 var resp = await fetch(API_BASE + '/api/pro-gifts/claim', {
                     method: 'POST',
@@ -639,22 +661,48 @@ const ADMIN_NAME = "xxz";
                 });
                 var data = await resp.json();
                 if (data.ok) {
+                    // 更新卡片状态
+                    if (card) {
+                        card.classList.add('claimed');
+                        if (btn) btn.remove();
+                        var infoDiv = card.querySelector('.pro-gift-card-info');
+                        if (infoDiv && infoDiv.parentNode) {
+                            var badge = document.createElement('div');
+                            badge.className = 'pro-gift-claimed-badge';
+                            badge.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>已领取';
+                            infoDiv.parentNode.insertBefore(badge, infoDiv.nextSibling);
+                        }
+                    }
                     showToast('🎉 Pro 已激活至 ' + new Date(data.expire_at).toLocaleDateString());
                     // 刷新VIP状态和UI
                     if (typeof window.__xtjSaveLocalVip === 'function') {
                         window.__xtjSaveLocalVip(data);
                     }
-                    await ensureVipStatusFresh(true);
+                    ensureVipStatusFresh(true);
                     updateVipUI();
                     updateVipModalUI();
                     if (typeof window.__xtjApplyProTheme === 'function') {
                         window.__xtjApplyProTheme(true);
                     }
+                    // 弹出庆祝动画
+                    setTimeout(function() {
+                        if (typeof window.__xtjShowProCelebration === 'function') {
+                            window.__xtjShowProCelebration(data);
+                        }
+                    }, 300);
                     loadProGiftCampaigns();
                 } else {
+                    if (btn) {
+                        btn.classList.remove('loading');
+                        btn.textContent = '免费领取';
+                    }
                     showToast(data.error || '领取失败', 'error');
                 }
             } catch(e) {
+                if (btn) {
+                    btn.classList.remove('loading');
+                    btn.textContent = '免费领取';
+                }
                 showToast('领取失败: ' + e.message, 'error');
             }
         };
