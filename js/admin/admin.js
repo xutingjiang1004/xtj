@@ -552,7 +552,7 @@
     // 安全说明：不再创建 Supabase 客户端，所有管理操作通过 API_BASE 执行
     // ===================== 双击 Tab 刷新数据 =====================
     window.refreshAdminTab = async function(tab) {
-        var normalized = tab === 'blacklist' ? 'bans' : (tab || currentTab || 'ann');
+        var normalized = tab || currentTab || 'ann';
         try {
             currentTab = normalized;
             saveCurrentTab();
@@ -606,7 +606,7 @@ async function initAdminClient() {
         startSessionTimeoutMonitor();
         installAdminTabDoubleClickRefresh();
         
-        var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos'];
+        var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos','progift'];
         var savedTab = localStorage.getItem(TAB_KEY);
         if (savedTab && allowedTabs.indexOf(savedTab) !== -1) {
             currentTab = savedTab;
@@ -740,7 +740,6 @@ async function initAdminClient() {
             adminTabDataLoaded.comments = true;
             adminTabDataLoaded.anns = true;
             adminTabDataLoaded.bans = true;
-            adminTabDataLoaded.mutes = true;
 
             var userMap = {};
             allPosts.forEach(function(p) { userMap[p.user_name] = true; });
@@ -769,7 +768,7 @@ async function initAdminClient() {
     }
 
     async function loadTabDataIfNeeded(tab) {
-        var normalized = tab === 'blacklist' ? 'bans' : tab;
+        var normalized = tab; // blacklist 保持原样，不 normalize 为 bans
         var tabDataMap = {
             'ann': { key: 'anns' },
             'posts': { key: 'posts' },
@@ -3112,7 +3111,7 @@ async function initAdminClient() {
     };
 
     window.switchTab = async function(tab) {
-        var normalized = tab === 'blacklist' ? 'bans' : tab;
+        var normalized = tab;
         var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist','progift'];
         currentTab = normalized;
         saveCurrentTab();
@@ -3138,7 +3137,7 @@ async function initAdminClient() {
     };
 
     window.renderTab = function(tab) {
-        var normalized = tab === 'blacklist' ? 'bans' : tab;
+        var normalized = tab;
         var el = document.getElementById('tab' + getTabDomName(normalized));
         if (!el) return;
         switch(normalized) {
@@ -4085,14 +4084,7 @@ async function initAdminClient() {
         var formWrap = document.getElementById('emailFormWrap');
         if (!wrap) return;
         try {
-            var res = await fetch(API_BASE + '/admin/users-with-email', {
-                headers: { 'Authorization': 'Bearer ' + getToken() }
-            });
-            if (!res.ok) {
-                wrap.innerHTML = '<div class="empty">加载失败（' + res.status + '）</div>';
-                return;
-            }
-            var data = await res.json();
+            var data = await apiCall('GET', '/admin/users-with-email');
             if (!data.users || data.users.length === 0) {
                 wrap.innerHTML = '<div class="empty">暂无用户填写邮箱</div>';
                 return;
@@ -4200,21 +4192,8 @@ async function initAdminClient() {
         resultEl.className = '';
         resultEl.textContent = '';
 
-        var abortCtrl = new AbortController();
-        var abortTmr = setTimeout(function() { abortCtrl.abort(); }, 30000);
-
         try {
-            var res = await fetch(API_BASE + '/admin/send-email', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + getToken()
-                },
-                body: JSON.stringify({ recipients: recipients, subject: subject, content: content, content_type: 'text' }),
-                signal: abortCtrl.signal
-            });
-            clearTimeout(abortTmr);
-            var data = await res.json();
+            var data = await apiCall('POST', '/admin/send-email', { recipients: recipients, subject: subject, content: content, content_type: 'text' });
             if (data.ok) {
                 var msg = '✅ 发送完成：成功 ' + data.sent_count + ' 人';
                 if (data.failed_count > 0) msg += '，失败 ' + data.failed_count + ' 人';
@@ -4248,13 +4227,8 @@ async function initAdminClient() {
             }
         } catch(e) {
             resultEl.className = 'send-result error';
-            if (e.name === 'AbortError') {
-                resultEl.textContent = '发送超时：连接SMTP服务器失败，请检查配置';
-            } else {
-                resultEl.textContent = '发送异常: ' + e.message;
-            }
+            resultEl.textContent = '发送异常: ' + e.message;
         } finally {
-            clearTimeout(abortTmr);
             btn.disabled = false;
             btn.textContent = '📤 发送邮件';
         }
