@@ -446,7 +446,13 @@
         try { localStorage.removeItem(TOKEN_KEY); } catch(e) {}
     }
 
-    async function apiCall(method, path, body) {
+    function isFetchAbortError(e) {
+        var msg = String((e && e.message) || e || '').toLowerCase();
+        return (e && e.name === 'AbortError') || msg.indexOf('abort') >= 0 || msg.indexOf('fetch is aborted') >= 0;
+    }
+
+    async function apiCall(method, path, body, options) {
+        options = options || {};
         if (!API_BASE) {
             throw new Error('API_BASE 未配置');
         }
@@ -457,8 +463,9 @@
         var token = getToken();
         if (token) opts.headers['Authorization'] = 'Bearer ' + token;
         if (body) opts.body = JSON.stringify(body);
+        var timeoutMs = Number(options.timeoutMs) || 30000;
         var ac = new AbortController();
-        var at = setTimeout(function() { ac.abort(); }, 30000);
+        var at = setTimeout(function() { ac.abort(); }, timeoutMs);
         opts.signal = ac.signal;
         opts.credentials = 'same-origin';
         var res;
@@ -4238,7 +4245,7 @@ async function initAdminClient() {
         resultEl.textContent = '';
 
         try {
-            var data = await apiCall('POST', '/admin/send-email', { recipients: recipients, subject: subject, content: content, content_type: 'text' });
+            var data = await apiCall('POST', '/admin/send-email', { recipients: recipients, subject: subject, content: content, content_type: 'text' }, { timeoutMs: 120000 });
             if (data.ok) {
                 var msg = '✅ 发送完成：成功 ' + data.sent_count + ' 人';
                 if (data.failed_count > 0) msg += '，失败 ' + data.failed_count + ' 人';
@@ -4272,7 +4279,11 @@ async function initAdminClient() {
             }
         } catch(e) {
             resultEl.className = 'send-result error';
-            resultEl.textContent = '发送异常: ' + e.message;
+            if (isFetchAbortError(e)) {
+                resultEl.textContent = '发送超时：邮件发送耗时较长，请稍后查看发送记录，或减少收件人后重试。';
+            } else {
+                resultEl.textContent = '发送异常: ' + e.message;
+            }
         } finally {
             btn.disabled = false;
             btn.textContent = '📤 发送邮件';
