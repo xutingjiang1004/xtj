@@ -3508,11 +3508,6 @@ async function sendViaSendGrid(to, subject, text, html) {
 
 // 发送邮件（优先 SendGrid HTTPS API，其次 Gmail SMTP）
 app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res) => {
-  var tmr = setTimeout(function() {
-    if (!res.headersSent) {
-      try { return res.status(504).json({ error: '邮件服务无响应（28s），如果持续失败，请在 Render 环境变量设置 SENDGRID_API_KEY（走 HTTPS 443 端口，不受 SMTP 封锁影响）。' }); } catch(e) {}
-    }
-  }, 28000);
   try {
     const { recipients, subject, content, content_type } = req.body;
     if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
@@ -3539,6 +3534,23 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
         return res.status(500).json({ error: '邮件服务未配置，请在 Render Dashboard 设置 GMAIL_USER 和 GMAIL_APP_PASSWORD' });
       }
     }
+
+    // 先保存收件人到历史（无论发送是否成功，都先存下来）
+    try {
+      var histEmails = [];
+      recipients.forEach(function(r) {
+        var e = String(r.email || '').trim().toLowerCase();
+        if (e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && histEmails.indexOf(e) === -1) histEmails.push(e);
+      });
+      for (var hi = 0; hi < histEmails.length; hi++) {
+        await supabase.from('posts').insert([{
+          user_name: ADMIN_USERNAME,
+          content: JSON.stringify({ email: histEmails[hi], sent_at: new Date().toISOString() }),
+          media_type: '__email_recipient_history__'
+        }]).catch(function(err) { console.warn('[Email] 保存历史收件人失败:', err && err.message); });
+      }
+    } catch(e) { console.warn('[Email] 保存收件人历史失败:', e.message); }
+
     var usedPort = mailTransporterPort;
     const sent = [];
     const failed = [];
@@ -3558,7 +3570,6 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
         sent.push(r.user_name || r.email);
       } catch (e) {
         console.error('[Email] 发送给 ' + r.email + ' 失败: ' + (e.code || '') + ' - ' + e.message);
-        // SendGrid 失败或 SMTP 失败 → 尝试 SMTP 回退
         if (SENDGRID_API_KEY) {
           SENDGRID_API_KEY = '';
           try {
@@ -3627,21 +3638,6 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
     } catch(e) {
       console.warn('[Email] 保存发送记录失败:', e.message);
     }
-    // 保存收件人到历史
-    try {
-      var histEmails = [];
-      recipients.forEach(function(r) {
-        var e = String(r.email || '').trim().toLowerCase();
-        if (e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && histEmails.indexOf(e) === -1) histEmails.push(e);
-      });
-      for (var hi = 0; hi < histEmails.length; hi++) {
-        await supabase.from('posts').insert([{
-          user_name: ADMIN_USERNAME,
-          content: JSON.stringify({ email: histEmails[hi], sent_at: new Date().toISOString() }),
-          media_type: '__email_recipient_history__'
-        }]).catch(function(){});
-      }
-    } catch(e) { console.warn('[Email] 保存收件人历史失败:', e.message); }
     if (sent.length === 0 && failed.length > 0) {
       var firstErr = failed[0].error || '';
       if (firstErr.indexOf('connect') > -1 || firstErr.indexOf('timeout') > -1 || firstErr.indexOf('ETIMEDOUT') > -1) {
@@ -3651,7 +3647,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
           failed_count: failed.length,
           sent: sent,
           failed: failed,
-          hint: 'HTTPS 443 端口也被封锁或 SendGrid 未配置。继续失败的话，重启 Render 实例试试。'
+          hint: 'SMTP 465/587 出站端口被云平台封锁，重启 Render 实例可能换到未封锁的宿主机。或者在 Render Dashboard 手动 Deploy 触发重启。'
         });
       }
     }
@@ -3665,8 +3661,6 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
   } catch (e) {
     console.error('[Email API] 发送邮件失败:', e.message);
     return res.status(500).json({ error: '发送邮件失败' });
-  } finally {
-    clearTimeout(tmr);
   }
 });
 
