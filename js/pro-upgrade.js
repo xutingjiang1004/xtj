@@ -314,13 +314,16 @@
       var proProfile = document.querySelector('.xtj-pro-profile');
       if (proProfile) proProfile.classList.remove('xtj-pro-profile');
     }
+    if (typeof window.__xtjApplyCurrentUserStyle === 'function') {
+      try { window.__xtjApplyCurrentUserStyle(); } catch(_) {}
+    }
   };
 
   window.__xtjGetProFeatures = function() {
     return {
       badge: '👑',
       label: 'Pro 会员',
-      unlock: ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'],
+      unlock: ['custom_theme', 'pro_chat_bubble', 'pro_post_style'],
       theme: 'xtj-pro-active'
     };
   };

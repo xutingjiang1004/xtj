@@ -161,6 +161,7 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', VIP_MARKER)
     .neq('media_type', VIP_ORDER_MARKER)
     .neq('media_type', VIP_PLAN_MARKER)
+    .neq('media_type', '__user_style__')
     .neq('media_type', PRO_GIFT_MARKER)
     .neq('media_type', PRO_GIFT_CLAIM_MARKER)
     .neq('media_type', LOGIN_EVENT_MARKER)
@@ -4040,7 +4041,7 @@ const VIP_PLANS = [
     price: 3,
     currency: 'CNY',
     duration_days: 30,
-    features: ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post']
+    features: ['custom_theme', 'pro_chat_bubble', 'pro_post_style']
   }
 ];
 
@@ -4176,7 +4177,7 @@ app.get('/api/vip/status', rateLimit(60000, 60), async (req, res) => {
 
 // ===================== Pro 赠送活动管理 =====================
 // PRO_GIFT_MARKER / PRO_GIFT_CLAIM_MARKER 已在文件前面集中定义（行 132-133）
-const DEFAULT_GIFT_FEATURES = ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'];
+const DEFAULT_GIFT_FEATURES = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
 
 // 管理员：获取全部 Pro 赠送活动
 // 2026-06-25：返回完整字段，包含 claim_limit / allowed_users / exclusive / start_at / end_at

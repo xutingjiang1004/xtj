@@ -471,6 +471,247 @@ const ADMIN_NAME = "xxz";
         }
         function getVipInfo() { return __vipStatus.vip_info; }
 
+        var USER_STYLE_MARKER = '__user_style__';
+        var USER_STYLE_STORAGE_PREFIX = 'xtj_user_style_';
+        var PRO_VISUAL_FEATURE_KEYS = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
+        var currentUserStyleRecordId = '';
+        var currentUserStyle = createDefaultUserStyle();
+
+        function createDefaultUserStyle() {
+            return {
+                theme: 'default',
+                chat_bubble_style: 'default',
+                post_card_style: 'default',
+                updated_at: ''
+            };
+        }
+
+        function getUserStyleStorageKey(userName) {
+            return USER_STYLE_STORAGE_PREFIX + String(userName || '').trim();
+        }
+
+        function normalizeUserStyle(payload) {
+            var style = Object.assign({}, createDefaultUserStyle(), payload || {});
+            var theme = String(style.theme || 'default');
+            var bubble = String(style.chat_bubble_style || 'default');
+            var postStyle = String(style.post_card_style || 'default');
+            if (['default', 'mint', 'aqua', 'sakura', 'lavender'].indexOf(theme) < 0) theme = 'default';
+            if (['default', 'mint', 'aqua', 'cream', 'sakura', 'lavender'].indexOf(bubble) < 0) bubble = 'default';
+            if (['default', 'clean_border', 'leaf_corner', 'soft_glow', 'minimal_pro'].indexOf(postStyle) < 0) postStyle = 'default';
+            style.theme = theme;
+            style.chat_bubble_style = bubble;
+            style.post_card_style = postStyle;
+            style.updated_at = style.updated_at ? String(style.updated_at) : '';
+            return style;
+        }
+
+        function readCachedUserStyle(userName) {
+            if (!userName) return null;
+            try {
+                return normalizeUserStyle(window.safeLocalStorageGetJSON(getUserStyleStorageKey(userName), null));
+            } catch(e) {
+                return null;
+            }
+        }
+
+        function writeCachedUserStyle(userName, style) {
+            if (!userName) return;
+            try {
+                localStorage.setItem(getUserStyleStorageKey(userName), JSON.stringify(normalizeUserStyle(style)));
+            } catch(e) {}
+        }
+
+        function getCurrentProFeatures() {
+            if (currentUser === ADMIN_NAME) return PRO_VISUAL_FEATURE_KEYS.slice();
+            if (!currentUser || !isVipUser()) return [];
+            var info = getVipInfo();
+            var features = Array.isArray(info && info.features) ? info.features : [];
+            return PRO_VISUAL_FEATURE_KEYS.filter(function(feature) {
+                return features.indexOf(feature) >= 0;
+            });
+        }
+        window.getCurrentProFeatures = getCurrentProFeatures;
+
+        function hasProFeature(feature) {
+            if (currentUser === ADMIN_NAME) return true;
+            if (!currentUser || !isVipUser()) return false;
+            return getCurrentProFeatures().indexOf(String(feature || '')) >= 0;
+        }
+        window.hasProFeature = hasProFeature;
+
+        function getResolvedUserStyle() {
+            var raw = normalizeUserStyle(currentUserStyle);
+            return {
+                theme: hasProFeature('custom_theme') ? raw.theme : 'default',
+                chat_bubble_style: hasProFeature('pro_chat_bubble') ? raw.chat_bubble_style : 'default',
+                post_card_style: hasProFeature('pro_post_style') ? raw.post_card_style : 'default'
+            };
+        }
+
+        function getCurrentUserPostStyleClass(post) {
+            if (!currentUser || !post || String(post.user_name || '') !== String(currentUser)) return '';
+            var resolved = getResolvedUserStyle();
+            if (!resolved.post_card_style || resolved.post_card_style === 'default') return ' is-self-post';
+            return ' is-self-post post-style-' + resolved.post_card_style;
+        }
+
+        function applyCurrentUserPostStyleToDom() {
+            var feed = document.getElementById('feed');
+            if (!feed || !currentUser) return;
+            var resolved = getResolvedUserStyle();
+            var styleClass = resolved.post_card_style && resolved.post_card_style !== 'default'
+                ? 'post-style-' + resolved.post_card_style
+                : '';
+            Array.prototype.forEach.call(feed.querySelectorAll('.post'), function(node) {
+                var postUser = node.getAttribute('data-post-user');
+                if (postUser !== String(currentUser)) return;
+                node.classList.add('is-self-post');
+                node.classList.remove('post-style-clean_border', 'post-style-leaf_corner', 'post-style-soft_glow', 'post-style-minimal_pro');
+                if (styleClass) node.classList.add(styleClass);
+            });
+        }
+
+        function renderProStyleSettings() {
+            var panel = document.getElementById('profileProStylePanel');
+            if (!panel) return;
+            var statusEl = document.getElementById('proStyleStatus');
+            var badgeEl = document.getElementById('proStyleBadge');
+            var saveBtn = document.getElementById('proStyleSaveBtn');
+            var themeSelect = document.getElementById('proThemeSelect');
+            var bubbleSelect = document.getElementById('proBubbleSelect');
+            var postSelect = document.getElementById('proPostStyleSelect');
+            if (!currentUser) {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = '';
+            var saved = normalizeUserStyle(currentUserStyle);
+            if (themeSelect) themeSelect.value = saved.theme;
+            if (bubbleSelect) bubbleSelect.value = saved.chat_bubble_style;
+            if (postSelect) postSelect.value = saved.post_card_style;
+            if (themeSelect) themeSelect.disabled = !hasProFeature('custom_theme');
+            if (bubbleSelect) bubbleSelect.disabled = !hasProFeature('pro_chat_bubble');
+            if (postSelect) postSelect.disabled = !hasProFeature('pro_post_style');
+            if (saveBtn) saveBtn.disabled = !currentUser || (!hasProFeature('custom_theme') && !hasProFeature('pro_chat_bubble') && !hasProFeature('pro_post_style') && currentUser !== ADMIN_NAME);
+            var features = getCurrentProFeatures();
+            if (badgeEl) {
+                badgeEl.textContent = features.length ? ('已解锁 ' + features.length + ' 项') : '默认';
+            }
+            if (statusEl) {
+                if (currentUser === ADMIN_NAME) {
+                    statusEl.textContent = '管理员默认可使用专属主题、聊天气泡和帖子卡片装饰。';
+                } else if (!isVipUser()) {
+                    statusEl.textContent = '当前为默认样式。开通包含视觉权益的 Pro 活动后，可恢复你保存的主题、聊天气泡和帖子卡片装饰。';
+                } else if (!features.length) {
+                    statusEl.textContent = '当前 Pro 未包含本次视觉权益，页面仍使用默认样式。';
+                } else {
+                    statusEl.textContent = '当前视觉权益已生效。即使 Pro 失效，你保存的样式也会保留，重新获得权益后自动恢复。';
+                }
+            }
+        }
+
+        function applyCurrentUserStyle() {
+            var root = document.documentElement;
+            var resolved = getResolvedUserStyle();
+            root.setAttribute('data-pro-theme', resolved.theme || 'default');
+            root.setAttribute('data-pro-chat-bubble', resolved.chat_bubble_style || 'default');
+            root.setAttribute('data-pro-post-style', resolved.post_card_style || 'default');
+            renderProStyleSettings();
+            applyCurrentUserPostStyleToDom();
+        }
+        window.__xtjApplyCurrentUserStyle = applyCurrentUserStyle;
+
+        async function loadCurrentUserStyle() {
+            currentUserStyleRecordId = '';
+            currentUserStyle = createDefaultUserStyle();
+            if (!currentUser) {
+                applyCurrentUserStyle();
+                return currentUserStyle;
+            }
+            var cached = readCachedUserStyle(currentUser);
+            if (cached) {
+                currentUserStyle = cached;
+                applyCurrentUserStyle();
+            } else {
+                applyCurrentUserStyle();
+            }
+            if (!window.sb) return currentUserStyle;
+            try {
+                var styleRes = await sb.from("posts")
+                    .select("id, content")
+                    .eq("user_name", currentUser)
+                    .eq("media_type", USER_STYLE_MARKER)
+                    .order("created_at", { ascending: false })
+                    .limit(1);
+                if (styleRes.data && styleRes.data.length > 0) {
+                    currentUserStyleRecordId = styleRes.data[0].id || '';
+                    try {
+                        currentUserStyle = normalizeUserStyle(JSON.parse(styleRes.data[0].content || '{}'));
+                    } catch(e) {
+                        currentUserStyle = createDefaultUserStyle();
+                    }
+                    writeCachedUserStyle(currentUser, currentUserStyle);
+                }
+            } catch(e) {
+                if (!cached) currentUserStyle = createDefaultUserStyle();
+            }
+            applyCurrentUserStyle();
+            return currentUserStyle;
+        }
+        window.loadCurrentUserStyle = loadCurrentUserStyle;
+
+        window.saveCurrentUserStyle = async function() {
+            if (!currentUser) { showToast('请先登录'); return; }
+            var themeSelect = document.getElementById('proThemeSelect');
+            var bubbleSelect = document.getElementById('proBubbleSelect');
+            var postSelect = document.getElementById('proPostStyleSelect');
+            var saveBtn = document.getElementById('proStyleSaveBtn');
+            var nextStyle = normalizeUserStyle({
+                theme: themeSelect ? themeSelect.value : currentUserStyle.theme,
+                chat_bubble_style: bubbleSelect ? bubbleSelect.value : currentUserStyle.chat_bubble_style,
+                post_card_style: postSelect ? postSelect.value : currentUserStyle.post_card_style,
+                updated_at: new Date().toISOString()
+            });
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.dataset.originText = saveBtn.textContent || '保存视觉偏好';
+                saveBtn.textContent = '保存中...';
+            }
+            try {
+                var payload = {
+                    user_name: currentUser,
+                    content: JSON.stringify(nextStyle),
+                    media_type: USER_STYLE_MARKER,
+                    actor_key: USER_STYLE_MARKER
+                };
+                if (currentUserStyleRecordId) {
+                    var updateRes = await sb.from("posts")
+                        .update({ content: payload.content, actor_key: USER_STYLE_MARKER })
+                        .eq("id", currentUserStyleRecordId);
+                    if (updateRes.error) throw updateRes.error;
+                } else {
+                    var insertRes = await sb.from("posts").insert([payload]).select("id");
+                    if (insertRes.error) throw insertRes.error;
+                    if (insertRes.data && insertRes.data[0] && insertRes.data[0].id) {
+                        currentUserStyleRecordId = insertRes.data[0].id;
+                    }
+                }
+                currentUserStyle = nextStyle;
+                writeCachedUserStyle(currentUser, currentUserStyle);
+                applyCurrentUserStyle();
+                showToast('视觉偏好已保存');
+            } catch(e) {
+                showToast('保存失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
+                applyCurrentUserStyle();
+            } finally {
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = saveBtn.dataset.originText || '保存视觉偏好';
+                    delete saveBtn.dataset.originText;
+                }
+            }
+        };
+
         async function updateVipStatus() {
             if (!currentUser) return;
 
@@ -566,6 +807,7 @@ const ADMIN_NAME = "xxz";
             }
             // 刷新帖子列表以显示VIP徽章
             if (typeof refreshFeedDisplay === 'function') refreshFeedDisplay();
+            applyCurrentUserStyle();
         }
 
         function openVipModal() {
@@ -726,7 +968,9 @@ const ADMIN_NAME = "xxz";
                             'large_file_upload': '⬆️ 大文件上传',
                             'pin_post': '📌 帖子置顶',
                             'custom_theme': '🎨 专属主题',
-                            'profile_effects': '✨ 头像特效'
+                            'profile_effects': '✨ 头像特效',
+                            'pro_chat_bubble': '💬 聊天气泡',
+                            'pro_post_style': '🪴 帖子卡片装饰'
                         };
                         var featNames = g.features.map(function(f) { return featureMap[f] || f; });
                         card += '<div class="pro-gift-card-features">' + featNames.map(function(n) {
@@ -2971,6 +3215,7 @@ function renderProfileActivityList(kind) {
                     
                     // 加载头像
                     loadUserAvatar();
+                    await loadCurrentUserStyle();
                     loadProfileActivity(true);
                     
                     queueDeferredStartupTasks();
@@ -2996,6 +3241,7 @@ function renderProfileActivityList(kind) {
                     if (profileAvatar) {
                         profileAvatar.innerHTML = '?';
                     }
+                    await loadCurrentUserStyle();
                     loadProfileActivity(true);
                     
                     try { stopDMPolling(); } catch(e) {}
@@ -4870,7 +5116,7 @@ function renderProfileActivityList(kind) {
                     'data-original-size="' + escapeHtml(String((normalized._contentMeta && normalized._contentMeta.originalSize) || "")) + '"'
                 ].join(" ");
                 return `
-                <div class="post glass" data-post-id="${escapeHtml(normalized.id)}">
+                <div class="post glass${getCurrentUserPostStyleClass(normalized)}" data-post-id="${escapeHtml(normalized.id)}" data-post-user="${escapeHtml(normalized.user_name || "")}">
                   <div class="post-header">
                     ${getAvatarHtml(normalized.user_name, normalized)}
                     <div class="post-header-main">
@@ -5282,6 +5528,7 @@ function renderProfileActivityList(kind) {
                     .neq("media_type", "__vip__")
                     .neq("media_type", "__vip_order__")
                     .neq("media_type", "__vip_plan__")
+                    .neq("media_type", "__user_style__")
                     .neq("media_type", "__pro_gift__")
                     .neq("media_type", "__pro_gift_claim__")
                     .neq("media_type", "__login_event__")
@@ -5302,7 +5549,7 @@ function renderProfileActivityList(kind) {
                     AUTH_MARKER, ADMIN_AUTH_MARKER, ADMIN_META_MARKER, DM_MARKER, REPORT_MARKER,
                     "__avatar__", "__user_info__", "__photo_wall__", "__visit__",
                     "__attack__", "__user_visit__", "__ann__",
-                    "__vip__", "__vip_order__", "__vip_plan__",
+                    "__vip__", "__vip_order__", "__vip_plan__", "__user_style__",
                     "__pro_gift__", "__pro_gift_claim__",
                     "__login_event__", "__security_alert__", "__admin_audit__", "__client_error__",
                     "__email_sent__", "__email_recipient_history__"
@@ -7279,7 +7526,9 @@ function renderProfileActivityList(kind) {
                         document.getElementById('dockChatDetailView').classList.remove('hidden');
                         document.getElementById('dockChatBackBtn').style.display = 'flex';
                         document.getElementById('dockChatTitle').textContent = dockChatActiveUser;
-                        loadDockChatMessages(dockChatActiveUser, false);
+                        if (!(options && options.source === 'openChat')) {
+                            loadDockChatMessages(dockChatActiveUser, false);
+                        }
                     } else {
                         loadDockChatList();
                     }
@@ -7408,7 +7657,7 @@ function renderProfileActivityList(kind) {
                 document.getElementById('dockChatDetailView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'flex';
                 document.getElementById('dockChatTitle').textContent = userName;
-                switchDockTab('chat', true);
+                switchDockTab('chat', true, { source: 'openChat' });
                 loadDockChatMessages(userName, true);
                 startDMPolling(60000);
             };
@@ -7428,7 +7677,6 @@ function renderProfileActivityList(kind) {
                     document.getElementById('dockChatTitle').textContent = '消息';
                 }
                 if (Date.now() - (window.dockChatListCacheTime || 0) < DOCK_CHAT_CACHE_DURATION) return;
-                window.dockChatListCacheTime = Date.now();
                 var hadRenderedList = !!el.children.length;
                 try {
                     if (!hadRenderedList) {
@@ -7438,16 +7686,27 @@ function renderProfileActivityList(kind) {
                             variant: 'chat-list'
                         });
                     }
-                    const { data: allMsgs, error } = await sb.from("posts")
-                        .select("id, user_name, media_url, content, created_at, views, actor_key")
-                        .eq("media_type", DM_MARKER)
-                        .or(`user_name.eq.${window.currentUser},media_url.eq.${window.currentUser}`)
-                        .order("created_at", { ascending: false })
-                        .limit(120);
-                    if (error) throw error;
+                    const [sentRes, recvRes] = await Promise.all([
+                        sb.from("posts")
+                            .select("id, user_name, media_url, content, created_at, views, actor_key")
+                            .eq("media_type", DM_MARKER)
+                            .eq("user_name", window.currentUser)
+                            .order("created_at", { ascending: false })
+                            .limit(120),
+                        sb.from("posts")
+                            .select("id, user_name, media_url, content, created_at, views, actor_key")
+                            .eq("media_type", DM_MARKER)
+                            .eq("media_url", window.currentUser)
+                            .order("created_at", { ascending: false })
+                            .limit(120)
+                    ]);
+                    if (sentRes.error) throw sentRes.error;
+                    if (recvRes.error) throw recvRes.error;
+                    const allMsgs = mergeDockChatRowsById((sentRes.data || []).concat(recvRes.data || []), false, 180);
                     if (!allMsgs || !allMsgs.length) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像就可以开始聊天</div></div>';
                         setUnreadBadgeCount(0);
+                        window.dockChatListCacheTime = Date.now();
                         return;
                     }
                     const convMap = {};
@@ -7465,14 +7724,18 @@ function renderProfileActivityList(kind) {
                         return total + (item && item.unread ? item.unread : 0);
                     }, 0));
                     renderDockChatConversationList(el, convs);
+                    window.dockChatListCacheTime = Date.now();
                     hydrateDockChatAvatars(convs.map(function(c) { return c.other_user; }), function(changed) {
-                        if (!changed) return;
                         var currentList = document.getElementById('dockChatList');
                         if (!currentList) return;
-                        renderDockChatConversationList(currentList, convs);
+                        if (changed) {
+                            renderDockChatConversationList(currentList, convs);
+                        }
+                        patchDockChatConversationAvatars(currentList);
                     });
                 } catch(e) {
-                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">!</div><div>' + (e.message || '加载失败') + '</div></div>';
+                    window.dockChatListCacheTime = 0;
+                    el.innerHTML = '<div class="chat-empty"><div class="ce-icon">!</div><div>消息加载失败，请重试</div></div>';
                 }
             }
 
@@ -7522,20 +7785,73 @@ function renderProfileActivityList(kind) {
                 return (currentUser || '') + '_' + (userName || '');
             }
 
+            function mergeDockChatRowsById(rows, ascending, limit) {
+                var seen = {};
+                var list = [];
+                (Array.isArray(rows) ? rows : []).forEach(function(row, index) {
+                    if (!row) return;
+                    var rowId = row.id ? String(row.id) : ('__row__' + index + '_' + (row.created_at || ''));
+                    if (seen[rowId]) return;
+                    seen[rowId] = true;
+                    list.push(row);
+                });
+                list.sort(function(a, b) {
+                    var at = new Date(a && a.created_at ? a.created_at : 0).getTime();
+                    var bt = new Date(b && b.created_at ? b.created_at : 0).getTime();
+                    return ascending ? (at - bt) : (bt - at);
+                });
+                if (limit && list.length > limit) {
+                    list = list.slice(0, limit);
+                }
+                return list;
+            }
+
+            function getDockChatAvatarMarkup(userName) {
+                var avatarUrl = avatarCache[userName];
+                if (avatarUrl) {
+                    var safeAvatarUrl = escapeHtml(sanitizeUrl(avatarUrl));
+                    if (safeAvatarUrl) {
+                        return '<img src="' + safeAvatarUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+                    }
+                }
+                return userName ? escapeHtml(String(userName).slice(0, 1).toUpperCase()) : '?';
+            }
+
+            function patchDockChatConversationAvatars(root) {
+                var container = root || document.getElementById('dockChatList');
+                if (!container) return;
+                Array.prototype.forEach.call(container.querySelectorAll('.chat-list-item[data-chat-user] .cli-avatar'), function(node) {
+                    var row = node.closest('.chat-list-item[data-chat-user]');
+                    if (!row) return;
+                    var userName = row.getAttribute('data-chat-user') || '';
+                    node.innerHTML = getDockChatAvatarMarkup(userName);
+                });
+            }
+
+            function patchDockChatMessageAvatars(userName) {
+                var container = document.getElementById('dockChatMessages');
+                if (!container || !dockChatActiveUser || dockChatActiveUser !== userName) return;
+                var mineAvatar = getDockChatAvatarMarkup(currentUser);
+                var otherAvatar = getDockChatAvatarMarkup(userName);
+                Array.prototype.forEach.call(container.querySelectorAll('.chat-msg-row .chat-msg-avatar'), function(node) {
+                    var row = node.closest('.chat-msg-row');
+                    if (!row) return;
+                    node.innerHTML = row.classList.contains('sent') ? mineAvatar : otherAvatar;
+                });
+            }
+
             function buildDockChatConversationSignature(conversation) {
                 return [
                     conversation && conversation.other_user ? conversation.other_user : '',
                     conversation && conversation.last_message ? conversation.last_message : '',
                     conversation && conversation.last_time ? conversation.last_time : '',
-                    conversation && conversation.unread ? conversation.unread : 0
+                    conversation && conversation.unread ? conversation.unread : 0,
+                    avatarCache[conversation && conversation.other_user ? conversation.other_user : ''] || ''
                 ].join('~');
             }
 
             function getDockChatConversationAvatarHtml(userName) {
-                if (avatarCache[userName]) {
-                    return '<img src="' + avatarCache[userName] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
-                }
-                return userName ? userName[0].toUpperCase() : '?';
+                return getDockChatAvatarMarkup(userName);
             }
 
             function buildDockChatListItemMarkup(conversation, index) {
@@ -7748,21 +8064,37 @@ function renderProfileActivityList(kind) {
                     renderDockMessages(userName, _chatCache[cacheKey], !!forceScroll);
                 }
                 hydrateDockChatAvatars([currentUser, userName], function(changed) {
-                    if (!changed || loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
-                    var cachedMessages = _chatCache[cacheKey];
-                    if (cachedMessages && cachedMessages.length) {
-                        renderDockMessages(userName, cachedMessages, false);
+                    if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
+                    if (changed) {
+                        var cachedMessages = _chatCache[cacheKey];
+                        if (cachedMessages && cachedMessages.length) {
+                            renderDockMessages(userName, cachedMessages, false);
+                        }
                     }
+                    patchDockChatMessageAvatars(userName);
                 });
                 const el = document.getElementById('dockChatMessages');
                 try {
-                    const { data: msgs, error } = await sb.from("posts").select("id, user_name, media_url, content, created_at, views, actor_key")
-                        .eq("media_type", DM_MARKER)
-                        .or(`and(user_name.eq.${window.currentUser},media_url.eq.${userName}),and(user_name.eq.${userName},media_url.eq.${window.currentUser})`)
-                        .order("created_at").limit(180);
-                    if (error) throw error;
+                    const [sentRes, recvRes] = await Promise.all([
+                        sb.from("posts")
+                            .select("id, user_name, media_url, content, created_at, views, actor_key")
+                            .eq("media_type", DM_MARKER)
+                            .eq("user_name", window.currentUser)
+                            .eq("media_url", userName)
+                            .order("created_at", { ascending: true })
+                            .limit(180),
+                        sb.from("posts")
+                            .select("id, user_name, media_url, content, created_at, views, actor_key")
+                            .eq("media_type", DM_MARKER)
+                            .eq("user_name", userName)
+                            .eq("media_url", window.currentUser)
+                            .order("created_at", { ascending: true })
+                            .limit(180)
+                    ]);
+                    if (sentRes.error) throw sentRes.error;
+                    if (recvRes.error) throw recvRes.error;
                     if (loadSeq !== _dockChatLoadSeq || dockChatActiveUser !== userName) return;
-                    var mergedMessages = mergeDockChatMessages(userName, msgs || []);
+                    var mergedMessages = mergeDockChatMessages(userName, mergeDockChatRowsById((sentRes.data || []).concat(recvRes.data || []), true, 180));
                     var readAt = new Date().toISOString();
                     var pendingReadUpdates = [];
                     mergedMessages = mergedMessages.map(function(message) {
@@ -7788,8 +8120,8 @@ function renderProfileActivityList(kind) {
                         updateUnreadBadge();
                     }
                 } catch(e) {
-                    if (!_chatCache[cacheKey] && loadSeq === _dockChatLoadSeq && dockChatActiveUser === userName) {
-                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>' + (e.message || '加载失败') + '</div></div>';
+                    if (loadSeq === _dockChatLoadSeq && dockChatActiveUser === userName) {
+                        el.innerHTML = '<div class="chat-empty"><div class="ce-icon">!</div><div>消息加载失败，请重试</div></div>';
                     }
                 }
             }
@@ -7814,13 +8146,14 @@ function renderProfileActivityList(kind) {
                 var shouldAutoScroll = forceScroll || isNearBottom;
                 const isBulk = msgs.length > 2;
                 var otherUser = msgs[0] ? (msgs[0].user_name === currentUser ? msgs[0].media_url : msgs[0].user_name) : '';
-                var myAvatarHtml = avatarCache[currentUser] ? '<img src="' + avatarCache[currentUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">' : (currentUser ? currentUser[0].toUpperCase() : '?');
-                var otherAvatarHtml = avatarCache[otherUser] ? '<img src="' + avatarCache[otherUser] + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">' : (otherUser ? otherUser[0].toUpperCase() : '?');
+                var myAvatarHtml = getDockChatAvatarMarkup(currentUser);
+                var otherAvatarHtml = getDockChatAvatarMarkup(otherUser);
                 el.innerHTML = msgs.map(function(m) {
                     return buildDockChatRowMarkup(m, { mine: myAvatarHtml, other: otherAvatarHtml }, isBulk);
                 }).join('');
                 el.dataset.chatUser = signatureKey;
                 _chatRenderSignature[signatureKey] = nextSignature;
+                patchDockChatMessageAvatars(userName);
                 if (shouldAutoScroll) el.scrollTop = el.scrollHeight;
             }
 
