@@ -1076,7 +1076,7 @@ const ADMIN_NAME = "xxz";
 
             return sortPosts(normalizePosts(posts).filter(function(post) {
                 if (!post) return false;
-                if (post.media_type === AUTH_MARKER || post.media_type === ADMIN_AUTH_MARKER || post.media_type === ADMIN_META_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__visit__" || post.media_type === "__attack__" || post.media_type === "__user_visit__" || post.media_type === "__ann__" || post.media_type === "__vip__" || post.media_type === "__vip_order__" || post.media_type === "__email_sent__" || post.media_type === "__email_recipient_history__") return false;
+                if (typeof isSystemPost === 'function' && isSystemPost(post)) return false;
                 if (!post.user_name) return false;
                 if (!canViewPost(post)) return false;
                 if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
@@ -5262,28 +5262,60 @@ function renderProfileActivityList(kind) {
                 return true;
             }
 
-            function getFeedBasePostQuery() {
-                return sb.from("posts")
-                    .select("*")
+            // 统一：应用所有需要从普通帖子流中排除的系统标记
+            // 集中维护，避免漏掉 __pro_gift__ / __pro_gift_claim__ / __vip_plan__ 等
+            function applyVisiblePostQueryFilters(query) {
+                if (!query || typeof query.neq !== 'function') return query;
+                return query
                     .neq("media_type", AUTH_MARKER)
                     .neq("media_type", ADMIN_AUTH_MARKER)
-                    .neq("media_type", DM_MARKER)
                     .neq("media_type", ADMIN_META_MARKER)
+                    .neq("media_type", DM_MARKER)
                     .neq("media_type", REPORT_MARKER)
                     .neq("media_type", "__avatar__")
                     .neq("media_type", "__user_info__")
                     .neq("media_type", "__photo_wall__")
                     .neq("media_type", "__visit__")
                     .neq("media_type", "__attack__")
+                    .neq("media_type", "__user_visit__")
                     .neq("media_type", "__ann__")
                     .neq("media_type", "__vip__")
                     .neq("media_type", "__vip_order__")
+                    .neq("media_type", "__vip_plan__")
+                    .neq("media_type", "__pro_gift__")
+                    .neq("media_type", "__pro_gift_claim__")
                     .neq("media_type", "__login_event__")
                     .neq("media_type", "__security_alert__")
                     .neq("media_type", "__admin_audit__")
-                    .neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__")
-        .order("created_at", { ascending: false });
-}
+                    .neq("media_type", "__client_error__")
+                    .neq("media_type", "__email_sent__")
+                    .neq("media_type", "__email_recipient_history__");
+            }
+            window.applyVisiblePostQueryFilters = applyVisiblePostQueryFilters;
+
+            // 客户端过滤：单一帖子是否对当前用户可见
+            function isSystemPost(post) {
+                if (!post) return true;
+                var mt = post.media_type;
+                if (!mt) return false;
+                var SYSTEM_MARKERS = [
+                    AUTH_MARKER, ADMIN_AUTH_MARKER, ADMIN_META_MARKER, DM_MARKER, REPORT_MARKER,
+                    "__avatar__", "__user_info__", "__photo_wall__", "__visit__",
+                    "__attack__", "__user_visit__", "__ann__",
+                    "__vip__", "__vip_order__", "__vip_plan__",
+                    "__pro_gift__", "__pro_gift_claim__",
+                    "__login_event__", "__security_alert__", "__admin_audit__", "__client_error__",
+                    "__email_sent__", "__email_recipient_history__"
+                ];
+                return SYSTEM_MARKERS.indexOf(mt) >= 0;
+            }
+            window.isSystemPost = isSystemPost;
+
+            function getFeedBasePostQuery() {
+                return applyVisiblePostQueryFilters(
+                    sb.from("posts").select("*")
+                ).order("created_at", { ascending: false });
+            }
 
             async function fetchFeedPageChunk(offset, requestId) {
                 var start = Math.max(0, Number(offset) || 0);
@@ -5445,8 +5477,9 @@ function renderProfileActivityList(kind) {
             async function syncFeedDataInBackground() {
                 var requestId = ++feedLoadRequestId;
                 try {
-                    var postRes = await sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__")
-  .order("created_at", { ascending: false });
+                    var postRes = await applyVisiblePostQueryFilters(
+                        sb.from("posts").select("*")
+                    ).order("created_at", { ascending: false });
                     if (requestId !== feedLoadRequestId) return false;
                     if (postRes.error) throw postRes.error;
                     feedAllPosts = normalizePosts(postRes.data || []);
@@ -9981,27 +10014,9 @@ function renderProfileActivityList(kind) {
 
             if (_reportType === 'post') {
                 try {
-                    sb.from('posts')
-                .select('id, user_name, content, media_url, media_type, created_at')
-                .neq('media_type', '__vip__')
-                .neq('media_type', '__vip_order__')
-                .neq('media_type', '__vip_plan__')
-                .neq('media_type', '__user_visit__')
-                .neq('media_type', '__avatar__')
-                .neq('media_type', '__user_info__')
-                .neq('media_type', '__visit__')
-                .neq('media_type', '__attack__')
-                .neq('media_type', '__ann__')
-                .neq('media_type', '__photo_wall__')
-                .neq('media_type', '__report__')
-                .neq('media_type', '__dm__')
-                .neq('media_type', '__auth__')
-                .neq('media_type', '__login_event__')
-                .neq('media_type', '__security_alert__')
-                .neq('media_type', '__admin_audit__')
-                .neq('media_type', '__client_error__')
-                .neq('media_type', '__email_sent__')
-                .neq('media_type', ADMIN_META_MARKER)
+                    applyVisiblePostQueryFilters(
+                        sb.from('posts').select('id, user_name, content, media_url, media_type, created_at')
+                    )
                         .order('created_at', { ascending: false })
                         .limit(200)
                         .then(function(res) {
@@ -11042,7 +11057,7 @@ function renderProfileActivityList(kind) {
 
             async function fetchSimpleStatSnapshot() {
                 var result = await Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
+                    applyVisiblePostQueryFilters(sb.from("posts").select("*")).order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]);
@@ -11411,7 +11426,7 @@ function renderProfileActivityList(kind) {
                     setTimeout(function() { resolve(null); }, timeoutMs);
                 });
                 var request = Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
+                    applyVisiblePostQueryFilters(sb.from("posts").select("*")).order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {
