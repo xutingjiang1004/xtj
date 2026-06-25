@@ -67,64 +67,64 @@ html[data-pro-theme="lavender"] {
   --xtj-pro-entry-sheen: linear-gradient(135deg, rgba(251, 250, 255, 0.94), rgba(235, 231, 251, 0.84));
 }
 
-html:not([data-theme="dark"]) body,
-html:not([data-theme="dark"]) .dock-panels {
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) body,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .dock-panels {
   background:
     radial-gradient(circle at top left, var(--xtj-theme-bg-2), transparent 36%),
     linear-gradient(180deg, var(--xtj-theme-bg-1), #ffffff) !important;
 }
 
-html:not([data-theme="dark"]) nav,
-html:not([data-theme="dark"]) .publish-box,
-html:not([data-theme="dark"]) .post,
-html:not([data-theme="dark"]) .post-filter-bar,
-html:not([data-theme="dark"]) .chat-header,
-html:not([data-theme="dark"]) .chat-input-area,
-html:not([data-theme="dark"]) .chat-list-item,
-html:not([data-theme="dark"]) .chat-messages,
-html:not([data-theme="dark"]) .dock-chat-container,
-html:not([data-theme="dark"]) .profile-user-card,
-html:not([data-theme="dark"]) .profile-setting-item,
-html:not([data-theme="dark"]) .xtj-vip-card,
-html:not([data-theme="dark"]) .profile-pro-style-panel,
-html:not([data-theme="dark"]) .profile-subpage-back {
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) nav,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .publish-box,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .post,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .post-filter-bar,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .chat-header,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .chat-input-area,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .chat-list-item,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .chat-messages,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .dock-chat-container,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .profile-user-card,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .profile-setting-item,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .xtj-vip-card,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .profile-pro-style-panel,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .profile-subpage-back {
   border-color: var(--xtj-theme-border) !important;
 }
 
-html:not([data-theme="dark"]) nav,
-html:not([data-theme="dark"]) .publish-box,
-html:not([data-theme="dark"]) .post,
-html:not([data-theme="dark"]) .post-filter-bar,
-html:not([data-theme="dark"]) .chat-header,
-html:not([data-theme="dark"]) .chat-input-area,
-html:not([data-theme="dark"]) .chat-list-item,
-html:not([data-theme="dark"]) .chat-messages,
-html:not([data-theme="dark"]) .dock-chat-container,
-html:not([data-theme="dark"]) .profile-user-card,
-html:not([data-theme="dark"]) .profile-setting-item,
-html:not([data-theme="dark"]) .xtj-vip-card,
-html:not([data-theme="dark"]) .profile-pro-style-panel {
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) nav,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .publish-box,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .post,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .post-filter-bar,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .chat-header,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .chat-input-area,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .chat-list-item,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .chat-messages,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .dock-chat-container,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .profile-user-card,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .profile-setting-item,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .xtj-vip-card,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .profile-pro-style-panel {
   background: var(--xtj-theme-card) !important;
   box-shadow: 0 16px 34px var(--xtj-theme-shadow) !important;
 }
 
-html:not([data-theme="dark"]) nav {
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) nav {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), var(--xtj-theme-card-soft)) !important;
 }
 
-html:not([data-theme="dark"]) .btn.primary,
-html:not([data-theme="dark"]) .btn.btn-primary,
-html:not([data-theme="dark"]) .pp-confirm-ok,
-html:not([data-theme="dark"]) .profile-subpage-back:hover {
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .btn.primary,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .btn.btn-primary,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .pp-confirm-ok,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .profile-subpage-back:hover {
   background: linear-gradient(135deg, var(--xtj-theme-accent), var(--xtj-theme-accent-2)) !important;
   border-color: transparent !important;
   color: #ffffff !important;
 }
 
-html:not([data-theme="dark"]) input:focus,
-html:not([data-theme="dark"]) textarea:focus,
-html:not([data-theme="dark"]) select:focus,
-html:not([data-theme="dark"]) .af-input:focus {
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) input:focus,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) textarea:focus,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) select:focus,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .af-input:focus {
   border-color: var(--xtj-theme-accent) !important;
   box-shadow: 0 0 0 3px var(--xtj-theme-soft) !important;
 }
