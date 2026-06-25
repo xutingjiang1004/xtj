@@ -12635,6 +12635,112 @@ body.ios-chat-keyboard-open .chat-input-area {
   align-items: center;
   gap: 4px;
 }
+.pro-gift-claimed-badge.disabled {
+  color: var(--text-muted, #6b7280);
+  background: rgba(107,114,128,0.12);
+}
+
+/* Pro 活动卡片 - 专属标签 */
+.pro-gift-card-tag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: linear-gradient(135deg,#f59e0b,#d97706);
+  color: #fff;
+  margin-right: 6px;
+  vertical-align: 1px;
+  letter-spacing: 0.05em;
+}
+/* Pro 活动卡片 - 剩余名额 */
+.pro-gift-card-remain {
+  font-weight: 600;
+  color: #ef4444;
+}
+.pro-gift-card-dot {
+  margin: 0 2px;
+  color: var(--text-muted, #9ca3af);
+  opacity: 0.6;
+}
+/* Pro 活动卡片 - 功能权益标签 */
+.pro-gift-card-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.pro-gift-card-feature {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(245,158,11,0.1);
+  color: #b45309;
+  font-weight: 500;
+}
+[data-theme="dark"] .pro-gift-card-feature {
+  background: rgba(245,158,11,0.15);
+  color: #fbbf24;
+}
+
+/* Pro 弹窗 - 顶部轻量状态条（已开通时显示） */
+.vip-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(245,158,11,0.12), rgba(217,119,6,0.08));
+  border: 1px solid rgba(245,158,11,0.25);
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #b45309;
+  font-weight: 500;
+}
+.vip-status-banner.is-pro {
+  background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(217,119,6,0.08));
+  border-color: rgba(245,158,11,0.35);
+}
+.vip-status-banner-icon {
+  font-size: 16px;
+}
+.vip-status-banner-text {
+  flex: 1;
+  line-height: 1.5;
+}
+[data-theme="dark"] .vip-status-banner {
+  color: #fbbf24;
+}
+
+/* Pro 弹窗 - 空状态 */
+.pro-gift-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 16px 28px;
+  text-align: center;
+  color: var(--text-muted, #6b7280);
+}
+.pro-gift-empty-icon {
+  font-size: 36px;
+  margin-bottom: 10px;
+  opacity: 0.7;
+}
+.pro-gift-empty-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary, #374151);
+  margin-bottom: 6px;
+}
+.pro-gift-empty-sub {
+  font-size: 11px;
+  color: var(--text-muted, #9ca3af);
+  line-height: 1.5;
+}
+[data-theme="dark"] .pro-gift-empty-text {
+  color: #e5e7eb;
+}
 
 /* VIP 已激活标识（简洁简约版：透明 + 描边） */
 .xtj-vip-badge {
