@@ -103,17 +103,14 @@
     if (existing) existing.remove();
 
     // Determine source label
-    var sourceLabel = '自主开通';
-    var sourceIcon = '🆓';
+    var sourceLabel = '活动领取';
+    var sourceIcon = '🎁';
     if (vipInfo.source === 'pro_gift') {
-      sourceLabel = '免费赠送';
+      sourceLabel = '管理员赠送';
       sourceIcon = '🎁';
     } else if (vipInfo.source === 'paid' || vipInfo.source === 'payment') {
       sourceLabel = '付费购买';
       sourceIcon = '💳';
-    } else if (vipInfo.source === 'frontend_direct') {
-      sourceLabel = '自主开通';
-      sourceIcon = '🆓';
     }
 
     var overlay = document.createElement('div');
@@ -129,7 +126,7 @@
       '    <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#fff" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="#fff"/></svg>',
       '  </div>',
       '  <div class="pro-celebration-title" style="font-size:22px;font-weight:700;margin-bottom:4px;background:linear-gradient(135deg,#fbbf24,#f59e0b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">🎉 恭喜升级 Pro！</div>',
-      '  <div class="pro-celebration-sub" style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:16px;">您已成功开启 XTJ Pro 会员之旅</div>',
+      '  <div class="pro-celebration-sub" style="font-size:13px;color:rgba(255,255,255,0.6);margin-bottom:16px;">您已成功开启 XTJ Pro 视觉权益</div>',
       '  <div class="pro-celebration-info" style="background:rgba(255,255,255,0.06);border-radius:12px;padding:12px;margin-bottom:16px;">',
       '    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:left;">',
       '      <div style="font-size:11px;color:rgba(255,255,255,0.4);">会员</div><div style="font-size:13px;font-weight:600;text-align:right;">XTJ Pro</div>',
@@ -138,14 +135,11 @@
       '    </div>',
       '  </div>',
       '  <div class="pro-celebration-features" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:16px;">',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">👑 身份标识</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">📸 无限照片墙</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">⬆️ 200MB文件</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">🎨 Pro主题</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">📌 帖子置顶</div>',
-      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">✨ 动态特效</div>',
+      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">🎨 专属主题</div>',
+      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">💬 聊天气泡</div>',
+      '    <div style="background:rgba(245,158,11,0.1);border-radius:8px;padding:6px 4px;font-size:11px;">🪴 帖子卡片装饰</div>',
       '  </div>',
-      '  <button class="pro-celebration-btn" id="proCelebrationBtn" style="width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;box-shadow:0 4px 15px rgba(245,158,11,0.3);">开始体验 Pro →</button>',
+      '  <button class="pro-celebration-btn" id="proCelebrationBtn" style="width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;font-size:15px;font-weight:600;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;box-shadow:0 4px 15px rgba(245,158,11,0.3);">开始体验 Pro</button>',
       '</div>'
     ].join('');
     document.body.appendChild(overlay);
