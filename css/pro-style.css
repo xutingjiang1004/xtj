@@ -301,9 +301,11 @@ html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .a
 }
 
 .pro-style-option-card {
+  display: grid;
+  grid-template-rows: auto auto;
   gap: 8px;
   min-height: 0;
-  padding: 10px;
+  padding: 8px;
   border-radius: 18px;
   border-color: rgba(182, 220, 198, 0.9);
   background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(246,252,248,0.9));
@@ -340,12 +342,17 @@ html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .a
   font-size: 12px;
   font-weight: 800;
   color: #2c5741;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
 }
 
 .theme-preview,
 .bubble-preview,
 .post-card-preview {
-  min-height: 88px;
+  min-height: 68px;
+  max-height: 78px;
   border-radius: 15px;
 }
 
@@ -560,6 +567,10 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
 }
 
 [data-theme="dark"] .profile-subpage-back,
+[data-theme="dark"] .profile-pro-style-actions {
+  background: linear-gradient(180deg, transparent, rgba(18, 28, 24, 0.96) 35%) !important;
+}
+
 [data-theme="dark"] .profile-pro-style-page .profile-pro-style-panel,
 [data-theme="dark"] .pro-style-option-card,
 [data-theme="dark"] .theme-preview,
@@ -693,11 +704,20 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   .theme-preview,
   .bubble-preview,
   .post-card-preview {
-    min-height: 82px;
+    min-height: 68px;
+    max-height: 76px;
+  }
+
+  .pro-style-option-card {
+    padding: 8px;
+  }
+
+  .pro-style-option-title {
+    font-size: 11.5px;
   }
 }
 
-@media (max-width: 460px) {
+@media (max-width: 340px) {
   .pro-style-preview-grid {
     grid-template-columns: 1fr;
   }
@@ -1012,8 +1032,18 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
 }
 
 /* ====== 移动端底栏不遮挡保存按钮 ====== */
-.profile-pro-style-page {
-  padding-bottom: 80px !important;
+.profile-pro-style-page,
+.profile-subpage {
+  padding-bottom: calc(110px + env(safe-area-inset-bottom)) !important;
+}
+
+/* 保存按钮 sticky 定位，保持在 Dock 上方 */
+.profile-pro-style-actions {
+  position: sticky;
+  bottom: calc(82px + env(safe-area-inset-bottom));
+  z-index: 20;
+  padding-top: 10px;
+  background: linear-gradient(180deg, transparent, rgba(245,251,247,0.96) 35%);
 }
 
 /* 移动端：分类预览卡片对齐 */

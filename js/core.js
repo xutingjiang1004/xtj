@@ -2292,6 +2292,7 @@ const ADMIN_NAME = "xxz";
                     await initUI();
                     initialLoad(true);
                     await resolvePendingProRelogin();
+                    try { if (typeof window.updateProStyle === 'function') window.updateProStyle(currentUser); } catch(e) {}
                     // 记录用户访问
                     logUserVisitToApi(name);
                 } catch (e) {
@@ -2383,6 +2384,7 @@ const ADMIN_NAME = "xxz";
                     await initUI();
                     initialLoad(true);
                     await resolvePendingProRelogin();
+                    try { if (typeof window.updateProStyle === 'function') window.updateProStyle(currentUser); } catch(e) {}
                     // 记录用户访问
                     logUserVisitToApi(name);
                 } catch (e) {
@@ -2864,6 +2866,7 @@ const ADMIN_NAME = "xxz";
                 showToast("已退出登录");
                 await initUI();
                 initialLoad(true);
+                try { if (typeof window.updateProStyle === 'function') window.updateProStyle(''); } catch(e) {}
             };
 
             // 处理鎴戠殑椤甸潰锟矫伙拷卡片鐐癸拷??

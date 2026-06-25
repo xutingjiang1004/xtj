@@ -437,5 +437,213 @@
     });
   };
 
+  // ===================== Pro 活动 API 调用 =====================
+
+  // 获取可用 Pro 活动列表（带 Authorization header）
+  window.fetchProGifts = async function() {
+    var listEl = document.getElementById('proGiftList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="pro-gift-loading">加载中...</div>';
+
+    for (var retry = 0; retry <= 1; retry++) {
+      try {
+        var headers = { 'Content-Type': 'application/json' };
+        if (typeof window.getUserAuthHeaders === 'function') {
+          var authHeaders = await window.getUserAuthHeaders();
+          if (authHeaders) {
+            headers['Authorization'] = authHeaders['Authorization'];
+          }
+        }
+        var resp = await fetch((window.API_BASE || '') + '/api/pro-gifts/available', {
+          headers: headers,
+          signal: AbortSignal.timeout(10000)
+        });
+        if (resp.status === 401 || resp.status === 403) {
+          if (retry === 0) {
+            // 尝试重试（clearUserToken + 重新认证）
+            if (typeof window.clearUserToken === 'function') {
+              window.clearUserToken();
+            }
+            continue;
+          }
+          listEl.innerHTML = renderAuthRequired();
+          return;
+        }
+        if (!resp.ok) {
+          listEl.innerHTML = '<div class="pro-gift-error">请求失败，请稍后重试</div>';
+          return;
+        }
+        var data = await resp.json();
+        renderGiftList(listEl, data.gifts || data.data || []);
+        return;
+      } catch(e) {
+        if (retry === 0) continue;
+        listEl.innerHTML = '<div class="pro-gift-error">网络错误，请检查网络后重试</div>';
+      }
+    }
+  };
+
+  // 领取 Pro 活动
+  window.claimProGift = async function(giftId) {
+    if (!giftId) return { ok: false, error: '缺少活动ID' };
+    for (var retry = 0; retry <= 1; retry++) {
+      try {
+        var headers = { 'Content-Type': 'application/json' };
+        if (typeof window.getUserAuthHeaders === 'function') {
+          var authHeaders = await window.getUserAuthHeaders();
+          if (authHeaders) {
+            headers['Authorization'] = authHeaders['Authorization'];
+          }
+        }
+        var resp = await fetch((window.API_BASE || '') + '/api/pro-gifts/claim', {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({ gift_id: giftId }),
+          signal: AbortSignal.timeout(10000)
+        });
+        if (resp.status === 401 || resp.status === 403) {
+          if (retry === 0) {
+            if (typeof window.clearUserToken === 'function') {
+              window.clearUserToken();
+            }
+            continue;
+          }
+          return { ok: false, error: '身份验证失败，请重新登录', needsReauth: true };
+        }
+        var data = await resp.json();
+        if (!resp.ok) {
+          return { ok: false, error: data.error || '领取失败' };
+        }
+        // 领取成功，刷新活动列表
+        if (typeof window.fetchProGifts === 'function') {
+          window.fetchProGifts();
+        }
+        return { ok: true, data: data };
+      } catch(e) {
+        if (retry === 0) continue;
+        return { ok: false, error: '网络错误，请稍后重试' };
+      }
+    }
+  };
+
+  // 渲染活动列表
+  function renderGiftList(container, gifts) {
+    if (!gifts || !gifts.length) {
+      container.innerHTML = '<div class="pro-gift-empty">暂无可用活动</div>';
+      return;
+    }
+    var html = gifts.map(function(g) {
+      var cfg = g.campaign || g.config || {};
+      var name = cfg.name || cfg.title || g.name || 'Pro 活动';
+      var remain = cfg.claim_limit ? (cfg.claim_limit - (g.claim_count || 0)) : '';
+      var claimed = g.claimed || g.is_claimed;
+      var expired = g.expired || g.is_expired;
+      var disabled = claimed || expired;
+      return [
+        '<div class="pro-gift-card" data-id="' + (g.id || g.gift_id) + '">',
+        '  <div class="pro-gift-card-header">',
+        '    <div class="pro-gift-card-title">' + escapeHtml(name) + '</div>',
+        '    <div class="pro-gift-card-badge' + (claimed ? ' claimed' : '') + '">' + (claimed ? '已领取' : (expired ? '已结束' : '可用')) + '</div>',
+        '  </div>',
+        cfg.description ? '  <div class="pro-gift-card-desc">' + escapeHtml(cfg.description) + '</div>' : '',
+        '  <div class="pro-gift-card-footer">',
+        remain ? '    <span class="pro-gift-card-remain">剩余 ' + remain + ' 份</span>' : '',
+        disabled ? '' : '    <button class="pro-gift-card-btn" onclick="onClaimGift(\'' + escapeAttr(g.id || g.gift_id) + '\')">立即领取</button>',
+        '  </div>',
+        '</div>'
+      ].join('');
+    }).join('');
+    container.innerHTML = html;
+  }
+
+  // 需要重新登录的提示渲染
+  function renderAuthRequired() {
+    return [
+      '<div class="pro-gift-auth-required">',
+      '  <div class="pro-gift-auth-icon">🔑</div>',
+      '  <div class="pro-gift-auth-title">登录凭证需要刷新</div>',
+      '  <div class="pro-gift-auth-desc">你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。</div>',
+      '  <button class="pro-gift-auth-btn" onclick="reAuthAndRefresh()">重新登录</button>',
+      '</div>'
+    ].join('');
+  }
+
+  // 重新登录
+  window.reAuthAndRefresh = function() {
+    // 清理旧凭证
+    if (typeof window.clearUserToken === 'function') {
+      window.clearUserToken();
+    }
+    try { localStorage.removeItem('xtj_user_token'); } catch(_) {}
+    // 调用登录弹窗
+    if (typeof window.closeModal === 'function') {
+      window.closeModal('loginModal');
+    }
+    if (typeof window.openAuthModal === 'function') {
+      window.openAuthModal('login');
+      // 注册登录成功后的回调
+      var origOnLogin = window.__xtjOnLoginSuccess;
+      window.__xtjOnLoginSuccess = function() {
+        if (typeof origOnLogin === 'function') {
+          try { origOnLogin(); } catch(_) {}
+        }
+        window.__xtjOnLoginSuccess = origOnLogin || null;
+        // 登录成功后自动刷新 Pro 活动
+        if (typeof window.fetchProGifts === 'function') {
+          window.fetchProGifts();
+        }
+        // 刷新 VIP 状态
+        if (window.currentUser && typeof window.__xtjQueryVipStatus === 'function') {
+          window.__xtjQueryVipStatus(window.currentUser);
+        }
+      };
+    }
+  };
+
+  // 全局领取回调（由按钮 onclick 触发）
+  window.onClaimGift = async function(giftId) {
+    var btn = event && event.target ? event.target : null;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '领取中...';
+    }
+    var result = await window.claimProGift(giftId);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '立即领取';
+    }
+    if (result.ok) {
+      if (result.data && result.data.vip_info && typeof window.__xtjShowProCelebration === 'function') {
+        window.__xtjShowProCelebration(result.data.vip_info);
+      }
+    } else if (result.needsReauth) {
+      var listEl = document.getElementById('proGiftList');
+      if (listEl) listEl.innerHTML = renderAuthRequired();
+    } else {
+      alert(result.error || '领取失败');
+    }
+  };
+
+  // 简单 escapeHtml
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // escape attribute
+  function escapeAttr(str) {
+    return String(str || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  // 在页面加载完成后，如果 Pro 活动区块可见，自动查询
+  document.addEventListener('DOMContentLoaded', function() {
+    var proGiftSection = document.getElementById('proGiftSection');
+    if (proGiftSection && !proGiftSection.hidden) {
+      if (typeof window.fetchProGifts === 'function') {
+        window.fetchProGifts();
+      }
+    }
+  });
+
   // console.log('[Pro] Upgrade module loaded');
 })();
