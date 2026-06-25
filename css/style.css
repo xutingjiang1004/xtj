@@ -15967,11 +15967,6 @@ html:not([data-theme="dark"]) .af-input:focus {
   box-shadow: 0 0 0 3px var(--xtj-theme-soft) !important;
 }
 
-html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .dock-bar > .dock-indicator {
-  background: var(--xtj-pro-theme-soft) !important;
-  border-color: var(--xtj-pro-theme-border) !important;
-}
-
 [data-theme="dark"][data-pro-theme]:not([data-pro-theme="default"]) {
   --xtj-pro-theme-accent: var(--xtj-theme-accent);
   --xtj-pro-theme-border: rgba(255,255,255,0.14);
