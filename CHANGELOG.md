@@ -1,5 +1,60 @@
 # 更新日志
 
+## v0.90 - 2026-06-25
+邮件发送记录展示重构 + 历史邮箱双保险持久化
+- 删除 from_email 列、详情列、收件人合计列
+- 表格结构改为 时间 / 接收邮件账号 / 接收人 / 主题 / 结果
+- 接收人列：网站用户显示用户名，外部邮箱显示邮箱号
+- 多收件人显示"第一个 + 等 N 人"，title 放完整列表
+- 兼容旧数据（recipients / emails / recipient_email / to_email / total_recipients）
+- 后端抽取 saveEmailRecipientHistory helper（去重 / 一次性查 / 已有更新 / 新增补 actor_key+media_url）
+- send-email 路由保存历史失败只 console.warn，不阻断邮件发送
+- POST /admin/email-recipient-history 兼容 recipients / emails 两种格式
+- GET /admin/email-recipient-history 兼容 info.email / row.media_url 等多字段
+- 前端 emailSend 4 种状态（成功/部分失败/全部失败/异常）都调用 saveRecipientsHistorySafe
+- index.html / README.md / CHANGELOG.md 同步到 v0.90
+
+## v0.89 - 2026-06-25
+Pro 会员改为限量/限定/限时活动模式
+- 彻底去除常驻 ¥3/月 套餐卡（vipPlanCard / vipPayBtn / vipCancelArea）
+- 弹窗只显示当前 Pro 状态条 + 活动列表
+- 无活动显示"暂无可领取的 Pro 活动"
+- 活动卡片支持：专属标签、剩余名额、截止时间、功能权益
+- 按钮状态：未领取/已领取/名额满/已结束
+- 后端 /api/pro-gifts/available 与 /api/pro-gifts/claim 加 authenticateUser 中间件
+- claim 强制以 req.userName 为准
+- /admin/pro-gifts/save 支持 claim_limit / allowed_users / exclusive / start_at / end_at
+- 前端 __xtjDirectPurchasePro 禁用，保留函数名返回错误
+- 活动编辑器增加限量名额、限定用户（逗号分隔）、是否专属、活动起止时间
+- 不影响：照片墙 / 聊天 / 底部 Dock / 普通帖子 / 登录 / 其他后台模块
+
+## v0.88c - 2026-06-24
+修复邮件历史邮箱账户不保存 + 发送记录增加详情
+- 后端 /admin/send-email 路由发送前先调用 saveEmailRecipientHistory 保存收件人历史
+- 新增 saveEmailRecipientHistory(recipients) helper：去重 / 一次性查询 / 已有更新 / 新增插入
+- 新增 actor_key + media_url 字段补齐
+- 邮件发送记录新增 from_email 与 recipients_detail 字段
+- 前端 loadEmailHistory 改为显示：发件邮箱 / 主题 / 收件人 / 结果 / 详情（含展开）
+- 前端 loadEmailRecipientHistory 展示 用户名 <邮箱> / 邮箱 两种形式
+- 发送成功后自动清空已选 + 刷新历史 + 刷新记录
+- emailClearSelected 添加到发送成功链
+
+## v0.88b - 2026-06-24
+邮件配置健康检查端点 + bug 修复
+- 新增 /health/mail 端点：返回 active_provider（GAS / SendGrid / Gmail_SMTP）以及 env 加载状态
+- 修复 SENDGRID_API_KEY 误用 var 声明被覆盖的隐患
+- 修复 /admin/report/:id/delete-post 和 /admin/report/:id/ban-user 端点缺少顶层 try-catch
+- 修复 index.html / README.md / CHANGELOG.md 版本号不一致
+- 升级 pro-upgrade.js query string 版本号到 20260624_progift
+
+## v0.88a - 2026-06-24
+Google Apps Script (GAS) 邮件中转通道上线
+- 新增 GAS (HTTPS 443) 邮件中转通道，绕过 Render SMTP 465/587 端口封锁
+- 邮件发送优先级：GAS (HTTPS 443) > SendGrid > Gmail SMTP（最终兜底）
+- 失败链：GAS 失败 → SendGrid → Gmail SMTP
+- 新增 GMAIL_GAS_URL 环境变量支持（IANA 不带空格）
+- GAS Web App 部署权限必须设为"任何人"（Anyone）以允许未认证请求
+
 ## v0.88 - 2026-06-24
 邮件系统重构：Google Apps Script (GAS) HTTPS 中转通道上线，绕过 Render SMTP 端口封锁
 - 新增 `GMAIL_GAS_URL` 环境变量支持，邮件发送优先级：GAS (HTTPS 443) > SendGrid > Gmail SMTP
