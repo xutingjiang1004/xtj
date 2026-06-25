@@ -674,6 +674,46 @@ const ADMIN_NAME = "xxz";
         }
         window.bindProStylePreviewCards = bindProStylePreviewCards;
 
+        function getProStylePanelStorageKey() {
+            return 'xtj_pro_style_panel_open_' + String(currentUser || '');
+        }
+
+        function setProStylePanelExpanded(expanded) {
+            var panel = document.getElementById('profileProStylePanel');
+            var summary = document.getElementById('profileProStyleSummary');
+            if (!panel) return;
+            var isExpanded = !!expanded;
+            panel.classList.toggle('expanded', isExpanded);
+            panel.classList.toggle('collapsed', !isExpanded);
+            if (summary) summary.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+            if (currentUser) {
+                try {
+                    localStorage.setItem(getProStylePanelStorageKey(), isExpanded ? '1' : '0');
+                } catch(e) {}
+            }
+        }
+        window.setProStylePanelExpanded = setProStylePanelExpanded;
+
+        function restoreProStylePanelState() {
+            var open = false;
+            if (currentUser) {
+                try {
+                    open = localStorage.getItem(getProStylePanelStorageKey()) === '1';
+                } catch(e) {
+                    open = false;
+                }
+            }
+            setProStylePanelExpanded(open);
+        }
+        window.restoreProStylePanelState = restoreProStylePanelState;
+
+        function toggleProStylePanel() {
+            var panel = document.getElementById('profileProStylePanel');
+            if (!panel) return;
+            setProStylePanelExpanded(!panel.classList.contains('expanded'));
+        }
+        window.toggleProStylePanel = toggleProStylePanel;
+
         function getResolvedUserStyle() {
             var raw = getCurrentStyleDraft();
             return {
@@ -721,6 +761,7 @@ const ADMIN_NAME = "xxz";
             }
             panel.style.display = '';
             bindProStylePreviewCards();
+            restoreProStylePanelState();
             var saved = getCurrentStyleDraft();
             if (themeSelect) themeSelect.value = saved.theme;
             if (bubbleSelect) bubbleSelect.value = saved.chat_bubble_style;
@@ -731,17 +772,23 @@ const ADMIN_NAME = "xxz";
             if (saveBtn) saveBtn.disabled = !currentUser || (!hasProFeature('custom_theme') && !hasProFeature('pro_chat_bubble') && !hasProFeature('pro_post_style') && currentUser !== ADMIN_NAME);
             var features = getCurrentProFeatures();
             if (badgeEl) {
-                badgeEl.textContent = features.length ? ('已解锁 ' + features.length + ' 项') : '默认';
+                if (currentUser === ADMIN_NAME || features.length >= 3) {
+                    badgeEl.textContent = '已解锁 3 项';
+                } else if (features.length > 0) {
+                    badgeEl.textContent = '部分解锁';
+                } else {
+                    badgeEl.textContent = '未解锁';
+                }
             }
             if (statusEl) {
                 if (currentUser === ADMIN_NAME) {
-                    statusEl.textContent = '管理员默认可使用专属主题、聊天气泡和帖子卡片装饰。';
+                    statusEl.textContent = '点击展开管理视觉偏好。管理员默认可使用全部视觉装扮。';
                 } else if (!isVipUser()) {
-                    statusEl.textContent = '当前为默认样式。开通包含视觉权益的 Pro 活动后，可恢复你保存的主题、聊天气泡和帖子卡片装饰。';
+                    statusEl.textContent = '点击展开管理视觉偏好。开通包含视觉权益的 Pro 活动后，可恢复你保存的主题、聊天气泡和帖子卡片装饰。';
                 } else if (!features.length) {
-                    statusEl.textContent = '当前 Pro 未包含本次视觉权益，页面仍使用默认样式。';
+                    statusEl.textContent = '点击展开管理视觉偏好。当前 Pro 未包含本次视觉权益，页面仍使用默认样式。';
                 } else {
-                    statusEl.textContent = '当前视觉权益已生效。即使 Pro 失效，你保存的样式也会保留，重新获得权益后自动恢复。';
+                    statusEl.textContent = '点击展开管理视觉偏好。即使 Pro 失效，你保存的样式也会保留，重新获得权益后自动恢复。';
                 }
             }
             updateProStylePreviewActiveStates();
