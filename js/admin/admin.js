@@ -4065,8 +4065,10 @@ async function initAdminClient() {
             '<div id="emailManualList" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;min-height:0;"></div>' +
             '<div id="emailSuffixList" style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;min-height:0;"></div>' +
             '<div style="margin-top:6px;"><h4 style="font-size:13px;margin:0 0 4px 0;">📇 历史邮箱账户</h4>' +
-            '<div id="emailRecipientHistory" style="display:flex;flex-wrap:wrap;gap:4px;min-height:24px;padding:2px 0;">加载中...</div>' +
-            '<button class="btn-sm" onclick="emailClearRecipientHistory()" style="margin-top:2px;font-size:11px;opacity:0.6;">清空历史</button></div>' +
+            '<div id="emailRecipientHistory" style="display:flex;flex-wrap:wrap;gap:6px;min-height:26px;padding:4px 0 8px;">加载中...</div>' +
+            '<div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(148,163,184,0.16);">' +
+            '<button class="btn-sm" onclick="emailClearRecipientHistory()" style="font-size:11px;opacity:0.65;">清空历史</button>' +
+            '</div></div>' +
             '</div>' +
             '<div class="form-group"><label>邮件主题</label><input id="emailSubjectInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件主题" /></div>' +
             '<div class="form-group"><label>邮件内容</label><textarea id="emailContentInp" oninput="emailAutoSaveDraft()" placeholder="输入邮件内容...&#10;支持换行，发送时将转为 HTML 格式"></textarea></div>' +
@@ -4498,7 +4500,8 @@ async function initAdminClient() {
           var displayName = (r.user_name && r.user_name !== r.email) ? r.user_name : '';
           var label = displayName ? (displayName + ' <' + r.email + '>') : r.email;
           var escapedEmail = r.email.replace(/'/g,"\\'");
-          h += '<span class="email-manual-tag" data-email="' + escapeHtml(r.email) + '" title="' + escapeHtml(r.email) + '" onclick="emailAddFromHistory(\'' + escapeHtml(escapedEmail) + '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;">' + escapeHtml(label) + ' <span onclick="event.stopPropagation();emailDeleteRecipientHistory(\'' + escapeHtml(escapedEmail) + '\')" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span></span>';
+          var escapedLabel = label.replace(/'/g, "\\'");
+          h += '<span class="email-manual-tag" data-email="' + escapeHtml(r.email) + '" title="' + escapeHtml(r.email) + '" onclick="emailAddFromHistory(\'' + escapeHtml(escapedEmail) + '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;">' + escapeHtml(label) + ' <span class="email-history-remove" onclick="event.stopPropagation();emailConfirmDeleteRecipientHistory(\'' + escapeHtml(escapedEmail) + '\',\'' + escapeHtml(escapedLabel) + '\')" style="cursor:pointer;opacity:0.55;font-size:14px;line-height:1;padding:0 2px;border-radius:999px;" title="删除此历史邮箱">×</span></span>';
         });
         wrap.innerHTML = h;
       } catch(e) {
@@ -4526,6 +4529,23 @@ async function initAdminClient() {
       tag.innerHTML = email + ' <span onclick="emailRemoveManual(this)" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span>';
       list.appendChild(tag);
       emailUpdateCount();
+    };
+
+    // 二次确认：删除单个历史邮箱
+    // 优先使用项目内的 showConfirm 模态框；不可用时降级为 window.confirm
+    window.emailConfirmDeleteRecipientHistory = function(email, label) {
+      var display = label || email || '';
+      var msg = '确定要从历史邮箱账户中删除「' + display + '」吗？\n\n删除后不会影响已经发送过的邮件记录。';
+      if (typeof window.showConfirm === 'function') {
+        window.showConfirm('删除历史邮箱', msg, '确认删除', function() {
+          emailDeleteRecipientHistory(email);
+        });
+      } else if (typeof confirm === 'function') {
+        if (confirm(msg)) emailDeleteRecipientHistory(email);
+      } else {
+        // 极端降级：直接删除
+        emailDeleteRecipientHistory(email);
+      }
     };
 
     window.emailDeleteRecipientHistory = async function(email) {
