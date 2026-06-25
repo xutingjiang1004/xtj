@@ -4123,6 +4123,14 @@ async function initAdminClient() {
         emailUpdateDraftBarVisibility();
     };
 
+    // 清空所有已选收件人（手动输入 + 用户列表勾选）
+    window.emailClearSelected = function() {
+        var manualList = document.getElementById('emailManualList');
+        if (manualList) manualList.innerHTML = '';
+        document.querySelectorAll('.email-checkbox:checked').forEach(function(cb) { cb.checked = false; });
+        emailUpdateCount();
+    };
+
     function emailUpdateDraftBarVisibility() {
         var bar = document.getElementById('emailDraftBar');
         if (!bar) return;
@@ -4261,6 +4269,10 @@ async function initAdminClient() {
                 resultEl.innerHTML = detailHtml;
                 showToast(msg);
                 emailClearDraft();
+                // 发送成功后清空已选收件人（手动+勾选），刷新历史邮箱和发送记录
+                emailClearSelected();
+                loadEmailRecipientHistory();
+                loadEmailHistory();
             } else if (data.hint) {
                 resultEl.className = 'send-result error';
                 var hintHtml = '⚠️ 全部发送失败';
@@ -4301,23 +4313,45 @@ async function initAdminClient() {
                 wrap.innerHTML = '<div class="empty">暂无发送记录</div>';
                 return;
             }
-            var h = '<div class="table-wrap" style="max-height:300px;overflow-y:auto;"><table><thead><tr style="position:sticky;top:0;z-index:1;"><th>时间</th><th>主题</th><th>收件人数</th><th>结果</th></tr></thead><tbody>';
-            records.forEach(function(r) {
+            var h = '<div class="table-wrap" style="max-height:400px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="position:sticky;top:0;z-index:1;background:var(--card-bg,var(--bg));"><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">时间</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">发件邮箱</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">主题</th><th style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border);">收件人</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">结果</th><th style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border);">详情</th></tr></thead><tbody>';
+            records.forEach(function(r, idx) {
                 var resultText = r.failed_count > 0
-                    ? '<span style="color:var(--danger);">' + r.sent_count + '/' + r.total_recipients + ' 失败' + r.failed_count + '</span>'
-                    : '<span style="color:var(--success);">✅ ' + r.sent_count + '/' + r.total_recipients + ' 全部成功</span>';
-                h += '<tr>';
-                h += '<td>' + formatTime(r.sent_at) + '</td>';
-                h += '<td>' + escapeHtml(r.subject) + '</td>';
-                h += '<td>' + (r.total_recipients || 0) + '</td>';
-                h += '<td>' + resultText + '</td>';
+                    ? '<span style="color:var(--danger);">' + r.sent_count + '/' + r.total_recipients + '（失败' + r.failed_count + '）</span>'
+                    : '<span style="color:var(--success);">✅ ' + r.sent_count + '/' + r.total_recipients + '</span>';
+                var detailList = Array.isArray(r.recipients_detail) ? r.recipients_detail : [];
+                var detailHtml = '';
+                if (detailList.length) {
+                    detailHtml = '<div id="emailDetail_' + idx + '" style="display:none;padding:8px 10px;margin:4px 0;background:rgba(0,0,0,0.15);border-radius:6px;font-size:11px;max-height:150px;overflow-y:auto;">';
+                    detailList.forEach(function(d) {
+                        var icon = d.status === 'sent' ? '✅' : '❌';
+                        var namePart = d.user_name && d.user_name !== d.email ? escapeHtml(d.user_name) + ' ' : '';
+                        detailHtml += '<div style="padding:2px 0;">' + icon + ' ' + namePart + '<span style="color:var(--text-muted);">' + escapeHtml(d.email) + '</span>';
+                        if (d.error) detailHtml += ' <span style="color:var(--danger);margin-left:4px;">' + escapeHtml(d.error) + '</span>';
+                        detailHtml += '</div>';
+                    });
+                    detailHtml += '</div>';
+                }
+                h += '<tr style="border-bottom:1px solid var(--border);">';
+                h += '<td style="padding:6px 8px;white-space:nowrap;">' + formatTime(r.sent_at) + '</td>';
+                h += '<td style="padding:6px 8px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(r.from_email || '') + '">' + escapeHtml(r.from_email || '') + '</td>';
+                h += '<td style="padding:6px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(r.subject) + '">' + escapeHtml(r.subject) + '</td>';
+                h += '<td style="padding:6px 8px;text-align:center;">' + (r.total_recipients || 0) + '</td>';
+                h += '<td style="padding:6px 8px;">' + resultText + '</td>';
+                h += '<td style="padding:6px 8px;text-align:center;">' + (detailList.length ? '<button class="btn-sm" style="font-size:11px;padding:2px 8px;" onclick="emailToggleDetail(' + idx + ')">查看</button>' : '<span style="color:var(--text-muted);">-</span>') + '</td>';
                 h += '</tr>';
+                if (detailList.length) h += '<tr><td colspan="6" style="padding:0;">' + detailHtml + '</td></tr>';
             });
             h += '</tbody></table></div>';
             wrap.innerHTML = h;
         } catch(e) {
             wrap.innerHTML = '<div class="empty">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
+    };
+
+    window.emailToggleDetail = function(idx) {
+        var el = document.getElementById('emailDetail_' + idx);
+        if (!el) return;
+        el.style.display = el.style.display === 'none' ? 'block' : 'none';
     };
 
     var EMAIL_SUFFIXES = ['@qq.com','@163.com','@gmail.com','@outlook.com','@hotmail.com','@icloud.com','@foxmail.com','@126.com','@sina.com'];
@@ -4374,7 +4408,10 @@ async function initAdminClient() {
         }
         var h = '';
         recipients.forEach(function(r) {
-          h += '<span class="email-manual-tag" data-email="' + escapeHtml(r.email) + '" onclick="emailAddFromHistory(\'' + escapeHtml(r.email.replace(/'/g,"\\'")) + '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;">' + escapeHtml(r.email) + ' <span onclick="event.stopPropagation();emailDeleteRecipientHistory(\'' + escapeHtml(r.email.replace(/'/g,"\\'")) + '\')" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span></span>';
+          var displayName = (r.user_name && r.user_name !== r.email) ? r.user_name : '';
+          var label = displayName ? (displayName + ' <' + r.email + '>') : r.email;
+          var escapedEmail = r.email.replace(/'/g,"\\'");
+          h += '<span class="email-manual-tag" data-email="' + escapeHtml(r.email) + '" title="' + escapeHtml(r.email) + '" onclick="emailAddFromHistory(\'' + escapeHtml(escapedEmail) + '\')" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;">' + escapeHtml(label) + ' <span onclick="event.stopPropagation();emailDeleteRecipientHistory(\'' + escapeHtml(escapedEmail) + '\')" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span></span>';
         });
         wrap.innerHTML = h;
       } catch(e) {
