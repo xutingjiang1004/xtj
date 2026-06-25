@@ -745,7 +745,96 @@ const ADMIN_NAME = "xxz";
                 }
             }
             updateProStylePreviewActiveStates();
+            if (typeof updateProStyleEntry === 'function') {
+                updateProStyleEntry();
+            }
         }
+
+        function updateProStyleEntry() {
+            var entry = document.getElementById('profileProStyleEntry');
+            var sub = document.getElementById('proStyleEntryStatus');
+            var badge = document.getElementById('proStyleEntryBadge');
+
+            if (!entry) return;
+
+            if (!currentUser) {
+                entry.classList.add('is-locked');
+                if (sub) sub.textContent = '登录后可查看和保存 Pro 视觉偏好';
+                if (badge) badge.textContent = '登录';
+                return;
+            }
+
+            entry.classList.remove('is-locked');
+
+            var features = typeof getCurrentProFeatures === 'function'
+                ? getCurrentProFeatures()
+                : [];
+
+            if (badge) {
+                badge.textContent = features.length ? ('已解锁 ' + features.length + ' 项') : '默认';
+            }
+
+            if (sub) {
+                var draft = typeof getCurrentStyleDraft === 'function'
+                    ? getCurrentStyleDraft()
+                    : null;
+
+                if (features.length) {
+                    sub.textContent = '专属主题、聊天气泡、帖子卡片装饰已可配置';
+                } else if (draft && (
+                    draft.theme !== 'default' ||
+                    draft.chat_bubble_style !== 'default' ||
+                    draft.post_card_style !== 'default'
+                )) {
+                    sub.textContent = '已保存偏好，重新获得 Pro 权益后自动恢复';
+                } else {
+                    sub.textContent = '当前使用默认视觉样式';
+                }
+            }
+        }
+        window.updateProStyleEntry = updateProStyleEntry;
+
+        window.openProStylePage = function() {
+            if (!currentUser) {
+                showToast('请先登录');
+                return;
+            }
+
+            var main = document.getElementById('profileMainView');
+            var page = document.getElementById('profileProStylePage');
+            var panel = document.getElementById('panelProfile');
+
+            if (!page) return;
+
+            if (main) main.hidden = true;
+            page.hidden = false;
+            page.classList.add('active');
+
+            if (typeof renderProStyleSettings === 'function') {
+                renderProStyleSettings();
+            }
+
+            if (panel && typeof panel.scrollTo === 'function') {
+                panel.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        };
+
+        window.closeProStylePage = function() {
+            var main = document.getElementById('profileMainView');
+            var page = document.getElementById('profileProStylePage');
+            var panel = document.getElementById('panelProfile');
+
+            if (page) {
+                page.classList.remove('active');
+                page.hidden = true;
+            }
+
+            if (main) main.hidden = false;
+
+            if (panel && typeof panel.scrollTo === 'function') {
+                panel.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        };
 
         function applyCurrentUserStyle() {
             var root = document.documentElement;
@@ -2703,6 +2792,16 @@ const ADMIN_NAME = "xxz";
                 window.dockChatListCacheTime = 0;
                 document.body.style.overflow = '';
                 Object.keys(avatarCache).forEach(k => delete avatarCache[k]);
+                // 退出登录时关闭 Pro 装扮二级页面 + 恢复主页面
+                var proStylePage = document.getElementById('profileProStylePage');
+                var profileMainView = document.getElementById('profileMainView');
+                if (proStylePage) {
+                    proStylePage.hidden = true;
+                    proStylePage.classList.remove('active');
+                }
+                if (profileMainView) {
+                    profileMainView.hidden = false;
+                }
                 showToast("已退出登录");
                 await initUI();
                 initialLoad(true);
