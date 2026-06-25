@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -560,8 +560,9 @@ const ADMIN_NAME = "xxz";
                     }
                 }
             } else {
-                if (badge) { badge.textContent = '开通'; badge.className = 'xtj-vip-card-badge'; }
-                if (sub) sub.textContent = '¥3/月 · 解锁更多特权';
+                // 旧版"¥3/月"已彻底去除：不显示价格，引导用户进入弹窗查看活动
+                if (badge) { badge.textContent = '查看活动'; badge.className = 'xtj-vip-card-badge'; }
+                if (sub) sub.textContent = '活动由管理员限时发布';
             }
             // 刷新帖子列表以显示VIP徽章
             if (typeof refreshFeedDisplay === 'function') refreshFeedDisplay();
@@ -573,57 +574,54 @@ const ADMIN_NAME = "xxz";
             updateVipModalUI();
         }
 
+        // 兼容保留：vipPayBtn 已被移除，这里只安全检查一下，不报错
         function updateVipModalUI() {
-            var btn = document.getElementById('vipPayBtn');
-            var btnText = document.getElementById('vipPayBtnText');
-            var cancelArea = document.getElementById('vipCancelArea');
-            if (!btn) return;
-            if (__vipStatus.is_vip) {
-                btnText.textContent = '✅ 已是VIP会员';
-                btn.disabled = true;
-                if (cancelArea) cancelArea.style.display = '';
-            } else {
-                btnText.textContent = '立即开通 ¥3';
-                btn.disabled = false;
-                if (cancelArea) cancelArea.style.display = 'none';
-            }
+            // 旧版的"立即开通 ¥3"按钮和"已是VIP会员"状态卡已彻底移除
+            // 新版 Pro 弹窗只显示当前 Pro 状态 + Pro 活动列表
+            renderVipStatusBanner();
             loadProGiftCampaigns();
         }
 
+        // 弹窗顶部轻量 Pro 状态条（不显示任何价格/套餐）
+        function renderVipStatusBanner() {
+            var banner = document.getElementById('vipStatusBanner');
+            if (!banner) return;
+            var info = __vipStatus && __vipStatus.vip_info;
+            if (__vipStatus && __vipStatus.is_vip) {
+                var expireText = '';
+                if (info && info.expire_at) {
+                    try {
+                        expireText = new Date(info.expire_at).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+                    } catch (e) {
+                        expireText = String(info.expire_at);
+                    }
+                }
+                banner.style.display = '';
+                banner.classList.add('is-pro');
+                banner.innerHTML = [
+                    '<span class="vip-status-banner-icon">👑</span>',
+                    '<span class="vip-status-banner-text">',
+                    '  当前是 Pro 会员',
+                    expireText ? ' · 有效至 ' + escapeHtml(expireText) : '',
+                    '</span>'
+                ].join('');
+            } else {
+                banner.style.display = 'none';
+                banner.classList.remove('is-pro');
+                banner.innerHTML = '';
+            }
+        }
+
+        // 兼容保留 handleVipPurchase 函数名（被删除按钮的旧 onclick 引用）
+        // 新规则：前端禁止直接开通 Pro，必须由后端管理发布的活动领取
         async function handleVipPurchase() {
             if (!currentUser) { showToast('请先登录'); return; }
-            if (__vipStatus.is_vip) { showToast('您已是VIP会员'); closeModal('vipModal'); return; }
-
-            var btn = document.getElementById('vipPayBtn');
-            var btnText = document.getElementById('vipPayBtnText');
-            if (btn) { btn.classList.add('loading'); btn.disabled = true; btnText.textContent = '激活中...'; }
-
-            // 直接前端激活Pro，所有用户免费开通
-            if (typeof window.__xtjDirectPurchasePro === 'function') {
-                try {
-                    var pResult = await window.__xtjDirectPurchasePro(currentUser);
-                    if (pResult.ok) {
-                        __vipStatus.is_vip = true;
-                        __vipStatus.vip_info = pResult;
-                        updateVipUI();
-                        updateVipModalUI();
-                        closeModal('vipModal');
-                        if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通'; }
-                        setTimeout(function() {
-                            if (typeof window.__xtjShowProCelebration === 'function') {
-                                window.__xtjShowProCelebration(pResult);
-                            }
-                            if (typeof window.__xtjApplyProTheme === 'function') {
-                                window.__xtjApplyProTheme(true);
-                            }
-                        }, 300);
-                        return;
-                    }
-                } catch(e) { console.error('[VIP] 激活失败:', e); }
+            if (__vipStatus && __vipStatus.is_vip) {
+                showToast('您已是 Pro 会员');
+                return;
             }
-
-            showToast('激活失败，请重试');
-            if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通'; }
+            // 前端已禁用直接开通入口；引导用户到下方活动区领取
+            showToast('Pro 会员由管理员限时发布，请等待活动开放后领取');
         }
 
         // 加载可领取的 Pro 赠送活动
@@ -631,15 +629,44 @@ const ADMIN_NAME = "xxz";
             var section = document.getElementById('proGiftSection');
             var list = document.getElementById('proGiftList');
             if (!section || !list || !currentUser) return;
+
+            // 渲染空状态（无活动时显示）
+            function renderEmpty(msg, sub) {
+                section.style.display = '';
+                list.innerHTML = [
+                    '<div class="pro-gift-empty">',
+                    '  <div class="pro-gift-empty-icon">🎁</div>',
+                    '  <div class="pro-gift-empty-text">' + escapeHtml(msg) + '</div>',
+                    sub ? '<div class="pro-gift-empty-sub">' + escapeHtml(sub) + '</div>' : '',
+                    '</div>'
+                ].join('');
+            }
+
             try {
-                var resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), { signal: AbortSignal.timeout(8000) });
+                var headers = {};
+                if (typeof getUserToken === 'function') {
+                    var tok = getUserToken();
+                    if (tok) headers['Authorization'] = 'Bearer ' + tok;
+                }
+                var resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), {
+                    headers: headers,
+                    signal: AbortSignal.timeout(8000)
+                });
                 var data = await resp.json();
-                var gifts = data.gifts || [];
-                if (!gifts.length) { section.style.display = 'none'; return; }
-                section.style.display = 'block';
+                if (data && data.error) {
+                    // 后端报错：仍然显示空状态，避免弹窗空白
+                    renderEmpty('暂无可领取的 Pro 活动', '活动由管理员限时发布，请等待下一次开放。');
+                    return;
+                }
+                var gifts = (data && data.gifts) || [];
+                if (!gifts.length) {
+                    renderEmpty('暂无可领取的 Pro 活动', '活动由管理员限时发布，请等待下一次开放。');
+                    return;
+                }
+                section.style.display = '';
                 list.innerHTML = gifts.map(function(g) {
                     var cardClass = 'pro-gift-card' + (g.already_claimed ? ' claimed' : '');
-                    var durationText = g.duration_days + ' 天 Pro';
+                    var durationText = (g.duration_days || 30) + ' 天 Pro';
                     if (g.claim_expire_at) {
                         var expireDate = new Date(g.claim_expire_at);
                         if (expireDate > new Date()) {
@@ -647,31 +674,73 @@ const ADMIN_NAME = "xxz";
                             durationText += ' · 还剩 ' + daysLeft + ' 天';
                         }
                     }
-                    var card = '<div class="' + cardClass + '" data-gift-id="' + g.id + '">';
+                    // 限定/专属活动标识
+                    var exclusiveTag = (g.exclusive || g.allowed_users || g.exclusive_users || g.target_users)
+                        ? '<span class="pro-gift-card-tag">专属</span>' : '';
+                    // 剩余名额
+                    var remainText = '';
+                    if (typeof g.remaining_count === 'number' && typeof g.claim_limit === 'number') {
+                        remainText = '<span class="pro-gift-card-remain">剩余 ' + g.remaining_count + ' / ' + g.claim_limit + ' 名额</span>';
+                    } else if (typeof g.remaining_count === 'number') {
+                        remainText = '<span class="pro-gift-card-remain">剩余 ' + g.remaining_count + ' 名额</span>';
+                    }
+                    // 截止时间
+                    var expireText = '';
+                    if (g.claim_expire_at) {
+                        try {
+                            expireText = new Date(g.claim_expire_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                        } catch (e) { expireText = String(g.claim_expire_at); }
+                    }
+
+                    // 按钮状态：未领取 / 已领取 / 名额满 / 已结束
+                    var buttonHtml;
+                    if (g.already_claimed) {
+                        buttonHtml = '<div class="pro-gift-claimed-badge">' +
+                            '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>已领取</div>';
+                    } else if (g.full || g.remaining_count === 0) {
+                        buttonHtml = '<div class="pro-gift-claimed-badge disabled">名额已满</div>';
+                    } else if (g.expired) {
+                        buttonHtml = '<div class="pro-gift-claimed-badge disabled">已结束</div>';
+                    } else {
+                        buttonHtml = '<button class="pro-gift-claim-btn" data-gift-id="' + escapeHtml(g.id) + '" onclick="claimProGift(\'' + escapeHtml(g.id) + '\')">领取 Pro</button>';
+                    }
+
+                    var card = '<div class="' + cardClass + '" data-gift-id="' + escapeHtml(g.id) + '">';
                     card += '<div class="pro-gift-card-main">';
                     card += '<div class="pro-gift-card-info">';
-                    card += '<div class="pro-gift-card-title">' + escapeHtml(g.title) + '</div>';
+                    card += '<div class="pro-gift-card-title">' + exclusiveTag + escapeHtml(g.title || '') + '</div>';
                     if (g.description) {
                         card += '<div class="pro-gift-card-desc">' + escapeHtml(g.description) + '</div>';
                     }
                     card += '<div class="pro-gift-card-meta">';
                     card += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-                    card += durationText;
+                    card += '<span>' + durationText + '</span>';
+                    if (remainText) card += '<span class="pro-gift-card-dot">·</span>' + remainText;
+                    if (expireText) card += '<span class="pro-gift-card-dot">·</span><span>截止 ' + escapeHtml(expireText) + '</span>';
                     card += '</div>';
-                    card += '</div>';
-                    if (g.already_claimed) {
-                        card += '<div class="pro-gift-claimed-badge">';
-                        card += '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
-                        card += '已领取';
-                        card += '</div>';
-                    } else {
-                        card += '<button class="pro-gift-claim-btn" data-gift-id="' + g.id + '" onclick="claimProGift(\'' + g.id + '\')">免费领取</button>';
+                    // 功能权益（来自后端活动 features）
+                    if (Array.isArray(g.features) && g.features.length) {
+                        var featureMap = {
+                            'vip_badge': '👑 身份标识',
+                            'photo_wall_unlimited': '📸 照片墙无限',
+                            'large_file_upload': '⬆️ 大文件上传',
+                            'pin_post': '📌 帖子置顶',
+                            'custom_theme': '🎨 专属主题',
+                            'profile_effects': '✨ 头像特效'
+                        };
+                        var featNames = g.features.map(function(f) { return featureMap[f] || f; });
+                        card += '<div class="pro-gift-card-features">' + featNames.map(function(n) {
+                            return '<span class="pro-gift-card-feature">' + escapeHtml(n) + '</span>';
+                        }).join('') + '</div>';
                     }
+                    card += '</div>';
+                    card += buttonHtml;
                     card += '</div></div>';
                     return card;
                 }).join('');
             } catch(e) {
-                section.style.display = 'none';
+                // 网络错误时也显示空状态，避免弹窗完全空白
+                renderEmpty('暂无可领取的 Pro 活动', '活动由管理员限时发布，请等待下一次开放。');
             }
         }
 
@@ -685,9 +754,14 @@ const ADMIN_NAME = "xxz";
                 btn.textContent = '领取中...';
             }
             try {
+                var claimHeaders = { 'Content-Type': 'application/json' };
+                if (typeof getUserToken === 'function') {
+                    var tok2 = getUserToken();
+                    if (tok2) claimHeaders['Authorization'] = 'Bearer ' + tok2;
+                }
                 var resp = await fetch(API_BASE + '/api/pro-gifts/claim', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: claimHeaders,
                     body: JSON.stringify({ user_name: currentUser, gift_id: giftId })
                 });
                 var data = await resp.json();
@@ -1002,7 +1076,7 @@ const ADMIN_NAME = "xxz";
 
             return sortPosts(normalizePosts(posts).filter(function(post) {
                 if (!post) return false;
-                if (post.media_type === AUTH_MARKER || post.media_type === ADMIN_AUTH_MARKER || post.media_type === ADMIN_META_MARKER || post.media_type === DM_MARKER || post.media_type === REPORT_MARKER || post.media_type === "__avatar__" || post.media_type === "__user_info__" || post.media_type === "__photo_wall__" || post.media_type === "__visit__" || post.media_type === "__attack__" || post.media_type === "__user_visit__" || post.media_type === "__ann__" || post.media_type === "__vip__" || post.media_type === "__vip_order__" || post.media_type === "__email_sent__" || post.media_type === "__email_recipient_history__") return false;
+                if (typeof isSystemPost === 'function' && isSystemPost(post)) return false;
                 if (!post.user_name) return false;
                 if (!canViewPost(post)) return false;
                 if (onlyMine && (!currentUser || post.user_name !== currentUser)) return false;
@@ -5188,28 +5262,60 @@ function renderProfileActivityList(kind) {
                 return true;
             }
 
-            function getFeedBasePostQuery() {
-                return sb.from("posts")
-                    .select("*")
+            // 统一：应用所有需要从普通帖子流中排除的系统标记
+            // 集中维护，避免漏掉 __pro_gift__ / __pro_gift_claim__ / __vip_plan__ 等
+            function applyVisiblePostQueryFilters(query) {
+                if (!query || typeof query.neq !== 'function') return query;
+                return query
                     .neq("media_type", AUTH_MARKER)
                     .neq("media_type", ADMIN_AUTH_MARKER)
-                    .neq("media_type", DM_MARKER)
                     .neq("media_type", ADMIN_META_MARKER)
+                    .neq("media_type", DM_MARKER)
                     .neq("media_type", REPORT_MARKER)
                     .neq("media_type", "__avatar__")
                     .neq("media_type", "__user_info__")
                     .neq("media_type", "__photo_wall__")
                     .neq("media_type", "__visit__")
                     .neq("media_type", "__attack__")
+                    .neq("media_type", "__user_visit__")
                     .neq("media_type", "__ann__")
                     .neq("media_type", "__vip__")
                     .neq("media_type", "__vip_order__")
+                    .neq("media_type", "__vip_plan__")
+                    .neq("media_type", "__pro_gift__")
+                    .neq("media_type", "__pro_gift_claim__")
                     .neq("media_type", "__login_event__")
                     .neq("media_type", "__security_alert__")
                     .neq("media_type", "__admin_audit__")
-                    .neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__")
-        .order("created_at", { ascending: false });
-}
+                    .neq("media_type", "__client_error__")
+                    .neq("media_type", "__email_sent__")
+                    .neq("media_type", "__email_recipient_history__");
+            }
+            window.applyVisiblePostQueryFilters = applyVisiblePostQueryFilters;
+
+            // 客户端过滤：单一帖子是否对当前用户可见
+            function isSystemPost(post) {
+                if (!post) return true;
+                var mt = post.media_type;
+                if (!mt) return false;
+                var SYSTEM_MARKERS = [
+                    AUTH_MARKER, ADMIN_AUTH_MARKER, ADMIN_META_MARKER, DM_MARKER, REPORT_MARKER,
+                    "__avatar__", "__user_info__", "__photo_wall__", "__visit__",
+                    "__attack__", "__user_visit__", "__ann__",
+                    "__vip__", "__vip_order__", "__vip_plan__",
+                    "__pro_gift__", "__pro_gift_claim__",
+                    "__login_event__", "__security_alert__", "__admin_audit__", "__client_error__",
+                    "__email_sent__", "__email_recipient_history__"
+                ];
+                return SYSTEM_MARKERS.indexOf(mt) >= 0;
+            }
+            window.isSystemPost = isSystemPost;
+
+            function getFeedBasePostQuery() {
+                return applyVisiblePostQueryFilters(
+                    sb.from("posts").select("*")
+                ).order("created_at", { ascending: false });
+            }
 
             async function fetchFeedPageChunk(offset, requestId) {
                 var start = Math.max(0, Number(offset) || 0);
@@ -5371,8 +5477,9 @@ function renderProfileActivityList(kind) {
             async function syncFeedDataInBackground() {
                 var requestId = ++feedLoadRequestId;
                 try {
-                    var postRes = await sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__")
-  .order("created_at", { ascending: false });
+                    var postRes = await applyVisiblePostQueryFilters(
+                        sb.from("posts").select("*")
+                    ).order("created_at", { ascending: false });
                     if (requestId !== feedLoadRequestId) return false;
                     if (postRes.error) throw postRes.error;
                     feedAllPosts = normalizePosts(postRes.data || []);
@@ -8461,6 +8568,88 @@ function renderProfileActivityList(kind) {
             // 版本更新日志
             const changelogData = [
                 {
+                    version: 'v0.90',
+                    date: '2026-06-25',
+                    content: `
+                        <h4>邮件发送记录重构 + 历史邮箱双保险持久化</h4>
+                        <ul>
+                            <li><b>邮件发送记录</b>：删除 from_email 列、详情列、收件人合计列；表格改为 时间 / 接收邮件账号 / 接收人 / 主题 / 结果</li>
+                            <li><b>接收人列</b>：网站用户显示用户名，外部邮箱显示邮箱号；多收件人显示"第一个 + 等 N 人"，title 放完整列表</li>
+                            <li><b>历史邮箱双保险</b>：后端 /admin/send-email 内部保存 + 前端 emailSend 发送后主动调用 POST /admin/email-recipient-history</li>
+                            <li><b>4 种状态都保存历史</b>：成功 / 部分失败 / 全部失败 / 网络异常 都调用 saveRecipientsHistorySafe，失败只 console.warn</li>
+                            <li><b>后端 helper</b>：新增 normalizeEmailAddress / isValidEmailAddress / normalizeRecipientUserName / saveEmailRecipientHistory</li>
+                            <li><b>saveEmailRecipientHistory</b>：去重 / 一次性查询 / 已有更新 / 新增补 actor_key + media_url</li>
+                            <li><b>API 兼容</b>：POST /admin/email-recipient-history 兼容 recipients 与 emails 两种格式；GET 兼容 info.email / row.media_url 等多字段</li>
+                            <li><b>旧数据兼容</b>：recipients / emails / recipient_email / to_email / total_recipients 都能解析</li>
+                            <li><b>不影响</b>：邮件发送主流程（SMTP / SendGrid / GAS）、/admin/send-email、/admin/email-history、照片墙 / 聊天 / 底部 Dock / 普通帖子</li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.89',
+                    date: '2026-06-25',
+                    content: `
+                        <h4>Pro 会员改为限量 / 限定 / 限时活动模式</h4>
+                        <ul>
+                            <li><b>彻底去除常驻 Pro 卡</b>：删除 vipModal 中 ¥3/月 套餐卡（vipPlanCard / vipPayBtn / vipCancelArea / 订阅条款 / 取消订阅）</li>
+                            <li><b>个人资料卡</b>：vipCard 不再显示"¥3/月"，改为"活动由管理员限时发布"</li>
+                            <li><b>弹窗只显示活动</b>：updateVipModalUI 只渲染 Pro 状态条 + 活动列表</li>
+                            <li><b>无活动空状态</b>：loadProGiftCampaigns 显示"暂无可领取的 Pro 活动"</li>
+                            <li><b>活动卡片增强</b>：专属标签 / 剩余名额 / 截止时间 / 功能权益 / 4 种按钮态（未领取/已领取/名额满/已结束）</li>
+                            <li><b>前端禁开通 Pro</b>：handleVipPurchase 不再调用 __xtjDirectPurchasePro，只 toast 引导用户到活动区</li>
+                            <li><b>前端 __xtjDirectPurchasePro 禁用</b>：保留函数名返回错误，注释 deprecated</li>
+                            <li><b>后端强校验</b>：/api/pro-gifts/available 与 /api/pro-gifts/claim 加 authenticateUser 中间件；claim 强制以 req.userName 为准</li>
+                            <li><b>活动发布</b>：/admin/pro-gifts/save 支持 claim_limit / allowed_users / exclusive / start_at / end_at</li>
+                            <li><b>活动编辑器</b>：限量名额 / 限定用户（逗号分隔）/ 是否专属 / 活动起止时间</li>
+                            <li><b>不影响</b>：照片墙 / 聊天 / 底部 Dock / 普通帖子 / 登录 / 其他后台管理</li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.88c',
+                    date: '2026-06-24',
+                    content: `
+                        <h4>修复邮件历史邮箱账户不保存 + 发送记录增加详情</h4>
+                        <ul>
+                            <li><b>后端 send-email 路由</b>：发送前先调用 saveEmailRecipientHistory 保存收件人历史</li>
+                            <li><b>saveEmailRecipientHistory helper</b>：去重 / 一次性查询 / 已有更新 / 新增插入；新增时补齐 actor_key + media_url</li>
+                            <li><b>发送记录字段扩展</b>：新增 from_email 与 recipients_detail 字段</li>
+                            <li><b>前端 loadEmailHistory</b>：显示 时间 / 发件邮箱 / 主题 / 收件人 / 结果 / 详情（含展开）</li>
+                            <li><b>前端 loadEmailRecipientHistory</b>：展示 用户名 &lt;邮箱&gt; / 邮箱 两种形式</li>
+                            <li><b>发送成功后</b>：自动清空已选 + 刷新历史 + 刷新记录</li>
+                            <li>emailClearSelected 添加到发送成功链</li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.88b',
+                    date: '2026-06-24',
+                    content: `
+                        <h4>邮件配置健康检查端点 + bug 修复</h4>
+                        <ul>
+                            <li><b>/health/mail</b>：返回 active_provider（GAS / SendGrid / Gmail_SMTP）以及 env 加载状态</li>
+                            <li>修复 SENDGRID_API_KEY 误用 var 声明被覆盖的隐患</li>
+                            <li>修复 /admin/report/:id/delete-post 和 /admin/report/:id/ban-user 端点缺少顶层 try-catch</li>
+                            <li>修复 index.html / README.md / CHANGELOG.md 版本号不一致</li>
+                            <li>升级 pro-upgrade.js query string 版本号到 20260624_progift</li>
+                        </ul>
+                    `
+                },
+                {
+                    version: 'v0.88a',
+                    date: '2026-06-24',
+                    content: `
+                        <h4>Google Apps Script (GAS) 邮件中转通道上线</h4>
+                        <ul>
+                            <li><b>GAS HTTPS 443 中转</b>：绕过 Render SMTP 465/587 端口封锁</li>
+                            <li><b>发送优先级</b>：GAS (HTTPS 443) > SendGrid > Gmail SMTP（最终兜底）</li>
+                            <li><b>失败链</b>：GAS 失败 → SendGrid → Gmail SMTP</li>
+                            <li><b>GMAIL_GAS_URL 环境变量</b>：必须在 Render Dashboard 准确填入 Key/Value，不能有空格</li>
+                            <li><b>GAS Web App</b>：部署权限必须设为"任何人"（Anyone）以允许未认证请求</li>
+                        </ul>
+                    `
+                },
+                {
                     version: 'v0.87',
                     date: '2026-06-24',
                     content: `
@@ -9825,27 +10014,9 @@ function renderProfileActivityList(kind) {
 
             if (_reportType === 'post') {
                 try {
-                    sb.from('posts')
-                .select('id, user_name, content, media_url, media_type, created_at')
-                .neq('media_type', '__vip__')
-                .neq('media_type', '__vip_order__')
-                .neq('media_type', '__vip_plan__')
-                .neq('media_type', '__user_visit__')
-                .neq('media_type', '__avatar__')
-                .neq('media_type', '__user_info__')
-                .neq('media_type', '__visit__')
-                .neq('media_type', '__attack__')
-                .neq('media_type', '__ann__')
-                .neq('media_type', '__photo_wall__')
-                .neq('media_type', '__report__')
-                .neq('media_type', '__dm__')
-                .neq('media_type', '__auth__')
-                .neq('media_type', '__login_event__')
-                .neq('media_type', '__security_alert__')
-                .neq('media_type', '__admin_audit__')
-                .neq('media_type', '__client_error__')
-                .neq('media_type', '__email_sent__')
-                .neq('media_type', ADMIN_META_MARKER)
+                    applyVisiblePostQueryFilters(
+                        sb.from('posts').select('id, user_name, content, media_url, media_type, created_at')
+                    )
                         .order('created_at', { ascending: false })
                         .limit(200)
                         .then(function(res) {
@@ -10886,7 +11057,7 @@ function renderProfileActivityList(kind) {
 
             async function fetchSimpleStatSnapshot() {
                 var result = await Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
+                    applyVisiblePostQueryFilters(sb.from("posts").select("*")).order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]);
@@ -11255,7 +11426,7 @@ function renderProfileActivityList(kind) {
                     setTimeout(function() { resolve(null); }, timeoutMs);
                 });
                 var request = Promise.all([
-                    sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
+                    applyVisiblePostQueryFilters(sb.from("posts").select("*")).order("created_at", { ascending: false }),
                     sb.from("comments").select("*").order("created_at"),
                     sb.from("likes").select("*").order("created_at", { ascending: false })
                 ]).then(function(results) {

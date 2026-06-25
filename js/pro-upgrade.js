@@ -46,63 +46,14 @@
     clearLocalVip();
   };
 
+  // deprecated: frontend direct Pro activation disabled. Pro can only be granted by admin campaigns.
+  // 保留函数名以兼容旧代码，但必须返回禁用错误，禁止向 posts 插入 __vip__ 记录
   window.__xtjDirectPurchasePro = async function(userName) {
-    if (!userName) return { ok: false, error: '未登录' };
-
-    var now = new Date();
-    var expireAt = new Date(now.getTime() + VIP_DURATION_DAYS * 24 * 60 * 60 * 1000).toISOString();
-    var orderNo = 'XTJ_DIRECT_' + Date.now() + '_' + String(Math.random()).slice(2, 8);
-
-    try {
-      if (window.sb) {
-        var vipContent = JSON.stringify({
-          plan_id: VIP_PLAN_ID,
-          plan_name: 'XTJ Pro',
-          price: VIP_PRICE,
-          is_active: true,
-          order_no: orderNo,
-          start_at: now.toISOString(),
-          expire_at: expireAt,
-          features: ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'],
-          activated_at: now.toISOString(),
-          source: 'frontend_direct'
-        });
-        var { error } = await window.sb.from('posts').insert([{
-          user_name: userName,
-          content: vipContent,
-          media_type: VIP_MARKER,
-          media_url: VIP_PLAN_ID,
-          actor_key: 'vip_direct_' + Date.now()
-        }]);
-        if (error) console.warn('[Pro] Supabase insert failed (non-fatal):', error.message);
-      } else {
-        console.warn('[Pro] window.sb not available, local-only activation');
-      }
-    } catch(e) {
-      console.warn('[Pro] Supabase insert error (non-fatal):', e.message);
-    }
-
-    var vipInfo = {
-      ok: true,
-      user_name: userName,
-      plan_name: 'XTJ Pro',
-      expire_at: expireAt,
-      is_active: true,
-      features: ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'],
-      activated_at: now.toISOString()
+    console.warn('[Pro] __xtjDirectPurchasePro 已禁用，请通过管理员发布的活动领取 Pro');
+    return {
+      ok: false,
+      error: '前端直接开通 Pro 已禁用，请通过管理员发布的活动领取'
     };
-
-    window.__xtjSaveLocalVip({
-      user_name: userName,
-      plan_name: 'XTJ Pro',
-      expire_at: expireAt,
-      is_active: true,
-      features: vipInfo.features,
-      activated_at: now.toISOString()
-    });
-
-    // console.log('[Pro] VIP activated locally for', userName);
-    return vipInfo;
   };
 
   window.__xtjQueryVipStatus = async function(userName) {
