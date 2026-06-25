@@ -1412,7 +1412,7 @@ async function initAdminClient() {
                 bansData = apiData.bans || [];
             } catch(e) {}
         }
-        var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__' && p.media_type !== REPORT_MARKER; });
+        var visiblePosts = allPosts.filter(function(p) { return [ANN_MARKER, '__photo_wall__', REPORT_MARKER, '__vip__', '__vip_order__', '__vip_plan__', '__pro_gift__', '__pro_gift_claim__', '__user_style__', '__auth__', '__admin_auth__', '__user_info__', '__user_visit__', '__login_event__', '__security_alert__', '__admin_audit__', '__client_error__', '__email_sent__', '__email_recipient_history__'].indexOf(p.media_type) < 0; });
         var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
         h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
         var filtered = visiblePosts;
@@ -3189,7 +3189,7 @@ async function initAdminClient() {
                 bansData = apiData.bans || [];
             } catch(e) {}
         }
-        var visiblePosts = allPosts.filter(function(p) { return p.media_type !== ANN_MARKER && p.media_type !== '__photo_wall__' && p.media_type !== REPORT_MARKER; });
+        var visiblePosts = allPosts.filter(function(p) { return [ANN_MARKER, '__photo_wall__', REPORT_MARKER, '__vip__', '__vip_order__', '__vip_plan__', '__pro_gift__', '__pro_gift_claim__', '__user_style__', '__auth__', '__admin_auth__', '__user_info__', '__user_visit__', '__login_event__', '__security_alert__', '__admin_audit__', '__client_error__', '__email_sent__', '__email_recipient_history__'].indexOf(p.media_type) < 0; });
         var h = '<div class="card"><h3>帖子管理（' + visiblePosts.length + '条）</h3>';
         h += '<div class="search-bar"><input id="postSearchInp" placeholder="搜索帖子内容或用户名..." oninput="searchPostInp()" /></div>';
         var filtered = visiblePosts;
@@ -4945,6 +4945,474 @@ async function initAdminClient() {
             renderProGiftSubTab();
         } catch(e) {
             showToast('删除失败: ' + e.message, 'error');
+        }
+    };
+    var _proGiftSavingFinal = false;
+    var _manualGiftSubmittingFinal = false;
+
+    function buildProGiftFeatureGridFinal(prefix, selectedFeatures, featureLabels) {
+        var features = selectedFeatures || [];
+        return ['custom_theme', 'pro_chat_bubble', 'pro_post_style'].map(function(featureKey) {
+            var checked = features.indexOf(featureKey) >= 0 ? ' checked' : '';
+            return '<label class="pg-feature-card"><input type="checkbox" id="' + prefix + featureKey + '"' + checked + ' /><span>' + escapeHtml(featureLabels[featureKey] || featureKey) + '</span></label>';
+        }).join('');
+    }
+
+    window.renderProGiftTab = async function(el) {
+        var h = '<div class="pro-gift-shell">';
+        h += '<div class="pro-gift-hero">';
+        h += '<div class="pro-gift-hero-head">';
+        h += '<div class="pro-gift-hero-copy">';
+        h += '<h3><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>Pro 会员管理</h3>';
+        h += '<p>管理前台可领取的 Pro 活动、名额、时间与权益，保留现有保存、发布、下架、删除与手动赠送逻辑。</p>';
+        h += '</div>';
+        h += '<div class="pro-gift-chip-row"><span class="pro-gift-chip">活动发布后才会在前台显示</span><span class="pro-gift-chip">手动赠送会直接生效</span></div>';
+        h += '</div>';
+        h += '<div class="pro-gift-tabs">';
+        h += '<button class="pro-gift-tab' + (_proGiftSubTab === 'activities' ? ' active' : '') + '" onclick="switchProGiftSubTab(\'activities\')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>活动管理</button>';
+        h += '<button class="pro-gift-tab' + (_proGiftSubTab === 'history' ? ' active' : '') + '" onclick="switchProGiftSubTab(\'history\')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 3v18h18"/><path d="M7 14l4-4 4 4 5-5"/></svg>Pro 记录</button>';
+        h += '</div></div>';
+        h += '<div class="pro-gift-body-card"><div id="proGiftSubContent"></div></div>';
+        h += '</div>';
+        el.innerHTML = h;
+        window.renderProGiftSubTab();
+    };
+
+    renderProGiftActivities = async function(container) {
+        container.innerHTML = '<div class="loading">加载中...</div>';
+        try {
+            var data = await apiCall('GET', '/admin/pro-gifts');
+            var gifts = data.gifts || [];
+            var h = '<div class="pro-gift-toolbar">';
+            h += '<div class="pro-gift-toolbar-copy"><h4>活动列表</h4><p>创建前台可领取的 Pro 活动，统一管理时间窗、名额和用户范围。</p></div>';
+            h += '<div class="pro-gift-toolbar-actions">';
+            h += '<button class="btn pro-gift-btn-main" onclick="openProGiftEditor(null)"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>创建新活动</button>';
+            h += '<button class="btn pro-gift-btn-secondary" onclick="openManualGiftDialog()"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>手动赠送给用户</button>';
+            h += '</div></div>';
+            if (!gifts.length) {
+                h += '<div class="empty">暂无活动，点击上方按钮创建第一个 Pro 活动。</div>';
+            } else {
+                h += '<div class="pro-gift-table-wrap"><div class="table-wrap"><table><thead><tr><th>活动标题</th><th>时长</th><th>限量 / 已领</th><th>限定 / 专属</th><th>状态</th><th>截止领取</th><th>操作</th></tr></thead><tbody>';
+                gifts.forEach(function(g) {
+                    var statusText = g.is_published ? '<span class="status-badge status-success">已发布</span>' : '<span class="status-badge status-muted">草稿</span>';
+                    var expireText = g.claim_expire_at ? formatTime(g.claim_expire_at) : '不限';
+                    var limitNum = parseInt(g.claim_limit, 10) || 0;
+                    var claimedNum = parseInt(g.claimed_count, 10) || 0;
+                    var limitText = limitNum > 0 ? (claimedNum + ' / ' + limitNum) : '不限';
+                    var allowedArr = Array.isArray(g.allowed_users) ? g.allowed_users : [];
+                    var exclusiveText = g.exclusive ? '<span class="status-badge status-warning">专属</span>' : (allowedArr.length ? ('<span class="pro-gift-chip" title="' + escapeHtml(allowedArr.join(', ')) + '">' + allowedArr.length + ' 人</span>') : '<span class="pro-gift-chip">全部用户</span>');
+                    h += '<tr>';
+                    h += '<td><div class="pro-gift-title-cell"><strong>' + escapeHtml(g.title) + '</strong>' + (g.description ? '<small>' + escapeHtml(g.description) + '</small>' : '') + '</div></td>';
+                    h += '<td><span class="pro-gift-chip">' + escapeHtml(String(g.duration_days || 0)) + ' 天</span></td>';
+                    h += '<td><span class="pro-gift-chip">' + escapeHtml(limitText) + '</span></td>';
+                    h += '<td><div class="pro-gift-badge-row">' + exclusiveText + '</div></td>';
+                    h += '<td><div class="pro-gift-badge-row">' + statusText + '</div></td>';
+                    h += '<td>' + escapeHtml(expireText) + '</td>';
+                    h += '<td><div class="pro-gift-actions">';
+                    h += '<button class="btn-sm" onclick="openProGiftEditor(\'' + g.id + '\')">编辑</button>';
+                    h += g.is_published ? '<button class="btn-sm" onclick="toggleProGiftPublish(\'' + g.id + '\',false)">下架</button>' : '<button class="btn-sm primary" onclick="toggleProGiftPublish(\'' + g.id + '\',true)">发布</button>';
+                    h += '<button class="btn-sm del" onclick="deleteProGift(\'' + g.id + '\')">删除</button>';
+                    h += '</div></td></tr>';
+                });
+                h += '</tbody></table></div></div>';
+            }
+            container.innerHTML = h;
+        } catch(e) {
+            container.innerHTML = '<div class="empty">加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    };
+
+    window.openProGiftEditor = async function(giftId) {
+        var title = '', description = '', features = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
+        var duration_days = 30, claim_expire_at = '', id = giftId;
+        var claim_limit = 0, allowed_users = [], exclusive = false, start_at = '', end_at = '';
+        if (giftId) {
+            try {
+                var data = await apiCall('GET', '/admin/pro-gifts');
+                var gift = (data.gifts || []).find(function(g) { return String(g.id) === String(giftId); });
+                if (gift) {
+                    title = gift.title;
+                    description = gift.description;
+                    features = gift.features || features;
+                    duration_days = gift.duration_days || 30;
+                    claim_expire_at = gift.claim_expire_at || '';
+                    claim_limit = gift.claim_limit || 0;
+                    allowed_users = gift.allowed_users || gift.exclusive_users || gift.target_users || [];
+                    exclusive = !!gift.exclusive;
+                    start_at = gift.start_at || '';
+                    end_at = gift.end_at || '';
+                }
+            } catch(e) { showToast('加载活动失败: ' + e.message, 'error'); }
+        }
+        var featureLabels = {
+            vip_badge: 'VIP 标识',
+            photo_wall_unlimited: '照片墙不限量',
+            large_file_upload: '大文件上传',
+            pin_post: '帖子置顶',
+            custom_theme: 'Pro 主题',
+            profile_effects: '头像光效'
+        };
+        var html = '<div class="modal-overlay" id="proGiftOverlay" onclick="closeProGiftEditor()">';
+        html += '<div class="modal-box pro-gift-modal" onclick="event.stopPropagation()">';
+        html += '<div class="modal-head"><h3>' + escapeHtml(id ? '编辑 Pro 活动' : '创建新活动') + '</h3><button type="button" class="btn btn-ghost admin-modal-close" onclick="closeProGiftEditor()" aria-label="关闭">×</button></div>';
+        html += '<div class="modal-body">';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>基本信息</h4><p>设置前台展示的标题与活动说明。</p></div><div class="form-group"><label>活动标题</label><input id="pgTitleInp" value="' + escapeHtml(title) + '" placeholder="例如：夏日 Pro 特权活动" /></div><div class="form-group"><label>活动说明</label><textarea id="pgDescInp" rows="3" placeholder="描述活动内容、限制或提示...">' + escapeHtml(description) + '</textarea></div></section>';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>时间与名额</h4><p>控制 Pro 生效天数、开始结束时间和领取名额。</p></div><div class="pg-grid-2">';
+        html += '<div class="form-group"><label>Pro 有效天数</label><input id="pgDaysInp" type="number" min="1" max="3650" value="' + duration_days + '" /></div>';
+        html += '<div class="form-group"><label>领取截止时间</label><input id="pgExpireInp" type="datetime-local" value="' + (claim_expire_at ? claim_expire_at.slice(0,16) : '') + '" /></div>';
+        html += '<div class="form-group"><label>活动开始时间</label><input id="pgStartInp" type="datetime-local" value="' + (start_at ? start_at.slice(0,16) : '') + '" /></div>';
+        html += '<div class="form-group"><label>活动结束时间</label><input id="pgEndInp" type="datetime-local" value="' + (end_at ? end_at.slice(0,16) : '') + '" /></div>';
+        html += '<div class="form-group pg-full"><label>限量名额（0 表示不限）</label><input id="pgLimitInp" type="number" min="0" value="' + claim_limit + '" placeholder="留空或 0 表示不限" /></div>';
+        html += '</div></section>';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>用户范围</h4><p>可选限定用户列表，并可切换为专属活动。</p></div><div class="pg-grid-2">';
+        html += '<div class="form-group pg-full"><label>限定用户</label><input id="pgAllowedInp" value="' + escapeHtml(Array.isArray(allowed_users) ? allowed_users.join(', ') : '') + '" placeholder="例如：xxz, abc, test" /></div>';
+        html += '<div class="form-group pg-full"><label class="pg-exclusive-card"><input type="checkbox" id="pgExclusiveInp"' + (exclusive ? ' checked' : '') + ' /><span>设为专属活动<small>开启后，仅限定用户可见并可领取。</small></span></label></div>';
+        html += '</div></section>';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>Pro 权限</h4><p>保持真实 checkbox，可直接点击卡片选择活动权益。</p></div><div class="pg-feature-grid">' + buildProGiftFeatureGridFinal('pgFeat_', features, featureLabels) + '</div></section>';
+        html += '<div class="pg-helper-note">提示：保存后默认仍为未发布状态，需要在活动列表中点击“发布”后前台才会显示。</div>';
+        html += '</div>';
+        html += '<div class="modal-btns"><button type="button" class="btn btn-ghost" onclick="closeProGiftEditor()">取消</button><button type="button" class="btn primary pro-gift-loading-btn" id="pgSaveBtn" onclick="saveProGift(\'' + (id || '') + '\')">保存</button></div>';
+        html += '</div></div>';
+        var existing = document.getElementById('proGiftOverlay');
+        if (existing) existing.remove();
+        document.body.insertAdjacentHTML('beforeend', html);
+        var overlay = document.getElementById('proGiftOverlay');
+        if (overlay) overlay.classList.add('active');
+    };
+
+    window.closeProGiftEditor = function() {
+        if (_proGiftSavingFinal) return;
+        var el = document.getElementById('proGiftOverlay');
+        if (el) el.remove();
+    };
+
+    window.openManualGiftDialog = function() {
+        var featureLabels = {
+            vip_badge: 'VIP 标识',
+            photo_wall_unlimited: '照片墙不限量',
+            large_file_upload: '大文件上传',
+            pin_post: '帖子置顶',
+            custom_theme: 'Pro 主题',
+            profile_effects: '头像光效'
+        };
+        var html = '<div class="modal-overlay" id="manualGiftOverlay" onclick="closeManualGiftDialog()">';
+        html += '<div class="modal-box pro-gift-modal" onclick="event.stopPropagation()">';
+        html += '<div class="modal-head"><h3>手动赠送 Pro</h3><button type="button" class="btn btn-ghost admin-modal-close" onclick="closeManualGiftDialog()" aria-label="关闭">×</button></div>';
+        html += '<div class="modal-body">';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>用户与时长</h4><p>直接为指定用户生效，不经过前台领取流程。</p></div><div class="pg-grid-2">';
+        html += '<div class="form-group pg-full"><label>用户名</label><input id="mgUserInp" placeholder="输入要赠送的用户名" /></div>';
+        html += '<div class="form-group"><label>有效天数</label><input id="mgDaysInp" type="number" min="1" max="3650" value="7" /></div>';
+        html += '<div class="form-group"><label>备注</label><input id="mgReasonInp" placeholder="例如：活动奖励、补偿" /></div>';
+        html += '</div></section>';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>Pro 权限</h4><p>默认全部勾选，可按需取消。</p></div><div class="pg-feature-grid">' + buildProGiftFeatureGridFinal('mgFeat_', ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'], featureLabels) + '</div></section>';
+        html += '<div class="pg-helper-note">手动赠送会直接写入 Pro 生效记录，不会创建前台活动，也不需要用户手动领取。</div>';
+        html += '</div>';
+        html += '<div class="modal-btns"><button type="button" class="btn btn-ghost" onclick="closeManualGiftDialog()">取消</button><button type="button" class="btn primary pro-gift-loading-btn" id="mgSubmitBtn" onclick="submitManualGift()">确认赠送</button></div>';
+        html += '</div></div>';
+        var existing = document.getElementById('manualGiftOverlay');
+        if (existing) existing.remove();
+        document.body.insertAdjacentHTML('beforeend', html);
+        var overlay = document.getElementById('manualGiftOverlay');
+        if (overlay) overlay.classList.add('active');
+    };
+
+    window.closeManualGiftDialog = function() {
+        if (_manualGiftSubmittingFinal) return;
+        var el = document.getElementById('manualGiftOverlay');
+        if (el) el.remove();
+    };
+
+    window.submitManualGift = async function() {
+        var userName = (document.getElementById('mgUserInp') || {}).value;
+        var daysValue = (document.getElementById('mgDaysInp') || {}).value;
+        var reason = (document.getElementById('mgReasonInp') || {}).value;
+        userName = String(userName || '').trim();
+        reason = String(reason || '').trim();
+        var days = parseInt(daysValue, 10) || 7;
+        if (!userName) { showToast('请输入用户名', 'error'); return; }
+        if (days < 1 || days > 3650) { showToast('有效期需在 1 到 3650 天之间', 'error'); return; }
+        var features = [];
+        ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'].forEach(function(featureKey) {
+            var checkbox = document.getElementById('mgFeat_' + featureKey);
+            if (checkbox && checkbox.checked) features.push(featureKey);
+        });
+        var submitBtn = document.getElementById('mgSubmitBtn');
+        if (_manualGiftSubmittingFinal) return;
+        _manualGiftSubmittingFinal = true;
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.dataset.originText = submitBtn.textContent || '确认赠送';
+            submitBtn.textContent = '赠送中...';
+        }
+        try {
+            await apiCall('POST', '/admin/pro-gifts/manual-gift', {
+                user_name: userName,
+                duration_days: days,
+                reason: reason,
+                features: features
+            });
+            showToast('赠送成功');
+            _manualGiftSubmittingFinal = false;
+            closeManualGiftDialog();
+            renderProGiftSubTab();
+        } catch(e) {
+            showToast('赠送失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
+        } finally {
+            _manualGiftSubmittingFinal = false;
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = submitBtn.dataset.originText || '确认赠送';
+                delete submitBtn.dataset.originText;
+            }
+        }
+    };
+
+    window.saveProGift = async function(giftId) {
+        var title = String(((document.getElementById('pgTitleInp') || {}).value) || '').trim();
+        var description = String(((document.getElementById('pgDescInp') || {}).value) || '').trim();
+        var duration_days = parseInt(((document.getElementById('pgDaysInp') || {}).value), 10) || 30;
+        var claimExpireValue = ((document.getElementById('pgExpireInp') || {}).value) || '';
+        var startValue = ((document.getElementById('pgStartInp') || {}).value) || '';
+        var endValue = ((document.getElementById('pgEndInp') || {}).value) || '';
+        var claim_limit = parseInt(((document.getElementById('pgLimitInp') || {}).value), 10) || 0;
+        var allowedRaw = String(((document.getElementById('pgAllowedInp') || {}).value) || '');
+        var exclusive = !!((document.getElementById('pgExclusiveInp') || {}).checked);
+        var allowed_users = allowedRaw.split(',').map(function(item) {
+            return String(item || '').trim();
+        }).filter(Boolean);
+        var features = [];
+        ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'].forEach(function(featureKey) {
+            var checkbox = document.getElementById('pgFeat_' + featureKey);
+            if (checkbox && checkbox.checked) features.push(featureKey);
+        });
+        if (!title) { showToast('请输入活动标题', 'error'); return; }
+        if (duration_days < 1 || duration_days > 3650) { showToast('Pro 有效天数需在 1 到 3650 天之间', 'error'); return; }
+        if (claim_limit < 0) { showToast('限量名额不能为负数', 'error'); return; }
+        if (exclusive && !allowed_users.length) { showToast('专属活动必须填写限定用户名单', 'error'); return; }
+        var body = {
+            title: title,
+            description: description,
+            features: features,
+            duration_days: duration_days,
+            claim_expire_at: claimExpireValue ? new Date(claimExpireValue).toISOString() : '',
+            start_at: startValue ? new Date(startValue).toISOString() : '',
+            end_at: endValue ? new Date(endValue).toISOString() : '',
+            claim_limit: claim_limit,
+            allowed_users: allowed_users,
+            exclusive: exclusive
+        };
+        if (giftId) body.id = giftId;
+        var saveBtn = document.getElementById('pgSaveBtn');
+        if (_proGiftSavingFinal) return;
+        _proGiftSavingFinal = true;
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.dataset.originText = saveBtn.textContent || '保存';
+            saveBtn.textContent = '保存中...';
+        }
+        try {
+            await apiCall('POST', '/admin/pro-gifts/save', body);
+            showToast('保存成功');
+            _proGiftSavingFinal = false;
+            closeProGiftEditor();
+            renderProGiftSubTab();
+        } catch(e) {
+            showToast('保存失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
+        } finally {
+            _proGiftSavingFinal = false;
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = saveBtn.dataset.originText || '保存';
+                delete saveBtn.dataset.originText;
+            }
+        }
+    };
+    var PRO_VISUAL_GIFT_FEATURES_FINAL = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
+    var PRO_VISUAL_GIFT_LABELS_FINAL = {
+        custom_theme: '专属主题',
+        pro_chat_bubble: '聊天气泡',
+        pro_post_style: '帖子卡片装饰'
+    };
+
+    function buildProGiftVisualFeatureGridFinal(prefix, selectedFeatures) {
+        var features = Array.isArray(selectedFeatures) ? selectedFeatures : [];
+        return PRO_VISUAL_GIFT_FEATURES_FINAL.map(function(featureKey) {
+            var checked = features.indexOf(featureKey) >= 0 ? ' checked' : '';
+            return '<label class="pg-feature-card"><input type="checkbox" id="' + prefix + featureKey + '"' + checked + ' /><span>' + escapeHtml(PRO_VISUAL_GIFT_LABELS_FINAL[featureKey] || featureKey) + '</span></label>';
+        }).join('');
+    }
+
+    window.openProGiftEditor = async function(giftId) {
+        var title = '', description = '', features = PRO_VISUAL_GIFT_FEATURES_FINAL.slice();
+        var duration_days = 30, claim_expire_at = '', id = giftId;
+        var claim_limit = 0, allowed_users = [], exclusive = false, start_at = '', end_at = '';
+        if (giftId) {
+            try {
+                var data = await apiCall('GET', '/admin/pro-gifts');
+                var gift = (data.gifts || []).find(function(g) { return String(g.id) === String(giftId); });
+                if (gift) {
+                    title = gift.title;
+                    description = gift.description;
+                    features = Array.isArray(gift.features) && gift.features.length ? gift.features : features;
+                    duration_days = gift.duration_days || 30;
+                    claim_expire_at = gift.claim_expire_at || '';
+                    claim_limit = gift.claim_limit || 0;
+                    allowed_users = gift.allowed_users || gift.exclusive_users || gift.target_users || [];
+                    exclusive = !!gift.exclusive;
+                    start_at = gift.start_at || '';
+                    end_at = gift.end_at || '';
+                }
+            } catch(e) { showToast('加载活动失败: ' + e.message, 'error'); }
+        }
+        var html = '<div class="modal-overlay" id="proGiftOverlay" onclick="closeProGiftEditor()">';
+        html += '<div class="modal-box pro-gift-modal" onclick="event.stopPropagation()">';
+        html += '<div class="modal-head"><h3>' + escapeHtml(id ? '编辑 Pro 活动' : '创建新活动') + '</h3><button type="button" class="btn btn-ghost admin-modal-close" onclick="closeProGiftEditor()" aria-label="关闭">×</button></div>';
+        html += '<div class="modal-body">';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>基本信息</h4><p>设置前台展示的活动标题与活动说明。</p></div><div class="form-group"><label>活动标题</label><input id="pgTitleInp" value="' + escapeHtml(title) + '" placeholder="例如：夏日 Pro 视觉活动" /></div><div class="form-group"><label>活动说明</label><textarea id="pgDescInp" rows="3" placeholder="描述活动内容、提醒或限制...">' + escapeHtml(description) + '</textarea></div></section>';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>时间与名额</h4><p>控制 Pro 生效天数、活动窗口和领取名额。</p></div><div class="pg-grid-2">';
+        html += '<div class="form-group"><label>Pro 有效天数</label><input id="pgDaysInp" type="number" min="1" max="3650" value="' + duration_days + '" /></div>';
+        html += '<div class="form-group"><label>领取截止时间</label><input id="pgExpireInp" type="datetime-local" value="' + (claim_expire_at ? claim_expire_at.slice(0,16) : '') + '" /></div>';
+        html += '<div class="form-group"><label>活动开始时间</label><input id="pgStartInp" type="datetime-local" value="' + (start_at ? start_at.slice(0,16) : '') + '" /></div>';
+        html += '<div class="form-group"><label>活动结束时间</label><input id="pgEndInp" type="datetime-local" value="' + (end_at ? end_at.slice(0,16) : '') + '" /></div>';
+        html += '<div class="form-group pg-full"><label>限量名额（0 表示不限）</label><input id="pgLimitInp" type="number" min="0" value="' + claim_limit + '" placeholder="留空或 0 表示不限" /></div>';
+        html += '</div></section>';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>用户范围</h4><p>可选限定用户列表，也可切换为专属活动。</p></div><div class="pg-grid-2">';
+        html += '<div class="form-group pg-full"><label>限定用户</label><input id="pgAllowedInp" value="' + escapeHtml(Array.isArray(allowed_users) ? allowed_users.join(', ') : '') + '" placeholder="例如：xxz, abc, test" /></div>';
+        html += '<div class="form-group pg-full"><label class="pg-exclusive-card"><input type="checkbox" id="pgExclusiveInp"' + (exclusive ? ' checked' : '') + ' /><span>设为专属活动<small>开启后，仅限定用户可见并可领取。</small></span></label></div>';
+        html += '</div></section>';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>Pro 权益</h4><p>仅提供专属主题、聊天气泡和帖子卡片装饰。</p></div><div class="pg-feature-grid">' + buildProGiftVisualFeatureGridFinal('pgFeat_', features) + '</div></section>';
+        html += '<div class="pg-helper-note">保存后默认未发布，需在活动列表点击发布后，前台用户才能领取。本次 Pro 仅提供专属主题、聊天气泡、帖子卡片装饰；Pro 标识已有展示逻辑，不重复修改。</div>';
+        html += '</div><div class="modal-btns"><button type="button" class="btn btn-ghost" onclick="closeProGiftEditor()">取消</button><button type="button" class="btn primary pro-gift-loading-btn" id="pgSaveBtn" onclick="saveProGift(\'' + (id || '') + '\')">保存</button></div></div></div>';
+        var existing = document.getElementById('proGiftOverlay');
+        if (existing) existing.remove();
+        document.body.insertAdjacentHTML('beforeend', html);
+        var overlay = document.getElementById('proGiftOverlay');
+        if (overlay) overlay.classList.add('active');
+    };
+
+    window.openManualGiftDialog = function() {
+        var html = '<div class="modal-overlay" id="manualGiftOverlay" onclick="closeManualGiftDialog()">';
+        html += '<div class="modal-box pro-gift-modal" onclick="event.stopPropagation()">';
+        html += '<div class="modal-head"><h3>手动赠送 Pro</h3><button type="button" class="btn btn-ghost admin-modal-close" onclick="closeManualGiftDialog()" aria-label="关闭">×</button></div>';
+        html += '<div class="modal-body">';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>用户与时长</h4><p>直接为指定用户生效，不经过前台领取流程。</p></div><div class="pg-grid-2">';
+        html += '<div class="form-group pg-full"><label>用户名</label><input id="mgUserInp" placeholder="输入要赠送的用户名" /></div>';
+        html += '<div class="form-group"><label>有效天数</label><input id="mgDaysInp" type="number" min="1" max="3650" value="7" /></div>';
+        html += '<div class="form-group"><label>备注</label><input id="mgReasonInp" placeholder="例如：活动奖励、补偿" /></div>';
+        html += '</div></section>';
+        html += '<section class="pg-section"><div class="pg-section-head"><h4>Pro 权益</h4><p>默认勾选全部视觉权益，可按需取消。</p></div><div class="pg-feature-grid">' + buildProGiftVisualFeatureGridFinal('mgFeat_', PRO_VISUAL_GIFT_FEATURES_FINAL) + '</div></section>';
+        html += '<div class="pg-helper-note">手动赠送会直接写入 Pro 生效记录，不会创建前台活动，也不需要用户手动领取。</div>';
+        html += '</div><div class="modal-btns"><button type="button" class="btn btn-ghost" onclick="closeManualGiftDialog()">取消</button><button type="button" class="btn primary pro-gift-loading-btn" id="mgSubmitBtn" onclick="submitManualGift()">确认赠送</button></div></div></div>';
+        var existing = document.getElementById('manualGiftOverlay');
+        if (existing) existing.remove();
+        document.body.insertAdjacentHTML('beforeend', html);
+        var overlay = document.getElementById('manualGiftOverlay');
+        if (overlay) overlay.classList.add('active');
+    };
+
+    window.submitManualGift = async function() {
+        var userName = (document.getElementById('mgUserInp') || {}).value;
+        var daysValue = (document.getElementById('mgDaysInp') || {}).value;
+        var reason = (document.getElementById('mgReasonInp') || {}).value;
+        userName = String(userName || '').trim();
+        reason = String(reason || '').trim();
+        var days = parseInt(daysValue, 10) || 7;
+        if (!userName) { showToast('请输入用户名', 'error'); return; }
+        if (days < 1 || days > 3650) { showToast('有效期需在 1 到 3650 天之间', 'error'); return; }
+        var features = [];
+        PRO_VISUAL_GIFT_FEATURES_FINAL.forEach(function(featureKey) {
+            var checkbox = document.getElementById('mgFeat_' + featureKey);
+            if (checkbox && checkbox.checked) features.push(featureKey);
+        });
+        var submitBtn = document.getElementById('mgSubmitBtn');
+        if (_manualGiftSubmittingFinal) return;
+        _manualGiftSubmittingFinal = true;
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.dataset.originText = submitBtn.textContent || '确认赠送';
+            submitBtn.textContent = '赠送中...';
+        }
+        try {
+            await apiCall('POST', '/admin/pro-gifts/manual-gift', {
+                user_name: userName,
+                duration_days: days,
+                reason: reason,
+                features: features
+            });
+            showToast('赠送成功');
+            _manualGiftSubmittingFinal = false;
+            closeManualGiftDialog();
+            renderProGiftSubTab();
+        } catch(e) {
+            showToast('赠送失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
+        } finally {
+            _manualGiftSubmittingFinal = false;
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = submitBtn.dataset.originText || '确认赠送';
+                delete submitBtn.dataset.originText;
+            }
+        }
+    };
+
+    window.saveProGift = async function(giftId) {
+        var title = String(((document.getElementById('pgTitleInp') || {}).value) || '').trim();
+        var description = String(((document.getElementById('pgDescInp') || {}).value) || '').trim();
+        var duration_days = parseInt(((document.getElementById('pgDaysInp') || {}).value), 10) || 30;
+        var claimExpireValue = ((document.getElementById('pgExpireInp') || {}).value) || '';
+        var startValue = ((document.getElementById('pgStartInp') || {}).value) || '';
+        var endValue = ((document.getElementById('pgEndInp') || {}).value) || '';
+        var claim_limit = parseInt(((document.getElementById('pgLimitInp') || {}).value), 10) || 0;
+        var allowedRaw = String(((document.getElementById('pgAllowedInp') || {}).value) || '');
+        var exclusive = !!((document.getElementById('pgExclusiveInp') || {}).checked);
+        var allowed_users = allowedRaw.split(',').map(function(item) {
+            return String(item || '').trim();
+        }).filter(Boolean);
+        var features = [];
+        PRO_VISUAL_GIFT_FEATURES_FINAL.forEach(function(featureKey) {
+            var checkbox = document.getElementById('pgFeat_' + featureKey);
+            if (checkbox && checkbox.checked) features.push(featureKey);
+        });
+        if (!title) { showToast('请输入活动标题', 'error'); return; }
+        if (duration_days < 1 || duration_days > 3650) { showToast('Pro 有效天数需在 1 到 3650 天之间', 'error'); return; }
+        if (claim_limit < 0) { showToast('限量名额不能为负数', 'error'); return; }
+        if (exclusive && !allowed_users.length) { showToast('专属活动必须填写限定用户名单', 'error'); return; }
+        var body = {
+            title: title,
+            description: description,
+            features: features,
+            duration_days: duration_days,
+            claim_expire_at: claimExpireValue ? new Date(claimExpireValue).toISOString() : '',
+            start_at: startValue ? new Date(startValue).toISOString() : '',
+            end_at: endValue ? new Date(endValue).toISOString() : '',
+            claim_limit: claim_limit,
+            allowed_users: allowed_users,
+            exclusive: exclusive
+        };
+        if (giftId) body.id = giftId;
+        var saveBtn = document.getElementById('pgSaveBtn');
+        if (_proGiftSavingFinal) return;
+        _proGiftSavingFinal = true;
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.dataset.originText = saveBtn.textContent || '保存';
+            saveBtn.textContent = '保存中...';
+        }
+        try {
+            await apiCall('POST', '/admin/pro-gifts/save', body);
+            showToast('保存成功');
+            _proGiftSavingFinal = false;
+            closeProGiftEditor();
+            renderProGiftSubTab();
+        } catch(e) {
+            showToast('保存失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
+        } finally {
+            _proGiftSavingFinal = false;
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = saveBtn.dataset.originText || '保存';
+                delete saveBtn.dataset.originText;
+            }
         }
     };
 })();
