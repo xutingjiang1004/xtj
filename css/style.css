@@ -13535,21 +13535,21 @@ html[data-pro-theme="lavender"] {
 }
 
 .post-card-preview.is-leaf-corner::after {
-  top: 12px;
-  right: 12px;
-  width: 24px;
-  height: 14px;
+  top: 10px;
+  right: 11px;
+  width: 20px;
+  height: 13px;
   border-radius: 80% 0 80% 0;
-  background: linear-gradient(135deg, rgba(112,190,145,0.72), rgba(185,230,202,0.38));
+  background: linear-gradient(135deg, rgba(112,190,145,0.62), rgba(185,230,202,0.32));
   transform: rotate(-18deg);
 }
 
 .post-card-preview.is-leaf-corner::before {
-  top: 18px;
-  right: 16px;
-  width: 16px;
+  top: 16px;
+  right: 15px;
+  width: 14px;
   height: 1px;
-  background: rgba(74,145,102,0.45);
+  background: rgba(74,145,102,0.35);
   transform: rotate(-18deg);
 }
 
@@ -13719,26 +13719,30 @@ html[data-pro-chat-bubble="lavender"] .chat-msg.sent .msg-read-status {
 .post.is-self-post.post-style-leaf_corner::before {
   content: '';
   position: absolute;
-  top: 22px;
-  right: 20px;
-  width: 20px;
+  top: 18px;
+  right: 17px;
+  width: 16px;
   height: 1px;
-  background: rgba(74,145,102,0.45);
+  background: rgba(74,145,102,0.35);
   transform: rotate(-18deg);
   pointer-events: none;
+  z-index: 1;
+  opacity: 0.7;
 }
 
 .post.is-self-post.post-style-leaf_corner::after {
   content: '';
   position: absolute;
-  top: 14px;
-  right: 14px;
-  width: 28px;
-  height: 18px;
+  top: 11px;
+  right: 12px;
+  width: 22px;
+  height: 14px;
   border-radius: 80% 0 80% 0;
-  background: linear-gradient(135deg, rgba(112,190,145,0.72), rgba(185,230,202,0.38));
+  background: linear-gradient(135deg, rgba(112,190,145,0.62), rgba(185,230,202,0.32));
   transform: rotate(-18deg);
   pointer-events: none;
+  z-index: 1;
+  opacity: 0.75;
 }
 
 .post.is-self-post.post-style-soft_glow {
@@ -15968,4 +15972,57 @@ html:not([data-theme="dark"]) .af-input:focus {
   --xtj-pro-theme-accent: var(--xtj-theme-accent);
   --xtj-pro-theme-border: rgba(255,255,255,0.14);
   --xtj-pro-theme-soft: rgba(255,255,255,0.06);
+}
+
+/* ===== 专属主题全站扩展 ===== */
+html[data-pro-theme]:not([data-pro-theme="default"]) body {
+  background: var(--xtj-theme-bg-1);
+}
+
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) {
+  --panel-bg: linear-gradient(180deg, var(--xtj-theme-bg-1), var(--xtj-theme-bg-2));
+}
+
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .dock-panel {
+  background: var(--panel-bg);
+}
+
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .dock-panel#panelAi::before {
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+}
+
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .comment-item,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .stat-detail-body,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .user-info-card {
+  border-color: var(--xtj-theme-border);
+}
+
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .action-btn:hover {
+  background: var(--xtj-theme-soft);
+}
+
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .pp-info-modal-body,
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .modal {
+  background: linear-gradient(180deg, rgba(255,255,255,0.97), var(--xtj-theme-card-soft));
+  border-color: var(--xtj-theme-border);
+}
+
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .profile-user-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), var(--xtj-theme-card-soft));
+  border-color: var(--xtj-theme-border);
+}
+
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .post .comment-item {
+  border-left: 2px solid var(--xtj-theme-soft);
+}
+
+/* 暗色模式下主题微调 */
+html[data-theme="dark"][data-pro-theme]:not([data-pro-theme="default"]) body {
+  background: linear-gradient(180deg, rgba(92, 177, 124, 0.04), transparent);
+}
+
+html[data-theme="dark"][data-pro-theme]:not([data-pro-theme="default"]) .dock-panel {
+  --panel-bg: linear-gradient(180deg, rgba(16, 26, 22, 0.96), rgba(22, 33, 28, 0.92));
+  background: var(--panel-bg);
 }
