@@ -608,15 +608,17 @@
                         <span class="xtj-vip-card-badge" id="vipCardBadge">开通</span>
                     </div>
                 </div>
-                <div class="profile-pro-style-panel" id="profileProStylePanel" style="display:none;">
-                    <div class="profile-pro-style-head">
+                <div class="profile-pro-style-panel collapsed" id="profileProStylePanel" style="display:none;">
+                    <button type="button" class="profile-pro-style-summary" id="profileProStyleSummary" onclick="toggleProStylePanel()">
                         <div class="profile-pro-style-copy">
                             <div class="profile-pro-style-kicker">Pro 视觉装扮</div>
                             <div class="profile-pro-style-title">专属主题、聊天气泡、帖子卡片</div>
-                            <div class="profile-pro-style-sub" id="proStyleStatus">登录后可保存你的视觉偏好</div>
+                            <div class="profile-pro-style-sub" id="proStyleStatus">点击展开管理视觉偏好</div>
                         </div>
-                        <span class="profile-pro-style-badge" id="proStyleBadge">默认</span>
-                    </div>
+                        <span class="profile-pro-style-badge profile-pro-style-status" id="proStyleBadge">默认</span>
+                        <span class="profile-pro-style-arrow" id="proStyleArrow" aria-hidden="true">⌄</span>
+                    </button>
+                    <div class="profile-pro-style-content" id="profileProStyleContent">
                     <div class="profile-pro-style-grid">
                         <label class="profile-pro-style-field">
                             <span class="profile-pro-style-label">专属主题</span>
@@ -795,7 +797,7 @@
                             <select id="proPostStyleSelect" class="pro-style-native-select">
                                 <option value="default">默认</option>
                                 <option value="clean_border">清透边框</option>
-                                <option value="leaf_corner">花叶角标</option>
+                                <option value="leaf_corner">叶子角标</option>
                                 <option value="soft_glow">柔光卡片</option>
                                 <option value="minimal_pro">极简 Pro</option>
                             </select>
@@ -843,7 +845,7 @@
                                             <span></span><span></span><span></span>
                                         </span>
                                     </span>
-                                    <span class="pro-style-option-title">花叶角标</span>
+                                    <span class="pro-style-option-title">叶子角标</span>
                                 </button>
                                 <button type="button" class="pro-style-option-card" data-pro-style-type="post" data-pro-style-value="soft_glow">
                                     <span class="pro-style-card-check" aria-hidden="true"></span>
@@ -880,6 +882,7 @@
                     </div>
                     <div class="profile-pro-style-actions">
                         <button class="btn primary" type="button" id="proStyleSaveBtn" onclick="saveCurrentUserStyle()">保存视觉偏好</button>
+                    </div>
                     </div>
                 </div>
                 <div class="profile-settings">
