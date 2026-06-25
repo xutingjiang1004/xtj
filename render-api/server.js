@@ -3596,19 +3596,44 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
       }
     }
 
-    // 先保存收件人到历史（无论发送是否成功，都先存下来）
+    // 先保存收件人到历史（无论发送是否成功，都先存下来，包含名字）
     try {
-      var histEmails = [];
+      var histMap = {};
       recipients.forEach(function(r) {
         var e = String(r.email || '').trim().toLowerCase();
-        if (e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && histEmails.indexOf(e) === -1) histEmails.push(e);
+        if (e && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) && !histMap[e]) {
+          histMap[e] = { email: e, user_name: String(r.user_name || '').trim() || e, last_sent_at: new Date().toISOString() };
+        }
       });
-      for (var hi = 0; hi < histEmails.length; hi++) {
-        await supabase.from('posts').insert([{
-          user_name: ADMIN_USERNAME,
-          content: JSON.stringify({ email: histEmails[hi], sent_at: new Date().toISOString() }),
-          media_type: '__email_recipient_history__'
-        }]).catch(function(err) { console.warn('[Email] 保存历史收件人失败:', err && err.message); });
+      var histList = Object.values(histMap);
+      // 一次性查出所有已有记录，避免 N+1 查询
+      var { data: existRows } = await supabase.from('posts')
+        .select('id, content')
+        .eq('media_type', EMAIL_RECIPIENT_MARKER)
+        .eq('user_name', ADMIN_USERNAME);
+      var existMap = {};
+      (existRows || []).forEach(function(row) {
+        try {
+          var eiInfo = JSON.parse(row.content || '{}');
+          var eEmail = (eiInfo.email || '').trim().toLowerCase();
+          if (eEmail) existMap[eEmail] = { id: row.id, user_name: eiInfo.user_name || '' };
+        } catch(pe) {}
+      });
+      for (var hi = 0; hi < histList.length; hi++) {
+        var hInfo = histList[hi];
+        var exist = existMap[hInfo.email];
+        if (exist) {
+          // 已有则更新（保留更好的名字）
+          if (hInfo.user_name === hInfo.email && exist.user_name) hInfo.user_name = exist.user_name;
+          await supabase.from('posts').update({ content: JSON.stringify(hInfo) }).eq('id', exist.id).catch(function(){});
+        } else {
+          var { data: newRow } = await supabase.from('posts').insert([{
+            user_name: ADMIN_USERNAME,
+            content: JSON.stringify(hInfo),
+            media_type: EMAIL_RECIPIENT_MARKER
+          }]).select('id').catch(function(){ return { data: null }; });
+          if (newRow && newRow[0]) existMap[hInfo.email] = { id: newRow[0].id, user_name: hInfo.user_name };
+        }
       }
     } catch(e) { console.warn('[Email] 保存收件人历史失败:', e.message); }
 
@@ -3720,14 +3745,29 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
       }
     }
     try {
+      // 构建详细的收件人列表（包含名字、邮箱、发送结果）
+      var detailList = recipients.map(function(r) {
+        var email = String(r.email || '').trim().toLowerCase();
+        var name = String(r.user_name || '').trim();
+        var isSent = sent.indexOf(r.user_name || r.email) >= 0;
+        var failInfo = null;
+        if (!isSent) {
+          for (var fi = 0; fi < failed.length; fi++) {
+            if (failed[fi].user === (r.user_name || r.email)) { failInfo = failed[fi].error; break; }
+          }
+        }
+        return { email: email, user_name: name || email, status: isSent ? 'sent' : 'failed', error: failInfo };
+      });
       await supabase.from('posts').insert([{
         user_name: ADMIN_USERNAME,
         media_type: EMAIL_SENT_MARKER,
         content: JSON.stringify({
+          from_email: GMAIL_USER,
           subject: subjectVal,
           sent_count: sent.length,
           failed_count: failed.length,
           total_recipients: recipients.length,
+          recipients_detail: detailList,
           sent_at: new Date().toISOString()
         }),
         actor_key: 'email_' + Date.now()
@@ -3776,10 +3816,12 @@ app.get('/admin/email-history', verifyToken, rateLimit(60000, 10), async (req, r
       try { info = JSON.parse(row.content || '{}'); } catch(e) {}
       return {
         id: row.id,
+        from_email: info.from_email || GMAIL_USER || '',
         subject: info.subject || '',
         sent_count: info.sent_count || 0,
         failed_count: info.failed_count || 0,
         total_recipients: info.total_recipients || 0,
+        recipients_detail: Array.isArray(info.recipients_detail) ? info.recipients_detail : [],
         sent_at: info.sent_at || row.created_at
       };
     });
@@ -3812,7 +3854,11 @@ app.get('/admin/email-recipient-history', verifyToken, rateLimit(60000, 10), asy
         var email = (info.email || '').trim().toLowerCase();
         if (email && !seen.has(email)) {
           seen.add(email);
-          recipients.push({ email: email, sent_at: info.sent_at || row.created_at });
+          recipients.push({
+            email: email,
+            user_name: info.user_name || email,
+            last_sent_at: info.last_sent_at || info.sent_at || row.created_at
+          });
         }
       } catch(e) {}
     });
