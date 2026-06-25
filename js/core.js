@@ -717,6 +717,9 @@ const ADMIN_NAME = "xxz";
             var postSelect = document.getElementById('proPostStyleSelect');
             if (!currentUser) {
                 panel.style.display = 'none';
+                if (typeof updateProStyleEntry === 'function') {
+                    updateProStyleEntry();
+                }
                 return;
             }
             panel.style.display = '';
