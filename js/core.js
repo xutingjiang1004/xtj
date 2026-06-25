@@ -111,6 +111,35 @@ const ADMIN_NAME = "xxz";
                 try { localStorage.removeItem(USER_TOKEN_TS_KEY); } catch(e) {}
             }
 
+            async function ensureUserToken() {
+                var existingToken = getUserToken();
+                if (existingToken) return existingToken;
+                if (!currentUser || !API_BASE) return '';
+                var pwHash = '';
+                try {
+                    pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || '';
+                } catch (e) {
+                    pwHash = '';
+                }
+                if (!pwHash) return '';
+                try {
+                    var tokenRes = await fetch(API_BASE + '/api/user/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_name: currentUser, password_hash: pwHash })
+                    });
+                    var tokenData = await tokenRes.json().catch(function() { return {}; });
+                    if (tokenRes.ok && tokenData && tokenData.token) {
+                        setUserToken(tokenData.token);
+                        return tokenData.token;
+                    }
+                    if (tokenRes.status === 401 || tokenRes.status === 403) {
+                        clearUserToken();
+                    }
+                } catch (e) {}
+                return '';
+            }
+
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
 
@@ -884,20 +913,36 @@ const ADMIN_NAME = "xxz";
                 ].join('');
             }
 
+            function renderAuthExpired(msg) {
+                section.style.display = '';
+                list.innerHTML = [
+                    '<div class="pro-gift-empty">',
+                    '  <div class="pro-gift-empty-icon">🔐</div>',
+                    '  <div class="pro-gift-empty-text">' + escapeHtml(msg) + '</div>',
+                    '</div>'
+                ].join('');
+            }
+
             try {
                 var headers = {};
-                if (typeof getUserToken === 'function') {
-                    var tok = getUserToken();
-                    if (tok) headers['Authorization'] = 'Bearer ' + tok;
+                var tok = await ensureUserToken();
+                if (!tok) {
+                    renderAuthExpired('登录状态已过期，请重新登录后查看 Pro 活动');
+                    return;
                 }
+                headers['Authorization'] = 'Bearer ' + tok;
                 var resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), {
                     headers: headers,
                     signal: AbortSignal.timeout(8000)
                 });
+                if (resp.status === 401 || resp.status === 403) {
+                    clearUserToken();
+                    renderAuthExpired('登录状态已过期，请重新登录后查看 Pro 活动');
+                    return;
+                }
                 var data = await resp.json();
                 if (data && data.error) {
-                    // 后端报错：仍然显示空状态，避免弹窗空白
-                    renderEmpty('暂无可领取的 Pro 活动', '活动由管理员限时发布，请等待下一次开放。');
+                    renderEmpty('Pro 活动加载失败', data.error || '请稍后重试');
                     return;
                 }
                 var gifts = (data && data.gifts) || [];
@@ -983,8 +1028,7 @@ const ADMIN_NAME = "xxz";
                     return card;
                 }).join('');
             } catch(e) {
-                // 网络错误时也显示空状态，避免弹窗完全空白
-                renderEmpty('暂无可领取的 Pro 活动', '活动由管理员限时发布，请等待下一次开放。');
+                renderEmpty('Pro 活动加载失败', '请稍后重试');
             }
         }
 
@@ -999,16 +1043,31 @@ const ADMIN_NAME = "xxz";
             }
             try {
                 var claimHeaders = { 'Content-Type': 'application/json' };
-                if (typeof getUserToken === 'function') {
-                    var tok2 = getUserToken();
-                    if (tok2) claimHeaders['Authorization'] = 'Bearer ' + tok2;
+                var tok2 = await ensureUserToken();
+                if (!tok2) {
+                    if (btn) {
+                        btn.classList.remove('loading');
+                        btn.textContent = '领取 Pro';
+                    }
+                    showToast('登录状态已过期，请重新登录', 'error');
+                    return;
                 }
+                claimHeaders['Authorization'] = 'Bearer ' + tok2;
                 var resp = await fetch(API_BASE + '/api/pro-gifts/claim', {
                     method: 'POST',
                     headers: claimHeaders,
                     body: JSON.stringify({ user_name: currentUser, gift_id: giftId })
                 });
                 var data = await resp.json();
+                if (resp.status === 401 || resp.status === 403) {
+                    clearUserToken();
+                    if (btn) {
+                        btn.classList.remove('loading');
+                        btn.textContent = '领取 Pro';
+                    }
+                    showToast((data && data.error) || '登录状态已过期，请重新登录', 'error');
+                    return;
+                }
                 if (data.ok) {
                     // 更新卡片状态
                     if (card) {
@@ -1043,14 +1102,14 @@ const ADMIN_NAME = "xxz";
                 } else {
                     if (btn) {
                         btn.classList.remove('loading');
-                        btn.textContent = '免费领取';
+                        btn.textContent = '领取 Pro';
                     }
                     showToast(data.error || '领取失败', 'error');
                 }
             } catch(e) {
                 if (btn) {
                     btn.classList.remove('loading');
-                    btn.textContent = '免费领取';
+                    btn.textContent = '领取 Pro';
                 }
                 showToast('领取失败: ' + e.message, 'error');
             }
@@ -11648,7 +11707,7 @@ function renderProfileActivityList(kind) {
 
             function applyStatSnapshot(posts, comments, likes) {
                 var visiblePosts = normalizePosts(Array.isArray(posts) ? posts : []).filter(function(p) {
-                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && canViewPost(p);
+                    return p && p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__login_event__' && p.media_type !== '__security_alert__' && p.media_type !== '__admin_audit__' && p.media_type !== '__client_error__' && p.media_type !== '__email_sent__' && p.media_type !== '__vip__' && p.media_type !== '__vip_order__' && p.media_type !== USER_STYLE_MARKER && canViewPost(p);
                 });
                 var visiblePostIds = new Set(visiblePosts.map(function(p) { return String(p.id); }));
                 statAllPosts = visiblePosts;
