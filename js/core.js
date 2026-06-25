@@ -505,6 +505,7 @@ const ADMIN_NAME = "xxz";
         var PRO_VISUAL_FEATURE_KEYS = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
         var currentUserStyleRecordId = '';
         var currentUserStyle = createDefaultUserStyle();
+        var currentUserStylePreview = null;
 
         function createDefaultUserStyle() {
             return {
@@ -568,8 +569,113 @@ const ADMIN_NAME = "xxz";
         }
         window.hasProFeature = hasProFeature;
 
+        function getCurrentStyleDraft() {
+            return normalizeUserStyle(currentUserStylePreview || currentUserStyle);
+        }
+
+        function getProStyleSelectMeta(type) {
+            if (type === 'theme') {
+                return {
+                    selectId: 'proThemeSelect',
+                    feature: 'custom_theme',
+                    key: 'theme'
+                };
+            }
+            if (type === 'bubble') {
+                return {
+                    selectId: 'proBubbleSelect',
+                    feature: 'pro_chat_bubble',
+                    key: 'chat_bubble_style'
+                };
+            }
+            return {
+                selectId: 'proPostStyleSelect',
+                feature: 'pro_post_style',
+                key: 'post_card_style'
+            };
+        }
+
+        function getUserStyleDraftFromControls() {
+            var draft = getCurrentStyleDraft();
+            var themeSelect = document.getElementById('proThemeSelect');
+            var bubbleSelect = document.getElementById('proBubbleSelect');
+            var postSelect = document.getElementById('proPostStyleSelect');
+            return normalizeUserStyle({
+                theme: themeSelect ? themeSelect.value : draft.theme,
+                chat_bubble_style: bubbleSelect ? bubbleSelect.value : draft.chat_bubble_style,
+                post_card_style: postSelect ? postSelect.value : draft.post_card_style,
+                updated_at: draft.updated_at || currentUserStyle.updated_at || ''
+            });
+        }
+
+        function setProStyleSelectValue(type, value) {
+            var meta = getProStyleSelectMeta(type);
+            var select = document.getElementById(meta.selectId);
+            if (!select) return false;
+            select.value = value;
+            currentUserStylePreview = getUserStyleDraftFromControls();
+            return true;
+        }
+        window.setProStyleSelectValue = setProStyleSelectValue;
+
+        function updateProStylePreviewActiveStates() {
+            var panel = document.getElementById('profileProStylePanel');
+            if (!panel) return;
+            ['theme', 'bubble', 'post'].forEach(function(type) {
+                var meta = getProStyleSelectMeta(type);
+                var select = document.getElementById(meta.selectId);
+                var selectedValue = select ? String(select.value || 'default') : 'default';
+                var enabled = currentUser === ADMIN_NAME || hasProFeature(meta.feature);
+                panel.querySelectorAll('.pro-style-option-card[data-pro-style-type="' + type + '"]').forEach(function(card) {
+                    var cardValue = String(card.getAttribute('data-pro-style-value') || '');
+                    var active = cardValue === selectedValue;
+                    card.classList.toggle('active', active);
+                    card.classList.toggle('locked', !enabled && cardValue !== 'default');
+                    card.disabled = !enabled && cardValue !== 'default';
+                    card.setAttribute('aria-pressed', active ? 'true' : 'false');
+                    card.setAttribute('aria-disabled', (!enabled && cardValue !== 'default') ? 'true' : 'false');
+                });
+            });
+        }
+        window.updateProStylePreviewActiveStates = updateProStylePreviewActiveStates;
+
+        function bindProStylePreviewCards() {
+            var panel = document.getElementById('profileProStylePanel');
+            if (!panel || panel.dataset.previewCardsBound === '1') return;
+            panel.dataset.previewCardsBound = '1';
+
+            panel.addEventListener('click', function(evt) {
+                var card = evt.target && evt.target.closest ? evt.target.closest('.pro-style-option-card[data-pro-style-type]') : null;
+                if (!card) return;
+                var type = String(card.getAttribute('data-pro-style-type') || '');
+                var value = String(card.getAttribute('data-pro-style-value') || '');
+                var meta = getProStyleSelectMeta(type);
+                var enabled = currentUser === ADMIN_NAME || hasProFeature(meta.feature);
+                if (!enabled && value !== 'default') {
+                    showToast('这是 Pro 视觉权益，领取包含该权益的 Pro 活动后可使用');
+                    return;
+                }
+                if (setProStyleSelectValue(type, value)) {
+                    updateProStylePreviewActiveStates();
+                    applyCurrentUserStyle();
+                }
+            });
+
+            ['proThemeSelect', 'proBubbleSelect', 'proPostStyleSelect'].forEach(function(id) {
+                var select = document.getElementById(id);
+                if (!select || select.dataset.previewSyncBound === '1') return;
+                select.dataset.previewSyncBound = '1';
+                select.addEventListener('change', function() {
+                    currentUserStylePreview = getUserStyleDraftFromControls();
+                    updateProStylePreviewActiveStates();
+                    applyCurrentUserStyle();
+                });
+            });
+        }
+        window.bindProStylePreviewCards = bindProStylePreviewCards;
+
         function getResolvedUserStyle() {
-            var raw = normalizeUserStyle(currentUserStyle);
+            var raw = getCurrentStyleDraft();
             return {
                 theme: hasProFeature('custom_theme') ? raw.theme : 'default',
                 chat_bubble_style: hasProFeature('pro_chat_bubble') ? raw.chat_bubble_style : 'default',
@@ -614,7 +720,8 @@ const ADMIN_NAME = "xxz";
                 return;
             }
             panel.style.display = '';
-            var saved = normalizeUserStyle(currentUserStyle);
+            bindProStylePreviewCards();
+            var saved = getCurrentStyleDraft();
             if (themeSelect) themeSelect.value = saved.theme;
             if (bubbleSelect) bubbleSelect.value = saved.chat_bubble_style;
             if (postSelect) postSelect.value = saved.post_card_style;
@@ -637,6 +744,7 @@ const ADMIN_NAME = "xxz";
                     statusEl.textContent = '当前视觉权益已生效。即使 Pro 失效，你保存的样式也会保留，重新获得权益后自动恢复。';
                 }
             }
+            updateProStylePreviewActiveStates();
         }
 
         function applyCurrentUserStyle() {
@@ -653,6 +761,7 @@ const ADMIN_NAME = "xxz";
         async function loadCurrentUserStyle() {
             currentUserStyleRecordId = '';
             currentUserStyle = createDefaultUserStyle();
+            currentUserStylePreview = null;
             if (!currentUser) {
                 applyCurrentUserStyle();
                 return currentUserStyle;
@@ -726,6 +835,7 @@ const ADMIN_NAME = "xxz";
                     }
                 }
                 currentUserStyle = nextStyle;
+                currentUserStylePreview = nextStyle;
                 writeCachedUserStyle(currentUser, currentUserStyle);
                 applyCurrentUserStyle();
                 showToast('视觉偏好已保存');
@@ -839,8 +949,28 @@ const ADMIN_NAME = "xxz";
             applyCurrentUserStyle();
         }
 
-        function openVipModal() {
+        function requestProGiftRelogin() {
+            window.__xtjPendingProRelogin = true;
+            if (typeof openAuthModal === 'function') {
+                openAuthModal('login');
+            } else {
+                var loginModal = document.getElementById('loginModal');
+                if (loginModal) loginModal.classList.add('active');
+            }
+        }
+        window.requestProGiftRelogin = requestProGiftRelogin;
+
+        async function resolvePendingProRelogin() {
+            if (!window.__xtjPendingProRelogin) return;
+            window.__xtjPendingProRelogin = false;
+            try { await ensureVipStatusFresh(true); } catch(e) {}
+            try { updateVipModalUI(); } catch(e) {}
+            try { await loadProGiftCampaigns(); } catch(e) {}
+        }
+
+        async function openVipModal() {
             if (!currentUser) { showToast('请先登录'); return; }
+            try { await ensureUserToken(); } catch(e) {}
             openModal('vipModal');
             updateVipModalUI();
         }
@@ -916,9 +1046,11 @@ const ADMIN_NAME = "xxz";
             function renderAuthExpired(msg) {
                 section.style.display = '';
                 list.innerHTML = [
-                    '<div class="pro-gift-empty">',
+                    '<div class="pro-gift-auth-card">',
                     '  <div class="pro-gift-empty-icon">🔐</div>',
-                    '  <div class="pro-gift-empty-text">' + escapeHtml(msg) + '</div>',
+                    '  <div class="pro-gift-auth-title">登录凭证需要刷新</div>',
+                    '  <div class="pro-gift-auth-copy">' + escapeHtml(msg || '你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。') + '</div>',
+                    '  <div class="pro-gift-auth-actions"><button type="button" class="btn primary pro-gift-auth-btn" onclick="requestProGiftRelogin()">重新登录</button></div>',
                     '</div>'
                 ].join('');
             }
@@ -927,7 +1059,7 @@ const ADMIN_NAME = "xxz";
                 var headers = {};
                 var tok = await ensureUserToken();
                 if (!tok) {
-                    renderAuthExpired('登录状态已过期，请重新登录后查看 Pro 活动');
+                    renderAuthExpired('你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。');
                     return;
                 }
                 headers['Authorization'] = 'Bearer ' + tok;
@@ -937,7 +1069,7 @@ const ADMIN_NAME = "xxz";
                 });
                 if (resp.status === 401 || resp.status === 403) {
                     clearUserToken();
-                    renderAuthExpired('登录状态已过期，请重新登录后查看 Pro 活动');
+                    renderAuthExpired('你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。');
                     return;
                 }
                 var data = await resp.json();
@@ -1049,7 +1181,8 @@ const ADMIN_NAME = "xxz";
                         btn.classList.remove('loading');
                         btn.textContent = '领取 Pro';
                     }
-                    showToast('登录状态已过期，请重新登录', 'error');
+                    showToast('登录凭证需要刷新，请重新登录后领取', 'error');
+                    requestProGiftRelogin();
                     return;
                 }
                 claimHeaders['Authorization'] = 'Bearer ' + tok2;
@@ -1065,7 +1198,7 @@ const ADMIN_NAME = "xxz";
                         btn.classList.remove('loading');
                         btn.textContent = '领取 Pro';
                     }
-                    showToast((data && data.error) || '登录状态已过期，请重新登录', 'error');
+                    showToast((data && data.error) || '登录凭证需要刷新，请重新登录后领取', 'error');
                     return;
                 }
                 if (data.ok) {
@@ -2010,6 +2143,7 @@ const ADMIN_NAME = "xxz";
                     
                     await initUI();
                     initialLoad(true);
+                    await resolvePendingProRelogin();
                     // 记录用户访问
                     logUserVisitToApi(name);
                 } catch (e) {
@@ -2100,6 +2234,7 @@ const ADMIN_NAME = "xxz";
                     
                     await initUI();
                     initialLoad(true);
+                    await resolvePendingProRelogin();
                     // 记录用户访问
                     logUserVisitToApi(name);
                 } catch (e) {
