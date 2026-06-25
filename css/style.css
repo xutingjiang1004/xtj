@@ -15939,7 +15939,6 @@ html:not([data-theme="dark"]) .profile-pro-style-panel {
   box-shadow: 0 18px 36px var(--xtj-theme-shadow), 0 0 0 1px rgba(255,255,255,0.55) inset !important;
 }
 
-html:not([data-theme="dark"]) .dock-indicator,
 html:not([data-theme="dark"]) .filter-active-badge,
 html:not([data-theme="dark"]) .profile-pro-style-arrow,
 html:not([data-theme="dark"]) .profile-pro-style-badge,
@@ -15966,6 +15965,11 @@ html:not([data-theme="dark"]) select:focus,
 html:not([data-theme="dark"]) .af-input:focus {
   border-color: var(--xtj-theme-accent) !important;
   box-shadow: 0 0 0 3px var(--xtj-theme-soft) !important;
+}
+
+html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .dock-bar > .dock-indicator {
+  background: var(--xtj-pro-theme-soft) !important;
+  border-color: var(--xtj-pro-theme-border) !important;
 }
 
 [data-theme="dark"][data-pro-theme]:not([data-pro-theme="default"]) {
