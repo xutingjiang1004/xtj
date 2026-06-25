@@ -602,7 +602,7 @@
                             </div>
                             <div class="xtj-vip-card-text">
                                 <span class="xtj-vip-card-title">XTJ Pro</span>
-                                <span class="xtj-vip-card-sub" id="vipCardSub">¥3/月 · 解锁更多特权</span>
+                                <span class="xtj-vip-card-sub" id="vipCardSub">活动由管理员限时发布</span>
                             </div>
                         </div>
                         <span class="xtj-vip-card-badge" id="vipCardBadge">开通</span>
@@ -1059,71 +1059,27 @@
                     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8">
                         <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
                     </svg>
-                    XTJ Pro
+                    Pro 会员
 
                 </h3>
                 <button class="btn btn-ghost" onclick="closeModal('vipModal')" style="padding:4px 12px;font-size:16px;">✕</button>
             </div>
             <div class="vip-modal-body">
-                <div class="vip-plan-card vip-plan-card--active" id="vipPlanCard">
-                    <div class="vip-plan-price">
-                        <span class="vip-plan-currency">¥</span>
-                        <span class="vip-plan-amount">3</span>
-                        <span class="vip-plan-period">/月</span>
-                    </div>
-                    <div class="vip-plan-name">XTJ Pro 会员</div>
-                    <div class="vip-plan-desc">解锁全部高级特权 · 限时活动进行中</div>
-                    <div class="vip-plan-features">
-                        <div class="vip-plan-feature">
-                            <span class="vip-plan-feature-icon">👑</span>
-                            <span class="vip-plan-feature-text">专属 VIP 身份标识</span>
-                        </div>
-                        <div class="vip-plan-feature">
-                            <span class="vip-plan-feature-icon">📸</span>
-                            <span class="vip-plan-feature-text">照片墙无限上传</span>
-                        </div>
-                        <div class="vip-plan-feature">
-                            <span class="vip-plan-feature-icon">⬆️</span>
-                            <span class="vip-plan-feature-text">大文件上传（≤200MB）</span>
-                        </div>
-                        <div class="vip-plan-feature">
-                            <span class="vip-plan-feature-icon">🎨</span>
-                            <span class="vip-plan-feature-text">Pro 专属奢华主题</span>
-                        </div>
-                        <div class="vip-plan-feature">
-                            <span class="vip-plan-feature-icon">📌</span>
-                            <span class="vip-plan-feature-text">帖子置顶特权</span>
-                        </div>
-                        <div class="vip-plan-feature">
-                            <span class="vip-plan-feature-icon">✨</span>
-                            <span class="vip-plan-feature-text">头像动态光效特效</span>
-                        </div>
-                    </div>
-                    <button class="vip-pay-btn" id="vipPayBtn" onclick="handleVipPurchase()">
-                        <span id="vipPayBtnText">立即开通 ¥3</span>
-                    </button>
-                </div>
-                <!-- Pro 赠送活动区 -->
-                <div id="proGiftSection" class="pro-gift-section" style="display:none;">
+                <!-- 当前 Pro 状态条（已开通时显示，轻量） -->
+                <div id="vipStatusBanner" class="vip-status-banner" style="display:none;"></div>
+
+                <!-- Pro 活动区（必显示，渲染空状态 / 活动卡片） -->
+                <div id="proGiftSection" class="pro-gift-section">
                     <div class="pro-gift-section-head">
                         <div class="pro-gift-section-icon">
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 12v10H4V12"/><path d="M2 7h20v5H2z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
                         </div>
                         <div class="pro-gift-section-title">
                             <span class="pro-gift-section-badge">限时</span>
-                            免费领 Pro
+                            活动领 Pro
                         </div>
                     </div>
                     <div id="proGiftList" class="pro-gift-list"></div>
-                </div>
-                <div class="vip-modal-footer" id="vipFooter">
-                    <span class="vip-modal-footer-text" id="vipFooterText">
-                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" style="vertical-align:-1px;margin-right:4px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                        订阅即表示同意服务条款
-                    </span>
-                    <div class="vip-modal-cancel-area" id="vipCancelArea" style="display:none;">
-                        <button class="vip-cancel-btn" id="vipCancelBtn" onclick="handleCancelPro()">取消订阅</button>
-                    </div>
                 </div>
             </div>
         </div>

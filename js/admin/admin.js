@@ -4517,19 +4517,29 @@ async function initAdminClient() {
             if (!gifts.length) {
                 h += '<div class="empty">暂无活动，点击上方按钮创建第一个赠送活动</div>';
             } else {
-                h += '<div class="table-wrap"><table><thead><tr><th>活动标题</th><th>时长</th><th>状态</th><th>创建时间</th><th>截止领取</th><th>操作</th></tr></thead><tbody>';
+                h += '<div class="table-wrap"><table><thead><tr><th>活动标题</th><th>时长</th><th>限量 / 已领</th><th>限定 / 专属</th><th>状态</th><th>截止领取</th><th>操作</th></tr></thead><tbody>';
                 gifts.forEach(function(g) {
                     var statusText = g.is_published
                         ? '<span class="status-badge status-success">● 已发布</span>'
                         : '<span class="status-badge status-muted">● 草稿</span>';
                     var expireText = g.claim_expire_at ? formatTime(g.claim_expire_at) : '不限';
+                    // 限量/已领
+                    var limitNum = parseInt(g.claim_limit) || 0;
+                    var claimedNum = parseInt(g.claimed_count) || 0;
+                    var limitText = limitNum > 0 ? (claimedNum + ' / ' + limitNum) : '不限';
+                    // 限定 / 专属
+                    var allowedArr = Array.isArray(g.allowed_users) ? g.allowed_users : [];
+                    var exclusiveText = g.exclusive
+                        ? '<span class="status-badge status-warning">专属</span>'
+                        : (allowedArr.length ? ('<span title="' + escapeHtml(allowedArr.join(', ')) + '">' + allowedArr.length + ' 人</span>') : '全部用户');
                     h += '<tr>';
                     h += '<td><strong>' + escapeHtml(g.title) + '</strong>';
                     if (g.description) h += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + escapeHtml(g.description) + '</div>';
                     h += '</td>';
                     h += '<td>' + g.duration_days + ' 天</td>';
+                    h += '<td>' + limitText + '</td>';
+                    h += '<td>' + exclusiveText + '</td>';
                     h += '<td>' + statusText + '</td>';
-                    h += '<td>' + formatTime(g.created_at) + '</td>';
                     h += '<td>' + expireText + '</td>';
                     h += '<td>';
                     h += '<button class="btn-sm" onclick="openProGiftEditor(\'' + g.id + '\')">编辑</button>';
@@ -4626,6 +4636,7 @@ async function initAdminClient() {
     window.openProGiftEditor = async function(giftId) {
         var title = '', description = '', features = ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'];
         var duration_days = 30, claim_expire_at = '', id = giftId;
+        var claim_limit = 0, allowed_users = [], exclusive = false, start_at = '', end_at = '';
         if (giftId) {
             try {
                 var data = await apiCall('GET', '/admin/pro-gifts');
@@ -4636,6 +4647,11 @@ async function initAdminClient() {
                     features = gift.features || features;
                     duration_days = gift.duration_days || 30;
                     claim_expire_at = gift.claim_expire_at || '';
+                    claim_limit = gift.claim_limit || 0;
+                    allowed_users = gift.allowed_users || gift.exclusive_users || gift.target_users || [];
+                    exclusive = !!gift.exclusive;
+                    start_at = gift.start_at || '';
+                    end_at = gift.end_at || '';
                 }
             } catch(e) { showToast('加载活动失败: ' + e.message, 'error'); }
         }
@@ -4649,17 +4665,29 @@ async function initAdminClient() {
         html += '</div>';
         html += '<div class="modal-body">';
         html += '<div class="form-group"><label>活动标题</label><input id="pgTitleInp" value="' + escapeHtml(title) + '" placeholder="例：夏日Pro特权赠送" /></div>';
-        html += '<div class="form-group"><label>活动描述</label><textarea id="pgDescInp" rows="3" placeholder="描述活动内容...">' + escapeHtml(description) + '</textarea></div>';
+        html += '<div class="form-group"><label>活动说明</label><textarea id="pgDescInp" rows="3" placeholder="描述活动内容...">' + escapeHtml(description) + '</textarea></div>';
         html += '<div class="form-row">';
-        html += '<div class="form-group" style="flex:1;"><label>有效期（天）</label><input id="pgDaysInp" type="number" min="1" max="3650" value="' + duration_days + '" /></div>';
+        html += '<div class="form-group" style="flex:1;"><label>Pro 有效天数</label><input id="pgDaysInp" type="number" min="1" max="3650" value="' + duration_days + '" /></div>';
         html += '<div class="form-group" style="flex:2;"><label>领取截止时间（可选）</label><input id="pgExpireInp" type="datetime-local" value="' + (claim_expire_at ? claim_expire_at.slice(0,16) : '') + '" /></div>';
         html += '</div>';
+        html += '<div class="form-row">';
+        html += '<div class="form-group" style="flex:1;"><label>活动开始时间（可选）</label><input id="pgStartInp" type="datetime-local" value="' + (start_at ? start_at.slice(0,16) : '') + '" /></div>';
+        html += '<div class="form-group" style="flex:1;"><label>活动结束时间（可选）</label><input id="pgEndInp" type="datetime-local" value="' + (end_at ? end_at.slice(0,16) : '') + '" /></div>';
+        html += '</div>';
+        html += '<div class="form-row">';
+        html += '<div class="form-group" style="flex:1;"><label>限量名额（0=不限）</label><input id="pgLimitInp" type="number" min="0" value="' + claim_limit + '" placeholder="留空 = 不限制" /></div>';
+        html += '<div class="form-group" style="flex:2;"><label>限定用户（逗号分隔，留空=所有用户）</label><input id="pgAllowedInp" value="' + escapeHtml(Array.isArray(allowed_users) ? allowed_users.join(', ') : '') + '" placeholder="例：xxz, abc, test" /></div>';
+        html += '</div>';
+        html += '<div class="form-group"><label class="feature-item" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="pgExclusiveInp"' + (exclusive ? ' checked' : '') + ' /> <span>设为专属活动（仅限定用户可见）</span></label></div>';
         html += '<div class="form-group"><label>Pro 权限</label><div class="feature-grid">';
         allFeatures.forEach(function(f) {
             var checked = features.indexOf(f) >= 0 ? ' checked' : '';
             html += '<label class="feature-item"><input type="checkbox" id="pgFeat_' + f + '"' + checked + ' /> <span>' + (featureLabels[f] || f) + '</span></label>';
         });
         html += '</div></div>';
+        html += '<div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text-muted);">';
+        html += '💡 提示：保存后默认未发布，需在活动列表中点"发布"才会在前端展示。';
+        html += '</div>';
         html += '</div>';
         html += '<div class="modal-btns">';
         html += '<button class="btn btn-ghost" onclick="closeProGiftEditor()">取消</button>';
@@ -4752,13 +4780,35 @@ async function initAdminClient() {
         var duration_days = parseInt(document.getElementById('pgDaysInp').value) || 30;
         var claim_expire_val = document.getElementById('pgExpireInp').value;
         var claim_expire_at = claim_expire_val ? new Date(claim_expire_val).toISOString() : '';
+        var start_val = document.getElementById('pgStartInp').value;
+        var end_val = document.getElementById('pgEndInp').value;
+        var start_at = start_val ? new Date(start_val).toISOString() : '';
+        var end_at = end_val ? new Date(end_val).toISOString() : '';
+        var claim_limit = parseInt(document.getElementById('pgLimitInp').value) || 0;
+        var allowed_raw = document.getElementById('pgAllowedInp').value || '';
+        var allowed_users = allowed_raw.split(',').map(function(s) { return String(s || '').trim(); }).filter(Boolean);
+        var exclusive = document.getElementById('pgExclusiveInp').checked;
         var features = [];
         ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'].forEach(function(f) {
             var cb = document.getElementById('pgFeat_' + f);
             if (cb && cb.checked) features.push(f);
         });
         if (!title) { showToast('请输入活动标题', 'error'); return; }
-        var body = { title: title, description: description, features: features, duration_days: duration_days, claim_expire_at: claim_expire_at };
+        if (duration_days < 1 || duration_days > 3650) { showToast('Pro 有效天数需在 1-3650 之间', 'error'); return; }
+        if (claim_limit < 0) { showToast('限量名额不能为负数', 'error'); return; }
+        if (exclusive && !allowed_users.length) { showToast('专属活动必须填写限定用户名单', 'error'); return; }
+        var body = {
+            title: title,
+            description: description,
+            features: features,
+            duration_days: duration_days,
+            claim_expire_at: claim_expire_at,
+            start_at: start_at,
+            end_at: end_at,
+            claim_limit: claim_limit,
+            allowed_users: allowed_users,
+            exclusive: exclusive
+        };
         if (giftId) body.id = giftId;
         try {
             await apiCall('POST', '/admin/pro-gifts/save', body);

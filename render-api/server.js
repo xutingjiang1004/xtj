@@ -4032,8 +4032,11 @@ app.post('/api/vip/create-order', rateLimit(60000, 10), async (req, res) => {
   }
 });
 
-// 直接激活VIP（免支付流程）
+// 直接激活VIP（免支付流程）- 生产环境已禁用，仅开发环境保留
 app.post('/api/vip/activate-test', rateLimit(60000, 5), async (req, res) => {
+  if (process.env.NODE_ENV === 'production' || process.env.DISABLE_VIP_TEST === '1') {
+    return res.status(403).json({ error: '测试激活端点已禁用' });
+  }
   try {
     const { user_name } = req.body;
     const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
@@ -4183,18 +4186,37 @@ app.get('/admin/pro-gifts', verifyToken, rateLimit(60000, 10), async (req, res) 
 // 管理员：创建/编辑 Pro 赠送活动
 app.post('/admin/pro-gifts/save', verifyToken, rateLimit(60000, 20), async (req, res) => {
   try {
-    var { id, title, description, features, duration_days, claim_expire_at } = req.body;
+    var { id, title, description, features, duration_days, claim_expire_at,
+          claim_limit, allowed_users, exclusive, start_at, end_at } = req.body;
     var titleVal = String(title || '').trim().slice(0, 100);
     var descVal = String(description || '').trim().slice(0, 500);
     if (!titleVal) return res.status(400).json({ error: '请输入活动标题' });
     if (!duration_days || duration_days < 1 || duration_days > 3650) return res.status(400).json({ error: '有效期1-3650天' });
     var featuresArr = Array.isArray(features) && features.length ? features : DEFAULT_GIFT_FEATURES;
+    // 解析限定用户（支持字符串 "xxz, abc" 或数组）
+    var allowedArr = [];
+    if (Array.isArray(allowed_users)) {
+      allowedArr = allowed_users.map(function(u) { return String(u || '').trim(); }).filter(Boolean);
+    } else if (typeof allowed_users === 'string' && allowed_users.trim()) {
+      allowedArr = allowed_users.split(/[,，\n;；\s]+/).map(function(u) { return String(u || '').trim(); }).filter(Boolean);
+    }
+    var limitNum = parseInt(claim_limit);
+    if (!Number.isFinite(limitNum) || limitNum < 0) limitNum = 0;
+    var isExclusive = !!exclusive;
+    var startAtISO = start_at ? new Date(start_at).toISOString() : '';
+    var endAtISO = end_at ? new Date(end_at).toISOString() : '';
+    var claimExpireISO = claim_expire_at ? new Date(claim_expire_at).toISOString() : (endAtISO || '');
     var info = {
       title: titleVal,
       description: descVal,
       features: featuresArr,
       duration_days: Math.min(3650, Math.max(1, parseInt(duration_days) || 30)),
-      claim_expire_at: claim_expire_at || '',
+      claim_expire_at: claimExpireISO,
+      start_at: startAtISO,
+      end_at: endAtISO,
+      claim_limit: limitNum,
+      allowed_users: allowedArr,
+      exclusive: isExclusive,
       is_published: false,
       updated_at: new Date().toISOString()
     };
@@ -4271,43 +4293,85 @@ app.post('/admin/pro-gifts/delete', verifyToken, rateLimit(60000, 10), async (re
   }
 });
 
-// 用户：获取可领取的 Pro 赠送活动
-app.get('/api/pro-gifts/available', rateLimit(60000, 30), async (req, res) => {
+// 用户：获取可领取的 Pro 赠送活动（严格按用户身份过滤）
+app.get('/api/pro-gifts/available', rateLimit(60000, 30), authenticateUser, async (req, res) => {
   try {
-    var userName = String(req.query.user_name || '').trim();
-    if (!userName) return res.status(400).json({ error: '缺少用户名' });
-    var now = new Date().toISOString();
+    var userName = String((req.userName || req.query.user_name) || '').trim();
+    if (!userName) return res.status(401).json({ error: '请先登录' });
+    var now = new Date();
+    var nowISO = now.toISOString();
+    // 一次性查出所有已发布的活动
     var { data: gifts } = await supabase.from('posts')
       .select('id, content, created_at')
       .eq('media_type', PRO_GIFT_MARKER)
       .order('created_at', { ascending: false })
-      .limit(50);
-    var available = [];
-    var claimedIds = [];
-    // 查用户已领取记录
-    var { data: claims } = await supabase.from('posts')
-      .select('media_url')
+      .limit(200);
+    // 一次性查用户的所有领取记录（用于标记已领取 + 统计每活动总数）
+    var { data: userClaims } = await supabase.from('posts')
+      .select('media_url, content')
       .eq('media_type', PRO_GIFT_CLAIM_MARKER)
       .eq('user_name', userName)
-      .limit(200);
-    if (claims) {
-      claims.forEach(function(c) { if (c.media_url) claimedIds.push(c.media_url); });
-    }
+      .limit(500);
+    var userClaimedIds = new Set();
+    (userClaims || []).forEach(function(c) {
+      if (c.media_url) userClaimedIds.add(String(c.media_url));
+    });
+    // 查所有领取记录（按 campaign_id 统计总量，用于 claim_limit）
+    var claimCountByCampaign = {};
+    var { data: allClaims } = await supabase.from('posts')
+      .select('media_url')
+      .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+      .limit(5000);
+    (allClaims || []).forEach(function(c) {
+      if (c.media_url) claimCountByCampaign[c.media_url] = (claimCountByCampaign[c.media_url] || 0) + 1;
+    });
+
+    var available = [];
     (gifts || []).forEach(function(g) {
       var info = {};
       try { info = JSON.parse(g.content || '{}'); } catch(e) {}
-      if (!info.is_published) return;
-      if (info.claim_expire_at && info.claim_expire_at < now) return;
-      var alreadyClaimed = claimedIds.indexOf(String(g.id)) >= 0;
+      // 1. 必须已发布
+      if (!info.is_published && info.status !== 'published') return;
+      // 2. 不可禁用
+      if (info.is_active === false) return;
+      // 3. start_at 未到
+      if (info.start_at && new Date(info.start_at) > now) return;
+      // 4. end_at 已过
+      if (info.end_at && new Date(info.end_at) < now) return;
+      // 5. claim_expire_at 已过
+      if (info.claim_expire_at && new Date(info.claim_expire_at) < now) return;
+      // 6. 限定用户检查（allowed_users / exclusive_users / target_users 任一非空）
+      var allowedArr = [];
+      if (Array.isArray(info.allowed_users)) allowedArr = allowedArr.concat(info.allowed_users);
+      if (Array.isArray(info.exclusive_users)) allowedArr = allowedArr.concat(info.exclusive_users);
+      if (Array.isArray(info.target_users)) allowedArr = allowedArr.concat(info.target_users);
+      allowedArr = allowedArr.map(function(u) { return String(u || '').trim(); }).filter(Boolean);
+      var hasAllowList = info.exclusive === true || allowedArr.length > 0;
+      if (hasAllowList && allowedArr.indexOf(userName) === -1) return; // 用户不在白名单，不返回
+      // 7. claim_limit 限制
+      var claimLimit = parseInt(info.claim_limit || info.limit || info.max_claims) || 0;
+      var claimedCount = claimCountByCampaign[g.id] || 0;
+      var alreadyClaimed = userClaimedIds.has(String(g.id));
+      // 已领取的即使名额满也要返回（用于展示"已领取"）
+      if (claimLimit > 0 && claimedCount >= claimLimit && !alreadyClaimed) return; // 名额已满且未领取，不返回
+      var remainingCount = claimLimit > 0 ? Math.max(0, claimLimit - claimedCount) : null;
+
       available.push({
         id: g.id,
         title: info.title || '',
         description: info.description || '',
         features: info.features || DEFAULT_GIFT_FEATURES,
         duration_days: info.duration_days || 30,
+        start_at: info.start_at || '',
+        end_at: info.end_at || '',
         claim_expire_at: info.claim_expire_at || '',
-        published_at: info.published_at || '',
-        already_claimed: alreadyClaimed
+        claim_limit: claimLimit,
+        claimed_count: claimedCount,
+        remaining_count: remainingCount,
+        exclusive: !!info.exclusive || (allowedArr.length > 0),
+        allowed_users: allowedArr,
+        already_claimed: alreadyClaimed,
+        published_at: info.published_at || ''
       });
     });
     return res.json({ ok: true, gifts: available });
@@ -4317,35 +4381,66 @@ app.get('/api/pro-gifts/available', rateLimit(60000, 30), async (req, res) => {
   }
 });
 
-// 用户：领取 Pro 赠送活动
-app.post('/api/pro-gifts/claim', rateLimit(60000, 10), async (req, res) => {
+// 用户：领取 Pro 赠送活动（强校验：身份、发布状态、时间、限定用户、名额、重复领取）
+app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (req, res) => {
   try {
     var { user_name, gift_id } = req.body;
-    var userNameVal = String(user_name || '').trim();
+    var userNameVal = String(user_name || req.userName || '').trim();
+    // 强制以 req.userName 为准（认证中间件写入），避免 body 传任意 user_name 替别人领
+    if (req.userName) userNameVal = String(req.userName).trim();
     var giftId = String(gift_id || '').trim();
-    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
+    if (!userNameVal) return res.status(401).json({ error: '请先登录' });
     if (!giftId) return res.status(400).json({ error: '缺少活动ID' });
     var now = new Date();
     var nowISO = now.toISOString();
-    // 查活动是否存在且已发布
+    // 1. 活动存在 + media_type 正确
     var { data: gift } = await supabase.from('posts')
       .select('content').eq('id', giftId).eq('media_type', PRO_GIFT_MARKER).maybeSingle();
     if (!gift) return res.status(404).json({ error: '活动不存在' });
     var giftInfo = {};
     try { giftInfo = JSON.parse(gift.content || '{}'); } catch(e) {}
-    if (!giftInfo.is_published) return res.status(400).json({ error: '活动未发布' });
-    if (giftInfo.claim_expire_at && giftInfo.claim_expire_at < nowISO) return res.status(400).json({ error: '活动已过期' });
-    // 查是否已领取过
+    // 2. 已发布
+    if (!giftInfo.is_published && giftInfo.status !== 'published') return res.status(400).json({ error: '活动未发布' });
+    // 3. 未禁用
+    if (giftInfo.is_active === false) return res.status(400).json({ error: '活动已禁用' });
+    // 4. 时间窗口
+    if (giftInfo.start_at && new Date(giftInfo.start_at) > now) return res.status(400).json({ error: '活动未开始' });
+    if (giftInfo.end_at && new Date(giftInfo.end_at) < now) return res.status(400).json({ error: '活动已结束' });
+    if (giftInfo.claim_expire_at && new Date(giftInfo.claim_expire_at) < now) return res.status(400).json({ error: '活动已过期' });
+    // 5. 限定用户白名单
+    var allowedArr = [];
+    if (Array.isArray(giftInfo.allowed_users)) allowedArr = allowedArr.concat(giftInfo.allowed_users);
+    if (Array.isArray(giftInfo.exclusive_users)) allowedArr = allowedArr.concat(giftInfo.exclusive_users);
+    if (Array.isArray(giftInfo.target_users)) allowedArr = allowedArr.concat(giftInfo.target_users);
+    allowedArr = allowedArr.map(function(u) { return String(u || '').trim(); }).filter(Boolean);
+    var hasAllowList = giftInfo.exclusive === true || allowedArr.length > 0;
+    if (hasAllowList && allowedArr.indexOf(userNameVal) === -1) {
+      return res.status(403).json({ error: '你不在本次活动领取名单中' });
+    }
+    // 6. 查当前活动领取总数（用于 claim_limit 二次校验）
+    var claimLimit = parseInt(giftInfo.claim_limit || giftInfo.limit || giftInfo.max_claims) || 0;
+    if (claimLimit > 0) {
+      var { data: allClaimRows } = await supabase.from('posts')
+        .select('id')
+        .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+        .eq('media_url', giftId)
+        .limit(5000);
+      if (allClaimRows && allClaimRows.length >= claimLimit) {
+        return res.status(400).json({ error: '活动名额已满' });
+      }
+    }
+    // 7. 当前用户是否已领取同一活动（强校验，不依赖前端）
     var { data: existingClaim } = await supabase.from('posts')
       .select('id').eq('media_type', PRO_GIFT_CLAIM_MARKER)
       .eq('user_name', userNameVal)
       .eq('media_url', giftId)
       .maybeSingle();
-    if (existingClaim) return res.status(400).json({ error: '已领取过此活动' });
+    if (existingClaim) return res.status(400).json({ error: '你已经领取过该活动' });
+
     var durationDays = giftInfo.duration_days || 30;
     var expireAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
     var features = giftInfo.features || DEFAULT_GIFT_FEATURES;
-    // 写入领取记录（先写，防重复领取）
+    // 写入领取记录（先写，防并发重复领取）
     var claimContent = JSON.stringify({
       campaign_id: giftId,
       campaign_title: giftInfo.title || '',
@@ -4363,7 +4458,7 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), async (req, res) => {
       actor_key: 'pro_claim_' + Date.now()
     }]).select('id').maybeSingle();
     if (claimErr) return res.status(400).json({ error: sanitizeError(claimErr) });
-    // 写入 VIP 激活记录（复用现有VIP系统）
+    // 写入 VIP 激活记录
     var vipContent = JSON.stringify({
       plan_id: 'pro_gift_' + giftId,
       plan_name: 'XTJ Pro (' + (giftInfo.title || '赠送') + ')',
@@ -4384,7 +4479,7 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), async (req, res) => {
       actor_key: 'vip_' + Date.now()
     }]);
     if (vipErr) {
-      // ★ 关键修复：VIP 写入失败时回滚领取记录，避免"已领取但没VIP"
+      // VIP 写入失败时回滚领取记录
       console.warn('[ProGift] VIP记录写入失败，回滚领取记录:', vipErr.message);
       try {
         if (claimData && claimData.id) {
