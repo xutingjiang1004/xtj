@@ -1,6 +1,6 @@
 # XTJ
 
-当前版本：`v0.88`
+当前版本：`v0.90`
 
 
 
@@ -70,6 +70,90 @@ npm start
 - 后端入口：`render-api/server.js`
 
 ## 最近重点更新
+
+### v0.90 - 2026-06-25 邮件发送记录重构 + 历史邮箱双保险
+
+**邮件发送记录展示（js/admin/admin.js loadEmailHistory）**：
+- 表格结构改为 时间 / 接收邮件账号 / 接收人 / 主题 / 结果
+- 删除 from_email 列（不再展示发件邮箱）
+- 删除"详情"列与展开区域（不再使用 emailToggleDetail）
+- 删除"收件人"合计列（已由"接收人"列承载）
+- 新增 getRecipientDisplayName helper：网站用户显示用户名，外部邮箱显示邮箱号
+- 新增 formatRecipientsList helper：单收件人直接展示；多收件人显示"第一个 + 等 N 人"，title 放完整列表
+- 新增 extractRecipientsFromRecord helper：兼容旧数据（recipients / emails / recipient_email / to_email / total_recipients）
+- 接收邮件账号列 max-width 180px / 接收人列 max-width 140px / overflow ellipsis
+
+**历史邮箱双保险持久化（js/admin/admin.js emailSend）**：
+- 发送成功 / 部分失败 / 全部失败 / 网络异常 都调用 `saveRecipientsHistorySafe()`
+- 双保险：后端 `/admin/send-email` 内部已保存，前端再主动 `POST /admin/email-recipient-history` 一次
+- 失败只 console.warn，不影响发送结果显示
+
+**后端 helper 抽取（render-api/server.js）**：
+- `normalizeEmailAddress(email)`：trim + lowercase
+- `isValidEmailAddress(email)`：邮箱格式校验
+- `normalizeRecipientUserName(recipient, email)`：外部邮箱时 user_name == email
+- `saveEmailRecipientHistory(recipients)`：统一去重 + 一次性查 + 已有更新 / 新增
+  - 新增时补齐 actor_key 与 media_url
+  - 失败只 console.warn，不阻断邮件发送
+
+**后端 API 兼容（render-api/server.js）**：
+- `POST /admin/email-recipient-history` 兼容 `recipients: [{ email, user_name }]` 新格式和 `emails: []` 旧格式
+- `GET /admin/email-recipient-history` 兼容 `info.email / row.media_url / info.user_name / info.last_sent_at / info.sent_at`，按 email 去重，created_at desc 顺序
+
+**不影响**：邮件发送主流程（SMTP / SendGrid / GAS）、`/admin/send-email` 接口、`/admin/email-history` 接口、手动添加邮箱、选择用户、删除/清空历史邮箱、照片墙 / 聊天 / 底部 Dock / 普通帖子 / 登录
+
+### v0.89 - 2026-06-25 Pro 会员改为限量/限定/限时活动模式
+
+**前端**：
+- 删除 vipModal 中的常驻 ¥3/月 套餐卡（vipPlanCard / vipPayBtn / vipCancelArea）
+- 删除 vip-modal-footer（订阅即表示同意服务条款 + 取消订阅）
+- 删除个人资料卡 vipCard 中"¥3/月 · 解锁更多特权"，改为"活动由管理员限时发布"
+- `updateVipModalUI` 重构：只显示当前 Pro 状态条 + 加载活动列表
+- `handleVipPurchase` 改为只 toast 提示，不再调用 `__xtjDirectPurchasePro`
+- `loadProGiftCampaigns`：无活动时显示"暂无可领取的 Pro 活动"空状态
+- 活动卡片支持：专属标签、剩余名额、截止时间、功能权益
+- 按钮状态：未领取 / 已领取 / 名额满 / 已结束
+- pro-gifts 接口调用附带 Authorization Bearer token
+
+**后端**：
+- `/api/pro-gifts/available` 与 `/api/pro-gifts/claim` 加 authenticateUser 中间件
+- claim 接口强制以 req.userName 为准，避免 body 任意 user_name 替别人领
+- `/admin/pro-gifts/save` 支持 claim_limit / allowed_users / exclusive / start_at / end_at
+- available/claim 严格过滤（已发布、未禁用、start_at/end_at/claim_expire_at、白名单、claim_limit、重复领取）
+
+**admin**：
+- 活动编辑器增加限量名额、限定用户（逗号分隔）、是否专属、活动起止时间字段
+- saveProGift 提交 allowed_users 数组、exclusive 标志、claim_limit
+- 活动列表显示"限量/已领"、"限定/专属"两列
+
+**deprecated**：前端直接开通 Pro 入口已禁用，Pro 只能由管理员发布的活动领取
+
+### v0.88c - 2026-06-24 邮件历史邮箱账户保存修复
+
+- 后端 `/admin/send-email` 路由发送前先调用统一 `saveEmailRecipientHistory` 保存收件人历史
+- 新增 `saveEmailRecipientHistory(recipients)` helper：去重 / 一次性查询 / 已有更新 / 新增插入
+- 新增 `actor_key` + `media_url` 字段补齐，避免数据库字段限制或后续查询不稳定
+- 邮件发送记录新增 `from_email` 与 `recipients_detail` 字段
+- 前端 `loadEmailHistory` 改为显示：发件邮箱 / 主题 / 收件人 / 结果 / 详情（含展开）
+- 前端 `loadEmailRecipientHistory` 展示 用户名 <邮箱> / 邮箱 两种形式
+- 发送成功后自动清空已选 + 刷新历史 + 刷新记录
+- `emailClearSelected` 添加到发送成功链
+
+### v0.88b - 2026-06-24 邮件配置健康检查端点
+
+- 新增 `/health/mail` 端点：返回 active_provider（GAS / SendGrid / Gmail_SMTP）以及 env 加载状态
+- 修复 `SENDGRID_API_KEY` 误用 var 声明被覆盖的隐患
+- 修复 `/admin/report/:id/delete-post` 和 `/admin/report/:id/ban-user` 端点缺少顶层 try-catch
+- 修复 index.html / README.md / CHANGELOG.md 版本号不一致
+- 升级 pro-upgrade.js query string 版本号到 20260624_progift
+
+### v0.88a - 2026-06-24 Google Apps Script (GAS) 邮件中转
+
+- 新增 GAS (HTTPS 443) 邮件中转通道，绕过 Render SMTP 465/587 端口封锁
+- 邮件发送优先级：GAS (HTTPS 443) > SendGrid > Gmail SMTP（最终兜底）
+- 失败链：GAS 失败 → SendGrid → Gmail SMTP
+- 新增 `GMAIL_GAS_URL` 环境变量支持（IANA 不带空格）
+- GAS Web App 部署权限必须设为"任何人"（Anyone）以允许未认证请求
 
 ### v0.87 - 2026-06-24 Pro赠送系统全面升级
 
