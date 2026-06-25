@@ -106,6 +106,9 @@
     var sourceLabel = '活动领取';
     var sourceIcon = '🎁';
     if (vipInfo.source === 'pro_gift') {
+      sourceLabel = '活动领取';
+      sourceIcon = '🎁';
+    } else if (vipInfo.source === 'admin_gift') {
       sourceLabel = '管理员赠送';
       sourceIcon = '🎁';
     } else if (vipInfo.source === 'paid' || vipInfo.source === 'payment') {
