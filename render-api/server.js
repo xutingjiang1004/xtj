@@ -2647,13 +2647,7 @@ app.get('/admin/stats', verifyToken, rateLimit(60000, 10), async (req, res) => {
       statsCache.pending = true;  // 简单锁标志
     }
     const [postsRes, authRowsRes, visitsRes, attacksRes, likesRes, commentsRes, photosRes] = await Promise.all([
-      buildSummaryQuery('posts', 'id, media_type, content, created_at', null, null, 'created_at')
-        .neq('media_type', '__avatar__').neq('media_type', '__user_info__')
-        .neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__')
-        .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
-        .neq('media_type', AUTH_MARKER).neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER)
-        .neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER)
-        .neq('media_type', '__user_visit__').neq('media_type', LOGIN_EVENT_MARKER),
+      applyPublicPostExclusions(buildSummaryQuery('posts', 'id, media_type, content, created_at', null, null, 'created_at')),
       buildSummaryQuery('posts', 'user_name, created_at', 'media_type', AUTH_MARKER, 'created_at'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
       buildSummaryQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
@@ -2797,12 +2791,7 @@ app.get('/admin/stats/daily', verifyToken, rateLimit(60000, 10), async (req, res
     const [visitsRes, attacksRes, postsRes, commentsRes, likesRes, authRows] = await Promise.all([
       buildQuery('posts', 'id, content, media_url, created_at', 'media_type', VISIT_MARKER, 'media_url'),
       buildQuery('posts', 'id, content, media_url, created_at', 'media_type', ATTACK_MARKER, 'created_at'),
-      buildQuery('posts', 'id, created_at', null, null, 'created_at')
-        .neq('media_type', '__avatar__').neq('media_type', USER_INFO_MARKER)
-        .neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER)
-        .neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER)
-        .neq('media_type', ATTACK_MARKER).neq('media_type', '__photo_wall__').neq('media_type', '__ann__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER)
-        .neq('media_type', USER_VISIT_MARKER).neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', AUDIT_LOG_MARKER).neq('media_type', CLIENT_ERROR_MARKER),
+      applyPublicPostExclusions(buildQuery('posts', 'id, created_at', null, null, 'created_at')),
       buildQuery('comments', 'id, created_at', null, null, 'created_at'),
       buildQuery('likes', 'id, created_at', null, null, 'created_at'),
       fetchAllPostsByMediaType(AUTH_MARKER, 'user_name, created_at'),
@@ -3481,6 +3470,32 @@ app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20),
 const EMAIL_SENT_MARKER = '__email_sent__';
 const EMAIL_RECIPIENT_MARKER = '__email_recipient_history__';
 
+// 统一：把后端 posts 查询过滤掉所有系统标记（包括 Pro 活动/领取/订单/套餐等）
+// 任何“普通帖子 / 总动态 / 后台管理 / 统计”类查询都应使用本 helper
+// 2026-06-25：与前端 applyVisiblePostQueryFilters 保持一致，避免遗漏 __pro_gift__/__pro_gift_claim__/__vip_plan__
+function applyPublicPostExclusions(query) {
+  if (!query || typeof query.neq !== 'function') return query;
+  return query
+    .neq('media_type', '__avatar__')
+    .neq('media_type', '__user_info__')
+    .neq('media_type', '__photo_wall__')
+    .neq('media_type', '__visit__')
+    .neq('media_type', '__attack__')
+    .neq('media_type', '__user_visit__')
+    .neq('media_type', '__ann__')
+    .neq('media_type', '__vip__')
+    .neq('media_type', '__vip_order__')
+    .neq('media_type', '__vip_plan__')
+    .neq('media_type', '__pro_gift__')
+    .neq('media_type', '__pro_gift_claim__')
+    .neq('media_type', '__login_event__')
+    .neq('media_type', '__security_alert__')
+    .neq('media_type', '__admin_audit__')
+    .neq('media_type', '__client_error__')
+    .neq('media_type', '__email_sent__')
+    .neq('media_type', '__email_recipient_history__');
+}
+
 // 通用：邮箱归一化（trim + lowercase）
 function normalizeEmailAddress(email) {
   return String(email || '').trim().toLowerCase();
@@ -4014,8 +4029,12 @@ const VIP_PLANS = [
 ];
 
 // 获取可用套餐列表
+// 2026-06-25：Pro 改为限量/限定/限时活动制，不再开放常驻购买
 app.get('/api/vip/plans', rateLimit(60000, 30), (req, res) => {
-  return res.json({ plans: VIP_PLANS });
+  return res.json({
+    plans: [],
+    message: 'Pro 购买暂未开放，请通过管理员活动领取'
+  });
 });
 
 // 验证用户是否存在的辅助函数
@@ -4029,90 +4048,23 @@ async function verifyUserExists(userName) {
 }
 
 // 创建订单
+// 2026-06-25：Pro 改为限量/限定/限时活动制，create-order 不再直接激活 Pro
+// 也不再写 __vip_order__ 记录（避免脏数据）
+// 真正开通 Pro 的唯一合法路径是 /api/pro-gifts/claim
 app.post('/api/vip/create-order', rateLimit(60000, 10), async (req, res) => {
-  try {
-    const { user_name, plan_id } = req.body;
-    const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
-    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
-
-    // 验证用户存在
-    const userExists = await verifyUserExists(userNameVal);
-    if (!userExists) return res.status(400).json({ error: '用户不存在' });
-
-    const plan = VIP_PLANS.find(p => p.id === plan_id);
-    if (!plan) return res.status(400).json({ error: '无效的套餐ID' });
-
-    // 检查是否已是VIP有效期内
-    const { data: activeVip } = await supabase.from('posts')
-      .select('*')
-      .eq('user_name', userNameVal)
-      .eq('media_type', VIP_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    if (activeVip && activeVip.length > 0) {
-      try {
-        var vipInfo = JSON.parse(activeVip[0].content || '{}');
-        if (vipInfo.is_active && vipInfo.expire_at && new Date(vipInfo.expire_at) > new Date()) {
-          return res.json({ error: '您已经是VIP会员，无需重复购买' });
-        }
-      } catch(e) {}
-    }
-
-    // 生成订单号
-    const orderNo = 'XTJ' + Date.now() + String(Math.random()).slice(2, 8);
-    const now = new Date().toISOString();
-    const orderContent = JSON.stringify({
-      user_name: userNameVal,
-      plan_id: plan.id,
-      plan_name: plan.name,
-      amount: plan.price,
-      currency: plan.currency,
-      status: 'pending',
-      order_no: orderNo,
-      created_at: now
-    });
-
-    const { error: orderErr } = await supabase.from('posts').insert([{
-      user_name: userNameVal,
-      content: orderContent,
-      media_type: VIP_ORDER_MARKER,
-      media_url: orderNo,
-      actor_key: 'vip_order_' + Date.now()
-    }]);
-
-    if (orderErr) return res.status(400).json({ error: sanitizeError(orderErr) });
-
-    // 立即完成激活
-    const orderResult = await processVipPayment(userNameVal, orderNo, plan);
-    return res.json({ order_no: orderNo, amount: plan.price, test_mode: true, result: orderResult });
-  } catch(e) {
-    console.error('[VIP] 创建订单失败:', e.message);
-    return res.status(500).json({ error: '创建订单失败' });
-  }
+  return res.status(403).json({
+    ok: false,
+    error: '暂未开放购买，请通过管理员发布的 Pro 活动领取'
+  });
 });
 
-// 直接激活VIP（免支付流程）- 生产环境已禁用，仅开发环境保留
+// 直接激活VIP（免支付流程）- 2026-06-25 永久禁用（所有环境）
+// 真正开通 Pro 的唯一合法路径是 /api/pro-gifts/claim
 app.post('/api/vip/activate-test', rateLimit(60000, 5), async (req, res) => {
-  if (process.env.NODE_ENV === 'production' || process.env.DISABLE_VIP_TEST === '1') {
-    return res.status(403).json({ error: '测试激活端点已禁用' });
-  }
-  try {
-    const { user_name } = req.body;
-    const userNameVal = validateString(user_name, MAX_USERNAME_LEN, '用户名');
-    if (!userNameVal) return res.status(400).json({ error: '缺少用户名' });
-
-    const userExists = await verifyUserExists(userNameVal);
-    if (!userExists) return res.status(400).json({ error: '用户不存在' });
-
-    const plan = VIP_PLANS[0];
-    const orderNo = 'TEST' + Date.now() + String(Math.random()).slice(2, 6);
-    const result = await processVipPayment(userNameVal, orderNo, plan);
-    return res.json(result);
-  } catch(e) {
-    console.error('[VIP] 测试激活失败:', e.message);
-    return res.status(500).json({ error: '激活失败' });
-  }
+  return res.status(404).json({
+    ok: false,
+    error: '测试激活端点已永久禁用，请通过管理员发布的 Pro 活动领取'
+  });
 });
 
 // 处理VIP支付完成（修复：先写VIP记录再更新订单，保证数据一致性）
@@ -4212,33 +4164,74 @@ const PRO_GIFT_CLAIM_MARKER = '__pro_gift_claim__';
 const DEFAULT_GIFT_FEATURES = ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'];
 
 // 管理员：获取全部 Pro 赠送活动
+// 2026-06-25：返回完整字段，包含 claim_limit / allowed_users / exclusive / start_at / end_at
+// claimed_count 必须从 __pro_gift_claim__ 实时统计（不信 content 里的 claimed_count）
 app.get('/admin/pro-gifts', verifyToken, rateLimit(60000, 10), async (req, res) => {
   try {
-    const { data, error } = await supabase.from('posts')
-      .select('id, user_name, content, created_at')
-      .eq('media_type', PRO_GIFT_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(200);
-    if (error) return res.status(400).json({ error: sanitizeError(error) });
-    const gifts = (data || []).map(function(row) {
+    const [giftsRes, claimsRes] = await Promise.all([
+      supabase.from('posts')
+        .select('id, user_name, content, created_at')
+        .eq('media_type', PRO_GIFT_MARKER)
+        .order('created_at', { ascending: false })
+        .limit(200),
+      // 实时统计领取数
+      supabase.from('posts')
+        .select('id, content')
+        .eq('media_type', PRO_GIFT_CLAIM_MARKER)
+        .limit(2000)
+    ]);
+    if (giftsRes.error) return res.status(400).json({ error: sanitizeError(giftsRes.error) });
+
+    // 索引：campaign_id -> claimed_count
+    var claimedMap = {};
+    (claimsRes.data || []).forEach(function(row) {
+      try {
+        var ci = JSON.parse(row.content || '{}');
+        var cid = String(ci.campaign_id || '').trim();
+        if (cid) claimedMap[cid] = (claimedMap[cid] || 0) + 1;
+      } catch(e) {}
+    });
+
+    var gifts = (giftsRes.data || []).map(function(row) {
       var info = {};
       try { info = JSON.parse(row.content || '{}'); } catch(e) {}
+      // 兼容字段别名：allowed_users / exclusive_users / target_users
+      var allowedArr = Array.isArray(info.allowed_users) ? info.allowed_users
+                      : Array.isArray(info.exclusive_users) ? info.exclusive_users
+                      : Array.isArray(info.target_users) ? info.target_users
+                      : [];
+      var limitNum = parseInt(info.claim_limit != null ? info.claim_limit : (info.limit != null ? info.limit : (info.max_claims != null ? info.max_claims : 0)));
+      if (!Number.isFinite(limitNum) || limitNum < 0) limitNum = 0;
+      // 实时统计 claimed_count（不信任 content 里的 claimed_count）
+      var claimedCount = claimedMap[String(row.id)] || 0;
+      var remainingCount = limitNum > 0 ? Math.max(0, limitNum - claimedCount) : null;
       return {
         id: row.id,
         created_by: row.user_name,
         created_at: row.created_at,
         title: info.title || '',
         description: info.description || '',
-        features: info.features || DEFAULT_GIFT_FEATURES,
-        duration_days: info.duration_days || 30,
+        features: Array.isArray(info.features) && info.features.length ? info.features : DEFAULT_GIFT_FEATURES,
+        duration_days: parseInt(info.duration_days) || 30,
+        start_at: info.start_at || '',
+        end_at: info.end_at || '',
         claim_expire_at: info.claim_expire_at || '',
+        claim_limit: limitNum,
+        claimed_count: claimedCount,
+        remaining_count: remainingCount,
+        allowed_users: allowedArr,
+        exclusive_users: Array.isArray(info.exclusive_users) ? info.exclusive_users : [],
+        target_users: Array.isArray(info.target_users) ? info.target_users : [],
+        exclusive: !!info.exclusive,
+        is_active: info.is_active !== false,
         is_published: !!info.is_published,
-        published_at: info.published_at || ''
+        published_at: info.published_at || '',
+        updated_at: info.updated_at || ''
       };
     });
     return res.json({ ok: true, gifts: gifts });
   } catch(e) {
-    console.error('[ProGift] 查询失败:', e.message);
+    console.error('[ProGift] 查询失败:', e.message || e);
     return res.status(500).json({ error: '查询失败' });
   }
 });
