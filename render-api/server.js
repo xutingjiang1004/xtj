@@ -4177,7 +4177,16 @@ app.get('/api/vip/status', rateLimit(60000, 60), async (req, res) => {
 
 // ===================== Pro 赠送活动管理 =====================
 // PRO_GIFT_MARKER / PRO_GIFT_CLAIM_MARKER 已在文件前面集中定义（行 132-133）
-const DEFAULT_GIFT_FEATURES = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
+const VISUAL_PRO_FEATURES = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
+const DEFAULT_GIFT_FEATURES = VISUAL_PRO_FEATURES.slice();
+
+function normalizeVisualProFeatures(features) {
+  var arr = Array.isArray(features) ? features : [];
+  var clean = arr.filter(function(f) {
+    return VISUAL_PRO_FEATURES.indexOf(String(f || '')) >= 0;
+  });
+  return clean.length ? clean : VISUAL_PRO_FEATURES.slice();
+}
 
 // 管理员：获取全部 Pro 赠送活动
 // 2026-06-25：返回完整字段，包含 claim_limit / allowed_users / exclusive / start_at / end_at
@@ -4227,7 +4236,7 @@ app.get('/admin/pro-gifts', verifyToken, rateLimit(60000, 10), async (req, res) 
         created_at: row.created_at,
         title: info.title || '',
         description: info.description || '',
-        features: Array.isArray(info.features) && info.features.length ? info.features : DEFAULT_GIFT_FEATURES,
+        features: normalizeVisualProFeatures(info.features),
         duration_days: parseInt(info.duration_days) || 30,
         start_at: info.start_at || '',
         end_at: info.end_at || '',
@@ -4261,7 +4270,7 @@ app.post('/admin/pro-gifts/save', verifyToken, rateLimit(60000, 20), async (req,
     var descVal = String(description || '').trim().slice(0, 500);
     if (!titleVal) return res.status(400).json({ error: '请输入活动标题' });
     if (!duration_days || duration_days < 1 || duration_days > 3650) return res.status(400).json({ error: '有效期1-3650天' });
-    var featuresArr = Array.isArray(features) && features.length ? features : DEFAULT_GIFT_FEATURES;
+    var featuresArr = normalizeVisualProFeatures(features);
     // 解析限定用户（支持字符串 "xxz, abc" 或数组）
     var allowedArr = [];
     if (Array.isArray(allowed_users)) {
@@ -4429,7 +4438,7 @@ app.get('/api/pro-gifts/available', rateLimit(60000, 30), authenticateUser, asyn
         id: g.id,
         title: info.title || '',
         description: info.description || '',
-        features: info.features || DEFAULT_GIFT_FEATURES,
+        features: normalizeVisualProFeatures(info.features),
         duration_days: info.duration_days || 30,
         start_at: info.start_at || '',
         end_at: info.end_at || '',
@@ -4508,7 +4517,7 @@ app.post('/api/pro-gifts/claim', rateLimit(60000, 10), authenticateUser, async (
 
     var durationDays = giftInfo.duration_days || 30;
     var expireAt = new Date(now.getTime() + durationDays * 24 * 60 * 60 * 1000).toISOString();
-    var features = giftInfo.features || DEFAULT_GIFT_FEATURES;
+    var features = normalizeVisualProFeatures(giftInfo.features);
     // 写入领取记录（先写，防并发重复领取）
     var claimContent = JSON.stringify({
       campaign_id: giftId,
@@ -4581,7 +4590,7 @@ app.post('/admin/pro-gifts/manual-gift', verifyToken, rateLimit(60000, 10), asyn
     var userNameVal = String(user_name || '').trim();
     if (!userNameVal) return res.status(400).json({ error: '请输入用户名' });
     var days = Math.min(3650, Math.max(1, parseInt(duration_days) || 30));
-    var featuresArr = Array.isArray(features) && features.length ? features : DEFAULT_GIFT_FEATURES;
+    var featuresArr = normalizeVisualProFeatures(features);
     var reasonVal = String(reason || '管理员手动赠送').trim().slice(0, 200);
     var now = new Date();
     var nowISO = now.toISOString();
@@ -4666,7 +4675,7 @@ app.get('/admin/pro-gifts/history', verifyToken, rateLimit(60000, 10), async (re
         expire_at: info.expire_at || '',
         plan_name: info.plan_name || 'XTJ Pro',
         price: info.price || 0,
-        features: info.features || [],
+        features: normalizeVisualProFeatures(info.features),
         created_at: row.created_at
       });
     });
@@ -4685,7 +4694,7 @@ app.get('/admin/pro-gifts/history', verifyToken, rateLimit(60000, 10), async (re
         activated_at: info.claimed_at || row.created_at,
         expire_at: info.vip_expire_at || '',
         duration_days: info.duration_days || 0,
-        features: info.features || [],
+        features: normalizeVisualProFeatures(info.features),
         created_at: row.created_at
       });
     });
