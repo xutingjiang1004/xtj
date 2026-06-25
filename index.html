@@ -608,6 +608,52 @@
                         <span class="xtj-vip-card-badge" id="vipCardBadge">开通</span>
                     </div>
                 </div>
+                <div class="profile-pro-style-panel" id="profileProStylePanel" style="display:none;">
+                    <div class="profile-pro-style-head">
+                        <div class="profile-pro-style-copy">
+                            <div class="profile-pro-style-kicker">Pro 视觉装扮</div>
+                            <div class="profile-pro-style-title">专属主题、聊天气泡、帖子卡片</div>
+                            <div class="profile-pro-style-sub" id="proStyleStatus">登录后可保存你的视觉偏好</div>
+                        </div>
+                        <span class="profile-pro-style-badge" id="proStyleBadge">默认</span>
+                    </div>
+                    <div class="profile-pro-style-grid">
+                        <label class="profile-pro-style-field">
+                            <span class="profile-pro-style-label">专属主题</span>
+                            <select id="proThemeSelect">
+                                <option value="default">默认</option>
+                                <option value="mint">薄荷绿</option>
+                                <option value="aqua">海盐蓝</option>
+                                <option value="sakura">樱雾粉</option>
+                                <option value="lavender">月光紫</option>
+                            </select>
+                        </label>
+                        <label class="profile-pro-style-field">
+                            <span class="profile-pro-style-label">聊天气泡</span>
+                            <select id="proBubbleSelect">
+                                <option value="default">默认</option>
+                                <option value="mint">薄荷玻璃</option>
+                                <option value="aqua">海盐蓝</option>
+                                <option value="cream">奶油白</option>
+                                <option value="sakura">樱花粉</option>
+                                <option value="lavender">雾紫</option>
+                            </select>
+                        </label>
+                        <label class="profile-pro-style-field">
+                            <span class="profile-pro-style-label">帖子卡片装饰</span>
+                            <select id="proPostStyleSelect">
+                                <option value="default">默认</option>
+                                <option value="clean_border">清透边框</option>
+                                <option value="leaf_corner">花叶角标</option>
+                                <option value="soft_glow">柔光卡片</option>
+                                <option value="minimal_pro">极简 Pro</option>
+                            </select>
+                        </label>
+                    </div>
+                    <div class="profile-pro-style-actions">
+                        <button class="btn primary" type="button" id="proStyleSaveBtn" onclick="saveCurrentUserStyle()">保存视觉偏好</button>
+                    </div>
+                </div>
                 <div class="profile-settings">
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
