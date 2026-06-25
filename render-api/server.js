@@ -109,6 +109,9 @@ const MAX_USERNAME_LEN = 50;
 const MAX_REASON_LEN = 500;
 const MAX_TITLE_LEN = 200;
 const MAX_CONTENT_LEN = 5000;
+
+// ===================== 系统 marker 常量（集中定义，避免 TDZ 问题） =====================
+// 所有 media_type 字符串集中在文件前面定义，下方 helper / 路由可直接引用
 const REPORT_MARKER = '__report__';
 const DM_MARKER = '__dm__';
 const AUTH_MARKER = '__auth__';
@@ -122,9 +125,51 @@ const LOGIN_EVENT_MARKER = '__login_event__';
 const SECURITY_ALERT_MARKER = '__security_alert__';
 const AUDIT_LOG_MARKER = '__admin_audit__';
 const CLIENT_ERROR_MARKER = '__client_error__';
+// VIP / Pro 相关
+const VIP_MARKER = '__vip__';
+const VIP_ORDER_MARKER = '__vip_order__';
+const VIP_PLAN_MARKER = '__vip_plan__';
+const PRO_GIFT_MARKER = '__pro_gift__';
+const PRO_GIFT_CLAIM_MARKER = '__pro_gift_claim__';
+// 邮件 / 历史邮箱
+const EMAIL_SENT_MARKER = '__email_sent__';
+const EMAIL_RECIPIENT_MARKER = '__email_recipient_history__';
+
 const LOGIN_LOG_RETENTION_DAYS = 90;
 const SECURITY_LOG_RETENTION_DAYS = 90;
 const ERROR_LOG_RETENTION_DAYS = 30;
+
+// ===================== 通用 posts 查询过滤 helper =====================
+// 集中处理普通帖子 / 总动态 / 后台管理 / 统计 端点需要排除的 system media_type
+// 与前端 applyVisiblePostQueryFilters 保持一致（22 个 marker）
+// 必须放在所有 marker 常量定义之后、路由定义之前
+function applyPublicPostExclusions(query) {
+  if (!query || typeof query.neq !== 'function') return query;
+  return query
+    .neq('media_type', AUTH_MARKER)
+    .neq('media_type', ADMIN_AUTH_MARKER)
+    .neq('media_type', ADMIN_META_MARKER)
+    .neq('media_type', DM_MARKER)
+    .neq('media_type', REPORT_MARKER)
+    .neq('media_type', '__avatar__')
+    .neq('media_type', USER_INFO_MARKER)
+    .neq('media_type', '__photo_wall__')
+    .neq('media_type', VISIT_MARKER)
+    .neq('media_type', ATTACK_MARKER)
+    .neq('media_type', USER_VISIT_MARKER)
+    .neq('media_type', '__ann__')
+    .neq('media_type', VIP_MARKER)
+    .neq('media_type', VIP_ORDER_MARKER)
+    .neq('media_type', VIP_PLAN_MARKER)
+    .neq('media_type', PRO_GIFT_MARKER)
+    .neq('media_type', PRO_GIFT_CLAIM_MARKER)
+    .neq('media_type', LOGIN_EVENT_MARKER)
+    .neq('media_type', SECURITY_ALERT_MARKER)
+    .neq('media_type', AUDIT_LOG_MARKER)
+    .neq('media_type', CLIENT_ERROR_MARKER)
+    .neq('media_type', EMAIL_SENT_MARKER)
+    .neq('media_type', EMAIL_RECIPIENT_MARKER);
+}
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
 let statsCache = { data: null, ts: 0, pending: null };
@@ -1597,7 +1642,7 @@ app.get('/admin/data', verifyToken, rateLimit(60000, 30), async (req, res) => {
     autoExpireOverdueRecords().catch(function() {});
 
     const [postRes, likeRes, commRes, banRes, annRes] = await Promise.all([
-      supabase.from('posts').select('*').neq('media_type', '__avatar__').neq('media_type', '__user_info__').neq('media_type', '__ann__').neq('media_type', ADMIN_AUTH_MARKER).neq('media_type', ADMIN_META_MARKER).neq('media_type', '__photo_wall__').neq('media_type', REPORT_MARKER).neq('media_type', DM_MARKER).neq('media_type', AUTH_MARKER).neq('media_type', VISIT_MARKER).neq('media_type', ATTACK_MARKER).neq('media_type', '__user_visit__').neq('media_type', '__vip__').neq('media_type', '__vip_order__').neq('media_type', LOGIN_EVENT_MARKER).neq('media_type', SECURITY_ALERT_MARKER).neq('media_type', CLIENT_ERROR_MARKER).neq('media_type', AUDIT_LOG_MARKER).neq('media_type', '__email_sent__').neq('media_type', '__email_recipient_history__').order('created_at', { ascending: false }).limit(5000),
+      applyPublicPostExclusions(supabase.from('posts').select('*')).order('created_at', { ascending: false }).limit(5000),
       supabase.from('likes').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('comments').select('*').order('created_at', { ascending: false }).limit(5000),
       supabase.from('bans').select('*').order('banned_at', { ascending: false }).limit(500),
@@ -3467,34 +3512,7 @@ app.post('/admin/users/register-alerts/read', verifyToken, rateLimit(60000, 20),
 
 // ===================== 管理员邮件通知 API =====================
 // 使用 Gmail SMTP 发送，需在 Render 环境变量设置：GMAIL_USER / GMAIL_APP_PASSWORD
-const EMAIL_SENT_MARKER = '__email_sent__';
-const EMAIL_RECIPIENT_MARKER = '__email_recipient_history__';
-
-// 统一：把后端 posts 查询过滤掉所有系统标记（包括 Pro 活动/领取/订单/套餐等）
-// 任何“普通帖子 / 总动态 / 后台管理 / 统计”类查询都应使用本 helper
-// 2026-06-25：与前端 applyVisiblePostQueryFilters 保持一致，避免遗漏 __pro_gift__/__pro_gift_claim__/__vip_plan__
-function applyPublicPostExclusions(query) {
-  if (!query || typeof query.neq !== 'function') return query;
-  return query
-    .neq('media_type', '__avatar__')
-    .neq('media_type', '__user_info__')
-    .neq('media_type', '__photo_wall__')
-    .neq('media_type', '__visit__')
-    .neq('media_type', '__attack__')
-    .neq('media_type', '__user_visit__')
-    .neq('media_type', '__ann__')
-    .neq('media_type', '__vip__')
-    .neq('media_type', '__vip_order__')
-    .neq('media_type', '__vip_plan__')
-    .neq('media_type', '__pro_gift__')
-    .neq('media_type', '__pro_gift_claim__')
-    .neq('media_type', '__login_event__')
-    .neq('media_type', '__security_alert__')
-    .neq('media_type', '__admin_audit__')
-    .neq('media_type', '__client_error__')
-    .neq('media_type', '__email_sent__')
-    .neq('media_type', '__email_recipient_history__');
-}
+// EMAIL_SENT_MARKER / EMAIL_RECIPIENT_MARKER 已在文件前面集中定义（行 135-136）
 
 // 通用：邮箱归一化（trim + lowercase）
 function normalizeEmailAddress(email) {
@@ -4013,9 +4031,7 @@ app.post('/admin/email-recipient-history/clear', verifyToken, rateLimit(60000, 1
 });
 
 // ===================== VIP 会员 API =====================
-const VIP_MARKER = '__vip__';
-const VIP_ORDER_MARKER = '__vip_order__';
-const VIP_PLAN_MARKER = '__vip_plan__';
+// VIP_MARKER / VIP_ORDER_MARKER / VIP_PLAN_MARKER 已在文件前面集中定义（行 129-131）
 
 const VIP_PLANS = [
   {
@@ -4159,8 +4175,7 @@ app.get('/api/vip/status', rateLimit(60000, 60), async (req, res) => {
 });
 
 // ===================== Pro 赠送活动管理 =====================
-const PRO_GIFT_MARKER = '__pro_gift__';
-const PRO_GIFT_CLAIM_MARKER = '__pro_gift_claim__';
+// PRO_GIFT_MARKER / PRO_GIFT_CLAIM_MARKER 已在文件前面集中定义（行 132-133）
 const DEFAULT_GIFT_FEATURES = ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'];
 
 // 管理员：获取全部 Pro 赠送活动
