@@ -72,6 +72,11 @@ const supabase = createClient(
 // ===================== Gmail SMTP 邮件配置 =====================
 const GMAIL_USER = process.env.GMAIL_USER || '';
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || '';
+// ★ 启动时打印邮件环境变量状态（便于 Render Dashboard Logs 调试）
+console.log('[MAIL-CONFIG] GMAIL_USER:', GMAIL_USER ? '已设置' : '未设置');
+console.log('[MAIL-CONFIG] GMAIL_APP_PASSWORD:', GMAIL_APP_PASSWORD ? '已设置' : '未设置');
+console.log('[MAIL-CONFIG] SENDGRID_API_KEY:', process.env.SENDGRID_API_KEY ? '已设置' : '未设置');
+console.log('[MAIL-CONFIG] GMAIL_GAS_URL:', process.env.GMAIL_GAS_URL ? '已设置' : '未设置');
 var mailTransporter = null;
 var mailTransporterPort = null;
 function getMailTransporter() {
@@ -1404,6 +1409,20 @@ app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
+// 邮件配置健康检查（无需鉴权，便于排查 GAS / SendGrid 配置）
+app.get('/health/mail', (req, res) => {
+  res.json({
+    ok: true,
+    mail_config: {
+      GMAIL_USER: GMAIL_USER ? '已设置' : '未设置',
+      GMAIL_APP_PASSWORD: GMAIL_APP_PASSWORD ? '已设置' : '未设置',
+      SENDGRID_API_KEY: process.env.SENDGRID_API_KEY ? '已设置' : '未设置',
+      GMAIL_GAS_URL: process.env.GMAIL_GAS_URL ? '已设置' : '未设置',
+      active_provider: GMAIL_GAS_URL ? 'GAS' : (process.env.SENDGRID_API_KEY ? 'SendGrid' : 'Gmail_SMTP')
+    }
+  });
+});
+
 // ===================== 管理员登录 ======================
 app.post('/admin/login', rateLimit(60000, 10), async (req, res) => {
   const { username, password } = req.body;
@@ -2393,110 +2412,120 @@ app.put('/admin/report/:id/respond', verifyToken, async (req, res) => {
 
 // 管理员处理举报 + 删除帖子
 app.post('/admin/report/:id/delete-post', verifyToken, async (req, res) => {
-  const { id } = req.params;
-  // 从 posts 表获取举报数据（存储在 content JSON 中）
-  const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
-  if (!reportPost) return res.status(404).json({ error: '举报不存在' });
-  var c = {};
-  try { c = JSON.parse(reportPost.content || '{}'); } catch(e) {}
-  const targetType = c.target_type || 'post';
-  const targetId = c.target_id || '';
-  if (targetType === 'post' || targetType === 'photo') {
-    const { data: post, error: fetchPostErr } = await supabase.from('posts').select('actor_key').eq('id', targetId).maybeSingle();
-    if (fetchPostErr) return res.status(400).json({ error: sanitizeError(fetchPostErr) });
-    const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
-    const { error: rpcErr } = await supabase.rpc('delete_post_with_actor', {
-      p_post_id: targetId,
-      p_actor_key: actorKey
-    });
-    if (rpcErr) return res.status(400).json({ error: sanitizeError(rpcErr) });
+  try {
+    const { id } = req.params;
+    // 从 posts 表获取举报数据（存储在 content JSON 中）
+    const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
+    if (!reportPost) return res.status(404).json({ error: '举报不存在' });
+    var c = {};
+    try { c = JSON.parse(reportPost.content || '{}'); } catch(e) {}
+    const targetType = c.target_type || 'post';
+    const targetId = c.target_id || '';
+    if (targetType === 'post' || targetType === 'photo') {
+      const { data: post, error: fetchPostErr } = await supabase.from('posts').select('actor_key').eq('id', targetId).maybeSingle();
+      if (fetchPostErr) return res.status(400).json({ error: sanitizeError(fetchPostErr) });
+      const actorKey = (post && post.actor_key) || 'admin_' + Date.now();
+      const { error: rpcErr } = await supabase.rpc('delete_post_with_actor', {
+        p_post_id: targetId,
+        p_actor_key: actorKey
+      });
+      if (rpcErr) return res.status(400).json({ error: sanitizeError(rpcErr) });
+    }
+    // 标记举报已处理
+    const adminMsg = '被举报的' + (targetType === 'photo' ? '照片' : '帖子') + '已被删除';
+    c.status = 'actioned';
+    c.reviewed_at = new Date().toISOString();
+    c.reviewed_by = ADMIN_USERNAME;
+    c.admin_response = adminMsg;
+    const { error: updErr } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+    if (updErr) return res.status(400).json({ error: sanitizeError(updErr) });
+    sendAdminDm(reportPost.user_name, '[举报处理] ' + adminMsg);
+    addReportNotification(id, 'content_deleted', '管理员已删除被举报内容').catch(function(){});
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[admin] 举报处理删除帖子失败:', e.message || e);
+    return res.status(500).json({ error: '处理失败：' + (e.message || '未知错误') });
   }
-  // 标记举报已处理
-  const adminMsg = '被举报的' + (targetType === 'photo' ? '照片' : '帖子') + '已被删除';
-  c.status = 'actioned';
-  c.reviewed_at = new Date().toISOString();
-  c.reviewed_by = ADMIN_USERNAME;
-  c.admin_response = adminMsg;
-  const { error: updErr } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-  if (updErr) return res.status(400).json({ error: sanitizeError(updErr) });
-  sendAdminDm(reportPost.user_name, '[举报处理] ' + adminMsg);
-  addReportNotification(id, 'content_deleted', '管理员已删除被举报内容').catch(function(){});
-  return res.json({ ok: true });
 });
 
 // 管理员处理举报 + 封禁用户
 app.post('/admin/report/:id/ban-user', verifyToken, async (req, res) => {
-  const { id } = req.params;
-  const { duration_hours } = req.body;
-  // 从 posts 表获取举报数据（存储在 content JSON 中）
-  const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
-  if (!reportPost) return res.status(404).json({ error: '举报不存在' });
-  var c = {};
-  try { c = JSON.parse(reportPost.content || '{}'); } catch(e) {}
-  const targetUser = c.target_user;
-  const reportReason = c.report_reason || '';
-  if (!targetUser) return res.status(400).json({ error: '无法确定被举报用户' });
-  
-  const banType = (duration_hours || 0) === 0 ? 'permanent' : 'temporary';
-  let expiresAt = null;
-  if (duration_hours > 0) {
-    expiresAt = new Date(Date.now() + duration_hours * 3600000).toISOString();
-  }
-  
-  // 检查是否已有封禁记录
-  const { data: existing } = await supabase.from('bans').select('id, is_active').eq('user_name', targetUser);
-  if (existing && existing.length) {
-    const activeBan = existing.find(b => b.is_active);
-    if (activeBan) {
-      // 已经封禁，只更新举报状态
-      c.status = 'actioned';
-      c.reviewed_at = new Date().toISOString();
-      c.reviewed_by = ADMIN_USERNAME;
-      c.admin_response = '该用户已被封禁';
-      const { error: updErr1 } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-      if (updErr1) return res.status(400).json({ error: sanitizeError(updErr1) });
-      sendAdminDm(reportPost.user_name, '[举报处理] 该用户已被封禁');
-      addReportNotification(id, 'user_banned', '管理员已将举报用户封禁').catch(function(){});
-      return res.json({ ok: true, message: '该用户已被封禁，举报已标记为已处理' });
+  try {
+    const { id } = req.params;
+    const { duration_hours } = req.body;
+    // 从 posts 表获取举报数据（存储在 content JSON 中）
+    const { data: reportPost } = await supabase.from('posts').select('*').eq('id', id).maybeSingle();
+    if (!reportPost) return res.status(404).json({ error: '举报不存在' });
+    var c = {};
+    try { c = JSON.parse(reportPost.content || '{}'); } catch(e) {}
+    const targetUser = c.target_user;
+    const reportReason = c.report_reason || '';
+    if (!targetUser) return res.status(400).json({ error: '无法确定被举报用户' });
+
+    const banType = (duration_hours || 0) === 0 ? 'permanent' : 'temporary';
+    let expiresAt = null;
+    if (duration_hours > 0) {
+      expiresAt = new Date(Date.now() + duration_hours * 3600000).toISOString();
     }
-    const { error: updBanErr } = await supabase.from('bans').update({
-      ban_reason: '举报处理：' + (reportReason || '违规内容'),
-      ban_duration_hours: duration_hours || 0,
-      ban_type: banType,
-      banned_by: ADMIN_USERNAME,
-      expires_at: expiresAt,
-      is_active: true,
-      banned_at: new Date().toISOString()
-    }).eq('id', existing[0].id);
-    if (updBanErr) {
-      // 回滚举报状态
-      await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-      return res.status(400).json({ error: sanitizeError(updBanErr) });
+
+    // 检查是否已有封禁记录
+    const { data: existing } = await supabase.from('bans').select('id, is_active').eq('user_name', targetUser);
+    if (existing && existing.length) {
+      const activeBan = existing.find(b => b.is_active);
+      if (activeBan) {
+        // 已经封禁，只更新举报状态
+        c.status = 'actioned';
+        c.reviewed_at = new Date().toISOString();
+        c.reviewed_by = ADMIN_USERNAME;
+        c.admin_response = '该用户已被封禁';
+        const { error: updErr1 } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+        if (updErr1) return res.status(400).json({ error: sanitizeError(updErr1) });
+        sendAdminDm(reportPost.user_name, '[举报处理] 该用户已被封禁');
+        addReportNotification(id, 'user_banned', '管理员已将举报用户封禁').catch(function(){});
+        return res.json({ ok: true, message: '该用户已被封禁，举报已标记为已处理' });
+      }
+      const { error: updBanErr } = await supabase.from('bans').update({
+        ban_reason: '举报处理：' + (reportReason || '违规内容'),
+        ban_duration_hours: duration_hours || 0,
+        ban_type: banType,
+        banned_by: ADMIN_USERNAME,
+        expires_at: expiresAt,
+        is_active: true,
+        banned_at: new Date().toISOString()
+      }).eq('id', existing[0].id);
+      if (updBanErr) {
+        // 回滚举报状态
+        await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+        return res.status(400).json({ error: sanitizeError(updBanErr) });
+      }
+    } else {
+      const { error: insErr } = await supabase.from('bans').insert([{
+        user_name: targetUser,
+        ban_type: banType,
+        ban_reason: '举报处理：' + (reportReason || '违规内容'),
+        ban_duration_hours: duration_hours || 0,
+        banned_by: ADMIN_USERNAME,
+        expires_at: expiresAt,
+        is_active: true
+      }]);
+      if (insErr) return res.status(400).json({ error: sanitizeError(insErr) });
     }
-  } else {
-    const { error: insErr } = await supabase.from('bans').insert([{
-      user_name: targetUser,
-      ban_type: banType,
-      ban_reason: '举报处理：' + (reportReason || '违规内容'),
-      ban_duration_hours: duration_hours || 0,
-      banned_by: ADMIN_USERNAME,
-      expires_at: expiresAt,
-      is_active: true
-    }]);
-    if (insErr) return res.status(400).json({ error: sanitizeError(insErr) });
+
+    // 标记举报已处理
+    const banMsg = banType === 'permanent' ? '用户已被永久封禁' : `用户已被封禁${duration_hours || 0}小时`;
+    c.status = 'actioned';
+    c.reviewed_at = new Date().toISOString();
+    c.reviewed_by = ADMIN_USERNAME;
+    c.admin_response = banMsg;
+    const { error: finalUpdErr } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
+    if (finalUpdErr) return res.status(400).json({ error: sanitizeError(finalUpdErr) });
+    sendAdminDm(reportPost.user_name, '[举报处理] ' + banMsg);
+    addReportNotification(id, 'user_banned', '管理员已将举报用户封禁').catch(function(){});
+    return res.json({ ok: true });
+  } catch(e) {
+    console.error('[admin] 举报处理封禁用户失败:', e.message || e);
+    return res.status(500).json({ error: '处理失败：' + (e.message || '未知错误') });
   }
-  
-  // 标记举报已处理
-  const banMsg = banType === 'permanent' ? '用户已被永久封禁' : `用户已被封禁${duration_hours || 0}小时`;
-  c.status = 'actioned';
-  c.reviewed_at = new Date().toISOString();
-  c.reviewed_by = ADMIN_USERNAME;
-  c.admin_response = banMsg;
-  const { error: finalUpdErr } = await supabase.from('posts').update({ content: JSON.stringify(c) }).eq('id', id);
-  if (finalUpdErr) return res.status(400).json({ error: sanitizeError(finalUpdErr) });
-  sendAdminDm(reportPost.user_name, '[举报处理] ' + banMsg);
-  addReportNotification(id, 'user_banned', '管理员已将举报用户封禁').catch(function(){});
-  return res.json({ ok: true });
 });
 
 // 用户提交举报
@@ -3480,8 +3509,8 @@ app.get('/admin/users-with-email', verifyToken, rateLimit(60000, 10), async (req
   }
 });
 
-var SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || '';
-var GMAIL_GAS_URL = process.env.GMAIL_GAS_URL || ''; // Google Apps Script Web App URL（走 HTTPS 443，绕过 Render SMTP 端口封锁）
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || ''; // 优先 const 防止误覆盖
+const GMAIL_GAS_URL = process.env.GMAIL_GAS_URL || ''; // Google Apps Script Web App URL（走 HTTPS 443，绕过 Render SMTP 端口封锁）
 
 async function fetchWithTimeout(url, options, timeoutMs) {
   var controller = new AbortController();
@@ -3638,8 +3667,8 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
           }
         }
         if (SENDGRID_API_KEY && !GMAIL_GAS_URL) {
-          // SendGrid 失败 → 回退到 SMTP
-          SENDGRID_API_KEY = '';
+          // SendGrid 失败 → 回退到 SMTP（不再重置常量，只走本地逻辑开关）
+          var sendgridBroken = true;
           try {
             var sgTransporter = getMailTransporter();
             if (sgTransporter) {
