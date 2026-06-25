@@ -1217,8 +1217,24 @@ const ADMIN_NAME = "xxz";
                 });
                 if (resp.status === 401 || resp.status === 403) {
                     clearUserToken();
-                    renderAuthExpired('你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。');
-                    return;
+                    // token 过期，尝试补一次 token 后重试
+                    var newTok = await ensureUserToken();
+                    if (newTok) {
+                        headers['Authorization'] = 'Bearer ' + newTok;
+                        resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), {
+                            headers: headers,
+                            signal: AbortSignal.timeout(8000)
+                        });
+                        if (resp.status === 401 || resp.status === 403) {
+                            clearUserToken();
+                            renderAuthExpired('你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。');
+                            return;
+                        }
+                    } else {
+                        renderAuthExpired('你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。');
+                        return;
+                    }
+                }
                 }
                 var data = await resp.json();
                 if (data && data.error) {
@@ -1342,12 +1358,29 @@ const ADMIN_NAME = "xxz";
                 var data = await resp.json();
                 if (resp.status === 401 || resp.status === 403) {
                     clearUserToken();
-                    if (btn) {
-                        btn.classList.remove('loading');
-                        btn.textContent = '领取 Pro';
+                    // token 过期，尝试补一次 token 后重试
+                    var newTok2 = await ensureUserToken();
+                    if (newTok2) {
+                        claimHeaders['Authorization'] = 'Bearer ' + newTok2;
+                        resp = await fetch(API_BASE + '/api/pro-gifts/claim', {
+                            method: 'POST',
+                            headers: claimHeaders,
+                            body: JSON.stringify({ user_name: currentUser, gift_id: giftId })
+                        });
+                        data = await resp.json();
+                        if (resp.status === 401 || resp.status === 403) {
+                            clearUserToken();
+                            if (btn) { btn.classList.remove('loading'); btn.textContent = '领取 Pro'; }
+                            showToast((data && data.error) || '登录凭证需要刷新，请重新登录后领取', 'error');
+                            return;
+                        }
+                        // 重试成功，继续处理
+                    } else {
+                        if (btn) { btn.classList.remove('loading'); btn.textContent = '领取 Pro'; }
+                        showToast((data && data.error) || '登录凭证需要刷新，请重新登录后领取', 'error');
+                        requestProGiftRelogin();
+                        return;
                     }
-                    showToast((data && data.error) || '登录凭证需要刷新，请重新登录后领取', 'error');
-                    return;
                 }
                 if (data.ok) {
                     // 更新卡片状态
