@@ -1,5 +1,14 @@
 # 更新日志
 
+## v0.88 - 2026-06-24
+邮件系统重构：Google Apps Script (GAS) HTTPS 中转通道上线，绕过 Render SMTP 端口封锁
+- 新增 `GMAIL_GAS_URL` 环境变量支持，邮件发送优先级：GAS (HTTPS 443) > SendGrid > Gmail SMTP
+- GAS 失败自动回退到 SendGrid，SendGrid 失败再回退到 Gmail SMTP（最终兜底）
+- 修复浏览器缓存：升级 pro-upgrade.js ?v= 到 20260624_progift
+- 修复 index.html / README.md / CHANGELOG.md 版本号不一致
+- 修复 /admin/report/:id/delete-post 和 /admin/report/:id/ban-user 端点缺少顶层 try-catch
+- 修复 SENDGRID_API_KEY 误用 var 声明被覆盖的隐患
+
 ## v0.85 - 2026-06-23
 Pro 赠送活动系统上线、安全审计修复、设备识别精度大幅提升、聊天头像即时更新
 
