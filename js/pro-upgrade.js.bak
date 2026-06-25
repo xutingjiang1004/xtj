@@ -57,35 +57,39 @@
   };
 
   window.__xtjQueryVipStatus = async function(userName) {
-    if (!userName) return null;
+    if (!userName || !window.sb) return null;
 
     var local = window.__xtjCheckLocalVip(userName);
     if (local) return local;
 
-    // 通过 API 查询 VIP 状态，不再直连 Supabase
-    if (typeof API_BASE !== 'undefined' && API_BASE) {
-      try {
-        var resp = await fetch(API_BASE + '/api/vip/status?user_name=' + encodeURIComponent(userName), {
-          signal: AbortSignal.timeout(8000)
-        });
-        var data = await resp.json();
-        if (data && data.active_vip && data.active_vip.is_active && data.active_vip.expire_at) {
-          var expireTs = new Date(data.active_vip.expire_at).getTime();
-          if (!isNaN(expireTs) && expireTs > Date.now()) {
-            window.__xtjSaveLocalVip({
-              user_name: userName,
-              plan_name: data.active_vip.plan_name || 'XTJ Pro',
-              expire_at: data.active_vip.expire_at,
-              is_active: true,
-              features: data.active_vip.features || [],
-              activated_at: data.active_vip.activated_at
-            });
-            return data.active_vip;
-          }
+    try {
+      var { data } = await window.sb.from('posts')
+        .select('content')
+        .eq('user_name', userName)
+        .eq('media_type', VIP_MARKER)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (data && data.length > 0) {
+        for (var i = 0; i < data.length; i++) {
+          try {
+            var c = JSON.parse(data[i].content || '{}');
+            if (c.is_active && c.expire_at && new Date(c.expire_at) > new Date()) {
+              window.__xtjSaveLocalVip({
+                user_name: userName,
+                plan_name: c.plan_name || 'XTJ Pro',
+                expire_at: c.expire_at,
+                is_active: true,
+                features: c.features || [],
+                activated_at: c.activated_at
+              });
+              return c;
+            }
+          } catch(e) {}
         }
-      } catch(e) {
-        console.warn('[Pro] API vip status query failed:', e);
       }
+    } catch(e) {
+      console.warn('[Pro] Supabase query failed:', e);
     }
 
     window.__xtjClearLocalVip();

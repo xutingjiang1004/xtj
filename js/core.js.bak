@@ -140,23 +140,6 @@ const ADMIN_NAME = "xxz";
                 return '';
             }
 
-            /**
-             * 返回统一认证请求头对象。
-             * 优先使用 JWT Bearer token；无 token 且无 password_hash 时返回 null。
-             * 有 token → 返回 { Authorization, Content-Type }
-             * 无 token 但有 currentUser + password_hash → 返回 null（调用方应传参兼容旧逻辑）
-             */
-            window.getUserAuthHeaders = async function() {
-                var token = await ensureUserToken();
-                if (token) {
-                    return {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + token
-                    };
-                }
-                return null;
-            }
-
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
 
@@ -636,14 +619,14 @@ const ADMIN_NAME = "xxz";
         window.setProStyleSelectValue = setProStyleSelectValue;
 
         function updateProStylePreviewActiveStates() {
-            var page = document.getElementById('profileProStylePage');
-            if (!page) return;
+            var panel = document.getElementById('profileProStylePanel');
+            if (!panel) return;
             ['theme', 'bubble', 'post'].forEach(function(type) {
                 var meta = getProStyleSelectMeta(type);
                 var select = document.getElementById(meta.selectId);
                 var selectedValue = select ? String(select.value || 'default') : 'default';
                 var enabled = currentUser === ADMIN_NAME || hasProFeature(meta.feature);
-                page.querySelectorAll('.pro-style-option-card[data-pro-style-type="' + type + '"]').forEach(function(card) {
+                panel.querySelectorAll('.pro-style-option-card[data-pro-style-type="' + type + '"]').forEach(function(card) {
                     var cardValue = String(card.getAttribute('data-pro-style-value') || '');
                     var active = cardValue === selectedValue;
                     card.classList.toggle('active', active);
@@ -657,11 +640,11 @@ const ADMIN_NAME = "xxz";
         window.updateProStylePreviewActiveStates = updateProStylePreviewActiveStates;
 
         function bindProStylePreviewCards() {
-            var page = document.getElementById('profileProStylePage');
-            if (!page || page.dataset.previewCardsBound === '1') return;
-            page.dataset.previewCardsBound = '1';
+            var panel = document.getElementById('profileProStylePanel');
+            if (!panel || panel.dataset.previewCardsBound === '1') return;
+            panel.dataset.previewCardsBound = '1';
 
-            page.addEventListener('click', function(evt) {
+            panel.addEventListener('click', function(evt) {
                 var card = evt.target && evt.target.closest ? evt.target.closest('.pro-style-option-card[data-pro-style-type]') : null;
                 if (!card) return;
                 var type = String(card.getAttribute('data-pro-style-type') || '');
@@ -724,11 +707,14 @@ const ADMIN_NAME = "xxz";
         }
 
         function renderProStyleSettings() {
-            var panel = document.getElementById('proStylePanelLanding');
+            var panel = document.getElementById('profileProStylePanel');
             if (!panel) return;
             var statusEl = document.getElementById('proStyleStatus');
             var badgeEl = document.getElementById('proStyleBadge');
             var saveBtn = document.getElementById('proStyleSaveBtn');
+            var themeSelect = document.getElementById('proThemeSelect');
+            var bubbleSelect = document.getElementById('proBubbleSelect');
+            var postSelect = document.getElementById('proPostStyleSelect');
             if (!currentUser) {
                 panel.style.display = 'none';
                 if (typeof updateProStyleEntry === 'function') {
@@ -737,11 +723,6 @@ const ADMIN_NAME = "xxz";
                 return;
             }
             panel.style.display = '';
-
-            // 同步所有分类面板的 select 值
-            var themeSelect = document.getElementById('proThemeSelect');
-            var bubbleSelect = document.getElementById('proBubbleSelect');
-            var postSelect = document.getElementById('proPostStyleSelect');
             bindProStylePreviewCards();
             var saved = getCurrentStyleDraft();
             if (themeSelect) themeSelect.value = saved.theme;
@@ -767,10 +748,6 @@ const ADMIN_NAME = "xxz";
                 }
             }
             updateProStylePreviewActiveStates();
-            // 确保回到总览视图
-            if (typeof window.showProStyleLanding === 'function') {
-                window.showProStyleLanding();
-            }
             if (typeof updateProStyleEntry === 'function') {
                 updateProStyleEntry();
             }
@@ -819,39 +796,6 @@ const ADMIN_NAME = "xxz";
             }
         }
         window.updateProStyleEntry = updateProStyleEntry;
-
-        // 三级分组入口：显示某个分类面板
-        window.showProStyleCategory = function(category) {
-            var landing = document.getElementById('proStylePanelLanding');
-            var actions = document.getElementById('proStylePanelActions');
-            var panels = {
-                theme: document.getElementById('proStylePanelTheme'),
-                bubble: document.getElementById('proStylePanelBubble'),
-                post: document.getElementById('proStylePanelPost')
-            };
-            if (landing) landing.hidden = true;
-            if (actions) actions.hidden = true;
-            Object.keys(panels).forEach(function(key) {
-                if (panels[key]) panels[key].hidden = (key !== category);
-            });
-            var panel = document.getElementById('profileProStylePage');
-            if (panel && typeof panel.scrollTo === 'function') {
-                panel.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-        };
-
-        // 三级分组入口：返回总览
-        window.showProStyleLanding = function() {
-            var landing = document.getElementById('proStylePanelLanding');
-            var actions = document.getElementById('proStylePanelActions');
-            var panels = ['proStylePanelTheme', 'proStylePanelBubble', 'proStylePanelPost'];
-            if (landing) landing.hidden = false;
-            if (actions) actions.hidden = false;
-            panels.forEach(function(id) {
-                var el = document.getElementById(id);
-                if (el) el.hidden = true;
-            });
-        };
 
         window.openProStylePage = function() {
             if (!currentUser) {
