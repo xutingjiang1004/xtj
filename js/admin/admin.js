@@ -4252,8 +4252,20 @@ async function initAdminClient() {
         resultEl.className = '';
         resultEl.textContent = '';
 
+        // 不论发送成功/部分失败/全部失败，都要保存历史邮箱
+        // 双保险：后端 /admin/send-email 内部已经会保存，前端这里再主动保存一次
+        async function saveRecipientsHistorySafe() {
+            try {
+                await apiCall('POST', '/admin/email-recipient-history', { recipients: recipients });
+            } catch(es) {
+                console.warn('[email] 保存历史邮箱失败:', es.message || es);
+            }
+        }
+
         try {
             var data = await apiCall('POST', '/admin/send-email', { recipients: recipients, subject: subject, content: content, content_type: 'text' }, { timeoutMs: 120000 });
+            // 无论成功/部分失败/全部失败，都尝试保存历史邮箱
+            await saveRecipientsHistorySafe();
             if (data.ok) {
                 var msg = '✅ 发送完成：成功 ' + data.sent_count + ' 人';
                 if (data.failed_count > 0) msg += '，失败 ' + data.failed_count + ' 人';
@@ -4285,11 +4297,18 @@ async function initAdminClient() {
                 }
                 hintHtml += '<div style="margin-top:8px;padding:8px;background:rgba(47,109,246,0.06);border-radius:6px;font-size:12px;color:var(--text-secondary);">💡 ' + escapeHtml(data.hint) + '</div>';
                 resultEl.innerHTML = hintHtml;
+                // 全部失败也刷新历史邮箱（用户输入过的收件人）
+                loadEmailRecipientHistory();
             } else {
                 resultEl.className = 'send-result error';
                 resultEl.textContent = '发送失败: ' + (data.error || '未知错误');
+                // 业务错误也刷新历史邮箱
+                loadEmailRecipientHistory();
             }
         } catch(e) {
+            // 网络异常/超时也要尝试保存历史邮箱
+            await saveRecipientsHistorySafe();
+            try { await loadEmailRecipientHistory(); } catch(_) {}
             resultEl.className = 'send-result error';
             if (isFetchAbortError(e)) {
                 resultEl.textContent = '发送超时：邮件发送耗时较长，请稍后查看发送记录，或减少收件人后重试。';
@@ -4303,6 +4322,72 @@ async function initAdminClient() {
     };
 
     // 加载邮件发送记录
+    // helper: 提取收件人显示名（网站用户显示用户名，外部邮箱显示邮箱号）
+    function getRecipientDisplayName(detail, allUsersMap) {
+        if (!detail) return '-';
+        var email = String(detail.email || '').trim();
+        var name = String(detail.user_name || '').trim();
+        // 兼容：手动外部邮箱 user_name 可能被保存成邮箱本身
+        var nameIsEmail = name && name.indexOf('@') >= 0;
+        // 优先用 allUsers 判断（更准确，因为后端有时把 user_name 设为邮箱字符串）
+        if (allUsersMap && name && !nameIsEmail && allUsersMap[name]) {
+            return name;
+        }
+        // 字段规则：user_name 存在且不是邮箱 → 显示用户名
+        if (name && !nameIsEmail && name !== email) {
+            return name;
+        }
+        // 否则显示邮箱
+        return email || name || '-';
+    }
+
+    // helper: 格式化收件人列表为"第一个 + 等 N 人"，鼠标 title 放完整列表
+    function formatRecipientsList(details, mode, allUsersMap) {
+        var list = Array.isArray(details) ? details : [];
+        if (!list.length) return { display: '共 0 人', title: '' };
+        var fullLines = [];
+        var firstText = '';
+        list.forEach(function(d, i) {
+            var email = String(d && d.email || '').trim();
+            var name = getRecipientDisplayName(d, allUsersMap);
+            if (mode === 'email') {
+                fullLines.push(email || name);
+                if (i === 0) firstText = email || name;
+            } else {
+                fullLines.push(name + (email && name !== email ? ' <' + email + '>' : ''));
+                if (i === 0) firstText = name;
+            }
+        });
+        var display = firstText || '-';
+        if (list.length > 1) display += ' 等 ' + list.length + ' 人';
+        return { display: display, title: fullLines.join('\n') };
+    }
+
+    // helper: 旧数据兜底（没有 recipients_detail 时从其他字段解析）
+    function extractRecipientsFromRecord(r) {
+        if (Array.isArray(r.recipients_detail) && r.recipients_detail.length) {
+            return r.recipients_detail;
+        }
+        if (Array.isArray(r.recipients) && r.recipients.length) {
+            return r.recipients.map(function(x) {
+                return typeof x === 'string' ? { email: x, user_name: x } : x;
+            });
+        }
+        if (Array.isArray(r.emails) && r.emails.length) {
+            return r.emails.map(function(x) { return { email: x, user_name: x }; });
+        }
+        if (r.recipient_email) {
+            return [{ email: String(r.recipient_email), user_name: String(r.recipient_email) }];
+        }
+        if (r.to_email) {
+            return [{ email: String(r.to_email), user_name: String(r.to_email) }];
+        }
+        if (r.total_recipients && r.total_recipients > 0) {
+            return []; // 让上层用"共 N 人"展示
+        }
+        return [];
+    }
+
     window.loadEmailHistory = async function() {
         var wrap = document.getElementById('emailHistoryWrap');
         if (!wrap) return;
@@ -4313,33 +4398,34 @@ async function initAdminClient() {
                 wrap.innerHTML = '<div class="empty">暂无发送记录</div>';
                 return;
             }
-            var h = '<div class="table-wrap" style="max-height:400px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="position:sticky;top:0;z-index:1;background:var(--card-bg,var(--bg));"><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">时间</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">发件邮箱</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">主题</th><th style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border);">收件人</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">结果</th><th style="padding:6px 8px;text-align:center;border-bottom:1px solid var(--border);">详情</th></tr></thead><tbody>';
-            records.forEach(function(r, idx) {
+            // 构建 allUsers 索引（用于判断邮箱是否对应网站用户）
+            var allUsersMap = {};
+            (allUsers || []).forEach(function(u) { if (u && u.name) allUsersMap[u.name] = true; });
+
+            var h = '<div class="table-wrap" style="max-height:400px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="position:sticky;top:0;z-index:1;background:var(--card-bg,var(--bg));"><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">时间</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">接收邮件账号</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">接收人</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">主题</th><th style="padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);">结果</th></tr></thead><tbody>';
+            records.forEach(function(r) {
                 var resultText = r.failed_count > 0
                     ? '<span style="color:var(--danger);">' + r.sent_count + '/' + r.total_recipients + '（失败' + r.failed_count + '）</span>'
                     : '<span style="color:var(--success);">✅ ' + r.sent_count + '/' + r.total_recipients + '</span>';
-                var detailList = Array.isArray(r.recipients_detail) ? r.recipients_detail : [];
-                var detailHtml = '';
-                if (detailList.length) {
-                    detailHtml = '<div id="emailDetail_' + idx + '" style="display:none;padding:8px 10px;margin:4px 0;background:rgba(0,0,0,0.15);border-radius:6px;font-size:11px;max-height:150px;overflow-y:auto;">';
-                    detailList.forEach(function(d) {
-                        var icon = d.status === 'sent' ? '✅' : '❌';
-                        var namePart = d.user_name && d.user_name !== d.email ? escapeHtml(d.user_name) + ' ' : '';
-                        detailHtml += '<div style="padding:2px 0;">' + icon + ' ' + namePart + '<span style="color:var(--text-muted);">' + escapeHtml(d.email) + '</span>';
-                        if (d.error) detailHtml += ' <span style="color:var(--danger);margin-left:4px;">' + escapeHtml(d.error) + '</span>';
-                        detailHtml += '</div>';
-                    });
-                    detailHtml += '</div>';
+                var detailList = extractRecipientsFromRecord(r);
+                var emailCol, recipientCol;
+                if (!detailList.length) {
+                    var totalN = r.total_recipients || 0;
+                    emailCol = '<span style="color:var(--text-muted);">共 ' + totalN + ' 人</span>';
+                    recipientCol = '<span style="color:var(--text-muted);">共 ' + totalN + ' 人</span>';
+                } else {
+                    var e1 = formatRecipientsList(detailList, 'email', allUsersMap);
+                    var n1 = formatRecipientsList(detailList, 'name', allUsersMap);
+                    emailCol = '<span title="' + escapeHtml(e1.title) + '" style="display:inline-block;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;">' + escapeHtml(e1.display) + '</span>';
+                    recipientCol = '<span title="' + escapeHtml(n1.title) + '" style="display:inline-block;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;">' + escapeHtml(n1.display) + '</span>';
                 }
                 h += '<tr style="border-bottom:1px solid var(--border);">';
                 h += '<td style="padding:6px 8px;white-space:nowrap;">' + formatTime(r.sent_at) + '</td>';
-                h += '<td style="padding:6px 8px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(r.from_email || '') + '">' + escapeHtml(r.from_email || '') + '</td>';
-                h += '<td style="padding:6px 8px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(r.subject) + '">' + escapeHtml(r.subject) + '</td>';
-                h += '<td style="padding:6px 8px;text-align:center;">' + (r.total_recipients || 0) + '</td>';
+                h += '<td style="padding:6px 8px;">' + emailCol + '</td>';
+                h += '<td style="padding:6px 8px;">' + recipientCol + '</td>';
+                h += '<td style="padding:6px 8px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escapeHtml(r.subject || '') + '">' + escapeHtml(r.subject || '') + '</td>';
                 h += '<td style="padding:6px 8px;">' + resultText + '</td>';
-                h += '<td style="padding:6px 8px;text-align:center;">' + (detailList.length ? '<button class="btn-sm" style="font-size:11px;padding:2px 8px;" onclick="emailToggleDetail(' + idx + ')">查看</button>' : '<span style="color:var(--text-muted);">-</span>') + '</td>';
                 h += '</tr>';
-                if (detailList.length) h += '<tr><td colspan="6" style="padding:0;">' + detailHtml + '</td></tr>';
             });
             h += '</tbody></table></div>';
             wrap.innerHTML = h;
@@ -4348,6 +4434,7 @@ async function initAdminClient() {
         }
     };
 
+    // 兼容保留：emailToggleDetail 不再从邮件发送记录表格调用
     window.emailToggleDetail = function(idx) {
         var el = document.getElementById('emailDetail_' + idx);
         if (!el) return;
@@ -4517,19 +4604,29 @@ async function initAdminClient() {
             if (!gifts.length) {
                 h += '<div class="empty">暂无活动，点击上方按钮创建第一个赠送活动</div>';
             } else {
-                h += '<div class="table-wrap"><table><thead><tr><th>活动标题</th><th>时长</th><th>状态</th><th>创建时间</th><th>截止领取</th><th>操作</th></tr></thead><tbody>';
+                h += '<div class="table-wrap"><table><thead><tr><th>活动标题</th><th>时长</th><th>限量 / 已领</th><th>限定 / 专属</th><th>状态</th><th>截止领取</th><th>操作</th></tr></thead><tbody>';
                 gifts.forEach(function(g) {
                     var statusText = g.is_published
                         ? '<span class="status-badge status-success">● 已发布</span>'
                         : '<span class="status-badge status-muted">● 草稿</span>';
                     var expireText = g.claim_expire_at ? formatTime(g.claim_expire_at) : '不限';
+                    // 限量/已领
+                    var limitNum = parseInt(g.claim_limit) || 0;
+                    var claimedNum = parseInt(g.claimed_count) || 0;
+                    var limitText = limitNum > 0 ? (claimedNum + ' / ' + limitNum) : '不限';
+                    // 限定 / 专属
+                    var allowedArr = Array.isArray(g.allowed_users) ? g.allowed_users : [];
+                    var exclusiveText = g.exclusive
+                        ? '<span class="status-badge status-warning">专属</span>'
+                        : (allowedArr.length ? ('<span title="' + escapeHtml(allowedArr.join(', ')) + '">' + allowedArr.length + ' 人</span>') : '全部用户');
                     h += '<tr>';
                     h += '<td><strong>' + escapeHtml(g.title) + '</strong>';
                     if (g.description) h += '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + escapeHtml(g.description) + '</div>';
                     h += '</td>';
                     h += '<td>' + g.duration_days + ' 天</td>';
+                    h += '<td>' + limitText + '</td>';
+                    h += '<td>' + exclusiveText + '</td>';
                     h += '<td>' + statusText + '</td>';
-                    h += '<td>' + formatTime(g.created_at) + '</td>';
                     h += '<td>' + expireText + '</td>';
                     h += '<td>';
                     h += '<button class="btn-sm" onclick="openProGiftEditor(\'' + g.id + '\')">编辑</button>';
@@ -4626,6 +4723,7 @@ async function initAdminClient() {
     window.openProGiftEditor = async function(giftId) {
         var title = '', description = '', features = ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'];
         var duration_days = 30, claim_expire_at = '', id = giftId;
+        var claim_limit = 0, allowed_users = [], exclusive = false, start_at = '', end_at = '';
         if (giftId) {
             try {
                 var data = await apiCall('GET', '/admin/pro-gifts');
@@ -4636,6 +4734,11 @@ async function initAdminClient() {
                     features = gift.features || features;
                     duration_days = gift.duration_days || 30;
                     claim_expire_at = gift.claim_expire_at || '';
+                    claim_limit = gift.claim_limit || 0;
+                    allowed_users = gift.allowed_users || gift.exclusive_users || gift.target_users || [];
+                    exclusive = !!gift.exclusive;
+                    start_at = gift.start_at || '';
+                    end_at = gift.end_at || '';
                 }
             } catch(e) { showToast('加载活动失败: ' + e.message, 'error'); }
         }
@@ -4649,17 +4752,29 @@ async function initAdminClient() {
         html += '</div>';
         html += '<div class="modal-body">';
         html += '<div class="form-group"><label>活动标题</label><input id="pgTitleInp" value="' + escapeHtml(title) + '" placeholder="例：夏日Pro特权赠送" /></div>';
-        html += '<div class="form-group"><label>活动描述</label><textarea id="pgDescInp" rows="3" placeholder="描述活动内容...">' + escapeHtml(description) + '</textarea></div>';
+        html += '<div class="form-group"><label>活动说明</label><textarea id="pgDescInp" rows="3" placeholder="描述活动内容...">' + escapeHtml(description) + '</textarea></div>';
         html += '<div class="form-row">';
-        html += '<div class="form-group" style="flex:1;"><label>有效期（天）</label><input id="pgDaysInp" type="number" min="1" max="3650" value="' + duration_days + '" /></div>';
+        html += '<div class="form-group" style="flex:1;"><label>Pro 有效天数</label><input id="pgDaysInp" type="number" min="1" max="3650" value="' + duration_days + '" /></div>';
         html += '<div class="form-group" style="flex:2;"><label>领取截止时间（可选）</label><input id="pgExpireInp" type="datetime-local" value="' + (claim_expire_at ? claim_expire_at.slice(0,16) : '') + '" /></div>';
         html += '</div>';
+        html += '<div class="form-row">';
+        html += '<div class="form-group" style="flex:1;"><label>活动开始时间（可选）</label><input id="pgStartInp" type="datetime-local" value="' + (start_at ? start_at.slice(0,16) : '') + '" /></div>';
+        html += '<div class="form-group" style="flex:1;"><label>活动结束时间（可选）</label><input id="pgEndInp" type="datetime-local" value="' + (end_at ? end_at.slice(0,16) : '') + '" /></div>';
+        html += '</div>';
+        html += '<div class="form-row">';
+        html += '<div class="form-group" style="flex:1;"><label>限量名额（0=不限）</label><input id="pgLimitInp" type="number" min="0" value="' + claim_limit + '" placeholder="留空 = 不限制" /></div>';
+        html += '<div class="form-group" style="flex:2;"><label>限定用户（逗号分隔，留空=所有用户）</label><input id="pgAllowedInp" value="' + escapeHtml(Array.isArray(allowed_users) ? allowed_users.join(', ') : '') + '" placeholder="例：xxz, abc, test" /></div>';
+        html += '</div>';
+        html += '<div class="form-group"><label class="feature-item" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" id="pgExclusiveInp"' + (exclusive ? ' checked' : '') + ' /> <span>设为专属活动（仅限定用户可见）</span></label></div>';
         html += '<div class="form-group"><label>Pro 权限</label><div class="feature-grid">';
         allFeatures.forEach(function(f) {
             var checked = features.indexOf(f) >= 0 ? ' checked' : '';
             html += '<label class="feature-item"><input type="checkbox" id="pgFeat_' + f + '"' + checked + ' /> <span>' + (featureLabels[f] || f) + '</span></label>';
         });
         html += '</div></div>';
+        html += '<div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text-muted);">';
+        html += '💡 提示：保存后默认未发布，需在活动列表中点"发布"才会在前端展示。';
+        html += '</div>';
         html += '</div>';
         html += '<div class="modal-btns">';
         html += '<button class="btn btn-ghost" onclick="closeProGiftEditor()">取消</button>';
@@ -4752,13 +4867,35 @@ async function initAdminClient() {
         var duration_days = parseInt(document.getElementById('pgDaysInp').value) || 30;
         var claim_expire_val = document.getElementById('pgExpireInp').value;
         var claim_expire_at = claim_expire_val ? new Date(claim_expire_val).toISOString() : '';
+        var start_val = document.getElementById('pgStartInp').value;
+        var end_val = document.getElementById('pgEndInp').value;
+        var start_at = start_val ? new Date(start_val).toISOString() : '';
+        var end_at = end_val ? new Date(end_val).toISOString() : '';
+        var claim_limit = parseInt(document.getElementById('pgLimitInp').value) || 0;
+        var allowed_raw = document.getElementById('pgAllowedInp').value || '';
+        var allowed_users = allowed_raw.split(',').map(function(s) { return String(s || '').trim(); }).filter(Boolean);
+        var exclusive = document.getElementById('pgExclusiveInp').checked;
         var features = [];
         ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'].forEach(function(f) {
             var cb = document.getElementById('pgFeat_' + f);
             if (cb && cb.checked) features.push(f);
         });
         if (!title) { showToast('请输入活动标题', 'error'); return; }
-        var body = { title: title, description: description, features: features, duration_days: duration_days, claim_expire_at: claim_expire_at };
+        if (duration_days < 1 || duration_days > 3650) { showToast('Pro 有效天数需在 1-3650 之间', 'error'); return; }
+        if (claim_limit < 0) { showToast('限量名额不能为负数', 'error'); return; }
+        if (exclusive && !allowed_users.length) { showToast('专属活动必须填写限定用户名单', 'error'); return; }
+        var body = {
+            title: title,
+            description: description,
+            features: features,
+            duration_days: duration_days,
+            claim_expire_at: claim_expire_at,
+            start_at: start_at,
+            end_at: end_at,
+            claim_limit: claim_limit,
+            allowed_users: allowed_users,
+            exclusive: exclusive
+        };
         if (giftId) body.id = giftId;
         try {
             await apiCall('POST', '/admin/pro-gifts/save', body);
@@ -4788,63 +4925,6 @@ async function initAdminClient() {
             renderProGiftSubTab();
         } catch(e) {
             showToast('删除失败: ' + e.message, 'error');
-        }
-    };
-
-    // 手动赠送给用户弹窗
-    window.openManualGiftDialog = function() {
-        var html = '<div class="modal-overlay" id="manualGiftOverlay" onclick="closeManualGiftDialog()" style="position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center;">';
-        html += '<div class="modal-content" onclick="event.stopPropagation()" style="background:var(--bg);border-radius:12px;padding:24px;max-width:480px;width:90%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,0.3);">';
-        html += '<h3 style="margin:0 0 16px;">🎁 手动赠送给用户</h3>';
-        html += '<div class="form-group"><label>用户名</label><input id="mgUserInp" placeholder="输入要赠送的用户名" /></div>';
-        html += '<div class="form-group"><label>有效期（天）</label><input id="mgDaysInp" type="number" min="1" max="3650" value="30" /></div>';
-        html += '<div class="form-group"><label>赠送原因（可选）</label><input id="mgReasonInp" placeholder="例：优秀内容贡献奖励" /></div>';
-        html += '<div class="form-group"><label>Pro 权限</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">';
-        var allFeatures = ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'];
-        var featureLabels = { 'vip_badge': 'VIP标识', 'photo_wall_unlimited': '不限照片墙', 'large_file_upload': '大文件上传', 'pin_post': '帖子置顶', 'custom_theme': 'Pro主题', 'profile_effects': '头像光效' };
-        allFeatures.forEach(function(f) {
-            html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="mgFeat_' + f + '" checked /> ' + (featureLabels[f] || f) + '</label>';
-        });
-        html += '</div></div>';
-        html += '<div style="display:flex;gap:8px;margin-top:16px;">';
-        html += '<button class="btn-primary" onclick="manualGiftSubmit()">🎁 确认赠送</button>';
-        html += '<button class="btn" onclick="closeManualGiftDialog()">取消</button></div>';
-        html += '</div></div>';
-        var existing = document.getElementById('manualGiftOverlay');
-        if (existing) existing.remove();
-        document.body.insertAdjacentHTML('beforeend', html);
-    };
-
-    window.closeManualGiftDialog = function() {
-        var el = document.getElementById('manualGiftOverlay');
-        if (el) el.remove();
-    };
-
-    window.manualGiftSubmit = async function() {
-        var userName = document.getElementById('mgUserInp').value.trim();
-        var days = parseInt(document.getElementById('mgDaysInp').value) || 30;
-        var reason = document.getElementById('mgReasonInp').value.trim();
-        if (!userName) { showToast('请输入用户名', 'error'); return; }
-        var features = [];
-        ['vip_badge', 'photo_wall_unlimited', 'large_file_upload', 'pin_post', 'custom_theme', 'profile_effects'].forEach(function(f) {
-            var cb = document.getElementById('mgFeat_' + f);
-            if (cb && cb.checked) features.push(f);
-        });
-        try {
-            var data = await apiCall('POST', '/admin/pro-gifts/manual-gift', {
-                user_name: userName,
-                duration_days: days,
-                features: features,
-                reason: reason || '管理员手动赠送'
-            });
-            if (data.ok) {
-                showToast('🎉 已成功赠送给 ' + userName + '，有效期至 ' + new Date(data.expire_at).toLocaleDateString());
-                closeManualGiftDialog();
-            } else {
-                showToast(data.error || '赠送失败', 'error');
-            }
-        } catch(e) {
-            showToast('赠送失败: ' + e.message, 'error');
         }
     };
 })();
