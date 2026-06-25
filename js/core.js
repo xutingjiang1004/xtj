@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -560,8 +560,9 @@ const ADMIN_NAME = "xxz";
                     }
                 }
             } else {
-                if (badge) { badge.textContent = '开通'; badge.className = 'xtj-vip-card-badge'; }
-                if (sub) sub.textContent = '¥3/月 · 解锁更多特权';
+                // 旧版"¥3/月"已彻底去除：不显示价格，引导用户进入弹窗查看活动
+                if (badge) { badge.textContent = '查看活动'; badge.className = 'xtj-vip-card-badge'; }
+                if (sub) sub.textContent = '活动由管理员限时发布';
             }
             // 刷新帖子列表以显示VIP徽章
             if (typeof refreshFeedDisplay === 'function') refreshFeedDisplay();
@@ -573,57 +574,54 @@ const ADMIN_NAME = "xxz";
             updateVipModalUI();
         }
 
+        // 兼容保留：vipPayBtn 已被移除，这里只安全检查一下，不报错
         function updateVipModalUI() {
-            var btn = document.getElementById('vipPayBtn');
-            var btnText = document.getElementById('vipPayBtnText');
-            var cancelArea = document.getElementById('vipCancelArea');
-            if (!btn) return;
-            if (__vipStatus.is_vip) {
-                btnText.textContent = '✅ 已是VIP会员';
-                btn.disabled = true;
-                if (cancelArea) cancelArea.style.display = '';
-            } else {
-                btnText.textContent = '立即开通 ¥3';
-                btn.disabled = false;
-                if (cancelArea) cancelArea.style.display = 'none';
-            }
+            // 旧版的"立即开通 ¥3"按钮和"已是VIP会员"状态卡已彻底移除
+            // 新版 Pro 弹窗只显示当前 Pro 状态 + Pro 活动列表
+            renderVipStatusBanner();
             loadProGiftCampaigns();
         }
 
+        // 弹窗顶部轻量 Pro 状态条（不显示任何价格/套餐）
+        function renderVipStatusBanner() {
+            var banner = document.getElementById('vipStatusBanner');
+            if (!banner) return;
+            var info = __vipStatus && __vipStatus.vip_info;
+            if (__vipStatus && __vipStatus.is_vip) {
+                var expireText = '';
+                if (info && info.expire_at) {
+                    try {
+                        expireText = new Date(info.expire_at).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+                    } catch (e) {
+                        expireText = String(info.expire_at);
+                    }
+                }
+                banner.style.display = '';
+                banner.classList.add('is-pro');
+                banner.innerHTML = [
+                    '<span class="vip-status-banner-icon">👑</span>',
+                    '<span class="vip-status-banner-text">',
+                    '  当前是 Pro 会员',
+                    expireText ? ' · 有效至 ' + escapeHtml(expireText) : '',
+                    '</span>'
+                ].join('');
+            } else {
+                banner.style.display = 'none';
+                banner.classList.remove('is-pro');
+                banner.innerHTML = '';
+            }
+        }
+
+        // 兼容保留 handleVipPurchase 函数名（被删除按钮的旧 onclick 引用）
+        // 新规则：前端禁止直接开通 Pro，必须由后端管理发布的活动领取
         async function handleVipPurchase() {
             if (!currentUser) { showToast('请先登录'); return; }
-            if (__vipStatus.is_vip) { showToast('您已是VIP会员'); closeModal('vipModal'); return; }
-
-            var btn = document.getElementById('vipPayBtn');
-            var btnText = document.getElementById('vipPayBtnText');
-            if (btn) { btn.classList.add('loading'); btn.disabled = true; btnText.textContent = '激活中...'; }
-
-            // 直接前端激活Pro，所有用户免费开通
-            if (typeof window.__xtjDirectPurchasePro === 'function') {
-                try {
-                    var pResult = await window.__xtjDirectPurchasePro(currentUser);
-                    if (pResult.ok) {
-                        __vipStatus.is_vip = true;
-                        __vipStatus.vip_info = pResult;
-                        updateVipUI();
-                        updateVipModalUI();
-                        closeModal('vipModal');
-                        if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通'; }
-                        setTimeout(function() {
-                            if (typeof window.__xtjShowProCelebration === 'function') {
-                                window.__xtjShowProCelebration(pResult);
-                            }
-                            if (typeof window.__xtjApplyProTheme === 'function') {
-                                window.__xtjApplyProTheme(true);
-                            }
-                        }, 300);
-                        return;
-                    }
-                } catch(e) { console.error('[VIP] 激活失败:', e); }
+            if (__vipStatus && __vipStatus.is_vip) {
+                showToast('您已是 Pro 会员');
+                return;
             }
-
-            showToast('激活失败，请重试');
-            if (btn) { btn.classList.remove('loading'); btn.disabled = false; btnText.textContent = '立即开通'; }
+            // 前端已禁用直接开通入口；引导用户到下方活动区领取
+            showToast('Pro 会员由管理员限时发布，请等待活动开放后领取');
         }
 
         // 加载可领取的 Pro 赠送活动
@@ -631,15 +629,44 @@ const ADMIN_NAME = "xxz";
             var section = document.getElementById('proGiftSection');
             var list = document.getElementById('proGiftList');
             if (!section || !list || !currentUser) return;
+
+            // 渲染空状态（无活动时显示）
+            function renderEmpty(msg, sub) {
+                section.style.display = '';
+                list.innerHTML = [
+                    '<div class="pro-gift-empty">',
+                    '  <div class="pro-gift-empty-icon">🎁</div>',
+                    '  <div class="pro-gift-empty-text">' + escapeHtml(msg) + '</div>',
+                    sub ? '<div class="pro-gift-empty-sub">' + escapeHtml(sub) + '</div>' : '',
+                    '</div>'
+                ].join('');
+            }
+
             try {
-                var resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), { signal: AbortSignal.timeout(8000) });
+                var headers = {};
+                if (typeof getUserToken === 'function') {
+                    var tok = getUserToken();
+                    if (tok) headers['Authorization'] = 'Bearer ' + tok;
+                }
+                var resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), {
+                    headers: headers,
+                    signal: AbortSignal.timeout(8000)
+                });
                 var data = await resp.json();
-                var gifts = data.gifts || [];
-                if (!gifts.length) { section.style.display = 'none'; return; }
-                section.style.display = 'block';
+                if (data && data.error) {
+                    // 后端报错：仍然显示空状态，避免弹窗空白
+                    renderEmpty('暂无可领取的 Pro 活动', '活动由管理员限时发布，请等待下一次开放。');
+                    return;
+                }
+                var gifts = (data && data.gifts) || [];
+                if (!gifts.length) {
+                    renderEmpty('暂无可领取的 Pro 活动', '活动由管理员限时发布，请等待下一次开放。');
+                    return;
+                }
+                section.style.display = '';
                 list.innerHTML = gifts.map(function(g) {
                     var cardClass = 'pro-gift-card' + (g.already_claimed ? ' claimed' : '');
-                    var durationText = g.duration_days + ' 天 Pro';
+                    var durationText = (g.duration_days || 30) + ' 天 Pro';
                     if (g.claim_expire_at) {
                         var expireDate = new Date(g.claim_expire_at);
                         if (expireDate > new Date()) {
@@ -647,31 +674,73 @@ const ADMIN_NAME = "xxz";
                             durationText += ' · 还剩 ' + daysLeft + ' 天';
                         }
                     }
-                    var card = '<div class="' + cardClass + '" data-gift-id="' + g.id + '">';
+                    // 限定/专属活动标识
+                    var exclusiveTag = (g.exclusive || g.allowed_users || g.exclusive_users || g.target_users)
+                        ? '<span class="pro-gift-card-tag">专属</span>' : '';
+                    // 剩余名额
+                    var remainText = '';
+                    if (typeof g.remaining_count === 'number' && typeof g.claim_limit === 'number') {
+                        remainText = '<span class="pro-gift-card-remain">剩余 ' + g.remaining_count + ' / ' + g.claim_limit + ' 名额</span>';
+                    } else if (typeof g.remaining_count === 'number') {
+                        remainText = '<span class="pro-gift-card-remain">剩余 ' + g.remaining_count + ' 名额</span>';
+                    }
+                    // 截止时间
+                    var expireText = '';
+                    if (g.claim_expire_at) {
+                        try {
+                            expireText = new Date(g.claim_expire_at).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+                        } catch (e) { expireText = String(g.claim_expire_at); }
+                    }
+
+                    // 按钮状态：未领取 / 已领取 / 名额满 / 已结束
+                    var buttonHtml;
+                    if (g.already_claimed) {
+                        buttonHtml = '<div class="pro-gift-claimed-badge">' +
+                            '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>已领取</div>';
+                    } else if (g.full || g.remaining_count === 0) {
+                        buttonHtml = '<div class="pro-gift-claimed-badge disabled">名额已满</div>';
+                    } else if (g.expired) {
+                        buttonHtml = '<div class="pro-gift-claimed-badge disabled">已结束</div>';
+                    } else {
+                        buttonHtml = '<button class="pro-gift-claim-btn" data-gift-id="' + escapeHtml(g.id) + '" onclick="claimProGift(\'' + escapeHtml(g.id) + '\')">领取 Pro</button>';
+                    }
+
+                    var card = '<div class="' + cardClass + '" data-gift-id="' + escapeHtml(g.id) + '">';
                     card += '<div class="pro-gift-card-main">';
                     card += '<div class="pro-gift-card-info">';
-                    card += '<div class="pro-gift-card-title">' + escapeHtml(g.title) + '</div>';
+                    card += '<div class="pro-gift-card-title">' + exclusiveTag + escapeHtml(g.title || '') + '</div>';
                     if (g.description) {
                         card += '<div class="pro-gift-card-desc">' + escapeHtml(g.description) + '</div>';
                     }
                     card += '<div class="pro-gift-card-meta">';
                     card += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-                    card += durationText;
+                    card += '<span>' + durationText + '</span>';
+                    if (remainText) card += '<span class="pro-gift-card-dot">·</span>' + remainText;
+                    if (expireText) card += '<span class="pro-gift-card-dot">·</span><span>截止 ' + escapeHtml(expireText) + '</span>';
                     card += '</div>';
-                    card += '</div>';
-                    if (g.already_claimed) {
-                        card += '<div class="pro-gift-claimed-badge">';
-                        card += '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
-                        card += '已领取';
-                        card += '</div>';
-                    } else {
-                        card += '<button class="pro-gift-claim-btn" data-gift-id="' + g.id + '" onclick="claimProGift(\'' + g.id + '\')">免费领取</button>';
+                    // 功能权益（来自后端活动 features）
+                    if (Array.isArray(g.features) && g.features.length) {
+                        var featureMap = {
+                            'vip_badge': '👑 身份标识',
+                            'photo_wall_unlimited': '📸 照片墙无限',
+                            'large_file_upload': '⬆️ 大文件上传',
+                            'pin_post': '📌 帖子置顶',
+                            'custom_theme': '🎨 专属主题',
+                            'profile_effects': '✨ 头像特效'
+                        };
+                        var featNames = g.features.map(function(f) { return featureMap[f] || f; });
+                        card += '<div class="pro-gift-card-features">' + featNames.map(function(n) {
+                            return '<span class="pro-gift-card-feature">' + escapeHtml(n) + '</span>';
+                        }).join('') + '</div>';
                     }
+                    card += '</div>';
+                    card += buttonHtml;
                     card += '</div></div>';
                     return card;
                 }).join('');
             } catch(e) {
-                section.style.display = 'none';
+                // 网络错误时也显示空状态，避免弹窗完全空白
+                renderEmpty('暂无可领取的 Pro 活动', '活动由管理员限时发布，请等待下一次开放。');
             }
         }
 
@@ -685,9 +754,14 @@ const ADMIN_NAME = "xxz";
                 btn.textContent = '领取中...';
             }
             try {
+                var claimHeaders = { 'Content-Type': 'application/json' };
+                if (typeof getUserToken === 'function') {
+                    var tok2 = getUserToken();
+                    if (tok2) claimHeaders['Authorization'] = 'Bearer ' + tok2;
+                }
                 var resp = await fetch(API_BASE + '/api/pro-gifts/claim', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: claimHeaders,
                     body: JSON.stringify({ user_name: currentUser, gift_id: giftId })
                 });
                 var data = await resp.json();
