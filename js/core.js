@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -8145,6 +8145,12 @@ function renderProfileActivityList(kind) {
                 document.getElementById('dockChatListView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'none';
                 document.getElementById('dockChatTitle').textContent = '消息';
+                // 恢复标准聊天输入（如果有 AI 聊天）
+                var chatInputArea = document.querySelector('.chat-input-area');
+                if (chatInputArea) chatInputArea.style.display = '';
+                var chatMessages = document.getElementById('dockChatMessages');
+                if (chatMessages) chatMessages.classList.remove('ai-chat-container');
+                if (typeof window.__xtjCloseAiChat === 'function') window.__xtjCloseAiChat();
                 window.dockChatListCacheTime = 0;
                 loadDockChatList();
                 startDMPolling(300000);
@@ -8242,6 +8248,7 @@ function renderProfileActivityList(kind) {
                         el.innerHTML = '<div class="chat-empty"><div class="ce-icon">💬</div><div>暂无消息</div><div style="font-size:12px;">在帖子页面点击头像就可以开始聊天</div></div>';
                         setUnreadBadgeCount(0);
                         window.dockChatListCacheTime = Date.now();
+                        renderDockChatAiEntry(el);
                         return;
                     }
                     const convMap = {};
@@ -8260,6 +8267,7 @@ function renderProfileActivityList(kind) {
                     }, 0));
                     renderDockChatConversationList(el, convs);
                     window.dockChatListCacheTime = Date.now();
+                    renderDockChatAiEntry(el);
                     hydrateDockChatAvatars(convs.map(function(c) { return c.other_user; }), function(changed) {
                         var currentList = document.getElementById('dockChatList');
                         if (!currentList) return;
@@ -8432,6 +8440,33 @@ function renderProfileActivityList(kind) {
                 el.replaceChildren(fragment);
                 _dockChatListRenderSignature = nextListSignature;
                 return nextListSignature;
+            }
+
+            // 在聊天列表渲染固定的"徐旭泽的小猫"AI 入口
+            function renderDockChatAiEntry(el) {
+                if (!el) return;
+                var existing = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
+                if (existing) {
+                    el.insertBefore(existing, el.firstChild);
+                    return;
+                }
+                var html = [
+                    '<div class="chat-list-item" data-chat-user="__ai_agent__" role="button" tabindex="0" style="--xtj-enter-delay:0ms">',
+                    '<div class="cli-avatar">🐱</div>',
+                    '<div class="cli-info"><div class="cli-name">徐旭泽的小猫</div><div class="cli-preview">和小猫聊聊天</div></div>',
+                    '<div class="cli-right"><span class="cli-time">AI</span></div>',
+                    '</div>'
+                ].join('');
+                var template = document.createElement('template');
+                template.innerHTML = html.trim();
+                var row = template.content.firstElementChild;
+                row.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    if (typeof window.__xtjOpenAiChat === 'function') {
+                        window.__xtjOpenAiChat();
+                    }
+                });
+                el.insertBefore(row, el.firstChild);
             }
 
             function applyDockChatConversationPreview(otherUser, message, unreadCount) {
