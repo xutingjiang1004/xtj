@@ -8141,16 +8141,18 @@ function renderProfileActivityList(kind) {
             function dockChatGoBack() {
                 dockChatActiveUser = null;
                 _dockChatLoadSeq += 1;
+                // 如果当前处于 AI 聊天状态，优先关闭 AI 并恢复标准 UI
+                if (window.__xtjAiChatActive) {
+                    if (typeof window.__xtjCloseAiChat === 'function') window.__xtjCloseAiChat();
+                    var chatInputArea2 = document.querySelector('.chat-input-area');
+                    if (chatInputArea2) chatInputArea2.style.display = '';
+                    var chatMessages2 = document.getElementById('dockChatMessages');
+                    if (chatMessages2) chatMessages2.classList.remove('ai-chat-container');
+                }
                 document.getElementById('dockChatDetailView').classList.add('hidden');
                 document.getElementById('dockChatListView').classList.remove('hidden');
                 document.getElementById('dockChatBackBtn').style.display = 'none';
                 document.getElementById('dockChatTitle').textContent = '消息';
-                // 恢复标准聊天输入（如果有 AI 聊天）
-                var chatInputArea = document.querySelector('.chat-input-area');
-                if (chatInputArea) chatInputArea.style.display = '';
-                var chatMessages = document.getElementById('dockChatMessages');
-                if (chatMessages) chatMessages.classList.remove('ai-chat-container');
-                if (typeof window.__xtjCloseAiChat === 'function') window.__xtjCloseAiChat();
                 window.dockChatListCacheTime = 0;
                 loadDockChatList();
                 startDMPolling(300000);
@@ -8209,6 +8211,7 @@ function renderProfileActivityList(kind) {
                 if (!window.currentUser) {
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">🔒</div><div>登录后可查看消息</div><div style="font-size:12px;">登录后即可查看和发送私信</div></div>';
                     setUnreadBadgeCount(0);
+                    renderDockChatAiEntry(el);
                     return;
                 }
                 if (!dockChatActiveUser) {
@@ -8273,12 +8276,14 @@ function renderProfileActivityList(kind) {
                         if (!currentList) return;
                         if (changed) {
                             renderDockChatConversationList(currentList, convs);
+                            renderDockChatAiEntry(currentList);
                         }
                         patchDockChatConversationAvatars(currentList);
                     });
                 } catch(e) {
                     window.dockChatListCacheTime = 0;
                     el.innerHTML = '<div class="chat-empty"><div class="ce-icon">!</div><div>消息加载失败，请重试</div></div>';
+                    renderDockChatAiEntry(el);
                 }
             }
 
@@ -8443,11 +8448,12 @@ function renderProfileActivityList(kind) {
             }
 
             // 在聊天列表渲染固定的"徐旭泽的小猫"AI 入口
+            // ★ 始终插入到列表最顶部
             function renderDockChatAiEntry(el) {
                 if (!el) return;
                 var existing = el.querySelector('.chat-list-item[data-chat-user="__ai_agent__"]');
                 if (existing) {
-                    el.insertBefore(existing, el.firstChild);
+                    if (el.firstChild !== existing) el.insertBefore(existing, el.firstChild);
                     return;
                 }
                 var html = [

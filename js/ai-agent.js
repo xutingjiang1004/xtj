@@ -4,7 +4,7 @@
  * - 普通用户不能修改 AI 名字/性格/提示词
  * - 数据：/api/agent/config (GET) + /api/agent/chat (POST) + /api/agent/chat/history (GET)
  * - 鉴权：window.ensureUserToken() 获取 Bearer token
- * - 不出现：宠物等级 / 亲密度 / 心情 / 用户自定义 profile
+ * - 不出现：用户自定义 profile
  */
 (function() {
     'use strict';
@@ -20,8 +20,18 @@
         messages: [],
         loading: false,
         sending: false,
+        thinkingMode: localStorage.getItem('ai_thinking_mode') || 'off',
         remaining: { hour: 10, day: 50 }
     };
+
+    var THINKING_LEVELS = [
+        { value: 'off', label: '关闭', icon: '' },
+        { value: 'low', label: '低', icon: '⚡' },
+        { value: 'medium', label: '中', icon: '🧠' },
+        { value: 'high', label: '高', icon: '🔥' }
+    ];
+
+    var DRAFT_KEY_PREFIX = 'ai_draft_';
 
     // ===================== 工具函数 =====================
     function $(sel) { return document.querySelector(sel); }
@@ -99,17 +109,19 @@
     }
 
     async function getAuthHeaders() {
+        var token = '';
         try {
             if (typeof window.ensureUserToken === 'function') {
-                var token = await window.ensureUserToken();
-                if (token) {
-                    return {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + token
-                    };
-                }
+                token = await window.ensureUserToken();
             }
         } catch (e) { /* 静默 */ }
+        if (token) {
+            return {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            };
+        }
+        // 没有 token 时仍尝试发送请求（后端 401 会由调用侧统一处理）
         return { 'Content-Type': 'application/json' };
     }
 
@@ -118,6 +130,7 @@
         var resp = await fetch(API_BASE + '/config', { method: 'GET', headers: headers });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
+        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
         if (!resp.ok) throw new Error(data && data.error || '获取配置失败');
         return data;
     }
@@ -128,6 +141,7 @@
         var resp = await fetch(API_BASE + '/chat/history?limit=' + l, { method: 'GET', headers: headers });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
+        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
         if (!resp.ok) throw new Error(data && data.error || '获取历史失败');
         return data;
     }
@@ -137,11 +151,25 @@
         var resp = await fetch(API_BASE + '/chat', {
             method: 'POST',
             headers: headers,
-            body: JSON.stringify({ message: message })
+            body: JSON.stringify({ message: message, thinking_mode: state.thinkingMode })
         });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
-        if (!resp.ok) throw new Error(data && data.error || '聊天失败，请稍后再试');
+        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
+        if (!resp.ok) throw new Error(data && data.error || 'AI 没有回应，请稍后再试');
+        return data;
+    }
+
+    async function apiClearChat() {
+        var headers = await getAuthHeaders();
+        var resp = await fetch(API_BASE + '/chat', {
+            method: 'DELETE',
+            headers: headers
+        });
+        var data = null;
+        try { data = await resp.json(); } catch (e) { data = null; }
+        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
+        if (!resp.ok) throw new Error(data && data.error || '清除失败');
         return data;
     }
 
@@ -160,6 +188,52 @@
             el('span', { class: 'ai-chat-topbar-name', text: name }),
             el('span', { class: 'ai-chat-topbar-desc', text: desc })
         ]);
+        // 思考模式选择器
+        function getThinkingLabel(lvl) {
+            for (var k = 0; k < THINKING_LEVELS.length; k++) {
+                if (THINKING_LEVELS[k].value === lvl) return THINKING_LEVELS[k];
+            }
+            return THINKING_LEVELS[0];
+        }
+        var curLevel = getThinkingLabel(state.thinkingMode);
+        var thinkBtn = el('button', {
+            type: 'button',
+            style: 'margin-left:auto;flex-shrink:0;background:none;border:1px solid ' + (state.thinkingMode !== 'off' ? 'rgba(46,148,101,0.7)' : 'rgba(140,196,158,0.28)') + ';border-radius:14px;padding:2px 10px;font-size:11px;color:' + (state.thinkingMode !== 'off' ? 'rgba(46,148,101,0.96)' : 'var(--text-muted,#6b6c7a)') + ';cursor:pointer;white-space:nowrap;',
+            text: (curLevel.icon ? curLevel.icon + ' ' : '') + curLevel.label
+        });
+        thinkBtn.addEventListener('click', function() {
+            var idx = 0;
+            for (var k = 0; k < THINKING_LEVELS.length; k++) {
+                if (THINKING_LEVELS[k].value === state.thinkingMode) { idx = k; break; }
+            }
+            var next = THINKING_LEVELS[(idx + 1) % THINKING_LEVELS.length];
+            state.thinkingMode = next.value;
+            localStorage.setItem('ai_thinking_mode', next.value);
+            thinkBtn.style.borderColor = next.value !== 'off' ? 'rgba(46,148,101,0.7)' : 'rgba(140,196,158,0.28)';
+            thinkBtn.style.color = next.value !== 'off' ? 'rgba(46,148,101,0.96)' : 'var(--text-muted,#6b6c7a)';
+            thinkBtn.textContent = (next.icon ? next.icon + ' ' : '') + next.label;
+        });
+        topBar.appendChild(thinkBtn);
+
+        // 新对话按钮
+        var newBtn = el('button', {
+            type: 'button',
+            style: 'margin-left:4px;flex-shrink:0;background:none;border:1px solid rgba(140,196,158,0.28);border-radius:14px;padding:2px 10px;font-size:11px;color:var(--text-muted,#6b6c7a);cursor:pointer;white-space:nowrap;',
+            text: '新对话'
+        });
+        newBtn.addEventListener('click', function() {
+            if (state.messages.length === 0) { notify('已经是新对话了'); return; }
+            if (!confirm('清空当前对话，重新开始？\n（聊天记录会保存在历史中，新对话不再带旧上下文）')) return;
+            state.messages = [];
+            var messagesEl = document.getElementById('aiChatMessagesArea');
+            if (messagesEl) {
+                messagesEl.innerHTML = '';
+                showEmptyState(messagesEl);
+            }
+            apiClearChat().catch(function() {});
+            notify('已开始新对话');
+        });
+        topBar.appendChild(newBtn);
 
         // 消息区
         var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
@@ -191,10 +265,18 @@
                 handleSendMessage(input, sendBtn, messagesEl, foot);
             }
         });
+        // 输入缓存：每次打字保存草稿到 localStorage
         input.addEventListener('input', function() {
             input.style.height = 'auto';
             input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+            try { localStorage.setItem(DRAFT_KEY_PREFIX + 'default', input.value); } catch(e) {}
         });
+
+        // 恢复之前缓存的草稿
+        try {
+            var savedDraft = localStorage.getItem(DRAFT_KEY_PREFIX + 'default');
+            if (savedDraft) { input.value = savedDraft; input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; }
+        } catch(e) {}
 
         inputBar.appendChild(input);
         inputBar.appendChild(sendBtn);
@@ -276,6 +358,7 @@
         btn.textContent = '发送中…';
         input.value = '';
         input.style.height = 'auto';
+        try { localStorage.removeItem(DRAFT_KEY_PREFIX + 'default'); } catch(e) {}
 
         var empty = messagesEl.querySelector('.ai-chat-empty');
         if (empty) empty.remove();
@@ -318,38 +401,34 @@
     }
 
     // ===================== 入口：打开/关闭 AI 聊天 =====================
+    window.__xtjAiChatActive = false;
+
     // 在聊天页会话列表中点击"徐旭泽的小猫"时调用
     window.__xtjOpenAiChat = async function() {
-        // 1. 检查登录
+        // 1. 检查登录（只检查 currentUser 是否存在，token 由后续 API 调用处理）
         if (!window.currentUser) {
             notify('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
             return;
         }
-        try {
-            if (typeof window.ensureUserToken === 'function') {
-                var token = await window.ensureUserToken();
-                if (!token) { notify('登录已过期，请重新登录'); return; }
-            }
-        } catch (e) {
-            notify('登录已过期，请重新登录');
-            return;
-        }
 
-        // 2. 切换到聊天 tab，打开详情视图
+        // 2. 加载配置（先异步获取再切换 tab，避免切换后仍有加载延迟）
+        try {
+            var cfgData = await apiGetConfig();
+            if (cfgData && cfgData.config) state.config = cfgData.config;
+        } catch (e) { /* 使用默认值 */ }
+
+        // 3. 切换到聊天 tab
         if (typeof window.switchDockTab === 'function') {
             window.switchDockTab('chat', true);
         }
 
-        // 3. 先加载配置
-        try {
-            var data = await apiGetConfig();
-            if (data && data.config) state.config = data.config;
-        } catch (e) { /* 使用默认值 */ }
-
         var name = state.config ? state.config.name : '徐旭泽的小猫';
         var avatar = state.config ? (state.config.avatar || '🐱') : '🐱';
 
-        // 4. 修改聊天页标题和 UI
+        // 4. 标记为 AI 聊天活跃
+        window.__xtjAiChatActive = true;
+
+        // 5. 修改聊天页标题和 UI
         var titleEl = document.getElementById('dockChatTitle');
         var backBtn = document.getElementById('dockChatBackBtn');
         var listView = document.getElementById('dockChatListView');
@@ -361,11 +440,11 @@
         if (listView) listView.classList.add('hidden');
         if (detailView) detailView.classList.remove('hidden');
 
-        // 5. 隐藏标准聊天输入（AI 聊天使用独立 UI）
+        // 6. 隐藏标准聊天输入（AI 聊天使用独立 UI）
         var chatInputArea = document.querySelector('.chat-input-area');
         if (chatInputArea) chatInputArea.style.display = 'none';
 
-        // 6. 在消息区渲染 AI 聊天界面
+        // 7. 在消息区渲染 AI 聊天界面
         if (messagesEl) {
             messagesEl.innerHTML = '';
             messagesEl.classList.add('ai-chat-container');
@@ -379,6 +458,8 @@
     };
 
     window.__xtjCloseAiChat = function() {
+        if (!window.__xtjAiChatActive) return;
+        window.__xtjAiChatActive = false;
         state.messages = [];
         var messagesEl = document.getElementById('dockChatMessages');
         if (messagesEl) {
