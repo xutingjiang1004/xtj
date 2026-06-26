@@ -1,5 +1,24 @@
 /* ===================== AI 聊天样式（徐旭泽的小猫）===================== */
 
+/* ===== 关键：接管 dock 容器时强制重置 ===== */
+/* 防止 dock 自身的 .chat-messages / .chat-view 规则覆盖我们的样式 */
+.ai-chat-container,
+.ai-chat-container.chat-messages,
+.ai-chat-container.chat-view,
+#dockChatMessages.ai-chat-container,
+#dockChatDetailView .ai-chat-container {
+  display: flex !important;
+  flex-direction: column !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  position: relative !important;
+  z-index: 50 !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+}
+
 /* ===== 入口按钮（在聊天页会话列表置顶） ===== */
 .chat-list-item[data-chat-user="__ai_agent__"] {
   cursor: pointer;
@@ -24,15 +43,7 @@
   color: rgba(46,148,101,0.80) !important;
 }
 
-/* ===== AI 聊天容器 ===== */
-.ai-chat-container {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  position: relative;
-  z-index: 1;
-}
+/* ===== AI 聊天容器（具体规则在顶部"接管 dock 容器"section） ===== */
 
 /* ===== 头部 ===== */
 .ai-chat-header {
@@ -46,8 +57,12 @@
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   position: relative;
-  z-index: 2;
+  z-index: 55;
   min-height: 48px;
+  pointer-events: auto;
+}
+.ai-chat-header * {
+  pointer-events: auto;
 }
 .ai-chat-back {
   flex: 0 0 auto;
@@ -64,6 +79,9 @@
   justify-content: center;
   color: var(--text, #1d1d24);
   padding: 0;
+  pointer-events: auto;
+  z-index: 60;
+  position: relative;
 }
 .ai-chat-back:hover {
   background: rgba(46,148,101,0.10);
@@ -109,6 +127,9 @@
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
+  pointer-events: auto;
+  z-index: 60;
+  position: relative;
 }
 .ai-chat-new-btn:hover {
   border-color: rgba(46,148,101,0.50);
@@ -126,6 +147,9 @@
   white-space: nowrap;
   flex-shrink: 0;
   transition: all 0.16s ease;
+  pointer-events: auto;
+  z-index: 60;
+  position: relative;
 }
 .ai-chat-think-btn.active {
   border-color: rgba(46,148,101,0.70);
@@ -255,8 +279,9 @@
   border-top: 1px solid var(--border, rgba(140,196,158,0.20));
   background: rgba(255,255,255,0.6);
   position: relative;
-  z-index: 2;
+  z-index: 55;
   align-items: flex-end;
+  pointer-events: auto;
 }
 .ai-chat-input {
   flex: 1 1 auto;
@@ -278,6 +303,7 @@
   user-select: text;
   -webkit-user-select: text;
   position: relative;
+  z-index: 60;
   overflow-y: auto;
 }
 .ai-chat-input:focus {
@@ -307,6 +333,7 @@
   transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
   position: relative;
   pointer-events: auto;
+  z-index: 60;
 }
 .ai-chat-send:hover {
   transform: translateY(-1px);
