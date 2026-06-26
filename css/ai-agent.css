@@ -83,18 +83,8 @@
   30%           { transform: translateY(-3px); opacity: 1; }
 }
 
-/* ===== 聊天输入区 ===== */
-.ai-chat-input-bar {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 8px;
-  padding: 10px 12px 12px;
-  border-top: 1px solid rgba(140, 196, 158, 0.22);
-  background: rgba(255, 255, 255, 0.6);
-  align-items: flex-end;
-}
+/* ===== 聊天输入框 ===== */
 .ai-chat-input {
-  flex: 1 1 auto;
   min-height: 40px;
   max-height: 120px;
   padding: 10px 14px;
@@ -266,10 +256,6 @@
 }
 [data-theme="dark"] .ai-chat-empty-title {
   color: #e8e8f0;
-}
-[data-theme="dark"] .ai-chat-input-bar,
-[data-theme="dark"] .ai-chat-foot {
-  background: rgba(30, 30, 45, 0.55);
 }
 [data-theme="dark"] .ai-chat-topbar {
   border-color: rgba(255, 255, 255, 0.10);
