@@ -198,6 +198,44 @@ const ADMIN_NAME = "xxz";
                 return '';
             };
 
+            /**
+             * ★ 新增：统一鉴权状态检查（AI 模块用）
+             *  - 仅当 currentUser + 真实 token 都存在时，返回 ok=true
+             *  - 没 token 但有 pw_hash 时，主动用 refreshUserToken(true) 换新
+             *  - 都没了返回 ok=false（调用方应提示重新登录）
+             * 返回 { ok, reason, token, user_name }
+             *   - reason: 'ok' | 'no_user' | 'missing_auth_credentials' | 'refresh_failed'
+             */
+            window.ensureRealUserAuth = async function() {
+                try {
+                    var userName = '';
+                    try {
+                        if (typeof currentUser === 'string') userName = currentUser;
+                        else if (currentUser && currentUser.user_name) userName = currentUser.user_name;
+                    } catch (e) { userName = ''; }
+                    if (!userName) {
+                        try { userName = localStorage.getItem('xtj_user') || ''; } catch (e) {}
+                    }
+                    userName = String(userName || '').trim();
+                    if (!userName) return { ok: false, reason: 'no_user', token: '', user_name: '' };
+
+                    var token = '';
+                    try { token = sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token') || ''; } catch (e) { token = ''; }
+                    if (token) return { ok: true, reason: 'ok', token: token, user_name: userName };
+
+                    // 没 token，看是否有 password_hash
+                    var pwHash = '';
+                    try { pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { pwHash = ''; }
+                    if (pwHash && typeof window.refreshUserToken === 'function') {
+                        var newToken = await window.refreshUserToken(true);
+                        if (newToken) return { ok: true, reason: 'ok_refreshed', token: newToken, user_name: userName };
+                    }
+                    return { ok: false, reason: pwHash ? 'refresh_failed' : 'missing_auth_credentials', token: '', user_name: userName };
+                } catch (e) {
+                    return { ok: false, reason: 'exception', token: '', user_name: '' };
+                }
+            };
+
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
 
@@ -272,6 +310,15 @@ const ADMIN_NAME = "xxz";
                 localStorage.setItem("xtj_user", userName);
             } catch (e) {}
             lastUserSessionWriteAt = now;
+            // ★ 关键修复：恢复登录态后检查是否有真实鉴权凭据
+            //   有 session 没 token 没 pwHash 时，console.warn 提示（不强制登出避免破坏其他流程）
+            try {
+                var hasToken = !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'));
+                var hasPwHash = !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash'));
+                if (!hasToken && !hasPwHash) {
+                    try { console.warn('[AUTH] restoreCurrentUserFromSession: session 有效但 token + pwHash 都缺失，AI 请求会失败，需重新登录'); } catch (e) {}
+                }
+            } catch (e) {}
             return userName;
         }
 
@@ -2458,6 +2505,8 @@ const ADMIN_NAME = "xxz";
                     }
 
                     // 获取 JWT token（替代 password_hash 认证）
+                    // ★ 关键修复：拿不到 token 时也要继续登录流程，但 console.warn 提示
+                    //   AI 模块会用 ensureRealUserAuth 主动补救
                     try {
                         var _pwHash = sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "";
                         if (_pwHash && API_BASE && name !== ADMIN_NAME) {
@@ -2466,11 +2515,23 @@ const ADMIN_NAME = "xxz";
                                 body: JSON.stringify({ user_name: name, password_hash: _pwHash })
                             });
                             if (tokenRes.ok) {
-                                var tokenData = await tokenRes.json();
-                                if (tokenData.token) setUserToken(tokenData.token);
+                                var tokenData = await tokenRes.json().catch(function(){ return {}; });
+                                if (tokenData && tokenData.token) {
+                                    setUserToken(tokenData.token);
+                                } else {
+                                    try { console.warn('[AUTH] login /api/user/login ok but no token in response'); } catch(e) {}
+                                }
+                            } else {
+                                try { console.warn('[AUTH] login /api/user/login failed, status =', tokenRes.status); } catch(e) {}
                             }
+                        } else if (!_pwHash) {
+                            try { console.warn('[AUTH] login: no password_hash, skip token fetch'); } catch(e) {}
+                        } else if (name === ADMIN_NAME) {
+                            try { console.warn('[AUTH] login: admin user, skip token fetch'); } catch(e) {}
+                        } else if (!API_BASE) {
+                            try { console.warn('[AUTH] login: no API_BASE, skip token fetch'); } catch(e) {}
                         }
-                    } catch(e) {}
+                    } catch(e) { try { console.warn('[AUTH] login token fetch exception:', e && e.message); } catch(e2) {} }
 
                     currentUser = name;
                     window.currentUser = currentUser;
@@ -2565,6 +2626,7 @@ const ADMIN_NAME = "xxz";
                     localStorage.setItem("xtj_pw_hash", pwHash);
                     try { sessionStorage.setItem("xtj_pw_hash", pwHash); } catch(e) {}
                     // 获取 JWT token（替代 password_hash 认证）
+                    // ★ 关键修复：拿不到 token 时也要继续注册流程，但 console.warn 提示
                     try {
                         if (API_BASE) {
                             var _regTokenRes = await fetch(API_BASE + '/api/user/login', {
@@ -2572,11 +2634,19 @@ const ADMIN_NAME = "xxz";
                                 body: JSON.stringify({ user_name: name, password_hash: pwHash })
                             });
                             if (_regTokenRes.ok) {
-                                var _regTokenData = await _regTokenRes.json();
-                                if (_regTokenData.token) setUserToken(_regTokenData.token);
+                                var _regTokenData = await _regTokenRes.json().catch(function(){ return {}; });
+                                if (_regTokenData && _regTokenData.token) {
+                                    setUserToken(_regTokenData.token);
+                                } else {
+                                    try { console.warn('[AUTH] register /api/user/login ok but no token in response'); } catch(e) {}
+                                }
+                            } else {
+                                try { console.warn('[AUTH] register /api/user/login failed, status =', _regTokenRes.status); } catch(e) {}
                             }
+                        } else {
+                            try { console.warn('[AUTH] register: no API_BASE, skip token fetch'); } catch(e) {}
                         }
-                    } catch(e) {}
+                    } catch(e) { try { console.warn('[AUTH] register token fetch exception:', e && e.message); } catch(e2) {} }
                     writeUserSession(currentUser, { resetLoginAt: true });
                     try {
                         if (typeof window.logLoginEventSafe === "function") {
