@@ -131,6 +131,8 @@ const VIP_ORDER_MARKER = '__vip_order__';
 const VIP_PLAN_MARKER = '__vip_plan__';
 const PRO_GIFT_MARKER = '__pro_gift__';
 const PRO_GIFT_CLAIM_MARKER = '__pro_gift_claim__';
+// 公告已读（跨设备同步用户已读公告）
+const ANN_READ_MARKER = '__ann_read__';
 // 邮件 / 历史邮箱
 const EMAIL_SENT_MARKER = '__email_sent__';
 const EMAIL_RECIPIENT_MARKER = '__email_recipient_history__';
@@ -169,7 +171,8 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', AUDIT_LOG_MARKER)
     .neq('media_type', CLIENT_ERROR_MARKER)
     .neq('media_type', EMAIL_SENT_MARKER)
-    .neq('media_type', EMAIL_RECIPIENT_MARKER);
+    .neq('media_type', EMAIL_RECIPIENT_MARKER)
+    .neq('media_type', ANN_READ_MARKER);
 }
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
@@ -1698,6 +1701,111 @@ app.delete('/admin/announcement/:id', verifyToken, async (req, res) => {
   });
   if (error) return res.status(400).json({ error: sanitizeError(error) });
   return res.json({ ok: true });
+});
+
+// ===================== 公告已读（跨设备同步） ======================
+// 复用 posts marker（media_type=__ann_read__, media_url=announcementId）
+// 同一用户对同一公告只允许一条记录（actor_key 唯一 + 23505 错误处理）
+app.get('/api/announcements/read', async (req, res) => {
+  try {
+    const auth = await authenticateUser(req);
+    if (!auth) {
+      return res.status(401).json({ error: '未授权' });
+    }
+    const { data, error } = await supabase
+      .from('posts')
+      .select('media_url, created_at')
+      .eq('media_type', ANN_READ_MARKER)
+      .eq('user_name', auth.userName);
+    if (error) {
+      console.error('[ann_read_get]', error);
+      return res.status(500).json({ error: '查询已读记录失败' });
+    }
+    // 返回 {id: read_at_iso} 格式，前端可 Set 化
+    const reads = {};
+    (data || []).forEach(function(row) {
+      if (row && row.media_url) {
+        reads[String(row.media_url)] = row.created_at || null;
+      }
+    });
+    return res.json({ reads: reads });
+  } catch (err) {
+    console.error('[ann_read_get_exception]', err);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+app.post('/api/announcements/read', async (req, res) => {
+  try {
+    const auth = await authenticateUser(req);
+    if (!auth) {
+      return res.status(401).json({ error: '未授权' });
+    }
+    const body = req.body || {};
+    let ids = body.announcement_ids;
+    if (!Array.isArray(ids)) {
+      return res.status(400).json({ error: 'announcement_ids 必须是数组' });
+    }
+    if (ids.length > 100) {
+      return res.status(400).json({ error: '一次最多 100 条' });
+    }
+    // 清洗 + 去重 + 限长
+    const seen = new Set();
+    const cleanIds = [];
+    for (const raw of ids) {
+      if (raw === undefined || raw === null) continue;
+      const s = String(raw).trim();
+      if (!s) continue;
+      if (s.length > 128) continue;
+      if (seen.has(s)) continue;
+      seen.add(s);
+      cleanIds.push(s);
+    }
+    if (!cleanIds.length) {
+      return res.json({ ok: true, marked: 0 });
+    }
+    // 查询已存在记录，避免重复插入
+    const { data: existing, error: existErr } = await supabase
+      .from('posts')
+      .select('media_url')
+      .eq('media_type', ANN_READ_MARKER)
+      .eq('user_name', auth.userName)
+      .in('media_url', cleanIds);
+    if (existErr) {
+      console.error('[ann_read_existing]', existErr);
+      return res.status(500).json({ error: '查询已读失败' });
+    }
+    const existingSet = new Set((existing || []).map(function(r) { return r && r.media_url ? String(r.media_url) : null; }).filter(Boolean));
+    const toInsert = cleanIds.filter(function(id) { return !existingSet.has(id); });
+    if (!toInsert.length) {
+      return res.json({ ok: true, marked: 0, already_read: cleanIds.length });
+    }
+    // 批量插入（每条记录 actor_key 唯一）
+    const rows = toInsert.map(function(id) {
+      return {
+        user_name: auth.userName,
+        content: '',
+        media_type: ANN_READ_MARKER,
+        media_url: id,
+        actor_key: 'ann_read:' + auth.userName + ':' + id
+      };
+    });
+    const { error: insErr } = await supabase
+      .from('posts')
+      .insert(rows);
+    if (insErr) {
+      // 23505 = 唯一约束冲突（并发情况），当作成功处理
+      if (insErr.code === '23505') {
+        return res.json({ ok: true, marked: toInsert.length, note: '部分已存在' });
+      }
+      console.error('[ann_read_insert]', insErr);
+      return res.status(500).json({ error: '保存已读失败' });
+    }
+    return res.json({ ok: true, marked: toInsert.length });
+  } catch (err) {
+    console.error('[ann_read_post_exception]', err);
+    return res.status(500).json({ error: '保存失败' });
+  }
 });
 
 // ===================== 帖子管理 ======================
