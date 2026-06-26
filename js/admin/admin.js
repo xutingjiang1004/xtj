@@ -571,7 +571,7 @@
             saveCurrentTab();
             showToast('正在刷新数据...', 'info');
 
-            var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist','progift'];
+            var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist','progift','ai'];
             allTabs.forEach(function(t) {
                 var panel = document.getElementById('tab' + getTabDomName(t));
                 var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
@@ -3110,7 +3110,7 @@ async function initAdminClient() {
 
     window.switchTab = async function(tab) {
         var normalized = tab;
-        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist','progift'];
+        var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist','progift','ai'];
         currentTab = normalized;
         saveCurrentTab();
         if (normalized === 'users') {
@@ -3154,6 +3154,7 @@ async function initAdminClient() {
             case 'errorlog': renderErrorLogTab(el); break;
             case 'progift': renderProGiftTab(el); break;
             case 'email': renderEmailTab(el); break;
+            case 'ai': renderAiTab(el); break;
         }
     };
 
@@ -5028,4 +5029,162 @@ async function initAdminClient() {
             }
         }
     };
+
+    // ===================== AI 管理 Tab =====================
+    var _aiAdminSubTab = 'settings'; // 'settings' | 'users'
+    var _aiAdminConvUser = null;
+
+    function renderAiTab(el) {
+        if (!el) return;
+        el.innerHTML = [
+            '<div style="display:flex;gap:8px;margin-bottom:14px;">',
+            '<button class="btn" id="aiSubTabSettingsBtn" onclick="window._switchAiAdminSubTab(\'settings\')">智能体设置</button>',
+            '<button class="btn" id="aiSubTabUsersBtn" onclick="window._switchAiAdminSubTab(\'users\')">用户对话记录</button>',
+            '</div>',
+            '<div id="aiAdminContent"></div>'
+        ].join('');
+
+        if (!window._switchAiAdminSubTab) {
+            window._switchAiAdminSubTab = function(sub) {
+                _aiAdminSubTab = sub;
+                _aiAdminConvUser = null;
+                var settingsBtn = document.getElementById('aiSubTabSettingsBtn');
+                var usersBtn = document.getElementById('aiSubTabUsersBtn');
+                if (settingsBtn) settingsBtn.style.opacity = sub === 'settings' ? '1' : '0.55';
+                if (usersBtn) usersBtn.style.opacity = sub === 'users' ? '1' : '0.55';
+                renderAiAdminContent();
+            };
+        }
+
+        window._switchAiAdminSubTab(_aiAdminSubTab);
+    }
+
+    function renderAiAdminContent() {
+        var content = document.getElementById('aiAdminContent');
+        if (!content) return;
+        if (_aiAdminSubTab === 'settings') {
+            renderAiAdminSettings(content);
+        } else if (_aiAdminSubTab === 'users') {
+            if (_aiAdminConvUser) {
+                renderAiAdminConversation(content);
+            } else {
+                renderAiAdminUsersList(content);
+            }
+        }
+    }
+
+    async function renderAiAdminSettings(content) {
+        if (!content) return;
+        content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
+        try {
+            var data = await apiCall('GET', '/admin/ai-agent/config');
+            var cfg = data && data.config ? data.config : {
+                name: '徐旭泽的小猫', avatar: '🐱', description: '', persona: '',
+                tone: '', system_prompt: '', welcome_message: ''
+            };
+            var html = [
+                '<div class="ai-admin-settings">',
+                '<div class="form-group"><label>AI 名称</label><input id="aiCfgName" value="' + escapeHtml(cfg.name) + '" maxlength="30" /></div>',
+                '<div class="form-group"><label>头像（如 🐱）</label><input id="aiCfgAvatar" value="' + escapeHtml(cfg.avatar) + '" maxlength="10" /></div>',
+                '<div class="form-group"><label>简介</label><input id="aiCfgDesc" value="' + escapeHtml(cfg.description || '') + '" maxlength="200" /></div>',
+                '<div class="form-group"><label>欢迎语</label><input id="aiCfgWelcome" value="' + escapeHtml(cfg.welcome_message || '') + '" maxlength="200" /></div>',
+                '<div class="form-group"><label>性格设定 persona（最多 500 字）</label><textarea id="aiCfgPersona" maxlength="500">' + escapeHtml(cfg.persona || '') + '</textarea></div>',
+                '<div class="form-group"><label>说话风格 tone（最多 200 字）</label><textarea id="aiCfgTone" maxlength="200">' + escapeHtml(cfg.tone || '') + '</textarea></div>',
+                '<div class="form-group"><label>系统提示词 system_prompt（最多 2000 字）</label><textarea id="aiCfgSysPrompt" maxlength="2000" style="min-height:120px">' + escapeHtml(cfg.system_prompt || '') + '</textarea></div>',
+                '<button class="save-btn" id="aiCfgSaveBtn">保存配置</button>',
+                '</div>'
+            ].join('\n');
+            content.innerHTML = html;
+            document.getElementById('aiCfgSaveBtn').addEventListener('click', async function() {
+                var saveBtn = document.getElementById('aiCfgSaveBtn');
+                saveBtn.textContent = '保存中...';
+                saveBtn.disabled = true;
+                try {
+                    await apiCall('POST', '/admin/ai-agent/config', {
+                        name: document.getElementById('aiCfgName').value,
+                        avatar: document.getElementById('aiCfgAvatar').value,
+                        description: document.getElementById('aiCfgDesc').value,
+                        welcome_message: document.getElementById('aiCfgWelcome').value,
+                        persona: document.getElementById('aiCfgPersona').value,
+                        tone: document.getElementById('aiCfgTone').value,
+                        system_prompt: document.getElementById('aiCfgSysPrompt').value
+                    });
+                    showToast('AI 配置保存成功');
+                } catch(e) {
+                    showToast('保存失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
+                } finally {
+                    saveBtn.textContent = '保存配置';
+                    saveBtn.disabled = false;
+                }
+            });
+        } catch(e) {
+            content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    async function renderAiAdminUsersList(content) {
+        if (!content) return;
+        content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
+        try {
+            var data = await apiCall('GET', '/admin/ai-agent/users');
+            var users = data && data.users ? data.users : [];
+            if (!users.length) {
+                content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">暂无用户 AI 聊天记录</div>';
+                return;
+            }
+            var html = ['<ul class="ai-conv-users-list">'];
+            users.forEach(function(u) {
+                var lastAt = u.last_at ? new Date(u.last_at).toLocaleString() : '未知';
+                html.push('<li onclick="window._viewAiUserConv(\'' + u.user_name + '\')">');
+                html.push('<span class="user-name">' + escapeHtml(u.user_name) + '</span>');
+                html.push('<span class="user-meta">' + u.message_count + ' 条消息 · ' + lastAt + '</span>');
+                html.push('</li>');
+            });
+            html.push('</ul>');
+            content.innerHTML = html.join('\n');
+
+            if (!window._viewAiUserConv) {
+                window._viewAiUserConv = function(userName) {
+                    _aiAdminConvUser = userName;
+                    renderAiAdminContent();
+                };
+            }
+        } catch(e) {
+            content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    async function renderAiAdminConversation(content) {
+        if (!content || !_aiAdminConvUser) return;
+        content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
+        try {
+            var data = await apiCall('GET', '/admin/ai-agent/conversations?user_name=' + encodeURIComponent(_aiAdminConvUser) + '&limit=500');
+            var msgs = data && data.messages ? data.messages : [];
+            var html = [
+                '<button class="ai-admin-back" onclick="window._backAiUserList()">← 返回用户列表</button>',
+                '<h3 style="margin-bottom:8px;font-size:14px;font-weight:700;">' + escapeHtml(_aiAdminConvUser) + ' 的对话记录（共 ' + msgs.length + ' 条）</h3>',
+                '<div class="ai-conv-view">'
+            ];
+            msgs.forEach(function(m) {
+                var role = m.role === 'assistant' ? 'assistant' : 'user';
+                var label = role === 'assistant' ? 'AI' : escapeHtml(_aiAdminConvUser);
+                var time = m.created_at ? new Date(m.created_at).toLocaleString() : '';
+                html.push('<div class="msg-row ' + role + '">');
+                html.push('<div><div class="msg-bubble">' + escapeHtml(m.content || '') + '</div>');
+                html.push('<div class="msg-time">' + label + ' · ' + time + '</div>');
+                html.push('</div></div>');
+            });
+            html.push('</div>');
+            content.innerHTML = html.join('\n');
+
+            if (!window._backAiUserList) {
+                window._backAiUserList = function() {
+                    _aiAdminConvUser = null;
+                    renderAiAdminContent();
+                };
+            }
+        } catch(e) {
+            content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
 })();
