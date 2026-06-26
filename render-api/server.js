@@ -149,7 +149,7 @@ const ANN_READ_MARKER = '__ann_read__';
 const EMAIL_SENT_MARKER = '__email_sent__';
 const EMAIL_RECIPIENT_MARKER = '__email_recipient_history__';
 
-// ===================== AI 智能体 / AI 宠物 =====================
+// ===================== AI 智能体 marker =====================
 // 所有 AI 相关数据使用 posts 表 + marker 集中存储（与现有 Pro Gift / VIP / 公告同模式）
 // ★ 必须加入 applyPublicPostExclusions() 避免出现在普通帖子 feed、统计、后台列表
 const AI_AGENT_PROFILE_MARKER = '__ai_agent_profile__';
@@ -1353,21 +1353,27 @@ async function callDeepSeek(messages, options) {
   }
 
   var model = (options && options.model) || DEEPSEEK_MODEL;
+  var thinkingLevel = (options && options.thinking_mode) || 'off';
+  var useThinking = thinkingLevel !== 'off';
   var controller = new AbortController();
-  var timer = setTimeout(function() { controller.abort(); }, DEEPSEEK_TIMEOUT_MS);
+  var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
 
   try {
+    var apiBody = {
+      model: model,
+      messages: messages,
+      stream: false
+    };
+    if (useThinking) {
+      apiBody.reasoning_effort = thinkingLevel;
+    }
     var resp = await fetch(DEEPSEEK_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
       },
-      body: JSON.stringify({
-        model: model,
-        messages: messages,
-        stream: false
-      }),
+      body: JSON.stringify(apiBody),
       signal: controller.signal
     });
     clearTimeout(timer);
@@ -5068,95 +5074,16 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
   }
 });
 
-// ===================== AI 智能体 / AI 宠物 接口（第一版：profile + chat）=====================
+// ===================== AI 聊天接口（徐旭泽的小猫）=====================
 // ★ 所有 AI 路由必须：
 // 1. 走 authenticateUser 中间件（验证用户身份）
 // 2. 走 checkAiUserRateLimit 限流（防滥用，按 userName）
 // 3. 字段严格验证（防注入 + 长度限制）
 // 4. 数据存 posts 表 + AI_AGENT_*_MARKER（已加入 applyPublicPostExclusions 过滤）
-// 5. 第一版不开通 actions/confirm / create_post 代理（保持稳定安全）
 
-const AI_AGENT_NAME_MAX_LEN = 20;
-const AI_AGENT_PERSONA_MAX_LEN = 500;
-const AI_AGENT_TONE_MAX_LEN = 200;
-const AI_PROFILE_HOURLY_IP_LIMIT = 20;  // IP 维度：每小时最多 20 次 profile 写入
-
-function validateAiProfileFields(body, currentUserName) {
-  var agentName = validateString(body.agent_name, AI_AGENT_NAME_MAX_LEN, '智能体名字');
-  if (agentName && agentName.error) return agentName;
-  if (!agentName) return { error: '智能体名字不能为空' };
-
-  var persona = validateString(body.persona, AI_AGENT_PERSONA_MAX_LEN, '性格设定');
-  if (persona && persona.error) return persona;
-  if (!persona) return { error: '性格设定不能为空' };
-
-  var tone = validateString(body.tone, AI_AGENT_TONE_MAX_LEN, '说话风格');
-  if (tone && tone.error) return tone;
-  if (!tone) return { error: '说话风格不能为空' };
-
-  // 普通用户不能开启 autonomy（保留入口但默认强制 false，第一版暂不开通自动能力）
-  var autonomy = false;
-  if (body.autonomy_enabled === true || body.autonomy_enabled === 'true') {
-    if (currentUserName && ADMIN_USERNAME && currentUserName === ADMIN_USERNAME) {
-      autonomy = true; // 仅管理员能开启
-    }
-  }
-
-  return {
-    ok: true,
-    data: {
-      agent_name: agentName,
-      persona: persona,
-      tone: tone,
-      autonomy_enabled: autonomy
-    }
-  };
-}
-
-// GET /api/agent/profile - 获取当前用户 AI 智能体资料
+// GET /api/agent/profile - 已废弃，返回 410（AI 配置由管理员统一管理，前端不再调用）
 app.get('/api/agent/profile', authenticateUser, async (req, res) => {
-  try {
-    var userName = req.userName;
-    var { data: row, error } = await supabase.from('posts')
-      .select('id, content, media_url, created_at')
-      .eq('user_name', userName)
-      .eq('media_type', AI_AGENT_PROFILE_MARKER)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.error('[AGENT-PROFILE] query error:', error.message);
-      return res.status(500).json({ error: '查询失败' });
-    }
-    if (!row) {
-      return res.json({ exists: false });
-    }
-
-    var payload = null;
-    try { payload = row.media_url ? JSON.parse(row.media_url) : null; } catch(e) { payload = null; }
-    if (!payload || !payload.agent_name) {
-      // 兼容老数据 / 旧格式：content 直接是 agent_name
-      payload = { agent_name: row.content || 'AI 宠物', persona: '', tone: '' };
-    }
-
-    return res.json({
-      exists: true,
-      profile: {
-        agent_name: payload.agent_name || 'AI 宠物',
-        persona: payload.persona || '',
-        tone: payload.tone || '',
-        autonomy_enabled: !!payload.autonomy_enabled,
-        level: typeof payload.level === 'number' ? payload.level : 1,
-        intimacy: typeof payload.intimacy === 'number' ? payload.intimacy : 0,
-        mood: payload.mood || 'curious',
-        updated_at: row.created_at
-      }
-    });
-  } catch (e) {
-    console.error('[AGENT-PROFILE] GET exception:', e.message);
-    return res.status(500).json({ error: '查询失败' });
-  }
+  return res.status(410).json({ error: '已废弃，AI 配置由管理员统一管理' });
 });
 
 // GET /api/agent/config - 普通用户获取当前 AI 公共配置（不含 system_prompt）
@@ -5489,8 +5416,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 
     // 7. 调用 DeepSeek
     var reply = '';
+    var thinkingMode = (req.body && req.body.thinking_mode) || 'off';
     try {
-      reply = await callDeepSeek(messages, { model: DEEPSEEK_MODEL });
+      reply = await callDeepSeek(messages, { model: DEEPSEEK_MODEL, thinking_mode: thinkingMode });
     } catch (e) {
       console.error('[AGENT-CHAT] callDeepSeek failed:', e && e.message);
       return res.status(502).json({
