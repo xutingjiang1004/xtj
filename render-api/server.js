@@ -155,8 +155,6 @@ const EMAIL_RECIPIENT_MARKER = '__email_recipient_history__';
 const AI_AGENT_PROFILE_MARKER = '__ai_agent_profile__';
 const AI_AGENT_MESSAGE_MARKER = '__ai_agent_msg__';
 const AI_AGENT_MEMORY_MARKER = '__ai_agent_memory__';
-const AI_AGENT_ACTION_MARKER = '__ai_agent_action__';
-const AI_AGENT_DAILY_MARKER = '__ai_agent_daily__';
 
 const LOGIN_LOG_RETENTION_DAYS = 90;
 const SECURITY_LOG_RETENTION_DAYS = 90;
@@ -193,7 +191,10 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', CLIENT_ERROR_MARKER)
     .neq('media_type', EMAIL_SENT_MARKER)
     .neq('media_type', EMAIL_RECIPIENT_MARKER)
-    .neq('media_type', ANN_READ_MARKER);
+    .neq('media_type', ANN_READ_MARKER)
+    .neq('media_type', AI_AGENT_PROFILE_MARKER)
+    .neq('media_type', AI_AGENT_MESSAGE_MARKER)
+    .neq('media_type', AI_AGENT_MEMORY_MARKER);
 }
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
@@ -1385,6 +1386,16 @@ async function callDeepSeek(messages, options) {
 
     var content = data.choices[0].message.content;
     if (typeof content !== 'string') content = '';
+
+    // 记录 usage 统计（不打印完整聊天内容和 API Key）
+    if (data.usage) {
+      var hit = data.usage.prompt_cache_hit_tokens;
+      var miss = data.usage.prompt_cache_miss_tokens;
+      if (typeof hit === 'number' || typeof miss === 'number') {
+        console.log('[DEEPSEEK-USAGE]', 'cache_hit=' + (hit || 0), 'cache_miss=' + (miss || 0));
+      }
+    }
+
     return content;
   } catch (e) {
     clearTimeout(timer);
@@ -5137,7 +5148,6 @@ app.get('/api/agent/profile', authenticateUser, async (req, res) => {
         level: typeof payload.level === 'number' ? payload.level : 1,
         intimacy: typeof payload.intimacy === 'number' ? payload.intimacy : 0,
         mood: payload.mood || 'curious',
-        tools_enabled: Array.isArray(payload.tools_enabled) ? payload.tools_enabled : ['read_my_posts', 'draft_post'],
         updated_at: row.created_at
       }
     });
@@ -5187,7 +5197,6 @@ app.post('/api/agent/profile', authenticateUser, rateLimit(3600000, AI_PROFILE_H
       level: 1,
       intimacy: 0,
       mood: 'curious',
-      tools_enabled: ['read_my_posts', 'draft_post'],
       updated_at: nowIso
     };
 
@@ -5225,7 +5234,6 @@ app.post('/api/agent/profile', authenticateUser, rateLimit(3600000, AI_PROFILE_H
         level: payload.level,
         intimacy: payload.intimacy,
         mood: payload.mood,
-        tools_enabled: payload.tools_enabled,
         updated_at: nowIso
       }
     });
@@ -5259,8 +5267,6 @@ app.post('/api/agent/profile', authenticateUser, rateLimit(3600000, AI_PROFILE_H
 
 const AI_CHAT_MESSAGE_MAX_LEN = 2000;
 const AI_CHAT_HISTORY_LIMIT = 20;
-const AI_CHAT_USER_POSTS_LIMIT = 5;
-const AI_CHAT_USER_COMMENTS_LIMIT = 5;
 const AI_CHAT_HOURLY_IP_LIMIT = 30; // IP 维度：每小时最多 30 次 chat 调用
 const AI_MEMORY_MAX_LEN = 1500;     // 长期记忆最大长度（≈ 750 token）
 const AI_MEMORY_SUMMARIZE_HISTORY = 10; // 触发总结时使用的最近历史条数
@@ -5279,15 +5285,17 @@ function buildAiCorePrompt(profile) {
     '你的说话风格是：' + tone,
     '',
     '【你可以做的】',
-    '- 陪用户聊天、整理用户自己的站内数据',
-    '- 帮用户润色 / 草拟帖子文案（但仅给草稿，不直接发布）',
-    '- 总结用户最近的动态',
-    '- 记住用户告诉你的重要信息（写入长期记忆）',
+    '- 陪用户聊天，像宠物一样陪伴',
+    '- 根据长期记忆理解并适应用户的喜好和要求',
+    '- 用户明确说"记住……"时，记录相关信息以备后续参考',
     '',
     '【你绝对不能做的】',
+    '- 你不能读取用户的帖子或评论',
+    '- 你不能读取或操作任何站内数据',
+    '- 你不能生成任何形式的帖子草稿、文案润色',
+    '- 你不能总结用户的最近动态',
     '- 你不能假装已经执行了发布、删除、修改资料等操作',
     '- 你不能直接发布帖子、删除内容、修改用户资料',
-    '- 涉及任何写操作时，你必须明确告知用户"我无法直接执行此操作，请你自己操作"',
     '- 你不能读取其他用户的隐私数据',
     '- 你不能访问后台管理接口',
     '- 第一版不支持任何 pending_action，所有写操作必须由用户自己完成',
@@ -5295,7 +5303,7 @@ function buildAiCorePrompt(profile) {
     '【输出要求】',
     '- 保持你的说话风格，自然、口语化',
     '- 回复长度控制在 500 字以内',
-    '- 涉及操作建议时，给出"具体怎么做"而不是"我已经做了"'
+    '- 如果用户问你能做什么，告诉用户：你可以陪他聊天、记住他的喜好和要求'
   ].join('\n');
 }
 
@@ -5304,7 +5312,7 @@ function buildAiCorePrompt(profile) {
 function buildAiDynamicContext(ctx, profile) {
   var lines = [];
   if (ctx && ctx.contextBlock) {
-    lines.push('【用户当前站内数据（仅供你参考）】');
+    lines.push('【长期记忆】');
     lines.push(ctx.contextBlock);
   }
   if (profile && typeof profile.mood === 'string') {
@@ -5325,6 +5333,13 @@ function buildAiDynamicContext(ctx, profile) {
 const aiMemoryUpdateLock = {}; // userName → { ts: number, pending: Promise }
 async function updateLongTermMemory(userName, profile, ctx, lastUserMsg, lastAiReply) {
   if (!DEEPSEEK_API_KEY) return; // 无 API Key 时跳过，避免 mock 噪声写入 memory
+
+  // ★ 第一版：只在用户明确说"记住"时保存长期记忆
+  //   检查最近一条用户消息是否包含"记住""记得""不要忘记"等关键词
+  if (!lastUserMsg || !/记住|记得|不要忘记|别忘了|记一下|记录下来/ .test(lastUserMsg)) {
+    return;
+  }
+
   var now = Date.now();
   var lock = aiMemoryUpdateLock[userName];
   if (lock && (now - lock.ts) < 5 * 60 * 1000) {
@@ -5405,7 +5420,7 @@ async function loadAiContext(userName, agentName) {
   try {
     // 1. 读取最近 AI 消息（同一用户的所有 AI 消息，user 发 / agent 回都算）
     var { data: msgRows } = await supabase.from('posts')
-      .select('user_name, content, created_at')
+      .select('user_name, content, media_url, created_at')
       .eq('user_name', userName)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .order('created_at', { ascending: false })
@@ -5413,7 +5428,7 @@ async function loadAiContext(userName, agentName) {
     if (Array.isArray(msgRows)) {
       // 倒序读到的是最新在前，反转成时间正序给 AI
       ctx.history = msgRows.slice().reverse().map(function(r) {
-        var role = r.user_name === userName ? 'user' : 'assistant';
+        var role = r.media_url === 'assistant' ? 'assistant' : 'user';
         return { role: role, content: String(r.content || '').slice(0, 4000) };
       });
     }
@@ -5428,49 +5443,6 @@ async function loadAiContext(userName, agentName) {
       .maybeSingle();
     if (memRow && memRow.content) {
       ctx.memory = String(memRow.content).slice(0, 2000);
-    }
-
-    // 3. 读取用户最近普通帖子（marker 已在 applyPublicPostExclusions 集中过滤）
-    var { data: postRows } = await supabase.from('posts')
-      .select('content, created_at, view_count, like_count')
-      .eq('user_name', userName)
-      .order('created_at', { ascending: false })
-      .limit(50); // 多取一些，应用层再用 marker 过滤
-    var realPosts = [];
-    if (Array.isArray(postRows)) {
-      // 第一版简化：只取前 5 条内容非空且长度 < 1000 字的帖子
-      // 严格 marker 过滤由 applyPublicPostExclusions 在普通 feed 中处理，AI 仅看自己数据
-      for (var i = 0; i < postRows.length && realPosts.length < AI_CHAT_USER_POSTS_LIMIT; i++) {
-        var p = postRows[i];
-        if (p && p.content && String(p.content).length > 0 && String(p.content).length < 1000) {
-          realPosts.push(p);
-        }
-      }
-    }
-    if (realPosts.length > 0) {
-      ctx.contextBlock += '[最近 ' + realPosts.length + ' 条帖子]\n';
-      realPosts.forEach(function(p, i) {
-        ctx.contextBlock += (i+1) + '. ' + String(p.content).slice(0, 200) + '\n';
-      });
-      ctx.contextBlock += '\n';
-    }
-
-    // 4. 读取用户最近评论（comments 表，不是 posts）
-    try {
-      var { data: commentRows } = await supabase.from('comments')
-        .select('content, created_at, post_id')
-        .eq('user_name', userName)
-        .order('created_at', { ascending: false })
-        .limit(AI_CHAT_USER_COMMENTS_LIMIT);
-      if (Array.isArray(commentRows) && commentRows.length > 0) {
-        ctx.contextBlock += '[最近 ' + commentRows.length + ' 条评论]\n';
-        commentRows.forEach(function(c, i) {
-          ctx.contextBlock += (i+1) + '. ' + String(c.content || '').slice(0, 150) + '\n';
-        });
-        ctx.contextBlock += '\n';
-      }
-    } catch (e) {
-      // comments 表可能不存在或字段不同，静默忽略
     }
 
     if (ctx.memory) {
@@ -5563,6 +5535,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     if (reply.length > 4000) reply = reply.slice(0, 4000) + '\n…（已截断）';
 
     // 8. 保存用户消息和 AI 回复
+    // ★ 两种消息都用 userName 作为 user_name，用 media_url 区分角色
+    //   - media_url = 'user'  → 用户发的消息
+    //   - media_url = 'assistant'  → AI 回复
     var nowIso = new Date().toISOString();
     try {
       await supabase.from('posts').insert([
@@ -5570,12 +5545,14 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
           user_name: userName,
           content: message,
           media_type: AI_AGENT_MESSAGE_MARKER,
+          media_url: 'user',
           actor_key: 'ai_msg_user_' + userName + '_' + Date.now()
         },
         {
-          user_name: prof.agent_name, // AI 用 agent_name 区分消息归属
+          user_name: userName,
           content: reply,
           media_type: AI_AGENT_MESSAGE_MARKER,
+          media_url: 'assistant',
           actor_key: 'ai_msg_agent_' + userName + '_' + Date.now()
         }
       ]);
@@ -5630,7 +5607,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
     var userName = req.userName;
     var limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 100);
     var { data: rows, error } = await supabase.from('posts')
-      .select('id, user_name, content, created_at')
+      .select('id, user_name, content, media_url, created_at')
       .eq('user_name', userName)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .order('created_at', { ascending: true })
@@ -5644,7 +5621,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       messages: (rows || []).map(function(r) {
         return {
           id: r.id,
-          role: r.user_name === userName ? 'user' : 'assistant',
+          role: r.media_url === 'assistant' ? 'assistant' : 'user',
           content: r.content || '',
           created_at: r.created_at
         };
