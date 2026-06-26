@@ -5033,6 +5033,7 @@ async function initAdminClient() {
     // ===================== AI 管理 Tab =====================
     var _aiAdminSubTab = 'settings'; // 'settings' | 'users'
     var _aiAdminConvUser = null;
+    var _aiAdminConvId = null;
 
     function renderAiTab(el) {
         if (!el) return;
@@ -5048,6 +5049,7 @@ async function initAdminClient() {
             window._switchAiAdminSubTab = function(sub) {
                 _aiAdminSubTab = sub;
                 _aiAdminConvUser = null;
+                _aiAdminConvId = null;
                 var settingsBtn = document.getElementById('aiSubTabSettingsBtn');
                 var usersBtn = document.getElementById('aiSubTabUsersBtn');
                 if (settingsBtn) settingsBtn.style.opacity = sub === 'settings' ? '1' : '0.55';
@@ -5065,10 +5067,12 @@ async function initAdminClient() {
         if (_aiAdminSubTab === 'settings') {
             renderAiAdminSettings(content);
         } else if (_aiAdminSubTab === 'users') {
-            if (_aiAdminConvUser) {
-                renderAiAdminConversation(content);
+            if (_aiAdminConvId && _aiAdminConvUser) {
+                renderAiAdminConvDetail(content);
+            } else if (_aiAdminConvUser) {
+                renderAiAdminUserConvs(content);
             } else {
-                renderAiAdminUsersList(content);
+                renderAiAdminUsageSummary(content);
             }
         }
     }
@@ -5122,34 +5126,65 @@ async function initAdminClient() {
         }
     }
 
-    async function renderAiAdminUsersList(content) {
+    async function renderAiAdminUsageSummary(content) {
         if (!content) return;
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
         try {
-            var data = await apiCall('GET', '/admin/ai-agent/users');
-            var users = data && data.users ? data.users : [];
-            if (!users.length) {
-                content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">暂无用户 AI 聊天记录</div>';
-                return;
+            // 加载统计 + 用户列表
+            var [summaryData, usersData] = await Promise.all([
+                apiCall('GET', '/admin/ai-agent/usage-summary').catch(function() { return null; }),
+                apiCall('GET', '/admin/ai-agent/users').catch(function() { return null; })
+            ]);
+            var summary = summaryData && summaryData.summary ? summaryData.summary : null;
+            var users = usersData && usersData.users ? usersData.users : [];
+
+            var html = [];
+
+            // 统计卡片
+            if (summary) {
+                html.push('<div class="ai-usage-cards">');
+                html.push('<div class="ai-usage-card"><div class="lbl">今日调用</div><div class="val">' + summary.today_calls + '</div></div>');
+                html.push('<div class="ai-usage-card"><div class="lbl">今日 Token</div><div class="val">' + (summary.today_total_tokens || 0).toLocaleString() + '</div></div>');
+                html.push('<div class="ai-usage-card"><div class="lbl">今日费用</div><div class="val">¥' + (summary.today_cost || 0).toFixed(6) + '</div><div class="sub">' + (summary.currency || 'CNY') + '</div></div>');
+                html.push('<div class="ai-usage-card"><div class="lbl">累计调用</div><div class="val">' + (summary.total_calls || 0).toLocaleString() + '</div></div>');
+                html.push('<div class="ai-usage-card"><div class="lbl">累计 Token</div><div class="val">' + (summary.total_tokens || 0).toLocaleString() + '</div></div>');
+                html.push('<div class="ai-usage-card"><div class="lbl">累计费用</div><div class="val">¥' + (summary.total_cost || 0).toFixed(6) + '</div><div class="sub">用户 ' + (summary.total_users || 0) + ' 人</div></div>');
+                html.push('</div>');
             }
-            var html = ['<ul class="ai-conv-users-list">'];
-            users.forEach(function(u) {
-                var lastAt = u.last_at ? new Date(u.last_at).toLocaleString() : '未知';
-                var safeName = escapeHtml(u.user_name);
-                html.push('<li data-user-name="' + safeName + '">');
-                html.push('<span class="user-name">' + safeName + '</span>');
-                html.push('<span class="user-meta">' + u.message_count + ' 条消息 · ' + lastAt + '</span>');
-                html.push('</li>');
-            });
-            html.push('</ul>');
+
+            // 用户列表
+            if (!users.length) {
+                html.push('<div style="text-align:center;padding:30px;color:var(--text-muted)">暂无用户 AI 聊天记录</div>');
+            } else {
+                html.push('<h3 style="font-size:13px;font-weight:700;margin-bottom:8px;">用户列表（' + users.length + ' 人）</h3>');
+                html.push('<ul class="ai-conv-users-list">');
+                users.forEach(function(u) {
+                    var lastAt = u.last_at ? new Date(u.last_at).toLocaleString() : '未知';
+                    var safeName = escapeHtml(u.user_name);
+                    html.push('<li data-user-name="' + safeName + '">');
+                    html.push('<span class="user-name">' + safeName + '</span>');
+                    var metaParts = [];
+                    metaParts.push(u.message_count + ' 条');
+                    if (u.conversation_count) metaParts.push(u.conversation_count + ' 会话');
+                    if (u.total_tokens) metaParts.push((u.total_tokens || 0).toLocaleString() + ' tokens');
+                    if (u.total_cost) metaParts.push('¥' + u.total_cost.toFixed(6));
+                    metaParts.push(lastAt);
+                    html.push('<span class="user-meta">' + metaParts.join(' · ') + '</span>');
+                    html.push('</li>');
+                });
+                html.push('</ul>');
+            }
+            html.push('');
+
             content.innerHTML = html.join('\n');
 
-            // 绑定点击事件（用 dataset 避免 XSS）
+            // 绑定点击
             content.querySelectorAll('.ai-conv-users-list li').forEach(function(li) {
                 var un = li.dataset.userName;
                 if (un) {
                     li.addEventListener('click', function() {
                         _aiAdminConvUser = un;
+                        _aiAdminConvId = null;
                         renderAiAdminContent();
                     });
                 }
@@ -5159,17 +5194,88 @@ async function initAdminClient() {
         }
     }
 
-    async function renderAiAdminConversation(content) {
+    async function renderAiAdminUserConvs(content) {
         if (!content || !_aiAdminConvUser) return;
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
         try {
-            var data = await apiCall('GET', '/admin/ai-agent/conversations?user_name=' + encodeURIComponent(_aiAdminConvUser) + '&limit=500');
-            var msgs = data && data.messages ? data.messages : [];
+            var data = await apiCall('GET', '/admin/ai-agent/conversations?user_name=' + encodeURIComponent(_aiAdminConvUser));
+            var convs = data && data.conversations ? data.conversations : [];
+
             var html = [
                 '<button class="ai-admin-back" onclick="window._backAiUserList()">← 返回用户列表</button>',
-                '<h3 style="margin-bottom:8px;font-size:14px;font-weight:700;">' + escapeHtml(_aiAdminConvUser) + ' 的对话记录（共 ' + msgs.length + ' 条）</h3>',
+                '<h3 style="margin-bottom:8px;font-size:14px;font-weight:700;">' + escapeHtml(_aiAdminConvUser) + ' 的会话列表（共 ' + convs.length + ' 个会话）</h3>'
+            ];
+
+            if (!convs.length) {
+                html.push('<div style="text-align:center;padding:30px;color:var(--text-muted)">该用户暂无 AI 聊天记录</div>');
+            } else {
+                html.push('<div class="ai-conversation-list">');
+                convs.forEach(function(c) {
+                    var cid = escapeHtml(c.conversation_id);
+                    var created = c.created_at ? new Date(c.created_at).toLocaleString() : '';
+                    var lastAt = c.last_at ? new Date(c.last_at).toLocaleString() : '';
+                    html.push('<div class="ai-conversation-item" data-conv-id="' + cid + '">');
+                    html.push('<div><div class="conv-id">' + (c.conversation_id === 'legacy' ? '旧数据' : c.conversation_id.slice(0, 14)) + '</div>');
+                    html.push('<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + created + '</div></div>');
+                    html.push('<div class="conv-stats">');
+                    html.push('<span>' + c.message_count + ' 条</span>');
+                    if (c.total_tokens) html.push('<span>' + (c.total_tokens || 0).toLocaleString() + ' tokens</span>');
+                    if (c.total_cost) html.push('<span>¥' + (c.total_cost || 0).toFixed(6) + '</span>');
+                    if (c.last_thinking_mode && c.last_thinking_mode !== 'off') html.push('<span>思考：' + escapeHtml(c.last_thinking_mode) + '</span>');
+                    html.push('</div>');
+                    html.push('</div>');
+                });
+                html.push('</div>');
+            }
+
+            content.innerHTML = html.join('\n');
+
+            // 绑定点击
+            content.querySelectorAll('.ai-conversation-item').forEach(function(item) {
+                var cid = item.dataset.convId;
+                if (cid) {
+                    item.addEventListener('click', function() {
+                        _aiAdminConvId = cid;
+                        renderAiAdminContent();
+                    });
+                }
+            });
+
+            if (!window._backAiUserList) {
+                window._backAiUserList = function() {
+                    _aiAdminConvUser = null;
+                    _aiAdminConvId = null;
+                    renderAiAdminContent();
+                };
+            }
+        } catch(e) {
+            content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    async function renderAiAdminConvDetail(content) {
+        if (!content || !_aiAdminConvUser || !_aiAdminConvId) return;
+        content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
+        try {
+            var data = await apiCall('GET', '/admin/ai-agent/conversation?user_name=' + encodeURIComponent(_aiAdminConvUser) + '&conversation_id=' + encodeURIComponent(_aiAdminConvId));
+            var msgs = data && data.messages ? data.messages : [];
+
+            // 统计
+            var totalTokens = 0, totalCost = 0;
+            msgs.forEach(function(m) {
+                if (m.role === 'assistant' && m.usage) {
+                    totalTokens += m.usage.total_tokens || 0;
+                    if (m.usage.cost) totalCost += m.usage.cost;
+                }
+            });
+
+            var html = [
+                '<button class="ai-admin-back" onclick="window._backAiConvList()">← 返回会话列表</button>',
+                '<h3 style="margin-bottom:4px;font-size:14px;font-weight:700;">' + escapeHtml(_aiAdminConvUser) + ' · 会话 ' + _aiAdminConvId.slice(0, 14) + '</h3>',
+                '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">' + msgs.length + ' 条消息 · ' + (totalTokens || 0).toLocaleString() + ' tokens · ¥' + totalCost.toFixed(6) + '</div>',
                 '<div class="ai-conv-view">'
             ];
+
             msgs.forEach(function(m) {
                 var role = m.role === 'assistant' ? 'assistant' : 'user';
                 var label = role === 'assistant' ? 'AI' : escapeHtml(_aiAdminConvUser);
@@ -5177,14 +5283,23 @@ async function initAdminClient() {
                 html.push('<div class="msg-row ' + role + '">');
                 html.push('<div><div class="msg-bubble">' + escapeHtml(m.content || '') + '</div>');
                 html.push('<div class="msg-time">' + label + ' · ' + time + '</div>');
+                // token 信息
+                if (m.role === 'assistant' && m.usage) {
+                    html.push('<div class="ai-token-meta">');
+                    if (m.usage.total_tokens) html.push('<span>输入 ' + m.usage.prompt_tokens + '</span><span>输出 ' + m.usage.completion_tokens + '</span><span>合计 ' + m.usage.total_tokens + '</span>');
+                    if (m.usage.cost !== null && m.usage.cost !== undefined) html.push('<span>¥' + Number(m.usage.cost).toFixed(6) + '</span>');
+                    if (m.usage.thinking_mode && m.usage.thinking_mode !== 'off') html.push('<span>思考：' + escapeHtml(m.usage.thinking_mode) + '</span>');
+                    html.push('</div>');
+                }
                 html.push('</div></div>');
             });
+
             html.push('</div>');
             content.innerHTML = html.join('\n');
 
-            if (!window._backAiUserList) {
-                window._backAiUserList = function() {
-                    _aiAdminConvUser = null;
+            if (!window._backAiConvList) {
+                window._backAiConvList = function() {
+                    _aiAdminConvId = null;
                     renderAiAdminContent();
                 };
             }
