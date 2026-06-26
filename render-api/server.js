@@ -1423,9 +1423,18 @@ async function callDeepSeek(messages, options) {
         prompt_cache_miss_tokens: typeof data.usage.prompt_cache_miss_tokens === 'number' ? data.usage.prompt_cache_miss_tokens : null
       };
       // 计算费用
+      // ★ 关键修复：prompt_cache_miss_tokens = 0 时不能再 fallback 到 prompt_tokens，
+      //   否则全缓存命中会按全未命中计费（多花几倍钱）。
+      //   用 typeof === 'number' 严格判断。
+      //   老 API 字段：仅给 prompt_tokens 和 hit_tokens，miss = prompt - hit 算出来
       var cost = null;
-      var hit = usage.prompt_cache_hit_tokens || 0;
-      var miss = usage.prompt_cache_miss_tokens || usage.prompt_tokens || 0;
+      var hit = typeof usage.prompt_cache_hit_tokens === 'number' ? usage.prompt_cache_hit_tokens : 0;
+      var miss;
+      if (typeof usage.prompt_cache_miss_tokens === 'number') {
+        miss = usage.prompt_cache_miss_tokens;
+      } else {
+        miss = Math.max(0, usage.prompt_tokens - hit);
+      }
       if (DEEPSEEK_INPUT_PRICE_PER_1M || DEEPSEEK_OUTPUT_PRICE_PER_1M) {
         var inputCost  = (miss * DEEPSEEK_INPUT_PRICE_PER_1M / 1000000) + (hit * DEEPSEEK_CACHE_HIT_PRICE_PER_1M / 1000000);
         var outputCost = (usage.completion_tokens * DEEPSEEK_OUTPUT_PRICE_PER_1M / 1000000);
@@ -5488,29 +5497,46 @@ app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
 });
 
 // GET /api/agent/chat/history - 获取当前用户 AI 聊天历史（按 conversation_id 分组）
+// 查询策略：
+//   - 带 conversation_id：只返回该 conv 的消息
+//   - 不带 conversation_id：先查最近一条 AI 消息解析其 convId，再返回这个 conv 的消息
+//   - 带 before（ISO 时间）：分页加载比 before 更早的消息（滚动加载更多用）
 app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
   try {
     var userName = req.userName;
     var convId = String(req.query.conversation_id || '').trim();
-    var limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 100);
+    var limit = Math.min(Math.max(parseInt(req.query.limit) || 30, 1), 100);
+    var before = String(req.query.before || '').trim();
 
-    // ★ 修复：之前 ascending: true + limit → 拿的是"最早 N 条"，刷新页面只看到旧对话。
-    //   改成 descending: true + limit → 拿"最近 N 条" desc，内存里 reverse 给前端按时间正序。
+    // 不带 convId → 先查最近一条 AI 消息的 convId
+    if (!convId) {
+      var { data: latest } = await supabase.from('posts')
+        .select('media_url')
+        .eq('user_name', userName)
+        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latest) {
+        var meta = parseMsgMeta(latest);
+        if (meta && meta.convId) convId = meta.convId;
+      }
+      if (!convId) {
+        // 用户从未聊过天
+        return res.json({ ok: true, conversation_id: null, messages: [] });
+      }
+    }
+
+    // 查指定 convId 的消息（desc + limit + 内存 reverse）
     var query = supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
       .eq('user_name', userName)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
       .order('created_at', { ascending: false })
       .limit(limit);
-
-    if (convId) {
-      query = supabase.from('posts')
-        .select('id, user_name, content, media_url, created_at')
-        .eq('user_name', userName)
-        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-        .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
-        .order('created_at', { ascending: false })
-        .limit(limit);
+    if (before) {
+      query = query.lt('created_at', before);
     }
 
     var { data: rows, error } = await query;
@@ -5524,16 +5550,18 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
 
     return res.json({
       ok: true,
-      conversation_id: convId || null,
+      conversation_id: convId,
+      has_more: (rows || []).length >= limit,
+      oldest: sortedRows.length ? sortedRows[0].created_at : null,
       messages: sortedRows.map(function(r) {
-        var meta = parseMsgMeta(r);
+        var m = parseMsgMeta(r);
         return {
           id: r.id,
-          role: meta.role || 'user',
+          role: m.role || 'user',
           content: r.content || '',
           created_at: r.created_at,
-          conversation_id: meta.convId || null,
-          usage: meta.usage || null
+          conversation_id: m.convId || convId,
+          usage: m.usage || null
         };
       })
     });
@@ -5599,12 +5627,38 @@ app.post('/admin/ai-agent/config', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/usage-summary - 管理员获取统计
+// 默认只查最近 30 天数据，避免全表扫描拖死接口。
+// 可通过 ?days=30 | 90 | all 切换窗口。
 app.get('/admin/ai-agent/usage-summary', verifyToken, async (req, res) => {
   try {
-    var { data: allRows } = await supabase.from('posts')
+    var daysParam = String(req.query.days || '30').toLowerCase();
+    var days;
+    var useAll = daysParam === 'all';
+    if (useAll) {
+      days = null;
+    } else {
+      days = parseInt(daysParam, 10);
+      if (isNaN(days) || days < 1) days = 30;
+      if (days > 365) days = 365; // 防止恶意查询过长时间范围
+    }
+
+    // 性能优化：assistant 消息通常占少数，limit 默认 10000 条
+    // 按 created_at desc 拿最近 N 天 / 全部
+    var query = supabase.from('posts')
       .select('user_name, content, media_url, created_at')
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(10000);
+    if (!useAll && days) {
+      var since = new Date(Date.now() - days * 86400000).toISOString();
+      query = query.gte('created_at', since);
+    }
+
+    var { data: allRows, error } = await query;
+    if (error) {
+      console.error('[ADMIN-AI] usage-summary query error:', error.message);
+      return res.status(500).json({ error: '查询失败' });
+    }
 
     var today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -5613,6 +5667,8 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, async (req, res) => {
     var totalTokens = 0, todayTokens = 0;
     var totalInputTokens = 0, todayInputTokens = 0;
     var totalOutputTokens = 0, todayOutputTokens = 0;
+    var totalCacheHit = 0, todayCacheHit = 0;
+    var totalCacheMiss = 0, todayCacheMiss = 0;
     var totalCost = 0, todayCost = 0;
     var uniqueUsers = {};
 
@@ -5623,16 +5679,21 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, async (req, res) => {
           totalCalls++;
           var isToday = r.created_at && r.created_at >= todayStr;
           if (isToday) todayCalls++;
-          if (meta.usage && meta.usage.total_tokens) {
-            totalTokens += meta.usage.total_tokens;
-            totalInputTokens += meta.usage.prompt_tokens || 0;
-            totalOutputTokens += meta.usage.completion_tokens || 0;
-            if (meta.usage.cost) totalCost += meta.usage.cost;
+          if (meta.usage) {
+            var u = meta.usage;
+            totalInputTokens += u.prompt_tokens || 0;
+            totalOutputTokens += u.completion_tokens || 0;
+            totalTokens += u.total_tokens || 0;
+            if (typeof u.prompt_cache_hit_tokens === 'number')  totalCacheHit  += u.prompt_cache_hit_tokens;
+            if (typeof u.prompt_cache_miss_tokens === 'number') totalCacheMiss += u.prompt_cache_miss_tokens;
+            if (u.cost) totalCost += u.cost;
             if (isToday) {
-              todayTokens += meta.usage.total_tokens;
-              todayInputTokens += meta.usage.prompt_tokens || 0;
-              todayOutputTokens += meta.usage.completion_tokens || 0;
-              if (meta.usage.cost) todayCost += meta.usage.cost;
+              todayInputTokens += u.prompt_tokens || 0;
+              todayOutputTokens += u.completion_tokens || 0;
+              todayTokens += u.total_tokens || 0;
+              if (typeof u.prompt_cache_hit_tokens === 'number')  todayCacheHit  += u.prompt_cache_hit_tokens;
+              if (typeof u.prompt_cache_miss_tokens === 'number') todayCacheMiss += u.prompt_cache_miss_tokens;
+              if (u.cost) todayCost += u.cost;
             }
           }
         }
@@ -5640,18 +5701,32 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, async (req, res) => {
       });
     }
 
+    // 缓存命中率 = hit / (hit + miss)，避免除 0
+    function hitRate(hit, miss) {
+      var total = hit + miss;
+      if (!total) return 0;
+      return Math.round((hit / total) * 10000) / 100; // 保留 2 位小数（百分比）
+    }
+
     return res.json({
       ok: true,
+      window_days: useAll ? 'all' : days,
       summary: {
         today_calls: todayCalls,
         today_input_tokens: todayInputTokens,
         today_output_tokens: todayOutputTokens,
         today_total_tokens: todayTokens,
+        today_cache_hit_tokens: todayCacheHit,
+        today_cache_miss_tokens: todayCacheMiss,
+        today_cache_hit_rate: hitRate(todayCacheHit, todayCacheMiss),
         today_cost: Math.round(todayCost * 1000000) / 1000000,
         total_calls: totalCalls,
         total_input_tokens: totalInputTokens,
         total_output_tokens: totalOutputTokens,
         total_tokens: totalTokens,
+        total_cache_hit_tokens: totalCacheHit,
+        total_cache_miss_tokens: totalCacheMiss,
+        total_cache_hit_rate: hitRate(totalCacheHit, totalCacheMiss),
         total_cost: Math.round(totalCost * 1000000) / 1000000,
         total_users: Object.keys(uniqueUsers).length,
         currency: DEEPSEEK_CURRENCY
@@ -5664,33 +5739,55 @@ app.get('/admin/ai-agent/usage-summary', verifyToken, async (req, res) => {
 });
 
 // GET /admin/ai-agent/users - 管理员查看有 AI 聊天记录的用户列表（含 tokens 统计）
+// 性能：limit 10000 + 30 天默认窗口
 app.get('/admin/ai-agent/users', verifyToken, async (req, res) => {
   try {
+    var days = parseInt(req.query.days, 10);
+    if (isNaN(days) || days < 1) days = 30;
+    if (days > 365) days = 365;
+    var since = new Date(Date.now() - days * 86400000).toISOString();
+
     var { data: rows } = await supabase.from('posts')
       .select('user_name, content, media_url, created_at')
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .order('created_at', { ascending: false });
+      .gte('created_at', since)
+      .order('created_at', { ascending: false })
+      .limit(10000);
 
-    if (!Array.isArray(rows)) return res.json({ ok: true, users: [] });
+    if (!Array.isArray(rows)) return res.json({ ok: true, users: [], window_days: days });
 
     var userMap = {};
     rows.forEach(function(r) {
       if (!r.user_name) return;
       if (!userMap[r.user_name]) {
-        userMap[r.user_name] = { message_count: 0, convs: {}, total_tokens: 0, input_tokens: 0, output_tokens: 0, total_cost: 0, last_at: null };
+        userMap[r.user_name] = {
+          message_count: 0, convs: {},
+          total_tokens: 0, input_tokens: 0, output_tokens: 0,
+          cache_hit_tokens: 0, cache_miss_tokens: 0,
+          total_cost: 0, last_at: null
+        };
       }
       var u = userMap[r.user_name];
       u.message_count++;
       var meta = parseMsgMeta(r);
       if (meta.convId) u.convs[meta.convId] = (u.convs[meta.convId] || 0) + 1;
       if (meta.role === 'assistant' && meta.usage) {
-        u.total_tokens += meta.usage.total_tokens || 0;
-        u.input_tokens += meta.usage.prompt_tokens || 0;
-        u.output_tokens += meta.usage.completion_tokens || 0;
-        if (meta.usage.cost) u.total_cost += meta.usage.cost;
+        var x = meta.usage;
+        u.input_tokens += x.prompt_tokens || 0;
+        u.output_tokens += x.completion_tokens || 0;
+        u.total_tokens += x.total_tokens || 0;
+        if (typeof x.prompt_cache_hit_tokens === 'number')  u.cache_hit_tokens  += x.prompt_cache_hit_tokens;
+        if (typeof x.prompt_cache_miss_tokens === 'number') u.cache_miss_tokens += x.prompt_cache_miss_tokens;
+        if (x.cost) u.total_cost += x.cost;
       }
       if (!u.last_at || (r.created_at && r.created_at > u.last_at)) u.last_at = r.created_at;
     });
+
+    function hitRate(hit, miss) {
+      var total = hit + miss;
+      if (!total) return 0;
+      return Math.round((hit / total) * 10000) / 100;
+    }
 
     var userList = [];
     for (var un in userMap) {
@@ -5702,6 +5799,9 @@ app.get('/admin/ai-agent/users', verifyToken, async (req, res) => {
         input_tokens: u.input_tokens,
         output_tokens: u.output_tokens,
         total_tokens: u.total_tokens,
+        cache_hit_tokens: u.cache_hit_tokens,
+        cache_miss_tokens: u.cache_miss_tokens,
+        cache_hit_rate: hitRate(u.cache_hit_tokens, u.cache_miss_tokens),
         total_cost: Math.round(u.total_cost * 1000000) / 1000000,
         last_at: u.last_at
       });
@@ -5709,35 +5809,47 @@ app.get('/admin/ai-agent/users', verifyToken, async (req, res) => {
 
     userList.sort(function(a, b) { return (b.last_at || '').localeCompare(a.last_at || ''); });
 
-    return res.json({ ok: true, users: userList });
+    return res.json({ ok: true, users: userList, window_days: days });
   } catch (e) {
     console.error('[ADMIN-AI] GET users error:', e.message);
     return res.status(500).json({ error: '查询失败' });
   }
 });
 
-// GET /admin/ai-agent/conversations?user_name=xxx - 获取用户对话列表
+// GET /admin/ai-agent/conversations?user_name=xxx&days=30 - 获取用户对话列表
+// 性能：限制最近 30 天，可通过 days 调整
 app.get('/admin/ai-agent/conversations', verifyToken, async (req, res) => {
   try {
     var targetUser = String(req.query.user_name || '').trim();
     if (!targetUser) return res.status(400).json({ error: '缺少 user_name 参数' });
 
+    var days = parseInt(req.query.days, 10);
+    if (isNaN(days) || days < 1) days = 30;
+    if (days > 365) days = 365;
+    var since = new Date(Date.now() - days * 86400000).toISOString();
+
     var { data: rows } = await supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
       .eq('user_name', targetUser)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .order('created_at', { ascending: true });
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .limit(5000);
 
-    if (!Array.isArray(rows)) return res.json({ ok: true, conversations: [] });
+    if (!Array.isArray(rows)) return res.json({ ok: true, user_name: targetUser, conversations: [], window_days: days });
 
     // 按 conversation_id 分组
     var convMap = {};
-    var legacyMsgs = [];
     rows.forEach(function(r) {
       var meta = parseMsgMeta(r);
       var cid = meta.convId || 'legacy';
       if (!convMap[cid]) {
-        convMap[cid] = { conversation_id: cid, messages: [], input_tokens: 0, output_tokens: 0, total_tokens: 0, total_cost: 0, model: null, last_thinking_mode: null };
+        convMap[cid] = {
+          conversation_id: cid, messages: [],
+          input_tokens: 0, output_tokens: 0, total_tokens: 0,
+          cache_hit_tokens: 0, cache_miss_tokens: 0,
+          total_cost: 0, model: null, last_thinking_mode: null
+        };
       }
       var conv = convMap[cid];
       conv.messages.push({
@@ -5749,14 +5861,23 @@ app.get('/admin/ai-agent/conversations', verifyToken, async (req, res) => {
         conversation_id: meta.convId || null
       });
       if (meta.role === 'assistant' && meta.usage) {
-        conv.input_tokens += meta.usage.prompt_tokens || 0;
-        conv.output_tokens += meta.usage.completion_tokens || 0;
-        conv.total_tokens += meta.usage.total_tokens || 0;
-        if (meta.usage.cost) conv.total_cost += meta.usage.cost;
-        if (meta.usage.model) conv.model = meta.usage.model;
-        if (meta.usage.thinking_mode) conv.last_thinking_mode = meta.usage.thinking_mode;
+        var x = meta.usage;
+        conv.input_tokens += x.prompt_tokens || 0;
+        conv.output_tokens += x.completion_tokens || 0;
+        conv.total_tokens += x.total_tokens || 0;
+        if (typeof x.prompt_cache_hit_tokens === 'number')  conv.cache_hit_tokens  += x.prompt_cache_hit_tokens;
+        if (typeof x.prompt_cache_miss_tokens === 'number') conv.cache_miss_tokens += x.prompt_cache_miss_tokens;
+        if (x.cost) conv.total_cost += x.cost;
+        if (x.model) conv.model = x.model;
+        if (x.thinking_mode) conv.last_thinking_mode = x.thinking_mode;
       }
     });
+
+    function hitRate(hit, miss) {
+      var total = hit + miss;
+      if (!total) return 0;
+      return Math.round((hit / total) * 10000) / 100;
+    }
 
     var conversations = Object.keys(convMap).map(function(cid) {
       var conv = convMap[cid];
@@ -5769,16 +5890,18 @@ app.get('/admin/ai-agent/conversations', verifyToken, async (req, res) => {
         input_tokens: conv.input_tokens,
         output_tokens: conv.output_tokens,
         total_tokens: conv.total_tokens,
+        cache_hit_tokens: conv.cache_hit_tokens,
+        cache_miss_tokens: conv.cache_miss_tokens,
+        cache_hit_rate: hitRate(conv.cache_hit_tokens, conv.cache_miss_tokens),
         total_cost: Math.round(conv.total_cost * 1000000) / 1000000,
         model: conv.model || DEEPSEEK_MODEL,
         last_thinking_mode: conv.last_thinking_mode || 'off'
       };
     });
 
-    // 按最后消息时间排序
     conversations.sort(function(a, b) { return (b.last_at || '').localeCompare(a.last_at || ''); });
 
-    return res.json({ ok: true, user_name: targetUser, conversations: conversations });
+    return res.json({ ok: true, user_name: targetUser, conversations: conversations, window_days: days });
   } catch (e) {
     console.error('[ADMIN-AI] GET conversations exception:', e.message);
     return res.status(500).json({ error: '查询失败' });
