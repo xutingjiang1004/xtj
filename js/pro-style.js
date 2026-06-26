@@ -100,6 +100,35 @@
     setupWrappers();
   });
 
+  // 点击 .pro-style-option-card 时重置该卡片的 preview 动画
+  // 让"切换到其他气泡"时该气泡的动画重新演绎（用户需求）
+  function restartPreviewAnimation(card) {
+    if (!card) return;
+    var preview = card.querySelector('.bubble-preview, .theme-preview, .post-card-preview');
+    if (!preview) return;
+    // 收集 preview 自身 + 所有子元素，统一重置 animation
+    var elements = [preview];
+    var children = preview.querySelectorAll('*');
+    for (var i = 0; i < children.length; i++) elements.push(children[i]);
+    elements.forEach(function(el) {
+      el.style.animation = 'none';
+    });
+    // 强制 reflow
+    try { void preview.offsetWidth; } catch (_) {}
+    // 恢复 CSS 中定义的 animation
+    elements.forEach(function(el) {
+      el.style.animation = '';
+    });
+  }
+
+  // 用事件代理绑定（一次绑定，永久生效）
+  document.addEventListener('click', function(e) {
+    var card = e.target && e.target.closest && e.target.closest('.pro-style-option-card');
+    if (!card) return;
+    // 0.97h：重置该卡片的 preview 动画（用户点击薄荷玻璃时它的动画重新演绎）
+    restartPreviewAnimation(card);
+  });
+
   // 初始状态：隐藏所有子面板（与原版行为一致）
   function init() {
     SUB_PANEL_IDS.forEach(function(id) {
