@@ -3,10 +3,13 @@
 
   // ===================== 配置 =====================
   var API_BASE = '/api/agent';
-  var HISTORY_PAGE_SIZE = 30;        // 一次加载多少条
-  var CONFIG_CACHE_TTL = 5 * 60 * 1000; // 5 分钟 config 缓存
+  var HISTORY_PAGE_SIZE = 30;
+  var CONFIG_CACHE_TTL = 5 * 60 * 1000;
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
   var THINKING_MODE_KEY = 'xtj_ai_thinking_mode';
+  // 兼容多种旧 localStorage key
+  var USER_NAME_KEYS = ['xtj_user', 'xtj_username', 'xtj_user_name'];
+  var PW_HASH_KEYS = ['xtj_pw_hash', 'xtj_password_hash'];
   var THINKING_LEVELS = [
     { value: 'off',    label: '关', icon: ''  },
     { value: 'low',    label: '低', icon: '⚡' },
@@ -14,23 +17,23 @@
     { value: 'high',   label: '高', icon: '🔥' }
   ];
 
-  // ===================== 状态（全局单例） =====================
+  // ===================== 状态 =====================
   var S = {
-    config: null,           // { name, avatar, description, welcome_message }
-    configFetchedAt: 0,     // 0 = 未拉过
-    conversationId: null,   // 当前 convId
-    messages: [],           // 当前已加载消息
-    oldestCursor: null,     // 滚动加载的 cursor
+    config: null,
+    configFetchedAt: 0,
+    conversationId: null,
+    messages: [],
+    oldestCursor: null,
     hasMore: false,
     sending: false,
-    loading: false,         // 首次加载
-    loadingMore: false,     // 滚动加载
+    loading: false,
+    loadingMore: false,
     thinkingMode: (function() {
       try { return localStorage.getItem(THINKING_MODE_KEY) || 'off'; } catch (e) { return 'off'; }
     })(),
-    active: false,          // AI 模式是否激活
-    rootEl: null,           // #aiChatRoot 引用
-    bound: false            // 是否已绑全局事件
+    active: false,
+    rootEl: null,
+    bound: false
   };
 
   // ===================== 工具 =====================
@@ -63,7 +66,6 @@
       if (typeof window.showToast === 'function') { window.showToast(msg); return; }
       if (typeof window.showNotify === 'function') { window.showNotify(msg); return; }
     } catch (e) {}
-    try { console.warn('[AI]', msg); } catch (e) {}
   }
 
   function fmtTime(iso) {
@@ -71,9 +73,7 @@
     try {
       var d = new Date(iso);
       if (isNaN(d.getTime())) return '';
-      var hh = String(d.getHours()).padStart(2, '0');
-      var mm = String(d.getMinutes()).padStart(2, '0');
-      return hh + ':' + mm;
+      return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
     } catch (e) { return ''; }
   }
 
@@ -87,23 +87,109 @@
     } catch (e) {}
   }
 
-  // ===================== API（统一封装） =====================
-  async function getAuthHeaders() {
+  // ===================== 鉴权兜底（双层 fallback）=====================
+  // 1. 优先 Bearer token
+  // 2. 没有 token 时自动用 user_name + password_hash 兜底
+  // 3. 同时从 localStorage / sessionStorage 多种 key 读取兼容老数据
+  function readUserName() {
+    if (window.currentUser) {
+      if (typeof window.currentUser === 'string') return window.currentUser;
+      if (window.currentUser.user_name) return window.currentUser.user_name;
+      if (window.currentUser.name) return window.currentUser.name;
+    }
+    for (var i = 0; i < USER_NAME_KEYS.length; i++) {
+      try {
+        var v = localStorage.getItem(USER_NAME_KEYS[i]);
+        if (v) return v;
+      } catch (e) {}
+      try {
+        var s = sessionStorage.getItem(USER_NAME_KEYS[i]);
+        if (s) return s;
+      } catch (e) {}
+    }
+    return '';
+  }
+  function readPwHash() {
+    for (var i = 0; i < PW_HASH_KEYS.length; i++) {
+      try {
+        var v = sessionStorage.getItem(PW_HASH_KEYS[i]);
+        if (v) return v;
+      } catch (e) {}
+      try {
+        var l = localStorage.getItem(PW_HASH_KEYS[i]);
+        if (l) return l;
+      } catch (e) {}
+    }
+    return '';
+  }
+
+  // 返回 { token, headers, body, query }
+  async function getUserAuthPayload() {
+    // 1. 优先 token
     var token = '';
     try {
       if (typeof window.ensureUserToken === 'function') {
         token = await window.ensureUserToken();
       }
-    } catch (e) {}
-    var h = { 'Content-Type': 'application/json' };
-    if (token) h['Authorization'] = 'Bearer ' + token;
-    return h;
+    } catch (e) {
+      token = '';
+    }
+
+    var headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+
+    // 2. 兜底
+    var body = {};
+    var query = {};
+    if (!token) {
+      var un = readUserName();
+      var pw = readPwHash();
+      if (un && pw) {
+        body.user_name = un;
+        body.password_hash = pw;
+        query.user_name = un;
+        query.password_hash = pw;
+      }
+    }
+    return { token: token, headers: headers, body: body, query: query };
   }
+
+  // ===================== API（统一封装）=====================
   async function apiRequest(method, path, body) {
+    var auth = null;
     try {
-      var headers = await getAuthHeaders();
+      auth = await getUserAuthPayload();
+      var headers = auth.headers;
       var opts = { method: method, headers: headers };
-      if (body !== undefined && body !== null) opts.body = JSON.stringify(body);
+
+      if (method === 'GET') {
+        // GET：把兜底鉴权加到 query
+        var extra = [];
+        for (var k in auth.query) {
+          if (auth.query.hasOwnProperty(k) && auth.query[k] !== undefined && auth.query[k] !== null) {
+            extra.push(encodeURIComponent(k) + '=' + encodeURIComponent(auth.query[k]));
+          }
+        }
+        if (extra.length) {
+          var sep = path.indexOf('?') >= 0 ? '&' : '?';
+          path = path + sep + extra.join('&');
+        }
+      } else {
+        // POST：把兜底鉴权合并到 body
+        var merged = {};
+        for (var bk in (body || {})) {
+          if ((body || {}).hasOwnProperty(bk)) merged[bk] = (body || {})[bk];
+        }
+        for (var ak in auth.body) {
+          if (auth.body.hasOwnProperty(ak) && merged[ak] === undefined) {
+            merged[ak] = auth.body[ak];
+          }
+        }
+        if (Object.keys(merged).length > 0) {
+          opts.body = JSON.stringify(merged);
+        }
+      }
+
       var resp = await fetch(API_BASE + path, opts);
       var data = null;
       try { data = await resp.json(); } catch (e) { data = null; }
@@ -134,7 +220,6 @@
       S.configFetchedAt = now;
       return S.config;
     }
-    // 失败兜底（不阻塞 UI）
     S.config = S.config || {
       name: '徐旭泽的小猫',
       avatar: '🐱',
@@ -165,7 +250,6 @@
     if (usage.model) parts.push(usage.model);
     return parts.length ? parts.join(' · ') : null;
   }
-
   function buildMessageNode(msg) {
     var role = msg.role === 'assistant' ? 'assistant' : 'user';
     var node = el('div', { class: 'ai-msg ' + role });
@@ -174,12 +258,9 @@
       var line = buildUsageLine(msg.usage);
       if (line) node.appendChild(el('div', { class: 'ai-msg-usage', text: line }));
     }
-    if (msg.created_at) {
-      node.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
-    }
+    if (msg.created_at) node.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
     return node;
   }
-
   function buildTypingNode() {
     var node = el('div', { class: 'ai-msg assistant typing' });
     var bubble = el('div', { class: 'ai-msg-bubble' });
@@ -187,13 +268,12 @@
     node.appendChild(bubble);
     return node;
   }
-
-  function buildEmptyState() {
+  function buildEmptyState(tipText) {
     var cfg = S.config || {};
     var empty = el('div', { class: 'ai-chat-empty' });
     empty.appendChild(el('div', { class: 'ai-chat-empty-emoji', text: cfg.avatar || '🐱' }));
     empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和' + (cfg.name || '徐旭泽的小猫') + '聊聊天' }));
-    empty.appendChild(el('div', { class: 'ai-chat-empty-tip', text: cfg.welcome_message || '喵，来聊天吧。' }));
+    empty.appendChild(el('div', { class: 'ai-chat-empty-tip', text: tipText || (cfg.welcome_message || '喵，来聊天吧。') }));
     return empty;
   }
 
@@ -242,7 +322,6 @@
       appendMessage(messagesEl, aiMsg);
       scrollToBottom(messagesEl);
     } else {
-      // 失败：移除乐观渲染的 user 消息（数据库不动）
       S.messages.pop();
       removeLastUserMessage(messagesEl);
       notify(describeError(r, 'AI 暂时没有回应，请稍后再试'));
@@ -259,7 +338,6 @@
   }
 
   function appendMessage(messagesEl, msg) {
-    // 移除空状态
     var empty = messagesEl.querySelector('.ai-chat-empty');
     if (empty) empty.remove();
     messagesEl.appendChild(buildMessageNode(msg));
@@ -270,29 +348,41 @@
       try { nodes[nodes.length - 1].remove(); } catch (e) {}
     }
   }
-
   function scrollToBottom(container) {
     if (!container) return;
     try { requestAnimationFrame(function() { container.scrollTop = container.scrollHeight; }); } catch (e) {}
   }
 
-  // ===================== 加载历史 =====================
+  // ===================== 加载历史（500 不阻塞输入框）=====================
   async function loadHistory(messagesEl, before) {
     if (S.loading || S.loadingMore) return;
     if (before) S.loadingMore = true; else S.loading = true;
     try {
       var qs = '?limit=' + HISTORY_PAGE_SIZE;
       if (S.conversationId) qs += '&conversation_id=' + encodeURIComponent(S.conversationId);
-      else {
-        // ★ 不带 convId：后端会查最近一条 AI 消息的 conv 再返回该 conv
-        //   如果从没聊过，convId 仍为 null
-      }
       if (before) qs += '&before=' + encodeURIComponent(before);
       var r = await apiRequest('GET', '/chat/history' + qs);
+
       if (!r.ok || !r.data) {
-        if (!before) showEmptyOrError(messagesEl, r);
+        if (!before) {
+          // ★ 关键：500 不阻塞输入框
+          //   - 控制台 warn（让开发者能看到）
+          //   - 显示空状态 + 友好提示
+          //   - 不清空 messagesEl（如果已有内容）
+          try { console.warn('[AI] loadHistory failed:', r.status, r.error); } catch (e) {}
+          if (messagesEl.children.length === 0) {
+            messagesEl.innerHTML = '';
+            messagesEl.appendChild(buildEmptyState('聊天历史加载失败（' + (r.status || '?') + '），但你仍可发送新消息'));
+          } else {
+            // 已有内容时，仅在头部追加一个小提示
+            var warnEl = el('div', { class: 'ai-msg-warn', text: '聊天历史加载失败（' + (r.status || '?') + '），但你仍可发送新消息' });
+            messagesEl.appendChild(warnEl);
+          }
+          // 不 throw、不弹窗阻塞 UI
+        }
         return;
       }
+
       if (r.data.conversation_id) {
         S.conversationId = r.data.conversation_id;
         writeConvId(r.data.conversation_id);
@@ -300,24 +390,21 @@
       S.hasMore = !!r.data.has_more;
       S.oldestCursor = r.data.oldest || S.oldestCursor;
       var msgs = r.data.messages || [];
+
       if (!msgs.length && !before) {
-        // 没历史 → 空状态
         S.messages = [];
         messagesEl.innerHTML = '';
         messagesEl.appendChild(buildEmptyState());
         return;
       }
       if (!before) {
-        // 首次加载
         S.messages = msgs;
         messagesEl.innerHTML = '';
         msgs.forEach(function(m) { messagesEl.appendChild(buildMessageNode(m)); });
         scrollToBottom(messagesEl);
       } else {
-        // 滚动加载更多
         var oldScroll = messagesEl.scrollHeight;
         msgs.forEach(function(m) { messagesEl.insertBefore(buildMessageNode(m), messagesEl.firstChild); });
-        // 保持视觉位置
         try {
           requestAnimationFrame(function() {
             var newScroll = messagesEl.scrollHeight;
@@ -331,15 +418,8 @@
     }
   }
 
-  function showEmptyOrError(messagesEl, r) {
-    messagesEl.innerHTML = '';
-    messagesEl.appendChild(buildEmptyState());
-    if (r && !r.ok) notify(describeError(r, '历史加载失败'));
-  }
-
-  // ===================== 渲染 AI 聊天页（独立 #aiChatRoot） =====================
+  // ===================== 渲染 AI 聊天页（独立 #aiChatRoot）=====================
   function renderAiRoot() {
-    // ★ 关键：先确保旧的 #aiChatRoot 不存在
     var old = document.getElementById('aiChatRoot');
     if (old) try { old.remove(); } catch (e) {}
 
@@ -361,7 +441,6 @@
     info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: '在线' }));
     header.appendChild(info);
 
-    // 思考模式按钮
     function getLevelMeta(v) {
       for (var k = 0; k < THINKING_LEVELS.length; k++) {
         if (THINKING_LEVELS[k].value === v) return THINKING_LEVELS[k];
@@ -390,7 +469,6 @@
     });
     header.appendChild(thinkBtn);
 
-    // 新对话按钮
     var newBtn = el('button', {
       type: 'button', class: 'ai-chat-new-btn', 'aria-label': '新对话',
       title: '开始新对话（不删除历史）'
@@ -426,7 +504,6 @@
 
     // ----- Messages -----
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
-    // 滚动到顶加载更多
     messagesEl.addEventListener('scroll', function() {
       if (messagesEl.scrollTop < 60 && S.hasMore && !S.loading && !S.loadingMore && S.oldestCursor) {
         loadHistory(messagesEl, S.oldestCursor);
@@ -479,12 +556,10 @@
     }
     S.active = true;
 
-    // 切到 chat tab
     if (typeof window.switchDockTab === 'function') {
       try { window.switchDockTab('chat', true); } catch (e) {}
     }
 
-    // 切到 detail view
     var listView = document.getElementById('dockChatListView');
     var detailView = document.getElementById('dockChatDetailView');
     var panelChat = document.getElementById('panelChat');
@@ -493,24 +568,20 @@
     if (panelChat) panelChat.classList.add('ai-mode');
     if (detailView) detailView.classList.add('ai-mode');
 
-    // 渲染独立 root
     var r = renderAiRoot();
     if (detailView) detailView.appendChild(r.root);
     S.rootEl = r.root;
 
-    // 恢复 localStorage 中的 convId
     S.conversationId = readConvId();
 
-    // 加载 config + 历史
     try {
       var cfg = await ensureConfig();
       applyConfigToUI(cfg);
     } catch (e) {}
+
     await loadHistory(r.messagesEl, null);
 
-    // 隐藏 dock 自带的 chat-header / input-area
-    // ★ 既然用了独立 root + .ai-mode 作用域，CSS 处理即可，无需 inline style
-    //   仍然保留防御性 inline 隐藏
+    // 防御性 inline 隐藏
     try {
       var hdr = document.querySelector('#dockChatContainer .chat-header');
       if (hdr) hdr.style.display = 'none';
@@ -520,12 +591,10 @@
       if (dcm) dcm.style.display = 'none';
     } catch (e) {}
 
-    // 停止 DM 轮询
     if (typeof window.stopDMPolling === 'function') {
       try { window.stopDMPolling(); } catch (e) {}
     }
 
-    // focus input
     setTimeout(function() { try { r.input.focus(); } catch (e) {} }, 80);
   }
 
@@ -553,18 +622,21 @@
     }
   }
 
-  // ===================== 关闭 AI 聊天 =====================
+  // ===================== 关闭 AI 聊天（重写恢复顺序）=====================
   function closeAiChat() {
     if (!S.active) return;
     S.active = false;
 
-    // 移除 .ai-mode
+    // 1. 移除 .ai-mode class
     var panelChat = document.getElementById('panelChat');
     var detailView = document.getElementById('dockChatDetailView');
     if (panelChat) panelChat.classList.remove('ai-mode');
     if (detailView) detailView.classList.remove('ai-mode');
 
-    // 恢复 dock 元素显示
+    // 2. 删除 #aiChatRoot
+    if (S.rootEl) { try { S.rootEl.remove(); } catch (e) {} S.rootEl = null; }
+
+    // 3. 恢复 dock 元素显示（防御性 inline 恢复）
     try {
       var hdr = document.querySelector('#dockChatContainer .chat-header');
       if (hdr) hdr.style.display = '';
@@ -574,33 +646,55 @@
       if (dcm) dcm.style.display = '';
     } catch (e) {}
 
-    // 移除 root
-    if (S.rootEl) { try { S.rootEl.remove(); } catch (e) {} S.rootEl = null; }
-
-    // 切回 list view
-    // ★ 关键：必须用 var 声明，避免 if (listView = ...) 隐式创建全局变量
-    var listView2 = document.getElementById('dockChatListView');
-    if (listView2) listView2.classList.remove('hidden');
+    // 4. 切回 list view（不调用未声明的变量）
     if (detailView) detailView.classList.add('hidden');
+    var listView = document.getElementById('dockChatListView');
+    if (listView) listView.classList.remove('hidden');
 
-    // 恢复 dock title
+    // 5. 恢复 dock title
     var titleEl = document.getElementById('dockChatTitle');
     if (titleEl) titleEl.textContent = '消息';
 
-    // 触发列表刷新
-    if (typeof window.renderDockChatList === 'function') {
-      try { window.renderDockChatList(); } catch (e) {}
+    // 6. 触发列表刷新 + AI 入口
+    //    ★ 不论 renderDockChatList 是否存在、是否抛错、是否异步，最终都要保证 AI 入口在
+    try {
+      if (typeof window.renderDockChatList === 'function') {
+        var refreshResult = window.renderDockChatList();
+        if (refreshResult && typeof refreshResult.then === 'function') {
+          try {
+            refreshResult.catch(function() {}).then(function() { insertEntry(); });
+          } catch (e) {
+            insertEntry();
+          }
+        }
+        // 同步完成的话 hook 已经把 insertEntry 排到 setTimeout，这里不重复调
+      } else {
+        // 没有 renderDockChatList 时直接插入
+        insertEntry();
+      }
+    } catch (e) {
+      // 兜底
+      try { insertEntry(); } catch (e2) {}
     }
   }
 
   // ===================== 插入 AI 入口到聊天列表 =====================
   function insertEntry() {
-    var listView = document.getElementById('dockChatListView');
-    if (!listView) return;
+    // ★ 关键修复：插入容器必须是 #dockChatList，不是 #dockChatListView
+    var list = document.getElementById('dockChatList');
+    if (!list) {
+      // 兼容老版本（如果有人改了）
+      list = document.getElementById('dockChatListView');
+    }
+    if (!list) return;
 
-    // 移除旧的
-    var old = listView.querySelector('[data-chat-user="__ai_agent__"]');
-    if (old) try { old.remove(); } catch (e) {}
+    // ★ 关键：querySelectorAll 全部去重（不只是第一个）
+    try {
+      var olds = list.querySelectorAll('[data-chat-user="__ai_agent__"]');
+      for (var i = 0; i < olds.length; i++) {
+        try { olds[i].remove(); } catch (e) {}
+      }
+    } catch (e) {}
 
     var cfg = S.config || { name: '徐旭泽的小猫', avatar: '🐱' };
     var name = cfg.name || '徐旭泽的小猫';
@@ -634,23 +728,28 @@
     });
 
     // 置顶插入
-    listView.insertBefore(item, listView.firstChild);
+    list.insertBefore(item, list.firstChild);
   }
 
-  // ===================== 注入聊天列表 hook =====================
+  // ===================== 注入聊天列表 hook（兼容 Promise）=====================
   function hookChatList() {
     if (S.bound) return;
-    // 拦截 renderDockChatList，每次调用后重新插入 AI 入口（保证不重复）
     var original = window.renderDockChatList;
     window.renderDockChatList = function() {
       var ret;
       if (typeof original === 'function') {
         try { ret = original.apply(this, arguments); } catch (e) {}
       }
-      // ★ 关键：必须先 return ret，再执行 setTimeout，否则提前 return 会跳过 insertEntry
-      //   普通聊天列表刷新后会清空 #dockChatListView 的子元素，覆盖 AI 入口
-      //   setTimeout 0 是为了让 original 内部 DOM 操作先完成再插入，避免被原函数后续逻辑覆盖
-      setTimeout(insertEntry, 0);
+      // ★ 兼容异步：如果 ret 是 Promise，等 finally 再 insertEntry
+      if (ret && typeof ret.finally === 'function') {
+        try {
+          ret.finally(function() { insertEntry(); });
+        } catch (e) {
+          setTimeout(insertEntry, 0);
+        }
+      } else {
+        setTimeout(insertEntry, 0);
+      }
       return ret;
     };
     S.bound = true;
@@ -662,10 +761,9 @@
       var x = window.innerWidth / 2;
       var y = window.innerHeight - 80;
       var el2 = document.elementFromPoint(x, y);
-      console.log('[DEBUG-AI] elementFromPoint(' + x + ', ' + y + ') =', el2);
-      console.log('[DEBUG-AI] tag=' + (el2 ? el2.tagName : 'null') + ' id=' + (el2 ? el2.id : '') + ' class=' + (el2 ? el2.className : ''));
+      try { console.log('[DEBUG-AI] elementFromPoint(' + x + ', ' + y + ') =', el2); } catch (e) {}
       return el2;
-    } catch (e) { console.error('[DEBUG-AI]', e); }
+    } catch (e) {}
   };
 
   // ===================== 暴露 API =====================
@@ -676,13 +774,11 @@
     getConfig: function() { return S.config; },
     getConversationId: function() { return S.conversationId; }
   };
-  // 同时保留旧名字兼容
   window.__xtjOpenAiChat = openAiChat;
   window.__xtjCloseAiChat = closeAiChat;
 
   // ===================== 启动 =====================
   function bootstrap() {
-    // 1. 拉一次 config（不阻塞）
     ensureConfig().then(function(cfg) {
       S.config = cfg;
       insertEntry();
@@ -690,7 +786,6 @@
       S.config = { name: '徐旭泽的小猫', avatar: '🐱', description: 'AI 智能体', welcome_message: '喵，来聊天吧。' };
       insertEntry();
     });
-    // 2. hook 聊天列表
     hookChatList();
   }
 
