@@ -26,18 +26,26 @@ const JS_FILES = [
   'js/core-animations.js',
   'js/ui-effects.js',
   'js/pro-upgrade.js',
+  'js/pro-style.js',
+  'js/login-device.js',
+  'js/theme-toggle.js',
+  'js/config.js',
   'js/photo-wall/upload-ui.js',
   'js/photo-wall/data.js',
   'js/photo-wall/render.js',
   'js/photo-wall/upload.js',
   'js/photo-wall/preview.js',
   'js/photo-wall/photo-wall.js',
+  'js/photo-wall/preview-hotfix.js',
   'js/admin/admin.js'
 ];
 
 const CSS_FILES = [
   'css/style.css',
-  'css/ui-enhance.css'
+  'css/ui-enhance.css',
+  'css/pro-style.css',
+  'css/desktop.css',
+  'css/visual-refinements.css'
 ];
 
 function minifyJS(filePath) {
