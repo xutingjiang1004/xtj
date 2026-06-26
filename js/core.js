@@ -770,10 +770,9 @@ const ADMIN_NAME = "xxz";
                 }
             }
             updateProStylePreviewActiveStates();
-            // 确保回到总览视图
-            if (typeof window.showProStyleLanding === 'function') {
-                window.showProStyleLanding();
-            }
+            // 注意：此处不再强制 showProStyleLanding() ——
+            //      openProStylePage() 会在第一次进入时显式调用，
+            //      避免用户在子面板中编辑时被打回总览。
             if (typeof updateProStyleEntry === 'function') {
                 updateProStyleEntry();
             }
@@ -874,6 +873,11 @@ const ADMIN_NAME = "xxz";
 
             if (typeof renderProStyleSettings === 'function') {
                 renderProStyleSettings();
+            }
+            // 第一次进入时显式显示总览
+            // (renderProStyleSettings 不再自动 showLanding，避免在子面板编辑时被强制重置)
+            if (typeof window.showProStyleLanding === 'function') {
+                window.showProStyleLanding();
             }
 
             if (panel && typeof panel.scrollTo === 'function') {
@@ -1194,26 +1198,57 @@ const ADMIN_NAME = "xxz";
                 ].join('');
             }
 
-            function renderAuthExpired(msg) {
+            // 区分两种"无法请求"场景：
+            //  1. fake_login  — currentUser 存在但 token / password_hash 都没有，是页面级假登录
+            //                   提示文案："登录状态已过期，请重新登录后查看活动"
+            //  2. expired     — token 真的过期了，重试一次后仍 401/403
+            //                   提示文案："登录凭证需要刷新" + 重新登录按钮
+            function renderFakeLogin() {
+                section.style.display = '';
+                list.innerHTML = [
+                    '<div class="pro-gift-auth-card">',
+                    '  <div class="pro-gift-empty-icon">🔐</div>',
+                    '  <div class="pro-gift-auth-title">登录状态已过期</div>',
+                    '  <div class="pro-gift-auth-copy">你的登录状态已过期，请重新登录后查看 Pro 活动。</div>',
+                    '  <div class="pro-gift-auth-actions"><button type="button" class="btn primary pro-gift-auth-btn" onclick="openAuthModal(\'login\')">重新登录</button></div>',
+                    '</div>'
+                ].join('');
+            }
+
+            function renderAuthExpired() {
                 section.style.display = '';
                 list.innerHTML = [
                     '<div class="pro-gift-auth-card">',
                     '  <div class="pro-gift-empty-icon">🔐</div>',
                     '  <div class="pro-gift-auth-title">登录凭证需要刷新</div>',
-                    '  <div class="pro-gift-auth-copy">' + escapeHtml(msg || '你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。') + '</div>',
+                    '  <div class="pro-gift-auth-copy">你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。</div>',
                     '  <div class="pro-gift-auth-actions"><button type="button" class="btn primary pro-gift-auth-btn" onclick="requestProGiftRelogin()">重新登录</button></div>',
                     '</div>'
                 ].join('');
             }
 
+            // 检查是否处于"假登录"状态：有 currentUser 但完全没有 token / password_hash
+            function isFakeLogin() {
+                if (getUserToken()) return false;
+                try {
+                    var pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || '';
+                    if (pwHash) return false;
+                } catch (e) {}
+                return true;
+            }
+
             try {
-                var headers = {};
                 var tok = await ensureUserToken();
                 if (!tok) {
-                    renderAuthExpired('你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。');
+                    // 没拿到 token：先判别是 fake login 还是真正缺凭据
+                    if (isFakeLogin()) {
+                        renderFakeLogin();
+                    } else {
+                        renderAuthExpired();
+                    }
                     return;
                 }
-                headers['Authorization'] = 'Bearer ' + tok;
+                var headers = { 'Authorization': 'Bearer ' + tok };
                 var resp = await fetch(API_BASE + '/api/pro-gifts/available?user_name=' + encodeURIComponent(currentUser), {
                     headers: headers,
                     signal: AbortSignal.timeout(8000)
@@ -1230,11 +1265,16 @@ const ADMIN_NAME = "xxz";
                         });
                         if (resp.status === 401 || resp.status === 403) {
                             clearUserToken();
-                            renderAuthExpired('你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。');
+                            renderAuthExpired();
                             return;
                         }
                     } else {
-                        renderAuthExpired('你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。');
+                        // 重试后还是拿不到 token：先看是不是 fake login
+                        if (isFakeLogin()) {
+                            renderFakeLogin();
+                        } else {
+                            renderAuthExpired();
+                        }
                         return;
                     }
                 }
