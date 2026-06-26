@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -156,6 +156,9 @@ const ADMIN_NAME = "xxz";
                 }
                 return null;
             }
+            window.getUserToken = getUserToken;
+            window.ensureUserToken = ensureUserToken;
+            window.clearUserToken = clearUserToken;
 
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
@@ -1234,7 +1237,6 @@ const ADMIN_NAME = "xxz";
                         renderAuthExpired('你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。');
                         return;
                     }
-                }
                 }
                 var data = await resp.json();
                 if (data && data.error) {
