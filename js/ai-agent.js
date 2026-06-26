@@ -99,6 +99,60 @@
   // 1. 优先 Bearer token
   // 2. 没有 token 时自动用 user_name + password_hash 兜底
   // 3. 同时从 localStorage / sessionStorage 多种 key 读取兼容老数据
+  // ===================== AI 鉴权诊断（console 一键排查）=====================
+  // 用户在控制台输入 __xtjAiAuthDiag() 即可看到完整链路状态
+  function diagCollectContext() {
+    var ctx = {
+      apiBase: API_BASE,
+      locationOrigin: (typeof location !== 'undefined') ? location.origin : '',
+      hasXtjConfig: !!window.XTJ_CONFIG,
+      xtjConfigApiBase: window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE,
+      hasCurrentUser: !!window.currentUser,
+      currentUserName: readUserName() || null,
+      hasPwHash: !!readPwHash(),
+      pwHashStorage: (function() {
+        try { if (sessionStorage.getItem('xtj_pw_hash')) return 'sessionStorage'; } catch (e) {}
+        try { if (localStorage.getItem('xtj_pw_hash')) return 'localStorage'; } catch (e) {}
+        return 'none';
+      })(),
+      hasUserToken: !!(function() {
+        try { return sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'); } catch (e) { return ''; }
+      })(),
+      hasEnsureUserToken: typeof window.ensureUserToken === 'function',
+      hasRefreshUserToken: typeof window.refreshUserToken === 'function',
+      hasClearUserToken: typeof window.clearUserToken === 'function',
+      scriptSrc: (function() {
+        try {
+          var ss = document.getElementsByTagName('script');
+          for (var i = 0; i < ss.length; i++) {
+            var s = ss[i].getAttribute('src') || '';
+            if (s.indexOf('ai-agent.js') >= 0) return s;
+          }
+        } catch (e) {}
+        return null;
+      })()
+    };
+    return ctx;
+  }
+  function diagPrintContext(label) {
+    try {
+      var c = diagCollectContext();
+      console.warn('[AI-DIAG' + (label ? '/' + label : '') + ']', c);
+      return c;
+    } catch (e) { return null; }
+  }
+  async function diagRun(label) {
+    try {
+      var c = diagPrintContext(label);
+      if (!c) return null;
+      console.warn('[AI-DIAG] test /api/agent/config ...');
+      var r = await sendOnce('GET', '/config', null, { forceNoToken: false });
+      console.warn('[AI-DIAG] /config result', { status: r && r.status, ok: r && r.ok, url: r && r.url });
+      return c;
+    } catch (e) { return null; }
+  }
+  window.__xtjAiAuthDiag = function() { return diagRun('manual'); };
+
   function readUserName() {
     if (window.currentUser) {
       if (typeof window.currentUser === 'string') return window.currentUser;
@@ -186,24 +240,30 @@
   // 失败时 console.warn 打印真实状态码/响应体，便于排查
   // ★ 401/403 后自动清理旧 token 并用 password_hash 兜底重试一次
   async function apiRequest(method, path, body) {
+    try { console.warn('[AI] apiRequest start', { method: method, path: path, apiBase: API_BASE }); } catch (e) {}
     var first = await sendOnce(method, path, body, { forceNoToken: false });
+    try { console.warn('[AI] first response', { method: method, path: path, status: first && first.status, ok: first && first.ok, url: first && first.url }); } catch (e) {}
     if (first && (first.status === 401 || first.status === 403)) {
+      var hasPw = hasLocalPasswordHash();
+      try { console.warn('[AI] auth failed, hasLocalPasswordHash =', hasPw); } catch (e) {}
       // 仅在有本地 password_hash 兜底时才重试，避免无谓请求
-      if (hasLocalPasswordHash()) {
+      if (hasPw) {
         try { console.warn('[AI] auth failed, retrying with password_hash fallback'); } catch (e) {}
         clearAiUserToken();
         var second = await sendOnce(method, path, body, { forceNoToken: true, retry: true });
-        try { console.warn('[AI] retry result', { status: second && second.status, ok: second && second.ok }); } catch (e) {}
+        try { console.warn('[AI] retry result (pw_hash)', { status: second && second.status, ok: second && second.ok, url: second && second.url }); } catch (e) {}
         return second;
       } else {
         // 没有任何兜底，尝试主动 refreshUserToken
+        try { console.warn('[AI] no password_hash, try refreshUserToken'); } catch (e) {}
         if (typeof window.refreshUserToken === 'function') {
           try {
             var refreshed = await window.refreshUserToken(true);
+            try { console.warn('[AI] refreshUserToken result, hasNewToken =', !!refreshed); } catch (e) {}
             if (refreshed) {
               try { console.warn('[AI] auth failed, retried with refreshed token'); } catch (e) {}
               var third = await sendOnce(method, path, body, { forceNoToken: false, retry: true });
-              try { console.warn('[AI] retry result', { status: third && third.status, ok: third && third.ok }); } catch (e) {}
+              try { console.warn('[AI] retry result (refreshed token)', { status: third && third.status, ok: third && third.ok, url: third && third.url }); } catch (e) {}
               return third;
             }
           } catch (e) {}
@@ -889,6 +949,8 @@
 
   // ===================== 启动 =====================
   function bootstrap() {
+    // ★ 启动时立即打印一次诊断上下文（不需要等用户开 AI）
+    try { diagPrintContext('boot'); } catch (e) {}
     ensureConfig().then(function(cfg) {
       S.config = cfg;
       scheduleInsertEntry();
