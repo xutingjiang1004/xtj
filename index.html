@@ -45,6 +45,7 @@
     </script>
     <link rel="stylesheet" href="css/style.css?v=20260627_uivisual_v1" />
     <link rel="stylesheet" href="css/visual-refinements.css?v=20260627_v1" />
+    <link rel="stylesheet" href="css/ai-agent.css?v=20260627_ai_agent_v1" />
     <style id="xtj-inline-hotfix-20260612">
         .dock-bar {
             position: fixed;
@@ -629,6 +630,19 @@
                         <span class="profile-pro-style-entry-arrow" aria-hidden="true">›</span>
                     </button>
                 </div>
+                <button
+                    type="button"
+                    class="ai-agent-entry-card"
+                    id="aiAgentEntry"
+                    aria-label="打开 AI 宠物"
+                >
+                    <span class="ai-agent-entry-icon" aria-hidden="true">🐾</span>
+                    <span class="ai-agent-entry-text">
+                        <strong>AI 宠物</strong>
+                        <small>创建你的专属 AI 宠物</small>
+                    </span>
+                    <span class="ai-agent-entry-arrow" aria-hidden="true">›</span>
+                </button>
                 <div class="profile-settings">
                     <div class="profile-setting-item">
                         <div class="profile-setting-label">
@@ -690,7 +704,6 @@
                             <p class="profile-subpage-sub">管理你的专属主题、聊天气泡和帖子卡片装饰。</p>
                         </div>
                     </div>
-                    <!-- Pro 装扮总览入口（精简版：直接展示 3 个分类入口，不再嵌套玻璃大卡） -->
                     <div class="pro-style-category-cards" id="proStyleCategoryCards">
                         <button type="button" class="pro-style-category-card" data-category="theme" onclick="showProStyleCategory('theme')">
                             <div class="pro-style-category-icon">🎨</div>
@@ -1003,6 +1016,10 @@
                             <button class="btn primary pro-style-save-btn" type="button" data-pro-style-save-type="post" onclick="saveCurrentUserStylePart('post')">保存</button>
                         </div>
                     </div>
+                </section>
+                <section class="profile-subpage profile-ai-agent-page" id="profileAiAgentPage" hidden>
+                    <!-- AI 宠物二级页（独立页，与 Pro 装扮二级页互斥） -->
+                    <!-- 内容由 js/ai-agent.js 动态渲染 -->
                 </section>
             </div>
         </div>
@@ -1541,6 +1558,7 @@
     <script defer src="js/ui-effects.js?v=20260623_1"></script>
     <script defer src="js/pro-upgrade.js?v=20260627_profile_v3"></script>
     <script defer src="js/pro-style.js?v=20260627_proanim_v3"></script>
+    <script defer src="js/ai-agent.js?v=20260627_ai_agent_v1"></script>
 <script defer src="js/photo-wall/upload-ui.min.js?v=20260623_v2"></script>
 </body>
 </html>
