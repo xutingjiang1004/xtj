@@ -39,7 +39,7 @@
 
     // ===================== 状态 =====================
     var state = {
-        profile: null,    // { agent_name, persona, tone, level, intimacy, mood, autonomy_enabled, tools_enabled, updated_at }
+        profile: null,    // { agent_name, persona, tone, level, intimacy, mood, autonomy_enabled, updated_at }
         messages: [],     // [{ id, role: 'user'|'assistant', content, created_at }]
         loading: false,
         sending: false,
@@ -221,7 +221,7 @@
         }, '🐾 欢迎，先给你的 AI 宠物起个名字');
         var sub = el('div', {
             style: 'font-size:12px;color:var(--text-muted,#6b6c7a);line-height:1.6;margin-bottom:14px;'
-        }, '它会陪在你身边，可以聊你的想法、帮你润色文案、总结最近的动态。所有数据只属于你，不会出现在首页。');
+        }, '和你的专属 AI 聊天，让它记住你的喜好和要求。所有数据只属于你，不会出现在首页。');
 
         var nameInput = el('input', {
             class: 'ai-form-input',
@@ -449,7 +449,7 @@
         var empty = el('div', { class: 'ai-chat-empty' }, [
             el('div', { class: 'ai-chat-empty-emoji', text: '🐾' }),
             el('div', { class: 'ai-chat-empty-title', text: '开始你们的第一次对话' }),
-            el('div', { class: 'ai-chat-empty-tip', text: '说点什么吧，比如"今天心情不太好"或者"帮我写一条帖子草稿"。' })
+            el('div', { class: 'ai-chat-empty-tip', text: '说点什么吧，比如聊聊你今天的心情。' })
         ]);
         messagesEl.appendChild(empty);
     }
