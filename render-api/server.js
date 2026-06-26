@@ -5351,7 +5351,23 @@ async function updateLongTermMemory(userName, profile, ctx, lastUserMsg, lastAiR
 
   try {
     // 1. 拉最近 N 条历史（按时间正序）
+    //    ctx.history 不包含当前这句"记住……"，所以需要手动追加 lastUserMsg / lastAiReply
     var hist = (ctx && Array.isArray(ctx.history)) ? ctx.history.slice(-AI_MEMORY_SUMMARIZE_HISTORY) : [];
+
+    // ★ 必须把当前消息追加进去，否则首次聊天"记住"时 hist 为空直接 return
+    if (lastUserMsg) {
+      hist.push({
+        role: 'user',
+        content: String(lastUserMsg || '').slice(0, 500)
+      });
+    }
+    if (lastAiReply) {
+      hist.push({
+        role: 'assistant',
+        content: String(lastAiReply || '').slice(0, 500)
+      });
+    }
+
     if (hist.length === 0) return;
 
     // 2. 已有 memory
