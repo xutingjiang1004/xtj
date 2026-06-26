@@ -673,11 +673,9 @@ const ADMIN_NAME = "xxz";
                 var type = String(card.getAttribute('data-pro-style-type') || '');
                 var value = String(card.getAttribute('data-pro-style-value') || '');
                 var meta = getProStyleSelectMeta(type);
-                var enabled = currentUser === ADMIN_NAME || hasProFeature(meta.feature);
-                if (!enabled && value !== 'default') {
-                    showToast('这是 Pro 视觉权益，领取包含该权益的 Pro 活动后可使用');
-                    return;
-                }
+                // 0.97i：移除非 Pro 用户点击预览的拦截
+                // 非 Pro 用户可以预览/查看所有 Pro 视觉权益（动画 + 切换预览）
+                // 权限校验在保存时（saveCurrentUserStylePart）进行
                 if (setProStyleSelectValue(type, value)) {
                     updateProStylePreviewActiveStates();
                     applyCurrentUserStyle();
