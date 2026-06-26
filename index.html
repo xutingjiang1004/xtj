@@ -43,7 +43,8 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.css?v=20260625_pro_subpage" />
+    <link rel="stylesheet" href="css/style.css?v=20260627_uivisual_v1" />
+    <link rel="stylesheet" href="css/visual-refinements.css?v=20260627_v1" />
     <style id="xtj-inline-hotfix-20260612">
         .dock-bar {
             position: fixed;
@@ -276,9 +277,9 @@
             -webkit-backdrop-filter: none !important;
         }
     </style>
-    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.css?v=20260624_progift" />
-    <link rel="stylesheet" href="css/ui-enhance.css?v=20260620_3">
-    <link rel="stylesheet" href="css/pro-style.css?v=20260626_dock_unborder">
+    <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.min.css?v=20260627_b1" />
+    <link rel="stylesheet" href="css/ui-enhance.min.css?v=20260627_b1">
+    <link rel="stylesheet" href="css/pro-style.min.css?v=20260627_b1">
 </head>
 <body>
     <svg class="xtj-svg-filters" width="0" height="0" aria-hidden="true" focusable="false">
@@ -689,67 +690,32 @@
                             <p class="profile-subpage-sub">管理你的专属主题、聊天气泡和帖子卡片装饰。</p>
                         </div>
                     </div>
-                    <!-- Pro 装扮总览面板（三级入口） -->
-                    <div class="profile-pro-style-panel" id="proStylePanelLanding">
-                        <div class="profile-pro-style-head">
-                            <div class="profile-pro-style-copy">
-                                <div class="profile-pro-style-kicker">Pro 视觉装扮</div>
-                                <div class="profile-pro-style-title">选择要装扮的视觉元素</div>
-                                <div class="profile-pro-style-sub" id="proStyleStatus">登录后可保存你的视觉偏好</div>
+                    <!-- Pro 装扮总览入口（精简版：直接展示 3 个分类入口，不再嵌套玻璃大卡） -->
+                    <div class="pro-style-category-cards" id="proStyleCategoryCards">
+                        <button type="button" class="pro-style-category-card" data-category="theme" onclick="showProStyleCategory('theme')">
+                            <div class="pro-style-category-icon">🎨</div>
+                            <div class="pro-style-category-info">
+                                <div class="pro-style-category-title">专属主题</div>
+                                <div class="pro-style-category-desc">整体界面配色风格</div>
                             </div>
-                            <span class="profile-pro-style-badge" id="proStyleBadge">默认</span>
-                        </div>
-                        <div class="pro-style-category-cards" id="proStyleCategoryCards">
-                            <button type="button" class="pro-style-category-card" data-category="theme" onclick="showProStyleCategory('theme')">
-                                <div class="pro-style-category-icon">🎨</div>
-                                <div class="pro-style-category-info">
-                                    <div class="pro-style-category-title">专属主题</div>
-                                    <div class="pro-style-category-desc">整体界面配色风格</div>
-                                </div>
-                                <div class="pro-style-category-preview theme-preview-thumb is-default">
-                                    <span class="theme-preview-topbar"></span>
-                                    <span class="theme-preview-surface">
-                                        <span class="theme-preview-card">
-                                            <span class="theme-preview-card-line is-strong"></span>
-                                            <span class="theme-preview-card-line"></span>
-                                        </span>
-                                    </span>
-                                </div>
-                                <span class="pro-style-category-arrow">›</span>
-                            </button>
-                            <button type="button" class="pro-style-category-card" data-category="bubble" onclick="showProStyleCategory('bubble')">
-                                <div class="pro-style-category-icon">💬</div>
-                                <div class="pro-style-category-info">
-                                    <div class="pro-style-category-title">聊天气泡</div>
-                                    <div class="pro-style-category-desc">聊天消息气泡风格</div>
-                                </div>
-                                <div class="pro-style-category-preview bubble-preview-thumb is-default">
-                                    <span class="bubble-preview-row">
-                                        <span class="bubble-preview-msg">你好</span>
-                                    </span>
-                                    <span class="bubble-preview-row is-right">
-                                        <span class="bubble-preview-msg sent">气泡</span>
-                                    </span>
-                                </div>
-                                <span class="pro-style-category-arrow">›</span>
-                            </button>
-                            <button type="button" class="pro-style-category-card" data-category="post" onclick="showProStyleCategory('post')">
-                                <div class="pro-style-category-icon">🪴</div>
-                                <div class="pro-style-category-info">
-                                    <div class="pro-style-category-title">帖子卡片装饰</div>
-                                    <div class="pro-style-category-desc">帖子边框与装饰样式</div>
-                                </div>
-                                <div class="pro-style-category-preview post-preview-thumb is-default">
-                                    <span class="post-card-preview-head">
-                                        <span class="post-card-preview-avatar"></span>
-                                        <span class="post-card-preview-user"></span>
-                                    </span>
-                                    <span class="post-card-preview-line is-strong"></span>
-                                    <span class="post-card-preview-line"></span>
-                                </div>
-                                <span class="pro-style-category-arrow">›</span>
-                            </button>
-                        </div>
+                            <span class="pro-style-category-arrow">›</span>
+                        </button>
+                        <button type="button" class="pro-style-category-card" data-category="bubble" onclick="showProStyleCategory('bubble')">
+                            <div class="pro-style-category-icon">💬</div>
+                            <div class="pro-style-category-info">
+                                <div class="pro-style-category-title">聊天气泡</div>
+                                <div class="pro-style-category-desc">聊天消息气泡风格</div>
+                            </div>
+                            <span class="pro-style-category-arrow">›</span>
+                        </button>
+                        <button type="button" class="pro-style-category-card" data-category="post" onclick="showProStyleCategory('post')">
+                            <div class="pro-style-category-icon">🪴</div>
+                            <div class="pro-style-category-info">
+                                <div class="pro-style-category-title">帖子卡片装饰</div>
+                                <div class="pro-style-category-desc">帖子边框与装饰样式</div>
+                            </div>
+                            <span class="pro-style-category-arrow">›</span>
+                        </button>
                     </div>
                     <!-- 专属主题面板 -->
                     <div class="profile-pro-style-panel pro-style-category-panel" id="proStylePanelTheme" hidden>
@@ -843,6 +809,9 @@
                                 </button>
                             </div>
                         </label>
+                        <div class="profile-pro-style-panel-actions">
+                            <button class="btn primary pro-style-save-btn" type="button" data-pro-style-save-type="theme" onclick="saveCurrentUserStylePart('theme')">保存</button>
+                        </div>
                     </div>
                     <!-- 聊天气泡面板 -->
                     <div class="profile-pro-style-panel pro-style-category-panel" id="proStylePanelBubble" hidden>
@@ -934,6 +903,9 @@
                                 </button>
                             </div>
                         </label>
+                        <div class="profile-pro-style-panel-actions">
+                            <button class="btn primary pro-style-save-btn" type="button" data-pro-style-save-type="bubble" onclick="saveCurrentUserStylePart('bubble')">保存</button>
+                        </div>
                     </div>
                     <!-- 帖子卡片装饰面板 -->
                     <div class="profile-pro-style-panel pro-style-category-panel" id="proStylePanelPost" hidden>
@@ -1027,9 +999,9 @@
                                 </button>
                             </div>
                         </label>
-                    </div>
-                    <div class="profile-pro-style-actions" id="proStylePanelActions">
-                        <button class="btn primary" type="button" id="proStyleSaveBtn" onclick="saveCurrentUserStyle()">保存视觉偏好</button>
+                        <div class="profile-pro-style-panel-actions">
+                            <button class="btn primary pro-style-save-btn" type="button" data-pro-style-save-type="post" onclick="saveCurrentUserStylePart('post')">保存</button>
+                        </div>
                     </div>
                 </section>
             </div>
@@ -1559,7 +1531,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
     <script defer src="js/config.js?v=2"></script>
     <script defer src="js/performance.js?v=20260623_1"></script>
-    <script defer src="js/core.js?v=20260626_hotfix_click"></script>
+    <script defer src="js/core.js?v=20260627_prostyle_v2"></script>
     <script defer src="js/login-device.js?v=20260623_device_v2"></script>
     <script defer src="js/core-animations.js?v=20260623_1"></script>
     <script defer src="js/features.js?v=20260623_1"></script>
@@ -1567,8 +1539,8 @@
     <script defer data-xtj-loaded="1" src="js/photo-wall/preview.min.js?v=20260620_2"></script>
     <script defer data-xtj-loaded="1" src="js/photo-wall/preview-hotfix.js?v=20260620_2"></script>
     <script defer src="js/ui-effects.js?v=20260623_1"></script>
-    <script defer src="js/pro-upgrade.js?v=20260626_hotfix_click"></script>
-    <script defer src="js/pro-style.js?v=20260626_hotfix_click"></script>
+    <script defer src="js/pro-upgrade.js?v=20260627_profile_v3"></script>
+    <script defer src="js/pro-style.js?v=20260627_proanim_v3"></script>
 <script defer src="js/photo-wall/upload-ui.min.js?v=20260623_v2"></script>
 </body>
 </html>
