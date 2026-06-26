@@ -620,7 +620,7 @@ async function initAdminClient() {
         startSessionTimeoutMonitor();
         installAdminTabDoubleClickRefresh();
         
-        var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos','progift'];
+        var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos','progift','ai'];
         var savedTab = localStorage.getItem(TAB_KEY);
         if (savedTab && allowedTabs.indexOf(savedTab) !== -1) {
             currentTab = savedTab;
