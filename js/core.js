@@ -2360,16 +2360,26 @@ const ADMIN_NAME = "xxz";
                     } catch(e) {}
                     showToast("登录成功，欢迎回来！" + name);
                     closeModal('loginModal');
-                    
+
                     // 更新闁哄牃鍋撻弶鈺傚灩濞呫儴銇愭洘锟筋槯闂?
                     await saveUserInfo(name, false);
-                    
+
                     await initUI();
                     initialLoad(true);
                     await resolvePendingProRelogin();
                     try { if (typeof window.updateProStyle === 'function') window.updateProStyle(currentUser); } catch(e) {}
                     // 记录用户访问
                     logUserVisitToApi(name);
+
+                    // 公告已读：拉取远端已读记录，跨设备同步红点
+                    try {
+                        if (typeof window.loadRemoteAnnouncementReads === 'function') {
+                            await window.loadRemoteAnnouncementReads();
+                            if (typeof window.updateAnnouncementBadge === 'function') {
+                                window.updateAnnouncementBadge();
+                            }
+                        }
+                    } catch (e) { console.warn('[ann_read_sync_login]', e); }
                 } catch (e) {
                     showToast("登录失败，请重试");
                 } finally {
@@ -2452,16 +2462,26 @@ const ADMIN_NAME = "xxz";
                     } catch(e) {}
                     showToast("注册成功，欢迎你！" + name);
                     closeModal('registerModal');
-                    
+
                     // 濞ｅ洦绻傞悺銊╂偨閵婏箑鐓曟繛澶堝妼閸炶姤绌遍鐟板⒉濞?
                     await saveUserInfo(name, true, email);
-                    
+
                     await initUI();
                     initialLoad(true);
                     await resolvePendingProRelogin();
                     try { if (typeof window.updateProStyle === 'function') window.updateProStyle(currentUser); } catch(e) {}
                     // 记录用户访问
                     logUserVisitToApi(name);
+
+                    // 公告已读：拉取远端已读记录，跨设备同步红点
+                    try {
+                        if (typeof window.loadRemoteAnnouncementReads === 'function') {
+                            await window.loadRemoteAnnouncementReads();
+                            if (typeof window.updateAnnouncementBadge === 'function') {
+                                window.updateAnnouncementBadge();
+                            }
+                        }
+                    } catch (e) { console.warn('[ann_read_sync_register]', e); }
                 } catch (e) {
                     showToast("注册失败，请重试");
                 } finally {
@@ -5978,7 +5998,7 @@ function renderProfileActivityList(kind) {
                 var SYSTEM_MARKERS = [
                     AUTH_MARKER, ADMIN_AUTH_MARKER, ADMIN_META_MARKER, DM_MARKER, REPORT_MARKER,
                     "__avatar__", "__user_info__", "__photo_wall__", "__visit__",
-                    "__attack__", "__user_visit__", "__ann__",
+                    "__attack__", "__user_visit__", "__ann__", "__ann_read__",
                     "__vip__", "__vip_order__", "__vip_plan__", "__user_style__",
                     "__pro_gift__", "__pro_gift_claim__",
                     "__login_event__", "__security_alert__", "__admin_audit__", "__client_error__",
@@ -8826,6 +8846,19 @@ function renderProfileActivityList(kind) {
                 // 记录访问（用户+IP）
                 if (currentUser) logUserVisitToApi(currentUser);
                 logIpVisitToSupabase();
+
+                // 公告已读：已登录用户进入页面时拉取远端已读记录（跨设备同步）
+                // 让"换设备/换浏览器/重新登录"的账号不再显示已读公告红点
+                if (window.currentUser && typeof window.loadRemoteAnnouncementReads === 'function') {
+                    Promise.resolve()
+                        .then(function() { return window.loadRemoteAnnouncementReads(); })
+                        .then(function() {
+                            if (typeof window.updateAnnouncementBadge === 'function') {
+                                window.updateAnnouncementBadge();
+                            }
+                        })
+                        .catch(function(e) { console.warn('[ann_read_sync_boot]', e); });
+                }
                 // 鎭㈠娑撳﹥保存閻ㄥ嫭鐖ｇ粵楣冿拷?
                 const savedTab = localStorage.getItem('xtj_current_tab');
                 if (savedTab && savedTab !== 'posts') {
@@ -9035,59 +9068,190 @@ function renderProfileActivityList(kind) {
             applyPerformanceMode();
             window.addEventListener('resize', applyPerformanceMode, { passive: true });
 
-            // ========== 鍏憡系?==========
+            // ========== 公告已读（跨设备同步 v2）==========
             const ANN_MARKER = '__ann__';
-            const ANN_READ_KEY = 'xtj_ann_read';
+            // 每用户独立 localStorage key（支持未登录 guest）
+            // - 已登录用户: xtj_announcement_read_v2_<currentUser>
+            // - 未登录:      xtj_announcement_read_v2_guest
+            // 切换账号前需调用 ensureAnnouncementReadCacheKey() 切换上下文
+            const ANN_READ_KEY_PREFIX = 'xtj_announcement_read_v2_';
             let announcements = [];
             let currentAnnouncement = null;
             let annRealtime = null;
 
-            function getReadAnnouncements() {
-                try {
-                    const data = localStorage.getItem(ANN_READ_KEY);
-                    return data ? JSON.parse(data) : [];
-                } catch(e) {
-                    return [];
+            // 简单的 32-bit FNV-1a 哈希：给没有 id 字段的旧公告生成稳定 fingerprint
+            function __xtjAnnHash(str) {
+                str = String(str || '');
+                var hash = 2166136261;
+                for (var i = 0; i < str.length; i++) {
+                    hash ^= str.charCodeAt(i);
+                    hash = Math.imul(hash, 16777619);
                 }
+                // 转成无符号 16 进制字符串
+                return (hash >>> 0).toString(16);
             }
 
-            function saveReadAnnouncements(readIds) {
-                localStorage.setItem(ANN_READ_KEY, JSON.stringify(readIds));
+            // 获取公告稳定 ID：优先用 ann.id，否则用 title+content+created_at 哈希
+            // 严禁用数组 index（公告排序变化后已读状态会错乱）
+            window.getAnnouncementId = function(ann) {
+                if (!ann) return null;
+                if (ann.id !== undefined && ann.id !== null && String(ann.id) !== '') {
+                    return 'a_' + String(ann.id);
+                }
+                var parts = [ann.title || '', ann.content || '', ann.created_at || ''];
+                return 'fp_' + __xtjAnnHash(parts.join('|'));
+            };
+
+            function getAnnouncementReadKey() {
+                var user = (window.currentUser || '').trim();
+                return ANN_READ_KEY_PREFIX + (user || 'guest');
             }
 
-            function markAnnouncementsRead(ids) {
-                var nextIds = Array.isArray(ids) ? ids.map(function(id) { return String(id); }).filter(Boolean) : [];
-                if (!nextIds.length) return;
-                var readIds = getReadAnnouncements().map(function(id) { return String(id); });
-                var merged = new Set(readIds);
-                nextIds.forEach(function(id) {
-                    merged.add(id);
+            // 读取本地已读公告 id 集合（仅当前用户）
+            window.getLocalAnnouncementReadSet = function() {
+                try {
+                    var raw = localStorage.getItem(getAnnouncementReadKey());
+                    if (!raw) return new Set();
+                    var obj = JSON.parse(raw);
+                    var keys = obj && typeof obj === 'object' ? Object.keys(obj) : [];
+                    return new Set(keys);
+                } catch (e) {
+                    return new Set();
+                }
+            };
+
+            // 写入本地已读公告（不覆盖已有 read_at）
+            window.saveLocalAnnouncementRead = function(ids) {
+                if (!Array.isArray(ids) || !ids.length) return;
+                try {
+                    var key = getAnnouncementReadKey();
+                    var raw = localStorage.getItem(key);
+                    var obj = {};
+                    try { obj = raw ? (JSON.parse(raw) || {}) : {}; } catch (_) { obj = {}; }
+                    var now = new Date().toISOString();
+                    var changed = false;
+                    ids.forEach(function(id) {
+                        if (id === undefined || id === null) return;
+                        var s = String(id);
+                        if (!s || s === 'a_undefined' || s === 'fp_undefined') return;
+                        if (!obj[s]) {
+                            obj[s] = now;
+                            changed = true;
+                        }
+                    });
+                    if (changed) {
+                        localStorage.setItem(key, JSON.stringify(obj));
+                    }
+                } catch (e) {}
+            };
+
+            // 加载远程已读公告（登录后调用）
+            // 返回 Promise<Set<string>>，并合并写入本地
+            window.loadRemoteAnnouncementReads = async function() {
+                if (!window.currentUser) return new Set();
+                try {
+                    var tok = await window.ensureUserToken();
+                    if (!tok) return new Set();
+                    var resp = await fetch((window.API_BASE || '') + '/api/announcements/read', {
+                        headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
+                        signal: AbortSignal.timeout(8000)
+                    });
+                    if (!resp.ok) {
+                        console.warn('[ann_read_get] status=' + resp.status);
+                        return new Set();
+                    }
+                    var data = await resp.json();
+                    var reads = (data && data.reads) || {};
+                    var ids = Object.keys(reads);
+                    if (ids.length) {
+                        window.saveLocalAnnouncementRead(ids);
+                    }
+                    return new Set(ids);
+                } catch (e) {
+                    console.warn('[loadRemoteAnnouncementReads]', e);
+                    return new Set();
+                }
+            };
+
+            // 标记公告已读：先写本地（立即刷新 UI），再异步写后端
+            // 后端失败不阻塞 UI，只 console.warn
+            window.markAnnouncementsRead = function(ids) {
+                if (!Array.isArray(ids) || !ids.length) return;
+                // 1) 立即写本地 + 立即隐藏红点
+                window.saveLocalAnnouncementRead(ids);
+                if (typeof window.updateAnnouncementBadge === 'function') {
+                    window.updateAnnouncementBadge();
+                }
+                if (typeof window.renderAnnouncementList === 'function' && !document.getElementById('announcementModal').classList.contains('active')) {
+                    // 弹窗未打开时不需要 render
+                }
+                // 2) 异步同步到后端（仅登录用户）
+                if (!window.currentUser) return;
+                (async function() {
+                    try {
+                        var tok = await window.ensureUserToken();
+                        if (!tok) return;
+                        var resp = await fetch((window.API_BASE || '') + '/api/announcements/read', {
+                            method: 'POST',
+                            headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ announcement_ids: ids }),
+                            signal: AbortSignal.timeout(8000)
+                        });
+                        if (!resp.ok) {
+                            console.warn('[markAnnouncementsRead] backend status=' + resp.status);
+                        }
+                    } catch (e) {
+                        console.warn('[markAnnouncementsRead] backend sync failed', e);
+                    }
+                })();
+            };
+
+            // 兼容旧调用（单条）
+            window.markAnnouncementRead = function(annId) {
+                if (annId === undefined || annId === null) return;
+                var id = String(annId);
+                if (id === 'a_undefined' || id === 'fp_undefined') return;
+                window.markAnnouncementsRead([id]);
+            };
+
+            // 兼容旧调用（直接返回数组形式，给 renderAnnouncementList 用）
+            // 注意：内部统一使用 getLocalAnnouncementReadSet（Set）
+            // 此函数包装成 Array 仅为兼容现有 renderAnnouncementList.includes()
+            window.getReadAnnouncementIds = function() {
+                return Array.from(window.getLocalAnnouncementReadSet());
+            };
+
+            // 红点更新：使用稳定 ID + 本地 + 远端（远端异步加载不影响本次）
+            window.updateAnnouncementBadge = function() {
+                if (!announcements || !announcements.length) {
+                    var badge0 = document.getElementById('announcementBadge');
+                    if (badge0) badge0.style.display = 'none';
+                    return;
+                }
+                var readSet = window.getLocalAnnouncementReadSet();
+                var unreadCount = 0;
+                announcements.forEach(function(a) {
+                    var id = window.getAnnouncementId(a);
+                    if (!id) return;
+                    if (!readSet.has(id)) unreadCount++;
                 });
-                saveReadAnnouncements(Array.from(merged));
-                updateAnnouncementBadge();
-            }
-
-            function markAnnouncementRead(annId) {
-                markAnnouncementsRead([annId]);
-            }
-
-            function isAnnouncementRead(annId) {
-                return getReadAnnouncements().includes(annId);
-            }
-
-            function updateAnnouncementBadge() {
-                const readIds = getReadAnnouncements();
-                const unreadCount = announcements.filter(a => !readIds.includes(a.id)).length;
-                const badge = document.getElementById('announcementBadge');
+                var badge = document.getElementById('announcementBadge');
                 if (badge) {
                     if (unreadCount > 0) {
-                        badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+                        badge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
                         badge.style.display = 'flex';
                     } else {
                         badge.style.display = 'none';
                     }
                 }
+            };
+
+            // 旧函数名（保留兼容）
+            function getReadAnnouncements() { return window.getReadAnnouncementIds(); }
+            function saveReadAnnouncements(arr) {
+                try { localStorage.setItem(ANN_READ_KEY_PREFIX + 'legacy', JSON.stringify(arr || [])); } catch(e) {}
             }
+            function updateAnnouncementBadgeOld() { window.updateAnnouncementBadge(); }
 
             window.openAnnouncementModal = async function() {
                 const overlay = document.getElementById('announcementModal');
@@ -9098,11 +9262,13 @@ function renderProfileActivityList(kind) {
                 document.body.style.overflow = 'hidden';
                 showAnnouncementList();
                 if (announcements && announcements.length) {
-                    markAnnouncementsRead(announcements.map(function(item) { return item && item.id; }));
+                    var preIds0 = announcements.map(window.getAnnouncementId).filter(Boolean);
+                    if (preIds0.length) window.markAnnouncementsRead(preIds0);
                     renderAnnouncementList();
                 }
                 await loadAnnouncements();
-                markAnnouncementsRead((announcements || []).map(function(item) { return item && item.id; }));
+                var postIds0 = (announcements || []).map(window.getAnnouncementId).filter(Boolean);
+                if (postIds0.length) window.markAnnouncementsRead(postIds0);
                 renderAnnouncementList();
 
                 if (isAdmin()) {
@@ -9143,7 +9309,9 @@ function renderProfileActivityList(kind) {
 
             function showAnnouncementDetail(ann) {
                 currentAnnouncement = ann;
-                markAnnouncementRead(ann.id);
+                // 标记单条公告已读（用稳定 ID）
+                var annId = window.getAnnouncementId(ann);
+                if (annId) window.markAnnouncementRead(annId);
 
                 // 杩涘叆璇︽儏閺冨爼娈ｉ挊蹇撳絺鐢啫灏拷??
                 document.getElementById('announcementAdminArea').style.display = 'none';
@@ -9190,8 +9358,18 @@ function renderProfileActivityList(kind) {
                         .order('created_at', { ascending: false });
                     if (error) throw error;
                     announcements = data || [];
-                    updateAnnouncementBadge();
-                    // 预锟节婏拷杞藉彂甯冿拷鈧懎銇旈崓?
+
+                    // 登录用户：异步拉取远端已读记录（合并到本地 + 刷新红点）
+                    if (window.currentUser) {
+                        try {
+                            await window.loadRemoteAnnouncementReads();
+                        } catch (e) {}
+                    }
+
+                    // 用合并后的已读集合刷新红点
+                    window.updateAnnouncementBadge();
+
+                    // 预加载发布者头像
                     if (announcements.length > 0) {
                         var publishers = new Set();
                         announcements.forEach(function(a) { publishers.add(a.user_name); });
@@ -9223,10 +9401,12 @@ function renderProfileActivityList(kind) {
                 }
 
                 listEl.innerHTML = '';
-                const readIds = getReadAnnouncements();
+                // 用稳定 ID 判断已读
+                const readSet = window.getLocalAnnouncementReadSet();
 
                 announcements.forEach((ann, index) => {
-                    const isRead = readIds.includes(ann.id);
+                    const annId = window.getAnnouncementId(ann);
+                    const isRead = annId ? readSet.has(annId) : true;
                     const item = document.createElement('div');
                     item.className = 'announcement-item' + (isRead ? '' : ' unread');
                     item.onclick = function() { showAnnouncementDetail(ann); };
@@ -12211,11 +12391,24 @@ function renderProfileActivityList(kind) {
                 overlay.classList.add('active');
                 setAnnouncementModalToListMode();
                 syncHeaderModalBodyLock();
+                // 立即标记已加载的公告为已读（用稳定 ID）
+                // 即使 loadAnnouncements 后续重新拉取也会再次 mark
+                try {
+                    if (announcements && announcements.length) {
+                        var preIds = announcements.map(window.getAnnouncementId).filter(Boolean);
+                        if (preIds.length) window.markAnnouncementsRead(preIds);
+                    }
+                } catch (_) {}
                 try {
                     if (typeof loadAnnouncements === 'function') {
                         Promise.resolve(loadAnnouncements()).then(function() {
                             if (typeof renderAnnouncementList === 'function') {
                                 renderAnnouncementList();
+                                // 重新拉取后再次标记
+                                if (announcements && announcements.length) {
+                                    var postIds = announcements.map(window.getAnnouncementId).filter(Boolean);
+                                    if (postIds.length) window.markAnnouncementsRead(postIds);
+                                }
                             } else if (list && !String(list.innerHTML || '').trim()) {
                                 list.innerHTML = '<div class="stat-empty" style="padding:12px 0;">暂无公告</div>';
                             }
