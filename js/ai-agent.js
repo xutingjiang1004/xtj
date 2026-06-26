@@ -1,46 +1,23 @@
-/* ===================== AI 智能体 / AI 宠物 前端 =====================
- * 第一版：profile + chat
- * - 位置：我的页 - Pro 装扮的下面
- * - 二级页（profileAiAgentPage），与 Pro 装扮二级页平级
- * - 数据：/api/agent/profile (GET/POST) + /api/agent/chat (POST) + /api/agent/chat/history (GET)
+/* ===================== XTJ AI 聊天（徐旭泽的小猫）=====================
+ * - 统一 AI 名称：徐旭泽的小猫（管理员 xxz 配置）
+ * - 位置：聊天页会话列表 -> 点击"徐旭泽的小猫"进入聊天
+ * - 普通用户不能修改 AI 名字/性格/提示词
+ * - 数据：/api/agent/config (GET) + /api/agent/chat (POST) + /api/agent/chat/history (GET)
  * - 鉴权：window.ensureUserToken() 获取 Bearer token
- * - 风格：浅绿色玻璃 + 暗色模式适配
- * - 第一版不做 actions/confirm / pending_action
+ * - 不出现：宠物等级 / 亲密度 / 心情 / 用户自定义 profile
  */
 (function() {
     'use strict';
 
-    if (window.__xtjAiAgent) return; // 防止重复初始化
+    if (window.__xtjAiAgent) return;
 
-    // ===================== 常量 =====================
     var API_BASE = '/api/agent';
-    var MAX_AGENT_NAME = 20;
-    var MAX_PERSONA = 500;
-    var MAX_TONE = 200;
     var MAX_MESSAGE = 2000;
     var HISTORY_LIMIT = 50;
 
-    var MOOD_EMOJI = {
-        curious: '🤔',
-        happy: '😊',
-        playful: '😺',
-        sleepy: '😴',
-        thoughtful: '💭',
-        default: '🐾'
-    };
-    var MOOD_LABEL = {
-        curious: '好奇',
-        happy: '开心',
-        playful: '调皮',
-        sleepy: '困倦',
-        thoughtful: '沉思',
-        default: '陪伴中'
-    };
-
-    // ===================== 状态 =====================
     var state = {
-        profile: null,    // { agent_name, persona, tone, level, intimacy, mood, autonomy_enabled, updated_at }
-        messages: [],     // [{ id, role: 'user'|'assistant', content, created_at }]
+        config: null,
+        messages: [],
         loading: false,
         sending: false,
         remaining: { hour: 10, day: 50 }
@@ -48,6 +25,7 @@
 
     // ===================== 工具函数 =====================
     function $(sel) { return document.querySelector(sel); }
+
     function el(tag, attrs, children) {
         var node = document.createElement(tag);
         if (attrs) {
@@ -71,11 +49,13 @@
         }
         return node;
     }
+
     function escapeHtml(s) {
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
+
     function formatTime(iso) {
         if (!iso) return '';
         try {
@@ -90,23 +70,34 @@
             return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
         } catch (e) { return ''; }
     }
-    function moodEmoji(m) { return MOOD_EMOJI[m] || MOOD_EMOJI.default; }
-    function moodLabel(m) { return MOOD_LABEL[m] || MOOD_LABEL.default; }
 
-    // toast：复用 core.js 的全局 showToast（如果存在），否则降级
-    function notify(msg, type) {
+    function notify(msg) {
         if (typeof window.showToast === 'function') {
             window.showToast(msg);
             return;
         }
-        // 降级：自己创建一个临时 toast
         var t = el('div', { class: 'ai-toast-fallback', text: msg });
         t.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:10px 18px;border-radius:10px;background:rgba(5,150,105,0.92);color:#fff;font-size:13px;z-index:99999;box-shadow:0 8px 24px rgba(0,0,0,0.18);';
         document.body.appendChild(t);
         setTimeout(function() { t.remove(); }, 2400);
     }
 
-    // ===================== API 调用 =====================
+    // ===================== API =====================
+    async function ensureLoggedIn() {
+        if (!window.currentUser) {
+            notify('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
+            return false;
+        }
+        try {
+            if (typeof window.ensureUserToken === 'function') {
+                var token = await window.ensureUserToken();
+                if (token) return true;
+            }
+        } catch (e) { /* fall through */ }
+        notify('登录已过期，请重新登录');
+        return false;
+    }
+
     async function getAuthHeaders() {
         try {
             if (typeof window.ensureUserToken === 'function') {
@@ -122,31 +113,12 @@
         return { 'Content-Type': 'application/json' };
     }
 
-    async function apiGetProfile() {
+    async function apiGetConfig() {
         var headers = await getAuthHeaders();
-        var resp = await fetch(API_BASE + '/profile', { method: 'GET', headers: headers });
+        var resp = await fetch(API_BASE + '/config', { method: 'GET', headers: headers });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
-        if (!resp.ok) {
-            var err = (data && data.error) || ('请求失败（' + resp.status + '）');
-            throw new Error(err);
-        }
-        return data;
-    }
-
-    async function apiPostProfile(body) {
-        var headers = await getAuthHeaders();
-        var resp = await fetch(API_BASE + '/profile', {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(body)
-        });
-        var data = null;
-        try { data = await resp.json(); } catch (e) { data = null; }
-        if (!resp.ok) {
-            var err = (data && data.error) || ('保存失败（' + resp.status + '）');
-            throw new Error(err);
-        }
+        if (!resp.ok) throw new Error(data && data.error || '获取配置失败');
         return data;
     }
 
@@ -156,10 +128,7 @@
         var resp = await fetch(API_BASE + '/chat/history?limit=' + l, { method: 'GET', headers: headers });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
-        if (!resp.ok) {
-            var err = (data && data.error) || ('获取历史失败（' + resp.status + '）');
-            throw new Error(err);
-        }
+        if (!resp.ok) throw new Error(data && data.error || '获取历史失败');
         return data;
     }
 
@@ -168,220 +137,39 @@
         var resp = await fetch(API_BASE + '/chat', {
             method: 'POST',
             headers: headers,
-            body: JSON.stringify({ message: message, mode: 'chat' })
+            body: JSON.stringify({ message: message })
         });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
-        if (!resp.ok) {
-            var err = (data && data.error) || ('聊天失败（' + resp.status + '）');
-            throw new Error(err);
-        }
+        if (!resp.ok) throw new Error(data && data.error || '聊天失败，请稍后再试');
         return data;
     }
 
-    // ===================== 渲染：入口卡片（在我的页 - Pro 装扮下面） =====================
-    function renderEntryCard() {
-        var entry = document.getElementById('aiAgentEntry');
-        if (!entry) return;
-        // 子标题根据 profile 状态显示
-        var sub = entry.querySelector('.ai-agent-entry-text small');
-        if (sub) {
-            if (state.profile && state.profile.agent_name) {
-                sub.textContent = '你的 AI 宠物：' + state.profile.agent_name;
-            } else {
-                sub.textContent = '创建你的专属 AI 宠物';
-            }
-        }
-    }
+    // ===================== 渲染：聊天界面 =====================
+    function renderChatView(container) {
+        if (!container) return;
+        container.innerHTML = '';
 
-    // ===================== 渲染：二级页 - 创建资料表单 =====================
-    function renderCreateForm() {
-        var page = document.getElementById('profileAiAgentPage');
-        if (!page) return;
-        page.innerHTML = '';
+        var name = state.config ? state.config.name : '徐旭泽的小猫';
+        var avatar = state.config ? (state.config.avatar || '🐱') : '🐱';
+        var desc = state.config ? state.config.description : '陪你聊天的小猫';
 
-        var backBtn = el('button', {
-            class: 'ai-agent-page-back',
-            type: 'button',
-            onclick: function() { window.__xtjAiAgent.close(); }
-        }, ['‹ 返回']);
-
-        var header = el('div', { class: 'ai-agent-page-header' }, [
-            el('div', { class: 'ai-agent-page-title' }, [
-                el('span', { class: 'ai-agent-page-title-dot' }),
-                'AI 宠物'
-            ]),
-            backBtn
+        // 顶栏
+        var topBar = el('div', { class: 'ai-chat-topbar' }, [
+            el('span', { class: 'ai-chat-topbar-avatar', text: avatar }),
+            el('span', { class: 'ai-chat-topbar-name', text: name }),
+            el('span', { class: 'ai-chat-topbar-desc', text: desc })
         ]);
 
-        var card = el('div', { class: 'ai-profile-card' });
+        // 消息区
+        var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
 
-        var title = el('div', {
-            style: 'font-size:15px;font-weight:800;margin-bottom:6px;color:var(--text,#1d1d24);'
-        }, '🐾 欢迎，先给你的 AI 宠物起个名字');
-        var sub = el('div', {
-            style: 'font-size:12px;color:var(--text-muted,#6b6c7a);line-height:1.6;margin-bottom:14px;'
-        }, '和你的专属 AI 聊天，让它记住你的喜好和要求。所有数据只属于你，不会出现在首页。');
-
-        var nameInput = el('input', {
-            class: 'ai-form-input',
-            type: 'text',
-            maxlength: MAX_AGENT_NAME,
-            placeholder: '比如：小藤、阿喵、萝卜',
-            id: 'aiAgentNameInput'
-        });
-        var personaInput = el('textarea', {
-            class: 'ai-form-textarea',
-            maxlength: MAX_PERSONA,
-            placeholder: '比如：温柔、聪明、有点吐槽，像宠物一样陪伴我',
-            id: 'aiAgentPersonaInput',
-            rows: 3
-        });
-        var toneInput = el('textarea', {
-            class: 'ai-form-textarea',
-            maxlength: MAX_TONE,
-            placeholder: '比如：自然、轻松、不要太机械',
-            id: 'aiAgentToneInput',
-            rows: 2
-        });
-
-        var errBox = el('div', { class: 'ai-form-error', id: 'aiAgentFormError' });
-
-        var submitBtn = el('button', {
-            class: 'ai-form-submit',
-            type: 'button',
-            id: 'aiAgentSubmitBtn'
-        }, '创建 AI 宠物');
-
-        submitBtn.addEventListener('click', function() {
-            handleCreateProfile(nameInput.value, personaInput.value, toneInput.value, submitBtn, errBox);
-        });
-
-        // Enter 提交
-        nameInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') { e.preventDefault(); handleCreateProfile(nameInput.value, personaInput.value, toneInput.value, submitBtn, errBox); }
-        });
-
-        // 字符计数
-        function updateCounter(input, counter, max) {
-            var len = (input.value || '').length;
-            counter.textContent = len + ' / ' + max;
-        }
-        var nameCounter = el('span', { class: 'ai-form-counter', text: '0 / ' + MAX_AGENT_NAME });
-        nameInput.addEventListener('input', function() { updateCounter(nameInput, nameCounter, MAX_AGENT_NAME); });
-        var personaCounter = el('span', { class: 'ai-form-counter', text: '0 / ' + MAX_PERSONA });
-        personaInput.addEventListener('input', function() { updateCounter(personaInput, personaCounter, MAX_PERSONA); });
-        var toneCounter = el('span', { class: 'ai-form-counter', text: '0 / ' + MAX_TONE });
-        toneInput.addEventListener('input', function() { updateCounter(toneInput, toneCounter, MAX_TONE); });
-
-        card.appendChild(title);
-        card.appendChild(sub);
-        card.appendChild(el('div', { class: 'ai-form-group' }, [
-            el('label', { class: 'ai-form-label' }, ['智能体名字', nameCounter]),
-            nameInput,
-            el('div', { class: 'ai-form-helper' }, '最长 ' + MAX_AGENT_NAME + ' 字')
-        ]));
-        card.appendChild(el('div', { class: 'ai-form-group' }, [
-            el('label', { class: 'ai-form-label' }, ['性格设定', personaCounter]),
-            personaInput,
-            el('div', { class: 'ai-form-helper' }, '描述它的性格、说话方式、对你的态度（最长 ' + MAX_PERSONA + ' 字）')
-        ]));
-        card.appendChild(el('div', { class: 'ai-form-group' }, [
-            el('label', { class: 'ai-form-label' }, ['说话风格', toneCounter]),
-            toneInput,
-            el('div', { class: 'ai-form-helper' }, '它说话的感觉（最长 ' + MAX_TONE + ' 字）')
-        ]));
-        card.appendChild(errBox);
-        card.appendChild(submitBtn);
-
-        page.appendChild(header);
-        page.appendChild(card);
-    }
-
-    async function handleCreateProfile(name, persona, tone, btn, errBox) {
-        if (state.loading) return;
-        errBox.textContent = '';
-        var n = String(name || '').trim();
-        var p = String(persona || '').trim();
-        var t = String(tone || '').trim();
-        if (!n) { errBox.textContent = '智能体名字不能为空'; return; }
-        if (n.length > MAX_AGENT_NAME) { errBox.textContent = '智能体名字不能超过 ' + MAX_AGENT_NAME + ' 字'; return; }
-        if (!p) { errBox.textContent = '性格设定不能为空'; return; }
-        if (p.length > MAX_PERSONA) { errBox.textContent = '性格设定不能超过 ' + MAX_PERSONA + ' 字'; return; }
-        if (!t) { errBox.textContent = '说话风格不能为空'; return; }
-        if (t.length > MAX_TONE) { errBox.textContent = '说话风格不能超过 ' + MAX_TONE + ' 字'; return; }
-
-        state.loading = true;
-        btn.disabled = true;
-        btn.textContent = '创建中…';
-
-        try {
-            var data = await apiPostProfile({ agent_name: n, persona: p, tone: t, autonomy_enabled: false });
-            if (data && data.profile) {
-                state.profile = data.profile;
-                renderEntryCard();
-                renderChatView();
-                notify('已创建 ' + data.profile.agent_name + '！');
-            }
-        } catch (e) {
-            errBox.textContent = e && e.message ? e.message : '创建失败';
-        } finally {
-            state.loading = false;
-            btn.disabled = false;
-            btn.textContent = '创建 AI 宠物';
-        }
-    }
-
-    // ===================== 渲染：二级页 - 聊天视图 =====================
-    function renderChatView() {
-        var page = document.getElementById('profileAiAgentPage');
-        if (!page) return;
-        page.innerHTML = '';
-
-        var backBtn = el('button', {
-            class: 'ai-agent-page-back',
-            type: 'button',
-            onclick: function() { window.__xtjAiAgent.close(); }
-        }, ['‹ 返回']);
-
-        var header = el('div', { class: 'ai-agent-page-header' }, [
-            el('div', { class: 'ai-agent-page-title' }, [
-                el('span', { class: 'ai-agent-page-title-dot' }),
-                'AI 宠物'
-            ]),
-            backBtn
-        ]);
-
-        // 资料卡
-        var profileCard = el('div', { class: 'ai-profile-card' });
-        var p = state.profile || {};
-        var intimacy = typeof p.intimacy === 'number' ? p.intimacy : 0;
-        var level = typeof p.level === 'number' ? p.level : 1;
-        var mood = p.mood || 'curious';
-
-        var head = el('div', { class: 'ai-pet-head' }, [
-            el('div', { class: 'ai-pet-avatar' }, [moodEmoji(mood)]),
-            el('div', { class: 'ai-pet-info' }, [
-                el('div', { class: 'ai-pet-name' }, [
-                    el('span', { text: p.agent_name || 'AI 宠物' })
-                ]),
-                el('div', { class: 'ai-pet-meta' }, [
-                    el('span', { class: 'ai-pet-meta-pill' }, [el('span', { class: 'emoji', text: '💕' }), '亲密度 ' + intimacy]),
-                    el('span', { class: 'ai-pet-meta-pill' }, [el('span', { class: 'emoji', text: '⭐' }), 'Lv. ' + level]),
-                    el('span', { class: 'ai-pet-meta-pill' }, [el('span', { class: 'emoji', text: moodEmoji(mood) }), moodLabel(mood)])
-                ])
-            ])
-        ]);
-        profileCard.appendChild(head);
-
-        // 聊天窗口
-        var chatShell = el('div', { class: 'ai-chat-shell', id: 'aiChatShell' });
-        var messages = el('div', { class: 'ai-chat-messages', id: 'aiChatMessages' });
+        // 输入区
         var inputBar = el('div', { class: 'ai-chat-input-bar' });
         var input = el('textarea', {
             class: 'ai-chat-input',
-            id: 'aiChatInput',
-            placeholder: '和 ' + (p.agent_name || 'AI 宠物') + ' 聊聊…',
+            id: 'aiChatMsgInput',
+            placeholder: '和' + name + '说点什么吧…',
             rows: 1
         });
         var sendBtn = el('button', {
@@ -389,20 +177,20 @@
             type: 'button',
             id: 'aiChatSendBtn'
         }, '发送');
+
         var foot = el('div', { class: 'ai-chat-foot' }, [
-            el('span', { id: 'aiChatFootStatus', text: '本小时内还可聊 ' + state.remaining.hour + ' 次 · 今日剩余 ' + state.remaining.day + ' 次' }),
-            el('span', { text: 'DeepSeek 模型' })
+            el('span', { id: 'aiChatFootStatus', text: '本小时内还可聊 ' + state.remaining.hour + ' 次' })
         ]);
 
-        sendBtn.addEventListener('click', function() { handleSendMessage(input, sendBtn, messages, foot); });
+        sendBtn.addEventListener('click', function() {
+            handleSendMessage(input, sendBtn, messagesEl, foot);
+        });
         input.addEventListener('keydown', function(e) {
-            // Enter 发送，Shift+Enter 换行
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
-                handleSendMessage(input, sendBtn, messages, foot);
+                handleSendMessage(input, sendBtn, messagesEl, foot);
             }
         });
-        // 自动调整高度
         input.addEventListener('input', function() {
             input.style.height = 'auto';
             input.style.height = Math.min(input.scrollHeight, 120) + 'px';
@@ -411,23 +199,19 @@
         inputBar.appendChild(input);
         inputBar.appendChild(sendBtn);
 
-        chatShell.appendChild(messages);
-        chatShell.appendChild(inputBar);
-        chatShell.appendChild(foot);
+        container.appendChild(topBar);
+        container.appendChild(messagesEl);
+        container.appendChild(inputBar);
+        container.appendChild(foot);
 
-        page.appendChild(header);
-        page.appendChild(profileCard);
-        page.appendChild(chatShell);
-
-        // 加载历史消息
-        loadHistory(messages, foot);
+        // 加载历史
+        loadHistory(messagesEl, foot);
     }
 
     async function loadHistory(messagesEl, footEl) {
         if (!messagesEl) return;
         if (state.messages.length > 0) {
-            // 已加载过，直接渲染
-            renderMessages(messagesEl, footEl);
+            renderMessages(messagesEl);
             return;
         }
         try {
@@ -436,25 +220,26 @@
             if (state.messages.length === 0) {
                 showEmptyState(messagesEl);
             } else {
-                renderMessages(messagesEl, footEl);
+                renderMessages(messagesEl);
             }
         } catch (e) {
             showEmptyState(messagesEl);
-            if (e && e.message) notify('加载历史失败：' + e.message);
         }
     }
 
     function showEmptyState(messagesEl) {
+        if (!messagesEl) return;
+        var welcome = state.config && state.config.welcome_message ? state.config.welcome_message : '喵，来聊天吧。';
         messagesEl.innerHTML = '';
         var empty = el('div', { class: 'ai-chat-empty' }, [
-            el('div', { class: 'ai-chat-empty-emoji', text: '🐾' }),
-            el('div', { class: 'ai-chat-empty-title', text: '开始你们的第一次对话' }),
-            el('div', { class: 'ai-chat-empty-tip', text: '说点什么吧，比如聊聊你今天的心情。' })
+            el('div', { class: 'ai-chat-empty-emoji', text: (state.config && state.config.avatar) || '🐱' }),
+            el('div', { class: 'ai-chat-empty-title', text: '和' + ((state.config && state.config.name) || 'AI') + '聊聊天' }),
+            el('div', { class: 'ai-chat-empty-tip', text: welcome })
         ]);
         messagesEl.appendChild(empty);
     }
 
-    function renderMessages(messagesEl, footEl) {
+    function renderMessages(messagesEl) {
         if (!messagesEl) return;
         messagesEl.innerHTML = '';
         var msgs = state.messages || [];
@@ -492,20 +277,15 @@
         input.value = '';
         input.style.height = 'auto';
 
-        // 移除空态
         var empty = messagesEl.querySelector('.ai-chat-empty');
         if (empty) empty.remove();
 
-        // 立即显示用户消息
         var userMsg = { role: 'user', content: text, created_at: new Date().toISOString() };
         state.messages.push(userMsg);
         messagesEl.appendChild(buildMessageNode(userMsg));
 
-        // 显示 typing
         var typingNode = el('div', { class: 'ai-msg assistant typing' }, [
-            el('div', { class: 'ai-msg-bubble' }, [
-                el('span'), el('span'), el('span')
-            ])
+            el('div', { class: 'ai-msg-bubble' }, [el('span'), el('span'), el('span')])
         ]);
         messagesEl.appendChild(typingNode);
         scrollToBottom(messagesEl);
@@ -517,106 +297,99 @@
                 var aiMsg = { role: 'assistant', content: data.reply, created_at: new Date().toISOString() };
                 state.messages.push(aiMsg);
                 messagesEl.appendChild(buildMessageNode(aiMsg));
-                if (data.mood) state.profile.mood = data.mood;
-                if (typeof data.intimacy === 'number') state.profile.intimacy = data.intimacy;
                 if (data.remaining) {
                     state.remaining = data.remaining;
                     var status = document.getElementById('aiChatFootStatus');
-                    if (status) status.textContent = '本小时内还可聊 ' + state.remaining.hour + ' 次 · 今日剩余 ' + state.remaining.day + ' 次';
+                    if (status) status.textContent = '本小时内还可聊 ' + state.remaining.hour + ' 次';
                 }
                 scrollToBottom(messagesEl);
-                renderEntryCard();
             } else {
-                notify('AI 没有回复');
+                notify((state.config && state.config.name) + '暂时没有回应，请稍后再试');
             }
         } catch (e) {
             typingNode.remove();
-            if (e && e.message) {
-                notify(e.message);
-                // 把用户消息保留在列表里
-            }
+            if (e && e.message) notify(e.message);
         } finally {
             state.sending = false;
             btn.disabled = false;
             btn.textContent = '发送';
-            input.focus();
+            if (input) input.focus();
         }
     }
 
-    // ===================== 页面切换 =====================
-    function openAiAgentPage() {
-        var main = document.getElementById('profileMainView');
-        var page = document.getElementById('profileAiAgentPage');
-        var proPage = document.getElementById('profileProStylePage');
-        var panel = document.getElementById('panelProfile');
-
-        // 确保 Pro 装扮页先关掉（互斥）
-        if (proPage) { proPage.hidden = true; proPage.classList.remove('active'); }
-
-        if (main) main.hidden = true;
-        if (page) {
-            page.hidden = false;
-            page.classList.add('active');
+    // ===================== 入口：打开/关闭 AI 聊天 =====================
+    // 在聊天页会话列表中点击"徐旭泽的小猫"时调用
+    window.__xtjOpenAiChat = async function() {
+        // 1. 检查登录
+        if (!window.currentUser) {
+            notify('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
+            return;
         }
-        if (panel && typeof panel.scrollTo === 'function') {
-            panel.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-        // 根据 profile 状态决定渲染哪种视图
-        if (state.profile && state.profile.agent_name) {
-            renderChatView();
-        } else {
-            renderCreateForm();
-        }
-    }
-
-    function closeAiAgentPage() {
-        var main = document.getElementById('profileMainView');
-        var page = document.getElementById('profileAiAgentPage');
-        var panel = document.getElementById('panelProfile');
-        if (page) { page.classList.remove('active'); page.hidden = true; }
-        if (main) main.hidden = false;
-        if (panel && typeof panel.scrollTo === 'function') {
-            panel.scrollTo({ top: 0, behavior: 'smooth' });
-        }
-    }
-
-    // ===================== 初始化 =====================
-    async function loadInitialProfile() {
         try {
-            var data = await apiGetProfile();
-            if (data && data.exists && data.profile) {
-                state.profile = data.profile;
-            } else {
-                state.profile = null;
+            if (typeof window.ensureUserToken === 'function') {
+                var token = await window.ensureUserToken();
+                if (!token) { notify('登录已过期，请重新登录'); return; }
             }
-            renderEntryCard();
         } catch (e) {
-            // 静默：未登录时 profile 加载失败不算错
-            state.profile = null;
-            renderEntryCard();
+            notify('登录已过期，请重新登录');
+            return;
         }
-    }
 
-    function init() {
-        // 绑定入口卡片点击
-        var entry = document.getElementById('aiAgentEntry');
-        if (entry) {
-            entry.addEventListener('click', function() { openAiAgentPage(); });
+        // 2. 切换到聊天 tab，打开详情视图
+        if (typeof window.switchDockTab === 'function') {
+            window.switchDockTab('chat', true);
         }
-        // 暴露给外部
-        window.__xtjAiAgent = {
-            open: openAiAgentPage,
-            close: closeAiAgentPage,
-            refresh: loadInitialProfile,
-            getProfile: function() { return state.profile; }
-        };
-        // 加载 profile
-        loadInitialProfile();
-    }
 
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
+        // 3. 先加载配置
+        try {
+            var data = await apiGetConfig();
+            if (data && data.config) state.config = data.config;
+        } catch (e) { /* 使用默认值 */ }
+
+        var name = state.config ? state.config.name : '徐旭泽的小猫';
+        var avatar = state.config ? (state.config.avatar || '🐱') : '🐱';
+
+        // 4. 修改聊天页标题和 UI
+        var titleEl = document.getElementById('dockChatTitle');
+        var backBtn = document.getElementById('dockChatBackBtn');
+        var listView = document.getElementById('dockChatListView');
+        var detailView = document.getElementById('dockChatDetailView');
+        var messagesEl = document.getElementById('dockChatMessages');
+
+        if (titleEl) titleEl.textContent = avatar + ' ' + name;
+        if (backBtn) backBtn.style.display = 'flex';
+        if (listView) listView.classList.add('hidden');
+        if (detailView) detailView.classList.remove('hidden');
+
+        // 5. 隐藏标准聊天输入（AI 聊天使用独立 UI）
+        var chatInputArea = document.querySelector('.chat-input-area');
+        if (chatInputArea) chatInputArea.style.display = 'none';
+
+        // 6. 在消息区渲染 AI 聊天界面
+        if (messagesEl) {
+            messagesEl.innerHTML = '';
+            messagesEl.classList.add('ai-chat-container');
+            renderChatView(messagesEl);
+        }
+
+        // 关闭 DM 轮询，防止干扰
+        if (typeof window.stopDMPolling === 'function') {
+            window.stopDMPolling();
+        }
+    };
+
+    window.__xtjCloseAiChat = function() {
+        state.messages = [];
+        var messagesEl = document.getElementById('dockChatMessages');
+        if (messagesEl) {
+            messagesEl.classList.remove('ai-chat-container');
+        }
+        var chatInputArea = document.querySelector('.chat-input-area');
+        if (chatInputArea) chatInputArea.style.display = '';
+    };
+
+    window.__xtjAiAgent = {
+        open: window.__xtjOpenAiChat,
+        close: window.__xtjCloseAiChat
+    };
 })();
