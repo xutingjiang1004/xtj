@@ -43,7 +43,7 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="css/style.css?v=20260627_profile_v3" />
+    <link rel="stylesheet" href="css/style.css?v=20260627_uivisual_v1" />
     <style id="xtj-inline-hotfix-20260612">
         .dock-bar {
             position: fixed;
@@ -278,7 +278,7 @@
     </style>
     <link rel="stylesheet" media="(min-width: 1024px)" href="css/desktop.css?v=20260624_progift" />
     <link rel="stylesheet" href="css/ui-enhance.css?v=20260620_3">
-    <link rel="stylesheet" href="css/pro-style.css?v=20260626_dock_unborder">
+    <link rel="stylesheet" href="css/pro-style.css?v=20260627_uivisual_v1">
 </head>
 <body>
     <svg class="xtj-svg-filters" width="0" height="0" aria-hidden="true" focusable="false">
@@ -843,6 +843,9 @@
                                 </button>
                             </div>
                         </label>
+                        <div class="profile-pro-style-panel-actions">
+                            <button class="btn primary pro-style-save-btn" type="button" data-pro-style-save-type="theme" onclick="saveCurrentUserStylePart('theme')">保存</button>
+                        </div>
                     </div>
                     <!-- 聊天气泡面板 -->
                     <div class="profile-pro-style-panel pro-style-category-panel" id="proStylePanelBubble" hidden>
@@ -934,6 +937,9 @@
                                 </button>
                             </div>
                         </label>
+                        <div class="profile-pro-style-panel-actions">
+                            <button class="btn primary pro-style-save-btn" type="button" data-pro-style-save-type="bubble" onclick="saveCurrentUserStylePart('bubble')">保存</button>
+                        </div>
                     </div>
                     <!-- 帖子卡片装饰面板 -->
                     <div class="profile-pro-style-panel pro-style-category-panel" id="proStylePanelPost" hidden>
@@ -1027,9 +1033,9 @@
                                 </button>
                             </div>
                         </label>
-                    </div>
-                    <div class="profile-pro-style-actions" id="proStylePanelActions">
-                        <button class="btn primary" type="button" id="proStyleSaveBtn" onclick="saveCurrentUserStyle()">保存视觉偏好</button>
+                        <div class="profile-pro-style-panel-actions">
+                            <button class="btn primary pro-style-save-btn" type="button" data-pro-style-save-type="post" onclick="saveCurrentUserStylePart('post')">保存</button>
+                        </div>
                     </div>
                 </section>
             </div>
@@ -1559,7 +1565,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
     <script defer src="js/config.js?v=2"></script>
     <script defer src="js/performance.js?v=20260623_1"></script>
-    <script defer src="js/core.js?v=20260627_ann_read_v2"></script>
+    <script defer src="js/core.js?v=20260627_uivisual_v1"></script>
     <script defer src="js/login-device.js?v=20260623_device_v2"></script>
     <script defer src="js/core-animations.js?v=20260623_1"></script>
     <script defer src="js/features.js?v=20260623_1"></script>
