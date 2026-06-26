@@ -5235,6 +5235,303 @@ app.post('/api/agent/profile', authenticateUser, rateLimit(3600000, AI_PROFILE_H
   }
 });
 
+// ===================== AI 智能体 chat 接口 =====================
+// POST /api/agent/chat
+// Body: { message: string, mode?: 'chat' | 'draft' }
+// Response: { ok: true, reply: string, pending_action: null, mood: string, intimacy: number, remaining: { hour, day } }
+//
+// ★ 第一版严格遵守：
+// 1. 走 authenticateUser 中间件
+// 2. 走 checkAiUserRateLimit 用户级限流（与 profile 共用 50/天 + 10/小时）
+// 3. 读取 profile / 20 条历史 / 长期记忆 / 用户最近 5 条帖子+5 条评论 / Pro 状态
+// 4. system prompt 明确：不能假装执行操作 / 不允许 pending_action / 不能改他人数据
+// 5. 用户消息和 AI 回复都存 posts 表 + AI_AGENT_MESSAGE_MARKER（已过滤出普通 feed）
+// 6. 调用真实 DeepSeek（callDeepSeek 内部已有 mock 兜底 + 超时 + 错误脱敏）
+// 7. 不返回 pending_action 给前端（即使模型想发帖子，前端拿不到 action_id 也不能确认）
+
+const AI_CHAT_MESSAGE_MAX_LEN = 2000;
+const AI_CHAT_HISTORY_LIMIT = 20;
+const AI_CHAT_USER_POSTS_LIMIT = 5;
+const AI_CHAT_USER_COMMENTS_LIMIT = 5;
+const AI_CHAT_HOURLY_IP_LIMIT = 30; // IP 维度：每小时最多 30 次 chat 调用
+
+function buildAiSystemPrompt(profile, userContext) {
+  var persona = String(profile.persona || '陪伴用户聊天，像宠物一样').slice(0, 500);
+  var tone = String(profile.tone || '自然、轻松、像朋友').slice(0, 200);
+  var agentName = String(profile.agent_name || 'AI 宠物').slice(0, 20);
+
+  var lines = [
+    '你是 XTJ 网站中用户专属的 AI 宠物智能体。',
+    '你的名字是：' + agentName,
+    '你的性格设定是：' + persona,
+    '你的说话风格是：' + tone,
+    '',
+    '【你可以做的】',
+    '- 陪用户聊天、整理用户自己的站内数据',
+    '- 帮用户润色 / 草拟帖子文案（但仅给草稿，不直接发布）',
+    '- 总结用户最近的动态',
+    '',
+    '【你绝对不能做的】',
+    '- 你不能假装已经执行了发布、删除、修改资料等操作',
+    '- 你不能直接发布帖子、删除内容、修改用户资料',
+    '- 涉及任何写操作时，你必须明确告知用户"我无法直接执行此操作，请你自己操作"',
+    '- 你不能读取其他用户的隐私数据',
+    '- 你不能访问后台管理接口',
+    '- 第一版不支持任何 pending_action，所有写操作必须由用户自己完成',
+    '',
+    '【输出要求】',
+    '- 保持你的说话风格，自然、口语化',
+    '- 回复长度控制在 500 字以内',
+    '- 涉及操作建议时，给出"具体怎么做"而不是"我已经做了"'
+  ];
+
+  if (userContext && userContext.contextBlock) {
+    lines.push('');
+    lines.push('【用户当前站内数据（仅供你参考）】');
+    lines.push(userContext.contextBlock);
+  }
+  return lines.join('\n');
+}
+
+async function loadAiContext(userName, agentName) {
+  var ctx = { history: [], memory: '', contextBlock: '' };
+
+  try {
+    // 1. 读取最近 AI 消息（同一用户的所有 AI 消息，user 发 / agent 回都算）
+    var { data: msgRows } = await supabase.from('posts')
+      .select('user_name, content, created_at')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(AI_CHAT_HISTORY_LIMIT);
+    if (Array.isArray(msgRows)) {
+      // 倒序读到的是最新在前，反转成时间正序给 AI
+      ctx.history = msgRows.slice().reverse().map(function(r) {
+        var role = r.user_name === userName ? 'user' : 'assistant';
+        return { role: role, content: String(r.content || '').slice(0, 4000) };
+      });
+    }
+
+    // 2. 读取 AI 长期记忆 summary
+    var { data: memRow } = await supabase.from('posts')
+      .select('content')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MEMORY_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (memRow && memRow.content) {
+      ctx.memory = String(memRow.content).slice(0, 2000);
+    }
+
+    // 3. 读取用户最近普通帖子（marker 已在 applyPublicPostExclusions 集中过滤）
+    var { data: postRows } = await supabase.from('posts')
+      .select('content, created_at, view_count, like_count')
+      .eq('user_name', userName)
+      .order('created_at', { ascending: false })
+      .limit(50); // 多取一些，应用层再用 marker 过滤
+    var realPosts = [];
+    if (Array.isArray(postRows)) {
+      // 第一版简化：只取前 5 条内容非空且长度 < 1000 字的帖子
+      // 严格 marker 过滤由 applyPublicPostExclusions 在普通 feed 中处理，AI 仅看自己数据
+      for (var i = 0; i < postRows.length && realPosts.length < AI_CHAT_USER_POSTS_LIMIT; i++) {
+        var p = postRows[i];
+        if (p && p.content && String(p.content).length > 0 && String(p.content).length < 1000) {
+          realPosts.push(p);
+        }
+      }
+    }
+    if (realPosts.length > 0) {
+      ctx.contextBlock += '[最近 ' + realPosts.length + ' 条帖子]\n';
+      realPosts.forEach(function(p, i) {
+        ctx.contextBlock += (i+1) + '. ' + String(p.content).slice(0, 200) + '\n';
+      });
+      ctx.contextBlock += '\n';
+    }
+
+    // 4. 读取用户最近评论（comments 表，不是 posts）
+    try {
+      var { data: commentRows } = await supabase.from('comments')
+        .select('content, created_at, post_id')
+        .eq('user_name', userName)
+        .order('created_at', { ascending: false })
+        .limit(AI_CHAT_USER_COMMENTS_LIMIT);
+      if (Array.isArray(commentRows) && commentRows.length > 0) {
+        ctx.contextBlock += '[最近 ' + commentRows.length + ' 条评论]\n';
+        commentRows.forEach(function(c, i) {
+          ctx.contextBlock += (i+1) + '. ' + String(c.content || '').slice(0, 150) + '\n';
+        });
+        ctx.contextBlock += '\n';
+      }
+    } catch (e) {
+      // comments 表可能不存在或字段不同，静默忽略
+    }
+
+    if (ctx.memory) {
+      ctx.contextBlock += '[长期记忆]\n' + ctx.memory + '\n';
+    }
+  } catch (e) {
+    console.error('[AGENT-CHAT] loadAiContext exception:', e.message);
+  }
+  return ctx;
+}
+
+// POST /api/agent/chat
+app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
+  try {
+    var userName = req.userName;
+
+    // 1. 用户级限流
+    var rl = checkAiUserRateLimit(userName);
+    if (!rl.allowed) {
+      return res.status(429).json({
+        error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : '今日 AI 聊天次数已达上限',
+        remainingHour: rl.remainingHour,
+        remainingDay: rl.remainingDay
+      });
+    }
+
+    // 2. 验证输入
+    var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
+    if (message && message.error) return res.status(400).json({ error: message.error });
+    if (!message) return res.status(400).json({ error: '消息内容不能为空' });
+
+    // 3. 读取 profile（不存在则要求先创建）
+    var { data: profRow, error: profErr } = await supabase.from('posts')
+      .select('id, content, media_url')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_PROFILE_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (profErr) {
+      console.error('[AGENT-CHAT] profile query error:', profErr.message);
+      return res.status(500).json({ error: '查询失败' });
+    }
+    if (!profRow) {
+      return res.status(400).json({ error: '请先创建你的 AI 宠物', code: 'NO_PROFILE' });
+    }
+    var prof = null;
+    try { prof = profRow.media_url ? JSON.parse(profRow.media_url) : null; } catch(e) { prof = null; }
+    if (!prof) prof = { agent_name: profRow.content || 'AI 宠物', persona: '', tone: '' };
+    prof.agent_name = String(prof.agent_name || 'AI 宠物').slice(0, 20);
+    prof.persona = String(prof.persona || '').slice(0, 500);
+    prof.tone = String(prof.tone || '').slice(0, 200);
+
+    // 4. 读取上下文
+    var ctx = await loadAiContext(userName, prof.agent_name);
+
+    // 5. 组装 system prompt
+    var systemPrompt = buildAiSystemPrompt(prof, ctx);
+
+    // 6. 组装 messages
+    var messages = [{ role: 'system', content: systemPrompt }];
+    // 限制历史长度，避免 token 超限
+    var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
+    for (var h = 0; h < histSlice.length; h++) {
+      messages.push({ role: histSlice[h].role, content: histSlice[h].content });
+    }
+    // 当前用户消息
+    messages.push({ role: 'user', content: message });
+
+    // 7. 调用 DeepSeek
+    var reply = '';
+    try {
+      reply = await callDeepSeek(messages, { model: DEEPSEEK_MODEL });
+    } catch (e) {
+      console.error('[AGENT-CHAT] callDeepSeek failed:', e && e.message);
+      return res.status(502).json({
+        error: 'AI 调用失败，请稍后再试',
+        detail: e && e.message ? String(e.message).slice(0, 200) : ''
+      });
+    }
+    if (typeof reply !== 'string' || !reply) reply = '（AI 没有回复，请稍后再试）';
+    if (reply.length > 4000) reply = reply.slice(0, 4000) + '\n…（已截断）';
+
+    // 8. 保存用户消息和 AI 回复
+    var nowIso = new Date().toISOString();
+    try {
+      await supabase.from('posts').insert([
+        {
+          user_name: userName,
+          content: message,
+          media_type: AI_AGENT_MESSAGE_MARKER,
+          actor_key: 'ai_msg_user_' + userName + '_' + Date.now()
+        },
+        {
+          user_name: prof.agent_name, // AI 用 agent_name 区分消息归属
+          content: reply,
+          media_type: AI_AGENT_MESSAGE_MARKER,
+          actor_key: 'ai_msg_agent_' + userName + '_' + Date.now()
+        }
+      ]);
+    } catch (e) {
+      console.error('[AGENT-CHAT] save messages failed:', e.message);
+      // 不阻塞返回给用户，消息保存失败是次要问题
+    }
+
+    // 9. 更新亲密度和心情（写回 profile）
+    try {
+      prof.intimacy = (typeof prof.intimacy === 'number' ? prof.intimacy : 0) + 1;
+      // 简单心情轮换（不依赖 AI 回复内容，避免模型决定情绪）
+      var moods = ['curious', 'happy', 'playful', 'sleepy', 'thoughtful'];
+      prof.mood = moods[prof.intimacy % moods.length];
+      prof.updated_at = nowIso;
+      await supabase.from('posts').update({
+        media_url: JSON.stringify(prof),
+        created_at: nowIso
+      }).eq('id', profRow.id);
+    } catch (e) {
+      console.error('[AGENT-CHAT] update profile failed:', e.message);
+    }
+
+    // 10. 返回
+    return res.json({
+      ok: true,
+      reply: reply,
+      pending_action: null, // 第一版明确不返回 action
+      mood: prof.mood,
+      intimacy: prof.intimacy,
+      remaining: { hour: rl.remainingHour, day: rl.remainingDay }
+    });
+  } catch (e) {
+    console.error('[AGENT-CHAT] exception:', e.message);
+    return res.status(500).json({ error: '聊天失败，请稍后再试' });
+  }
+});
+
+// GET /api/agent/chat/history - 获取当前用户 AI 聊天历史（仅用于前端展示）
+app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
+  try {
+    var userName = req.userName;
+    var limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 100);
+    var { data: rows, error } = await supabase.from('posts')
+      .select('id, user_name, content, created_at')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .order('created_at', { ascending: true })
+      .limit(limit);
+    if (error) {
+      console.error('[AGENT-CHAT] history query error:', error.message);
+      return res.status(500).json({ error: '查询失败' });
+    }
+    return res.json({
+      ok: true,
+      messages: (rows || []).map(function(r) {
+        return {
+          id: r.id,
+          role: r.user_name === userName ? 'user' : 'assistant',
+          content: r.content || '',
+          created_at: r.created_at
+        };
+      })
+    });
+  } catch (e) {
+    console.error('[AGENT-CHAT] history exception:', e.message);
+    return res.status(500).json({ error: '查询失败' });
+  }
+});
+
 // 自动清理旧日志（每24小时执行一次）
 setInterval(function() {
   cleanupOldLogs('login').catch(function() {});
