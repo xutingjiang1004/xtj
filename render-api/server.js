@@ -1377,7 +1377,12 @@ async function callDeepSeek(messages, options) {
       messages: messages,
       stream: false
     };
+    // DeepSeek v4 thinking 模式：
+    //   - thinking: { type: 'enabled' }   启用思考
+    //   - reasoning_effort: 'low' | 'medium' | 'high'   思考强度
+    // 关闭时不传 thinking 字段，仅 reasoning_effort 不发
     if (useThinking) {
+      apiBody.thinking = { type: 'enabled' };
       apiBody.reasoning_effort = thinkingLevel;
     }
     var resp = await fetch(DEEPSEEK_API_URL, {
@@ -5311,13 +5316,16 @@ async function loadAiContext(userName, convId) {
   var ctx = { history: [], memory: '', contextBlock: '' };
 
   try {
+    // 1. 读取最近 AI 消息
+    // ★ 关键：先按 created_at desc 取最近的消息（更准确反映"最近聊了什么"），
+    //         然后在内存里 reverse 成时间正序给 AI。
+    //         修复：之前带 convId 的分支 limit(15) + desc + reverse = 实际只取到最旧 15 条
     var query = supabase.from('posts')
       .select('user_name, content, media_url, created_at')
       .eq('user_name', userName)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .order('created_at', { ascending: false })
       .limit(AI_CHAT_HISTORY_LIMIT);
-    // 如果有 conversation_id，只读取当前会话
     if (convId) {
       query = supabase.from('posts')
         .select('user_name, content, media_url, created_at')
@@ -5329,6 +5337,7 @@ async function loadAiContext(userName, convId) {
     }
     var { data: msgRows } = await query;
     if (Array.isArray(msgRows)) {
+      // desc 拿到的是最新在前，reverse 后变正序（旧→新），再 slice 取最近 15 条
       ctx.history = msgRows.slice().reverse().map(function(r) {
         var meta = parseMsgMeta(r);
         return { role: meta.role || 'user', content: String(r.content || '').slice(0, 800) };
@@ -5426,6 +5435,11 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     // 9. 保存消息（含 conversation_id，不物理删除旧数据）
     var nowIso = new Date().toISOString();
     var nowTs = Date.now();
+    // 把 thinking_mode + model 也写进 usage，方便后台按 conv 统计
+    var usageToStore = Object.assign({}, usage || {}, {
+      thinking_mode: thinkingMode,
+      model: model
+    });
     try {
       await supabase.from('posts').insert([
         {
@@ -5439,7 +5453,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
           user_name: userName,
           content: reply,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', convId, usage),
+          media_url: buildMsgMeta('assistant', convId, usageToStore),
           actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
         }
       ]);
@@ -5480,11 +5494,13 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
     var convId = String(req.query.conversation_id || '').trim();
     var limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 100);
 
+    // ★ 修复：之前 ascending: true + limit → 拿的是"最早 N 条"，刷新页面只看到旧对话。
+    //   改成 descending: true + limit → 拿"最近 N 条" desc，内存里 reverse 给前端按时间正序。
     var query = supabase.from('posts')
       .select('id, user_name, content, media_url, created_at')
       .eq('user_name', userName)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
       .limit(limit);
 
     if (convId) {
@@ -5493,7 +5509,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
         .eq('user_name', userName)
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
         .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
-        .order('created_at', { ascending: true })
+        .order('created_at', { ascending: false })
         .limit(limit);
     }
 
@@ -5503,10 +5519,13 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return res.status(500).json({ error: '查询失败' });
     }
 
+    // desc → reverse 成 asc 给前端展示
+    var sortedRows = (rows || []).slice().reverse();
+
     return res.json({
       ok: true,
       conversation_id: convId || null,
-      messages: (rows || []).map(function(r) {
+      messages: sortedRows.map(function(r) {
         var meta = parseMsgMeta(r);
         return {
           id: r.id,
