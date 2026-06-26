@@ -730,20 +730,12 @@ const ADMIN_NAME = "xxz";
         }
 
         function renderProStyleSettings() {
-            var panel = document.getElementById('proStylePanelLanding');
-            if (!panel) return;
-            var statusEl = document.getElementById('proStyleStatus');
-            var badgeEl = document.getElementById('proStyleBadge');
-            var saveBtn = document.getElementById('proStyleSaveBtn');
+            // 0.97g 简化：landing 不再有 #proStylePanelLanding 包装（直接展示 3 个入口卡）
+            // 这里只做：刷新每个 select 的值 + 重新计算 preview 选中状态 + 更新入口卡描述
             if (!currentUser) {
-                panel.style.display = 'none';
-                if (typeof updateProStyleEntry === 'function') {
-                    updateProStyleEntry();
-                }
+                if (typeof updateProStyleEntry === 'function') updateProStyleEntry();
                 return;
             }
-            panel.style.display = '';
-
             // 同步所有分类面板的 select 值
             var themeSelect = document.getElementById('proThemeSelect');
             var bubbleSelect = document.getElementById('proBubbleSelect');
@@ -756,22 +748,6 @@ const ADMIN_NAME = "xxz";
             if (themeSelect) themeSelect.disabled = !hasProFeature('custom_theme');
             if (bubbleSelect) bubbleSelect.disabled = !hasProFeature('pro_chat_bubble');
             if (postSelect) postSelect.disabled = !hasProFeature('pro_post_style');
-            if (saveBtn) saveBtn.disabled = !currentUser || (!hasProFeature('custom_theme') && !hasProFeature('pro_chat_bubble') && !hasProFeature('pro_post_style') && currentUser !== ADMIN_NAME);
-            var features = getCurrentProFeatures();
-            if (badgeEl) {
-                badgeEl.textContent = features.length ? ('已解锁 ' + features.length + ' 项') : '默认';
-            }
-            if (statusEl) {
-                if (currentUser === ADMIN_NAME) {
-                    statusEl.textContent = '管理员默认可使用专属主题、聊天气泡和帖子卡片装饰。';
-                } else if (!isVipUser()) {
-                    statusEl.textContent = '当前为默认样式。开通包含视觉权益的 Pro 活动后，可恢复你保存的主题、聊天气泡和帖子卡片装饰。';
-                } else if (!features.length) {
-                    statusEl.textContent = '当前 Pro 未包含本次视觉权益，页面仍使用默认样式。';
-                } else {
-                    statusEl.textContent = '当前视觉权益已生效。即使 Pro 失效，你保存的样式也会保留，重新获得权益后自动恢复。';
-                }
-            }
             updateProStylePreviewActiveStates();
             // 注意：此处不再强制 showProStyleLanding() ——
             //      openProStylePage() 会在第一次进入时显式调用，
@@ -827,7 +803,7 @@ const ADMIN_NAME = "xxz";
 
         // 三级分组入口：显示某个分类面板
         window.showProStyleCategory = function(category) {
-            var landing = document.getElementById('proStylePanelLanding');
+            var entries = document.getElementById('proStyleCategoryCards');
             // 外层总保存按钮已删除（每个板块独立保存），保留查找以便向后兼容
             var actions = document.getElementById('proStylePanelActions');
             var panels = {
@@ -835,9 +811,9 @@ const ADMIN_NAME = "xxz";
                 bubble: document.getElementById('proStylePanelBubble'),
                 post: document.getElementById('proStylePanelPost')
             };
-            if (landing) {
-                landing.hidden = true;
-                landing.classList.remove('is-enter');
+            if (entries) {
+                entries.hidden = true;
+                entries.classList.remove('is-enter');
             }
             if (actions) actions.hidden = true; // 兼容旧结构
             var target = panels[category];
@@ -868,15 +844,11 @@ const ADMIN_NAME = "xxz";
 
         // 三级分组入口：返回总览
         window.showProStyleLanding = function() {
-            var landing = document.getElementById('proStylePanelLanding');
-            // 外层总保存按钮已删除（每个板块独立保存）。保留查找以便向后兼容。
+            // 0.97g 简化：landing 不再有 #proStylePanelLanding 包装
+            // 直接隐藏三个子面板 + 显示入口卡组
+            var entries = document.getElementById('proStyleCategoryCards');
             var actions = document.getElementById('proStylePanelActions');
             var panels = ['proStylePanelTheme', 'proStylePanelBubble', 'proStylePanelPost'];
-            if (landing) {
-                landing.hidden = false;
-                landing.classList.remove('is-enter');
-            }
-            if (actions) actions.hidden = true; // 兼容旧结构
             panels.forEach(function(id) {
                 var el = document.getElementById(id);
                 if (el) {
@@ -884,13 +856,15 @@ const ADMIN_NAME = "xxz";
                     el.classList.remove('is-enter');
                 }
             });
-            // 总览页淡入
-            if (landing) {
+            if (entries) {
+                entries.hidden = false;
+                entries.classList.remove('is-enter');
                 try {
-                    void landing.offsetWidth;
-                    landing.classList.add('is-enter');
+                    void entries.offsetWidth;
+                    entries.classList.add('is-enter');
                 } catch (e) {}
             }
+            if (actions) actions.hidden = true; // 兼容旧结构
             var panel = document.getElementById('profileProStylePage');
             if (panel && typeof panel.scrollTo === 'function') {
                 panel.scrollTo({ top: 0, behavior: 'smooth' });

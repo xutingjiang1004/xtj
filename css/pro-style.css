@@ -771,22 +771,23 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
 .pro-style-category-cards {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
+  margin-top: 4px;
 }
 
 .pro-style-category-card {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
   width: 100%;
   padding: 14px 16px;
-  border: 1px solid rgba(178, 220, 198, 0.78);
-  border-radius: 22px;
+  border: 1px solid rgba(178, 220, 198, 0.72);
+  border-radius: 18px;
   background:
-    radial-gradient(circle at 12% 0%, rgba(255,255,255,0.88), transparent 38%),
-    var(--xtj-pro-entry-sheen);
-  box-shadow: 0 12px 28px rgba(50,115,85,0.08);
+    radial-gradient(circle at 10% 0%, rgba(255,255,255,0.86), transparent 36%),
+    linear-gradient(180deg, rgba(255,255,255,0.78), rgba(246,252,248,0.7));
+  box-shadow: 0 8px 22px rgba(50,115,85,0.06);
   cursor: pointer;
   text-align: left;
   color: var(--text-main);
@@ -799,13 +800,13 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
 
 .pro-style-category-card:hover {
   transform: translateY(-1px);
-  box-shadow: 0 16px 34px rgba(50,115,85,0.11);
+  box-shadow: 0 14px 28px rgba(50,115,85,0.1);
   border-color: color-mix(in srgb, var(--xtj-theme-accent) 34%, rgba(178, 220, 198, 0.78));
 }
 
 .pro-style-category-card:active {
   transform: translateY(0);
-  box-shadow: 0 8px 20px rgba(50,115,85,0.08);
+  box-shadow: 0 6px 16px rgba(50,115,85,0.08);
 }
 
 .pro-style-category-icon {
@@ -818,7 +819,7 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   align-items: center;
   justify-content: center;
   font-size: 20px;
-  box-shadow: 0 10px 22px rgba(89, 161, 119, 0.18);
+  box-shadow: 0 8px 18px rgba(89, 161, 119, 0.18);
   flex-shrink: 0;
 }
 
@@ -841,137 +842,6 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.pro-style-category-preview {
-  width: 52px;
-  height: 40px;
-  border-radius: 10px;
-  overflow: hidden;
-  flex-shrink: 0;
-  border: 1px solid rgba(178, 220, 198, 0.5);
-  background: rgba(255, 255, 255, 0.7);
-  position: relative;
-}
-
-/* theme preview thumbnail */
-.theme-preview-thumb {
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.theme-preview-thumb .theme-preview-topbar {
-  display: block;
-  height: 6px;
-  border-radius: 3px;
-  background: rgba(92, 177, 124, 0.35);
-}
-.theme-preview-thumb .theme-preview-surface {
-  display: block;
-  padding: 4px;
-}
-.theme-preview-thumb .theme-preview-card {
-  display: block;
-  border-radius: 4px;
-  background: rgba(255,255,255,0.6);
-  padding: 3px;
-  border: 1px solid rgba(178, 220, 198, 0.35);
-}
-.theme-preview-thumb .theme-preview-card-line {
-  display: block;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(92, 177, 124, 0.2);
-  margin-bottom: 2px;
-}
-.theme-preview-thumb .theme-preview-card-line.is-strong {
-  width: 70%;
-  background: rgba(92, 177, 124, 0.4);
-}
-
-.theme-preview-thumb.is-aqua .theme-preview-topbar { background: rgba(79, 167, 200, 0.35); }
-.theme-preview-thumb.is-aqua .theme-preview-card { border-color: rgba(133, 195, 220, 0.35); }
-.theme-preview-thumb.is-aqua .theme-preview-card-line { background: rgba(79, 167, 200, 0.2); }
-.theme-preview-thumb.is-aqua .theme-preview-card-line.is-strong { background: rgba(79, 167, 200, 0.4); }
-.theme-preview-thumb.is-sakura .theme-preview-topbar { background: rgba(216, 137, 169, 0.35); }
-.theme-preview-thumb.is-sakura .theme-preview-card { border-color: rgba(230, 179, 201, 0.35); }
-.theme-preview-thumb.is-sakura .theme-preview-card-line { background: rgba(216, 137, 169, 0.2); }
-.theme-preview-thumb.is-sakura .theme-preview-card-line.is-strong { background: rgba(216, 137, 169, 0.4); }
-.theme-preview-thumb.is-lavender .theme-preview-topbar { background: rgba(141, 130, 216, 0.35); }
-.theme-preview-thumb.is-lavender .theme-preview-card { border-color: rgba(181, 173, 236, 0.35); }
-.theme-preview-thumb.is-lavender .theme-preview-card-line { background: rgba(141, 130, 216, 0.2); }
-.theme-preview-thumb.is-lavender .theme-preview-card-line.is-strong { background: rgba(141, 130, 216, 0.4); }
-.theme-preview-thumb.is-mint .theme-preview-topbar { background: rgba(88, 183, 131, 0.35); }
-.theme-preview-thumb.is-mint .theme-preview-card { border-color: rgba(124, 206, 156, 0.35); }
-.theme-preview-thumb.is-mint .theme-preview-card-line { background: rgba(88, 183, 131, 0.2); }
-.theme-preview-thumb.is-mint .theme-preview-card-line.is-strong { background: rgba(88, 183, 131, 0.4); }
-
-/* bubble preview thumbnail */
-.bubble-preview-thumb {
-  padding: 5px 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.bubble-preview-thumb .bubble-preview-row {
-  display: flex;
-  justify-content: flex-start;
-}
-.bubble-preview-thumb .bubble-preview-row.is-right {
-  justify-content: flex-end;
-}
-.bubble-preview-thumb .bubble-preview-msg {
-  font-size: 7px;
-  line-height: 1.2;
-  padding: 2px 5px;
-  min-height: 0;
-  border-radius: 6px;
-  background: rgba(92, 177, 124, 0.12);
-  color: rgba(58, 90, 73, 0.7);
-  max-width: 70%;
-}
-.bubble-preview-thumb .bubble-preview-msg.sent {
-  background: rgba(92, 177, 124, 0.2);
-  color: rgba(58, 90, 73, 0.85);
-}
-
-/* post preview thumbnail */
-.post-preview-thumb {
-  padding: 5px 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.post-preview-thumb .post-card-preview-head {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-bottom: 2px;
-}
-.post-preview-thumb .post-card-preview-avatar {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: rgba(92, 177, 124, 0.25);
-  flex-shrink: 0;
-}
-.post-preview-thumb .post-card-preview-user {
-  height: 5px;
-  width: 30px;
-  border-radius: 3px;
-  background: rgba(92, 177, 124, 0.25);
-}
-.post-preview-thumb .post-card-preview-line {
-  display: block;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(92, 177, 124, 0.15);
-  margin-bottom: 2px;
-}
-.post-preview-thumb .post-card-preview-line.is-strong {
-  width: 75%;
-  background: rgba(92, 177, 124, 0.3);
 }
 
 .pro-style-category-arrow {
@@ -1055,11 +925,6 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   color: #ebf6ef;
 }
 
-[data-theme="dark"] .pro-style-category-preview {
-  border-color: rgba(126, 194, 161, 0.2);
-  background: rgba(255, 255, 255, 0.06);
-}
-
 /* ====== 移动端底栏不遮挡保存按钮 ====== */
 .profile-pro-style-page,
 .profile-subpage {
@@ -1080,11 +945,6 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   .pro-style-category-card {
     padding: 12px 14px;
     grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  .pro-style-category-preview {
-    width: 44px;
-    height: 36px;
   }
 
   .pro-style-category-card .pro-style-category-icon {
@@ -1136,6 +996,7 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
 /* 每板块独立的保存按钮容器（不 sticky） */
 .profile-pro-style-panel-actions {
   display: flex;
+  flex-direction: column;
   justify-content: center;
   align-items: center;
   margin: 22px 0 8px;
@@ -1144,6 +1005,7 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   bottom: auto !important;
   z-index: auto !important;
   background: transparent !important;
+  gap: 18px;
 }
 
 .profile-pro-style-panel-actions::before {
@@ -1152,8 +1014,7 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   width: 100%;
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(173, 221, 194, 0.45), transparent);
-  margin-bottom: 18px;
-  order: -1;
+  order: 0;
 }
 
 .pro-style-save-btn {
@@ -1320,20 +1181,14 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   animation: xtjPostMinimalShimmer 2.6s ease-in-out infinite;
 }
 
-/* 总览三个入口卡片的预览小图也轻微动 */
-.pro-style-category-card .pro-style-category-preview {
-  overflow: hidden;
-  position: relative;
+/* 总览三个入口卡片的 icon 轻微动 */
+@keyframes xtjCategoryIconBreath {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
 }
 
-@keyframes xtjCategoryPreviewBreath {
-  0%, 100% { opacity: 0.92; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.02); }
-}
-
-.pro-style-category-card:hover .pro-style-category-preview,
-.pro-style-category-card .pro-style-category-preview {
-  animation: xtjCategoryPreviewBreath 3.4s ease-in-out infinite;
+.pro-style-category-card .pro-style-category-icon {
+  animation: xtjCategoryIconBreath 3.4s ease-in-out infinite;
 }
 
 /* 移动端：保存按钮整宽 */
