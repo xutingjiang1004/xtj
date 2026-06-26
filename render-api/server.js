@@ -5236,9 +5236,17 @@ app.post('/api/agent/profile', authenticateUser, rateLimit(3600000, AI_PROFILE_H
 });
 
 // ===================== AI 智能体 chat 接口 =====================
-// POST /api/agent/chat
-// Body: { message: string, mode?: 'chat' | 'draft' }
-// Response: { ok: true, reply: string, pending_action: null, mood: string, intimacy: number, remaining: { hour, day } }
+//
+// ★ 缓存优化设计（DeepSeek prompt cache）：
+//   DeepSeek 按 token 序列前缀匹配缓存。把 system prompt 拆成两段：
+//   - 第 1 段（core）：人格 + 规则 → 完全固定，命中缓存概率最高
+//   - 第 2 段（dynamic）：用户当前数据 + 长期记忆 → 独立 token 段，不污染 core 缓存
+//   历史 user/assistant 消息按时间顺序追加，结构稳定 → 缓存命中良好。
+//
+// ★ 长期记忆（long-term memory）：
+//   - 存储：posts 表 + media_type = AI_AGENT_MEMORY_MARKER
+//   - 读取：loadAiContext 每次 chat 时拉取，作为 dynamic context 第二段
+//   - 写入：chat 完成后异步（不阻塞响应）调用 AI 总结最近 10 条 + 已有 memory → 写回
 //
 // ★ 第一版严格遵守：
 // 1. 走 authenticateUser 中间件
@@ -5254,13 +5262,17 @@ const AI_CHAT_HISTORY_LIMIT = 20;
 const AI_CHAT_USER_POSTS_LIMIT = 5;
 const AI_CHAT_USER_COMMENTS_LIMIT = 5;
 const AI_CHAT_HOURLY_IP_LIMIT = 30; // IP 维度：每小时最多 30 次 chat 调用
+const AI_MEMORY_MAX_LEN = 1500;     // 长期记忆最大长度（≈ 750 token）
+const AI_MEMORY_SUMMARIZE_HISTORY = 10; // 触发总结时使用的最近历史条数
 
-function buildAiSystemPrompt(profile, userContext) {
+// 核心 system prompt：完全固定，DeepSeek 缓存命中段
+// ★ 不要在这里加任何动态时间戳 / 用户数据 / 随机内容
+function buildAiCorePrompt(profile) {
   var persona = String(profile.persona || '陪伴用户聊天，像宠物一样').slice(0, 500);
   var tone = String(profile.tone || '自然、轻松、像朋友').slice(0, 200);
   var agentName = String(profile.agent_name || 'AI 宠物').slice(0, 20);
 
-  var lines = [
+  return [
     '你是 XTJ 网站中用户专属的 AI 宠物智能体。',
     '你的名字是：' + agentName,
     '你的性格设定是：' + persona,
@@ -5270,6 +5282,7 @@ function buildAiSystemPrompt(profile, userContext) {
     '- 陪用户聊天、整理用户自己的站内数据',
     '- 帮用户润色 / 草拟帖子文案（但仅给草稿，不直接发布）',
     '- 总结用户最近的动态',
+    '- 记住用户告诉你的重要信息（写入长期记忆）',
     '',
     '【你绝对不能做的】',
     '- 你不能假装已经执行了发布、删除、修改资料等操作',
@@ -5283,14 +5296,107 @@ function buildAiSystemPrompt(profile, userContext) {
     '- 保持你的说话风格，自然、口语化',
     '- 回复长度控制在 500 字以内',
     '- 涉及操作建议时，给出"具体怎么做"而不是"我已经做了"'
-  ];
+  ].join('\n');
+}
 
-  if (userContext && userContext.contextBlock) {
-    lines.push('');
+// 动态上下文：每次可能变，独立 token 段
+// ★ 放在第 2 条 system 消息里，不污染第 1 条 core 的缓存命中
+function buildAiDynamicContext(ctx, profile) {
+  var lines = [];
+  if (ctx && ctx.contextBlock) {
     lines.push('【用户当前站内数据（仅供你参考）】');
-    lines.push(userContext.contextBlock);
+    lines.push(ctx.contextBlock);
+  }
+  if (profile && typeof profile.mood === 'string') {
+    lines.push('');
+    lines.push('【宠物当前状态】');
+    lines.push('心情：' + profile.mood + ' | 亲密度：' + (profile.intimacy || 0));
   }
   return lines.join('\n');
+}
+
+// 异步更新长期记忆（fire-and-forget，不阻塞 chat 响应）
+// 设计：
+//   1. 拉取最近 N 条历史 + 已有 memory
+//   2. 调一次 AI 总结成 ≤ AI_MEMORY_MAX_LEN 字的 summary
+//   3. 写回 posts 表 + AI_AGENT_MEMORY_MARKER（同一用户只保留最新一条）
+// 失败容错：写库失败 → 仅打日志，不影响用户聊天
+// 触发频率：每次 chat 都触发，但用防抖（同一用户 5 分钟内只总结一次）避免浪费 token
+const aiMemoryUpdateLock = {}; // userName → { ts: number, pending: Promise }
+async function updateLongTermMemory(userName, profile, ctx, lastUserMsg, lastAiReply) {
+  if (!DEEPSEEK_API_KEY) return; // 无 API Key 时跳过，避免 mock 噪声写入 memory
+  var now = Date.now();
+  var lock = aiMemoryUpdateLock[userName];
+  if (lock && (now - lock.ts) < 5 * 60 * 1000) {
+    // 5 分钟内已总结过 → 跳过
+    return;
+  }
+  // 标记进入临界区
+  aiMemoryUpdateLock[userName] = { ts: now, pending: null };
+
+  try {
+    // 1. 拉最近 N 条历史（按时间正序）
+    var hist = (ctx && Array.isArray(ctx.history)) ? ctx.history.slice(-AI_MEMORY_SUMMARIZE_HISTORY) : [];
+    if (hist.length === 0) return;
+
+    // 2. 已有 memory
+    var oldMemory = (ctx && ctx.memory) ? String(ctx.memory).slice(0, AI_MEMORY_MAX_LEN) : '';
+
+    // 3. 组装总结 prompt
+    var summarizeMessages = [
+      {
+        role: 'system',
+        content: '你是 XTJ 长期记忆整理助手。你的任务是阅读最近的对话和已有记忆，输出更新后的长期记忆 summary。\n' +
+                 '要求：\n' +
+                 '1. 保留关于用户的重要事实（昵称、习惯、偏好、重要事件、明确告诉你的信息）\n' +
+                 '2. 忽略闲聊和一次性话题\n' +
+                 '3. 用第三人称中文写，控制在 800 字以内\n' +
+                 '4. 不要包含 "用户说" "AI 回复" 这类元信息\n' +
+                 '5. 如果没有新信息，原样输出已有记忆'
+      },
+      {
+        role: 'user',
+        content: '【已有记忆】\n' + (oldMemory || '（无）') + '\n\n【最近对话】\n' +
+                 hist.map(function(h, i) {
+                   return (i + 1) + '. ' + (h.role === 'user' ? '用户' : 'AI') + '：' + String(h.content || '').slice(0, 300);
+                 }).join('\n')
+      }
+    ];
+
+    // 4. 调用 AI 总结
+    var newMemory = await callDeepSeek(summarizeMessages, { model: DEEPSEEK_MODEL });
+    if (typeof newMemory !== 'string' || !newMemory.trim()) return;
+    newMemory = newMemory.trim().slice(0, AI_MEMORY_MAX_LEN);
+
+    // 5. 写回 posts 表（同一用户只保留最新一条 memory）
+    var { data: existing } = await supabase.from('posts')
+      .select('id')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MEMORY_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    var nowIso = new Date().toISOString();
+    if (existing && existing.id) {
+      await supabase.from('posts').update({
+        content: newMemory,
+        created_at: nowIso
+      }).eq('id', existing.id);
+    } else {
+      await supabase.from('posts').insert({
+        user_name: userName,
+        content: newMemory,
+        media_type: AI_AGENT_MEMORY_MARKER,
+        actor_key: 'ai_memory_' + userName + '_' + Date.now()
+      });
+    }
+    console.log('[AGENT-MEMORY] updated for', userName, 'len=' + newMemory.length);
+  } catch (e) {
+    console.error('[AGENT-MEMORY] update failed:', e && e.message);
+  } finally {
+    // 释放锁（保留 ts 以便防抖继续生效）
+  }
 }
 
 async function loadAiContext(userName, agentName) {
@@ -5421,11 +5527,19 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     // 4. 读取上下文
     var ctx = await loadAiContext(userName, prof.agent_name);
 
-    // 5. 组装 system prompt
-    var systemPrompt = buildAiSystemPrompt(prof, ctx);
+    // 5. 组装 system prompt（拆分为两段以提升 DeepSeek 缓存命中）
+    //    第 1 段 core 完全固定（人格 + 规则）
+    //    第 2 段 dynamic 包含用户数据 / 长期记忆 / 宠物状态
+    var corePrompt = buildAiCorePrompt(prof);
+    var dynamicContext = buildAiDynamicContext(ctx, prof);
 
     // 6. 组装 messages
-    var messages = [{ role: 'system', content: systemPrompt }];
+    // ★ 顺序严格：core(固定) → dynamic(变化) → 历史 → 当前消息
+    //   DeepSeek 按前缀 token 匹配缓存，这样 core 段不会因 dynamic 变化而失配
+    var messages = [
+      { role: 'system', content: corePrompt },
+      { role: 'system', content: dynamicContext }
+    ];
     // 限制历史长度，避免 token 超限
     var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
     for (var h = 0; h < histSlice.length; h++) {
@@ -5483,6 +5597,16 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       }).eq('id', profRow.id);
     } catch (e) {
       console.error('[AGENT-CHAT] update profile failed:', e.message);
+    }
+
+    // 9.5 异步更新长期记忆（fire-and-forget，不阻塞响应）
+    //   - 失败仅打日志
+    //   - 5 分钟防抖，避免连续 chat 浪费 token
+    //   - 无 DEEPSEEK_API_KEY 时自动跳过
+    try {
+      updateLongTermMemory(userName, prof, ctx, message, reply).catch(function() {});
+    } catch (e) {
+      // 同步抛错也吞掉
     }
 
     // 10. 返回
