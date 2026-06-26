@@ -340,14 +340,31 @@ html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .a
 .pro-style-option-card.active {
   border-color: rgba(116, 195, 148, 0.88);
   background: linear-gradient(180deg, rgba(247,255,250,0.96), rgba(237,250,243,0.94));
-  box-shadow: 0 0 0 1px rgba(160, 225, 189, 0.82), 0 16px 30px rgba(56, 114, 77, 0.12);
+  box-shadow:
+    0 0 0 1px rgba(160, 225, 189, 0.82),
+    0 16px 30px rgba(56, 114, 77, 0.12),
+    0 0 22px color-mix(in srgb, var(--xtj-theme-accent) 22%, transparent);
   transform: translateY(-1px);
+  animation: xtjOptionActiveIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes xtjOptionActiveIn {
+  0% { transform: translateY(-1px) scale(0.96); }
+  60% { transform: translateY(-2px) scale(1.02); }
+  100% { transform: translateY(-1px) scale(1); }
 }
 
 .pro-style-option-card.locked,
 .pro-style-option-card:disabled {
-  opacity: 0.88;
-  filter: saturate(0.88);
+  opacity: 0.78;
+  filter: saturate(0.7);
+  cursor: not-allowed;
+  animation: none !important;
+}
+
+.pro-style-option-card.locked *,
+.pro-style-option-card:disabled * {
+  animation-play-state: paused !important;
 }
 
 .pro-style-option-card.locked::after {
@@ -356,8 +373,43 @@ html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .a
 }
 
 .pro-style-card-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
   background: rgba(255,255,255,0.86);
   z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.4, 0.64, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.pro-style-card-check::before {
+  content: "";
+  width: 10px;
+  height: 5px;
+  border-left: 2px solid var(--xtj-theme-accent, #29c38a);
+  border-bottom: 2px solid var(--xtj-theme-accent, #29c38a);
+  transform: rotate(-45deg) scale(0);
+  margin-top: -2px;
+  transition: transform 0.2s 0.05s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+.pro-style-option-card.active .pro-style-card-check {
+  opacity: 1;
+  transform: scale(1);
+  background: var(--xtj-theme-accent, #29c38a);
+}
+
+.pro-style-option-card.active .pro-style-card-check::before {
+  transform: rotate(-45deg) scale(1);
+  border-color: #ffffff;
 }
 
 .pro-style-option-title {
@@ -756,14 +808,42 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   .profile-subpage,
   .profile-pro-style-entry,
   .profile-pro-style-entry:hover,
+  .profile-pro-style-back,
+  .pro-style-category-card,
+  .pro-style-category-card::after,
+  .pro-style-category-icon,
   .profile-subpage-back,
+  .pro-style-option-card,
+  .pro-style-option-card.active,
+  .pro-style-option-card:hover,
+  .pro-style-card-check,
+  .pro-style-card-check::before,
   .theme-preview,
   .theme-preview::after,
-  .bubble-preview-row:last-child .bubble-preview-msg.sent,
-  .post-card-preview {
+  .theme-preview::before,
+  .theme-preview-card,
+  .theme-preview-topbar,
+  .theme-preview-title-line,
+  .theme-preview-card-line,
+  .theme-preview-card-action,
+  .bubble-preview,
+  .bubble-preview::before,
+  .bubble-preview-msg,
+  .bubble-preview-msg.sent,
+  .post-card-preview,
+  .post-card-preview::before,
+  .post-card-preview::after,
+  .post-card-preview-avatar,
+  .post-card-preview-user,
+  .post-card-preview-line,
+  .post-card-preview-meta > span,
+  .profile-pro-style-panel-actions,
+  .pro-style-save-btn,
+  .xtj-anim {
     animation: none !important;
     transition: none !important;
     transform: none !important;
+    filter: none !important;
   }
 }
 
@@ -975,22 +1055,63 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
  * Pro 装扮 UI 收口（每板块独立保存 + 切换动画 + 预览动画增强）
  * ======================================================== */
 
-/* 总览页 / 子面板 淡入动画 */
+/* ====== 二级面板切换动画（增强版） ====== */
+/* 进入子面板：从右侧 12px 滑入 + 淡入 */
 @keyframes xtjProPanelIn {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateX(12px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(0);
   }
 }
 
+/* 返回总览：从左侧轻微滑入 + 淡入 */
+@keyframes xtjProLandingIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.pro-style-category-panel.is-entering {
+  animation: xtjProPanelIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+.pro-style-category-cards.is-entering {
+  animation: xtjProLandingIn 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+/* 兼容旧 is-enter class */
 .pro-style-category-panel.is-enter,
 #proStylePanelLanding.is-enter {
   animation: xtjProPanelIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
   will-change: opacity, transform;
+}
+
+/* 选项卡片 stagger 动画：进入面板时依次淡入 */
+.pro-style-option-card.is-stagger {
+  animation: xtjOptionStagger 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+@keyframes xtjOptionStagger {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* 每板块独立的保存按钮容器（不 sticky） */
@@ -1051,14 +1172,40 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   filter: saturate(0.85);
 }
 
-/* 总览页三个入口卡片：轻浮起 + 阴影增强 */
+/* 总览页三个入口卡片：增强玻璃层 + hover 扫光 */
 .pro-style-category-card {
+  position: relative;
+  overflow: hidden;
   transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+/* 卡片内部扫光条 */
+.pro-style-category-card::after {
+  content: "";
+  position: absolute;
+  inset: -40% auto -40% -30%;
+  width: 44%;
+  transform: translateX(-120%);
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.22), rgba(255,255,255,0));
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+
+.pro-style-category-card:hover::after {
+  animation: xtjEntrySheen 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes xtjEntrySheen {
+  0% { transform: translateX(-120%); opacity: 0; }
+  20% { opacity: 0.6; }
+  100% { transform: translateX(220%); opacity: 0; }
 }
 
 .pro-style-category-card:hover {
   transform: translateY(-1px);
   box-shadow: 0 18px 36px rgba(56, 114, 77, 0.1);
+  border-color: color-mix(in srgb, var(--xtj-theme-accent) 40%, rgba(178, 220, 198, 0.78));
 }
 
 .pro-style-category-card:active {
@@ -1066,28 +1213,33 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   transition-duration: 0.1s;
 }
 
-/* 三个板块的预览：增强版轻量演示动画 */
+/* 三个板块的预览：精细化演示动画（按用户要求重做） */
 
-/* A) 专属主题：顶部条呼吸 + 卡片轻浮 + 扫光 */
+/* =============== A) 专属主题预览 =============== */
+/* 整体卡片轻浮 */
 @keyframes xtjThemeCardFloat {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-1.5px); }
 }
 
 .theme-preview .theme-preview-card {
-  animation: xtjThemeCardFloat 4.2s ease-in-out infinite;
+  animation: xtjThemeCardFloat 4.4s ease-in-out infinite;
+  will-change: transform;
 }
 
+/* 顶部 bar 渐变 + 慢呼吸 */
 @keyframes xtjThemeTopbarBreath {
-  0%, 100% { opacity: 0.85; transform: scaleX(1); }
-  50% { opacity: 1; transform: scaleX(1.04); }
+  0%, 100% { opacity: 0.78; transform: scaleX(1); }
+  50% { opacity: 1; transform: scaleX(1.05); }
 }
 
 .theme-preview .theme-preview-topbar {
-  animation: xtjThemeTopbarBreath 3.4s ease-in-out infinite;
+  animation: xtjThemeTopbarBreath 3.6s ease-in-out infinite;
   transform-origin: center;
+  will-change: opacity, transform;
 }
 
+/* 文字线条 stagger 错开淡入 */
 @keyframes xtjThemeLineFade {
   0%, 100% { opacity: 0.78; }
   50% { opacity: 1; }
@@ -1095,81 +1247,230 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
 
 .theme-preview .theme-preview-title-line,
 .theme-preview .theme-preview-card-line {
-  animation: xtjThemeLineFade 3.8s ease-in-out infinite;
+  animation: xtjThemeLineFade 3.6s ease-in-out infinite;
 }
 
-.theme-preview .theme-preview-card-line:nth-child(2) { animation-delay: 0.4s; }
-.theme-preview .theme-preview-card-line:nth-child(3) { animation-delay: 0.8s; }
+.theme-preview .theme-preview-title-line { animation-delay: 0.0s; }
+.theme-preview .theme-preview-card-line:nth-child(1) { animation-delay: 0.3s; }
+.theme-preview .theme-preview-card-line:nth-child(2) { animation-delay: 0.6s; }
+.theme-preview .theme-preview-card-action { animation-delay: 0.9s; }
 
-/* 扫光：原 sheen 已经存在（var(--xtj-pro-preview-sheen)），这里稍作加速让其更可感知 */
+/* 背景渐变漂移（通过 background-position） */
+@keyframes xtjThemeBgDrift {
+  0% { background-position: 0% 0%, 0 0; }
+  50% { background-position: 100% 50%, 0 0; }
+  100% { background-position: 0% 0%, 0 0; }
+}
+
+.theme-preview {
+  background-size: 180% 180%, auto;
+  animation: xtjThemeBgDrift 8s ease-in-out infinite;
+  will-change: background-position;
+}
+
+/* 主题差异：mint/aqua/sakura/lavender 各自有独立色调（已经由 is-* 修饰） */
+.theme-preview.is-mint {
+  background: linear-gradient(135deg, rgba(216, 245, 226, 0.85), rgba(178, 230, 199, 0.7));
+}
+.theme-preview.is-aqua {
+  background: linear-gradient(135deg, rgba(216, 240, 247, 0.85), rgba(170, 218, 232, 0.7));
+}
+.theme-preview.is-sakura {
+  background: linear-gradient(135deg, rgba(252, 226, 235, 0.85), rgba(240, 198, 217, 0.7));
+}
+.theme-preview.is-lavender {
+  background: linear-gradient(135deg, rgba(232, 226, 248, 0.85), rgba(206, 198, 236, 0.7));
+}
+
+/* active 状态：柔和 halo 外发光（用 box-shadow，避免金色） */
+.pro-style-option-card.active .theme-preview {
+  box-shadow: 0 0 0 2px var(--xtj-theme-accent), 0 0 18px color-mix(in srgb, var(--xtj-theme-accent) 30%, transparent);
+}
+
+/* 主题预览扫光（保留原 sheen 但减速 + 加速双重控制） */
 .theme-preview::after {
-  animation-duration: 5.5s !important;
+  animation: xtjThemeSheen 5.5s ease-in-out infinite;
 }
 
-/* B) 聊天气泡：第一条淡入 + 第二条轻浮（呼吸） */
-@keyframes xtjBubbleFadeIn {
-  from { opacity: 0; transform: translateY(2px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes xtjThemeSheen {
+  0% { transform: translateX(-120%); opacity: 0; }
+  35% { opacity: 0.28; }
+  70% { opacity: 0; }
+  100% { transform: translateX(120%); opacity: 0; }
 }
 
-.bubble-preview .bubble-preview-row:nth-child(1) {
-  animation: xtjBubbleFadeIn 0.6s 0.1s ease-out both;
+/* =============== B) 聊天气泡预览 =============== */
+/* 模拟一次发消息：左气泡淡入 → 输入点跳动 → 右气泡弹出 → 高光扫过 */
+/* 1) 左侧气泡：从左下淡入 + 上浮 */
+@keyframes xtjBubbleInLeft {
+  0% { opacity: 0; transform: translateX(-6px) translateY(2px) scale(0.94); }
+  100% { opacity: 1; transform: translateX(0) translateY(0) scale(1); }
 }
 
-.bubble-preview .bubble-preview-row:nth-child(2) {
-  animation: xtjBubbleFadeIn 0.6s 0.45s ease-out both;
+.bubble-preview .bubble-preview-row:nth-child(1) .bubble-preview-msg {
+  animation: xtjBubbleInLeft 0.5s 0.1s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
 }
 
-/* 第二条的气泡轻浮：原 var(--xtj-pro-preview-breathe) 已是 4s 呼吸，这里保留原节奏 */
+/* 2) 输入点跳动（用 ::before 模拟三个点） */
+.bubble-preview::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 22px;
+  height: 6px;
+  margin: -3px 0 0 -11px;
+  background:
+    radial-gradient(circle 1.5px at 4px 3px, rgba(116, 167, 132, 0.5) 99%, transparent 100%),
+    radial-gradient(circle 1.5px at 11px 3px, rgba(116, 167, 132, 0.5) 99%, transparent 100%),
+    radial-gradient(circle 1.5px at 18px 3px, rgba(116, 167, 132, 0.5) 99%, transparent 100%);
+  background-repeat: no-repeat;
+  opacity: 0;
+  animation: xtjBubbleTyping 2.6s 0.5s ease-in-out infinite;
+  pointer-events: none;
+}
 
-/* C) 帖子卡片：清透边框高光流动 / 叶子摇摆 / 柔光呼吸 / 极简 Pro 显隐 */
+@keyframes xtjBubbleTyping {
+  0%, 100% { opacity: 0; transform: translateY(0); }
+  10% { opacity: 0.7; transform: translateY(0); }
+  20% { transform: translateY(-2px); }
+  30% { transform: translateY(0); }
+  40% { transform: translateY(-2px); }
+  50% { transform: translateY(0); opacity: 0.6; }
+  60% { opacity: 0; }
+}
+
+/* 3) 右侧气泡弹出：scale(.92) -> 1.04 -> 1 */
+@keyframes xtjBubblePopRight {
+  0% { opacity: 0; transform: scale(0.92) translateX(4px); }
+  60% { opacity: 1; transform: scale(1.04) translateX(0); }
+  100% { opacity: 1; transform: scale(1) translateX(0); }
+}
+
+.bubble-preview .bubble-preview-row:nth-child(2) .bubble-preview-msg.sent {
+  animation: xtjBubblePopRight 0.45s 0.8s cubic-bezier(0.34, 1.4, 0.64, 1) both,
+             xtjBubbleSentSheen 3.4s 1.4s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+
+/* 4) sent 气泡高光扫过 */
+@keyframes xtjBubbleSentSheen {
+  0%, 100% { filter: saturate(1) brightness(1); }
+  50% { filter: saturate(1.08) brightness(1.04); }
+}
+
+/* 5) sent 气泡轻呼吸（在 sheen 结束后循环） */
+@keyframes xtjBubbleSentBreath {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.015); }
+}
+
+/* nth-child 错开延迟 */
+.pro-style-preview-grid .pro-style-option-card:nth-child(2) .bubble-preview::before { animation-delay: 0.65s; }
+.pro-style-preview-grid .pro-style-option-card:nth-child(2) .bubble-preview-row:nth-child(2) .bubble-preview-msg.sent { animation-delay: 0.8s, 1.4s; }
+.pro-style-preview-grid .pro-style-option-card:nth-child(3) .bubble-preview::before { animation-delay: 0.8s; }
+.pro-style-preview-grid .pro-style-option-card:nth-child(3) .bubble-preview-row:nth-child(2) .bubble-preview-msg.sent { animation-delay: 0.8s, 1.4s; }
+.pro-style-preview-grid .pro-style-option-card:nth-child(4) .bubble-preview::before { animation-delay: 0.95s; }
+.pro-style-preview-grid .pro-style-option-card:nth-child(4) .bubble-preview-row:nth-child(2) .bubble-preview-msg.sent { animation-delay: 0.8s, 1.4s; }
+.pro-style-preview-grid .pro-style-option-card:nth-child(5) .bubble-preview::before { animation-delay: 1.1s; }
+.pro-style-preview-grid .pro-style-option-card:nth-child(5) .bubble-preview-row:nth-child(2) .bubble-preview-msg.sent { animation-delay: 0.8s, 1.4s; }
+.pro-style-preview-grid .pro-style-option-card:nth-child(6) .bubble-preview::before { animation-delay: 1.25s; }
+.pro-style-preview-grid .pro-style-option-card:nth-child(6) .bubble-preview-row:nth-child(2) .bubble-preview-msg.sent { animation-delay: 0.8s, 1.4s; }
+
+/* active 卡片的气泡动画更明显 */
+.pro-style-option-card.active .bubble-preview .bubble-preview-row:nth-child(2) .bubble-preview-msg.sent {
+  filter: saturate(1.12) brightness(1.05);
+}
+
+/* =============== C) 帖子卡片装饰预览 =============== */
+/* default：保持干净（不动画） */
+
+/* 头像和文字线条 stagger 错开淡入（仅 is-default 之外的应用，避免 default 过于活跃） */
+@keyframes xtjPostLineFade {
+  0% { opacity: 0; transform: translateY(1px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.post-card-preview .post-card-preview-avatar,
+.post-card-preview .post-card-preview-user,
+.post-card-preview .post-card-preview-line,
+.post-card-preview .post-card-preview-meta > span {
+  animation: xtjPostLineFade 0.5s ease-out both;
+}
+
+.post-card-preview .post-card-preview-avatar { animation-delay: 0.05s; }
+.post-card-preview .post-card-preview-user { animation-delay: 0.15s; }
+.post-card-preview .post-card-preview-line.is-strong { animation-delay: 0.25s; }
+.post-card-preview .post-card-preview-line:nth-of-type(2) { animation-delay: 0.35s; }
+.post-card-preview .post-card-preview-meta > span:nth-child(1) { animation-delay: 0.45s; }
+.post-card-preview .post-card-preview-meta > span:nth-child(2) { animation-delay: 0.5s; }
+.post-card-preview .post-card-preview-meta > span:nth-child(3) { animation-delay: 0.55s; }
+
+/* clean_border：边框流光（用 box-shadow 模拟） */
 @keyframes xtjPostBorderGlow {
-  0%, 100% { box-shadow: 0 0 0 0.5px rgba(116, 195, 148, 0.4), 0 0 6px rgba(116, 195, 148, 0.08); }
-  50% { box-shadow: 0 0 0 1px rgba(116, 195, 148, 0.7), 0 0 12px rgba(116, 195, 148, 0.18); }
+  0%, 100% { box-shadow: 0 0 0 0.5px rgba(116, 195, 148, 0.32), 0 8px 18px rgba(42, 96, 66, 0.08); }
+  50% { box-shadow: 0 0 0 1px rgba(116, 195, 148, 0.62), 0 0 14px rgba(116, 195, 148, 0.16); }
 }
 
 .post-card-preview.is-clean-border {
-  animation: xtjPostBorderGlow 3.6s ease-in-out infinite;
+  animation: xtjPostBorderGlow 3.8s ease-in-out infinite;
+  will-change: box-shadow;
 }
 
-@keyframes xtjLeafSway {
-  0%, 100% { transform: rotate(-3deg); }
-  50% { transform: rotate(3deg); }
+/* leaf_corner：叶子生长（先 scale 0 -> 1）+ 每几秒轻轻摆动 */
+@keyframes xtjLeafGrow {
+  0%, 100% { transform: rotate(-2deg) scale(1); }
+  25% { transform: rotate(2deg) scale(1.04); }
+  50% { transform: rotate(-1deg) scale(0.98); }
+  75% { transform: rotate(3deg) scale(1.02); }
 }
 
-.post-card-preview.is-leaf-corner {
-  position: relative;
+.post-card-preview.is-leaf-corner::before {
+  animation: xtjLeafGrow 4.2s ease-in-out infinite;
+  transform-origin: center;
+  will-change: transform;
 }
+
+/* 叶脉：延迟出现，循环 */
 .post-card-preview.is-leaf-corner::after {
-  content: "";
-  position: absolute;
-  top: 4px;
-  right: 5px;
-  width: 10px;
-  height: 10px;
-  background: radial-gradient(circle, rgba(116, 195, 148, 0.85), rgba(116, 195, 148, 0));
-  border-radius: 50% 0 50% 50%;
-  transform-origin: bottom right;
-  animation: xtjLeafSway 3.2s ease-in-out infinite;
+  animation: xtjLeafVeinFade 4.2s 0.4s ease-in-out infinite;
+  will-change: opacity;
 }
 
+@keyframes xtjLeafVeinFade {
+  0%, 100% { opacity: 0.42; }
+  50% { opacity: 0.78; }
+}
+
+/* soft_glow：右上柔光缓慢漂移 + 阴影呼吸 */
 @keyframes xtjPostSoftGlow {
-  0%, 100% { box-shadow: 0 0 6px rgba(255, 255, 255, 0.4), 0 6px 14px rgba(56, 114, 77, 0.06); }
-  50% { box-shadow: 0 0 14px rgba(255, 255, 255, 0.6), 0 8px 18px rgba(56, 114, 77, 0.1); }
+  0%, 100% {
+    background-position: 100% 0%, 0 0;
+    box-shadow: 0 8px 18px rgba(56, 114, 77, 0.08);
+  }
+  50% {
+    background-position: 0% 50%, 0 0;
+    box-shadow: 0 12px 24px rgba(56, 114, 77, 0.12);
+  }
 }
 
 .post-card-preview.is-soft-glow {
-  animation: xtjPostSoftGlow 4s ease-in-out infinite;
+  background:
+    radial-gradient(circle at top right, var(--xtj-theme-soft), transparent 42%),
+    rgba(255, 255, 255, 0.94);
+  background-size: 200% 200%, auto;
+  animation: xtjPostSoftGlow 5s ease-in-out infinite;
+  will-change: background-position, box-shadow;
 }
 
-@keyframes xtjPostMinimalShimmer {
-  0%, 100% { opacity: 0.7; }
-  50% { opacity: 1; }
+/* minimal_pro：顶部细线从左到右展开 + 内容线条 stagger */
+@keyframes xtjPostTopBarExpand {
+  0% { transform: scaleX(0); opacity: 0; }
+  35% { transform: scaleX(1); opacity: 1; }
+  100% { transform: scaleX(1); opacity: 0.7; }
 }
 
-.post-card-preview.is-minimal-pro {
-  position: relative;
-}
 .post-card-preview.is-minimal-pro::before {
   content: "";
   position: absolute;
@@ -1177,11 +1478,20 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   left: 8%;
   right: 8%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(116, 195, 148, 0.65), transparent);
-  animation: xtjPostMinimalShimmer 2.6s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, var(--xtj-theme-accent), transparent);
+  transform-origin: left center;
+  animation: xtjPostTopBarExpand 4.2s 0.2s ease-in-out infinite;
+  will-change: transform, opacity;
 }
 
-/* 总览三个入口卡片的 icon 轻微动 */
+/* minimal_pro 内容线条 stagger（覆盖默认 stagger） */
+.post-card-preview.is-minimal-pro .post-card-preview-line.is-strong { animation-delay: 0.3s; }
+.post-card-preview.is-minimal-pro .post-card-preview-line:nth-of-type(2) { animation-delay: 0.45s; }
+.post-card-preview.is-minimal-pro .post-card-preview-meta > span:nth-child(1) { animation-delay: 0.6s; }
+.post-card-preview.is-minimal-pro .post-card-preview-meta > span:nth-child(2) { animation-delay: 0.7s; }
+.post-card-preview.is-minimal-pro .post-card-preview-meta > span:nth-child(3) { animation-delay: 0.8s; }
+
+/* =============== 总览三个入口卡片的 icon 轻呼吸 =============== */
 @keyframes xtjCategoryIconBreath {
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.05); }
@@ -1189,6 +1499,7 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
 
 .pro-style-category-card .pro-style-category-icon {
   animation: xtjCategoryIconBreath 3.4s ease-in-out infinite;
+  will-change: transform;
 }
 
 /* 移动端：保存按钮整宽 */
@@ -1199,6 +1510,145 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   .pro-style-save-btn {
     width: 100%;
     min-width: 0;
+  }
+}
+
+/* ========================================================
+ * 深色模式适配（避免白块、白边、刺眼高光）
+ * ======================================================== */
+[data-theme="dark"] .theme-preview {
+  background: linear-gradient(135deg, rgba(40, 56, 48, 0.92), rgba(28, 42, 35, 0.96)) !important;
+}
+[data-theme="dark"] .theme-preview.is-mint {
+  background: linear-gradient(135deg, rgba(40, 64, 48, 0.92), rgba(32, 56, 42, 0.96)) !important;
+}
+[data-theme="dark"] .theme-preview.is-aqua {
+  background: linear-gradient(135deg, rgba(36, 56, 64, 0.92), rgba(28, 48, 56, 0.96)) !important;
+}
+[data-theme="dark"] .theme-preview.is-sakura {
+  background: linear-gradient(135deg, rgba(60, 44, 52, 0.92), rgba(48, 36, 44, 0.96)) !important;
+}
+[data-theme="dark"] .theme-preview.is-lavender {
+  background: linear-gradient(135deg, rgba(48, 44, 64, 0.92), rgba(38, 36, 56, 0.96)) !important;
+}
+[data-theme="dark"] .theme-preview::after {
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.08), rgba(255,255,255,0)) !important;
+}
+[data-theme="dark"] .theme-preview-topbar,
+[data-theme="dark"] .theme-preview-title-line,
+[data-theme="dark"] .theme-preview-card-line,
+[data-theme="dark"] .theme-preview-card-action,
+[data-theme="dark"] .theme-preview-card {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+[data-theme="dark"] .bubble-preview {
+  background: linear-gradient(180deg, rgba(28, 40, 34, 0.96), rgba(20, 30, 26, 0.98)) !important;
+}
+[data-theme="dark"] .bubble-preview::before {
+  background:
+    radial-gradient(circle 1.5px at 4px 3px, rgba(180, 200, 188, 0.5) 99%, transparent 100%),
+    radial-gradient(circle 1.5px at 11px 3px, rgba(180, 200, 188, 0.5) 99%, transparent 100%),
+    radial-gradient(circle 1.5px at 18px 3px, rgba(180, 200, 188, 0.5) 99%, transparent 100%) !important;
+  background-repeat: no-repeat !important;
+}
+[data-theme="dark"] .bubble-preview-msg {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: rgba(220, 230, 224, 0.86) !important;
+}
+[data-theme="dark"] .bubble-preview-msg.sent {
+  background: linear-gradient(135deg, rgba(116, 195, 148, 0.42), rgba(96, 168, 128, 0.32)) !important;
+  color: rgba(232, 245, 238, 0.92) !important;
+}
+
+[data-theme="dark"] .post-card-preview {
+  background: linear-gradient(180deg, rgba(28, 40, 34, 0.96), rgba(20, 30, 26, 0.98)) !important;
+}
+[data-theme="dark"] .post-card-preview-avatar,
+[data-theme="dark"] .post-card-preview-user,
+[data-theme="dark"] .post-card-preview-line,
+[data-theme="dark"] .post-card-preview-meta > span {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+[data-theme="dark"] .post-card-preview.is-soft-glow {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--xtj-theme-accent) 14%, rgba(255,255,255,0.02)), transparent 42%),
+    linear-gradient(180deg, rgba(28, 40, 34, 0.96), rgba(20, 30, 26, 0.98)) !important;
+}
+[data-theme="dark"] .post-card-preview.is-leaf-corner::before {
+  background: linear-gradient(135deg, rgba(112,190,145,0.42), rgba(185,230,202,0.18)) !important;
+}
+[data-theme="dark"] .post-card-preview.is-leaf-corner::after {
+  background: rgba(180, 220, 195, 0.4) !important;
+}
+[data-theme="dark"] .post-card-preview.is-minimal-pro::before {
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--xtj-theme-accent) 60%, transparent), transparent) !important;
+}
+
+/* 深色模式 active halo 降低强度 */
+[data-theme="dark"] .pro-style-option-card.active {
+  box-shadow:
+    0 0 0 1px rgba(160, 225, 189, 0.6),
+    0 16px 30px rgba(0, 0, 0, 0.4),
+    0 0 18px color-mix(in srgb, var(--xtj-theme-accent) 18%, transparent) !important;
+}
+[data-theme="dark"] .pro-style-option-card.active .pro-style-card-check {
+  background: color-mix(in srgb, var(--xtj-theme-accent) 80%, #1f2c25) !important;
+}
+[data-theme="dark"] .pro-style-option-card.active .pro-style-card-check::before {
+  border-color: #1f2c25 !important;
+}
+[data-theme="dark"] .pro-style-option-card.active .theme-preview,
+[data-theme="dark"] .pro-style-option-card.active .bubble-preview,
+[data-theme="dark"] .pro-style-option-card.active .post-card-preview {
+  box-shadow: 0 0 0 1px var(--xtj-theme-accent), 0 0 14px color-mix(in srgb, var(--xtj-theme-accent) 22%, transparent) !important;
+}
+
+/* 深色模式 lock 状态更明显 */
+[data-theme="dark"] .pro-style-option-card.locked,
+[data-theme="dark"] .pro-style-option-card:disabled {
+  filter: saturate(0.55);
+}
+
+/* 深色模式总览扫光：避免过亮 */
+[data-theme="dark"] .pro-style-category-card::after {
+  background: linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.08), rgba(255,255,255,0)) !important;
+}
+
+/* ========================================================
+ * 移动端 375px 不溢出适配
+ * ======================================================== */
+@media (max-width: 375px) {
+  .pro-style-preview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+  .pro-style-option-card {
+    padding: 7px !important;
+  }
+  .theme-preview,
+  .bubble-preview,
+  .post-card-preview {
+    min-height: 60px !important;
+    max-height: 70px !important;
+  }
+  .pro-style-option-title {
+    font-size: 11px !important;
+  }
+  .pro-style-category-card {
+    padding: 12px 12px !important;
+  }
+  .pro-style-category-card .pro-style-category-icon {
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 16px !important;
+  }
+  .pro-style-category-title {
+    font-size: 13.5px !important;
+  }
+  .pro-style-category-desc {
+    font-size: 10.5px !important;
   }
 }
 
