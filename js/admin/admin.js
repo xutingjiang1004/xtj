@@ -5135,20 +5135,25 @@ async function initAdminClient() {
             var html = ['<ul class="ai-conv-users-list">'];
             users.forEach(function(u) {
                 var lastAt = u.last_at ? new Date(u.last_at).toLocaleString() : '未知';
-                html.push('<li onclick="window._viewAiUserConv(\'' + u.user_name + '\')">');
-                html.push('<span class="user-name">' + escapeHtml(u.user_name) + '</span>');
+                var safeName = escapeHtml(u.user_name);
+                html.push('<li data-user-name="' + safeName + '">');
+                html.push('<span class="user-name">' + safeName + '</span>');
                 html.push('<span class="user-meta">' + u.message_count + ' 条消息 · ' + lastAt + '</span>');
                 html.push('</li>');
             });
             html.push('</ul>');
             content.innerHTML = html.join('\n');
 
-            if (!window._viewAiUserConv) {
-                window._viewAiUserConv = function(userName) {
-                    _aiAdminConvUser = userName;
-                    renderAiAdminContent();
-                };
-            }
+            // 绑定点击事件（用 dataset 避免 XSS）
+            content.querySelectorAll('.ai-conv-users-list li').forEach(function(li) {
+                var un = li.dataset.userName;
+                if (un) {
+                    li.addEventListener('click', function() {
+                        _aiAdminConvUser = un;
+                        renderAiAdminContent();
+                    });
+                }
+            });
         } catch(e) {
             content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
         }

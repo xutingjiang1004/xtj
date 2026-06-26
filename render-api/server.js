@@ -5082,6 +5082,11 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
 // 4. 数据存 posts 表 + AI_AGENT_*_MARKER（已加入 applyPublicPostExclusions 过滤）
 
 const AI_CHAT_MESSAGE_MAX_LEN = 2000;
+const AI_CHAT_HISTORY_LIMIT = 15;
+const AI_CHAT_HOURLY_IP_LIMIT = 30;
+const AI_MEMORY_MAX_LEN = 1200;
+const AI_MEMORY_SUMMARIZE_HISTORY = 10;
+
 app.get('/api/agent/profile', authenticateUser, async (req, res) => {
   return res.status(410).json({ error: '已废弃，AI 配置由管理员统一管理' });
 });
@@ -5129,7 +5134,7 @@ function buildAiCorePrompt(config) {
   var name = String(config.name || '徐旭泽的小猫').slice(0, 30);
   var persona = String(config.persona || '').slice(0, 500);
   var tone = String(config.tone || '').slice(0, 200);
-  var sysPrompt = String(config.system_prompt || '').slice(0, 1000);
+  var sysPrompt = String(config.system_prompt || '').slice(0, 2000);
 
   var lines = [
     '你是 XTJ 网站的 AI 聊天智能体，名字是：' + name,
@@ -5200,7 +5205,7 @@ async function getAiConfig() {
 // 失败容错：写库失败 → 仅打日志，不影响用户聊天
 // 触发频率：每次 chat 都触发，但用防抖（同一用户 5 分钟内只总结一次）避免浪费 token
 const aiMemoryUpdateLock = {}; // userName → { ts: number, pending: Promise }
-async function updateLongTermMemory(userName, profile, ctx, lastUserMsg, lastAiReply) {
+async function updateLongTermMemory(userName, ctx, lastUserMsg, lastAiReply) {
   if (!DEEPSEEK_API_KEY) return; // 无 API Key 时跳过，避免 mock 噪声写入 memory
 
   // ★ 第一版：只在用户明确说"记住"时保存长期记忆
@@ -5293,7 +5298,7 @@ async function updateLongTermMemory(userName, profile, ctx, lastUserMsg, lastAiR
   }
 }
 
-async function loadAiContext(userName, agentName) {
+async function loadAiContext(userName) {
   var ctx = { history: [], memory: '', contextBlock: '' };
 
   try {
@@ -5357,7 +5362,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var config = await getAiConfig();
 
     // 4. 读取上下文
-    var ctx = await loadAiContext(userName, config.name);
+    var ctx = await loadAiContext(userName);
 
     // 5. 组装 system prompt（拆分为两段以提升 DeepSeek 缓存命中）
     //    第 1 段 core 完全固定（使用全局配置）
@@ -5427,7 +5432,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     //   - 5 分钟防抖，避免连续 chat 浪费 token
     //   - 无 DEEPSEEK_API_KEY 时自动跳过
     try {
-      updateLongTermMemory(userName, config, ctx, message, reply).catch(function() {});
+      updateLongTermMemory(userName, ctx, message, reply).catch(function() {});
     } catch (e) {
       // 同步抛错也吞掉
     }
