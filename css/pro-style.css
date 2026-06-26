@@ -1082,35 +1082,3 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   }
 }
 
-/* ====== Dock 保护：禁止主题影响 Dock 和胶囊 ====== */
-/* 确保任何 Pro 主题/active 都不会改变 dock-bar 的外观 */
-html[data-pro-theme] .dock-bar,
-html[data-pro-theme] .dock-tab,
-html[data-pro-theme] .dock-indicator,
-html.xtj-pro-active .dock-bar,
-html.xtj-pro-active .dock-tab,
-html.xtj-pro-active .dock-indicator {
-  background: inherit !important;
-  color: inherit !important;
-  border-color: inherit !important;
-  box-shadow: none !important;
-}
-
-/* 阻止主题变量影响 dock-tab 胶囊样式 */
-html[data-pro-theme] .dock-tab .dt-capsule,
-html[data-pro-theme] .dock-tab.active .dt-capsule,
-html.xtj-pro-active .dock-tab .dt-capsule,
-html.xtj-pro-active .dock-tab.active .dt-capsule {
-  background: inherit !important;
-  color: inherit !important;
-}
-
-/* 阻止主题影响花朵图标大小 */
-html[data-pro-theme] .dock-tab .dt-svg,
-html[data-pro-theme] .dock-tab.active .dt-svg,
-html.xtj-pro-active .dock-tab .dt-svg,
-html.xtj-pro-active .dock-tab.active .dt-svg {
-  width: inherit !important;
-  height: inherit !important;
-  filter: none !important;
-}
