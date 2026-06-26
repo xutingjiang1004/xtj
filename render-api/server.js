@@ -79,9 +79,14 @@ const DEEPSEEK_TIMEOUT_MS = 25000; // 25 秒超时
 const AI_AGENT_DAILY_LIMIT = 50;  // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = 10; // 每用户每小时 AI 调用次数
 // 单价配置（CNY / 1M tokens），可通过环境变量覆盖
-const DEEPSEEK_INPUT_PRICE_PER_1M   = parseFloat(process.env.DEEPSEEK_INPUT_PRICE_PER_1M   || '0.5');
-const DEEPSEEK_OUTPUT_PRICE_PER_1M  = parseFloat(process.env.DEEPSEEK_OUTPUT_PRICE_PER_1M  || '2.0');
-const DEEPSEEK_CACHE_HIT_PRICE_PER_1M = parseFloat(process.env.DEEPSEEK_CACHE_HIT_PRICE_PER_1M || '0.1');
+// 默认值对应 deepseek-v4-flash 官方定价（2025年）：
+//   缓存未命中输入 1 元/1M tokens → DEEPSEEK_INPUT_PRICE_PER_1M
+//   缓存命中输入 0.02 元/1M tokens → DEEPSEEK_CACHE_HIT_PRICE_PER_1M
+//   输出 2 元/1M tokens → DEEPSEEK_OUTPUT_PRICE_PER_1M
+// 若使用 deepseek-v4-pro：INPUT=3, CACHE_HIT=0.025, OUTPUT=6
+const DEEPSEEK_INPUT_PRICE_PER_1M   = parseFloat(process.env.DEEPSEEK_INPUT_PRICE_PER_1M   || '1');
+const DEEPSEEK_OUTPUT_PRICE_PER_1M  = parseFloat(process.env.DEEPSEEK_OUTPUT_PRICE_PER_1M  || '2');
+const DEEPSEEK_CACHE_HIT_PRICE_PER_1M = parseFloat(process.env.DEEPSEEK_CACHE_HIT_PRICE_PER_1M || '0.02');
 const DEEPSEEK_CURRENCY = process.env.DEEPSEEK_CURRENCY || 'CNY';
 console.log('[AI-CONFIG] DEEPSEEK_API_KEY:', DEEPSEEK_API_KEY ? '已设置' : '未设置（开发模式将使用 mock 回复）');
 console.log('[AI-CONFIG] DEEPSEEK_MODEL:', DEEPSEEK_MODEL);
