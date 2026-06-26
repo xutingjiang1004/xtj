@@ -439,10 +439,41 @@
 
   // ===================== Pro 活动 API 调用 =====================
 
+  // 检测 fake login：有 currentUser 但无 token 也无 password_hash
+  function isProGiftsFakeLogin() {
+    if (typeof window.getUserToken === 'function' && window.getUserToken()) return false;
+    try {
+      var pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || '';
+      if (pwHash) return false;
+    } catch (e) {}
+    return true;
+  }
+
+  // 假登录提示
+  function renderFakeLogin() {
+    return [
+      '<div class="pro-gift-auth-required">',
+      '  <div class="pro-gift-auth-icon">🔑</div>',
+      '  <div class="pro-gift-auth-title">登录状态已过期</div>',
+      '  <div class="pro-gift-auth-desc">你的登录状态已过期，请重新登录后查看 Pro 活动。</div>',
+      '  <button class="pro-gift-auth-btn" onclick="reAuthAndRefresh()">重新登录</button>',
+      '</div>'
+    ].join('');
+  }
+
   // 获取可用 Pro 活动列表（带 Authorization header）
   window.fetchProGifts = async function() {
     var listEl = document.getElementById('proGiftList');
     if (!listEl) return;
+    if (!window.currentUser) {
+      listEl.innerHTML = '<div class="pro-gift-empty">登录后可查看 Pro 活动</div>';
+      return;
+    }
+    // 假登录状态：直接显示"登录状态已过期"，不浪费一次 401
+    if (isProGiftsFakeLogin()) {
+      listEl.innerHTML = renderFakeLogin();
+      return;
+    }
     listEl.innerHTML = '<div class="pro-gift-loading">加载中...</div>';
 
     for (var retry = 0; retry <= 1; retry++) {
@@ -463,6 +494,11 @@
             // 尝试重试（clearUserToken + 重新认证）
             if (typeof window.clearUserToken === 'function') {
               window.clearUserToken();
+            }
+            // 重试前再判断一次：重试后变成 fake login 也要立刻结束
+            if (isProGiftsFakeLogin()) {
+              listEl.innerHTML = renderFakeLogin();
+              return;
             }
             continue;
           }
@@ -562,8 +598,11 @@
       '<div class="pro-gift-auth-required">',
       '  <div class="pro-gift-auth-icon">🔑</div>',
       '  <div class="pro-gift-auth-title">登录凭证需要刷新</div>',
-      '  <div class="pro-gift-auth-desc">你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。</div>',
-      '  <button class="pro-gift-auth-btn" onclick="reAuthAndRefresh()">重新登录</button>',
+      '  <div class="pro-gift-auth-desc">你当前账号仍显示为已登录，但领取 Pro 活动需要重新验证一次身份。可点击重试或重新登录。</div>',
+      '  <div class="pro-gift-auth-actions">',
+      '    <button class="pro-gift-auth-btn pro-gift-auth-btn-secondary" onclick="window.fetchProGifts && window.fetchProGifts()">重试</button>',
+      '    <button class="pro-gift-auth-btn" onclick="reAuthAndRefresh()">重新登录</button>',
+      '  </div>',
       '</div>'
     ].join('');
   }

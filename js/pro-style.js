@@ -37,7 +37,8 @@
     var target = document.getElementById(targetId);
     if (!target) return;
     if (landing) landing.hidden = true;
-    if (actions) actions.hidden = true;
+    // 进入子面板 → 显示保存按钮（每个子面板的修改都需要保存按钮）
+    if (actions) actions.hidden = false;
     hideAllSubPanels();
     target.hidden = false;
     if (typeof window.updateProStylePreviewActiveStates === 'function') {
@@ -54,7 +55,8 @@
     var actions = getActionsEl();
     hideAllSubPanels();
     if (landing) landing.hidden = false;
-    if (actions) actions.hidden = false;
+    // 总览页 → 隐藏保存按钮（避免遮挡 3 个分类入口卡片）
+    if (actions) actions.hidden = true;
   };
 
   function init() {

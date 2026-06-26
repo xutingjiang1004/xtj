@@ -13512,10 +13512,24 @@ html[data-pro-theme="lavender"] {
 .pro-gift-auth-actions {
   display: flex;
   justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .pro-gift-auth-btn {
   min-width: 112px;
+}
+
+.pro-gift-auth-btn-secondary {
+  background: rgba(255, 255, 255, .7) !important;
+  color: #2d6c4b !important;
+  border: 1px solid rgba(173, 221, 194, .65) !important;
+  box-shadow: none !important;
+}
+
+.pro-gift-auth-btn-secondary:hover {
+  background: rgba(255, 255, 255, .9) !important;
+  border-color: rgba(127, 209, 174, .85) !important;
 }
 
 .profile-pro-style-field select {
@@ -15982,4 +15996,224 @@ html[data-theme-transition="light"]::view-transition-old(root) {
   #statModal .stat-two-col {
     grid-template-columns: 1fr !important;
   }
+}
+
+/* ============================================================
+   0.97d — 我的页视觉系统统一（v2）
+   - 统一外层宽度 calc(100% - 32px), max-width 420px, auto margin
+   - 统一浅绿玻璃拟态背景
+   - 设置项改为内嵌行（整体大卡片 + 内部行 + border-bottom 分割）
+   - XTJ Pro 卡片橙色只用于 icon + 按钮
+   - Pro 装扮入口与其他卡片统一
+   - 底部统计栏加 safe-area-inset-bottom
+   - Pro 装扮二级页 [hidden] 强制 display:none
+   - 保存按钮：总览隐藏 / 子面板内显示
+   ============================================================ */
+
+/* 强制 [hidden] 始终隐藏（不被其他 display 规则覆盖） */
+[hidden] {
+  display: none !important;
+}
+
+/* 1) 我的页外层宽度统一 */
+.dock-profile-container .profile-user-card,
+.dock-profile-container .profile-activity-card,
+.dock-profile-container .xtj-vip-card,
+.dock-profile-container .profile-pro-style-entry-wrap,
+.dock-profile-container .profile-settings,
+.dock-profile-container .profile-totals-bar {
+  width: calc(100% - 32px);
+  max-width: 420px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* 2) 统一卡片背景（浅绿玻璃拟态） */
+.dock-profile-container .profile-user-card,
+.dock-profile-container .profile-activity-card,
+.dock-profile-container .xtj-vip-card,
+.dock-profile-container .profile-pro-style-entry {
+  background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72));
+  border: 1px solid rgba(173, 221, 194, .55);
+  box-shadow: 0 14px 30px rgba(41, 108, 76, .08);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+  border-radius: 18px;
+}
+
+/* 3) 设置项：整体大卡片 + 内部行 + border-bottom 分割 */
+.dock-profile-container .profile-settings {
+  background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72));
+  border: 1px solid rgba(173, 221, 194, .55);
+  box-shadow: 0 14px 30px rgba(41, 108, 76, .08);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+  border-radius: 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+}
+.dock-profile-container .profile-setting-item {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(173, 221, 194, .35) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  padding: 14px 18px !important;
+  min-height: 56px;
+}
+.dock-profile-container .profile-setting-item:last-child {
+  border-bottom: none !important;
+}
+.dock-profile-container .profile-setting-item:hover {
+  background: rgba(241, 252, 246, .6) !important;
+  transform: none;
+  box-shadow: none !important;
+}
+/* 设置项图标底色统一浅绿玻璃 */
+.dock-profile-container .profile-setting-icon {
+  background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(231, 243, 236, .82)) !important;
+  border: 1px solid rgba(173, 221, 194, .55) !important;
+  color: #2d6c4b !important;
+}
+
+/* 4) XTJ Pro 卡片：橙色只用于 icon + 按钮，背景使用统一浅绿玻璃 */
+.dock-profile-container .xtj-vip-card {
+  background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72)) !important;
+  border: 1px solid rgba(173, 221, 194, .55) !important;
+  box-shadow: 0 14px 30px rgba(41, 108, 76, .08) !important;
+  backdrop-filter: blur(18px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(145%) !important;
+  border-radius: 18px !important;
+}
+.dock-profile-container .xtj-vip-card:hover {
+  border-color: rgba(173, 221, 194, .85) !important;
+  box-shadow: 0 16px 34px rgba(41, 108, 76, .12) !important;
+}
+.dock-profile-container .xtj-vip-card-icon {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  color: #fff !important;
+}
+.dock-profile-container .xtj-vip-card-badge {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+  color: #fff !important;
+}
+.dock-profile-container .xtj-vip-card-badge.active {
+  background: linear-gradient(135deg, #10b981, #059669) !important;
+}
+
+/* 5) Pro 装扮入口：统一卡片外观 */
+.dock-profile-container .profile-pro-style-entry {
+  background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72)) !important;
+  border: 1px solid rgba(173, 221, 194, .55) !important;
+  box-shadow: 0 14px 30px rgba(41, 108, 76, .08) !important;
+  backdrop-filter: blur(18px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(145%) !important;
+  border-radius: 18px !important;
+}
+.dock-profile-container .profile-pro-style-entry:hover {
+  border-color: rgba(173, 221, 194, .85) !important;
+  box-shadow: 0 16px 34px rgba(41, 108, 76, .12) !important;
+}
+.dock-profile-container .profile-pro-style-entry-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* 6) 底部统计栏：留出 Dock 安全距离 */
+.dock-profile-container .profile-totals-bar {
+  margin-top: 14px;
+  margin-bottom: calc(96px + env(safe-area-inset-bottom));
+  padding: 8px 0 0;
+}
+
+/* 7) Pro 装扮二级页：主页面与子页面互斥显示（[hidden] 已在上面统一） */
+.dock-profile-container .profile-main-view {
+  display: block;
+}
+.dock-profile-container .profile-main-view[hidden] {
+  display: none !important;
+}
+.dock-profile-container .profile-pro-style-page {
+  display: block;
+}
+.dock-profile-container .profile-pro-style-page[hidden] {
+  display: none !important;
+}
+
+/* 8) Pro 装扮保存按钮：总览隐藏，子面板内显示 */
+.dock-profile-container .profile-pro-style-panel[id="proStylePanelLanding"] ~ .profile-pro-style-actions,
+.dock-profile-container .profile-pro-style-page #proStylePanelActions {
+  /* 默认：总览页内隐藏（通过 JS 在子面板切换时控制 hidden） */
+}
+.dock-profile-container .profile-pro-style-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(173, 221, 194, .35);
+  /* 强制覆盖 pro-style.css 里的 sticky 定位（不能悬浮在总览页中间） */
+  position: static !important;
+  bottom: auto !important;
+  z-index: auto !important;
+  background: transparent !important;
+}
+
+/* 当保存按钮在子面板内时（用户已点开 theme/bubble/post）才显示 */
+/* 总览页下隐藏（避免遮挡 3 个分类入口） */
+.dock-profile-container .profile-pro-style-actions[hidden] {
+  display: none !important;
+}
+
+/* 子面板（theme/bubble/post）内的保存按钮 - 永远显示在子面板底部 */
+.dock-profile-container #proStylePanelTheme .profile-pro-style-actions,
+.dock-profile-container #proStylePanelBubble .profile-pro-style-actions,
+.dock-profile-container #proStylePanelPost .profile-pro-style-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(173, 221, 194, .35);
+}
+
+/* 9) Pro 装扮二级页背景和定位 */
+.dock-profile-container .profile-pro-style-page {
+  padding: 14px 16px 28px;
+  background: transparent;
+  min-height: 100%;
+}
+.dock-profile-container .profile-pro-style-page .profile-pro-style-panel {
+  background: linear-gradient(180deg, rgba(255,255,255,.82), rgba(241,252,246,.72));
+  border: 1px solid rgba(173, 221, 194, .55);
+  box-shadow: 0 14px 30px rgba(41, 108, 76, .08);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+  border-radius: 18px;
+}
+
+/* 10) 暗色模式适配 */
+[data-theme="dark"] .dock-profile-container .profile-user-card,
+[data-theme="dark"] .dock-profile-container .profile-activity-card,
+[data-theme="dark"] .dock-profile-container .xtj-vip-card,
+[data-theme="dark"] .dock-profile-container .profile-pro-style-entry,
+[data-theme="dark"] .dock-profile-container .profile-settings,
+[data-theme="dark"] .dock-profile-container .profile-pro-style-page .profile-pro-style-panel {
+  background: linear-gradient(180deg, rgba(20,32,26,.82), rgba(16,28,22,.72)) !important;
+  border-color: rgba(120, 170, 145, .25) !important;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, .35) !important;
+}
+[data-theme="dark"] .dock-profile-container .profile-setting-item {
+  border-bottom-color: rgba(120, 170, 145, .2) !important;
+}
+[data-theme="dark"] .dock-profile-container .profile-setting-icon {
+  background: linear-gradient(180deg, rgba(28,42,34,.92), rgba(20,32,26,.82)) !important;
+  border-color: rgba(120, 170, 145, .25) !important;
+  color: #c5ead5 !important;
+}
+[data-theme="dark"] .dock-profile-container .profile-pro-style-actions {
+  border-top-color: rgba(120, 170, 145, .2);
 }
