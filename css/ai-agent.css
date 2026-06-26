@@ -1,254 +1,6 @@
-/* ===================== AI 智能体样式 ===================== */
-/* 第一版：轻玻璃 + 独立二级页 */
-/* 浅色 / 暗色模式适配；与现有 Pro 装扮 / 我的页风格保持一致 */
+/* ===================== AI 智能体样式（徐旭泽的小猫）===================== */
 
-/* ===== AI 资料卡 ===== */
-.profile-ai-agent-page {
-  display: none;
-  width: 100%;
-  padding: 0;
-  margin: 0;
-}
-.profile-ai-agent-page.active {
-  display: block;
-  animation: aiAgentPageIn 0.18s ease both;
-}
-@keyframes aiAgentPageIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-/* ===== 顶部返回条（与 Pro 装饰二级页风格一致） ===== */
-.ai-agent-page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 0 14px;
-  border-bottom: 1px dashed var(--border, rgba(140, 196, 158, 0.24));
-  margin-bottom: 16px;
-}
-.ai-agent-page-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 34px;
-  padding: 0 14px;
-  border-radius: 999px;
-  border: 1px solid var(--border, rgba(140, 196, 158, 0.24));
-  background: rgba(255, 255, 255, 0.55);
-  color: var(--text, #1d1d24);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
-}
-.ai-agent-page-back:hover {
-  background: rgba(255, 255, 255, 0.78);
-  border-color: rgba(96, 177, 126, 0.36);
-  transform: translateX(-1px);
-}
-.ai-agent-page-back:active {
-  transform: translateX(0) scale(0.97);
-  transition-duration: 0.12s;
-}
-.ai-agent-page-title {
-  font-size: 16px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text, #1d1d24);
-}
-.ai-agent-page-title-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #34d399, #059669);
-  box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.18);
-}
-
-/* ===== AI 资料卡片样式 ===== */
-.ai-profile-card {
-  border-radius: 18px;
-  padding: 18px 18px 16px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(140, 196, 158, 0.24);
-  box-shadow: 0 14px 30px rgba(26, 71, 48, 0.06);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  margin-bottom: 14px;
-}
-
-/* 已创建状态：智能体头部（头像 / 名字 / 心情 / 亲密度） */
-.ai-pet-head {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding-bottom: 14px;
-  border-bottom: 1px dashed rgba(140, 196, 158, 0.22);
-  margin-bottom: 14px;
-}
-.ai-pet-avatar {
-  width: 56px;
-  height: 56px;
-  border-radius: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 24px;
-  background: linear-gradient(135deg, rgba(52, 211, 153, 0.92), rgba(5, 150, 105, 0.94));
-  color: #fff;
-  box-shadow: 0 10px 22px rgba(5, 150, 105, 0.18);
-  flex-shrink: 0;
-  position: relative;
-}
-.ai-pet-avatar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 60%);
-  pointer-events: none;
-}
-.ai-pet-info {
-  flex: 1;
-  min-width: 0;
-}
-.ai-pet-name {
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--text, #1d1d24);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  line-height: 1.2;
-  word-break: break-all;
-}
-.ai-pet-meta {
-  margin-top: 4px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  color: var(--text-muted, #6b6c7a);
-  font-size: 12px;
-}
-.ai-pet-meta-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(140, 196, 158, 0.2);
-  color: var(--text-muted, #6b6c7a);
-  font-size: 11px;
-  font-weight: 700;
-}
-.ai-pet-meta-pill .emoji {
-  font-size: 12px;
-}
-
-/* ===== 创建资料表单 ===== */
-.ai-form-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-.ai-form-label {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-muted, #6b6c7a);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.ai-form-label .ai-form-counter {
-  font-size: 11px;
-  font-weight: 500;
-  opacity: 0.7;
-}
-.ai-form-input,
-.ai-form-textarea {
-  width: 100%;
-  padding: 11px 14px;
-  border-radius: 12px;
-  border: 1px solid var(--border, rgba(140, 196, 158, 0.28));
-  background: rgba(255, 255, 255, 0.7);
-  color: var(--text, #1d1d24);
-  font-size: 14px;
-  outline: none;
-  box-sizing: border-box;
-  font-family: inherit;
-  transition: border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
-}
-.ai-form-input:focus,
-.ai-form-textarea:focus {
-  border-color: rgba(52, 167, 92, 0.55);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 0 0 3px rgba(52, 167, 92, 0.12);
-}
-.ai-form-textarea {
-  min-height: 80px;
-  resize: vertical;
-  line-height: 1.55;
-}
-.ai-form-helper {
-  font-size: 11px;
-  color: var(--text-muted, #6b6c7a);
-  line-height: 1.5;
-  margin-top: 2px;
-}
-.ai-form-submit {
-  width: 100%;
-  min-height: 44px;
-  padding: 0 18px;
-  border-radius: 14px;
-  border: 1px solid rgba(46, 148, 101, 0.96);
-  background: linear-gradient(135deg, rgba(46, 148, 101, 0.96), rgba(68, 176, 118, 0.96));
-  color: #fff;
-  font-size: 14px;
-  font-weight: 800;
-  cursor: pointer;
-  box-shadow: 0 14px 26px rgba(46, 148, 101, 0.20);
-  transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
-}
-.ai-form-submit:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 18px 30px rgba(46, 148, 101, 0.24);
-}
-.ai-form-submit:active {
-  transform: translateY(0) scale(0.98);
-  transition-duration: 0.12s;
-}
-.ai-form-submit[disabled] {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-}
-.ai-form-error {
-  color: #ff3b60;
-  font-size: 12px;
-  margin-top: 8px;
-  text-align: center;
-}
-
-/* ===== 聊天窗口 ===== */
-.ai-chat-shell {
-  border-radius: 18px;
-  border: 1px solid rgba(140, 196, 158, 0.24);
-  background: rgba(255, 255, 255, 0.55);
-  box-shadow: 0 14px 30px rgba(26, 71, 48, 0.06);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  height: 60vh;
-  min-height: 360px;
-  max-height: 640px;
-}
+/* ===== 聊天消息气泡（通用，新旧复用） ===== */
 .ai-chat-messages {
   flex: 1 1 auto;
   min-height: 0;
@@ -427,150 +179,6 @@
   max-width: 260px;
 }
 
-/* ===== 旧 AI 入口卡片（保留兼容） ===== */
-.ai-agent-entry-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(140, 196, 158, 0.22);
-  box-shadow: 0 10px 22px rgba(26, 71, 48, 0.05);
-  cursor: pointer;
-  margin: 0 0 12px;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.18s ease;
-  -webkit-tap-highlight-color: transparent;
-}
-.ai-agent-entry-card:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(26, 71, 48, 0.10);
-  border-color: rgba(96, 177, 126, 0.36);
-  background: rgba(255, 255, 255, 0.78);
-}
-.ai-agent-entry-card:active {
-  transform: translateY(0) scale(0.99);
-  transition-duration: 0.12s;
-}
-.ai-agent-entry-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  background: linear-gradient(135deg, rgba(52, 211, 153, 0.92), rgba(5, 150, 105, 0.94));
-  color: #fff;
-  flex-shrink: 0;
-  box-shadow: 0 6px 14px rgba(5, 150, 105, 0.18);
-}
-.ai-agent-entry-text {
-  flex: 1;
-  min-width: 0;
-}
-.ai-agent-entry-text strong {
-  display: block;
-  font-size: 14px;
-  font-weight: 800;
-  color: var(--text, #1d1d24);
-  line-height: 1.2;
-}
-.ai-agent-entry-text small {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  color: var(--text-muted, #6b6c7a);
-  line-height: 1.4;
-}
-.ai-agent-entry-arrow {
-  font-size: 16px;
-  color: var(--text-muted, #6b6c7a);
-  opacity: 0.55;
-  flex-shrink: 0;
-  transition: transform 0.16s ease, opacity 0.16s ease;
-}
-.ai-agent-entry-card:hover .ai-agent-entry-arrow {
-  transform: translateX(2px);
-  opacity: 0.9;
-}
-
-/* ===== 暗色模式适配 ===== */
-[data-theme="dark"] .ai-profile-card,
-[data-theme="dark"] .ai-chat-shell {
-  background: rgba(30, 30, 45, 0.55);
-  border-color: rgba(140, 196, 158, 0.18);
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.20);
-}
-[data-theme="dark"] .ai-pet-meta-pill {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(140, 196, 158, 0.18);
-  color: #a8b0c0;
-}
-[data-theme="dark"] .ai-form-input,
-[data-theme="dark"] .ai-form-textarea,
-[data-theme="dark"] .ai-chat-input {
-  background: rgba(255, 255, 255, 0.05);
-  color: #e8e8f0;
-  border-color: rgba(255, 255, 255, 0.10);
-}
-[data-theme="dark"] .ai-form-input:focus,
-[data-theme="dark"] .ai-form-textarea:focus,
-[data-theme="dark"] .ai-chat-input:focus {
-  background: rgba(255, 255, 255, 0.10);
-  border-color: rgba(52, 211, 153, 0.55);
-}
-[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.10);
-  color: #e8e8f0;
-}
-[data-theme="dark"] .ai-chat-empty-title {
-  color: #e8e8f0;
-}
-[data-theme="dark"] .ai-agent-entry-card {
-  background: rgba(30, 30, 45, 0.55);
-  border-color: rgba(255, 255, 255, 0.10);
-}
-[data-theme="dark"] .ai-agent-entry-card:hover {
-  background: rgba(30, 30, 45, 0.78);
-  border-color: rgba(52, 211, 153, 0.36);
-}
-[data-theme="dark"] .ai-agent-entry-text strong {
-  color: #e8e8f0;
-}
-[data-theme="dark"] .ai-agent-page-back {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.10);
-  color: #e8e8f0;
-}
-[data-theme="dark"] .ai-agent-page-back:hover {
-  background: rgba(255, 255, 255, 0.12);
-}
-[data-theme="dark"] .ai-agent-page-title {
-  color: #e8e8f0;
-}
-[data-theme="dark"] .ai-chat-input-bar,
-[data-theme="dark"] .ai-chat-foot {
-  background: rgba(30, 30, 45, 0.55);
-}
-
-/* ===== 移动端适配 ===== */
-@media (max-width: 640px) {
-  .ai-chat-shell {
-    height: 64vh;
-    min-height: 320px;
-  }
-  .ai-pet-avatar {
-    width: 48px;
-    height: 48px;
-    font-size: 20px;
-  }
-  .ai-pet-name {
-    font-size: 15px;
-  }
-}
-
 /* ===== AI 聊天容器（在 Dock 聊天面板内使用）===== */
 .ai-chat-container {
   display: flex;
@@ -613,7 +221,7 @@
   background: transparent;
 }
 
-/* 顶栏（头像 + 名字 + 描述） */
+/* ===== AI 聊天顶栏 ===== */
 .ai-chat-topbar {
   flex: 0 0 auto;
   display: flex;
@@ -640,7 +248,29 @@
   margin-left: auto;
 }
 
-/* 暗色模式适配 */
+/* ===== 暗色模式适配 ===== */
+[data-theme="dark"] .ai-chat-input,
+[data-theme="dark"] .ai-chat-input:focus {
+  background: rgba(255, 255, 255, 0.05);
+  color: #e8e8f0;
+  border-color: rgba(255, 255, 255, 0.10);
+}
+[data-theme="dark"] .ai-chat-input:focus {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(52, 211, 153, 0.55);
+}
+[data-theme="dark"] .ai-msg.assistant .ai-msg-bubble {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.10);
+  color: #e8e8f0;
+}
+[data-theme="dark"] .ai-chat-empty-title {
+  color: #e8e8f0;
+}
+[data-theme="dark"] .ai-chat-input-bar,
+[data-theme="dark"] .ai-chat-foot {
+  background: rgba(30, 30, 45, 0.55);
+}
 [data-theme="dark"] .ai-chat-topbar {
   border-color: rgba(255, 255, 255, 0.10);
 }
@@ -771,8 +401,4 @@
   font-weight: 600;
   cursor: pointer;
   margin-bottom: 10px;
-}
-  .ai-msg {
-    max-width: 92%;
-  }
 }
