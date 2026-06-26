@@ -31,6 +31,8 @@
         { value: 'high', label: '高', icon: '🔥' }
     ];
 
+    var DRAFT_KEY_PREFIX = 'ai_draft_';
+
     // ===================== 工具函数 =====================
     function $(sel) { return document.querySelector(sel); }
 
@@ -107,17 +109,19 @@
     }
 
     async function getAuthHeaders() {
+        var token = '';
         try {
             if (typeof window.ensureUserToken === 'function') {
-                var token = await window.ensureUserToken();
-                if (token) {
-                    return {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + token
-                    };
-                }
+                token = await window.ensureUserToken();
             }
         } catch (e) { /* 静默 */ }
+        if (token) {
+            return {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + token
+            };
+        }
+        // 没有 token 时仍尝试发送请求（后端 401 会由调用侧统一处理）
         return { 'Content-Type': 'application/json' };
     }
 
@@ -126,6 +130,7 @@
         var resp = await fetch(API_BASE + '/config', { method: 'GET', headers: headers });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
+        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
         if (!resp.ok) throw new Error(data && data.error || '获取配置失败');
         return data;
     }
@@ -136,6 +141,7 @@
         var resp = await fetch(API_BASE + '/chat/history?limit=' + l, { method: 'GET', headers: headers });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
+        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
         if (!resp.ok) throw new Error(data && data.error || '获取历史失败');
         return data;
     }
@@ -149,7 +155,21 @@
         });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
-        if (!resp.ok) throw new Error(data && data.error || '聊天失败，请稍后再试');
+        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
+        if (!resp.ok) throw new Error(data && data.error || 'AI 没有回应，请稍后再试');
+        return data;
+    }
+
+    async function apiClearChat() {
+        var headers = await getAuthHeaders();
+        var resp = await fetch(API_BASE + '/chat', {
+            method: 'DELETE',
+            headers: headers
+        });
+        var data = null;
+        try { data = await resp.json(); } catch (e) { data = null; }
+        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
+        if (!resp.ok) throw new Error(data && data.error || '清除失败');
         return data;
     }
 
@@ -195,6 +215,26 @@
         });
         topBar.appendChild(thinkBtn);
 
+        // 新对话按钮
+        var newBtn = el('button', {
+            type: 'button',
+            style: 'margin-left:4px;flex-shrink:0;background:none;border:1px solid rgba(140,196,158,0.28);border-radius:14px;padding:2px 10px;font-size:11px;color:var(--text-muted,#6b6c7a);cursor:pointer;white-space:nowrap;',
+            text: '新对话'
+        });
+        newBtn.addEventListener('click', function() {
+            if (state.messages.length === 0) { notify('已经是新对话了'); return; }
+            if (!confirm('清空当前对话，重新开始？\n（聊天记录会保存在历史中，新对话不再带旧上下文）')) return;
+            state.messages = [];
+            var messagesEl = document.getElementById('aiChatMessagesArea');
+            if (messagesEl) {
+                messagesEl.innerHTML = '';
+                showEmptyState(messagesEl);
+            }
+            apiClearChat().catch(function() {});
+            notify('已开始新对话');
+        });
+        topBar.appendChild(newBtn);
+
         // 消息区
         var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
 
@@ -225,10 +265,18 @@
                 handleSendMessage(input, sendBtn, messagesEl, foot);
             }
         });
+        // 输入缓存：每次打字保存草稿到 localStorage
         input.addEventListener('input', function() {
             input.style.height = 'auto';
             input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+            try { localStorage.setItem(DRAFT_KEY_PREFIX + 'default', input.value); } catch(e) {}
         });
+
+        // 恢复之前缓存的草稿
+        try {
+            var savedDraft = localStorage.getItem(DRAFT_KEY_PREFIX + 'default');
+            if (savedDraft) { input.value = savedDraft; input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; }
+        } catch(e) {}
 
         inputBar.appendChild(input);
         inputBar.appendChild(sendBtn);
@@ -310,6 +358,7 @@
         btn.textContent = '发送中…';
         input.value = '';
         input.style.height = 'auto';
+        try { localStorage.removeItem(DRAFT_KEY_PREFIX + 'default'); } catch(e) {}
 
         var empty = messagesEl.querySelector('.ai-chat-empty');
         if (empty) empty.remove();
@@ -356,18 +405,9 @@
 
     // 在聊天页会话列表中点击"徐旭泽的小猫"时调用
     window.__xtjOpenAiChat = async function() {
-        // 1. 检查登录
+        // 1. 检查登录（只检查 currentUser 是否存在，token 由后续 API 调用处理）
         if (!window.currentUser) {
             notify('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
-            return;
-        }
-        try {
-            if (typeof window.ensureUserToken === 'function') {
-                var token = await window.ensureUserToken();
-                if (!token) { notify('登录已过期，请重新登录'); return; }
-            }
-        } catch (e) {
-            notify('登录已过期，请重新登录');
             return;
         }
 
