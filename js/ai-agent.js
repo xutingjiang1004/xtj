@@ -92,22 +92,7 @@
         setTimeout(function() { t.remove(); }, 2400);
     }
 
-    // ===================== API =====================
-    async function ensureLoggedIn() {
-        if (!window.currentUser) {
-            notify('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
-            return false;
-        }
-        try {
-            if (typeof window.ensureUserToken === 'function') {
-                var token = await window.ensureUserToken();
-                if (token) return true;
-            }
-        } catch (e) { /* fall through */ }
-        notify('登录已过期，请重新登录');
-        return false;
-    }
-
+    // ===================== API（静默失败，不 throw，不弹 401 通知）=====================
     async function getAuthHeaders() {
         var token = '';
         try {
@@ -121,7 +106,6 @@
                 'Authorization': 'Bearer ' + token
             };
         }
-        // 没有 token 时仍尝试发送请求（后端 401 会由调用侧统一处理）
         return { 'Content-Type': 'application/json' };
     }
 
@@ -130,9 +114,7 @@
         var resp = await fetch(API_BASE + '/config', { method: 'GET', headers: headers });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
-        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
-        if (!resp.ok) throw new Error(data && data.error || '获取配置失败');
-        return data;
+        return resp.ok ? data : null;
     }
 
     async function apiGetHistory(limit) {
@@ -141,9 +123,7 @@
         var resp = await fetch(API_BASE + '/chat/history?limit=' + l, { method: 'GET', headers: headers });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
-        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
-        if (!resp.ok) throw new Error(data && data.error || '获取历史失败');
-        return data;
+        return resp.ok ? data : null;
     }
 
     async function apiPostChat(message) {
@@ -155,22 +135,15 @@
         });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
-        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
-        if (!resp.ok) throw new Error(data && data.error || 'AI 没有回应，请稍后再试');
-        return data;
+        return resp.ok ? data : null;
     }
 
     async function apiClearChat() {
         var headers = await getAuthHeaders();
-        var resp = await fetch(API_BASE + '/chat', {
-            method: 'DELETE',
-            headers: headers
-        });
+        var resp = await fetch(API_BASE + '/chat', { method: 'DELETE', headers: headers });
         var data = null;
         try { data = await resp.json(); } catch (e) { data = null; }
-        if (resp.status === 401) throw new Error('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
-        if (!resp.ok) throw new Error(data && data.error || '清除失败');
-        return data;
+        return resp.ok ? data : null;
     }
 
     // ===================== 渲染：聊天界面 =====================
@@ -387,11 +360,11 @@
                 }
                 scrollToBottom(messagesEl);
             } else {
-                notify((state.config && state.config.name) + '暂时没有回应，请稍后再试');
+                typingNode.remove();
+                notify('AI 暂时没有回应，请稍后再试');
             }
         } catch (e) {
             typingNode.remove();
-            if (e && e.message) notify(e.message);
         } finally {
             state.sending = false;
             btn.disabled = false;
@@ -405,30 +378,35 @@
 
     // 在聊天页会话列表中点击"徐旭泽的小猫"时调用
     window.__xtjOpenAiChat = async function() {
-        // 1. 检查登录（只检查 currentUser 是否存在，token 由后续 API 调用处理）
+        // 1. 防重复：如果正在加载中，不重复执行
+        if (window.__xtjAiChatLoading) return;
+        window.__xtjAiChatLoading = true;
+
+        // 2. 检查登录
         if (!window.currentUser) {
-            notify('请先登录后再和' + (state.config ? state.config.name : 'AI') + '聊天');
+            window.__xtjAiChatLoading = false;
+            notify('请先登录后再和徐旭泽的小猫聊天');
             return;
         }
 
-        // 2. 加载配置（先异步获取再切换 tab，避免切换后仍有加载延迟）
-        try {
-            var cfgData = await apiGetConfig();
-            if (cfgData && cfgData.config) state.config = cfgData.config;
-        } catch (e) { /* 使用默认值 */ }
-
-        // 3. 切换到聊天 tab
+        // 3. 先切到聊天 tab（即时反馈，用户马上看到界面变化）
         if (typeof window.switchDockTab === 'function') {
             window.switchDockTab('chat', true);
         }
 
+        // 4. 后台加载配置（失败不影响 UI）
+        apiGetConfig().then(function(cfgData) {
+            if (cfgData && cfgData.config) state.config = cfgData.config;
+        }).catch(function() {});
+
         var name = state.config ? state.config.name : '徐旭泽的小猫';
         var avatar = state.config ? (state.config.avatar || '🐱') : '🐱';
 
-        // 4. 标记为 AI 聊天活跃
+        // 5. 标记为 AI 聊天活跃
         window.__xtjAiChatActive = true;
+        window.__xtjAiChatLoading = false;
 
-        // 5. 修改聊天页标题和 UI
+        // 6. 修改聊天页标题和 UI
         var titleEl = document.getElementById('dockChatTitle');
         var backBtn = document.getElementById('dockChatBackBtn');
         var listView = document.getElementById('dockChatListView');
@@ -440,21 +418,56 @@
         if (listView) listView.classList.add('hidden');
         if (detailView) detailView.classList.remove('hidden');
 
-        // 6. 隐藏标准聊天输入（AI 聊天使用独立 UI）
+        // 7. 隐藏标准聊天输入
         var chatInputArea = document.querySelector('.chat-input-area');
         if (chatInputArea) chatInputArea.style.display = 'none';
 
-        // 7. 在消息区渲染 AI 聊天界面
+        // 8. 在消息区渲染 AI 聊天界面
         if (messagesEl) {
             messagesEl.innerHTML = '';
             messagesEl.classList.add('ai-chat-container');
             renderChatView(messagesEl);
         }
 
-        // 关闭 DM 轮询，防止干扰
+        // 关闭 DM 轮询
         if (typeof window.stopDMPolling === 'function') {
             window.stopDMPolling();
         }
+
+        // 9. 配置加载完成后刷新 UI（如果有新配置）
+        apiGetConfig().then(function(cfgData) {
+            if (!cfgData || !cfgData.config) return;
+            state.config = cfgData.config;
+            var name2 = state.config.name || '徐旭泽的小猫';
+            var avatar2 = state.config.avatar || '🐱';
+            var desc2 = state.config.description || '';
+            // 更新顶栏
+            var container = document.getElementById('dockChatMessages');
+            if (!container) return;
+            var tb = container.querySelector('.ai-chat-topbar');
+            if (tb) {
+                var spans = tb.children;
+                if (spans[0]) spans[0].textContent = avatar2;
+                if (spans[1]) spans[1].textContent = name2;
+                if (spans[2]) spans[2].textContent = desc2;
+            }
+            // 更新输入框 placeholder
+            var inp = document.getElementById('aiChatMsgInput');
+            if (inp) inp.placeholder = '和' + name2 + '说点什么吧…';
+            // 更新标题
+            var titleEl2 = document.getElementById('dockChatTitle');
+            if (titleEl2) titleEl2.textContent = avatar2 + ' ' + name2;
+            // 更新空状态
+            var emptyEl = container.querySelector('.ai-chat-empty');
+            if (emptyEl) {
+                var emoji = emptyEl.querySelector('.ai-chat-empty-emoji');
+                if (emoji) emoji.textContent = avatar2;
+                var title = emptyEl.querySelector('.ai-chat-empty-title');
+                if (title) title.textContent = '和' + name2 + '聊聊天';
+                var tip = emptyEl.querySelector('.ai-chat-empty-tip');
+                if (tip) tip.textContent = (state.config.welcome_message || '喵，来聊天吧。');
+            }
+        }).catch(function() {});
     };
 
     window.__xtjCloseAiChat = function() {
