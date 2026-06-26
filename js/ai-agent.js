@@ -349,7 +349,13 @@
 
   function describeError(r, fallback) {
     if (!r) return fallback || '请求失败';
-    if (r.status === 401 || r.status === 403) return '登录状态失效，请重新登录';
+    if (r.status === 401 || r.status === 403) {
+      // ★ 关键修复：根据本地凭据状态给出更精准的提示
+      var hasPw = !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash'));
+      var hasTok = !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'));
+      if (!hasPw && !hasTok) return '登录状态已过期，请重新登录后再使用 AI 聊天';
+      return '账号凭据失效，请重新登录';
+    }
     if (r.status === 404) return 'AI 后端接口不存在，请检查 API_BASE / 部署域名';
     if (r.status === 405) return 'AI 后端方法不允许，请检查 API_BASE / 部署域名';
     if (r.status === 429) return 'AI 聊天次数已达上限，休息一下再来吧';
@@ -433,6 +439,26 @@
     var text = (input.value || '').trim();
     if (!text) return;
 
+    // ★ 关键修复：发送前再校验一次真实鉴权状态（双保险）
+    //   避免打开时 token 有效、发送时已过期
+    if (typeof window.ensureRealUserAuth === 'function') {
+      try {
+        var auth = await window.ensureRealUserAuth();
+        if (!auth || !auth.ok) {
+          try {
+            console.warn('[AI-AUTH] sendMessage blocked, auth not ready', {
+              hasUser: !!readUserName(),
+              hasToken: !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')),
+              hasPwHash: !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')),
+              reason: auth && auth.reason
+            });
+          } catch (e) {}
+          notify('登录状态需要刷新，请重新登录后再使用 AI 聊天');
+          return;
+        }
+      } catch (e) {}
+    }
+
     S.sending = true;
     sendBtn.disabled = true;
     sendBtn.textContent = '发送中…';
@@ -448,11 +474,62 @@
     messagesEl.appendChild(typingNode);
     scrollToBottom(messagesEl);
 
-    var r = await apiRequest('POST', '/chat', {
-      message: text,
-      thinking_mode: S.thinkingMode,
-      conversation_id: S.conversationId
-    });
+    var firstStatus = null;
+    var retryStatus = null;
+    var r = await (async function() {
+      var _first = await sendOnce('POST', '/chat', {
+        message: text,
+        thinking_mode: S.thinkingMode,
+        conversation_id: S.conversationId
+      }, { forceNoToken: false });
+      firstStatus = _first && _first.status;
+      try { console.warn('[AI-AUTH] send first', { status: firstStatus, ok: _first && _first.ok }); } catch (e) {}
+      if (_first && (_first.status === 401 || _first.status === 403)) {
+        var hasPw = hasLocalPasswordHash();
+        if (hasPw) {
+          clearAiUserToken();
+          var _second = await sendOnce('POST', '/chat', {
+            message: text,
+            thinking_mode: S.thinkingMode,
+            conversation_id: S.conversationId
+          }, { forceNoToken: true, retry: true });
+          retryStatus = _second && _second.status;
+          try { console.warn('[AI-AUTH] send retry(pw_hash)', { status: retryStatus, ok: _second && _second.ok }); } catch (e) {}
+          try {
+            console.warn('[AI-AUTH]', {
+              hasUser: !!readUserName(),
+              hasToken: !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')),
+              hasPwHash: !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')),
+              firstStatus: firstStatus,
+              retryStatus: retryStatus
+            });
+          } catch (e) {}
+          return _second;
+        } else if (typeof window.refreshUserToken === 'function') {
+          var refreshed = await window.refreshUserToken(true);
+          if (refreshed) {
+            var _third = await sendOnce('POST', '/chat', {
+              message: text,
+              thinking_mode: S.thinkingMode,
+              conversation_id: S.conversationId
+            }, { forceNoToken: false, retry: true });
+            retryStatus = _third && _third.status;
+            try { console.warn('[AI-AUTH] send retry(refreshed)', { status: retryStatus, ok: _third && _third.ok }); } catch (e) {}
+            try {
+              console.warn('[AI-AUTH]', {
+                hasUser: !!readUserName(),
+                hasToken: !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')),
+                hasPwHash: !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')),
+                firstStatus: firstStatus,
+                retryStatus: retryStatus
+              });
+            } catch (e) {}
+            return _third;
+          }
+        }
+      }
+      return _first;
+    })();
 
     try { typingNode.remove(); } catch (e) {}
 
@@ -703,6 +780,27 @@
     if (!window.currentUser) {
       notify('请先登录后再和徐旭泽的小猫聊天');
       return;
+    }
+    // ★ 关键修复：打开 AI 前先校验真实鉴权状态
+    //   如果只有 UI 登录态（xtj_user_session）但没真实 token 也没 pwHash，
+    //   提前拦截并提示重新登录，避免进入后发送 401/403
+    if (typeof window.ensureRealUserAuth === 'function') {
+      try {
+        var auth = await window.ensureRealUserAuth();
+        if (!auth || !auth.ok) {
+          try {
+            console.warn('[AI-AUTH] openAiChat blocked, auth not ready', {
+              hasUser: !!readUserName(),
+              hasToken: !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')),
+              hasPwHash: !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')),
+              reason: auth && auth.reason
+            });
+          } catch (e) {}
+          notify('登录状态需要刷新，请重新登录后再使用 AI 聊天');
+          return;
+        }
+        try { console.warn('[AI-AUTH] openAiChat auth ok', { reason: auth.reason }); } catch (e) {}
+      } catch (e) {}
     }
     S.active = true;
 
