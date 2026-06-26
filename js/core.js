@@ -598,20 +598,23 @@ const ADMIN_NAME = "xxz";
                 return {
                     selectId: 'proThemeSelect',
                     feature: 'custom_theme',
-                    key: 'theme'
+                    key: 'theme',
+                    label: '专属主题'
                 };
             }
             if (type === 'bubble') {
                 return {
                     selectId: 'proBubbleSelect',
                     feature: 'pro_chat_bubble',
-                    key: 'chat_bubble_style'
+                    key: 'chat_bubble_style',
+                    label: '聊天气泡'
                 };
             }
             return {
                 selectId: 'proPostStyleSelect',
                 feature: 'pro_post_style',
-                key: 'post_card_style'
+                key: 'post_card_style',
+                label: '帖子卡片装饰'
             };
         }
 
@@ -825,17 +828,38 @@ const ADMIN_NAME = "xxz";
         // 三级分组入口：显示某个分类面板
         window.showProStyleCategory = function(category) {
             var landing = document.getElementById('proStylePanelLanding');
+            // 外层总保存按钮已删除（每个板块独立保存），保留查找以便向后兼容
             var actions = document.getElementById('proStylePanelActions');
             var panels = {
                 theme: document.getElementById('proStylePanelTheme'),
                 bubble: document.getElementById('proStylePanelBubble'),
                 post: document.getElementById('proStylePanelPost')
             };
-            if (landing) landing.hidden = true;
-            if (actions) actions.hidden = true;
+            if (landing) {
+                landing.hidden = true;
+                landing.classList.remove('is-enter');
+            }
+            if (actions) actions.hidden = true; // 兼容旧结构
+            var target = panels[category];
             Object.keys(panels).forEach(function(key) {
-                if (panels[key]) panels[key].hidden = (key !== category);
+                if (panels[key]) {
+                    panels[key].hidden = (key !== category);
+                    panels[key].classList.remove('is-enter');
+                }
             });
+            // 子面板淡入 + 轻微上浮
+            if (target) {
+                target.hidden = false;
+                try {
+                    // 强制 reflow 重启动画
+                    void target.offsetWidth;
+                    target.classList.add('is-enter');
+                } catch (e) {}
+            }
+            // 重新计算 preview 选中状态
+            if (typeof updateProStylePreviewActiveStates === 'function') {
+                try { updateProStylePreviewActiveStates(); } catch (_) {}
+            }
             var panel = document.getElementById('profileProStylePage');
             if (panel && typeof panel.scrollTo === 'function') {
                 panel.scrollTo({ top: 0, behavior: 'smooth' });
@@ -845,14 +869,32 @@ const ADMIN_NAME = "xxz";
         // 三级分组入口：返回总览
         window.showProStyleLanding = function() {
             var landing = document.getElementById('proStylePanelLanding');
+            // 外层总保存按钮已删除（每个板块独立保存）。保留查找以便向后兼容。
             var actions = document.getElementById('proStylePanelActions');
             var panels = ['proStylePanelTheme', 'proStylePanelBubble', 'proStylePanelPost'];
-            if (landing) landing.hidden = false;
-            if (actions) actions.hidden = false;
+            if (landing) {
+                landing.hidden = false;
+                landing.classList.remove('is-enter');
+            }
+            if (actions) actions.hidden = true; // 兼容旧结构
             panels.forEach(function(id) {
                 var el = document.getElementById(id);
-                if (el) el.hidden = true;
+                if (el) {
+                    el.hidden = true;
+                    el.classList.remove('is-enter');
+                }
             });
+            // 总览页淡入
+            if (landing) {
+                try {
+                    void landing.offsetWidth;
+                    landing.classList.add('is-enter');
+                } catch (e) {}
+            }
+            var panel = document.getElementById('profileProStylePage');
+            if (panel && typeof panel.scrollTo === 'function') {
+                panel.scrollTo({ top: 0, behavior: 'smooth' });
+            }
         };
 
         window.openProStylePage = function() {
@@ -1001,6 +1043,77 @@ const ADMIN_NAME = "xxz";
                 if (saveBtn) {
                     saveBtn.disabled = false;
                     saveBtn.textContent = saveBtn.dataset.originText || '保存视觉偏好';
+                    delete saveBtn.dataset.originText;
+                }
+            }
+        };
+
+        // 板块级保存：只保存 type 指定的字段，保留其他两个板块的已保存值
+        // type ∈ 'theme' | 'bubble' | 'post'
+        window.saveCurrentUserStylePart = async function(type) {
+            if (!currentUser) { showToast('请先登录'); return; }
+            if (!type) return;
+            var meta = getProStyleSelectMeta(type);
+            var selectEl = document.getElementById(meta.selectId);
+            if (!selectEl) {
+                showToast('未找到对应选项');
+                return;
+            }
+            // 权限校验
+            var enabled = currentUser === ADMIN_NAME || hasProFeature(meta.feature);
+            if (!enabled && selectEl.value !== 'default') {
+                showToast('这是 Pro 视觉权益，领取包含该权益的 Pro 活动后可使用');
+                return;
+            }
+            // 找到本板块的"保存"按钮
+            var saveBtn = document.querySelector(
+                '.pro-style-save-btn[data-pro-style-save-type="' + type + '"]'
+            );
+            // 从 currentUserStyle 中读取其他两个板块已保存值（关键：保留！不能覆盖！）
+            var next = normalizeUserStyle({
+                theme: type === 'theme' ? selectEl.value : (currentUserStyle.theme || 'default'),
+                chat_bubble_style: type === 'bubble' ? selectEl.value : (currentUserStyle.chat_bubble_style || 'default'),
+                post_card_style: type === 'post' ? selectEl.value : (currentUserStyle.post_card_style || 'default'),
+                updated_at: new Date().toISOString()
+            });
+            var originText = '';
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                originText = saveBtn.textContent || '保存';
+                saveBtn.dataset.originText = originText;
+                saveBtn.textContent = '保存中...';
+            }
+            try {
+                var payload = {
+                    user_name: currentUser,
+                    content: JSON.stringify(next),
+                    media_type: USER_STYLE_MARKER,
+                    actor_key: USER_STYLE_MARKER
+                };
+                if (currentUserStyleRecordId) {
+                    var updateRes = await sb.from("posts")
+                        .update({ content: payload.content, actor_key: USER_STYLE_MARKER })
+                        .eq("id", currentUserStyleRecordId);
+                    if (updateRes.error) throw updateRes.error;
+                } else {
+                    var insertRes = await sb.from("posts").insert([payload]).select("id");
+                    if (insertRes.error) throw insertRes.error;
+                    if (insertRes.data && insertRes.data[0] && insertRes.data[0].id) {
+                        currentUserStyleRecordId = insertRes.data[0].id;
+                    }
+                }
+                currentUserStyle = next;
+                currentUserStylePreview = next;
+                writeCachedUserStyle(currentUser, currentUserStyle);
+                applyCurrentUserStyle();
+                showToast('已保存「' + (meta.label || type) + '」板块');
+            } catch(e) {
+                showToast('保存失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
+                applyCurrentUserStyle();
+            } finally {
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = saveBtn.dataset.originText || '保存';
                     delete saveBtn.dataset.originText;
                 }
             }

@@ -16217,3 +16217,319 @@ html[data-theme-transition="light"]::view-transition-old(root) {
 [data-theme="dark"] .dock-profile-container .profile-pro-style-actions {
   border-top-color: rgba(120, 170, 145, .2);
 }
+
+/* ========================================================
+ * XTJ 统一视觉系统（浅蓝 + 浅绿 + 奶白玻璃拟态）
+ * 用于：首页 / 聊天页 / 我的页 / Pro 装扮的卡片与容器
+ * ======================================================== */
+:root {
+  --xtj-bg-page: linear-gradient(180deg, #eef7f6 0%, #f5fbfa 48%, #edf6f4 100%);
+  --xtj-bg-card: linear-gradient(180deg, rgba(255, 255, 255, .84), rgba(245, 252, 249, .72));
+  --xtj-bg-card-strong: linear-gradient(180deg, rgba(255, 255, 255, .92), rgba(241, 250, 246, .82));
+  --xtj-bg-pill: rgba(255, 255, 255, .58);
+  --xtj-border-soft: rgba(180, 224, 202, .55);
+  --xtj-border-soft-2: rgba(196, 214, 232, .45);
+  --xtj-shadow-soft: 0 12px 32px rgba(61, 104, 85, .08);
+  --xtj-shadow-soft-2: 0 8px 18px rgba(61, 104, 85, .06);
+  --xtj-text-main: #24463d;
+  --xtj-text-sub: #6e8d84;
+  --xtj-accent-mint: #29c38a;
+  --xtj-accent-mint-deep: #14a873;
+  --xtj-accent-blue: #9ed9f6;
+  --xtj-radius-xl: 28px;
+  --xtj-radius-lg: 22px;
+  --xtj-radius-md: 18px;
+  --xtj-radius-sm: 14px;
+}
+
+/* 基础玻璃卡片 */
+.glass-card {
+  background: var(--xtj-bg-card);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: var(--xtj-radius-lg);
+  box-shadow: var(--xtj-shadow-soft);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+}
+
+.glass-card-strong {
+  background: var(--xtj-bg-card-strong);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: var(--xtj-radius-lg);
+  box-shadow: var(--xtj-shadow-soft);
+  backdrop-filter: blur(20px) saturate(148%);
+  -webkit-backdrop-filter: blur(20px) saturate(148%);
+}
+
+.glass-pill {
+  background: var(--xtj-bg-pill);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: 999px;
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+.glass-section {
+  background: var(--xtj-bg-card);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: var(--xtj-radius-xl);
+  box-shadow: var(--xtj-shadow-soft-2);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+}
+
+.glass-stat-card {
+  background: var(--xtj-bg-card-strong);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: var(--xtj-radius-md);
+  box-shadow: var(--xtj-shadow-soft-2);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+/* 设置列表：单卡片内含多行（深色模式 / 通知 / 关于） */
+.glass-setting-list {
+  background: var(--xtj-bg-card);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: var(--xtj-radius-lg);
+  box-shadow: var(--xtj-shadow-soft-2);
+  overflow: hidden;
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+}
+
+.glass-setting-list .profile-setting-item {
+  border-radius: 0 !important;
+  background: transparent !important;
+}
+
+/* ========================================================
+ * 首页 UI 收口（发布框 / 筛选栏 / 统计卡 / 帖子卡）
+ * ======================================================== */
+.publish-box,
+#postInput {
+  border-radius: var(--xtj-radius-md);
+}
+
+.panelHome,
+#panelHome,
+.home-wrap {
+  background: var(--xtj-bg-page);
+}
+
+/* 帖子发布框玻璃化 */
+.publish-box {
+  background: var(--xtj-bg-card-strong);
+  border: 1px solid var(--xtj-border-soft);
+  box-shadow: var(--xtj-shadow-soft-2);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+  border-radius: var(--xtj-radius-lg);
+}
+
+/* 筛选栏玻璃化 */
+.post-filter-bar,
+.post-search-input,
+.post-filter-input {
+  background: var(--xtj-bg-card);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: var(--xtj-radius-md);
+  box-shadow: var(--xtj-shadow-soft-2);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+/* 统计卡玻璃化（顶部 总动态 / 总浏览 / 点赞） */
+.post-stats,
+.stats {
+  background: var(--xtj-bg-card-strong);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: var(--xtj-radius-md);
+  box-shadow: var(--xtj-shadow-soft-2);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+/* 帖子卡片玻璃化（保留原有阴影，但圆角统一 + 背景统一） */
+.post {
+  background: var(--xtj-bg-card);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: var(--xtj-radius-md);
+  box-shadow: var(--xtj-shadow-soft-2);
+  backdrop-filter: blur(16px) saturate(142%);
+  -webkit-backdrop-filter: blur(16px) saturate(142%);
+}
+
+/* 发布按钮：浅绿/薄荷体系（替代突兀紫） */
+.btn.primary,
+.btn.btn-primary,
+.publish-box button.primary,
+#postSubmit,
+button.post-publish {
+  background: linear-gradient(135deg, var(--xtj-accent-mint), var(--xtj-accent-mint-deep)) !important;
+  color: #fff !important;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  box-shadow: 0 10px 22px rgba(41, 195, 138, .22);
+}
+
+.btn.primary:hover,
+.btn.btn-primary:hover,
+#postSubmit:hover,
+button.post-publish:hover {
+  filter: saturate(1.06) brightness(1.02);
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(41, 195, 138, .28);
+}
+
+/* ========================================================
+ * 聊天页 UI 收口（柔和大白 → 玻璃容器）
+ * ======================================================== */
+.dock-chat-container,
+.dock-chat-container .chat-list,
+.dock-chat-container .chat-messages {
+  background: transparent;
+}
+
+.chat-list {
+  background: transparent;
+  border-radius: var(--xtj-radius-lg);
+}
+
+.chat-list-item {
+  background: var(--xtj-bg-card);
+  border: 1px solid var(--xtj-border-soft);
+  border-radius: var(--xtj-radius-md);
+  margin: 6px 8px;
+  box-shadow: var(--xtj-shadow-soft-2);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+}
+
+.chat-list-item:hover {
+  background: var(--xtj-bg-card-strong);
+  border-color: var(--xtj-border-soft-2);
+}
+
+.chat-list-item.active {
+  background: var(--xtj-bg-card-strong);
+  border-color: rgba(116, 195, 148, 0.6);
+  box-shadow: 0 0 0 1px rgba(160, 225, 189, 0.5), var(--xtj-shadow-soft-2);
+}
+
+.chat-messages {
+  background: transparent;
+  border-radius: var(--xtj-radius-lg);
+}
+
+.chat-header {
+  background: var(--xtj-bg-card-strong);
+  border-bottom: 1px solid var(--xtj-border-soft);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+}
+
+.chat-input-area {
+  background: var(--xtj-bg-card-strong);
+  border-top: 1px solid var(--xtj-border-soft);
+  border-radius: 0 0 var(--xtj-radius-lg) var(--xtj-radius-lg);
+  backdrop-filter: blur(18px) saturate(145%);
+  -webkit-backdrop-filter: blur(18px) saturate(145%);
+}
+
+/* ========================================================
+ * 我的页 UI 收口（已部分由 0.97d 完成，此处补强）
+ * ======================================================== */
+.dock-profile-container .profile-user-card,
+.dock-profile-container .profile-activity-card,
+.dock-profile-container .xtj-vip-card,
+.dock-profile-container .profile-pro-style-entry-wrap,
+.dock-profile-container .profile-settings,
+.dock-profile-container .profile-totals-bar {
+  background: var(--xtj-bg-card-strong) !important;
+  border: 1px solid var(--xtj-border-soft) !important;
+  border-radius: var(--xtj-radius-lg) !important;
+  box-shadow: var(--xtj-shadow-soft) !important;
+  backdrop-filter: blur(18px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(145%) !important;
+}
+
+/* XTJ Pro 卡：橙色仅作局部点缀（icon + 按钮），整体保持玻璃感 */
+.xtj-vip-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, .88), rgba(252, 248, 240, .78)) !important;
+  border: 1px solid rgba(255, 215, 0, .22) !important;
+}
+
+.xtj-vip-card:hover {
+  border-color: rgba(255, 215, 0, .42) !important;
+}
+
+/* 互动记录卡（点赞/评论） */
+.dock-profile-container .profile-activity-card {
+  background: var(--xtj-bg-card-strong) !important;
+}
+
+/* Pro 装扮入口 */
+.dock-profile-container .profile-pro-style-entry-wrap {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.dock-profile-container .profile-pro-style-entry {
+  background: var(--xtj-bg-card-strong) !important;
+  border: 1px solid var(--xtj-border-soft) !important;
+  border-radius: var(--xtj-radius-lg) !important;
+  box-shadow: var(--xtj-shadow-soft) !important;
+}
+
+/* 设置区域：合并到一张大玻璃卡片 */
+.dock-profile-container .profile-settings {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.dock-profile-container .profile-setting-item {
+  background: transparent !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(173, 221, 194, .32) !important;
+  border-radius: 0 !important;
+  padding: 14px 18px !important;
+}
+
+.dock-profile-container .profile-setting-item:last-child {
+  border-bottom: none !important;
+}
+
+/* 设置项左侧图标底色统一 */
+.dock-profile-container .profile-setting-item .psi-icon,
+.dock-profile-container .profile-setting-item .setting-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(146, 219, 175, 0.22), rgba(174, 222, 245, 0.18));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--xtj-accent-mint-deep);
+}
+
+/* ========================================================
+ * 深色模式适配
+ * ======================================================== */
+[data-theme="dark"] {
+  --xtj-bg-page: linear-gradient(180deg, #0f1c19 0%, #11201c 50%, #0d1a17 100%);
+  --xtj-bg-card: linear-gradient(180deg, rgba(28, 42, 35, .88), rgba(20, 32, 28, .82));
+  --xtj-bg-card-strong: linear-gradient(180deg, rgba(34, 50, 42, .92), rgba(22, 36, 30, .88));
+  --xtj-bg-pill: rgba(34, 50, 42, .6);
+  --xtj-border-soft: rgba(126, 194, 161, .22);
+  --xtj-border-soft-2: rgba(108, 156, 188, .18);
+  --xtj-shadow-soft: 0 12px 32px rgba(0, 0, 0, .32);
+  --xtj-shadow-soft-2: 0 8px 18px rgba(0, 0, 0, .22);
+  --xtj-text-main: #d4ebe1;
+  --xtj-text-sub: #9ab8a9;
+}
+
+[data-theme="dark"] .dock-profile-container .profile-setting-item {
+  border-bottom-color: rgba(126, 194, 161, .14) !important;
+}

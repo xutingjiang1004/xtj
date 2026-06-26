@@ -301,26 +301,47 @@ html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .a
 }
 
 .pro-style-option-card {
-  display: grid;
-  grid-template-rows: auto auto;
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
   gap: 8px;
+  min-width: 0;
   min-height: 0;
   padding: 8px;
   border-radius: 18px;
   border-color: rgba(182, 220, 198, 0.9);
   background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(246,252,248,0.9));
   box-shadow: 0 10px 24px rgba(45, 88, 65, 0.07);
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease, border-color 0.22s ease, background-color 0.22s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.pro-style-option-card > .theme-preview,
+.pro-style-option-card > .bubble-preview,
+.pro-style-option-card > .post-card-preview {
+  width: 100%;
+  flex: 0 0 auto;
+  display: block;
 }
 
 .pro-style-option-card:hover {
+  transform: translateY(-2px) scale(1.01);
   border-color: color-mix(in srgb, var(--xtj-theme-accent) 40%, rgba(182, 220, 198, 0.9));
-  box-shadow: 0 16px 28px rgba(45, 88, 65, 0.11);
+  box-shadow: 0 16px 32px rgba(45, 88, 65, 0.12);
+}
+
+.pro-style-option-card:active {
+  transform: translateY(0) scale(0.99);
+  transition-duration: 0.1s;
 }
 
 .pro-style-option-card.active {
   border-color: rgba(116, 195, 148, 0.88);
   background: linear-gradient(180deg, rgba(247,255,250,0.96), rgba(237,250,243,0.94));
   box-shadow: 0 0 0 1px rgba(160, 225, 189, 0.82), 0 16px 30px rgba(56, 114, 77, 0.12);
+  transform: translateY(-1px);
 }
 
 .pro-style-option-card.locked,
@@ -336,16 +357,24 @@ html[data-pro-theme]:not([data-pro-theme="default"]):not([data-theme="dark"]) .a
 
 .pro-style-card-check {
   background: rgba(255,255,255,0.86);
+  z-index: 2;
 }
 
 .pro-style-option-title {
+  display: block;
+  width: 100%;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   color: #2c5741;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
   text-align: center;
+  line-height: 1.25;
+  word-break: break-word;
+  hyphens: none;
+  flex: 0 0 auto;
+  padding: 2px 0 0;
 }
 
 .theme-preview,
@@ -1079,6 +1108,242 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   .pro-style-category-panel-head {
     margin-bottom: 12px;
     padding-bottom: 10px;
+  }
+}
+
+/* ========================================================
+ * Pro 装扮 UI 收口（每板块独立保存 + 切换动画 + 预览动画增强）
+ * ======================================================== */
+
+/* 总览页 / 子面板 淡入动画 */
+@keyframes xtjProPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.pro-style-category-panel.is-enter,
+#proStylePanelLanding.is-enter {
+  animation: xtjProPanelIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+/* 每板块独立的保存按钮容器（不 sticky） */
+.profile-pro-style-panel-actions {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 22px 0 8px;
+  padding: 4px 0 0;
+  position: static !important;
+  bottom: auto !important;
+  z-index: auto !important;
+  background: transparent !important;
+}
+
+.profile-pro-style-panel-actions::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(173, 221, 194, 0.45), transparent);
+  margin-bottom: 18px;
+  order: -1;
+}
+
+.pro-style-save-btn {
+  min-width: 180px;
+  height: 42px;
+  padding: 0 32px;
+  border-radius: 999px !important;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--xtj-theme-accent, #29c38a), var(--xtj-theme-accent-2, #14a873)) !important;
+  border: 1px solid transparent;
+  box-shadow: 0 10px 22px rgba(41, 195, 138, 0.22), 0 2px 4px rgba(41, 195, 138, 0.08);
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease, filter 0.18s ease;
+  cursor: pointer;
+}
+
+.pro-style-save-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 28px rgba(41, 195, 138, 0.28), 0 2px 4px rgba(41, 195, 138, 0.1);
+  filter: saturate(1.05);
+}
+
+.pro-style-save-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+  box-shadow: 0 6px 16px rgba(41, 195, 138, 0.22);
+  transition-duration: 0.1s;
+}
+
+.pro-style-save-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  filter: saturate(0.85);
+}
+
+/* 总览页三个入口卡片：轻浮起 + 阴影增强 */
+.pro-style-category-card {
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.pro-style-category-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 36px rgba(56, 114, 77, 0.1);
+}
+
+.pro-style-category-card:active {
+  transform: translateY(0) scale(0.99);
+  transition-duration: 0.1s;
+}
+
+/* 三个板块的预览：增强版轻量演示动画 */
+
+/* A) 专属主题：顶部条呼吸 + 卡片轻浮 + 扫光 */
+@keyframes xtjThemeCardFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
+}
+
+.theme-preview .theme-preview-card {
+  animation: xtjThemeCardFloat 4.2s ease-in-out infinite;
+}
+
+@keyframes xtjThemeTopbarBreath {
+  0%, 100% { opacity: 0.85; transform: scaleX(1); }
+  50% { opacity: 1; transform: scaleX(1.04); }
+}
+
+.theme-preview .theme-preview-topbar {
+  animation: xtjThemeTopbarBreath 3.4s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes xtjThemeLineFade {
+  0%, 100% { opacity: 0.78; }
+  50% { opacity: 1; }
+}
+
+.theme-preview .theme-preview-title-line,
+.theme-preview .theme-preview-card-line {
+  animation: xtjThemeLineFade 3.8s ease-in-out infinite;
+}
+
+.theme-preview .theme-preview-card-line:nth-child(2) { animation-delay: 0.4s; }
+.theme-preview .theme-preview-card-line:nth-child(3) { animation-delay: 0.8s; }
+
+/* 扫光：原 sheen 已经存在（var(--xtj-pro-preview-sheen)），这里稍作加速让其更可感知 */
+.theme-preview::after {
+  animation-duration: 5.5s !important;
+}
+
+/* B) 聊天气泡：第一条淡入 + 第二条轻浮（呼吸） */
+@keyframes xtjBubbleFadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.bubble-preview .bubble-preview-row:nth-child(1) {
+  animation: xtjBubbleFadeIn 0.6s 0.1s ease-out both;
+}
+
+.bubble-preview .bubble-preview-row:nth-child(2) {
+  animation: xtjBubbleFadeIn 0.6s 0.45s ease-out both;
+}
+
+/* 第二条的气泡轻浮：原 var(--xtj-pro-preview-breathe) 已是 4s 呼吸，这里保留原节奏 */
+
+/* C) 帖子卡片：清透边框高光流动 / 叶子摇摆 / 柔光呼吸 / 极简 Pro 显隐 */
+@keyframes xtjPostBorderGlow {
+  0%, 100% { box-shadow: 0 0 0 0.5px rgba(116, 195, 148, 0.4), 0 0 6px rgba(116, 195, 148, 0.08); }
+  50% { box-shadow: 0 0 0 1px rgba(116, 195, 148, 0.7), 0 0 12px rgba(116, 195, 148, 0.18); }
+}
+
+.post-card-preview.is-clean-border {
+  animation: xtjPostBorderGlow 3.6s ease-in-out infinite;
+}
+
+@keyframes xtjLeafSway {
+  0%, 100% { transform: rotate(-3deg); }
+  50% { transform: rotate(3deg); }
+}
+
+.post-card-preview.is-leaf-corner {
+  position: relative;
+}
+.post-card-preview.is-leaf-corner::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  width: 10px;
+  height: 10px;
+  background: radial-gradient(circle, rgba(116, 195, 148, 0.85), rgba(116, 195, 148, 0));
+  border-radius: 50% 0 50% 50%;
+  transform-origin: bottom right;
+  animation: xtjLeafSway 3.2s ease-in-out infinite;
+}
+
+@keyframes xtjPostSoftGlow {
+  0%, 100% { box-shadow: 0 0 6px rgba(255, 255, 255, 0.4), 0 6px 14px rgba(56, 114, 77, 0.06); }
+  50% { box-shadow: 0 0 14px rgba(255, 255, 255, 0.6), 0 8px 18px rgba(56, 114, 77, 0.1); }
+}
+
+.post-card-preview.is-soft-glow {
+  animation: xtjPostSoftGlow 4s ease-in-out infinite;
+}
+
+@keyframes xtjPostMinimalShimmer {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+.post-card-preview.is-minimal-pro {
+  position: relative;
+}
+.post-card-preview.is-minimal-pro::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(116, 195, 148, 0.65), transparent);
+  animation: xtjPostMinimalShimmer 2.6s ease-in-out infinite;
+}
+
+/* 总览三个入口卡片的预览小图也轻微动 */
+.pro-style-category-card .pro-style-category-preview {
+  overflow: hidden;
+  position: relative;
+}
+
+@keyframes xtjCategoryPreviewBreath {
+  0%, 100% { opacity: 0.92; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.02); }
+}
+
+.pro-style-category-card:hover .pro-style-category-preview,
+.pro-style-category-card .pro-style-category-preview {
+  animation: xtjCategoryPreviewBreath 3.4s ease-in-out infinite;
+}
+
+/* 移动端：保存按钮整宽 */
+@media (max-width: 767px) {
+  .profile-pro-style-panel-actions {
+    margin: 18px 0 6px;
+  }
+  .pro-style-save-btn {
+    width: 100%;
+    min-width: 0;
   }
 }
 
