@@ -5081,7 +5081,7 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
 // 3. 字段严格验证（防注入 + 长度限制）
 // 4. 数据存 posts 表 + AI_AGENT_*_MARKER（已加入 applyPublicPostExclusions 过滤）
 
-// GET /api/agent/profile - 已废弃，返回 410（AI 配置由管理员统一管理，前端不再调用）
+const AI_CHAT_MESSAGE_MAX_LEN = 2000;
 app.get('/api/agent/profile', authenticateUser, async (req, res) => {
   return res.status(410).json({ error: '已废弃，AI 配置由管理员统一管理' });
 });
@@ -5123,22 +5123,7 @@ app.post('/api/agent/profile', authenticateUser, async (req, res) => {
 //   - 读取：loadAiContext 每次 chat 时拉取，作为 dynamic context 第二段
 //   - 写入：chat 完成后异步（不阻塞响应）调用 AI 总结最近 10 条 + 已有 memory → 写回
 //
-// ★ 第一版严格遵守：
 // 1. 走 authenticateUser 中间件
-// 2. 走 checkAiUserRateLimit 用户级限流（与 profile 共用 50/天 + 10/小时）
-// 3. 读取 profile / 20 条历史 / 长期记忆 / 用户最近 5 条帖子+5 条评论 / Pro 状态
-// 4. system prompt 明确：不能假装执行操作 / 不允许 pending_action / 不能改他人数据
-// 5. 用户消息和 AI 回复都存 posts 表 + AI_AGENT_MESSAGE_MARKER（已过滤出普通 feed）
-// 6. 调用真实 DeepSeek（callDeepSeek 内部已有 mock 兜底 + 超时 + 错误脱敏）
-// 7. 不返回 pending_action 给前端（即使模型想发帖子，前端拿不到 action_id 也不能确认）
-
-const AI_CHAT_MESSAGE_MAX_LEN = 2000;
-const AI_CHAT_HISTORY_LIMIT = 20;
-const AI_CHAT_HOURLY_IP_LIMIT = 30; // IP 维度：每小时最多 30 次 chat 调用
-const AI_MEMORY_MAX_LEN = 1500;     // 长期记忆最大长度（≈ 750 token）
-const AI_MEMORY_SUMMARIZE_HISTORY = 10; // 触发总结时使用的最近历史条数
-
-// 核心 system prompt：使用全局 AI 配置而非用户 profile
 // ★ 完全固定，DeepSeek 缓存命中段
 function buildAiCorePrompt(config) {
   var name = String(config.name || '徐旭泽的小猫').slice(0, 30);
@@ -5147,25 +5132,14 @@ function buildAiCorePrompt(config) {
   var sysPrompt = String(config.system_prompt || '').slice(0, 1000);
 
   var lines = [
-    '你是 XTJ 网站中的 AI 聊天智能体。',
-    '你的名字是：' + name,
+    '你是 XTJ 网站的 AI 聊天智能体，名字是：' + name,
   ];
-  if (persona) lines.push('你的身份设定：' + persona);
-  if (tone) lines.push('你的说话风格：' + tone);
-  if (sysPrompt) lines.push('管理员给你的系统要求：' + sysPrompt);
+  if (persona) lines.push('身份设定：' + persona);
+  if (tone) lines.push('说话风格：' + tone);
+  if (sysPrompt) lines.push('管理员要求：' + sysPrompt);
   lines = lines.concat([
-    '',
-    '【安全要求】',
-    '- 你只能根据当前对话和当前用户自己的长期记忆回答。',
-    '- 不能透露任何其他用户的聊天记录。',
-    '- 不能声称你看到了后台数据。',
-    '- 不能编造你执行了发布、删除、修改等操作。',
-    '- 如果用户要求查看别人聊天记录，必须拒绝。',
-    '',
-    '【输出要求】',
-    '- 保持你的说话风格，自然、口语化。',
-    '- 回复长度控制在 500 字以内。',
-    '- 如果用户问你能做什么，告诉用户你可以陪他聊天、记住他的喜好和要求。'
+    '【安全】只根据当前对话和用户自己的长期记忆回答。不能透露其他用户聊天记录。不能编造你执行了发布、删除、修改等操作。用户要求查看别人聊天记录必须拒绝。',
+    '【输出】保持你的说话风格，自然口语化。回复控制在 500 字以内。用户问你能做什么，告诉用户你可以陪他聊天、记住他的喜好和要求。'
   ]);
   return lines.join('\n');
 }
@@ -5175,13 +5149,11 @@ function buildAiCorePrompt(config) {
 function buildAiDynamicContext(ctx, config) {
   var lines = [];
   if (ctx && ctx.contextBlock) {
-    lines.push('【长期记忆】');
-    lines.push(ctx.contextBlock);
+    lines.push('【记忆】' + ctx.contextBlock.replace(/\[长期记忆\]\s*/g, '').trim());
   }
   if (config && config.name) {
     lines.push('');
-    lines.push('【你当前的身份】');
-    lines.push('你的名字是：' + config.name);
+    lines.push('【身份】名字：' + config.name);
   }
   return lines.join('\n');
 }
@@ -5274,13 +5246,7 @@ async function updateLongTermMemory(userName, profile, ctx, lastUserMsg, lastAiR
     var summarizeMessages = [
       {
         role: 'system',
-        content: '你是 XTJ 长期记忆整理助手。你的任务是阅读最近的对话和已有记忆，输出更新后的长期记忆 summary。\n' +
-                 '要求：\n' +
-                 '1. 保留关于用户的重要事实（昵称、习惯、偏好、重要事件、明确告诉你的信息）\n' +
-                 '2. 忽略闲聊和一次性话题\n' +
-                 '3. 用第三人称中文写，控制在 800 字以内\n' +
-                 '4. 不要包含 "用户说" "AI 回复" 这类元信息\n' +
-                 '5. 如果没有新信息，原样输出已有记忆'
+        content: '你是 XTJ 记忆助手。阅读最近对话和已有记忆，输出更新后的长期记忆。\n要求：\n1. 保留用户重要事实（昵称、习惯、偏好、明确告诉你的信息）\n2. 忽略闲聊和一次性话题\n3. 第三人称中文，600 字以内\n4. 不要包含"用户说""AI 回复"这类元信息\n5. 无新信息时原样输出已有记忆'
       },
       {
         role: 'user',
@@ -5342,7 +5308,7 @@ async function loadAiContext(userName, agentName) {
       // 倒序读到的是最新在前，反转成时间正序给 AI
       ctx.history = msgRows.slice().reverse().map(function(r) {
         var role = r.media_url === 'assistant' ? 'assistant' : 'user';
-        return { role: role, content: String(r.content || '').slice(0, 4000) };
+        return { role: role, content: String(r.content || '').slice(0, 800) };
       });
     }
 
@@ -5470,12 +5436,30 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     return res.json({
       ok: true,
       reply: reply,
-      pending_action: null,
       remaining: { hour: rl.remainingHour, day: rl.remainingDay }
     });
   } catch (e) {
     console.error('[AGENT-CHAT] exception:', e.message);
     return res.status(500).json({ error: '聊天失败，请稍后再试' });
+  }
+});
+
+// DELETE /api/agent/chat - 清空当前用户 AI 对话
+app.delete('/api/agent/chat', authenticateUser, async (req, res) => {
+  try {
+    var userName = req.userName;
+    var { error } = await supabase.from('posts')
+      .delete()
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER);
+    if (error) {
+      console.error('[AGENT-CHAT] clear error:', error.message);
+      return res.status(500).json({ error: '清除失败' });
+    }
+    return res.json({ ok: true, message: '对话已清空' });
+  } catch (e) {
+    console.error('[AGENT-CHAT] clear exception:', e.message);
+    return res.status(500).json({ error: '清除失败' });
   }
 });
 
