@@ -2,7 +2,15 @@
   'use strict';
 
   // ===================== 配置 =====================
-  var API_BASE = '/api/agent';
+  // ★ 关键修复：API_BASE 不能再写死为 /api/agent
+  //   - 前端可能部署在 Vercel/Netlify/静态站
+  //   - 后端在 Render
+  //   - 相对路径 /api/agent 会打到前端域名导致 404/405
+  //   - 统一从 window.XTJ_CONFIG.API_BASE 读，缺省才回落到 window.location.origin
+  var ROOT_API_BASE = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.location.origin;
+  ROOT_API_BASE = String(ROOT_API_BASE || '').replace(/\/$/, '');
+  var API_BASE = ROOT_API_BASE + '/api/agent';
+  try { console.warn('[AI] API_BASE =', API_BASE); } catch (e) {}
   var HISTORY_PAGE_SIZE = 30;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
@@ -155,8 +163,11 @@
   }
 
   // ===================== API（统一封装）=====================
+  // 返回 { ok, status, data, error, url, rawText }
+  // 失败时 console.warn 打印真实状态码/响应体，便于排查
   async function apiRequest(method, path, body) {
     var auth = null;
+    var url = API_BASE + path;
     try {
       auth = await getUserAuthPayload();
       var headers = auth.headers;
@@ -172,7 +183,7 @@
         }
         if (extra.length) {
           var sep = path.indexOf('?') >= 0 ? '&' : '?';
-          path = path + sep + extra.join('&');
+          url = API_BASE + path + sep + extra.join('&');
         }
       } else {
         // POST：把兜底鉴权合并到 body
@@ -190,20 +201,48 @@
         }
       }
 
-      var resp = await fetch(API_BASE + path, opts);
+      var resp = await fetch(url, opts);
+      var rawText = '';
+      try { rawText = await resp.text(); } catch (e) { rawText = ''; }
       var data = null;
-      try { data = await resp.json(); } catch (e) { data = null; }
-      return { ok: resp.ok, status: resp.status, data: data, error: data && data.error ? data.error : null };
+      if (rawText) {
+        try { data = JSON.parse(rawText); } catch (e) { data = null; }
+      }
+      var result = {
+        ok: resp.ok,
+        status: resp.status,
+        data: data,
+        error: data && data.error ? data.error : null,
+        url: url,
+        rawText: rawText ? String(rawText).slice(0, 300) : ''
+      };
+      if (!result.ok) {
+        try {
+          console.warn('[AI] request failed', {
+            method: method,
+            url: url,
+            status: resp.status,
+            data: data,
+            error: result.error,
+            rawText: result.rawText
+          });
+        } catch (e) {}
+      }
+      return result;
     } catch (e) {
-      return { ok: false, status: 0, data: null, error: (e && e.message) || '网络异常' };
+      var errMsg = (e && e.message) || '网络异常';
+      try { console.warn('[AI] request exception', { method: method, url: url, error: errMsg }); } catch (e2) {}
+      return { ok: false, status: 0, data: null, error: errMsg, url: url, rawText: '' };
     }
   }
 
   function describeError(r, fallback) {
     if (!r) return fallback || '请求失败';
-    if (r.status === 401 || r.status === 403) return '请重新登录后再试';
+    if (r.status === 401 || r.status === 403) return '登录状态失效，请重新登录';
+    if (r.status === 404) return 'AI 后端接口不存在，请检查 API_BASE / 部署域名';
+    if (r.status === 405) return 'AI 后端方法不允许，请检查 API_BASE / 部署域名';
     if (r.status === 429) return 'AI 聊天次数已达上限，休息一下再来吧';
-    if (r.status === 502) return 'AI 服务调用失败，请稍后再试';
+    if (r.status === 502) return 'AI 服务调用失败，请检查 DeepSeek API Key / 模型名 / Render Logs';
     if (r.status === 500) return '服务器错误，请稍后再试';
     if (r.status === 0)  return '网络异常，请检查连接';
     if (r.error) return r.error;
@@ -657,44 +696,52 @@
 
     // 6. 触发列表刷新 + AI 入口
     //    ★ 不论 renderDockChatList 是否存在、是否抛错、是否异步，最终都要保证 AI 入口在
+    //    ★ 统一走 scheduleInsertEntry（防抖），避免和 hook 重复插入
     try {
       if (typeof window.renderDockChatList === 'function') {
         var refreshResult = window.renderDockChatList();
         if (refreshResult && typeof refreshResult.then === 'function') {
-          try {
-            refreshResult.catch(function() {}).then(function() { insertEntry(); });
-          } catch (e) {
-            insertEntry();
+          // 异步：hook 里 ret.finally 会调用 scheduleInsertEntry，这里不重复调
+          // 但 Promise 失败时要兜底再排一次
+          try { refreshResult.catch(function() { scheduleInsertEntry(); }); } catch (e) {
+            scheduleInsertEntry();
           }
         }
-        // 同步完成的话 hook 已经把 insertEntry 排到 setTimeout，这里不重复调
+        // 同步：hook 里已 scheduleInsertEntry，不重复
       } else {
-        // 没有 renderDockChatList 时直接插入
-        insertEntry();
+        // 没有 renderDockChatList 时直接 schedule
+        scheduleInsertEntry();
       }
     } catch (e) {
       // 兜底
-      try { insertEntry(); } catch (e2) {}
+      scheduleInsertEntry();
     }
   }
 
-  // ===================== 插入 AI 入口到聊天列表 =====================
-  function insertEntry() {
-    // ★ 关键修复：插入容器必须是 #dockChatList，不是 #dockChatListView
-    var list = document.getElementById('dockChatList');
-    if (!list) {
-      // 兼容老版本（如果有人改了）
-      list = document.getElementById('dockChatListView');
-    }
-    if (!list) return;
-
-    // ★ 关键：querySelectorAll 全部去重（不只是第一个）
+  // ===================== 全局清理 AI 入口（防重复）=====================
+  // ★ 老版本错误地插到 #dockChatListView，必须全局清理 #panelChat 内所有 AI 入口
+  //   避免新版本插入 #dockChatList 时老版本残留造成"两个小猫"
+  function removeAllAiEntries() {
     try {
-      var olds = list.querySelectorAll('[data-chat-user="__ai_agent__"]');
+      var panel = document.getElementById('panelChat') || document.body || document;
+      if (!panel || !panel.querySelectorAll) return;
+      var olds = panel.querySelectorAll('[data-chat-user="__ai_agent__"], .ai-agent-entry');
       for (var i = 0; i < olds.length; i++) {
         try { olds[i].remove(); } catch (e) {}
       }
     } catch (e) {}
+  }
+
+  // ===================== 插入 AI 入口到聊天列表 =====================
+  // ★ 关键修复：
+  //   1. 容器只允许是 #dockChatList（删除 fallback 到 #dockChatListView 的逻辑）
+  //   2. 每次插入前全局清理整个 #panelChat 内所有 AI 入口
+  function insertEntry() {
+    var list = document.getElementById('dockChatList');
+    if (!list) return;
+
+    // 全局清理：避免老版本残留造成"两个小猫"
+    removeAllAiEntries();
 
     var cfg = S.config || { name: '徐旭泽的小猫', avatar: '🐱' };
     var name = cfg.name || '徐旭泽的小猫';
@@ -731,7 +778,19 @@
     list.insertBefore(item, list.firstChild);
   }
 
-  // ===================== 注入聊天列表 hook（兼容 Promise）=====================
+  // ===================== 防抖：所有插入统一走 scheduleInsertEntry =====================
+  var insertTimer = null;
+  function scheduleInsertEntry() {
+    if (insertTimer) {
+      try { clearTimeout(insertTimer); } catch (e) {}
+    }
+    insertTimer = setTimeout(function() {
+      insertTimer = null;
+      try { insertEntry(); } catch (e) {}
+    }, 0);
+  }
+
+  // ===================== 注入聊天列表 hook（兼容 Promise + 防抖）=====================
   function hookChatList() {
     if (S.bound) return;
     var original = window.renderDockChatList;
@@ -740,15 +799,15 @@
       if (typeof original === 'function') {
         try { ret = original.apply(this, arguments); } catch (e) {}
       }
-      // ★ 兼容异步：如果 ret 是 Promise，等 finally 再 insertEntry
+      // ★ 兼容异步：如果 ret 是 Promise，等 finally 再 scheduleInsertEntry
       if (ret && typeof ret.finally === 'function') {
         try {
-          ret.finally(function() { insertEntry(); });
+          ret.finally(function() { scheduleInsertEntry(); });
         } catch (e) {
-          setTimeout(insertEntry, 0);
+          scheduleInsertEntry();
         }
       } else {
-        setTimeout(insertEntry, 0);
+        scheduleInsertEntry();
       }
       return ret;
     };
@@ -781,10 +840,10 @@
   function bootstrap() {
     ensureConfig().then(function(cfg) {
       S.config = cfg;
-      insertEntry();
+      scheduleInsertEntry();
     }).catch(function() {
       S.config = { name: '徐旭泽的小猫', avatar: '🐱', description: 'AI 智能体', welcome_message: '喵，来聊天吧。' };
-      insertEntry();
+      scheduleInsertEntry();
     });
     hookChatList();
   }
