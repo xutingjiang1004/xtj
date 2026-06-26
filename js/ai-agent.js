@@ -394,9 +394,35 @@
             window.switchDockTab('chat', true);
         }
 
-        // 4. 后台加载配置（失败不影响 UI）
+        // 4. 异步加载配置（只调用一次，加载完成后更新 UI）
         apiGetConfig().then(function(cfgData) {
-            if (cfgData && cfgData.config) state.config = cfgData.config;
+            if (!cfgData || !cfgData.config) return;
+            state.config = cfgData.config;
+            var name2 = state.config.name || '徐旭泽的小猫';
+            var avatar2 = state.config.avatar || '🐱';
+            var desc2 = state.config.description || '';
+            var container = document.getElementById('dockChatMessages');
+            if (!container) return;
+            var tb = container.querySelector('.ai-chat-topbar');
+            if (tb) {
+                var spans = tb.children;
+                if (spans[0]) spans[0].textContent = avatar2;
+                if (spans[1]) spans[1].textContent = name2;
+                if (spans[2]) spans[2].textContent = desc2;
+            }
+            var inp = document.getElementById('aiChatMsgInput');
+            if (inp) inp.placeholder = '和' + name2 + '说点什么吧…';
+            var titleEl2 = document.getElementById('dockChatTitle');
+            if (titleEl2) titleEl2.textContent = avatar2 + ' ' + name2;
+            var emptyEl = container.querySelector('.ai-chat-empty');
+            if (emptyEl) {
+                var emoji = emptyEl.querySelector('.ai-chat-empty-emoji');
+                if (emoji) emoji.textContent = avatar2;
+                var title = emptyEl.querySelector('.ai-chat-empty-title');
+                if (title) title.textContent = '和' + name2 + '聊聊天';
+                var tip = emptyEl.querySelector('.ai-chat-empty-tip');
+                if (tip) tip.textContent = (state.config.welcome_message || '喵，来聊天吧。');
+            }
         }).catch(function() {});
 
         var name = state.config ? state.config.name : '徐旭泽的小猫';
@@ -433,41 +459,6 @@
         if (typeof window.stopDMPolling === 'function') {
             window.stopDMPolling();
         }
-
-        // 9. 配置加载完成后刷新 UI（如果有新配置）
-        apiGetConfig().then(function(cfgData) {
-            if (!cfgData || !cfgData.config) return;
-            state.config = cfgData.config;
-            var name2 = state.config.name || '徐旭泽的小猫';
-            var avatar2 = state.config.avatar || '🐱';
-            var desc2 = state.config.description || '';
-            // 更新顶栏
-            var container = document.getElementById('dockChatMessages');
-            if (!container) return;
-            var tb = container.querySelector('.ai-chat-topbar');
-            if (tb) {
-                var spans = tb.children;
-                if (spans[0]) spans[0].textContent = avatar2;
-                if (spans[1]) spans[1].textContent = name2;
-                if (spans[2]) spans[2].textContent = desc2;
-            }
-            // 更新输入框 placeholder
-            var inp = document.getElementById('aiChatMsgInput');
-            if (inp) inp.placeholder = '和' + name2 + '说点什么吧…';
-            // 更新标题
-            var titleEl2 = document.getElementById('dockChatTitle');
-            if (titleEl2) titleEl2.textContent = avatar2 + ' ' + name2;
-            // 更新空状态
-            var emptyEl = container.querySelector('.ai-chat-empty');
-            if (emptyEl) {
-                var emoji = emptyEl.querySelector('.ai-chat-empty-emoji');
-                if (emoji) emoji.textContent = avatar2;
-                var title = emptyEl.querySelector('.ai-chat-empty-title');
-                if (title) title.textContent = '和' + name2 + '聊聊天';
-                var tip = emptyEl.querySelector('.ai-chat-empty-tip');
-                if (tip) tip.textContent = (state.config.welcome_message || '喵，来聊天吧。');
-            }
-        }).catch(function() {});
     };
 
     window.__xtjCloseAiChat = function() {
