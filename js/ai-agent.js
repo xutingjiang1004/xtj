@@ -578,7 +578,9 @@
     if (S.rootEl) { try { S.rootEl.remove(); } catch (e) {} S.rootEl = null; }
 
     // 切回 list view
-    if (listView = document.getElementById('dockChatListView')) listView.classList.remove('hidden');
+    // ★ 关键：必须用 var 声明，避免 if (listView = ...) 隐式创建全局变量
+    var listView2 = document.getElementById('dockChatListView');
+    if (listView2) listView2.classList.remove('hidden');
     if (detailView) detailView.classList.add('hidden');
 
     // 恢复 dock title
@@ -641,11 +643,15 @@
     // 拦截 renderDockChatList，每次调用后重新插入 AI 入口（保证不重复）
     var original = window.renderDockChatList;
     window.renderDockChatList = function() {
+      var ret;
       if (typeof original === 'function') {
-        try { return original.apply(this, arguments); } catch (e) {}
+        try { ret = original.apply(this, arguments); } catch (e) {}
       }
-      // 在原函数执行后插入入口（无论成功失败）
+      // ★ 关键：必须先 return ret，再执行 setTimeout，否则提前 return 会跳过 insertEntry
+      //   普通聊天列表刷新后会清空 #dockChatListView 的子元素，覆盖 AI 入口
+      //   setTimeout 0 是为了让 original 内部 DOM 操作先完成再插入，避免被原函数后续逻辑覆盖
       setTimeout(insertEntry, 0);
+      return ret;
     };
     S.bound = true;
   }
