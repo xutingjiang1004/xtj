@@ -69,6 +69,18 @@ const supabase = createClient(
   SUPABASE_SERVICE_KEY
 );
 
+// ===================== DeepSeek AI 配置 =====================
+// ★ DeepSeek API Key 只能放后端环境变量，绝对不能放前端
+// 全部模型都用 deepseek-v4-flash（不暴露原始错误给前端）
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
+const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
+const DEEPSEEK_TIMEOUT_MS = 25000; // 25 秒超时，避免长请求拖死 Express 进程
+const AI_AGENT_DAILY_LIMIT = 50;  // 每用户每天 AI 调用次数
+const AI_AGENT_HOURLY_LIMIT = 10; // 每用户每小时 AI 调用次数
+console.log('[AI-CONFIG] DEEPSEEK_API_KEY:', DEEPSEEK_API_KEY ? '已设置' : '未设置（开发模式将使用 mock 回复）');
+console.log('[AI-CONFIG] DEEPSEEK_MODEL:', DEEPSEEK_MODEL);
+
 // ===================== Gmail SMTP 邮件配置 =====================
 const GMAIL_USER = process.env.GMAIL_USER || '';
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || '';
@@ -136,6 +148,15 @@ const ANN_READ_MARKER = '__ann_read__';
 // 邮件 / 历史邮箱
 const EMAIL_SENT_MARKER = '__email_sent__';
 const EMAIL_RECIPIENT_MARKER = '__email_recipient_history__';
+
+// ===================== AI 智能体 / AI 宠物 =====================
+// 所有 AI 相关数据使用 posts 表 + marker 集中存储（与现有 Pro Gift / VIP / 公告同模式）
+// ★ 必须加入 applyPublicPostExclusions() 避免出现在普通帖子 feed、统计、后台列表
+const AI_AGENT_PROFILE_MARKER = '__ai_agent_profile__';
+const AI_AGENT_MESSAGE_MARKER = '__ai_agent_msg__';
+const AI_AGENT_MEMORY_MARKER = '__ai_agent_memory__';
+const AI_AGENT_ACTION_MARKER = '__ai_agent_action__';
+const AI_AGENT_DAILY_MARKER = '__ai_agent_daily__';
 
 const LOGIN_LOG_RETENTION_DAYS = 90;
 const SECURITY_LOG_RETENTION_DAYS = 90;
@@ -1303,6 +1324,116 @@ function rateLimit(windowMs, maxRequests) {
       return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
     }
     next();
+  };
+}
+
+// ===================== DeepSeek 统一调用封装 =====================
+// ★ 调用 DeepSeek API 的唯一入口
+// - API Key 从后端 DEEPSEEK_API_KEY 读取，绝对不出现在前端 / 日志
+// - 内置 25s 超时控制（AbortController），避免长请求拖死 Express 进程
+// - 未配置 API Key 时返 mock 回复（开发模式 + 本地无 Key 测试）
+// - 错误信息统一脱敏，不暴露 DeepSeek 原始错误给前端调用方
+async function callDeepSeek(messages, options) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    throw new Error('AI 调用参数无效');
+  }
+
+  // 开发模式：API Key 未配置时返 mock 回复
+  if (!DEEPSEEK_API_KEY) {
+    var lastUser = null;
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (messages[i] && messages[i].role === 'user') { lastUser = messages[i].content; break; }
+    }
+    return '[MOCK 回复 · DeepSeek API Key 未配置]\n' +
+           '我已收到你的消息：' + String(lastUser || '').slice(0, 80) + '\n\n' +
+           '请在 Render Dashboard 配置 DEEPSEEK_API_KEY 后重启服务即可使用真实模型。';
+  }
+
+  var model = (options && options.model) || DEEPSEEK_MODEL;
+  var controller = new AbortController();
+  var timer = setTimeout(function() { controller.abort(); }, DEEPSEEK_TIMEOUT_MS);
+
+  try {
+    var resp = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: messages,
+        stream: false
+      }),
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+
+    var data = await resp.json().catch(function() { return {}; });
+
+    if (!resp.ok) {
+      // 不暴露 DeepSeek 原始错误给前端调用方（仅服务器端日志记录）
+      var deepErr = data && data.error && data.error.message ? String(data.error.message).slice(0, 200) : '';
+      console.error('[DEEPSEEK] API error', resp.status, deepErr);
+      throw new Error('AI 调用失败（HTTP ' + resp.status + '）');
+    }
+
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      console.error('[DEEPSEEK] unexpected response shape');
+      throw new Error('AI 返回格式异常');
+    }
+
+    var content = data.choices[0].message.content;
+    if (typeof content !== 'string') content = '';
+    return content;
+  } catch (e) {
+    clearTimeout(timer);
+    if (e && e.name === 'AbortError') {
+      console.error('[DEEPSEEK] request timeout after', DEEPSEEK_TIMEOUT_MS, 'ms');
+      throw new Error('AI 调用超时，请稍后再试');
+    }
+    // 已知错误直接抛出（已是脱敏后的中文消息）
+    if (e && e.message && (e.message.indexOf('AI 调用失败') === 0 || e.message.indexOf('AI 返回格式') === 0)) throw e;
+    console.error('[DEEPSEEK] unexpected error:', e && e.message);
+    throw new Error('AI 调用异常，请稍后再试');
+  }
+}
+
+// ===================== AI 用户级限流（按 userName 而非 IP） =====================
+// ★ AI 智能体调用按 userName 限流，避免 IP 共享用户互相挤占额度
+// 限流维度：每用户每天 AI_AGENT_DAILY_LIMIT 次 / 每小时 AI_AGENT_HOURLY_LIMIT 次
+var aiUserRateStore = new Map(); // userName -> { hourly: {count, resetAt}, daily: {count, resetAt} }
+function checkAiUserRateLimit(userName) {
+  if (!userName) return { allowed: false, reason: 'no_user' };
+  var now = Date.now();
+  var record = aiUserRateStore.get(userName) || {
+    hourly: { count: 0, resetAt: now + 3600000 },
+    daily:  { count: 0, resetAt: now + 86400000 }
+  };
+
+  // 重置窗口
+  if (now > record.hourly.resetAt) {
+    record.hourly = { count: 1, resetAt: now + 3600000 };
+  } else {
+    record.hourly.count++;
+  }
+  if (now > record.daily.resetAt) {
+    record.daily = { count: 1, resetAt: now + 86400000 };
+  } else {
+    record.daily.count++;
+  }
+  aiUserRateStore.set(userName, record);
+
+  if (record.hourly.count > AI_AGENT_HOURLY_LIMIT) {
+    return { allowed: false, reason: 'hourly_limit', remainingHour: 0, remainingDay: Math.max(0, AI_AGENT_DAILY_LIMIT - record.daily.count) };
+  }
+  if (record.daily.count > AI_AGENT_DAILY_LIMIT) {
+    return { allowed: false, reason: 'daily_limit', remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count), remainingDay: 0 };
+  }
+  return {
+    allowed: true,
+    remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count),
+    remainingDay:  Math.max(0, AI_AGENT_DAILY_LIMIT  - record.daily.count)
   };
 }
 
