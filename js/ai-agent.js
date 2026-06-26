@@ -131,45 +131,96 @@
     return '';
   }
 
-  // 返回 { token, headers, body, query }
-  async function getUserAuthPayload() {
-    // 1. 优先 token
+  // 返回 { token, headers, body, query, userName, passwordHash }
+  // options.forceNoToken = true 时强制不走 token（重试 401/403 后用）
+  // 注意：即使无 token，也总是返回 userName/passwordHash（用于日志/重试判断）
+  async function getUserAuthPayload(options) {
+    options = options || {};
+    var forceNoToken = !!options.forceNoToken;
+
+    // 1. 优先 token（重试模式下不读旧 token）
     var token = '';
-    try {
-      if (typeof window.ensureUserToken === 'function') {
-        token = await window.ensureUserToken();
+    if (!forceNoToken) {
+      try {
+        if (typeof window.ensureUserToken === 'function') {
+          token = await window.ensureUserToken();
+        }
+      } catch (e) {
+        token = '';
       }
-    } catch (e) {
-      token = '';
     }
 
     var headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = 'Bearer ' + token;
 
-    // 2. 兜底
+    // 2. 读取 user_name / password_hash（任何模式都读，用于重试兜底）
+    var un = readUserName();
+    var pw = readPwHash();
+
     var body = {};
     var query = {};
-    if (!token) {
-      var un = readUserName();
-      var pw = readPwHash();
-      if (un && pw) {
-        body.user_name = un;
-        body.password_hash = pw;
-        query.user_name = un;
-        query.password_hash = pw;
-      }
+    if (!token && un && pw) {
+      body.user_name = un;
+      body.password_hash = pw;
+      query.user_name = un;
+      query.password_hash = pw;
     }
-    return { token: token, headers: headers, body: body, query: query };
+    return { token: token, headers: headers, body: body, query: query, userName: un, passwordHash: pw };
+  }
+
+  // ===================== 清理 AI 模块的 user token =====================
+  function clearAiUserToken() {
+    try { if (typeof window.clearUserToken === 'function') window.clearUserToken(); } catch (e) {}
+    try { localStorage.removeItem('xtj_user_token'); } catch (e) {}
+    try { sessionStorage.removeItem('xtj_user_token'); } catch (e) {}
+    try { localStorage.removeItem('xtj_user_token_ts'); } catch (e) {}
+  }
+
+  // ===================== 是否有本地 password_hash 兜底 =====================
+  function hasLocalPasswordHash() {
+    return !!(readUserName() && readPwHash());
   }
 
   // ===================== API（统一封装）=====================
   // 返回 { ok, status, data, error, url, rawText }
   // 失败时 console.warn 打印真实状态码/响应体，便于排查
+  // ★ 401/403 后自动清理旧 token 并用 password_hash 兜底重试一次
   async function apiRequest(method, path, body) {
+    var first = await sendOnce(method, path, body, { forceNoToken: false });
+    if (first && (first.status === 401 || first.status === 403)) {
+      // 仅在有本地 password_hash 兜底时才重试，避免无谓请求
+      if (hasLocalPasswordHash()) {
+        try { console.warn('[AI] auth failed, retrying with password_hash fallback'); } catch (e) {}
+        clearAiUserToken();
+        var second = await sendOnce(method, path, body, { forceNoToken: true, retry: true });
+        try { console.warn('[AI] retry result', { status: second && second.status, ok: second && second.ok }); } catch (e) {}
+        return second;
+      } else {
+        // 没有任何兜底，尝试主动 refreshUserToken
+        if (typeof window.refreshUserToken === 'function') {
+          try {
+            var refreshed = await window.refreshUserToken(true);
+            if (refreshed) {
+              try { console.warn('[AI] auth failed, retried with refreshed token'); } catch (e) {}
+              var third = await sendOnce(method, path, body, { forceNoToken: false, retry: true });
+              try { console.warn('[AI] retry result', { status: third && third.status, ok: third && third.ok }); } catch (e) {}
+              return third;
+            }
+          } catch (e) {}
+        }
+      }
+    }
+    return first;
+  }
+
+  // ===================== 实际发起一次请求 =====================
+  // options.forceNoToken = true 时强制不带 Authorization（用 password_hash 兜底）
+  async function sendOnce(method, path, body, options) {
+    options = options || {};
     var auth = null;
     var url = API_BASE + path;
     try {
-      auth = await getUserAuthPayload();
+      auth = await getUserAuthPayload({ forceNoToken: !!options.forceNoToken });
       var headers = auth.headers;
       var opts = { method: method, headers: headers };
 
@@ -216,7 +267,7 @@
         url: url,
         rawText: rawText ? String(rawText).slice(0, 300) : ''
       };
-      if (!result.ok) {
+      if (!result.ok && !options.retry) {
         try {
           console.warn('[AI] request failed', {
             method: method,

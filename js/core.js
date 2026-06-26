@@ -160,6 +160,44 @@ const ADMIN_NAME = "xxz";
             window.ensureUserToken = ensureUserToken;
             window.clearUserToken = clearUserToken;
 
+            /**
+             * 强制刷新 token。
+             *  - force=false（默认）：和 ensureUserToken 一样，有旧 token 就直接返回
+             *  - force=true：忽略旧 token，主动用 currentUser + xtj_pw_hash 调 /api/user/login 换新 token
+             * 用途：AI 401/403 后由 ai-agent.js 调用，避开"旧 token 永远优先"的死循环
+             */
+            window.refreshUserToken = async function(force) {
+                try {
+                    if (!force) {
+                        var existing = getUserToken();
+                        if (existing) return existing;
+                    }
+                    var userName = '';
+                    try { userName = (typeof currentUser === 'string' ? currentUser : (currentUser && currentUser.user_name) || '') || ''; } catch (e) { userName = ''; }
+                    if (!userName) {
+                        try { userName = localStorage.getItem('xtj_user') || sessionStorage.getItem('xtj_user') || ''; } catch (e) {}
+                    }
+                    var pwHash = '';
+                    try { pwHash = sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash') || ''; } catch (e) { pwHash = ''; }
+                    if (!userName || !pwHash) return '';
+                    clearUserToken();
+                    var tokenRes = await fetch(API_BASE + '/api/user/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_name: userName, password_hash: pwHash })
+                    });
+                    var tokenData = await tokenRes.json().catch(function() { return {}; });
+                    if (tokenRes.ok && tokenData && tokenData.token) {
+                        setUserToken(tokenData.token);
+                        return tokenData.token;
+                    }
+                    if (tokenRes.status === 401 || tokenRes.status === 403) {
+                        clearUserToken();
+                    }
+                } catch (e) {}
+                return '';
+            };
+
             let avatarCache = {};
             let lastUserSessionWriteAt = 0;
 
