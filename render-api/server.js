@@ -1742,8 +1742,12 @@ async function authenticateUser(req, res, next) {
   }
 
   // 兼容旧 password_hash（逐步废弃）
-  var password_hash = req.body.password_hash || '';
-  var userName = req.body.user_name || req.query.user_name || req.body.reporter_name || '';
+  // ★ 关键修复：GET 请求 req.body 可能为空，必须从 req.query 兜底
+  //   同时确保 password_hash 也能从 query 读取（前端 GET history 走 query 兜底）
+  var body = req.body || {};
+  var query = req.query || {};
+  var password_hash = body.password_hash || query.password_hash || '';
+  var userName = body.user_name || query.user_name || body.reporter_name || query.reporter_name || '';
   var userNameVal = validateString(userName, MAX_USERNAME_LEN, '用户名');
   if (!userNameVal || !password_hash) {
     return res.status(401).json({ error: '缺少身份验证' });
