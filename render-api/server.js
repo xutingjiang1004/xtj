@@ -108,33 +108,48 @@ async function searchWeb(query, maxResults) {
   var results = [];
   try {
     // SearXNG — 免费开源元搜索引擎，无需 API Key
-    // 可自建 Docker，也可使用公开实例
-    // 默认使用 searx.be (长期稳定公开实例)
-    // 也可通过 SEARCH_API_URL 自定义
-    var searchApiUrl = process.env.SEARCH_API_URL || 'https://search.sapti.me';
+    // 使用多个公开实例做 fallback
+    // 也可通过 SEARCH_API_URL 环境变量自定义
+    var searchApiUrl = process.env.SEARCH_API_URL || '';
+    var instances = searchApiUrl ? [searchApiUrl] : [
+      'https://search.sapti.me',
+      'https://searx.be',
+      'https://search.us.projectsegfau.lt'
+    ];
     
-    var searxngUrl = searchApiUrl.replace(/\/+$/, '') + '/search?q=' + encodeURIComponent(query) + '&format=json&number_of_results=' + maxResults + '&language=zh-CN';
-    
-    var searxngRes = await fetch(searxngUrl, {
-      headers: { 'Accept': 'application/json', 'User-Agent': 'XTJ-AI/1.0' }
-    });
-    
-    if (searxngRes.ok) {
-      var searxngData = await searxngRes.json();
-      var searxngResults = searxngData && searxngData.results;
-      if (Array.isArray(searxngResults)) {
-        results = searxngResults.slice(0, maxResults).map(function(r) {
-          return {
-            title: String(r.title || '').slice(0, 200),
-            url: String(r.url || ''),
-            snippet: String(r.content || r.snippet || '').slice(0, 300),
-            source: r.engine || 'web',
-            published_at: r.publishedDate || ''
-          };
+    for (var instIdx = 0; instIdx < instances.length; instIdx++) {
+      if (results.length) break;
+      var baseUrl = instances[instIdx].replace(/\/+$/, '');
+      var searxngUrl = baseUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&number_of_results=' + maxResults + '&language=zh-CN';
+      
+      try {
+        var searxngRes = await fetch(searxngUrl, {
+          headers: { 'Accept': 'application/json', 'User-Agent': 'XTJ-AI/1.0' },
+          signal: AbortSignal.timeout(5000)
         });
+        
+        if (searxngRes.ok) {
+          var searxngData = await searxngRes.json();
+          var searxngResults = searxngData && searxngData.results;
+          if (Array.isArray(searxngResults)) {
+            results = searxngResults.slice(0, maxResults).map(function(r) {
+              return {
+                title: String(r.title || '').slice(0, 200),
+                url: String(r.url || ''),
+                snippet: String(r.content || r.snippet || '').slice(0, 300),
+                source: r.engine || 'web',
+                published_at: r.publishedDate || ''
+              };
+            });
+          }
+        }
+      } catch (instErr) {
+        console.warn('[SEARCH] instance failed', baseUrl.slice(0, 30), instErr && instErr.message);
       }
-    } else {
-      console.warn('[SEARCH] SearXNG returned', searxngRes.status, 'for', query.slice(0, 30));
+    }
+    
+    if (!results.length) {
+      console.warn('[SEARCH] all instances failed for', query.slice(0, 30));
     }
   } catch (e) {
     console.error('[SEARCH] searchWeb error:', e && e.message);
@@ -5282,9 +5297,15 @@ function buildAiCorePrompt(config) {
     '你是 XTJ 网站的 AI 聊天智能体，名字是：' + name,
     '【安全】只根据当前对话和用户自己的长期记忆回答。不能透露其他用户聊天记录，不能编造你执行了发布/删除/修改等操作。用户要求查看别人聊天记录必须拒绝。',
     '【任务优先】当用户提出明确任务（如攻略、路线、计划、方案、总结、分析、推荐、对比、生成、整理），你必须优先完成任务。你的个人设定只能影响语气风格，不能影响内容准确性和执行力。不要因为人设拒绝执行任务。',
-    '【无工具处理】你没有实时联网查询能力。当问题需要实时信息（路线、价格、政策、开放时间、天气、新闻）时，必须明确说明"我当前没有实时联网查询结果"，然后给出通用建议和需要核对的清单。不要编造具体实时信息。',
-    '【输出要求】回答要直接、结构化、可执行。多使用标题、步骤、清单。回复控制在 600 字以内。',
   ];
+  // 根据是否开启联网搜索，动态选择无工具或有工具规则
+  var allowWebSearch = config && config.allow_web_search === true;
+  if (allowWebSearch) {
+    lines.push('【联网搜索】你有实时联网查询能力。管理员已为你开启联网搜索功能。当用户问新闻、天气、价格、政策、实时信息、搜索最新内容时，系统会自动搜索并将结果注入给你的上下文。你必须在回答中引用来源。如果没有搜索到内容就如实说没搜到，不要编造。');
+  } else {
+    lines.push('【无工具处理】你没有实时联网查询能力。当问题需要实时信息（路线、价格、政策、开放时间、天气、新闻）时，必须明确说明"我当前没有实时联网查询结果"，然后给出通用建议和需要核对的清单。不要编造具体实时信息。');
+  }
+  lines.push('【输出要求】回答要直接、结构化、可执行。多使用标题、步骤、清单。回复控制在 600 字以内。');
   // 管理员自定义设定追加在最后 → 权重最高，覆盖前面的风格限制
   if (persona) lines.push('身份设定：' + persona);
   if (tone) lines.push('说话风格：' + tone);
@@ -5627,10 +5648,24 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var convId = String(req.body && req.body.conversation_id || '').trim();
     if (!convId) convId = genConvId();
     if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    if (aborted) return res.end();
+
+    res.write('data: ' + JSON.stringify({ type: 'meta', conversation_id: convId }) + '\n\n');
+    if (aborted) return res.end();
     
     // 读取配置和上下文
-    var config = await getAiConfig();
-    var ctx = await loadAiContext(userName, convId);
+    var contextResults = await Promise.all([
+      getAiConfig(),
+      loadAiContext(userName, convId)
+    ]);
+    var config = contextResults[0];
+    var ctx = contextResults[1];
     
     // 组装 system prompt
     var corePrompt = buildAiCorePrompt(config);
@@ -5661,20 +5696,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } catch (e) {}
     }
     
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    
     var reasoning = '';
     var content = '';
     var usageResult = null;
     var usedModel = DEEPSEEK_MODEL_REASONER;
     
     if (aborted) return res.end();
-    
-    // 发送 convId
-    res.write('data: ' + JSON.stringify({ type: 'meta', conversation_id: convId }) + '\n\n');
     
     // 发送搜索摘要（如果有）
     if (searchResults && Array.isArray(searchResults) && searchResults.length) {
