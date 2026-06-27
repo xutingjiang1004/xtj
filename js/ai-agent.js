@@ -573,8 +573,57 @@
         usage: d.usage || null
       };
       S.messages.push(aiMsg);
-      appendMessage(messagesEl, aiMsg);
+
+      // 手动构建 AI 消息节点以支持打字机动画
+      var aiNode = el('div', { class: 'ai-msg assistant' });
+      var aiBubble = el('div', { class: 'ai-msg-bubble ai-typing' });
+      // 思考过程块
+      if (d.reasoning) {
+        var thinkingContainer = el('div', { class: 'ai-thinking' });
+        var thinkingHeader = el('div', { class: 'ai-thinking-header', text: '💭 思考过程' });
+        var thinkingBody = el('div', { class: 'ai-thinking-body' });
+        thinkingBody.textContent = d.reasoning;
+        thinkingBody.style.display = 'none';
+        thinkingHeader.addEventListener('click', function() {
+          var isHidden = thinkingBody.style.display === 'none';
+          thinkingBody.style.display = isHidden ? 'block' : 'none';
+          thinkingContainer.classList.toggle('expanded', isHidden);
+          thinkingHeader.textContent = isHidden ? '💭 收起思考' : '💭 思考过程';
+          try { requestAnimationFrame(function() { scrollToBottom(messagesEl); }); } catch (e) {}
+        });
+        thinkingContainer.appendChild(thinkingHeader);
+        thinkingContainer.appendChild(thinkingBody);
+        aiNode.appendChild(thinkingContainer);
+      }
+      aiNode.appendChild(aiBubble);
+      messagesEl.appendChild(aiNode);
       scrollToBottom(messagesEl);
+
+      // 打字机逐字动画
+      var fullText = d.reply;
+      var charsPerTick = fullText.length > 400 ? 5 : 3;
+      var charDelayMs = 10;
+      var pos = 0;
+      function typeTick() {
+        if (pos >= fullText.length) {
+          aiBubble.classList.remove('ai-typing');
+          aiBubble.textContent = fullText;
+          if (d.usage) {
+            var usageLine = buildUsageLine(d.usage);
+            if (usageLine) aiNode.appendChild(el('div', { class: 'ai-msg-usage', text: usageLine }));
+          }
+          if (d.created_at) aiNode.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(d.created_at || nowIso) }));
+          scrollToBottom(messagesEl);
+          return;
+        }
+        pos += charsPerTick;
+        if (pos > fullText.length) pos = fullText.length;
+        aiBubble.textContent = fullText.slice(0, pos);
+        scrollToBottom(messagesEl);
+        setTimeout(typeTick, charDelayMs);
+      }
+      aiBubble.textContent = '';
+      setTimeout(typeTick, 30);
     } else {
       S.messages.pop();
       removeLastUserMessage(messagesEl);
