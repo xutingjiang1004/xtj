@@ -772,13 +772,8 @@
     container.classList.toggle('expanded', !!expanded);
     toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     caret.textContent = '\u25be';
-    if (expanded) {
-      panel.style.maxHeight = panel.scrollHeight + 'px';
-      panel.style.opacity = '1';
-      if (messagesEl) scrollToBottom(messagesEl, false);
-    } else {
-      panel.style.maxHeight = '0px';
-      panel.style.opacity = '0';
+    if (messagesEl && expanded) {
+      scrollToBottom(messagesEl, false);
     }
   }
 
@@ -796,8 +791,6 @@
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
     var panel = el('div', { class: 'ai-thinking-panel' });
-    panel.style.maxHeight = '0px';
-    panel.style.opacity = '0';
     panel.appendChild(el('div', { class: 'ai-thinking-body', text: reasoning }));
 
     toggle.addEventListener('click', function() {
@@ -1350,34 +1343,6 @@
             continue;
           }
           
-          if (evt.type === 'status') {
-            var statusBar = messagesEl.querySelector('.ai-search-status');
-            if (!statusBar) {
-              statusBar = el('div', { class: 'ai-search-status' });
-              messagesEl.appendChild(statusBar);
-            }
-            statusBar.textContent = evt.text || '';
-            clearTimeout(statusBar._hideTimer);
-            statusBar._hideTimer = setTimeout(function() {
-              try { statusBar.remove(); } catch (e) {}
-            }, 3000);
-            continue;
-          }
-          
-          if (evt.type === 'weather') {
-            var weatherBar = messagesEl.querySelector('.ai-search-status');
-            if (!weatherBar) {
-              weatherBar = el('div', { class: 'ai-search-status' });
-              messagesEl.appendChild(weatherBar);
-            }
-            weatherBar.textContent = '已查询天气';
-            clearTimeout(weatherBar._hideTimer);
-            weatherBar._hideTimer = setTimeout(function() {
-              try { weatherBar.remove(); } catch (e) {}
-            }, 3000);
-            continue;
-          }
-          
           if (evt.type === 'error') {
             try { typingNode.remove(); } catch (e) {}
             notify(evt.error || 'AI 调用失败');
@@ -1415,11 +1380,6 @@
               var rn = ensureReasoningNode();
               var body = rn.querySelector('.ai-thinking-body');
               if (body) body.textContent = aiReasoning || '思考中...';
-              var panel = rn.querySelector('.ai-thinking-panel');
-              if (panel && rn.classList.contains('expanded')) {
-                panel.style.maxHeight = panel.scrollHeight + 'px';
-                panel.style.opacity = '1';
-              }
               scrollToBottom(messagesEl, false);
             }
             continue;
