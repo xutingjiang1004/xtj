@@ -793,6 +793,69 @@
     }
   }
 
+  function formatThinkingElapsed(ms) {
+    var totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+    if (totalSeconds < 60) return totalSeconds + '秒';
+    var minutes = Math.floor(totalSeconds / 60);
+    var seconds = totalSeconds % 60;
+    return seconds > 0 ? (minutes + '分' + seconds + '秒') : (minutes + '分钟');
+  }
+
+  function setThinkingStatus(node, text) {
+    if (!node || !node.querySelector) return;
+    var status = node.querySelector('.ai-thinking-status');
+    if (!status) return;
+    status.textContent = text || '';
+  }
+
+  function createThinkingTimer(reasoningNode) {
+    var intervalId = null;
+    var startedAt = 0;
+    var stopped = false;
+
+    function update(prefix, elapsedMs) {
+      if (!reasoningNode || !reasoningNode.isConnected) return;
+      setThinkingStatus(reasoningNode, prefix + ' ' + formatThinkingElapsed(elapsedMs));
+    }
+
+    return {
+      start: function() {
+        if (stopped || intervalId) return;
+        startedAt = Date.now();
+        update('思考中', 0);
+        intervalId = setInterval(function() {
+          if (!reasoningNode || !reasoningNode.isConnected) return;
+          update('思考中', Date.now() - startedAt);
+        }, 500);
+      },
+      stop: function() {
+        if (intervalId) {
+          try { clearInterval(intervalId); } catch (e) {}
+          intervalId = null;
+        }
+        stopped = true;
+        return startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+      },
+      cancel: function() {
+        if (intervalId) {
+          try { clearInterval(intervalId); } catch (e) {}
+          intervalId = null;
+        }
+        stopped = true;
+      },
+      syncFinal: function(ms) {
+        if (intervalId) {
+          try { clearInterval(intervalId); } catch (e) {}
+          intervalId = null;
+        }
+        stopped = true;
+        if (reasoningNode && reasoningNode.isConnected) {
+          setThinkingStatus(reasoningNode, '已思考 ' + formatThinkingElapsed(ms));
+        }
+      }
+    };
+  }
+
   function buildReasoningNode(reasoning, messagesEl) {
     var container = el('div', { class: 'ai-thinking' });
     var toggle = el('button', {
@@ -804,6 +867,7 @@
     var label = el('span', { class: 'ai-thinking-label' });
     label.appendChild(el('span', { text: '思考' }));
     toggle.appendChild(label);
+    toggle.appendChild(el('span', { class: 'ai-thinking-status', text: '' }));
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
     var panel = el('div', { class: 'ai-thinking-panel' });
@@ -1334,6 +1398,9 @@
       var reasoningContainer = null;
       var contentRenderer = null;
       var reasoningRenderer = null;
+      var thinkingTimer = null;
+      var thinkingStartedAt = 0;
+      var finalThinkingElapsedMs = 0;
       var usageResult = null;
       var finalModel = '';
       var finalThinkingMode = '';
@@ -1342,6 +1409,9 @@
       var evtHandled = false;
 
       function finishAiMessage(node, content, thinking, evt) {
+        if (thinkingTimer) {
+          finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
+        }
         if (reasoningRenderer) reasoningRenderer.finish(thinking || '');
         if (contentRenderer) contentRenderer.finish(content || '');
         cleanupRenderers();
@@ -1360,7 +1430,16 @@
             var body = rNode.querySelector('.ai-thinking-body');
             if (body) body.textContent = thinking;
           }
+          if (rNode) {
+            setThinkingExpanded(rNode, !!rNode.classList.contains('expanded'), messagesEl);
+            if (thinkingTimer) {
+              thinkingTimer.syncFinal(finalThinkingElapsedMs);
+            } else {
+              setThinkingStatus(rNode, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
+            }
+          }
         } else if (reasoningContainer) {
+          if (thinkingTimer) thinkingTimer.cancel();
           try { reasoningContainer.remove(); } catch (e) {}
           reasoningContainer = null;
         }
@@ -1386,6 +1465,10 @@
       }
 
       function cleanupRenderers() {
+        if (thinkingTimer) {
+          try { thinkingTimer.cancel(); } catch (e0) {}
+          thinkingTimer = null;
+        }
         if (contentRenderer) {
           try { contentRenderer.cancel(); } catch (e) {}
           contentRenderer = null;
@@ -1422,6 +1505,17 @@
           setThinkingExpanded(reasoningContainer, true, messagesEl);
         }
         return reasoningContainer;
+      }
+
+      function ensureThinkingTimer() {
+        var rn = ensureReasoningNode();
+        if (!thinkingTimer) {
+          thinkingTimer = createThinkingTimer(rn);
+          thinkingStartedAt = Date.now();
+          finalThinkingElapsedMs = 0;
+          thinkingTimer.start();
+        }
+        return thinkingTimer;
       }
 
       function ensureAssistantBubble() {
@@ -1587,6 +1681,7 @@
             reasoningStarted = true;
             if ((finalThinkingMode && finalThinkingMode !== 'off') || (!finalThinkingMode && S.thinkingMode !== 'off')) {
               ensureReasoningNode();
+              ensureThinkingTimer();
             }
             continue;
           }
@@ -1624,6 +1719,9 @@
             try { typingNode.remove(); } catch (e) {}
             S.sending = false;
             S.abortController = null;
+            if (thinkingTimer) {
+              finalThinkingElapsedMs = thinkingTimer.stop();
+            }
             
             // 更新 usage / done 数据
             try {
