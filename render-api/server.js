@@ -1368,6 +1368,7 @@ async function callDeepSeek(messages, options) {
   var model = (options && options.model) || DEEPSEEK_MODEL;
   var thinkingLevel = (options && options.thinking_mode) || 'off';
   var useThinking = thinkingLevel !== 'off';
+  try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking); } catch (e) {}
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
 
@@ -1401,6 +1402,10 @@ async function callDeepSeek(messages, options) {
     if (!resp.ok) {
       var deepErr = data && data.error && data.error.message ? String(data.error.message).slice(0, 200) : '';
       console.error('[DEEPSEEK] API error', resp.status, deepErr);
+      // 检测模型不支持思考模式：DeepSeek 返回的 error 包含 "thinking" / "reasoning_effort" 关键词
+      if (useThinking && (deepErr.indexOf('thinking') >= 0 || deepErr.indexOf('reasoning_effort') >= 0 || resp.status === 400)) {
+        throw new Error('AI 调用失败：当前模型不支持思考模式，请关闭思考模式后重试');
+      }
       throw new Error('AI 调用失败（HTTP ' + resp.status + '）');
     }
 
@@ -5147,9 +5152,10 @@ function parseMsgMeta(r) {
   return { role: raw === 'assistant' ? 'assistant' : 'user' };
 }
 
-function buildMsgMeta(role, convId, usage) {
+function buildMsgMeta(role, convId, usage, reasoning) {
   var obj = { role: role, convId: convId };
   if (usage) obj.usage = usage;
+  if (reasoning) obj.reasoning = reasoning;
   return JSON.stringify(obj);
 }
 
@@ -5476,9 +5482,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
         },
         {
           user_name: userName,
-          content: JSON.stringify({ reply: reply, reasoning: reasoning }),
+          content: reply,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', convId, usageToStore),
+          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning),
           actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
         }
       ]);
@@ -5504,6 +5510,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     });
   } catch (e) {
     console.error('[AGENT-CHAT] exception:', e.message);
+    if (e.message && e.message.indexOf('不支持思考模式') >= 0) {
+      return res.status(400).json({ error: e.message });
+    }
     return res.status(500).json({ error: '聊天失败，请稍后再试' });
   }
 });
@@ -5573,9 +5582,9 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       messages: sortedRows.map(function(r) {
         var m = parseMsgMeta(r);
         var content = r.content || '';
-        var reasoning = '';
-        // assistant 消息 content 可能为 JSON { reply, reasoning }
-        if (m.role === 'assistant') {
+        var reasoning = m.reasoning || '';
+        // 兼容旧格式：assistant 消息 content 可能为 JSON { reply, reasoning }
+        if (m.role === 'assistant' && !reasoning) {
           try {
             var c = JSON.parse(r.content || '{}');
             if (c && typeof c.reply === 'string') {
