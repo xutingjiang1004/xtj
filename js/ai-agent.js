@@ -683,11 +683,19 @@
 
   async function ensureConfig() {
     var now = Date.now();
-    if (S.config && now - S.configFetchedAt < CONFIG_CACHE_TTL) return S.config;
+    if (S.config && now - S.configFetchedAt < CONFIG_CACHE_TTL) {
+      if (S._lastConfigVersion && S.config.config_version !== S._lastConfigVersion) {
+        S.configFetchedAt = 0;
+        S.config = null;
+      } else {
+        return S.config;
+      }
+    }
     var r = await apiRequest('GET', '/config');
     if (r.ok && r.data && r.data.config) {
       S.config = r.data.config;
       S.configFetchedAt = now;
+      S._lastConfigVersion = r.data.config.config_version || 0;
       return S.config;
     }
     S.config = S.config || {
@@ -1619,9 +1627,9 @@
           'data-conv-id': conv.conversation_id
         });
         item.appendChild(el('div', { class: 'ai-conv-title', text: conv.title || '新对话' }));
+        item.appendChild(el('div', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' }));
         item.appendChild(el('div', { class: 'ai-conv-preview', text: getConversationPreview(conv) }));
         var meta = el('div', { class: 'ai-conv-meta' });
-        meta.appendChild(el('span', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' }));
         meta.appendChild(el('span', { class: 'ai-conv-count', text: getConversationCountText(conv) }));
         item.appendChild(meta);
         item.addEventListener('click', function() {

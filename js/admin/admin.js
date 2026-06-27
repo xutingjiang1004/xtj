@@ -5077,6 +5077,24 @@ async function initAdminClient() {
         }
     }
 
+    function getCfgVal(cfg, path, def) {
+        var parts = path.split('.');
+        var cur = cfg;
+        for (var i = 0; i < parts.length; i++) {
+            if (cur == null || typeof cur !== 'object') return def;
+            cur = cur[parts[i]];
+        }
+        return cur !== undefined && cur !== null ? cur : def;
+    }
+
+    function selOpts(selected, options) {
+        var html = '';
+        for (var i = 0; i < options.length; i++) {
+            html += '<option value="' + options[i].val + '"' + (selected === options[i].val ? ' selected' : '') + '>' + options[i].label + '</option>';
+        }
+        return html;
+    }
+
     async function renderAiAdminSettings(content) {
         if (!content) return;
         content.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-muted)">加载中...</div>';
@@ -5086,8 +5104,20 @@ async function initAdminClient() {
                 name: '徐旭泽的小猫', avatar: '🐱', description: '', persona: '',
                 tone: '', system_prompt: '', welcome_message: ''
             };
+            var rs = cfg.reply_style || {};
+            var rp = cfg.roleplay || {};
+            var or = cfg.output_rules || {};
+            var sc = cfg.search || {};
+            var mem = cfg.memory || {};
+            var mdl = cfg.model || {};
+            var dbg = cfg.admin_debug || {};
+
             var html = [
                 '<div class="ai-admin-settings">',
+
+                // ---- 模块1: 基础信息 ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">基础信息</h4>',
                 '<div class="form-group"><label>AI 名称</label><input id="aiCfgName" value="' + escapeHtml(cfg.name) + '" maxlength="30" /></div>',
                 '<div class="form-group"><label>头像图片</label>',
                 '<div style="display:flex;align-items:center;gap:12px;">',
@@ -5095,23 +5125,118 @@ async function initAdminClient() {
                 (cfg.avatar_url ? '<img src="' + escapeHtml(cfg.avatar_url) + '?v=' + (cfg.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml(cfg.avatar || '🐱') + '\'">' : escapeHtml(cfg.avatar || '🐱')),
                 '</div>',
                 '<input type="file" id="aiAvatarFileInput" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" />',
-                '<button class="btn" id="aiAvatarUploadBtn">选择图片</button>',
+                '<button class="btn" id="aiAvatarUploadBtn" style="padding:6px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:transparent;">选择图片</button>',
                 '<span id="aiAvatarStatus" style="font-size:12px;color:var(--text-muted)"></span>',
                 '</div>',
                 '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">支持 png/jpg/webp/gif，最大 5MB。上传后保存配置才会生效。</div>',
                 '</div>',
                 '<div class="form-group"><label>头像文字（如 🐱）</label><input id="aiCfgAvatar" value="' + escapeHtml(cfg.avatar) + '" maxlength="10" /></div>',
-                '<div class="form-group"><label>简介</label><input id="aiCfgDesc" value="' + escapeHtml(cfg.description || '') + '" maxlength="200" /></div>',
-                '<div class="form-group"><label>欢迎语</label><input id="aiCfgWelcome" value="' + escapeHtml(cfg.welcome_message || '') + '" maxlength="200" /></div>',
-                '<div class="form-group"><label>性格设定 persona（最多 500 字）</label><textarea id="aiCfgPersona" maxlength="500">' + escapeHtml(cfg.persona || '') + '</textarea></div>',
-                '<div class="form-group"><label>说话风格 tone（最多 200 字）</label><textarea id="aiCfgTone" maxlength="200">' + escapeHtml(cfg.tone || '') + '</textarea></div>',
-                '<div class="form-group"><label>系统提示词 system_prompt（最多 2000 字）</label><textarea id="aiCfgSysPrompt" maxlength="2000" style="min-height:120px">' + escapeHtml(cfg.system_prompt || '') + '</textarea></div>',
-                '<div class="form-group" style="display:flex;align-items:center;gap:8px;padding-top:4px;">',
-                '<input type="checkbox" id="aiCfgWebSearch"' + (cfg.allow_web_search ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);cursor:pointer;" />',
-                '<label for="aiCfgWebSearch" style="font-size:13px;cursor:pointer;margin:0;">启用联网搜索（免费，无需 API Key）</label>',
+                '<div class="form-group"><label>简介 description</label><input id="aiCfgDesc" value="' + escapeHtml(cfg.description || '') + '" maxlength="200" /></div>',
+                '<div class="form-group"><label>欢迎语 welcome_message</label><input id="aiCfgWelcome" value="' + escapeHtml(cfg.welcome_message || '') + '" maxlength="200" /></div>',
                 '</div>',
+
+                // ---- 模块2: 人设与语气 ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">人设与语气</h4>',
+                '<div class="form-group"><label>性格设定 persona（最多 500 字）</label><textarea id="aiCfgPersona" maxlength="500">' + escapeHtml(cfg.persona || '') + '</textarea></div>',
+                '<div class="form-group"><label>说话风格 tone（最多 200 字）</label><input id="aiCfgTone" value="' + escapeHtml(cfg.tone || '') + '" maxlength="200" /></div>',
+                '<div class="form-group"><label>回复直接程度</label><select id="styleDirectness">' + selOpts(rs.directness, [{val:'direct',label:'直接'},{val:'gentle',label:'委婉'},{val:'balanced',label:'适中'}]) + '</select></div>',
+                '<div class="form-group"><label>详细程度</label><select id="styleDetail">' + selOpts(rs.detail_level, [{val:'brief',label:'简洁'},{val:'medium',label:'适中'},{val:'detailed',label:'详细'}]) + '</select></div>',
+                '<div class="form-group"><label>幽默程度</label><select id="styleHumor">' + selOpts(rs.humor_level, [{val:'low',label:'低'},{val:'medium',label:'中'},{val:'high',label:'高'}]) + '</select></div>',
+                '<div class="form-group"><label>毒舌程度</label><select id="styleSarcasm">' + selOpts(rs.sarcasm_level, [{val:'low',label:'低'},{val:'medium',label:'中'},{val:'high',label:'高'}]) + '</select></div>',
+                '<div class="form-group"><label>温暖程度</label><select id="styleWarmth">' + selOpts(rs.warmth_level, [{val:'low',label:'低'},{val:'medium',label:'中'},{val:'high',label:'高'}]) + '</select></div>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="styleMarkdown"' + (rs.use_markdown ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 使用 Markdown</label>',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="styleEmoji"' + (rs.use_emoji ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 使用 emoji</label>',
+                '</div>',
+                '<div class="form-group"><label>最大回复字数</label><input type="number" id="styleMaxChars" value="' + (rs.max_reply_chars || 1200) + '" min="100" max="8000" /></div>',
+                '</div>',
+
+                // ---- 模块3: 最终回复规则 ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">最终回复规则</h4>',
+                '<div class="form-group"><label>【必须遵守】（每行一条）</label><textarea id="orMust" style="min-height:60px;">' + escapeHtml((or.must || []).join('\n')) + '</textarea></div>',
+                '<div class="form-group"><label>【禁止】（每行一条）</label><textarea id="orAvoid" style="min-height:60px;">' + escapeHtml((or.avoid || []).join('\n')) + '</textarea></div>',
+                '<div class="form-group"><label>【格式要求】（每行一条）</label><textarea id="orFormat" style="min-height:60px;">' + escapeHtml((or.format || []).join('\n')) + '</textarea></div>',
+                '</div>',
+
+                // ---- 模块4: 角色扮演控制 ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">角色扮演控制</h4>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="rpEnabled"' + (getCfgVal(cfg,'roleplay.enabled') ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 允许角色扮演</label>',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="rpStage"' + (getCfgVal(cfg,'roleplay.allow_stage_directions') ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 允许括号动作</label>',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="rpCat"' + (getCfgVal(cfg,'roleplay.allow_cat_actions') ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 允许猫咪动作</label>',
+                '</div>',
+                '<div class="form-group"><label>禁止动作关键词（逗号分隔）</label><input id="rpPatterns" value="' + escapeHtml((rp.forbidden_action_patterns || []).join(',')) + '" placeholder="例如: 摇尾巴,蹭蹭" /></div>',
+                '</div>',
+
+                // ---- 模块5: 联网搜索 ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">联网搜索</h4>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="searchEnabled"' + (getCfgVal(cfg,'search.allow_web_search') || cfg.allow_web_search ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 开启联网搜索</label>',
+                '</div>',
+                '<div class="form-group"><label>搜索提供商</label><input id="searchProvider" value="' + escapeHtml(sc.search_provider || 'searxng') + '" placeholder="searxng" /></div>',
+                '<div class="form-group"><label>最大结果数</label><input type="number" id="searchMaxResults" value="' + (sc.max_results || 5) + '" min="1" max="20" /></div>',
+                '<div class="form-group"><label>搜索超时(ms)</label><input type="number" id="searchTimeout" value="' + (sc.timeout_ms || 4000) + '" min="1000" max="30000" step="500" /></div>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="searchWeather"' + (sc.use_weather_tool ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 开启天气工具</label>',
+                '</div>',
+                '</div>',
+
+                // ---- 模块6: 记忆设置 ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">记忆设置</h4>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="memEnabled"' + (getCfgVal(cfg,'memory.enabled') ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 开启长期记忆</label>',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="memBoxEnabled"' + (getCfgVal(cfg,'memory.memory_box_enabled') ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 开启 memory_box</label>',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="memSummaryEnabled"' + (getCfgVal(cfg,'memory.summary_enabled') ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 开启会话摘要</label>',
+                '</div>',
+                '<div class="form-group"><label>每次读取最近消息数量</label><input type="number" id="memRecentLimit" value="' + (mem.recent_messages_limit || 8) + '" min="1" max="50" /></div>',
+                '<div class="form-group"><label>记忆 prompt 最大长度</label><input type="number" id="memMaxChars" value="' + (mem.max_memory_prompt_chars || 1500) + '" min="100" max="10000" step="100" /></div>',
+                '<div class="form-group"><label>相关摘要数量</label><input type="number" id="memSummaryLimit" value="' + (mem.relevant_summaries_limit || 3) + '" min="1" max="20" /></div>',
+                '</div>',
+
+                // ---- 模块7: 模型与思考模式 ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">模型与思考模式</h4>',
+                '<div class="form-group"><label>reasoner 模型名</label><input id="modelReasoner" value="' + escapeHtml(mdl.reasoner_model || '') + '" placeholder="例如: deepseek-reasoner" /></div>',
+                '<div class="form-group"><label>默认思考模式</label><select id="modelThinkingMode">' + selOpts(mdl.default_thinking_mode, [{val:'off',label:'关闭'},{val:'low',label:'低'},{val:'medium',label:'中'},{val:'high',label:'高'}]) + '</select></div>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="modelUserSwitch"' + (mdl.allow_user_thinking_switch ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 允许用户切换思考模式</label>',
+                '</div>',
+                '</div>',
+
+                // ---- 模块8: 管理员调试 ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">管理员调试</h4>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="debugPrompt"' + (dbg.show_effective_prompt ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 显示当前生效 prompt</label>',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="debugModelInfo"' + (dbg.show_model_info ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 显示模型信息</label>',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="debugReasonLen"' + (dbg.show_reasoning_length ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 显示 reasoning_length</label>',
+                '</div>',
+                '</div>',
+
+                // ---- 模块9: system_prompt（保留旧字段） ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">系统提示词</h4>',
+                '<div class="form-group"><label>system_prompt（最多 2000 字）</label><textarea id="aiCfgSysPrompt" maxlength="2000" style="min-height:120px;">' + escapeHtml(cfg.system_prompt || '') + '</textarea></div>',
+                '</div>',
+
+                // ---- 模块10: 保存按钮 ----
                 '<button class="save-btn" id="aiCfgSaveBtn">保存配置</button>',
-                // --- 用户记忆管理 ---
+
+                // ---- 模块11: 当前生效 Prompt 预览 ----
+                '<div class="ai-settings-section" style="margin-top:20px;">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">当前生效 Prompt 预览</h4>',
+                '<div id="aiEffectivePrompt">',
+                '<button id="aiLoadEffectiveBtn" class="save-btn" style="background:transparent;color:var(--primary);">查看当前生效 Prompt</button>',
+                '<pre id="aiEffectivePromptContent" style="display:none;white-space:pre-wrap;font-size:12px;background:#f5f5f5;padding:8px;border-radius:4px;max-height:400px;overflow-y:auto;"></pre>',
+                '</div>',
+                '</div>',
+
+                // ---- 模块12: 用户记忆管理 ----
                 '<div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border,rgba(140,196,158,0.30))">',
                 '<h3 style="font-size:14px;font-weight:600;margin:0 0 8px 0;">用户记忆管理</h3>',
                 '<div style="display:flex;gap:8px;margin-bottom:8px;">',
@@ -5120,6 +5245,7 @@ async function initAdminClient() {
                 '</div>',
                 '<div id="aiMemList" style="max-height:400px;overflow-y:auto;font-size:12px;color:#555;"></div>',
                 '</div>',
+
                 '</div>'
             ].join('\n');
             content.innerHTML = html;
@@ -5145,7 +5271,6 @@ async function initAdminClient() {
                     if (statusEl) statusEl.textContent = '上传中...';
                     try {
                         var adminToken = window._adminToken || '';
-                        // 读文件为 base64
                         var reader = new FileReader();
                         var ext = (file.name.split('.').pop() || 'png').toLowerCase();
                         var base64Data = await new Promise(function(resolve, reject) {
@@ -5176,29 +5301,108 @@ async function initAdminClient() {
                 });
             }
 
-            document.getElementById('aiCfgSaveBtn').addEventListener('click', async function() {
-                var saveBtn = document.getElementById('aiCfgSaveBtn');
-                saveBtn.textContent = '保存中...';
-                saveBtn.disabled = true;
-                try {
-                    await apiCall('POST', '/admin/ai-agent/config', {
-                        name: document.getElementById('aiCfgName').value,
-                        avatar: document.getElementById('aiCfgAvatar').value,
-                        description: document.getElementById('aiCfgDesc').value,
-                        welcome_message: document.getElementById('aiCfgWelcome').value,
-                        persona: document.getElementById('aiCfgPersona').value,
-                        tone: document.getElementById('aiCfgTone').value,
-                        system_prompt: document.getElementById('aiCfgSysPrompt').value,
-                        allow_web_search: document.getElementById('aiCfgWebSearch').checked
-                    });
-                    showToast('AI 配置保存成功');
-                } catch(e) {
-                    showToast('保存失败: ' + (e && e.message ? e.message : '未知错误'), 'error');
-                } finally {
-                    saveBtn.textContent = '保存配置';
-                    saveBtn.disabled = false;
-                }
-            });
+            // 保存按钮
+            var saveBtn = document.getElementById('aiCfgSaveBtn');
+            if (saveBtn) {
+                saveBtn.addEventListener('click', async function() {
+                    saveBtn.textContent = '保存中...';
+                    saveBtn.disabled = true;
+                    try {
+                        var configPayload = {
+                            name: document.getElementById('aiCfgName').value.trim(),
+                            description: document.getElementById('aiCfgDesc').value.trim(),
+                            welcome_message: document.getElementById('aiCfgWelcome').value.trim(),
+                            persona: document.getElementById('aiCfgPersona').value.trim(),
+                            tone: document.getElementById('aiCfgTone').value.trim(),
+                            system_prompt: document.getElementById('aiCfgSysPrompt').value.trim(),
+                            avatar: document.getElementById('aiCfgAvatar').value.trim(),
+                            reply_style: {
+                                directness: document.getElementById('styleDirectness').value,
+                                detail_level: document.getElementById('styleDetail').value,
+                                humor_level: document.getElementById('styleHumor').value,
+                                sarcasm_level: document.getElementById('styleSarcasm').value,
+                                warmth_level: document.getElementById('styleWarmth').value,
+                                use_markdown: document.getElementById('styleMarkdown').checked,
+                                use_emoji: document.getElementById('styleEmoji').checked,
+                                max_reply_chars: parseInt(document.getElementById('styleMaxChars').value) || 1200
+                            },
+                            roleplay: {
+                                enabled: document.getElementById('rpEnabled').checked,
+                                allow_stage_directions: document.getElementById('rpStage').checked,
+                                allow_cat_actions: document.getElementById('rpCat').checked,
+                                forbidden_action_patterns: document.getElementById('rpPatterns').value.split(',').map(function(s) { return s.trim(); }).filter(Boolean)
+                            },
+                            output_rules: {
+                                must: document.getElementById('orMust').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean),
+                                avoid: document.getElementById('orAvoid').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean),
+                                format: document.getElementById('orFormat').value.split('\n').map(function(s) { return s.trim(); }).filter(Boolean)
+                            },
+                            search: {
+                                allow_web_search: document.getElementById('searchEnabled').checked,
+                                search_provider: document.getElementById('searchProvider').value.trim() || 'searxng',
+                                max_results: parseInt(document.getElementById('searchMaxResults').value) || 5,
+                                timeout_ms: parseInt(document.getElementById('searchTimeout').value) || 4000,
+                                use_weather_tool: document.getElementById('searchWeather').checked
+                            },
+                            memory: {
+                                enabled: document.getElementById('memEnabled').checked,
+                                memory_box_enabled: document.getElementById('memBoxEnabled').checked,
+                                summary_enabled: document.getElementById('memSummaryEnabled').checked,
+                                recent_messages_limit: parseInt(document.getElementById('memRecentLimit').value) || 8,
+                                max_memory_prompt_chars: parseInt(document.getElementById('memMaxChars').value) || 1500,
+                                relevant_summaries_limit: parseInt(document.getElementById('memSummaryLimit').value) || 3
+                            },
+                            model: {
+                                reasoner_model: document.getElementById('modelReasoner').value.trim(),
+                                default_thinking_mode: document.getElementById('modelThinkingMode').value,
+                                allow_user_thinking_switch: document.getElementById('modelUserSwitch').checked
+                            },
+                            admin_debug: {
+                                show_effective_prompt: document.getElementById('debugPrompt').checked,
+                                show_model_info: document.getElementById('debugModelInfo').checked,
+                                show_reasoning_length: document.getElementById('debugReasonLen').checked
+                            }
+                        };
+                        configPayload.allow_web_search = configPayload.search.allow_web_search;
+                        var r = await apiCall('POST', '/admin/ai-agent/config', configPayload);
+                        if (r && r.ok) {
+                            showToast('配置已保存，用户端刷新后生效');
+                        } else {
+                            showToast('保存失败');
+                        }
+                    } catch(e) {
+                        showToast('保存异常: ' + (e && e.message ? e.message : ''), 'error');
+                    } finally {
+                        saveBtn.textContent = '保存配置';
+                        saveBtn.disabled = false;
+                    }
+                });
+            }
+
+            // 查看当前生效 Prompt
+            var loadEffectiveBtn = document.getElementById('aiLoadEffectiveBtn');
+            var effectiveContent = document.getElementById('aiEffectivePromptContent');
+            if (loadEffectiveBtn && effectiveContent) {
+                loadEffectiveBtn.addEventListener('click', async function() {
+                    if (effectiveContent.style.display !== 'none') {
+                        effectiveContent.style.display = 'none';
+                        loadEffectiveBtn.textContent = '查看当前生效 Prompt';
+                        return;
+                    }
+                    try {
+                        var r = await apiCall('GET', '/admin/ai-agent/effective-prompt');
+                        if (r && r.core_prompt) {
+                            effectiveContent.textContent = r.core_prompt;
+                            effectiveContent.style.display = 'block';
+                            loadEffectiveBtn.textContent = '收起';
+                        } else {
+                            showToast('无法获取生效 prompt');
+                        }
+                    } catch (e) {
+                        showToast('获取失败: ' + (e && e.message ? e.message : ''), 'error');
+                    }
+                });
+            }
 
             // 记忆管理
             var memSearchBtn = document.getElementById('aiMemSearchBtn');
