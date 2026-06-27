@@ -72,15 +72,11 @@ const supabase = createClient(
 // ===================== DeepSeek AI 配置 =====================
 // ★ DeepSeek API Key 只能放后端环境变量，绝对不能放前端
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
-const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
-// ★ 双模型策略：off 用聊天模型（无 thinking），low/medium/high 用推理模型
-//   默认均使用 deepseek-v4-flash（同时支持聊模式和思模式），可分开指定
-const DEEPSEEK_MODEL_CHAT = process.env.DEEPSEEK_MODEL_CHAT || process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
 const DEEPSEEK_MODEL_REASONER = process.env.DEEPSEEK_MODEL_REASONER || process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_TIMEOUT_MS = 25000; // 25 秒超时
-const AI_AGENT_DAILY_LIMIT = 50;  // 每用户每天 AI 调用次数
-const AI_AGENT_HOURLY_LIMIT = 10; // 每用户每小时 AI 调用次数
+const AI_AGENT_DAILY_LIMIT = 300; // 每用户每天 AI 调用次数
+const AI_AGENT_HOURLY_LIMIT = 50; // 每用户每小时 AI 调用次数
 // 单价配置（CNY / 1M tokens），可通过环境变量覆盖
 // 默认值对应 deepseek-v4-flash 官方定价（2025年）：
 //   缓存未命中输入 1 元/1M tokens → DEEPSEEK_INPUT_PRICE_PER_1M
@@ -92,7 +88,7 @@ const DEEPSEEK_OUTPUT_PRICE_PER_1M  = parseFloat(process.env.DEEPSEEK_OUTPUT_PRI
 const DEEPSEEK_CACHE_HIT_PRICE_PER_1M = parseFloat(process.env.DEEPSEEK_CACHE_HIT_PRICE_PER_1M || '0.02');
 const DEEPSEEK_CURRENCY = process.env.DEEPSEEK_CURRENCY || 'CNY';
 console.log('[AI-CONFIG] DEEPSEEK_API_KEY:', DEEPSEEK_API_KEY ? '已设置' : '未设置（开发模式将使用 mock 回复）');
-console.log('[AI-CONFIG] DEEPSEEK_MODEL:', DEEPSEEK_MODEL);
+console.log('[AI-CONFIG] DEEPSEEK_MODEL_REASONER:', DEEPSEEK_MODEL_REASONER);
 
 // ===================== Gmail SMTP 邮件配置 =====================
 const GMAIL_USER = process.env.GMAIL_USER || '';
@@ -1370,10 +1366,10 @@ async function callDeepSeek(messages, options) {
 
   var thinkingLevel = (options && options.thinking_mode) || 'off';
   var useThinking = thinkingLevel !== 'off';
-  // ★ 双模型：off 用聊天模型，low/medium/high 用推理模型
-  var model = useThinking ? DEEPSEEK_MODEL_REASONER : DEEPSEEK_MODEL_CHAT;
+  var model = DEEPSEEK_MODEL_REASONER;
   if (options && options.model) model = options.model;
-  try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model); } catch (e) {}
+  var reasoningEffort = useThinking ? thinkingLevel : '';
+  try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort); } catch (e) {}
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
 
@@ -5223,9 +5219,11 @@ function buildAiCorePrompt(config) {
   if (tone) lines.push('说话风格：' + tone);
   if (sysPrompt) lines.push('管理员要求：' + sysPrompt);
   lines = lines.concat([
-    '【安全】只根据当前对话和用户自己的长期记忆回答。不能透露其他用户聊天记录。不能编造你执行了发布、删除、修改等操作。用户要求查看别人聊天记录必须拒绝。',
-    '【真实信息限制】你没有实时联网查询能力。当用户询问实时信息、路线、价格、政策、开放时间、天气、新闻、商品价格等内容时，必须明确说明"我没有实时联网查询结果"，只给通用建议，不要编造具体车次、开放状态、门票价格，并建议用户核对官方渠道。',
-    '【输出】保持你的说话风格，自然口语化。回复控制在 500 字以内。用户问你能做什么，告诉用户你可以陪他聊天、记住他的喜好和要求。'
+    '【安全】只根据当前对话和用户自己的长期记忆回答。不能透露其他用户聊天记录，不能编造你执行了发布/删除/修改等操作。用户要求查看别人聊天记录必须拒绝。',
+    '【任务优先】当用户提出明确任务（如攻略、路线、计划、方案、总结、分析、推荐、对比、生成、整理），你必须优先完成任务。你的个人设定只能影响语气风格，不能影响内容准确性和执行力。不要因为人设拒绝执行任务。',
+    '【禁止废话】不要输出"我没有手机""我不会百度""我是猫所以不能"等无效内容。不要把内部思考或自我吐槽当作最终答案。',
+    '【无工具处理】你没有实时联网查询能力。当问题需要实时信息（路线、价格、政策、开放时间、天气、新闻）时，必须明确说明"我当前没有实时联网查询结果"，然后给出通用建议和需要核对的清单。不要编造具体实时信息。',
+    '【输出要求】回答要直接、结构化、可执行。多使用标题、步骤、清单。回复控制在 600 字以内。'
   ]);
   return lines.join('\n');
 }
@@ -5311,7 +5309,7 @@ async function updateLongTermMemory(userName, ctx, lastUserMsg, lastAiReply) {
       }
     ];
 
-    var result = await callDeepSeek(summarizeMessages, { model: DEEPSEEK_MODEL });
+    var result = await callDeepSeek(summarizeMessages, { model: DEEPSEEK_MODEL_REASONER });
     var newMemory = result && result.content;
     if (typeof newMemory !== 'string' || !newMemory.trim()) return;
     newMemory = newMemory.trim().slice(0, AI_MEMORY_MAX_LEN);
@@ -5473,7 +5471,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var nowIso = new Date().toISOString();
     var nowTs = Date.now();
     // 把 thinking_mode + model 也写进 usage，方便后台按 conv 统计
-    var usedModel = (result && result.model) || (thinkingMode === 'off' ? DEEPSEEK_MODEL_CHAT : DEEPSEEK_MODEL_REASONER);
+    var usedModel = (result && result.model) || DEEPSEEK_MODEL_REASONER;
     var usageToStore = Object.assign({}, usage || {}, {
       thinking_mode: thinkingMode,
       model: usedModel
@@ -5940,7 +5938,7 @@ app.get('/admin/ai-agent/conversations', verifyToken, async (req, res) => {
         cache_miss_tokens: conv.cache_miss_tokens,
         cache_hit_rate: hitRate(conv.cache_hit_tokens, conv.cache_miss_tokens),
         total_cost: Math.round(conv.total_cost * 1000000) / 1000000,
-        model: conv.model || DEEPSEEK_MODEL,
+        model: conv.model || DEEPSEEK_MODEL_REASONER,
         last_thinking_mode: conv.last_thinking_mode || 'off'
       };
     });
@@ -6022,10 +6020,7 @@ app.listen(port, () => {
   console.log(`[xtj-admin-api] password configured: ${ADMIN_PASSWORD ? 'yes' : 'no'}`);
   console.log(`[xtj-admin-api] supabase key type: ${SUPABASE_SERVICE_KEY ? 'service_role' : (process.env.SUPABASE_ANON_KEY ? 'anon' : 'none')}`);
   console.log(`[xtj-admin-api] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
-  console.log(`[AI-CONFIG] DEEPSEEK_MODEL_CHAT: ${DEEPSEEK_MODEL_CHAT}`);
   console.log(`[AI-CONFIG] DEEPSEEK_MODEL_REASONER: ${DEEPSEEK_MODEL_REASONER}`);
   console.log(`[AI-CONFIG] API Key: ${DEEPSEEK_API_KEY ? '已配置' : '未配置'}`);
-  if (DEEPSEEK_MODEL_CHAT === DEEPSEEK_MODEL_REASONER) {
-    console.log('[AI-CONFIG] 警告：普通聊天模型和思考模型相同，切换思考模式可能效果不明显');
-  }
+  console.log(`[AI-CONFIG] Rate Limit: 每小时${AI_AGENT_HOURLY_LIMIT}次 / 每天${AI_AGENT_DAILY_LIMIT}次`);
 });
