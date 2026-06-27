@@ -710,7 +710,12 @@
       if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + usage.prompt_cache_miss_tokens);
       if (typeof usage.cost === 'number' && usage.cost > 0) parts.push('¥' + usage.cost.toFixed(6) + ' ' + (usage.currency || 'CNY'));
     }
-    if (usage.thinking_mode && usage.thinking_mode !== 'off') parts.push('思考 ' + usage.thinking_mode);
+    if (usage.thinking_mode && usage.thinking_mode !== 'off') {
+      parts.push('思考 ' + usage.thinking_mode);
+      if (typeof usage.reasoning_length === 'number' && usage.reasoning_length === 0) {
+        parts.push('当前模型未返回思考内容');
+      }
+    }
     return parts.length ? parts.join(' · ') : null;
   }
 
@@ -1155,6 +1160,18 @@
     var text = String(input.value || '').trim();
     if (!text) return;
     
+    var originalText = text;
+    
+    function restoreInputText() {
+      input.value = originalText;
+      input.style.height = 'auto';
+      try {
+        input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+        input.focus();
+      } catch (e) {}
+      updateInputMetrics();
+    }
+    
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) return;
     
@@ -1333,9 +1350,50 @@
             continue;
           }
           
+          if (evt.type === 'status') {
+            var statusBar = messagesEl.querySelector('.ai-search-status');
+            if (!statusBar) {
+              statusBar = el('div', { class: 'ai-search-status' });
+              messagesEl.appendChild(statusBar);
+            }
+            statusBar.textContent = evt.text || '';
+            clearTimeout(statusBar._hideTimer);
+            statusBar._hideTimer = setTimeout(function() {
+              try { statusBar.remove(); } catch (e) {}
+            }, 3000);
+            continue;
+          }
+          
+          if (evt.type === 'weather') {
+            var weatherBar = messagesEl.querySelector('.ai-search-status');
+            if (!weatherBar) {
+              weatherBar = el('div', { class: 'ai-search-status' });
+              messagesEl.appendChild(weatherBar);
+            }
+            weatherBar.textContent = '已查询天气';
+            clearTimeout(weatherBar._hideTimer);
+            weatherBar._hideTimer = setTimeout(function() {
+              try { weatherBar.remove(); } catch (e) {}
+            }, 3000);
+            continue;
+          }
+          
           if (evt.type === 'error') {
             try { typingNode.remove(); } catch (e) {}
             notify(evt.error || 'AI 调用失败');
+            restoreInputText();
+            S.sending = false;
+            S.abortController = null;
+            if (reader) try { reader.cancel(); } catch (e) {}
+            aborted = true;
+            break;
+          }
+          
+          // 兼容旧错误格式（无 type 但有 error）
+          if (evt.error && !evt.type) {
+            try { typingNode.remove(); } catch (e) {}
+            notify(evt.error || 'AI 调用失败');
+            restoreInputText();
             S.sending = false;
             S.abortController = null;
             if (reader) try { reader.cancel(); } catch (e) {}
@@ -1457,12 +1515,14 @@
         try { typingNode.remove(); } catch (e) {}
         S.messages.pop();
         removeLastUserMessage(messagesEl);
+        restoreInputText();
         notify('网络异常，请检查连接后重试');
       } else {
         try { typingNode.remove(); } catch (e) {}
         if (!aiContent) {
           S.messages.pop();
           removeLastUserMessage(messagesEl);
+          restoreInputText();
         }
       }
     }
