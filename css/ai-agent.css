@@ -198,6 +198,54 @@
   pointer-events: auto;
 }
 
+/* ===== 思考过程（可折叠） ===== */
+.ai-thinking {
+  margin-bottom: 6px;
+  border: 1px solid rgba(128,128,160,0.18);
+  border-radius: 10px;
+  overflow: hidden;
+  max-width: 85%;
+  font-size: 12px;
+  line-height: 1.55;
+  background: rgba(128,128,160,0.04);
+}
+.ai-thinking-header {
+  padding: 6px 12px;
+  color: var(--text-muted, #7a7a8a);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  font-size: 11px;
+  transition: background 0.15s;
+}
+.ai-thinking-header:hover {
+  background: rgba(128,128,160,0.08);
+}
+.ai-thinking-body {
+  padding: 8px 12px 10px;
+  color: var(--text-muted, #888899);
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-top: 1px solid rgba(128,128,160,0.1);
+}
+.ai-thinking.expanded .ai-thinking-header {
+  color: var(--accent, #2e9465);
+  border-bottom-color: rgba(128,128,160,0.14);
+}
+
+/* 暗色模式：思考过程 */
+[data-theme="dark"] .ai-thinking {
+  background: rgba(255,255,255,0.04);
+  border-color: rgba(255,255,255,0.1);
+}
+[data-theme="dark"] .ai-thinking-header:hover {
+  background: rgba(255,255,255,0.06);
+}
+[data-theme="dark"] .ai-thinking-body {
+  border-top-color: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.55);
+}
+
 /* ===== 打字动画 ===== */
 .ai-msg.typing .ai-msg-bubble { display: flex; gap: 4px; padding: 12px 14px; }
 .ai-msg.typing .ai-msg-bubble span {
