@@ -96,6 +96,10 @@ const AI_AGENT_CONVERSATION_LIST_LIMIT = 50;
 const SEARCH_CACHE_TTL_MS = 60000;
 const searchCache = new Map();
 
+var memoryBoxCache = new Map();
+var MEMORY_CACHE_TTL_MS = 5 * 60 * 1000;
+var summaryCache = new Map();
+
 // Open-Meteo 免费天气查询（无需 API Key）
 var CITY_COORDS = {
   '北京': { lat: 39.9042, lon: 116.4074 },
@@ -366,6 +370,9 @@ const AI_AGENT_PROFILE_MARKER = '__ai_agent_profile__';
 const AI_AGENT_MESSAGE_MARKER = '__ai_agent_msg__';
 const AI_AGENT_MEMORY_MARKER = '__ai_agent_memory__';
 const AI_AGENT_CONFIG_MARKER = '__ai_agent_config__';
+const AI_AGENT_MEMORY_BOX_MARKER = '**ai_agent_memory_box**';
+const AI_AGENT_CONV_SUMMARY_MARKER = '**ai_agent_conv_summary**';
+const AI_AGENT_MEMORY_LOG_MARKER = '**ai_agent_memory_log**';
 
 const LOGIN_LOG_RETENTION_DAYS = 90;
 const SECURITY_LOG_RETENTION_DAYS = 90;
@@ -406,7 +413,10 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', AI_AGENT_PROFILE_MARKER)
     .neq('media_type', AI_AGENT_MESSAGE_MARKER)
     .neq('media_type', AI_AGENT_MEMORY_MARKER)
-    .neq('media_type', AI_AGENT_CONFIG_MARKER);
+    .neq('media_type', AI_AGENT_CONFIG_MARKER)
+    .neq('media_type', AI_AGENT_MEMORY_BOX_MARKER)
+    .neq('media_type', AI_AGENT_CONV_SUMMARY_MARKER)
+    .neq('media_type', AI_AGENT_MEMORY_LOG_MARKER);
 }
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
@@ -5425,6 +5435,349 @@ app.post('/api/agent/profile', authenticateUser, async (req, res) => {
   return res.status(403).json({ error: '该接口已关闭，AI 配置由管理员统一管理' });
 });
 
+// ===================== AI 长期记忆系统 =====================
+
+function createEmptyMemoryBox(userName) {
+  return {
+    version: 1,
+    user_name: userName || '',
+    display_name: '',
+    stable_profile: { name: '', birthday: '', gender: '', job: '', location: '', devices: [] },
+    reply_preferences: { language: 'zh-CN', tone: [], format: [], avoid: [] },
+    project_preferences: [],
+    long_term_goals: [],
+    likes: [],
+    dislikes: [],
+    do_not_do: [],
+    important_notes: [],
+    updated_at: new Date().toISOString(),
+    last_extracted_at: ''
+  };
+}
+
+function compressMemoryBox(memoryBox) {
+  if (!memoryBox) return '';
+  var lines = [];
+  lines.push('【用户长期记忆】');
+  var name = memoryBox.display_name || memoryBox.stable_profile.name || '';
+  if (name) lines.push('用户称呼：' + name.slice(0, 20));
+  var pref = memoryBox.reply_preferences || {};
+  if (pref.language && pref.language !== 'zh-CN') lines.push('语言偏好：' + pref.language);
+  var tones = pref.tone || [];
+  if (tones.length) lines.push('语气偏好：' + tones.join('、'));
+  var avoids = pref.avoid || [];
+  if (avoids.length) lines.push('避免：' + avoids.join('、'));
+  var likes = memoryBox.likes || [];
+  if (likes.length) lines.push('喜欢：' + likes.slice(0, 15).join('、'));
+  var dislikes = memoryBox.dislikes || [];
+  if (dislikes.length) lines.push('不喜欢：' + dislikes.slice(0, 15).join('、'));
+  var dont = memoryBox.do_not_do || [];
+  if (dont.length) lines.push('项目禁区：' + dont.slice(0, 20).join('、'));
+  var goals = memoryBox.long_term_goals || [];
+  if (goals.length) lines.push('长期目标：' + goals.slice(0, 10).join('、'));
+  var notes = memoryBox.important_notes || [];
+  if (notes.length) lines.push('重要提醒：' + notes.slice(0, 10).join('、'));
+  var projects = memoryBox.project_preferences || [];
+  if (projects.length) lines.push('项目偏好：' + projects.slice(0, 15).join('、'));
+  var text = lines.join('\n');
+  if (text.length > 1500) text = text.slice(0, 1497) + '...';
+  return text;
+}
+
+async function loadAiMemoryBox(userName) {
+  if (!userName) return { memoryBox: createEmptyMemoryBox(''), compressedText: '' };
+  
+  var cached = memoryBoxCache.get(userName);
+  if (cached && (Date.now() - cached.ts) < MEMORY_CACHE_TTL_MS) return cached.data;
+  
+  try {
+    var { data } = await supabase.from('posts')
+      .select('content')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MEMORY_BOX_MARKER)
+      .eq('media_url', 'memory_box')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    var memoryBox = data && data.content ? (function() { try { return JSON.parse(data.content); } catch(e) { return null; } })() : null;
+    if (!memoryBox) memoryBox = createEmptyMemoryBox(userName);
+    
+    var compressedText = compressMemoryBox(memoryBox);
+    
+    var result = { memoryBox: memoryBox, compressedText: compressedText };
+    memoryBoxCache.set(userName, { ts: Date.now(), data: result });
+    console.log('[MEMORY] loaded for', userName, 'text_len=', compressedText.length);
+    return result;
+  } catch (e) {
+    console.error('[MEMORY] load error:', e && e.message);
+    var fallback = createEmptyMemoryBox(userName);
+    return { memoryBox: fallback, compressedText: '' };
+  }
+}
+
+function mergeMemoryBox(existing, patch) {
+  if (!existing) existing = createEmptyMemoryBox('');
+  if (!patch || typeof patch !== 'object') return existing;
+  var changes = patch.changes || patch;
+  
+  function mergeArrayField(field, maxCount) {
+    var existingArr = existing[field] || [];
+    var newArr = changes[field] || [];
+    if (!Array.isArray(newArr) || !newArr.length) return;
+    var merged = existingArr.concat(newArr);
+    var seen = new Set();
+    var unique = [];
+    for (var i = 0; i < merged.length; i++) {
+      var item = String(merged[i] || '').trim();
+      if (!item || seen.has(item)) continue;
+      seen.add(item);
+      unique.push(item);
+    }
+    existing[field] = unique.slice(0, maxCount || 50);
+  }
+  
+  function mergeObjectField(field) {
+    var existingObj = existing[field] || {};
+    var newObj = changes[field] || {};
+    Object.keys(newObj).forEach(function(k) {
+      if (Array.isArray(newObj[k])) {
+        var arr = existingObj[k] || [];
+        var existingSet = new Set(arr.map(function(v) { return String(v).trim(); }));
+        newObj[k].forEach(function(v) {
+          var sv = String(v).trim();
+          if (sv && !existingSet.has(sv)) { arr.push(sv); existingSet.add(sv); }
+        });
+        existingObj[k] = arr;
+      } else if (newObj[k] !== undefined && newObj[k] !== null && newObj[k] !== '') {
+        existingObj[k] = newObj[k];
+      }
+    });
+    existing[field] = existingObj;
+  }
+  
+  mergeArrayField('likes', 30);
+  mergeArrayField('dislikes', 30);
+  mergeArrayField('project_preferences', 50);
+  mergeArrayField('do_not_do', 50);
+  mergeArrayField('important_notes', 30);
+  mergeArrayField('long_term_goals', 30);
+  mergeObjectField('reply_preferences');
+  mergeObjectField('stable_profile');
+  
+  existing.updated_at = new Date().toISOString();
+  existing.last_extracted_at = existing.updated_at;
+  
+  if (existing.display_name && !existing.stable_profile.name) {
+    existing.stable_profile.name = existing.display_name;
+  }
+  
+  return existing;
+}
+
+async function loadRelevantConversationSummaries(userName, message, limit) {
+  limit = limit || 3;
+  if (!userName || !message) return [];
+  
+  try {
+    var { data } = await supabase.from('posts')
+      .select('content')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_CONV_SUMMARY_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    
+    if (!data || !data.length) return [];
+    
+    var keywords = message.match(/[\u4e00-\u9fff]{2,10}/g) || [];
+    var engKeywords = message.match(/[a-zA-Z]{3,}/g) || [];
+    var techKeywords = ['AI','搜索','SearXNG','dock','气泡','气泡样式','历史','思考模式','联网搜索','天气','地点','记忆','偏好'];
+    var allKeywords = keywords.concat(engKeywords).concat(techKeywords).map(function(k) { return k.toLowerCase(); });
+    var uniqueKeywords = [];
+    var seenKW = new Set();
+    allKeywords.forEach(function(k) {
+      if (!seenKW.has(k)) { seenKW.add(k); uniqueKeywords.push(k); }
+    });
+    
+    if (!uniqueKeywords.length) return [];
+    
+    var scored = data.map(function(row) {
+      var summary = (function() { try { return JSON.parse(row.content || '{}'); } catch(e) { return {}; } })();
+      var searchText = (summary.title || '') + ' ' + (summary.summary || '') + ' ' + (summary.tags || []).join(' ');
+      var score = 0;
+      var lower = searchText.toLowerCase();
+      uniqueKeywords.forEach(function(kw) {
+        if (lower.indexOf(kw) >= 0) score += 1;
+      });
+      return { summary: summary, score: score };
+    });
+    
+    scored.sort(function(a, b) { return b.score - a.score; });
+    return scored.slice(0, limit).filter(function(s) { return s.score > 0; }).map(function(s) {
+      var t = [];
+      var su = s.summary;
+      if (su.title) t.push('标题：' + String(su.title).slice(0, 50));
+      if (su.summary) t.push('摘要：' + String(su.summary).slice(0, 200));
+      if (su.tags && su.tags.length) t.push('标签：' + su.tags.join('、'));
+      return t.join('\n');
+    });
+  } catch (e) {
+    console.error('[MEMORY] load summaries error:', e && e.message);
+    return [];
+  }
+}
+
+async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assistantReply, existingMemoryBox) {
+  if (!userName || !latestUserMessage || latestUserMessage.length < 20) return;
+  
+  var skipPattern = /^(嗯|继续|不对|哈哈|好的|收到|可以|行|好|ok|对|是|不是|没有|知道了|明白了|了解|懂|嗯嗯|哦|哦哦|好的吧|好吧|那好|然后|还有|再来|继续聊|还有吗|然后呢|之后呢|后面呢|接着说)$/i;
+  if (skipPattern.test(latestUserMessage.trim())) return;
+  
+  var triggerWords = /我叫|我喜欢|我不喜欢|以后不要|以后都|记住|我的要求|我的偏好|我正在做|这个项目|不准|必须|请记住|记得|偏好|讨厌|爱|恨|指定|要求|注意/i;
+  if (!triggerWords.test(latestUserMessage)) return;
+  
+  var lastUpdateKey = 'memory_update_' + userName;
+  var lastUpdate = (function() { try { return parseInt(globalThis[lastUpdateKey] || '0', 10); } catch(e) { return 0; } })();
+  if (Date.now() - lastUpdate < 5 * 60 * 1000) return;
+  
+  try {
+    globalThis[lastUpdateKey] = String(Date.now());
+  } catch(e) {}
+  
+  var memoryModel = process.env.DEEPSEEK_MODEL_REASONER || 'deepseek-v4-flash';
+  var memoryBoxJson = JSON.stringify(existingMemoryBox || {});
+  
+  var extractPrompt = '你是一个用户记忆提取助手。根据以下内容，输出 JSON patch 用于更新用户的长期记忆。\n\n当前记忆：\n' + memoryBoxJson.slice(0, 2000) + '\n\n用户消息：' + latestUserMessage.slice(0, 500) + '\n\nAI 回复：' + (assistantReply || '').slice(0, 500) + '\n\n当前日期：' + new Date().toISOString() + '\n\n规则：\n1. 只记录长期稳定信息，不记录一次性闲聊。\n2. 不记录密码、token、密钥、银行卡。\n3. 健康、性、身份敏感信息默认不写入，除非用户明确说"记住"。\n4. 不确定就不写。\n5. 同类内容合并，不要重复。\n\n必须输出纯 JSON，不要加任何其他文字：\n{"should_update":true或false,"changes":{"likes":[],"dislikes":[],"project_preferences":[],"do_not_do":[],"important_notes":[],"long_term_goals":[],"reply_preferences":{"tone":[],"format":[],"avoid":[]},"stable_profile":{}},"reason":"原因"}';
+  
+  try {
+    var apiResp = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (process.env.DEEPSEEK_API_KEY || '') },
+      body: JSON.stringify({
+        model: memoryModel,
+        messages: [{ role: 'user', content: extractPrompt }],
+        temperature: 0.1,
+        max_tokens: 2000,
+        stream: false
+      }),
+      signal: AbortSignal.timeout(15000)
+    });
+    
+    if (!apiResp.ok) return;
+    var apiData = await apiResp.json();
+    var patchText = (apiData.choices && apiData.choices[0] && apiData.choices[0].message && apiData.choices[0].message.content) || '';
+    var patch = (function() { try { return JSON.parse(patchText); } catch(e) { return null; } })();
+    
+    if (!patch || !patch.should_update) return;
+    
+    var updatedMemoryBox = mergeMemoryBox(existingMemoryBox, patch);
+    
+    var nowIso = new Date().toISOString();
+    var saveContent = JSON.stringify(updatedMemoryBox);
+    if (saveContent.length > 5000) {
+      updatedMemoryBox = createEmptyMemoryBox(userName);
+      updatedMemoryBox.important_notes = (existingMemoryBox.important_notes || []).concat(existingMemoryBox.do_not_do || []).concat(existingMemoryBox.dislikes || []).slice(0, 10);
+      updatedMemoryBox.updated_at = nowIso;
+      saveContent = JSON.stringify(updatedMemoryBox);
+    }
+    
+    var { data: existing } = await supabase.from('posts')
+      .select('id')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MEMORY_BOX_MARKER)
+      .eq('media_url', 'memory_box')
+      .maybeSingle();
+    
+    if (existing && existing.id) {
+      await supabase.from('posts').update({ content: saveContent, created_at: nowIso }).eq('id', existing.id);
+    } else {
+      await supabase.from('posts').insert([{ user_name: userName, content: saveContent, media_type: AI_AGENT_MEMORY_BOX_MARKER, media_url: 'memory_box', actor_key: 'memory_box_' + userName + '_' + Date.now() }]);
+    }
+    
+    await supabase.from('posts').insert([{
+      user_name: userName,
+      content: JSON.stringify({ type: 'update', source_conversation_id: convId, changes: patch.changes, reason: patch.reason, created_at: nowIso }),
+      media_type: AI_AGENT_MEMORY_LOG_MARKER,
+      media_url: 'memory_log_' + Date.now(),
+      actor_key: 'memory_log_' + userName + '_' + Date.now()
+    }]).catch(function() {});
+    
+    memoryBoxCache.delete(userName);
+    console.log('[MEMORY] updated for', userName, 'reason:', patch.reason);
+  } catch (e) {
+    console.error('[MEMORY] extract error:', e && e.message);
+  }
+}
+
+async function maybeUpdateConversationSummary(userName, convId, messages) {
+  if (!userName || !convId) return;
+  
+  var { data: lastSummary } = await supabase.from('posts')
+    .select('content')
+    .eq('user_name', userName)
+    .eq('media_type', AI_AGENT_CONV_SUMMARY_MARKER)
+    .eq('media_url', convId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  
+  var lastSummaryObj = lastSummary ? (function() { try { return JSON.parse(lastSummary.content); } catch(e) { return null; } })() : null;
+  var now = Date.now();
+  
+  if (lastSummaryObj) {
+    var lastTime = new Date(lastSummaryObj.updated_at || 0).getTime();
+    if (now - lastTime < 10 * 60 * 1000) return;
+  }
+  
+  var recentMessages = (messages || []).slice(-20);
+  var msgText = recentMessages.map(function(m) {
+    var role = m.role === 'user' ? '用户' : 'AI';
+    var content = String(m.content || '').slice(0, 200);
+    return role + '：' + content;
+  }).join('\n');
+  
+  if (msgText.length < 20) return;
+  
+  var summaryPrompt = '根据以下对话内容，生成 JSON 格式的会话摘要。只输出 JSON，不要加任何其他文字。\n\n' + msgText.slice(0, 3000) + '\n\n{"title":"精简标题","summary":"摘要（300字以内）","tags":["标签1","标签2"],"important_facts":["重要事实"],"user_preferences_found":["发现的偏好"],"open_tasks":["待办任务"],"importance":1}';
+  
+  try {
+    var apiResp = await fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (process.env.DEEPSEEK_API_KEY || '') },
+      body: JSON.stringify({
+        model: process.env.DEEPSEEK_MODEL_REASONER || 'deepseek-v4-flash',
+        messages: [{ role: 'user', content: summaryPrompt }],
+        temperature: 0.2,
+        max_tokens: 1000,
+        stream: false
+      }),
+      signal: AbortSignal.timeout(10000)
+    });
+    
+    if (!apiResp.ok) return;
+    var apiData = await apiResp.json();
+    var summaryText = (apiData.choices && apiData.choices[0] && apiData.choices[0].message && apiData.choices[0].message.content) || '';
+    var summaryObj = (function() { try { return JSON.parse(summaryText); } catch(e) { return null; } })();
+    if (!summaryObj) return;
+    
+    summaryObj.conversation_id = convId;
+    summaryObj.created_at = new Date().toISOString();
+    summaryObj.updated_at = summaryObj.created_at;
+    
+    var saveContent = JSON.stringify(summaryObj);
+    
+    if (lastSummary && lastSummary.id) {
+      await supabase.from('posts').update({ content: saveContent, created_at: summaryObj.created_at }).eq('id', lastSummary.id);
+    } else {
+      await supabase.from('posts').insert([{ user_name: userName, content: saveContent, media_type: AI_AGENT_CONV_SUMMARY_MARKER, media_url: convId, actor_key: 'conv_summary_' + userName + '_' + convId + '_' + Date.now() }]);
+    }
+    
+    console.log('[MEMORY] summary updated for', userName, 'conv=', convId.slice(0, 8));
+  } catch (e) {
+    console.error('[MEMORY] summary error:', e && e.message);
+  }
+}
+
 // ===================== AI 智能体 chat 接口 =====================
 //
 // ★ 缓存优化设计（DeepSeek prompt cache）：
@@ -5850,10 +6203,26 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var corePrompt = buildAiCorePrompt(config);
     var dynamicContext = buildAiDynamicContext(ctx, config);
     
+    // 分层上下文
     var messages = [
       { role: 'system', content: corePrompt },
-      { role: 'system', content: dynamicContext }
+      { role: 'system', content: '【当前时间】现在是北京时间：' + _currentDateCN + '。ISO 时间：' + _currentDateISO + '。回答"今天、现在、最新、刚刚、当前"等问题时，必须以这个时间为准。不能编造其他日期。如果搜索结果与当前日期不一致，要明确指出可能是旧内容。' }
     ];
+    
+    // 用户长期记忆
+    var memoryData = await loadAiMemoryBox(userName);
+    if (memoryData.compressedText) {
+      messages.push({ role: 'system', content: memoryData.compressedText + '\n【说明】这些是用户长期记忆，帮助更好理解用户偏好。如果记忆与用户当前说法不一致，以当前说法为准。' });
+    }
+    
+    // 相关历史摘要
+    var relevantSummaries = await loadRelevantConversationSummaries(userName, message, 3);
+    if (relevantSummaries && relevantSummaries.length) {
+      messages.push({ role: 'system', content: '【相关历史摘要】\n' + relevantSummaries.join('\n---\n') });
+    }
+
+    messages.push({ role: 'system', content: dynamicContext });
+
     var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
     for (var h = 0; h < histSlice.length; h++) {
       messages.push({ role: histSlice[h].role, content: histSlice[h].content });
@@ -6068,6 +6437,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           
           // 异步更新长期记忆
           try { updateLongTermMemory(userName, ctx, message, content).catch(function() {}); } catch (e) {}
+          
+          // 异步更新记忆和摘要（不阻塞回复）
+          maybeUpdateUserMemory(userName, convId, message, content, memoryData.memoryBox).catch(function() {});
+          maybeUpdateConversationSummary(userName, convId, ctx.history || []).catch(function() {});
           
           // 发送完成事件
           writeSse(res, {
@@ -6323,6 +6696,50 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
   } catch (e) {
     console.error('[AGENT-CHAT] history exception:', e.message);
     return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// ===================== AI 记忆 API =====================
+
+// GET /api/agent/memory — 获取当前用户记忆
+app.get('/api/agent/memory', authenticateUser, async (req, res) => {
+  var userName = req.userName;
+  if (!userName) return res.status(401).json({ ok: false, error: '未登录' });
+  var data = await loadAiMemoryBox(userName);
+  return res.json({ ok: true, memory: data.memoryBox, compressed: data.compressedText });
+});
+
+// POST /api/agent/memory/clear — 清空当前用户记忆
+app.post('/api/agent/memory/clear', authenticateUser, async (req, res) => {
+  var userName = req.userName;
+  if (!userName) return res.status(401).json({ ok: false, error: '未登录' });
+  try {
+    await supabase.from('posts').delete().eq('user_name', userName).eq('media_type', AI_AGENT_MEMORY_BOX_MARKER);
+    await supabase.from('posts').delete().eq('user_name', userName).eq('media_type', AI_AGENT_MEMORY_LOG_MARKER);
+    memoryBoxCache.delete(userName);
+    console.log('[MEMORY] cleared for', userName);
+    return res.json({ ok: true, message: '记忆已清空' });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// POST /api/agent/memory/toggle — 开启或关闭记忆
+app.post('/api/agent/memory/toggle', authenticateUser, async (req, res) => {
+  var userName = req.userName;
+  var enabled = req.body && req.body.enabled === true;
+  var markerEnabled = '**ai_agent_memory_enabled**';
+  try {
+    var { data: existing } = await supabase.from('posts')
+      .select('id').eq('user_name', userName).eq('media_type', markerEnabled).limit(1).maybeSingle();
+    if (existing && existing.id) {
+      await supabase.from('posts').update({ content: String(enabled), created_at: new Date().toISOString() }).eq('id', existing.id);
+    } else {
+      await supabase.from('posts').insert([{ user_name: userName, content: String(enabled), media_type: markerEnabled, actor_key: 'memory_enabled_' + userName + '_' + Date.now() }]);
+    }
+    return res.json({ ok: true, enabled: enabled });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
 
@@ -6833,6 +7250,63 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
   } catch (e) {
     console.error('[ADMIN-AI] GET conversation exception:', e.message);
     return res.status(500).json({ error: '查询失败' });
+  }
+});
+
+// ===================== 管理员 AI 记忆管理接口 =====================
+
+// GET /admin/ai-agent/memories — 管理员查看所有用户记忆
+app.get('/admin/ai-agent/memories', verifyToken, async (req, res) => {
+  try {
+    var search = String(req.query.q || '').trim();
+    var query = supabase.from('posts')
+      .select('user_name, content, created_at')
+      .eq('media_type', AI_AGENT_MEMORY_BOX_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (search) {
+      query = query.eq('user_name', search);
+    }
+    var { data } = await query;
+    var memories = (data || []).map(function(r) {
+      var box = (function() { try { return JSON.parse(r.content || '{}'); } catch(e) { return {}; } })();
+      return {
+        user_name: r.user_name,
+        has_memory: !!r.content && r.content.length > 10,
+        updated_at: box.updated_at || r.created_at,
+        display_name: box.display_name || box.stable_profile?.name || '',
+        note_count: (box.important_notes || []).length + (box.do_not_do || []).length + (box.dislikes || []).length,
+        has_preferences: !!(box.reply_preferences && (box.reply_preferences.tone || []).length)
+      };
+    });
+    return res.json({ ok: true, memories: memories, count: memories.length });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// GET /admin/ai-agent/memory/:userName — 管理员查看单个用户记忆详情
+app.get('/admin/ai-agent/memory/:userName', verifyToken, async (req, res) => {
+  try {
+    var userName = String(req.params.userName || '').trim();
+    if (!userName) return res.status(400).json({ ok: false, error: '缺少用户名' });
+    var data = await loadAiMemoryBox(userName);
+    
+    var { data: logs } = await supabase.from('posts')
+      .select('content, created_at')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MEMORY_LOG_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    
+    return res.json({
+      ok: true,
+      memory: data.memoryBox,
+      compressed: data.compressedText,
+      logs: (logs || []).map(function(l) { try { return JSON.parse(l.content); } catch(e) { return null; } }).filter(Boolean)
+    });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
 

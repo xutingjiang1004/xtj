@@ -5111,6 +5111,15 @@ async function initAdminClient() {
                 '<label for="aiCfgWebSearch" style="font-size:13px;cursor:pointer;margin:0;">启用联网搜索（免费，无需 API Key）</label>',
                 '</div>',
                 '<button class="save-btn" id="aiCfgSaveBtn">保存配置</button>',
+                // --- 用户记忆管理 ---
+                '<div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border,rgba(140,196,158,0.30))">',
+                '<h3 style="font-size:14px;font-weight:600;margin:0 0 8px 0;">用户记忆管理</h3>',
+                '<div style="display:flex;gap:8px;margin-bottom:8px;">',
+                '<input type="text" id="aiMemSearch" placeholder="搜索用户名" style="flex:1;padding:6px 8px;border:1px solid var(--border,rgba(140,196,158,0.30));border-radius:4px;font-size:13px;" />',
+                '<button id="aiMemSearchBtn" class="save-btn" style="padding:6px 12px;font-size:13px;">搜索</button>',
+                '</div>',
+                '<div id="aiMemList" style="max-height:400px;overflow-y:auto;font-size:12px;color:#555;"></div>',
+                '</div>',
                 '</div>'
             ].join('\n');
             content.innerHTML = html;
@@ -5190,6 +5199,56 @@ async function initAdminClient() {
                     saveBtn.disabled = false;
                 }
             });
+
+            // 记忆管理
+            var memSearchBtn = document.getElementById('aiMemSearchBtn');
+            var memSearch = document.getElementById('aiMemSearch');
+            var memList = document.getElementById('aiMemList');
+            if (memSearchBtn && memSearch && memList) {
+                async function loadMemories(q) {
+                    memList.textContent = '加载中...';
+                    try {
+                        var url = '/admin/ai-agent/memories' + (q ? '?q=' + encodeURIComponent(q) : '');
+                        var r = await apiCall('GET', url);
+                        if (r && r.ok && r.memories && r.memories.length) {
+                            var html = '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#f5f5f5;"><th style="padding:4px 6px;text-align:left;border-bottom:1px solid #ddd;">用户名</th><th style="padding:4px 6px;text-align:left;border-bottom:1px solid #ddd;">称呼</th><th style="padding:4px 6px;text-align:left;border-bottom:1px solid #ddd;">记忆条目</th><th style="padding:4px 6px;text-align:left;border-bottom:1px solid #ddd;">更新时间</th><th style="padding:4px 6px;text-align:center;border-bottom:1px solid #ddd;">操作</th></tr></thead><tbody>';
+                            r.memories.forEach(function(m) {
+                                var updated = (m.updated_at || '').slice(0, 10);
+                                html += '<tr><td style="padding:4px 6px;border-bottom:1px solid #eee;">' + escapeHtml(m.user_name) + '</td><td style="padding:4px 6px;border-bottom:1px solid #eee;">' + escapeHtml(m.display_name || '-') + '</td><td style="padding:4px 6px;border-bottom:1px solid #eee;">' + m.note_count + ' 条</td><td style="padding:4px 6px;border-bottom:1px solid #eee;">' + updated + '</td><td style="padding:4px 6px;border-bottom:1px solid #eee;text-align:center;"><button class="view-mem-btn" data-user="' + escapeHtml(m.user_name) + '" style="padding:2px 8px;font-size:11px;border:1px solid rgba(140,196,158,0.5);border-radius:3px;background:transparent;cursor:pointer;">查看</button></td></tr>';
+                            });
+                            html += '</tbody></table>';
+                            memList.innerHTML = html;
+                            memList.querySelectorAll('.view-mem-btn').forEach(function(btn) {
+                                btn.addEventListener('click', async function() {
+                                    var userName = this.getAttribute('data-user');
+                                    var r2 = await apiCall('GET', '/admin/ai-agent/memory/' + encodeURIComponent(userName));
+                                    if (r2 && r2.ok && r2.memory) {
+                                        var jsonStr = '<pre style="white-space:pre-wrap;font-size:11px;background:#f9f9f9;padding:8px;border-radius:4px;max-height:300px;overflow-y:auto;">' + escapeHtml(JSON.stringify(r2.memory, null, 2)) + '</pre>';
+                                        var logsHtml = '';
+                                        if (r2.logs && r2.logs.length) {
+                                            logsHtml = '<div style="margin-top:8px;font-size:11px;"><strong>操作日志：</strong><ul style="margin:4px 0;padding-left:16px;">';
+                                            r2.logs.slice(0, 10).forEach(function(l) {
+                                                logsHtml += '<li style="margin-bottom:2px;">[' + (l.created_at || '').slice(0, 10) + '] ' + escapeHtml(String(l.reason || l.type || '')).slice(0, 60) + '</li>';
+                                            });
+                                            logsHtml += '</ul></div>';
+                                        }
+                                        showModal('用户记忆 - ' + escapeHtml(userName), jsonStr + logsHtml);
+                                    } else {
+                                        showModal('错误', '无法加载该用户记忆');
+                                    }
+                                });
+                            });
+                        } else {
+                            memList.innerHTML = '<div style="color:#999;padding:12px;text-align:center;">' + (q ? '未找到用户' : '暂无用户记忆') + '</div>';
+                        }
+                    } catch (e) {
+                        memList.innerHTML = '<div style="color:#c00;padding:12px;">加载失败</div>';
+                    }
+                }
+                memSearchBtn.addEventListener('click', function() { loadMemories(memSearch.value.trim()); });
+                memSearch.addEventListener('keydown', function(e) { if (e.key === 'Enter') loadMemories(memSearch.value.trim()); });
+                loadMemories('');
+            }
         } catch(e) {
             content.innerHTML = '<div style="text-align:center;padding:20px;color:red">加载失败: ' + escapeHtml(e.message) + '</div>';
         }
