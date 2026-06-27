@@ -444,24 +444,25 @@
 
 .ai-thinking-toggle {
   width: auto;
-  min-height: 24px;
-  padding: 0 9px;
-  display: flex;
+  min-height: unset;
+  padding: 0;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 4px;
-  border: 1px solid rgba(136, 178, 166, 0.16);
-  border-radius: 999px;
-  background: rgba(248, 253, 250, 0.48);
-  color: rgba(95, 114, 117, 0.9);
-  font-size: 10px;
-  line-height: 1;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(95, 114, 117, 0.92);
+  font-size: 13px;
+  line-height: 1.35;
   cursor: pointer;
   box-shadow: none;
 }
 
 .ai-thinking-toggle:hover {
-  background: rgba(244, 252, 249, 0.74);
+  background: transparent;
+  color: rgba(72, 153, 129, 0.95);
 }
 
 .ai-thinking-label {
@@ -470,7 +471,7 @@
   gap: 0;
   min-width: 0;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
 }
 
 .ai-thinking-icon {
@@ -480,7 +481,7 @@
 .ai-thinking-caret {
   flex: 0 0 auto;
   color: rgba(110, 130, 132, 0.76);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1;
   transition: transform 140ms ease, color 140ms ease;
 }
@@ -513,15 +514,15 @@
 }
 
 .ai-thinking-body {
-  margin-top: 1px;
-  padding: 7px 9px;
-  border-radius: 11px;
-  border: 1px solid rgba(136, 178, 166, 0.14);
-  background: rgba(251, 255, 253, 0.56);
+  margin-top: 4px;
+  padding: 6px 0;
+  border-radius: 0;
+  border: none;
+  background: transparent;
   box-shadow: none;
-  color: rgba(104, 116, 126, 0.95);
-  font-size: 11px;
-  line-height: 1.5;
+  color: rgba(92, 105, 113, 0.96);
+  font-size: 13px;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -1026,18 +1027,19 @@
 
 [data-theme="dark"] .ai-thinking-toggle {
   color: rgba(212, 225, 222, 0.82);
-  background: rgba(255, 255, 255, 0.03);
-  border-color: rgba(127, 187, 172, 0.1);
+  background: transparent;
+  border-color: transparent;
 }
 
 [data-theme="dark"] .ai-thinking-toggle:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: transparent;
+  color: rgba(157, 223, 202, 0.92);
 }
 
 [data-theme="dark"] .ai-thinking-body {
   color: rgba(194, 206, 211, 0.82);
-  background: rgba(255, 255, 255, 0.035);
-  border-color: rgba(127, 187, 172, 0.12);
+  background: transparent;
+  border-color: transparent;
 }
 
 [data-theme="dark"] .ai-thinking.expanded {
