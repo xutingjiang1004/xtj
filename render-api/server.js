@@ -6149,43 +6149,37 @@ app.post('/admin/ai-agent/config', verifyToken, async (req, res) => {
   }
 });
 
-// POST /admin/ai-agent/avatar - 管理员上传 AI 头像图片
-app.post('/admin/ai-agent/avatar', verifyToken, async (req, res) => {
+// POST /api/admin/ai-agent/avatar (旧路径 /admin/ai-agent/avatar 也保留)
+// 管理员上传 AI 头像图片 — 使用 JSON base64（不依赖 multipart 解析）
+async function handleAvatarUpload(req, res) {
   try {
-    // 验证 Content-Type 包含 multipart/form-data
-    var ct = String(req.headers['content-type'] || '');
-    if (ct.indexOf('multipart/form-data') < 0) {
-      return res.status(400).json({ error: '请使用 multipart/form-data 上传' });
-    }
+    var body = req.body || {};
+    var imageBase64 = String(body.image || '').trim();
+    var ext = String(body.ext || 'png').toLowerCase();
 
-    // 解析 multipart 表单
-    var boundary = ct.split('boundary=')[1];
-    if (!boundary) return res.status(400).json({ error: '缺少 boundary' });
-    
-    // 收集 raw body
-    var bufs = [];
-    req.on('data', function(chunk) { bufs.push(chunk); });
-    await new Promise(function(resolve, reject) {
-      req.on('end', resolve);
-      req.on('error', reject);
-    });
-    var rawBody = Buffer.concat(bufs);
-    
-    // 手动解析第一部分（仅文件）
-    var parts = parseMultipartSimple(rawBody, boundary);
-    var filePart = parts && parts[0];
-    if (!filePart || !filePart.data || filePart.data.length < 20) {
-      return res.status(400).json({ error: '未检测到有效文件数据' });
+    if (!imageBase64) {
+      return res.status(400).json({ error: '缺少图片数据' });
     }
     
-    var filename = filePart.filename || 'avatar.png';
-    var ext = (filename.split('.').pop() || '').toLowerCase();
     var allowedExts = { png: true, jpg: true, jpeg: true, webp: true, gif: true };
     if (!allowedExts[ext]) {
       return res.status(400).json({ error: '只允许 png/jpg/webp/gif 格式' });
     }
     
-    if (filePart.data.length > 5 * 1024 * 1024) {
+    // 去掉 data:image/...;base64, 前缀
+    var rawBase64 = imageBase64;
+    var commaIdx = imageBase64.indexOf(',');
+    if (commaIdx >= 0) rawBase64 = imageBase64.slice(commaIdx + 1);
+    
+    var imageBuffer;
+    try { imageBuffer = Buffer.from(rawBase64, 'base64'); } catch (e) {
+      return res.status(400).json({ error: '图片数据格式错误' });
+    }
+    
+    if (!imageBuffer || imageBuffer.length < 20) {
+      return res.status(400).json({ error: '图片数据无效' });
+    }
+    if (imageBuffer.length > 5 * 1024 * 1024) {
       return res.status(400).json({ error: '图片大小不能超过 5MB' });
     }
     
@@ -6194,16 +6188,17 @@ app.post('/admin/ai-agent/avatar', verifyToken, async (req, res) => {
     var storagePath = 'avatars/' + safeName;
     
     // 上传到 Supabase Storage
+    var contentTypeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
     var { error: uploadError } = await supabase.storage
       .from('uploads')
-      .upload(storagePath, filePart.data, {
-        contentType: filePart.contentType || 'image/' + (ext === 'jpg' ? 'jpeg' : ext),
+      .upload(storagePath, imageBuffer, {
+        contentType: contentTypeMap[ext] || 'image/png',
         upsert: true
       });
     
     if (uploadError) {
       console.error('[ADMIN-AI] avatar upload error:', uploadError.message);
-      return res.status(500).json({ error: '上传失败' });
+      return res.status(500).json({ error: '上传失败: ' + (uploadError.message || '') });
     }
     
     // 获取 public URL
@@ -6225,7 +6220,7 @@ app.post('/admin/ai-agent/avatar', verifyToken, async (req, res) => {
     updatedPayload.updated_at = nowIso;
     updatedPayload.updated_by = req.adminName || 'admin';
     
-    // 查找已有配置记录
+    // 查找已有配置记录并更新
     var { data: existing } = await supabase.from('posts')
       .select('id')
       .eq('media_type', AI_AGENT_CONFIG_MARKER)
@@ -6258,56 +6253,11 @@ app.post('/admin/ai-agent/avatar', verifyToken, async (req, res) => {
     console.error('[ADMIN-AI] avatar exception:', e && e.message);
     return res.status(500).json({ error: '上传失败: ' + (e.message || '未知错误') });
   }
-});
-
-// 辅助函数：简单 multipart 解析（仅文件）
-function parseMultipartSimple(rawBody, boundary) {
-  try {
-    var boundaryBytes = Buffer.from('--' + boundary);
-    var endBoundary = Buffer.from('--' + boundary + '--');
-    
-    var parts = [];
-    var start = 0;
-    while (start < rawBody.length) {
-      var sepStart = rawBody.indexOf(boundaryBytes, start);
-      if (sepStart < 0) break;
-      var sepEnd = sepStart + boundaryBytes.length;
-      var nextSep = rawBody.indexOf(boundaryBytes, sepEnd);
-      if (nextSep < 0) {
-        // 最后一段
-        var endIdx = rawBody.indexOf(endBoundary, sepEnd);
-        if (endIdx < 0) break;
-        nextSep = endIdx;
-      }
-      var partRaw = rawBody.slice(sepEnd, nextSep);
-      // 跳过开头的 \r\n
-      var headerEnd = partRaw.indexOf('\r\n\r\n');
-      if (headerEnd < 0) { start = nextSep + 1; continue; }
-      var headers = partRaw.slice(0, headerEnd).toString();
-      var data = partRaw.slice(headerEnd + 4);
-      // 去掉末尾的 \r\n
-      if (data.length >= 2 && data[data.length - 2] === 13 && data[data.length - 1] === 10) {
-        data = data.slice(0, -2);
-      }
-      
-      var filenameMatch = headers.match(/filename="([^"]*)"/i);
-      var nameMatch = headers.match(/name="([^"]*)"/i);
-      var ctMatch = headers.match(/Content-Type:\s*(\S+)/i);
-      
-      parts.push({
-        name: nameMatch ? nameMatch[1] : '',
-        filename: filenameMatch ? filenameMatch[1] : '',
-        contentType: ctMatch ? ctMatch[1] : 'application/octet-stream',
-        data: data
-      });
-      start = nextSep + 1;
-    }
-    return parts.length ? parts : null;
-  } catch (e) {
-    console.error('[MULTIPART] parse error:', e && e.message);
-    return null;
-  }
 }
+
+app.post('/api/admin/ai-agent/avatar', verifyToken, handleAvatarUpload);
+app.post('/admin/ai-agent/avatar', verifyToken, handleAvatarUpload);
+
 
 // GET /admin/ai-agent/usage-summary - 管理员获取统计
 // 默认只查最近 30 天数据，避免全表扫描拖死接口。
