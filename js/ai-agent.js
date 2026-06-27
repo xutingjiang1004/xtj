@@ -320,14 +320,22 @@
     );
   }
 
-  function renderHeaderAvatar(target) {
+  function renderHeaderAvatar(target, avatarUrl, avatarVersion) {
     if (!target) return;
-    target.innerHTML = buildCatAvatarMarkup('');
+    if (avatarUrl) {
+      target.innerHTML = '<span class="ai-avatar-image-wrapper"><img class="ai-avatar-image" src="' + avatarUrl + (avatarVersion ? '?v=' + avatarVersion : '') + '" alt="" loading="lazy" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'' + buildCatAvatarMarkup('') + '\'"></span>';
+    } else {
+      target.innerHTML = buildCatAvatarMarkup('');
+    }
   }
 
-  function renderCatAvatarNode(target, extraClass) {
+  function renderCatAvatarNode(target, extraClass, avatarUrl, avatarVersion) {
     if (!target) return;
-    target.innerHTML = buildCatAvatarMarkup(extraClass || '');
+    if (avatarUrl) {
+      target.innerHTML = '<span class="ai-avatar-image-wrapper"><img class="ai-avatar-image" src="' + avatarUrl + (avatarVersion ? '?v=' + avatarVersion : '') + '" alt="" loading="lazy" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'' + buildCatAvatarMarkup(extraClass || '') + '\'"></span>';
+    } else {
+      target.innerHTML = buildCatAvatarMarkup(extraClass || '');
+    }
   }
 
   function isCompactAiHeader() {
@@ -826,7 +834,7 @@
     var empty = el('div', { class: 'ai-chat-empty' });
     var visual = el('div', { class: 'ai-chat-empty-visual' });
     var emojiSlot = el('div', { class: 'ai-chat-empty-emoji' });
-    renderCatAvatarNode(emojiSlot, 'ai-chat-empty-avatar');
+    renderCatAvatarNode(emojiSlot, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
     visual.appendChild(emojiSlot);
     empty.appendChild(visual);
     empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + (cfg.name || '徐旭泽的小猫') + ' 聊聊天' }));
@@ -1654,7 +1662,7 @@ function showChatMessages() {
     header.appendChild(backBtn);
 
     var avatarEl = el('div', { class: 'ai-chat-header-avatar', id: 'aiChatHeaderAvatar' });
-    renderHeaderAvatar(avatarEl);
+    renderHeaderAvatar(avatarEl, S.config && S.config.avatar_url, S.config && S.config.avatar_version);
     header.appendChild(avatarEl);
 
     var info = el('div', { class: 'ai-chat-header-info' });
@@ -1927,7 +1935,7 @@ function showChatMessages() {
     var empty = document.querySelector('#aiChatRoot .ai-chat-empty');
     if (empty) {
       var e1 = empty.querySelector('.ai-chat-empty-emoji');
-      if (e1) renderCatAvatarNode(e1, 'ai-chat-empty-avatar');
+      if (e1) renderCatAvatarNode(e1, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
       var e2 = empty.querySelector('.ai-chat-empty-title');
       if (e2) e2.textContent = '和 ' + (cfg.name || '徐旭泽的小猫') + ' 聊聊天';
       var e3 = empty.querySelector('.ai-chat-empty-tip');
@@ -2037,7 +2045,7 @@ function showChatMessages() {
       'aria-label': '打开 ' + name
     });
     var listAvatar = el('span', { class: 'chat-list-avatar ai-entry-avatar' });
-    renderCatAvatarNode(listAvatar, 'ai-entry-avatar-inner');
+    renderCatAvatarNode(listAvatar, 'ai-entry-avatar-inner', cfg.avatar_url, cfg.avatar_version);
     item.appendChild(listAvatar);
     var meta = el('div', { class: 'chat-list-meta' });
     meta.appendChild(el('div', { class: 'chat-list-name', text: name }));
