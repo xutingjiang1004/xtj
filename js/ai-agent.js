@@ -439,22 +439,19 @@
     var text = (input.value || '').trim();
     if (!text) return;
 
-    // ★ 关键修复：发送前再校验一次真实鉴权状态（双保险）
-    //   避免打开时 token 有效、发送时已过期
+    // 发送前记录鉴权状态，但不拦截——下方的 401/403 重试逻辑会处理
     if (typeof window.ensureRealUserAuth === 'function') {
       try {
         var auth = await window.ensureRealUserAuth();
         if (!auth || !auth.ok) {
           try {
-            console.warn('[AI-AUTH] sendMessage blocked, auth not ready', {
+            console.warn('[AI-AUTH] sendMessage auth not ready, proceeding anyway', {
               hasUser: !!readUserName(),
               hasToken: !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')),
               hasPwHash: !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')),
               reason: auth && auth.reason
             });
           } catch (e) {}
-          notify('登录状态需要刷新，请重新登录后再使用 AI 聊天');
-          return;
         }
       } catch (e) {}
     }
@@ -781,25 +778,23 @@
       notify('请先登录后再和徐旭泽的小猫聊天');
       return;
     }
-    // ★ 关键修复：打开 AI 前先校验真实鉴权状态
-    //   如果只有 UI 登录态（xtj_user_session）但没真实 token 也没 pwHash，
-    //   提前拦截并提示重新登录，避免进入后发送 401/403
+    // 记录鉴权状态但不拦截（有 currentUser 就放行）
+    // 真正的鉴权问题由 handleSendMessage 中的 401/403 重试逻辑处理
     if (typeof window.ensureRealUserAuth === 'function') {
       try {
         var auth = await window.ensureRealUserAuth();
         if (!auth || !auth.ok) {
           try {
-            console.warn('[AI-AUTH] openAiChat blocked, auth not ready', {
+            console.warn('[AI-AUTH] openAiChat auth not ready, proceeding anyway', {
               hasUser: !!readUserName(),
               hasToken: !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')),
               hasPwHash: !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')),
               reason: auth && auth.reason
             });
           } catch (e) {}
-          notify('登录状态需要刷新，请重新登录后再使用 AI 聊天');
-          return;
+        } else {
+          try { console.warn('[AI-AUTH] openAiChat auth ok', { reason: auth.reason }); } catch (e) {}
         }
-        try { console.warn('[AI-AUTH] openAiChat auth ok', { reason: auth.reason }); } catch (e) {}
       } catch (e) {}
     }
     S.active = true;
