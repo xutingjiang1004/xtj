@@ -1712,6 +1712,7 @@ function verifyToken(req, res, next) {
   var payload = verifySignedToken(token);
   if (payload) {
     req.adminToken = token;
+    req.adminName = payload.user || payload.user_name || 'admin';
     return next();
   }
 
@@ -1723,6 +1724,7 @@ function verifyToken(req, res, next) {
 
   session.expiresAt = Date.now() + TOKEN_EXPIRY_MS;
   req.adminToken = token;
+  req.adminName = session.userName || 'admin';
   next();
 }
 
@@ -5613,6 +5615,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   var userName = req.userName;
   var aborted = false;
   var clientReqId = req.body && req.body.client_request_id;
+  var streamSeq = 0;
   
   req.on('close', function() {
     aborted = true;
@@ -5821,19 +5824,23 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           });
           
           try {
+            streamSeq += 1;
+            var seqUser = streamSeq;
+            streamSeq += 1;
+            var seqAssistant = streamSeq;
             await supabase.from('posts').insert([
               {
                 user_name: userName,
                 content: message,
                 media_type: AI_AGENT_MESSAGE_MARKER,
-                media_url: buildMsgMeta('user', convId),
+                media_url: buildMsgMeta('user', convId, null, null, seqUser),
                 actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
               },
               {
                 user_name: userName,
                 content: content,
                 media_type: AI_AGENT_MESSAGE_MARKER,
-                media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning),
+                media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, seqAssistant),
                 actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
               }
             ]);
