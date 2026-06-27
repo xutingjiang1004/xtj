@@ -1343,34 +1343,6 @@
             continue;
           }
           
-          if (evt.type === 'status') {
-            var statusBar = messagesEl.querySelector('.ai-search-status');
-            if (!statusBar) {
-              statusBar = el('div', { class: 'ai-search-status' });
-              messagesEl.appendChild(statusBar);
-            }
-            statusBar.textContent = evt.text || '';
-            clearTimeout(statusBar._hideTimer);
-            statusBar._hideTimer = setTimeout(function() {
-              try { statusBar.remove(); } catch (e) {}
-            }, 3000);
-            continue;
-          }
-          
-          if (evt.type === 'weather') {
-            var weatherBar = messagesEl.querySelector('.ai-search-status');
-            if (!weatherBar) {
-              weatherBar = el('div', { class: 'ai-search-status' });
-              messagesEl.appendChild(weatherBar);
-            }
-            weatherBar.textContent = '已查询天气';
-            clearTimeout(weatherBar._hideTimer);
-            weatherBar._hideTimer = setTimeout(function() {
-              try { weatherBar.remove(); } catch (e) {}
-            }, 3000);
-            continue;
-          }
-          
           if (evt.type === 'error') {
             try { typingNode.remove(); } catch (e) {}
             notify(evt.error || 'AI 调用失败');
