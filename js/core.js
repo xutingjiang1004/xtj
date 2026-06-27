@@ -310,13 +310,15 @@ const ADMIN_NAME = "xxz";
                 localStorage.setItem("xtj_user", userName);
             } catch (e) {}
             lastUserSessionWriteAt = now;
-            // ★ 关键修复：恢复登录态后检查是否有真实鉴权凭据
-            //   有 session 没 token 没 pwHash 时，console.warn 提示（不强制登出避免破坏其他流程）
+            // ★ 关键修复：有 session 但 token + pwHash 都缺失 → 假登录态，自动清理
+            //   要求用户重新登录，避免 AI 等模块错误地认为已鉴权
             try {
-                var hasToken = !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'));
-                var hasPwHash = !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash'));
-                if (!hasToken && !hasPwHash) {
-                    try { console.warn('[AUTH] restoreCurrentUserFromSession: session 有效但 token + pwHash 都缺失，AI 请求会失败，需重新登录'); } catch (e) {}
+                var _restoreToken = !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'));
+                var _restorePw = !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash'));
+                if (!_restoreToken && !_restorePw) {
+                    try { console.warn('[AUTH] restoreCurrentUserFromSession: 假登录态（token + pwHash 缺失），自动登出'); } catch (e) {}
+                    clearUserSessionStorage();
+                    return "";
                 }
             } catch (e) {}
             return userName;
