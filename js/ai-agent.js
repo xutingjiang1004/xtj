@@ -26,6 +26,22 @@
   ];
 
   // ===================== 状态 =====================
+  function getAiStatusText() {
+    var hr = new Date().getHours();
+    if (hr >= 5 && hr < 9) return '早起营业';
+    if (hr >= 9 && hr < 12) return '在线';
+    if (hr >= 12 && hr < 14) return '盯着你';
+    if (hr >= 14 && hr < 18) return '在线';
+    if (hr >= 18 && hr < 22) return '精力充沛';
+    if (hr >= 22 && hr < 24) return '精神上班';
+    return '阴间营业';
+  }
+
+  function updateAiStatus() {
+    var el = document.getElementById('aiChatHeaderStatus');
+    if (el) el.textContent = getAiStatusText();
+  }
+
   var S = {
     config: null,
     configFetchedAt: 0,
@@ -744,7 +760,7 @@
     header.appendChild(el('div', { class: 'ai-chat-header-avatar', id: 'aiChatHeaderAvatar', text: '🐱' }));
     var info = el('div', { class: 'ai-chat-header-info' });
     info.appendChild(el('div', { class: 'ai-chat-header-name', id: 'aiChatHeaderName', text: '徐旭泽的小猫' }));
-    info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: '在线' }));
+    info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: getAiStatusText() }));
     header.appendChild(info);
 
     function getLevelMeta(v) {
