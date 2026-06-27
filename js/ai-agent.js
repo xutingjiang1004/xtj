@@ -570,7 +570,10 @@
         content: d.reply,
         reasoning: d.reasoning || '',
         created_at: d.created_at || new Date().toISOString(),
-        usage: d.usage || null
+        usage: Object.assign({}, d.usage || {}, {
+          model: d.model || '',
+          thinking_mode: d.thinking_mode || 'off'
+        })
       };
       S.messages.push(aiMsg);
 
