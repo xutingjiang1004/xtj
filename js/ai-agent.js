@@ -120,6 +120,138 @@
     }
   }
 
+  var _copyMenuActive = null;
+
+  function closeCopyMenu() {
+    if (_copyMenuActive) {
+      try {
+        if (_copyMenuActive.parentNode) _copyMenuActive.parentNode.removeChild(_copyMenuActive);
+      } catch (e) {}
+      _copyMenuActive = null;
+    }
+  }
+
+  function setupBubbleCopy(bubbleEl, containerEl) {
+    if (!bubbleEl || !bubbleEl.parentNode) return;
+    var _longPressTimer = null;
+    var _longPressStarted = false;
+
+    function getBubbleText() {
+      return (bubbleEl.textContent || '').trim();
+    }
+
+    function showCopyMenu(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      var text = getBubbleText();
+      if (!text) return;
+      closeCopyMenu();
+      var rect = bubbleEl.getBoundingClientRect();
+      var menu = el('div', { class: 'ai-copy-menu' });
+      menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg-card,#fff);border:1px solid var(--border,rgba(140,196,158,0.30));border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.12);padding:4px 0;min-width:60px;';
+      var btn = el('button', {
+        type: 'button',
+        class: 'ai-copy-btn',
+        text: '复制'
+      });
+      btn.style.cssText = 'display:block;width:100%;padding:8px 16px;text-align:left;background:none;border:none;font-size:12px;color:var(--text,#1d1d24);cursor:pointer;';
+      btn.addEventListener('mouseenter', function() { btn.style.background = 'rgba(46,148,101,0.06)'; });
+      btn.addEventListener('mouseleave', function() { btn.style.background = 'none'; });
+      btn.addEventListener('click', function(ce) {
+        ce.preventDefault(); ce.stopPropagation();
+        doCopy(text);
+        closeCopyMenu();
+      });
+      menu.appendChild(btn);
+      document.body.appendChild(menu);
+      _copyMenuActive = menu;
+      var menuRect = menu.getBoundingClientRect();
+      var left = Math.min(rect.left, window.innerWidth - menuRect.width - 8);
+      var top = rect.bottom + 4;
+      if (top + menuRect.height > window.innerHeight) top = rect.top - menuRect.height - 4;
+      menu.style.left = Math.max(8, left) + 'px';
+      menu.style.top = Math.max(8, top) + 'px';
+      setTimeout(function() {
+        document.addEventListener('click', function onDoc(ce2) {
+          if (!menu.contains(ce2.target) && ce2.target !== bubbleEl) {
+            closeCopyMenu();
+            document.removeEventListener('click', onDoc);
+          }
+        }, { once: true });
+      }, 0);
+    }
+
+    function startLongPress(ev) {
+      if (ev.pointerType === 'touch' || ev.pointerType === 'pen') {
+        _longPressStarted = false;
+        _longPressTimer = setTimeout(function() {
+          _longPressStarted = true;
+          showCopyMenu(ev);
+        }, 500);
+      }
+    }
+
+    function cancelLongPress(ev) {
+      if (_longPressTimer) {
+        clearTimeout(_longPressTimer);
+        _longPressTimer = null;
+      }
+      if (ev && ev.pointerType !== 'touch' && ev.pointerType !== 'pen') return;
+      if (_longPressStarted) {
+        ev && ev.preventDefault();
+        _longPressStarted = false;
+      }
+    }
+
+    bubbleEl.addEventListener('pointerdown', startLongPress);
+    bubbleEl.addEventListener('pointerup', cancelLongPress);
+    bubbleEl.addEventListener('pointercancel', cancelLongPress);
+    bubbleEl.addEventListener('pointermove', function(ev) {
+      if (_longPressTimer && ev.pointerType === 'touch') {
+        clearTimeout(_longPressTimer);
+        _longPressTimer = null;
+      }
+    });
+    bubbleEl.addEventListener('contextmenu', function(ev) {
+      var text = getBubbleText();
+      if (text) showCopyMenu(ev);
+    });
+  }
+
+  function doCopy(text) {
+    if (!text) return;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function() {
+          try { notify('已复制'); } catch (e) {}
+        }).catch(function() {
+          fallbackCopy(text);
+        });
+      } else {
+        fallbackCopy(text);
+      }
+    } catch (e) {
+      fallbackCopy(text);
+    }
+  }
+
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      try { notify('已复制'); } catch (e) {}
+    } catch (e) {
+      try { notify('复制失败，请手动选择文本'); } catch (e2) {}
+    }
+  }
+
   function getAiRoot() {
     return S.rootEl || document.getElementById('aiChatRoot');
   }
@@ -188,14 +320,22 @@
     );
   }
 
-  function renderHeaderAvatar(target) {
+  function renderHeaderAvatar(target, avatarUrl, avatarVersion) {
     if (!target) return;
-    target.innerHTML = buildCatAvatarMarkup('');
+    if (avatarUrl) {
+      target.innerHTML = '<span class="ai-avatar-image-wrapper"><img class="ai-avatar-image" src="' + avatarUrl + (avatarVersion ? '?v=' + avatarVersion : '') + '" alt="" loading="lazy" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'' + buildCatAvatarMarkup('') + '\'"></span>';
+    } else {
+      target.innerHTML = buildCatAvatarMarkup('');
+    }
   }
 
-  function renderCatAvatarNode(target, extraClass) {
+  function renderCatAvatarNode(target, extraClass, avatarUrl, avatarVersion) {
     if (!target) return;
-    target.innerHTML = buildCatAvatarMarkup(extraClass || '');
+    if (avatarUrl) {
+      target.innerHTML = '<span class="ai-avatar-image-wrapper"><img class="ai-avatar-image" src="' + avatarUrl + (avatarVersion ? '?v=' + avatarVersion : '') + '" alt="" loading="lazy" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'' + buildCatAvatarMarkup(extraClass || '') + '\'"></span>';
+    } else {
+      target.innerHTML = buildCatAvatarMarkup(extraClass || '');
+    }
   }
 
   function isCompactAiHeader() {
@@ -670,7 +810,9 @@
     if (role === 'assistant' && shouldRenderReasoning(msg)) {
       node.appendChild(buildReasoningNode(msg.reasoning, messagesEl));
     }
-    node.appendChild(el('div', { class: 'ai-msg-bubble', text: msg.content || '' }));
+    var bubble = el('div', { class: 'ai-msg-bubble', text: msg.content || '' });
+    setupBubbleCopy(bubble, messagesEl);
+    node.appendChild(bubble);
     if (role === 'assistant' && msg.usage) {
       var line = buildUsageLine(msg.usage);
       if (line) node.appendChild(el('div', { class: 'ai-msg-usage', text: line }));
@@ -692,7 +834,7 @@
     var empty = el('div', { class: 'ai-chat-empty' });
     var visual = el('div', { class: 'ai-chat-empty-visual' });
     var emojiSlot = el('div', { class: 'ai-chat-empty-emoji' });
-    renderCatAvatarNode(emojiSlot, 'ai-chat-empty-avatar');
+    renderCatAvatarNode(emojiSlot, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
     visual.appendChild(emojiSlot);
     empty.appendChild(visual);
     empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + (cfg.name || '徐旭泽的小猫') + ' 聊聊天' }));
@@ -1174,6 +1316,7 @@
             aiBubble = aiNode.querySelector('.ai-msg-bubble');
             if (!aiBubble) {
               aiBubble = el('div', { class: 'ai-msg-bubble ai-typing', text: '' });
+              setupBubbleCopy(aiBubble, messagesEl);
               aiNode.appendChild(aiBubble);
             }
             continue;
@@ -1196,6 +1339,7 @@
             aiBubble = aiNode.querySelector('.ai-msg-bubble');
             if (!aiBubble) {
               aiBubble = el('div', { class: 'ai-msg-bubble ai-typing', text: '' });
+              setupBubbleCopy(aiBubble, messagesEl);
               aiNode.appendChild(aiBubble);
             }
             aiBubble.textContent = aiContent;
@@ -1518,7 +1662,7 @@ function showChatMessages() {
     header.appendChild(backBtn);
 
     var avatarEl = el('div', { class: 'ai-chat-header-avatar', id: 'aiChatHeaderAvatar' });
-    renderHeaderAvatar(avatarEl);
+    renderHeaderAvatar(avatarEl, S.config && S.config.avatar_url, S.config && S.config.avatar_version);
     header.appendChild(avatarEl);
 
     var info = el('div', { class: 'ai-chat-header-info' });
@@ -1791,7 +1935,7 @@ function showChatMessages() {
     var empty = document.querySelector('#aiChatRoot .ai-chat-empty');
     if (empty) {
       var e1 = empty.querySelector('.ai-chat-empty-emoji');
-      if (e1) renderCatAvatarNode(e1, 'ai-chat-empty-avatar');
+      if (e1) renderCatAvatarNode(e1, 'ai-chat-empty-avatar', S.config && S.config.avatar_url, S.config && S.config.avatar_version);
       var e2 = empty.querySelector('.ai-chat-empty-title');
       if (e2) e2.textContent = '和 ' + (cfg.name || '徐旭泽的小猫') + ' 聊聊天';
       var e3 = empty.querySelector('.ai-chat-empty-tip');
@@ -1901,7 +2045,7 @@ function showChatMessages() {
       'aria-label': '打开 ' + name
     });
     var listAvatar = el('span', { class: 'chat-list-avatar ai-entry-avatar' });
-    renderCatAvatarNode(listAvatar, 'ai-entry-avatar-inner');
+    renderCatAvatarNode(listAvatar, 'ai-entry-avatar-inner', cfg.avatar_url, cfg.avatar_version);
     item.appendChild(listAvatar);
     var meta = el('div', { class: 'chat-list-meta' });
     meta.appendChild(el('div', { class: 'chat-list-name', text: name }));
