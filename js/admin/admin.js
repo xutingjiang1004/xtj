@@ -5131,13 +5131,22 @@ async function initAdminClient() {
                     }
                     if (statusEl) statusEl.textContent = '上传中...';
                     try {
-                        var formData = new FormData();
-                        formData.append('avatar', file);
                         var adminToken = window._adminToken || '';
+                        // 读文件为 base64
+                        var reader = new FileReader();
+                        var ext = (file.name.split('.').pop() || 'png').toLowerCase();
+                        var base64Data = await new Promise(function(resolve, reject) {
+                            reader.onload = function() { resolve(reader.result); };
+                            reader.onerror = reject;
+                            reader.readAsDataURL(file);
+                        });
                         var resp = await fetch('/api/admin/ai-agent/avatar', {
                             method: 'POST',
-                            headers: adminToken ? { 'Authorization': 'Bearer ' + adminToken } : {},
-                            body: formData
+                            headers: adminToken ? {
+                                'Authorization': 'Bearer ' + adminToken,
+                                'Content-Type': 'application/json'
+                            } : { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ image: base64Data, ext: ext })
                         });
                         var result = await resp.json().catch(function() { return {}; });
                         if (result && result.ok && result.avatar_url) {
