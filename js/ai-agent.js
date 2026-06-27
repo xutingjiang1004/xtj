@@ -53,7 +53,8 @@
     currentStreamAborted: false,
     conversations: [],
     conversationsEl: null,
-    showingHistory: false
+    showingHistory: false,
+    headerButtonsCleanup: null
   };
 
   function getAiStatusText() {
@@ -158,10 +159,9 @@
     if (state === 'ai-replying') triggerAvatarPop();
   }
 
-  function renderHeaderAvatar(target) {
-    if (!target) return;
-    target.innerHTML =
-      '<span class="ai-cat-avatar" aria-hidden="true">' +
+  function buildCatAvatarMarkup(extraClass) {
+    return (
+      '<span class="ai-cat-avatar' + (extraClass ? ' ' + extraClass : '') + '" aria-hidden="true">' +
         '<span class="ai-cat-aura"></span>' +
         '<span class="ai-cat-ring"></span>' +
         '<svg class="ai-cat-svg" viewBox="0 0 72 72" focusable="false" aria-hidden="true">' +
@@ -184,7 +184,102 @@
           '<path class="ai-cat-mouth" d="M28.6 43.8 C31.1 44.6 33 44.7 34.8 44.2"></path>' +
           '<path class="ai-cat-mouth" d="M43.4 43.8 C40.9 44.6 39 44.7 37.2 44.2"></path>' +
         '</svg>' +
-      '</span>';
+      '</span>'
+    );
+  }
+
+  function renderHeaderAvatar(target) {
+    if (!target) return;
+    target.innerHTML = buildCatAvatarMarkup('');
+  }
+
+  function renderCatAvatarNode(target, extraClass) {
+    if (!target) return;
+    target.innerHTML = buildCatAvatarMarkup(extraClass || '');
+  }
+
+  function isCompactAiHeader() {
+    return window.innerWidth <= 640;
+  }
+
+  function getThinkButtonText(label) {
+    return isCompactAiHeader() ? label : ('思考 ' + label);
+  }
+
+  function getNewButtonText() {
+    return isCompactAiHeader() ? '新' : '新对话';
+  }
+
+  function getHistoryButtonText(showingHistory) {
+    if (showingHistory) return isCompactAiHeader() ? '返回' : '返回聊天';
+    return '历史';
+  }
+
+  function syncAiHeaderButtons(thinkBtn, histBtn, newBtn) {
+    if (!thinkBtn || !histBtn || !newBtn) return;
+    var label = thinkBtn.getAttribute('data-short-label') || '关';
+    thinkBtn.textContent = getThinkButtonText(label);
+    histBtn.textContent = getHistoryButtonText(!!S.showingHistory);
+    newBtn.textContent = getNewButtonText();
+  }
+
+  function bindAiHeaderButtons(thinkBtn, histBtn, newBtn) {
+    function onResize() {
+      syncAiHeaderButtons(thinkBtn, histBtn, newBtn);
+    }
+    window.addEventListener('resize', onResize);
+    onResize();
+    return function() {
+      window.removeEventListener('resize', onResize);
+    };
+  }
+
+  function upgradeEmptyStateAvatar(scope) {
+    if (!scope || !scope.querySelectorAll) return;
+    var nodes = scope.querySelectorAll('.ai-chat-empty-emoji');
+    for (var i = 0; i < nodes.length; i++) {
+      renderCatAvatarNode(nodes[i], 'ai-chat-empty-avatar');
+    }
+  }
+
+  function appendEmptyState(container, tipText) {
+    if (!container) return null;
+    var node = buildEmptyState(tipText);
+    container.appendChild(node);
+    upgradeEmptyStateAvatar(container);
+    return node;
+  }
+
+  function normalizeDateKey(dateValue) {
+    if (!dateValue) return '';
+    var d = new Date(dateValue);
+    if (isNaN(d.getTime())) return '';
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function getConversationGroupLabel(dateValue) {
+    var d = new Date(dateValue || 0);
+    if (isNaN(d.getTime())) return '更早';
+    var now = new Date();
+    var todayKey = normalizeDateKey(now);
+    var yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    var dateKey = normalizeDateKey(d);
+    if (dateKey === todayKey) return '今天';
+    if (dateKey === normalizeDateKey(yesterday)) return '昨天';
+    return '更早';
+  }
+
+  function getConversationPreview(conv) {
+    if (!conv) return '继续这段对话';
+    var preview = conv.summary || conv.preview || conv.last_message || conv.last_message_preview || '';
+    preview = String(preview || '').replace(/\s+/g, ' ').trim();
+    return preview || '继续这段对话';
+  }
+
+  function getConversationCountText(conv) {
+    var count = Number(conv && (conv.message_count || conv.messages_count || conv.turn_count || conv.count));
+    if (!isFinite(count) || count <= 0) return '消息数未知';
+    return count + ' 条消息';
   }
 
   function readConvId() {
@@ -520,7 +615,7 @@
     if (messagesEl.querySelector('.ai-msg')) return;
     if (messagesEl.querySelector('.ai-chat-empty')) return;
     messagesEl.innerHTML = '';
-    messagesEl.appendChild(buildEmptyState());
+    appendEmptyState(messagesEl);
   }
 
   function setThinkingExpanded(container, expanded, messagesEl) {
@@ -595,7 +690,11 @@
   function buildEmptyState(tipText) {
     var cfg = S.config || {};
     var empty = el('div', { class: 'ai-chat-empty' });
-    empty.appendChild(el('div', { class: 'ai-chat-empty-emoji', text: cfg.avatar || '😼' }));
+    var visual = el('div', { class: 'ai-chat-empty-visual' });
+    var emojiSlot = el('div', { class: 'ai-chat-empty-emoji' });
+    renderCatAvatarNode(emojiSlot, 'ai-chat-empty-avatar');
+    visual.appendChild(emojiSlot);
+    empty.appendChild(visual);
     empty.appendChild(el('div', { class: 'ai-chat-empty-title', text: '和 ' + (cfg.name || '徐旭泽的小猫') + ' 聊聊天' }));
     empty.appendChild(el('div', { class: 'ai-chat-empty-tip', text: tipText || (cfg.welcome_message || '喵，来聊天吧。') }));
     return empty;
@@ -1231,7 +1330,7 @@
       if (!msgs.length && !before) {
         S.messages = [];
         messagesEl.innerHTML = '';
-        messagesEl.appendChild(buildEmptyState());
+        appendEmptyState(messagesEl);
         return;
       }
 
@@ -1293,6 +1392,48 @@
   }
   
   // 切换会话
+  function renderConversationListStyled(container) {
+    container.innerHTML = '';
+    if (!S.conversations.length) {
+      container.appendChild(el('div', { class: 'ai-no-history', text: '暂无聊天记录' }));
+      return;
+    }
+    var groups = {};
+    var ordered = [];
+    S.conversations.forEach(function(conv) {
+      var key = getConversationGroupLabel(conv.updated_at || conv.created_at || '');
+      if (!groups[key]) {
+        groups[key] = [];
+        ordered.push(key);
+      }
+      groups[key].push(conv);
+    });
+    ordered.forEach(function(groupLabel) {
+      var section = el('section', { class: 'ai-conv-group' });
+      section.appendChild(el('div', { class: 'ai-conv-group-title', text: groupLabel }));
+      (groups[groupLabel] || []).forEach(function(conv) {
+        var item = el('button', {
+          type: 'button',
+          class: 'ai-conv-item' + (conv.conversation_id === S.conversationId ? ' active' : ''),
+          'data-conv-id': conv.conversation_id
+        });
+        item.appendChild(el('div', { class: 'ai-conv-title', text: conv.title || '新对话' }));
+        item.appendChild(el('div', { class: 'ai-conv-preview', text: getConversationPreview(conv) }));
+        var meta = el('div', { class: 'ai-conv-meta' });
+        meta.appendChild(el('span', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' }));
+        meta.appendChild(el('span', { class: 'ai-conv-count', text: getConversationCountText(conv) }));
+        item.appendChild(meta);
+        item.addEventListener('click', function() {
+          if (S.sending) return;
+          var cid = this.getAttribute('data-conv-id');
+          switchConversation(cid);
+        });
+        section.appendChild(item);
+      });
+      container.appendChild(section);
+    });
+  }
+
   async function switchConversation(cid) {
     if (!cid || cid === S.conversationId) return;
     if (S.sending) {
@@ -1324,7 +1465,7 @@
           appendMessage(S.messagesEl, msg);
         });
       } else {
-        S.messagesEl.appendChild(buildEmptyState());
+        appendEmptyState(S.messagesEl);
       }
       scrollToBottom(S.messagesEl, true);
     }
@@ -1332,25 +1473,31 @@
     showChatMessages();
   }
   
-  function showChatMessages() {
+function showChatMessages() {
     if (S.conversationsEl) S.conversationsEl.style.display = 'none';
     if (S.messagesEl) S.messagesEl.style.display = '';
     var infoBar = document.getElementById('aiChatHistoryInfo');
     if (infoBar) infoBar.style.display = 'none';
     var inputBar = document.getElementById('aiChatInputBar');
     if (inputBar) inputBar.style.display = '';
+    S.showingHistory = false;
+    var root = getAiRoot();
+    if (root) root.classList.remove('showing-history');
   }
   
   function showConversationList() {
     if (S.messagesEl) S.messagesEl.style.display = 'none';
     if (S.conversationsEl) {
       S.conversationsEl.style.display = '';
-      renderConversationList(S.conversationsEl);
+      renderConversationListStyled(S.conversationsEl);
     }
     var infoBar = document.getElementById('aiChatHistoryInfo');
     if (infoBar) infoBar.style.display = '';
     var inputBar = document.getElementById('aiChatInputBar');
     if (inputBar) inputBar.style.display = 'none';
+    S.showingHistory = true;
+    var root = getAiRoot();
+    if (root) root.classList.add('showing-history');
   }
 
   function renderAiRoot() {
@@ -1394,6 +1541,7 @@
       'aria-label': '思考模式',
       title: '思考模式：' + curLvl.label
     }, '思考 ' + curLvl.label);
+    thinkBtn.setAttribute('data-short-label', curLvl.label);
     var thinkMenu = el('div', { class: 'ai-chat-think-menu' });
     THINKING_LEVELS.forEach(function(level) {
       var opt = el('button', {
@@ -1406,9 +1554,11 @@
         ev.stopPropagation();
         S.thinkingMode = level.value;
         try { localStorage.setItem(THINKING_MODE_KEY, level.value); } catch (e) {}
+        thinkBtn.setAttribute('data-short-label', level.label);
         thinkBtn.textContent = '思考 ' + level.label;
         thinkBtn.title = '思考模式：' + level.label;
         thinkBtn.classList.toggle('active', level.value !== 'off');
+        syncAiHeaderButtons(thinkBtn, histBtn, newBtn);
         var opts = thinkMenu.querySelectorAll('.ai-chat-think-opt');
         for (var i = 0; i < opts.length; i++) {
           opts[i].classList.toggle('selected', opts[i].getAttribute('data-value') === level.value);
@@ -1429,13 +1579,11 @@
     histBtn.addEventListener('click', function() {
       if (S.showingHistory) {
         showChatMessages();
-        S.showingHistory = false;
-        histBtn.textContent = '历史';
+        syncAiHeaderButtons(thinkBtn, histBtn, newBtn);
       } else {
         fetchConversations().then(function() {
           showConversationList();
-          S.showingHistory = true;
-          histBtn.textContent = '返回';
+          syncAiHeaderButtons(thinkBtn, histBtn, newBtn);
         });
       }
     });
@@ -1462,7 +1610,7 @@
           S.hasMore = false;
           if (S.messagesEl) {
             S.messagesEl.innerHTML = '';
-            S.messagesEl.appendChild(buildEmptyState());
+            appendEmptyState(S.messagesEl);
           }
           setAiRootState('ai-idle');
           notify('已开始新对话，旧对话仍保留在历史中');
@@ -1474,6 +1622,10 @@
       }
     });
     header.appendChild(newBtn);
+    if (S.headerButtonsCleanup) {
+      try { S.headerButtonsCleanup(); } catch (eCleanup) {}
+    }
+    S.headerButtonsCleanup = bindAiHeaderButtons(thinkBtn, histBtn, newBtn);
     root.appendChild(header);
 
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
@@ -1488,10 +1640,12 @@
     // 历史会话提示栏
     var histInfo = el('div', { id: 'aiChatHistoryInfo', style: 'display:none;padding:8px 12px;font-size:12px;color:#666;text-align:center;border-bottom:1px solid var(--border,rgba(140,196,158,0.30))' });
     histInfo.textContent = '点击下方会话继续聊天';
+    histInfo.className = 'ai-chat-history-info';
+    histInfo.style.cssText = 'display:none';
     root.appendChild(histInfo);
     
     // 会话列表
-    var convList = el('div', { style: 'display:none;flex:1;overflow-y:auto;padding:8px' });
+    var convList = el('div', { class: 'ai-conversation-list', style: 'display:none' });
     root.appendChild(convList);
     S.conversationsEl = convList;
 
@@ -1637,7 +1791,7 @@
     var empty = document.querySelector('#aiChatRoot .ai-chat-empty');
     if (empty) {
       var e1 = empty.querySelector('.ai-chat-empty-emoji');
-      if (e1) e1.textContent = cfg.avatar || '😼';
+      if (e1) renderCatAvatarNode(e1, 'ai-chat-empty-avatar');
       var e2 = empty.querySelector('.ai-chat-empty-title');
       if (e2) e2.textContent = '和 ' + (cfg.name || '徐旭泽的小猫') + ' 聊聊天';
       var e3 = empty.querySelector('.ai-chat-empty-tip');
@@ -1668,6 +1822,10 @@
     if (S.avatarPopTimer) {
       try { clearTimeout(S.avatarPopTimer); } catch (e5) {}
       S.avatarPopTimer = null;
+    }
+    if (S.headerButtonsCleanup) {
+      try { S.headerButtonsCleanup(); } catch (e6) {}
+      S.headerButtonsCleanup = null;
     }
 
     var panelChat = document.getElementById('panelChat');
@@ -1742,7 +1900,9 @@
       tabindex: '0',
       'aria-label': '打开 ' + name
     });
-    item.appendChild(el('span', { class: 'chat-list-avatar', text: avatar }));
+    var listAvatar = el('span', { class: 'chat-list-avatar ai-entry-avatar' });
+    renderCatAvatarNode(listAvatar, 'ai-entry-avatar-inner');
+    item.appendChild(listAvatar);
     var meta = el('div', { class: 'chat-list-meta' });
     meta.appendChild(el('div', { class: 'chat-list-name', text: name }));
     meta.appendChild(el('div', { class: 'chat-list-preview', text: desc }));
@@ -1796,6 +1956,20 @@
     S.bound = true;
   }
 
+  function hookAiTabVisibility() {
+    if (window.__xtjAiTabVisibilityHooked) return;
+    if (typeof window.switchDockTab !== 'function') return;
+    var original = window.switchDockTab;
+    window.switchDockTab = function(tab, skipReturn, options) {
+      var result = original.apply(this, arguments);
+      if (tab !== 'chat' && S.active) {
+        try { closeAiChat(); } catch (e) {}
+      }
+      return result;
+    };
+    window.__xtjAiTabVisibilityHooked = true;
+  }
+
   window.__debugAiClick = function() {
     try {
       var x = window.innerWidth / 2;
@@ -1833,6 +2007,7 @@
       scheduleInsertEntry();
     });
     hookChatList();
+    hookAiTabVisibility();
   }
 
   if (document.readyState === 'loading') {
