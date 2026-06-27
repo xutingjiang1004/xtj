@@ -160,7 +160,10 @@ async function queryWeather(query) {
 // Uses SearXNG public instances - no API Key required
 async function searchWeb(query, maxResults) {
   maxResults = maxResults || 5;
-  var cacheKey = query.toLowerCase().trim().slice(0, 100);
+  // 先清洗搜索词
+  var searchQuery = buildSearchQuery(query);
+  if (!searchQuery) searchQuery = String(query || '').trim().slice(0, 120);
+  var cacheKey = searchQuery.toLowerCase().trim().slice(0, 100);
   var cached = searchCache.get(cacheKey);
   if (cached && (Date.now() - cached.ts) < SEARCH_CACHE_TTL_MS) return cached.results;
 
@@ -169,17 +172,18 @@ async function searchWeb(query, maxResults) {
   var instances = searchApiUrl ? [searchApiUrl] : [
     'https://search.sapti.me',
     'https://searx.be',
-    'https://search.us.projectsegfau.lt'
+    'https://search.projectsegfau.lt',
+    'https://search.sapti.me'
   ];
-  var category = /新闻|资讯|报道|新闻/i.test(query) ? 'news' : 'general';
+  var category = /新闻|资讯|报道|新闻/i.test(searchQuery) ? 'news' : 'general';
 
-  // 并行请求所有实例，用最快返回有效结果的那个
+  // 并行请求所有实例
   var fetchers = instances.map(function(baseUrl) {
     baseUrl = baseUrl.replace(/\/+$/, '');
-    var url = baseUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1&number_of_results=' + maxResults;
+    var url = baseUrl + '/search?q=' + encodeURIComponent(searchQuery) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
     return fetch(url, {
-      headers: { 'Accept': 'application/json', 'User-Agent': 'XTJ-AI/1.0' },
-      signal: AbortSignal.timeout(2500)
+      headers: { 'Accept': 'application/json', 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },
+      signal: AbortSignal.timeout(5000)
     }).then(function(r) {
       if (!r.ok) throw new Error('status=' + r.status);
       return r.json();
@@ -192,9 +196,9 @@ async function searchWeb(query, maxResults) {
     });
   });
 
-  // 全局超时 4s
+  // 全局超时 7s
   var timeout = new Promise(function(_, reject) {
-    setTimeout(function() { reject(new Error('search timeout 4s')); }, 4000);
+    setTimeout(function() { reject(new Error('search timeout 7s')); }, 7000);
   });
 
   try {
@@ -235,8 +239,15 @@ function buildSearchQuery(message) {
   var q = String(message || '').trim();
   var cleaned = q.replace(/今天|现在|当前|实时|最新/g, '').trim();
   if (!cleaned) return q.slice(0, 120);
-  if (/新闻|资讯|报道|快讯/i.test(q)) return (cleaned + ' 最新 新闻').slice(0, 120);
-  if (/价格|多少钱|售价/i.test(q)) return (cleaned + ' 最新 价格').slice(0, 120);
+  if (/新闻|资讯|报道|快讯/i.test(q)) {
+    return (cleaned + ' 新闻').slice(0, 120);
+  }
+  if (/价格|多少钱|售价/i.test(q)) {
+    return (cleaned + ' 价格').slice(0, 120);
+  }
+  if (/天气|温度|下雨|降雨/i.test(q)) {
+    return ''; // 天气不走搜素
+  }
   return cleaned.slice(0, 120);
 }
 
@@ -6163,7 +6174,7 @@ app.get('/api/agent/search-health', authenticateUser, async (req, res) => {
       count: results.length,
       results: results,
       timestamp: new Date().toISOString(),
-      instances_checked: process.env.SEARCH_API_URL ? [process.env.SEARCH_API_URL] : ['search.sapti.me', 'searx.be', 'search.us.projectsegfau.lt']
+      instances_checked: process.env.SEARCH_API_URL ? [process.env.SEARCH_API_URL] : ['search.sapti.me', 'searx.be', 'search.projectsegfau.lt']
     });
   } catch (e) {
     return res.json({ ok: false, error: e && e.message || '搜索检查失败', results: [] });
