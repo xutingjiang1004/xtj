@@ -310,15 +310,19 @@ const ADMIN_NAME = "xxz";
                 localStorage.setItem("xtj_user", userName);
             } catch (e) {}
             lastUserSessionWriteAt = now;
-            // ★ 关键修复：有 session 但 token + pwHash 都缺失 → 假登录态，自动清理
-            //   要求用户重新登录，避免 AI 等模块错误地认为已鉴权
+            // ★ 关键修复：检查真实鉴权凭据
             try {
-                var _restoreToken = !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'));
-                var _restorePw = !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash'));
-                if (!_restoreToken && !_restorePw) {
-                    try { console.warn('[AUTH] restoreCurrentUserFromSession: 假登录态（token + pwHash 缺失），自动登出'); } catch (e) {}
+                var _rt = !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'));
+                var _rp = !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash'));
+                if (!_rt && !_rp) {
+                    try { console.warn('[AUTH] restore: 假登录态（token + pwHash 缺失），自动登出'); } catch (e) {}
                     clearUserSessionStorage();
                     return "";
+                }
+                // token 缺失但 pwHash 存在 → 自动刷新 token（不阻塞页面加载）
+                if (!_rt && _rp && typeof window.refreshUserToken === 'function') {
+                    try { console.warn('[AUTH] restore: token 缺失但 pwHash 存在，自动刷新 token'); } catch (e) {}
+                    window.refreshUserToken(true).catch(function(){});
                 }
             } catch (e) {}
             return userName;
