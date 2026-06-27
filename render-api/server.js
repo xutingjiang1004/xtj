@@ -5228,10 +5228,11 @@ function parseMsgMeta(r) {
   return { role: raw === 'assistant' ? 'assistant' : 'user' };
 }
 
-function buildMsgMeta(role, convId, usage, reasoning) {
+function buildMsgMeta(role, convId, usage, reasoning, seq) {
   var obj = { role: role, convId: convId };
   if (usage) obj.usage = usage;
   if (reasoning) obj.reasoning = reasoning;
+  if (typeof seq === 'number') obj.seq = seq;
   return JSON.stringify(obj);
 }
 
@@ -5424,6 +5425,7 @@ async function loadAiContext(userName, convId) {
       .eq('user_name', userName)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .limit(AI_CHAT_HISTORY_LIMIT);
     if (convId) {
       query = supabase.from('posts')
@@ -5432,6 +5434,7 @@ async function loadAiContext(userName, convId) {
         .eq('media_type', AI_AGENT_MESSAGE_MARKER)
         .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
         .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
         .limit(AI_CHAT_HISTORY_LIMIT);
     }
     var { data: msgRows } = await query;
@@ -5987,6 +5990,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
       .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .limit(limit);
     if (before) {
       query = query.lt('created_at', before);
