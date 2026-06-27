@@ -803,9 +803,9 @@
 
   function setThinkingStatus(node, text) {
     if (!node || !node.querySelector) return;
-    var status = node.querySelector('.ai-thinking-status');
-    if (!status) return;
-    status.textContent = text || '';
+    var label = node.querySelector('.ai-thinking-label');
+    if (!label) return;
+    label.textContent = text || '思考';
   }
 
   function createThinkingTimer(reasoningNode) {
@@ -867,7 +867,6 @@
     var label = el('span', { class: 'ai-thinking-label' });
     label.appendChild(el('span', { text: '思考' }));
     toggle.appendChild(label);
-    toggle.appendChild(el('span', { class: 'ai-thinking-status', text: '' }));
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
     var panel = el('div', { class: 'ai-thinking-panel' });
@@ -1640,6 +1639,7 @@
               // 已有部分回复，保留内容并追加错误提示
               var errNote = el('div', { class: 'ai-error-note', style: 'font-size:11px;color:#c44;margin-top:4px;text-align:left;' }, errMsg);
               try { aiNode.appendChild(errNote); } catch (e) {}
+              if (!aiNode) ensureAssistantBubble();
               finishAiMessage(aiNode, aiContent, aiReasoning, evt);
             } else {
               // 没有内容，回滚
@@ -1841,6 +1841,8 @@
           if (usageLine) aiNode.appendChild(el('div', { class: 'ai-msg-usage', text: usageLine }));
         }
         if (aiMsg.created_at) aiNode.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
+      } else if (aiNode) {
+        finishAiMessage(aiNode, aiContent, aiReasoning, null);
       } else if (doneReceived) {
         cleanupRenderers();
       } else if (!doneReceived) {
