@@ -5387,7 +5387,7 @@ async function loadAiContext(userName, convId) {
       .limit(1)
       .maybeSingle();
     if (memRow && memRow.content) {
-      ctx.memory = String(memRow.content).slice(0, 2000);
+      ctx.memory = String(memRow.content).slice(0, AI_MEMORY_MAX_LEN);
     }
 
     if (ctx.memory) {
@@ -5510,7 +5510,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       reasoning: reasoning,
       conversation_id: convId,
       usage: usage,
-      model: model,
+      model: usedModel,
       thinking_mode: thinkingMode,
       remaining: { hour: rl.remainingHour, day: rl.remainingDay }
     });
@@ -6021,4 +6021,5 @@ app.listen(port, () => {
   console.log(`[xtj-admin-api] password configured: ${ADMIN_PASSWORD ? 'yes' : 'no'}`);
   console.log(`[xtj-admin-api] supabase key type: ${SUPABASE_SERVICE_KEY ? 'service_role' : (process.env.SUPABASE_ANON_KEY ? 'anon' : 'none')}`);
   console.log(`[xtj-admin-api] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`[xtj-admin-api] DEEPSEEK_MODEL_CHAT: ${DEEPSEEK_MODEL_CHAT} | DEEPSEEK_MODEL_REASONER: ${DEEPSEEK_MODEL_REASONER} | API Key: ${DEEPSEEK_API_KEY ? '配置了' : '未配置'}`);
 });
