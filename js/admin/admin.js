@@ -5177,12 +5177,14 @@ async function initAdminClient() {
                 '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
                 '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="searchEnabled"' + (getCfgVal(cfg,'search.allow_web_search') || cfg.allow_web_search ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 开启联网搜索</label>',
                 '</div>',
+                '<div style="font-size:11px;color:#c44;margin:4px 0 8px 0;line-height:1.4;padding:6px 8px;background:rgba(204,68,68,0.08);border-radius:4px;"><strong>⚠ 注意：</strong>如未在 Render 环境变量中配置 <code>TAVILY_API_KEY</code>、<code>BRAVE_SEARCH_API_KEY</code> 或 <code>SERPER_API_KEY</code>，将使用公共 SearXNG / Bing HTML 作为兜底，可能因网络限制而搜索失败。</div>',
                 '<div class="form-group"><label>搜索提供商</label><input id="searchProvider" value="' + escapeHtml(sc.search_provider || 'searxng') + '" placeholder="searxng" /></div>',
                 '<div class="form-group"><label>最大结果数</label><input type="number" id="searchMaxResults" value="' + (sc.max_results || 5) + '" min="1" max="20" /></div>',
                 '<div class="form-group"><label>搜索超时(ms)</label><input type="number" id="searchTimeout" value="' + (sc.timeout_ms || 4000) + '" min="1000" max="30000" step="500" /></div>',
                 '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
                 '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="searchWeather"' + (sc.use_weather_tool ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 开启天气工具</label>',
                 '</div>',
+                '<div style="margin:8px 0;"><button onclick="checkSearchHealth()" style="font-size:12px;padding:4px 10px;border:1px solid var(--border,rgba(140,196,158,0.3));border-radius:4px;background:transparent;cursor:pointer;">检查搜索健康状态</button> <span id="searchHealthResult" style="font-size:11px;color:#888;"></span></div>',
                 '</div>',
 
                 // ---- 模块6: 记忆设置 ----
@@ -5378,6 +5380,50 @@ async function initAdminClient() {
                     }
                 });
             }
+
+            // 检查搜索健康状态
+            function checkSearchHealth() {
+                var resultEl = document.getElementById('searchHealthResult');
+                if (!resultEl) return;
+                resultEl.textContent = '检查中...';
+                fetch('/api/agent/search-health?q=测试搜索健康')
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (!data || data.ok === false) {
+                            resultEl.textContent = '搜索异常: ' + (data && data.error || '无有效结果');
+                            return;
+                        }
+                        var done = data.diagnostics || {};
+                        var parts = [];
+                        var envs = done.env_status || {};
+                        var hasStable = envs.TAVILY_API_KEY || envs.BRAVE_SEARCH_API_KEY || envs.SERPER_API_KEY;
+                        if (hasStable) {
+                            parts.push('已配置稳定 API');
+                        } else {
+                            parts.push('无稳定 API');
+                        }
+                        if (done.enabled_providers && done.enabled_providers.length) {
+                            parts.push('可用: ' + done.enabled_providers.join(','));
+                        } else {
+                            parts.push('无可用的搜索提供商');
+                        }
+                        if (done.provider_errors && done.provider_errors.length) {
+                            parts.push('失败: ' + done.provider_errors.map(function(p) { return p.provider + '(' + (p.error || '').slice(0, 40) + ')'; }).join(','));
+                        }
+                        if (done.missing_env && done.missing_env.length) {
+                            parts.push('缺少: ' + done.missing_env.join(','));
+                        }
+                        if (data.used_provider) {
+                            parts.push('当前使用: ' + data.used_provider);
+                        }
+                        resultEl.textContent = parts.join(' | ');
+                    })
+                    .catch(function(e) {
+                        resultEl.textContent = '检查失败: ' + (e && e.message || '网络错误');
+                    });
+            }
+            // 暴露到全局
+            window.checkSearchHealth = checkSearchHealth;
 
             // 查看当前生效 Prompt
             var loadEffectiveBtn = document.getElementById('aiLoadEffectiveBtn');
