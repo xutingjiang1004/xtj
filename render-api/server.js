@@ -5249,6 +5249,9 @@ app.get('/api/agent/config', authenticateUser, async (req, res) => {
       config: {
         name: config.name || '徐旭泽的小猫',
         avatar: config.avatar || '🐱',
+        avatar_url: config.avatar_url || '',
+        avatar_type: config.avatar_type || 'emoji',
+        avatar_version: config.avatar_version || 0,
         description: config.description || '陪你聊天的小猫',
         welcome_message: config.welcome_message || '喵，来聊天吧。',
         allow_web_search: config.allow_web_search === true
@@ -5315,6 +5318,9 @@ function buildAiDynamicContext(ctx, config) {
 const AI_DEFAULT_CONFIG = {
   name: '徐旭泽的小猫',
   avatar: '🐱',
+  avatar_url: '',
+  avatar_type: 'emoji',
+  avatar_version: 0,
   description: '陪你聊天的小猫',
   persona: '',
   tone: '',
@@ -5881,7 +5887,7 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
     var userName = req.userName;
     var limit = Math.min(Math.max(parseInt(req.query.limit) || AI_AGENT_CONVERSATION_LIST_LIMIT, 1), 100);
 
-    // 按 actor_key 分组查询，每个 convId 获取最新一条消息
+    // 取该用户所有 AI 消息，按时间倒序
     var { data: rows } = await supabase.from('posts')
       .select('actor_key, content, media_url, created_at')
       .eq('user_name', userName)
@@ -5893,51 +5899,82 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
       return res.json({ ok: true, conversations: [] });
     }
     
-    // 按 convId 分组
-    var convMap = {};
-    for (var i = 0; i < rows.length; i++) {
+    // 按 convId 分组，统计所有消息
+    // 用两个 pass：第一遍按时间倒序拿最新一条；第二遍计数 & 找第一条 user 消息
+    var convData = {}; // convId -> { firstUserMsg, lastMsg, updated_at, msgCount, totalUser, firstRole }
+    for (var i = rows.length - 1; i >= 0; i--) {
+      // 倒序遍历更容易拿第一条 user 消息
       var r = rows[i];
       var ak = String(r.actor_key || '');
       if (!ak) continue;
       var parts = ak.split('_');
-      // ai_msg_conv_{convId}_user_{userName}_{timestamp}
-      var convIdIdx = 2; // 从第3段开始
       if (parts[0] !== 'ai' || parts[1] !== 'msg' || parts.length < 5) continue;
-      // 找回 convId（跳过 ai_msg_conv_ 前缀）
-      var convId = parts[convIdIdx]; // ai, msg, conv, {convId}, ...
+      var convId = parts[2];
       if (!convId || convId === 'conv') continue;
       
-      if (convMap[convId]) continue; // 已处理过（按时间倒序，第一个就是最新的）
+      if (!convData[convId]) {
+        convData[convId] = {
+          firstUserMsg: null,
+          lastMsg: null,
+          updated_at: null,
+          msgCount: 0,
+          firstRole: null,
+          title: ''
+        };
+      }
+      convData[convId].msgCount++;
       
       var meta = parseMsgMeta(r);
-      var msgContent = String(r.content || '').slice(0, 100);
-      // 兼容旧格式
+      var msgContent = String(r.content || '');
       if (meta.role === 'assistant') {
         try {
           var c = JSON.parse(r.content || '{}');
-          if (c && typeof c.reply === 'string') msgContent = c.reply.slice(0, 100);
+          if (c && typeof c.reply === 'string') msgContent = c.reply;
         } catch (e) {}
       }
       
-      convMap[convId] = {
-        conversation_id: convId,
-        title: '',
-        last_message: msgContent,
-        updated_at: r.created_at,
-        message_count: 1,
-        role: meta.role || 'user'
-      };
-      if (convMap[convId].role === 'user' && !convMap[convId].title) {
-        convMap[convId].title = msgContent.slice(0, 20);
+      // 第一条 user 消息作为 title
+      if (meta.role === 'user' && !convData[convId].firstUserMsg) {
+        convData[convId].firstUserMsg = msgContent.slice(0, 20);
       }
     }
     
-    var conversations = Object.keys(convMap).sort(function(a, b) {
-      return (convMap[b].updated_at || '') > (convMap[a].updated_at || '') ? 1 : -1;
+    // 第二遍：按时间倒序拿最新消息的 updated_at 和 lastMsg
+    for (var j = 0; j < rows.length; j++) {
+      var r2 = rows[j];
+      var ak2 = String(r2.actor_key || '');
+      if (!ak2) continue;
+      var parts2 = ak2.split('_');
+      if (parts2[0] !== 'ai' || parts2[1] !== 'msg' || parts2.length < 5) continue;
+      var convId2 = parts2[2];
+      if (!convId2 || convId2 === 'conv') continue;
+      if (!convData[convId2]) continue;
+      
+      if (!convData[convId2].updated_at) {
+        convData[convId2].updated_at = r2.created_at;
+        var meta2 = parseMsgMeta(r2);
+        var msg2 = String(r2.content || '');
+        if (meta2.role === 'assistant') {
+          try {
+            var c2 = JSON.parse(r2.content || '{}');
+            if (c2 && typeof c2.reply === 'string') msg2 = c2.reply;
+          } catch (e) {}
+        }
+        convData[convId2].lastMsgString = msg2.slice(0, 100);
+      }
+    }
+    
+    var conversations = Object.keys(convData).sort(function(a, b) {
+      return (convData[b].updated_at || '') > (convData[a].updated_at || '') ? 1 : -1;
     }).slice(0, limit).map(function(k) {
-      var c = convMap[k];
-      if (!c.title) c.title = '新对话';
-      return c;
+      var d = convData[k];
+      return {
+        conversation_id: k,
+        title: d.firstUserMsg || '新对话',
+        last_message: d.lastMsgString || '',
+        updated_at: d.updated_at,
+        message_count: d.msgCount
+      };
     });
     
     return res.json({ ok: true, conversations: conversations });
@@ -6066,9 +6103,17 @@ app.post('/admin/ai-agent/config', verifyToken, async (req, res) => {
     var welcomeMessage = String(body.welcome_message || '').trim().slice(0, 200);
 
     var nowIso = new Date().toISOString();
+
+    // 读取现有配置，保留 avatar_url/avatar_type/avatar_version
+    var existingConfig = await getAiConfig();
+    var avatarUrl = existingConfig.avatar_url || '';
+    var avatarType = existingConfig.avatar_type || 'emoji';
+    var avatarVersion = existingConfig.avatar_version || 0;
+
     var payload = {
       name: name, avatar: avatar, description: description, persona: persona,
       tone: tone, system_prompt: systemPrompt, welcome_message: welcomeMessage,
+      avatar_url: avatarUrl, avatar_type: avatarType, avatar_version: avatarVersion,
       allow_web_search: body.allow_web_search === true,
       updated_at: nowIso, updated_by: req.adminName || 'admin'
     };
@@ -6096,6 +6141,166 @@ app.post('/admin/ai-agent/config', verifyToken, async (req, res) => {
     return res.status(500).json({ error: '保存失败' });
   }
 });
+
+// POST /admin/ai-agent/avatar - 管理员上传 AI 头像图片
+app.post('/admin/ai-agent/avatar', verifyToken, async (req, res) => {
+  try {
+    // 验证 Content-Type 包含 multipart/form-data
+    var ct = String(req.headers['content-type'] || '');
+    if (ct.indexOf('multipart/form-data') < 0) {
+      return res.status(400).json({ error: '请使用 multipart/form-data 上传' });
+    }
+
+    // 解析 multipart 表单
+    var boundary = ct.split('boundary=')[1];
+    if (!boundary) return res.status(400).json({ error: '缺少 boundary' });
+    
+    // 收集 raw body
+    var bufs = [];
+    req.on('data', function(chunk) { bufs.push(chunk); });
+    await new Promise(function(resolve, reject) {
+      req.on('end', resolve);
+      req.on('error', reject);
+    });
+    var rawBody = Buffer.concat(bufs);
+    
+    // 手动解析第一部分（仅文件）
+    var parts = parseMultipartSimple(rawBody, boundary);
+    var filePart = parts && parts[0];
+    if (!filePart || !filePart.data || filePart.data.length < 20) {
+      return res.status(400).json({ error: '未检测到有效文件数据' });
+    }
+    
+    var filename = filePart.filename || 'avatar.png';
+    var ext = (filename.split('.').pop() || '').toLowerCase();
+    var allowedExts = { png: true, jpg: true, jpeg: true, webp: true, gif: true };
+    if (!allowedExts[ext]) {
+      return res.status(400).json({ error: '只允许 png/jpg/webp/gif 格式' });
+    }
+    
+    if (filePart.data.length > 5 * 1024 * 1024) {
+      return res.status(400).json({ error: '图片大小不能超过 5MB' });
+    }
+    
+    // 生成安全文件名
+    var safeName = 'ai_avatar_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex') + '.' + ext;
+    var storagePath = 'avatars/' + safeName;
+    
+    // 上传到 Supabase Storage
+    var { error: uploadError } = await supabase.storage
+      .from('uploads')
+      .upload(storagePath, filePart.data, {
+        contentType: filePart.contentType || 'image/' + (ext === 'jpg' ? 'jpeg' : ext),
+        upsert: true
+      });
+    
+    if (uploadError) {
+      console.error('[ADMIN-AI] avatar upload error:', uploadError.message);
+      return res.status(500).json({ error: '上传失败' });
+    }
+    
+    // 获取 public URL
+    var { data: publicUrlData } = supabase.storage.from('uploads').getPublicUrl(storagePath);
+    var publicUrl = publicUrlData ? publicUrlData.publicUrl : '';
+    if (!publicUrl) {
+      return res.status(500).json({ error: '获取图片地址失败' });
+    }
+    
+    // 更新 AI 配置中的头像字段
+    var existingConfig = await getAiConfig();
+    var newVersion = (existingConfig.avatar_version || 0) + 1;
+    var nowIso = new Date().toISOString();
+    
+    var updatedPayload = JSON.parse(JSON.stringify(existingConfig));
+    updatedPayload.avatar_url = publicUrl;
+    updatedPayload.avatar_type = 'image';
+    updatedPayload.avatar_version = newVersion;
+    updatedPayload.updated_at = nowIso;
+    updatedPayload.updated_by = req.adminName || 'admin';
+    
+    // 查找已有配置记录
+    var { data: existing } = await supabase.from('posts')
+      .select('id')
+      .eq('media_type', AI_AGENT_CONFIG_MARKER)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    if (existing && existing.id) {
+      await supabase.from('posts').update({
+        media_url: JSON.stringify(updatedPayload),
+        created_at: nowIso
+      }).eq('id', existing.id);
+    } else {
+      await supabase.from('posts').insert([{
+        user_name: req.adminName || 'admin',
+        content: updatedPayload.name || 'AI',
+        media_type: AI_AGENT_CONFIG_MARKER,
+        media_url: JSON.stringify(updatedPayload),
+        actor_key: 'ai_config_' + Date.now()
+      }]);
+    }
+    
+    return res.json({
+      ok: true,
+      avatar_url: publicUrl,
+      avatar_version: newVersion,
+      message: '头像上传成功'
+    });
+  } catch (e) {
+    console.error('[ADMIN-AI] avatar exception:', e && e.message);
+    return res.status(500).json({ error: '上传失败: ' + (e.message || '未知错误') });
+  }
+});
+
+// 辅助函数：简单 multipart 解析（仅文件）
+function parseMultipartSimple(rawBody, boundary) {
+  try {
+    var boundaryBytes = Buffer.from('--' + boundary);
+    var endBoundary = Buffer.from('--' + boundary + '--');
+    
+    var parts = [];
+    var start = 0;
+    while (start < rawBody.length) {
+      var sepStart = rawBody.indexOf(boundaryBytes, start);
+      if (sepStart < 0) break;
+      var sepEnd = sepStart + boundaryBytes.length;
+      var nextSep = rawBody.indexOf(boundaryBytes, sepEnd);
+      if (nextSep < 0) {
+        // 最后一段
+        var endIdx = rawBody.indexOf(endBoundary, sepEnd);
+        if (endIdx < 0) break;
+        nextSep = endIdx;
+      }
+      var partRaw = rawBody.slice(sepEnd, nextSep);
+      // 跳过开头的 \r\n
+      var headerEnd = partRaw.indexOf('\r\n\r\n');
+      if (headerEnd < 0) { start = nextSep + 1; continue; }
+      var headers = partRaw.slice(0, headerEnd).toString();
+      var data = partRaw.slice(headerEnd + 4);
+      // 去掉末尾的 \r\n
+      if (data.length >= 2 && data[data.length - 2] === 13 && data[data.length - 1] === 10) {
+        data = data.slice(0, -2);
+      }
+      
+      var filenameMatch = headers.match(/filename="([^"]*)"/i);
+      var nameMatch = headers.match(/name="([^"]*)"/i);
+      var ctMatch = headers.match(/Content-Type:\s*(\S+)/i);
+      
+      parts.push({
+        name: nameMatch ? nameMatch[1] : '',
+        filename: filenameMatch ? filenameMatch[1] : '',
+        contentType: ctMatch ? ctMatch[1] : 'application/octet-stream',
+        data: data
+      });
+      start = nextSep + 1;
+    }
+    return parts.length ? parts : null;
+  } catch (e) {
+    console.error('[MULTIPART] parse error:', e && e.message);
+    return null;
+  }
+}
 
 // GET /admin/ai-agent/usage-summary - 管理员获取统计
 // 默认只查最近 30 天数据，避免全表扫描拖死接口。

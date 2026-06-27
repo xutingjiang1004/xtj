@@ -5089,7 +5089,18 @@ async function initAdminClient() {
             var html = [
                 '<div class="ai-admin-settings">',
                 '<div class="form-group"><label>AI 名称</label><input id="aiCfgName" value="' + escapeHtml(cfg.name) + '" maxlength="30" /></div>',
-                '<div class="form-group"><label>头像（如 🐱）</label><input id="aiCfgAvatar" value="' + escapeHtml(cfg.avatar) + '" maxlength="10" /></div>',
+                '<div class="form-group"><label>头像图片</label>',
+                '<div style="display:flex;align-items:center;gap:12px;">',
+                '<div id="aiAvatarPreview" style="width:60px;height:60px;border-radius:50%;overflow:hidden;background:#f0f8ef;display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;">',
+                (cfg.avatar_url ? '<img src="' + escapeHtml(cfg.avatar_url) + '?v=' + (cfg.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'' + escapeHtml(cfg.avatar || '🐱') + '\'">' : escapeHtml(cfg.avatar || '🐱')),
+                '</div>',
+                '<input type="file" id="aiAvatarFileInput" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" />',
+                '<button class="btn" id="aiAvatarUploadBtn">选择图片</button>',
+                '<span id="aiAvatarStatus" style="font-size:12px;color:var(--text-muted)"></span>',
+                '</div>',
+                '<div style="font-size:11px;color:var(--text-muted);margin-top:4px;">支持 png/jpg/webp/gif，最大 5MB。上传后保存配置才会生效。</div>',
+                '</div>',
+                '<div class="form-group"><label>头像文字（如 🐱）</label><input id="aiCfgAvatar" value="' + escapeHtml(cfg.avatar) + '" maxlength="10" /></div>',
                 '<div class="form-group"><label>简介</label><input id="aiCfgDesc" value="' + escapeHtml(cfg.description || '') + '" maxlength="200" /></div>',
                 '<div class="form-group"><label>欢迎语</label><input id="aiCfgWelcome" value="' + escapeHtml(cfg.welcome_message || '') + '" maxlength="200" /></div>',
                 '<div class="form-group"><label>性格设定 persona（最多 500 字）</label><textarea id="aiCfgPersona" maxlength="500">' + escapeHtml(cfg.persona || '') + '</textarea></div>',
@@ -5099,6 +5110,50 @@ async function initAdminClient() {
                 '</div>'
             ].join('\n');
             content.innerHTML = html;
+
+            // 头像上传
+            var uploadBtn = document.getElementById('aiAvatarUploadBtn');
+            var fileInput = document.getElementById('aiAvatarFileInput');
+            var statusEl = document.getElementById('aiAvatarStatus');
+            var previewEl = document.getElementById('aiAvatarPreview');
+            if (uploadBtn && fileInput) {
+                uploadBtn.addEventListener('click', function() { fileInput.click(); });
+                fileInput.addEventListener('change', async function() {
+                    var file = fileInput.files && fileInput.files[0];
+                    if (!file) return;
+                    if (!file.type.match(/^image\/(png|jpeg|webp|gif)$/)) {
+                        if (statusEl) statusEl.textContent = '只支持 png/jpg/webp/gif';
+                        return;
+                    }
+                    if (file.size > 5 * 1024 * 1024) {
+                        if (statusEl) statusEl.textContent = '图片不能超过 5MB';
+                        return;
+                    }
+                    if (statusEl) statusEl.textContent = '上传中...';
+                    try {
+                        var formData = new FormData();
+                        formData.append('avatar', file);
+                        var adminToken = window._adminToken || '';
+                        var resp = await fetch('/api/admin/ai-agent/avatar', {
+                            method: 'POST',
+                            headers: adminToken ? { 'Authorization': 'Bearer ' + adminToken } : {},
+                            body: formData
+                        });
+                        var result = await resp.json().catch(function() { return {}; });
+                        if (result && result.ok && result.avatar_url) {
+                            if (previewEl) previewEl.innerHTML = '<img src="' + result.avatar_url + '?v=' + (result.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'🐱\'">';
+                            if (statusEl) statusEl.textContent = '上传成功，记得保存配置';
+                            showToast('头像上传成功，请点击保存配置');
+                        } else {
+                            if (statusEl) statusEl.textContent = '上传失败: ' + (result && result.error ? result.error : '未知错误');
+                        }
+                    } catch(e) {
+                        if (statusEl) statusEl.textContent = '上传异常';
+                        showToast('头像上传失败', 'error');
+                    }
+                });
+            }
+
             document.getElementById('aiCfgSaveBtn').addEventListener('click', async function() {
                 var saveBtn = document.getElementById('aiCfgSaveBtn');
                 saveBtn.textContent = '保存中...';
