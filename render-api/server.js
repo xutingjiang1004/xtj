@@ -107,47 +107,34 @@ async function searchWeb(query, maxResults) {
   
   var results = [];
   try {
-    var searchApiKey = process.env.SEARCH_API_KEY || process.env.BRAVE_API_KEY || process.env.TAVILY_API_KEY || '';
-    var searchEngine = process.env.SEARCH_ENGINE || 'brave';
-    var searchApiUrl = process.env.SEARCH_API_URL || '';
+    // SearXNG — 免费开源元搜索引擎，无需 API Key
+    // 可自建 Docker，也可使用公开实例
+    // 默认使用 searx.be (长期稳定公开实例)
+    // 也可通过 SEARCH_API_URL 自定义
+    var searchApiUrl = process.env.SEARCH_API_URL || 'https://search.sapti.me';
     
-    if (!searchApiKey) {
-      results.push({ title: '搜索未配置', url: '', snippet: '管理员未配置搜索 API Key', source: '' });
-    } else if (searchEngine === 'brave' || (!searchApiUrl && searchEngine === 'brave')) {
-      var braveUrl = searchApiUrl || 'https://api.search.brave.com/res/v1/web/search';
-      var braveRes = await fetch(braveUrl + '?q=' + encodeURIComponent(query) + '&count=' + maxResults, {
-        headers: { 'Accept': 'application/json', 'Accept-Encoding': 'gzip', 'X-Subscription-Token': searchApiKey }
-      });
-      if (braveRes.ok) {
-        var braveData = await braveRes.json();
-        var webResults = braveData.web && braveData.web.results;
-        if (Array.isArray(webResults)) {
-          results = webResults.slice(0, maxResults).map(function(r) {
-            return {
-              title: String(r.title || '').slice(0, 200),
-              url: String(r.url || ''),
-              snippet: String(r.description || '').slice(0, 300),
-              source: 'brave',
-              published_at: r.age || r.published_time || ''
-            };
-          });
-        }
+    var searxngUrl = searchApiUrl.replace(/\/+$/, '') + '/search?q=' + encodeURIComponent(query) + '&format=json&number_of_results=' + maxResults + '&language=zh-CN';
+    
+    var searxngRes = await fetch(searxngUrl, {
+      headers: { 'Accept': 'application/json', 'User-Agent': 'XTJ-AI/1.0' }
+    });
+    
+    if (searxngRes.ok) {
+      var searxngData = await searxngRes.json();
+      var searxngResults = searxngData && searxngData.results;
+      if (Array.isArray(searxngResults)) {
+        results = searxngResults.slice(0, maxResults).map(function(r) {
+          return {
+            title: String(r.title || '').slice(0, 200),
+            url: String(r.url || ''),
+            snippet: String(r.content || r.snippet || '').slice(0, 300),
+            source: r.engine || 'web',
+            published_at: r.publishedDate || ''
+          };
+        });
       }
-    } else if (searchEngine === 'tavily') {
-      var tavilyRes = await fetch(searchApiUrl || 'https://api.tavily.com/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ api_key: searchApiKey, query: query, max_results: maxResults })
-      });
-      if (tavilyRes.ok) {
-        var tavilyData = await tavilyRes.json();
-        var tavilyResults = tavilyData.results;
-        if (Array.isArray(tavilyResults)) {
-          results = tavilyResults.slice(0, maxResults).map(function(r) {
-            return { title: String(r.title || '').slice(0, 200), url: String(r.url || ''), snippet: String(r.content || '').slice(0, 300), source: 'tavily', published_at: '' };
-          });
-        }
-      }
+    } else {
+      console.warn('[SEARCH] SearXNG returned', searxngRes.status, 'for', query.slice(0, 30));
     }
   } catch (e) {
     console.error('[SEARCH] searchWeb error:', e && e.message);
