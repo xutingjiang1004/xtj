@@ -750,27 +750,64 @@
       }
       return THINKING_LEVELS[0];
     }
+    var thinkBtnWrapper = el('div', { class: 'ai-chat-think-wrap' });
     var curLvl = getLevelMeta(S.thinkingMode);
     var thinkBtn = el('button', {
       type: 'button', class: 'ai-chat-think-btn', 'aria-label': '思考模式',
       title: '思考模式：' + curLvl.label
-    }, (curLvl.icon ? curLvl.icon + ' ' : '') + '思考 ' + curLvl.label);
+    }, '思考 ' + curLvl.label);
     if (S.thinkingMode !== 'off') thinkBtn.classList.add('active');
+
+    var thinkMenu = el('div', { class: 'ai-chat-think-menu', style: 'display:none' });
+    THINKING_LEVELS.forEach(function(lvl) {
+      var opt = el('button', {
+        type: 'button', class: 'ai-chat-think-opt' + (lvl.value === S.thinkingMode ? ' selected' : ''),
+        'data-value': lvl.value
+      }, lvl.label);
+      opt.addEventListener('click', function(ev2) {
+        ev2.preventDefault(); ev2.stopPropagation();
+        if (S.thinkingMode === lvl.value) {
+          thinkMenu.style.display = 'none';
+          return;
+        }
+        S.thinkingMode = lvl.value;
+        try { localStorage.setItem(THINKING_MODE_KEY, lvl.value); } catch (e) {}
+        thinkBtn.textContent = '思考 ' + lvl.label;
+        thinkBtn.title = '思考模式：' + lvl.label;
+        if (lvl.value !== 'off') thinkBtn.classList.add('active');
+        else thinkBtn.classList.remove('active');
+        thinkMenu.querySelectorAll('.ai-chat-think-opt').forEach(function(o) {
+          o.classList.toggle('selected', o.getAttribute('data-value') === lvl.value);
+        });
+        thinkMenu.style.display = 'none';
+      });
+      thinkMenu.appendChild(opt);
+    });
+
+    function closeThinkMenu() {
+      if (thinkMenu.style.display !== 'none') thinkMenu.style.display = 'none';
+    }
+
     thinkBtn.addEventListener('click', function(ev) {
       ev.preventDefault(); ev.stopPropagation();
-      var idx = 0;
-      for (var k = 0; k < THINKING_LEVELS.length; k++) {
-        if (THINKING_LEVELS[k].value === S.thinkingMode) { idx = k; break; }
+      if (thinkMenu.style.display === 'none') {
+        thinkMenu.style.display = '';
+        // 点击外部关闭
+        setTimeout(function() {
+          document.addEventListener('click', function onDocClick(ce) {
+            if (!thinkBtnWrapper.contains(ce.target)) {
+              closeThinkMenu();
+              document.removeEventListener('click', onDocClick);
+            }
+          }, { once: true });
+        }, 0);
+      } else {
+        closeThinkMenu();
       }
-      var next = THINKING_LEVELS[(idx + 1) % THINKING_LEVELS.length];
-      S.thinkingMode = next.value;
-      try { localStorage.setItem(THINKING_MODE_KEY, next.value); } catch (e) {}
-      thinkBtn.textContent = (next.icon ? next.icon + ' ' : '') + '思考 ' + next.label;
-      thinkBtn.title = '思考模式：' + next.label;
-      if (next.value !== 'off') thinkBtn.classList.add('active');
-      else thinkBtn.classList.remove('active');
     });
-    header.appendChild(thinkBtn);
+    thinkBtnWrapper.appendChild(thinkBtn);
+    thinkBtnWrapper.appendChild(thinkMenu);
+    header.appendChild(thinkBtnWrapper);
 
     var newBtn = el('button', {
       type: 'button', class: 'ai-chat-new-btn', 'aria-label': '新对话',
