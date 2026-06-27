@@ -240,13 +240,13 @@ async function searchWeb(query, maxResults) {
     ]);
   }
 
-  // 并行跑 Bing 和 SearXNG，最快有效结果胜出
+  // 等两个引擎都返回（或超时），哪个有结果用哪个
   try {
-    var winner = await Promise.race([
-      searchBing(),
-      searchSearxng().catch(function() { return []; })
-    ]);
-    if (Array.isArray(winner)) {
+    var settled = await Promise.allSettled([searchBing(), searchSearxng()]);
+    for (var si = 0; si < settled.length && !results.length; si++) {
+      if (settled[si].status !== 'fulfilled') continue;
+      var winner = settled[si].value;
+      if (!Array.isArray(winner) || !winner.length) continue;
       for (var ri = 0; ri < winner.length && results.length < maxResults; ri++) {
         var r2 = winner[ri];
         var title2 = String(r2.title || '').trim();
@@ -5830,7 +5830,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (aborted) return res.end();
 
     writeSse(res, { type: 'meta', conversation_id: convId });
-    writeSse(res, { type: 'status', text: '正在准备回复...' });
     if (aborted) return res.end();
     
     // 读取全局 AI 配置 + 上下文
@@ -5872,7 +5871,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       weatherResult = await queryWeather(message);
       if (weatherResult) {
         messages.push({ role: 'system', content: weatherResult });
-        res.write('data: ' + JSON.stringify({ type: 'weather', text: weatherResult.slice(0, 200) }) + '\n\n');
       }
     }
 
