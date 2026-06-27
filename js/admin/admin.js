@@ -5108,7 +5108,7 @@ async function initAdminClient() {
                 '<div class="form-group"><label>系统提示词 system_prompt（最多 2000 字）</label><textarea id="aiCfgSysPrompt" maxlength="2000" style="min-height:120px">' + escapeHtml(cfg.system_prompt || '') + '</textarea></div>',
                 '<div class="form-group" style="display:flex;align-items:center;gap:8px;padding-top:4px;">',
                 '<input type="checkbox" id="aiCfgWebSearch"' + (cfg.allow_web_search ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);cursor:pointer;" />',
-                '<label for="aiCfgWebSearch" style="font-size:13px;cursor:pointer;margin:0;">启用联网搜索（需配置 SEARCH_API_KEY 环境变量）</label>',
+                '<label for="aiCfgWebSearch" style="font-size:13px;cursor:pointer;margin:0;">启用联网搜索（免费，无需 API Key）</label>',
                 '</div>',
                 '<button class="save-btn" id="aiCfgSaveBtn">保存配置</button>',
                 '</div>'
