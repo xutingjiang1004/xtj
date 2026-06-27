@@ -160,64 +160,95 @@ async function queryWeather(query) {
 // Uses SearXNG public instances - no API Key required
 async function searchWeb(query, maxResults) {
   maxResults = maxResults || 5;
-  var cacheKey = query.toLowerCase().trim().slice(0, 100);
+  // 先清洗搜索词
+  var searchQuery = buildSearchQuery(query);
+  if (!searchQuery) searchQuery = String(query || '').trim().slice(0, 120);
+  var cacheKey = searchQuery.toLowerCase().trim().slice(0, 100);
   var cached = searchCache.get(cacheKey);
   if (cached && (Date.now() - cached.ts) < SEARCH_CACHE_TTL_MS) return cached.results;
 
   var results = [];
+  var searchApiUrl = process.env.SEARCH_API_URL || '';
+  var instances = searchApiUrl ? [searchApiUrl] : [
+    'https://search.sapti.me',
+    'https://searx.be',
+    'https://search.projectsegfau.lt',
+    'https://search.sapti.me'
+  ];
+  var category = /新闻|资讯|报道|新闻/i.test(searchQuery) ? 'news' : 'general';
+
+  // 并行请求所有实例
+  var fetchers = instances.map(function(baseUrl) {
+    baseUrl = baseUrl.replace(/\/+$/, '');
+    var url = baseUrl + '/search?q=' + encodeURIComponent(searchQuery) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
+    return fetch(url, {
+      headers: { 'Accept': 'application/json', 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },
+      signal: AbortSignal.timeout(5000)
+    }).then(function(r) {
+      if (!r.ok) throw new Error('status=' + r.status);
+      return r.json();
+    }).then(function(data) {
+      var raw = data && data.results;
+      if (!Array.isArray(raw) || !raw.length) throw new Error('no results');
+      return raw;
+    }).catch(function(e) {
+      throw new Error(baseUrl.slice(0, 30) + ': ' + (e.message || 'unknown'));
+    });
+  });
+
+  // 全局超时 7s
+  var timeout = new Promise(function(_, reject) {
+    setTimeout(function() { reject(new Error('search timeout 7s')); }, 7000);
+  });
+
   try {
-    var searchApiUrl = process.env.SEARCH_API_URL || '';
-    var instances = searchApiUrl ? [searchApiUrl] : [
-      'https://search.sapti.me',
-      'https://searx.be',
-      'https://search.us.projectsegfau.lt'
-    ];
-
-    for (var instIdx = 0; instIdx < instances.length; instIdx++) {
-      if (results.length) break;
-      var baseUrl = instances[instIdx].replace(/\/+$/, '');
-      var category = /新闻|资讯|报道|新闻/i.test(query) ? 'news' : 'general';
-      var searxngUrl = baseUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
-
-      try {
-        var searxngRes = await fetch(searxngUrl, {
-          headers: { 'Accept': 'application/json', 'User-Agent': 'XTJ-AI/1.0' },
-          signal: AbortSignal.timeout(6000)
+    var winner = await Promise.race([
+      Promise.any(fetchers),
+      timeout
+    ]);
+    if (Array.isArray(winner)) {
+      for (var ri = 0; ri < winner.length && results.length < maxResults; ri++) {
+        var r = winner[ri];
+        var title = String(r.title || '').trim();
+        var url = String(r.url || '').trim();
+        if (!title || !url) continue;
+        results.push({
+          title: title.slice(0, 200),
+          url: url,
+          snippet: String(r.content || r.snippet || '').trim().slice(0, 500),
+          source: r.engine || 'web',
+          published_at: r.publishedDate || ''
         });
-
-        if (searxngRes.ok) {
-          var searxngData = await searxngRes.json();
-          var searxngResults = searxngData && searxngData.results;
-          if (Array.isArray(searxngResults)) {
-            for (var ri = 0; ri < searxngResults.length && results.length < maxResults; ri++) {
-              var r = searxngResults[ri];
-              var title = String(r.title || '').trim();
-              var url = String(r.url || '').trim();
-              if (!title || !url) continue;
-              results.push({
-                title: title.slice(0, 200),
-                url: url,
-                snippet: String(r.content || r.snippet || '').trim().slice(0, 300),
-                source: r.engine || 'web',
-                published_at: r.publishedDate || ''
-              });
-            }
-          }
-        }
-      } catch (instErr) {
-        console.warn('[SEARCH] instance failed', baseUrl.slice(0, 30), instErr && instErr.message);
       }
     }
-
-    if (!results.length) {
-      console.warn('[SEARCH] all instances failed for', query.slice(0, 30));
-    }
   } catch (e) {
-    console.error('[SEARCH] searchWeb error:', e && e.message);
+    console.warn('[SEARCH] all instances failed:', e && e.message);
   }
 
   searchCache.set(cacheKey, { ts: Date.now(), results: results });
   return results;
+}
+
+function writeSse(res, payload) {
+  if (res.headersSent) {
+    try { res.write('data: ' + JSON.stringify(payload) + '\n\n'); } catch (e) {}
+  }
+}
+
+function buildSearchQuery(message) {
+  var q = String(message || '').trim();
+  var cleaned = q.replace(/今天|现在|当前|实时|最新/g, '').trim();
+  if (!cleaned) return q.slice(0, 120);
+  if (/新闻|资讯|报道|快讯/i.test(q)) {
+    return (cleaned + ' 新闻').slice(0, 120);
+  }
+  if (/价格|多少钱|售价/i.test(q)) {
+    return (cleaned + ' 价格').slice(0, 120);
+  }
+  if (/天气|温度|下雨|降雨/i.test(q)) {
+    return ''; // 天气不走搜素
+  }
+  return cleaned.slice(0, 120);
 }
 
 // ===================== Gmail SMTP 邮件配置 =====================
@@ -5269,7 +5300,10 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
 // 3. 字段严格验证（防注入 + 长度限制）
 // 4. 数据存 posts 表 + AI_AGENT_*_MARKER（已加入 applyPublicPostExclusions 过滤）
 
-const AI_CHAT_MESSAGE_MAX_LEN = 500;
+const AI_CHAT_MESSAGE_MAX_LEN = Math.min(
+  Math.max(parseInt(process.env.AI_CHAT_MESSAGE_MAX_LEN || '8000', 10) || 8000, 1000),
+  20000
+);
 const AI_CHAT_HISTORY_LIMIT = 10;
 const AI_CHAT_HOURLY_IP_LIMIT = 30;
 const AI_MEMORY_MAX_LEN = 800;
@@ -5716,13 +5750,31 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var rl = checkAiUserRateLimit(userName);
     if (!rl.allowed) {
       res.setHeader('Content-Type', 'text/event-stream');
-      return res.end('data: ' + JSON.stringify({ error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : '今日 AI 聊天次数已达上限' }) + '\n\n');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      writeSse(res, { type: 'error', error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : '今日 AI 聊天次数已达上限' });
+      return res.end();
     }
     
     // 验证输入
     var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
-    if (message && message.error) { res.setHeader('Content-Type', 'text/event-stream'); return res.end('data: ' + JSON.stringify({ error: message.error }) + '\n\n'); }
-    if (!message) { res.setHeader('Content-Type', 'text/event-stream'); return res.end('data: ' + JSON.stringify({ error: '消息内容不能为空' }) + '\n\n'); }
+    if (message && message.error) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      writeSse(res, { type: 'error', error: message.error });
+      return res.end();
+    }
+    if (!message) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      writeSse(res, { type: 'error', error: '消息内容不能为空' });
+      return res.end();
+    }
     if (aborted) return res.end();
     
     // 会话管理
@@ -5737,16 +5789,14 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
     if (aborted) return res.end();
 
-    res.write('data: ' + JSON.stringify({ type: 'meta', conversation_id: convId }) + '\n\n');
+    writeSse(res, { type: 'meta', conversation_id: convId });
+    writeSse(res, { type: 'status', text: '正在准备回复...' });
     if (aborted) return res.end();
     
-    // 读取配置和上下文
-    var contextResults = await Promise.all([
-      getAiConfig(),
-      loadAiContext(userName, convId)
-    ]);
-    var config = contextResults[0];
-    var ctx = contextResults[1];
+    // 读取全局 AI 配置 + 上下文
+    var configPromise = getAiConfig();
+    var ctxPromise = loadAiContext(userName, convId);
+    var [config, ctx] = await Promise.all([configPromise, ctxPromise]);
     
     // 当前时间上下文
     var _now = new Date();
@@ -5822,6 +5872,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     
     messages.push({ role: 'user', content: message });
+    
+    console.log('[AGENT-STREAM] thinking_mode=', thinkingMode, 'useThinking=', useThinking, 'model=', usedModel, 'reasoning_effort=', useThinking ? thinkingMode : 'off', '|| message_len=', message.length, 'history_messages=', messages.length);
     
     // 调用 DeepSeek（流式）
     var apiBody = {
@@ -5939,8 +5991,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           if (aborted) return res.end();
           
           // 保存消息
-          var nowIso = new Date().toISOString();
-          var nowTs = Date.now();
+          var nowSave = Date.now();
           var usageToStore = Object.assign({}, usageResult || {}, {
             thinking_mode: thinkingMode,
             model: usedModel,
@@ -5953,20 +6004,24 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             var seqUser = streamSeq;
             streamSeq += 1;
             var seqAssistant = streamSeq;
+            var userCreatedAt = new Date(nowSave).toISOString();
+            var assistantCreatedAt = new Date(nowSave + 1).toISOString();
             await supabase.from('posts').insert([
               {
                 user_name: userName,
                 content: message,
                 media_type: AI_AGENT_MESSAGE_MARKER,
                 media_url: buildMsgMeta('user', convId, null, null, seqUser),
-                actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
+                actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowSave,
+                created_at: userCreatedAt
               },
               {
                 user_name: userName,
                 content: content,
                 media_type: AI_AGENT_MESSAGE_MARKER,
                 media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, seqAssistant),
-                actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
+                actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowSave + 1),
+                created_at: assistantCreatedAt
               }
             ]);
           } catch (e) {
@@ -5977,14 +6032,19 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           try { updateLongTermMemory(userName, ctx, message, content).catch(function() {}); } catch (e) {}
           
           // 发送完成事件
-          res.write('data: ' + JSON.stringify({
+          writeSse(res, {
             type: 'done',
             reasoning: (thinkingMode !== 'off' ? reasoning : ''),
             usage: usageResult,
             model: usedModel,
             thinking_mode: thinkingMode,
+            requested_thinking_mode: thinkingMode,
+            applied_thinking_mode: useThinking ? thinkingMode : 'off',
+            reasoning_length: reasoningBuffer.length,
+            content_length: contentBuffer.length,
             remaining: { hour: rl.remainingHour, day: rl.remainingDay }
-          }) + '\n\n');
+          });
+          console.log('[AGENT-STREAM] done thinking_mode=', thinkingMode, 'reasoning_len=', reasoningBuffer.length, 'content_len=', contentBuffer.length);
           return res.end();
         }
       }
@@ -5992,14 +6052,18 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     
     // 流意外结束但没收到 finish_reason
     if (contentBuffer && !aborted) {
-      res.write('data: ' + JSON.stringify({
+      writeSse(res, {
         type: 'done',
         content: contentBuffer,
         reasoning: (thinkingMode !== 'off' ? reasoningBuffer : ''),
         usage: null,
         model: usedModel,
-        thinking_mode: thinkingMode
-      }) + '\n\n');
+        thinking_mode: thinkingMode,
+        requested_thinking_mode: thinkingMode,
+        applied_thinking_mode: useThinking ? thinkingMode : 'off',
+        reasoning_length: reasoningBuffer.length,
+        content_length: contentBuffer.length
+      });
     }
     res.end();
   } catch (e) {
@@ -6099,6 +6163,24 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
   }
 });
 
+// GET /api/agent/search-health - 搜索健康检查（验证 SearXNG 可用性）
+app.get('/api/agent/search-health', authenticateUser, async (req, res) => {
+  try {
+    var q = String(req.query.q || '济州岛最新新闻').trim().slice(0, 100);
+    var results = await searchWeb(q, 3);
+    return res.json({
+      ok: true,
+      query: q,
+      count: results.length,
+      results: results,
+      timestamp: new Date().toISOString(),
+      instances_checked: process.env.SEARCH_API_URL ? [process.env.SEARCH_API_URL] : ['search.sapti.me', 'searx.be', 'search.projectsegfau.lt']
+    });
+  } catch (e) {
+    return res.json({ ok: false, error: e && e.message || '搜索检查失败', results: [] });
+  }
+});
+
 // POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
 app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
   return res.json({ ok: true, conversation_id: genConvId() });
@@ -6154,8 +6236,21 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return res.status(500).json({ error: '查询失败' });
     }
 
-    // desc → reverse 成 asc 给前端展示
-    var sortedRows = (rows || []).slice().reverse();
+    // 内存中稳定排序（created_at > seq > roleWeight）
+    function getMsgSortKey(row) {
+      var meta = parseMsgMeta(row);
+      var created = new Date(row.created_at || 0).getTime() || 0;
+      var seq = typeof meta.seq === 'number' ? meta.seq : 0;
+      var roleWeight = meta.role === 'user' ? 1 : 2;
+      return { created: created, seq: seq, roleWeight: roleWeight };
+    }
+    var sortedRows = (rows || []).slice().sort(function(a, b) {
+      var A = getMsgSortKey(a);
+      var B = getMsgSortKey(b);
+      if (A.created !== B.created) return A.created - B.created;
+      if (A.seq !== B.seq) return A.seq - B.seq;
+      return A.roleWeight - B.roleWeight;
+    });
 
     return res.json({
       ok: true,
