@@ -1251,6 +1251,30 @@
       var finalThinkingMode = '';
       var streamConvId = null;
       var doneReceived = false;
+
+      function ensureAssistantNode() {
+        if (!aiNode) {
+          try { typingNode.remove(); } catch (e) {}
+          aiNode = el('div', { class: 'ai-msg assistant entering generating' });
+          messagesEl.appendChild(aiNode);
+          S.autoScrollPinned = true;
+          scrollToBottom(messagesEl, true);
+        }
+        return aiNode;
+      }
+
+      function ensureReasoningNode() {
+        ensureAssistantNode();
+        if (!reasoningContainer) {
+          reasoningContainer = aiNode.querySelector('.ai-thinking');
+        }
+        if (!reasoningContainer) {
+          reasoningContainer = buildReasoningNode('思考中...', messagesEl);
+          aiNode.insertBefore(reasoningContainer, aiNode.firstChild);
+          setThinkingExpanded(reasoningContainer, true, messagesEl);
+        }
+        return reasoningContainer;
+      }
       
       while (true) {
         if (myReqId !== reqId || controller.signal.aborted) {
@@ -1305,22 +1329,30 @@
           
           if (evt.type === 'reasoning_start' && !reasoningStarted) {
             reasoningStarted = true;
+            if ((finalThinkingMode && finalThinkingMode !== 'off') || (!finalThinkingMode && S.thinkingMode !== 'off')) {
+              ensureReasoningNode();
+            }
             continue;
           }
           
           if (evt.type === 'reasoning') {
             aiReasoning += evt.text || '';
+            if ((finalThinkingMode && finalThinkingMode !== 'off') || (!finalThinkingMode && S.thinkingMode !== 'off')) {
+              var rn = ensureReasoningNode();
+              var body = rn.querySelector('.ai-thinking-body');
+              if (body) body.textContent = aiReasoning || '思考中...';
+              var panel = rn.querySelector('.ai-thinking-panel');
+              if (panel && rn.classList.contains('expanded')) {
+                panel.style.maxHeight = panel.scrollHeight + 'px';
+                panel.style.opacity = '1';
+              }
+              scrollToBottom(messagesEl, false);
+            }
             continue;
           }
           
           if (evt.type === 'content') {
-            if (!aiNode) {
-              try { typingNode.remove(); } catch (e) {}
-              aiNode = el('div', { class: 'ai-msg assistant entering generating' });
-              messagesEl.appendChild(aiNode);
-              S.autoScrollPinned = true;
-              scrollToBottom(messagesEl, true);
-            }
+            ensureAssistantNode();
             aiContent += evt.text || '';
             aiBubble = aiNode.querySelector('.ai-msg-bubble');
             if (!aiBubble) {
@@ -1362,12 +1394,15 @@
         if (aiBubble) aiBubble.classList.remove('ai-typing');
         setAiRootState('ai-idle');
         
-        // 如果有 reasoning 且思考模式不为 off，显示折叠 reasoning
+        // 如果有 reasoning 且思考模式不为 off，保持 reasoning 在正文前方
         if (aiReasoning && finalThinkingMode !== 'off') {
-          var reasoningNode = aiNode.querySelector('.ai-thinking');
+          var reasoningNode = reasoningContainer || aiNode.querySelector('.ai-thinking');
           if (!reasoningNode) {
             reasoningNode = buildReasoningNode(aiReasoning, messagesEl);
             aiNode.insertBefore(reasoningNode, aiNode.firstChild);
+          } else {
+            var finalBody = reasoningNode.querySelector('.ai-thinking-body');
+            if (finalBody) finalBody.textContent = aiReasoning;
           }
         }
         
