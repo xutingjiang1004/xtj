@@ -441,17 +441,26 @@
     var text = (input.value || '').trim();
     if (!text) return;
 
-    // 发送前记录鉴权状态，但不拦截——下方的 401/403 重试逻辑会处理
+    // ★ 发送前硬检查鉴权状态：token 和 password_hash 都没有时直接拦截
     if (typeof window.ensureRealUserAuth === 'function') {
       try {
         var auth = await window.ensureRealUserAuth();
         if (!auth || !auth.ok) {
+          var reason = auth && auth.reason;
+          if (reason === 'missing_auth_credentials' || reason === 'refresh_failed') {
+            notify('鉴权凭据缺失，请退出后重新登录再使用 AI 聊天');
+            return;
+          }
+          if (reason === 'no_user') {
+            notify('请先登录后再和 AI 聊天');
+            return;
+          }
           try {
             console.warn('[AI-AUTH] sendMessage auth not ready, proceeding anyway', {
               hasUser: !!readUserName(),
               hasToken: !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')),
               hasPwHash: !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')),
-              reason: auth && auth.reason
+              reason: reason
             });
           } catch (e) {}
         }
@@ -780,18 +789,22 @@
       notify('请先登录后再和徐旭泽的小猫聊天');
       return;
     }
-    // 记录鉴权状态但不拦截（有 currentUser 就放行）
-    // 真正的鉴权问题由 handleSendMessage 中的 401/403 重试逻辑处理
+    // 打开前硬检查鉴权：没有 token 且没有 password_hash → 无法恢复
     if (typeof window.ensureRealUserAuth === 'function') {
       try {
         var auth = await window.ensureRealUserAuth();
         if (!auth || !auth.ok) {
+          var reason = auth && auth.reason;
+          if (reason === 'missing_auth_credentials' || reason === 'refresh_failed') {
+            notify('鉴权凭据缺失，请退出后重新登录再使用 AI 聊天');
+            return;
+          }
           try {
             console.warn('[AI-AUTH] openAiChat auth not ready, proceeding anyway', {
               hasUser: !!readUserName(),
               hasToken: !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')),
               hasPwHash: !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')),
-              reason: auth && auth.reason
+              reason: reason
             });
           } catch (e) {}
         } else {
