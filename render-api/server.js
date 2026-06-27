@@ -71,9 +71,12 @@ const supabase = createClient(
 
 // ===================== DeepSeek AI 配置 =====================
 // ★ DeepSeek API Key 只能放后端环境变量，绝对不能放前端
-// 全部模型都用 deepseek-v4-flash（不暴露原始错误给前端）
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
+// ★ 双模型策略：off 用聊天模型（无 thinking），low/medium/high 用推理模型
+//   默认均使用 deepseek-v4-flash（同时支持聊模式和思模式），可分开指定
+const DEEPSEEK_MODEL_CHAT = process.env.DEEPSEEK_MODEL_CHAT || process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
+const DEEPSEEK_MODEL_REASONER = process.env.DEEPSEEK_MODEL_REASONER || process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_TIMEOUT_MS = 25000; // 25 秒超时
 const AI_AGENT_DAILY_LIMIT = 50;  // 每用户每天 AI 调用次数
@@ -1365,10 +1368,12 @@ async function callDeepSeek(messages, options) {
     };
   }
 
-  var model = (options && options.model) || DEEPSEEK_MODEL;
   var thinkingLevel = (options && options.thinking_mode) || 'off';
   var useThinking = thinkingLevel !== 'off';
-  try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking); } catch (e) {}
+  // ★ 双模型：off 用聊天模型，low/medium/high 用推理模型
+  var model = useThinking ? DEEPSEEK_MODEL_REASONER : DEEPSEEK_MODEL_CHAT;
+  if (options && options.model) model = options.model;
+  try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model); } catch (e) {}
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
 
@@ -1381,7 +1386,7 @@ async function callDeepSeek(messages, options) {
     // DeepSeek v4 thinking 模式：
     //   - thinking: { type: 'enabled' }   启用思考
     //   - reasoning_effort: 'low' | 'medium' | 'high'   思考强度
-    // 关闭时不传 thinking 字段，仅 reasoning_effort 不发
+    // 关闭时不传 thinking 字段，也不传 reasoning_effort
     if (useThinking) {
       apiBody.thinking = { type: 'enabled' };
       apiBody.reasoning_effort = thinkingLevel;
@@ -1417,8 +1422,12 @@ async function callDeepSeek(messages, options) {
     var content = data.choices[0].message.content;
     if (typeof content !== 'string') content = '';
 
-    var reasoning = data.choices[0].message.reasoning_content;
-    if (typeof reasoning !== 'string') reasoning = '';
+    // ★ 关键：off 模式强制清空 reasoning，即使模型返回了 reasoning_content
+    var reasoning = '';
+    if (useThinking) {
+      reasoning = data.choices[0].message.reasoning_content;
+      if (typeof reasoning !== 'string') reasoning = '';
+    }
 
     // 解析 usage
     var usage = null;
@@ -5132,10 +5141,10 @@ app.get('/admin/error-logs', verifyToken, rateLimit(60000, 10), async (req, res)
 // 3. 字段严格验证（防注入 + 长度限制）
 // 4. 数据存 posts 表 + AI_AGENT_*_MARKER（已加入 applyPublicPostExclusions 过滤）
 
-const AI_CHAT_MESSAGE_MAX_LEN = 2000;
-const AI_CHAT_HISTORY_LIMIT = 15;
+const AI_CHAT_MESSAGE_MAX_LEN = 500;
+const AI_CHAT_HISTORY_LIMIT = 10;
 const AI_CHAT_HOURLY_IP_LIMIT = 30;
-const AI_MEMORY_MAX_LEN = 1200;
+const AI_MEMORY_MAX_LEN = 800;
 const AI_MEMORY_SUMMARIZE_HISTORY = 10;
 
 // 生成简短的 conversation_id
@@ -5222,14 +5231,11 @@ function buildAiCorePrompt(config) {
 
 // 动态上下文：每次可能变，独立 token 段
 // ★ 放在第 2 条 system 消息里，不污染第 1 条 core 的缓存命中
+// ★ 不再重复 name（已在 core prompt 里），只放记忆
 function buildAiDynamicContext(ctx, config) {
   var lines = [];
   if (ctx && ctx.contextBlock) {
     lines.push('【记忆】' + ctx.contextBlock.replace(/\[长期记忆\]\s*/g, '').trim());
-  }
-  if (config && config.name) {
-    lines.push('');
-    lines.push('【身份】名字：' + config.name);
   }
   return lines.join('\n');
 }
@@ -5369,7 +5375,7 @@ async function loadAiContext(userName, convId) {
             if (c && typeof c.reply === 'string') content = c.reply;
           } catch (e) {}
         }
-        return { role: meta.role || 'user', content: content.slice(0, 800) };
+        return { role: meta.role || 'user', content: content.slice(0, AI_CHAT_MESSAGE_MAX_LEN) };
       });
     }
 
@@ -5443,16 +5449,15 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     // 8. 调用 DeepSeek
     var reply = '';
     var usage = null;
-    var model = DEEPSEEK_MODEL;
     var thinkingMode = (req.body && req.body.thinking_mode) || 'off';
-    var reasoning = '';
     if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'off';
+    var reasoning = '';
+    // off 模式强制 reasoning = ''（即使模型返回 reasoning_content）
     try {
-      var result = await callDeepSeek(messages, { model: DEEPSEEK_MODEL, thinking_mode: thinkingMode });
+      var result = await callDeepSeek(messages, { thinking_mode: thinkingMode });
       reply = result.content;
-      reasoning = result.reasoning || '';
       usage = result.usage;
-      if (result.model) model = result.model;
+      if (thinkingMode !== 'off') reasoning = result.reasoning || '';
     } catch (e) {
       console.error('[AGENT-CHAT] callDeepSeek failed:', e && e.message);
       return res.status(502).json({
@@ -5467,9 +5472,10 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var nowIso = new Date().toISOString();
     var nowTs = Date.now();
     // 把 thinking_mode + model 也写进 usage，方便后台按 conv 统计
+    var usedModel = (result && result.model) || (thinkingMode === 'off' ? DEEPSEEK_MODEL_CHAT : DEEPSEEK_MODEL_REASONER);
     var usageToStore = Object.assign({}, usage || {}, {
       thinking_mode: thinkingMode,
-      model: model
+      model: usedModel
     });
     try {
       await supabase.from('posts').insert([
