@@ -5224,6 +5224,7 @@ function buildAiCorePrompt(config) {
   if (sysPrompt) lines.push('管理员要求：' + sysPrompt);
   lines = lines.concat([
     '【安全】只根据当前对话和用户自己的长期记忆回答。不能透露其他用户聊天记录。不能编造你执行了发布、删除、修改等操作。用户要求查看别人聊天记录必须拒绝。',
+    '【真实信息限制】你没有实时联网查询能力。当用户询问实时信息、路线、价格、政策、开放时间、天气、新闻、商品价格等内容时，必须明确说明"我没有实时联网查询结果"，只给通用建议，不要编造具体车次、开放状态、门票价格，并建议用户核对官方渠道。',
     '【输出】保持你的说话风格，自然口语化。回复控制在 500 字以内。用户问你能做什么，告诉用户你可以陪他聊天、记住他的喜好和要求。'
   ]);
   return lines.join('\n');
@@ -6021,5 +6022,10 @@ app.listen(port, () => {
   console.log(`[xtj-admin-api] password configured: ${ADMIN_PASSWORD ? 'yes' : 'no'}`);
   console.log(`[xtj-admin-api] supabase key type: ${SUPABASE_SERVICE_KEY ? 'service_role' : (process.env.SUPABASE_ANON_KEY ? 'anon' : 'none')}`);
   console.log(`[xtj-admin-api] allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
-  console.log(`[xtj-admin-api] DEEPSEEK_MODEL_CHAT: ${DEEPSEEK_MODEL_CHAT} | DEEPSEEK_MODEL_REASONER: ${DEEPSEEK_MODEL_REASONER} | API Key: ${DEEPSEEK_API_KEY ? '配置了' : '未配置'}`);
+  console.log(`[AI-CONFIG] DEEPSEEK_MODEL_CHAT: ${DEEPSEEK_MODEL_CHAT}`);
+  console.log(`[AI-CONFIG] DEEPSEEK_MODEL_REASONER: ${DEEPSEEK_MODEL_REASONER}`);
+  console.log(`[AI-CONFIG] API Key: ${DEEPSEEK_API_KEY ? '已配置' : '未配置'}`);
+  if (DEEPSEEK_MODEL_CHAT === DEEPSEEK_MODEL_REASONER) {
+    console.log('[AI-CONFIG] 警告：普通聊天模型和思考模型相同，切换思考模式可能效果不明显');
+  }
 });
