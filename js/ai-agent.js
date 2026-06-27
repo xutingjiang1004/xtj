@@ -766,7 +766,7 @@
     if (!toggle || !panel || !caret) return;
     container.classList.toggle('expanded', !!expanded);
     toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-    caret.textContent = expanded ? '收起' : '展开';
+    caret.textContent = '\u25be';
     if (expanded) {
       panel.style.maxHeight = panel.scrollHeight + 'px';
       panel.style.opacity = '1';
@@ -782,13 +782,13 @@
     var toggle = el('button', {
       type: 'button',
       class: 'ai-thinking-toggle',
-      'aria-expanded': 'false'
+      'aria-expanded': 'false',
+      'aria-label': '思考过程'
     });
     var label = el('span', { class: 'ai-thinking-label' });
-    label.appendChild(el('span', { class: 'ai-thinking-icon', text: '✦' }));
-    label.appendChild(el('span', { text: '思考过程' }));
+    label.appendChild(el('span', { text: '思考' }));
     toggle.appendChild(label);
-    toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '展开' }));
+    toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
     var panel = el('div', { class: 'ai-thinking-panel' });
     panel.style.maxHeight = '0px';
@@ -822,8 +822,8 @@
   }
 
   function buildTypingNode() {
-    var node = el('div', { class: 'ai-msg assistant typing entering' });
-    var bubble = el('div', { class: 'ai-msg-bubble' });
+    var node = el('div', { class: 'ai-msg assistant typing' });
+    var bubble = el('div', { class: 'ai-msg-bubble ai-typing-bubble', 'aria-hidden': 'true' });
     for (var i = 0; i < 3; i++) bubble.appendChild(el('span'));
     node.appendChild(bubble);
     return node;
@@ -1305,20 +1305,6 @@
           
           if (evt.type === 'reasoning_start' && !reasoningStarted) {
             reasoningStarted = true;
-            // 创建 AI 消息节点（如果还没创建）
-            if (!aiNode) {
-              try { typingNode.remove(); } catch (e) {}
-              aiNode = el('div', { class: 'ai-msg assistant entering generating' });
-              messagesEl.appendChild(aiNode);
-              S.autoScrollPinned = true;
-              scrollToBottom(messagesEl, true);
-            }
-            aiBubble = aiNode.querySelector('.ai-msg-bubble');
-            if (!aiBubble) {
-              aiBubble = el('div', { class: 'ai-msg-bubble ai-typing', text: '' });
-              setupBubbleCopy(aiBubble, messagesEl);
-              aiNode.appendChild(aiBubble);
-            }
             continue;
           }
           
