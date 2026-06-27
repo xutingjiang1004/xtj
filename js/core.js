@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -2481,6 +2481,14 @@ const ADMIN_NAME = "xxz";
                             if (loginRes.token) {
                                 localStorage.setItem(ADMIN_TOKEN_KEY, loginRes.token);
                             }
+                            // ★ 管理员也写入 xtj_pw_hash，以便 AI 聊天等模块鉴权
+                            try {
+                                var adminAuthRec = await findAuthRecord(name);
+                                if (adminAuthRec && adminAuthRec.media_url) {
+                                    localStorage.setItem("xtj_pw_hash", adminAuthRec.media_url);
+                                    try { sessionStorage.setItem("xtj_pw_hash", adminAuthRec.media_url); } catch(e) {}
+                                }
+                            } catch(e) { console.warn('[Admin] 写入 xtj_pw_hash 失败:', e); }
                         } catch (apiErr) {
                             showToast("管理员登录失败: 无法连接后端 API");
                             btn.disabled = false; btn.textContent = "登录";
@@ -2509,7 +2517,7 @@ const ADMIN_NAME = "xxz";
                     //   AI 模块会用 ensureRealUserAuth 主动补救
                     try {
                         var _pwHash = sessionStorage.getItem("xtj_pw_hash") || localStorage.getItem("xtj_pw_hash") || "";
-                        if (_pwHash && API_BASE && name !== ADMIN_NAME) {
+                        if (_pwHash && API_BASE) {
                             var tokenRes = await fetch(API_BASE + '/api/user/login', {
                                 method: 'POST', headers: {'Content-Type':'application/json'},
                                 body: JSON.stringify({ user_name: name, password_hash: _pwHash })
