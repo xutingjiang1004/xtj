@@ -92,23 +92,344 @@ console.log('[AI-CONFIG] DEEPSEEK_MODEL_REASONER:', DEEPSEEK_MODEL_REASONER);
 
 const AI_AGENT_CONVERSATION_LIST_LIMIT = 50;
 
-// Web Search config
-const SEARCH_CACHE_TTL_MS = 60000;
-const searchCache = new Map();
-
 // AI 配置缓存
 var aiConfigCache = null;
 var aiConfigFetchedAt = 0;
 
-// 清洗 AI 最终回复正文，删除括号舞台动作
+// Web Search 配置
+const SEARCH_CACHE_TTL_MS = 60000;
+const SEARCH_EMPTY_CACHE_TTL_MS = 5000;
+const searchCache = new Map();
+
+// 在文件顶部收集已配置的环境变量信息
+var searchEnvSummary = (function() {
+  return {
+    TAVILY_API_KEY: !!process.env.TAVILY_API_KEY,
+    BRAVE_SEARCH_API_KEY: !!process.env.BRAVE_SEARCH_API_KEY,
+    SERPER_API_KEY: !!process.env.SERPER_API_KEY,
+    SEARCH_API_URL: !!process.env.SEARCH_API_URL
+  };
+})();
+
+// ===================== 搜索 Provider 架构 =====================
+// 每个 provider 返回 { results: [...], error: string|null }
+// results 每条为 { title, url, snippet, source, published_at }
+
+// Provider 1: Tavily API
+async function searchTavily(query, maxResults) {
+  var apiKey = process.env.TAVILY_API_KEY;
+  if (!apiKey) return { results: [], error: null }; // 未配置，跳过
+  try {
+    var resp = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: apiKey,
+        query: query,
+        max_results: Math.min(maxResults || 5, 10),
+        search_depth: 'basic',
+        include_answer: false
+      }),
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!resp.ok) {
+      var errBody = await resp.text().catch(function(){ return ''; });
+      return { results: [], error: 'Tavily status=' + resp.status + ' ' + errBody.slice(0, 100) };
+    }
+    var data = await resp.json();
+    var raw = data && data.results;
+    if (!Array.isArray(raw) || !raw.length) return { results: [], error: 'Tavily returned 0 results' };
+    var results = raw.map(function(r) {
+      return {
+        title: String(r.title || '').trim().slice(0, 200),
+        url: String(r.url || '').trim(),
+        snippet: String(r.content || r.snippet || '').trim().slice(0, 500),
+        source: r.source || 'tavily',
+        published_at: r.published_date || ''
+      };
+    }).filter(function(r) { return r.title && r.url; });
+    return { results: results.slice(0, maxResults || 5), error: null };
+  } catch (e) {
+    return { results: [], error: 'Tavily error: ' + (e.message || 'unknown') };
+  }
+}
+
+// Provider 2: Brave Search API
+async function searchBrave(query, maxResults) {
+  var apiKey = process.env.BRAVE_SEARCH_API_KEY;
+  if (!apiKey) return { results: [], error: null };
+  try {
+    var resp = await fetch('https://api.search.brave.com/res/v1/web/search?q=' + encodeURIComponent(query) + '&count=' + (maxResults || 5), {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip',
+        'X-Subscription-Token': apiKey
+      },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!resp.ok) return { results: [], error: 'Brave status=' + resp.status };
+    var data = await resp.json();
+    var web = data && data.web;
+    var raw = web && web.results;
+    if (!Array.isArray(raw) || !raw.length) return { results: [], error: 'Brave returned 0 results' };
+    var results = raw.map(function(r) {
+      return {
+        title: String(r.title || '').trim().slice(0, 200),
+        url: String(r.url || '').trim(),
+        snippet: String(r.description || '').trim().slice(0, 500),
+        source: r.source || 'brave',
+        published_at: r.age || r.published_date || r.pub_date || ''
+      };
+    }).filter(function(r) { return r.title && r.url; });
+    return { results: results.slice(0, maxResults || 5), error: null };
+  } catch (e) {
+    return { results: [], error: 'Brave error: ' + (e.message || 'unknown') };
+  }
+}
+
+// Provider 3: Serper / Google Search API
+async function searchSerper(query, maxResults) {
+  var apiKey = process.env.SERPER_API_KEY;
+  if (!apiKey) return { results: [], error: null };
+  try {
+    var resp = await fetch('https://google.serper.dev/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-KEY': apiKey },
+      body: JSON.stringify({ q: query, num: Math.min(maxResults || 5, 10) }),
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!resp.ok) return { results: [], error: 'Serper status=' + resp.status };
+    var data = await resp.json();
+    var raw = data && data.organic;
+    if (!Array.isArray(raw) || !raw.length) return { results: [], error: 'Serper returned 0 results' };
+    var results = raw.map(function(r) {
+      return {
+        title: String(r.title || '').trim().slice(0, 200),
+        url: String(r.link || '').trim(),
+        snippet: String(r.snippet || '').trim().slice(0, 500),
+        source: r.source || 'serper',
+        published_at: r.date || r.publicationDate || ''
+      };
+    }).filter(function(r) { return r.title && r.url; });
+    return { results: results.slice(0, maxResults || 5), error: null };
+  } catch (e) {
+    return { results: [], error: 'Serper error: ' + (e.message || 'unknown') };
+  }
+}
+
+// Provider 4: 自定义 SEARCH_API_URL（兼容 SearXNG 格式）
+async function searchCustomApi(query, maxResults) {
+  var apiUrl = process.env.SEARCH_API_URL;
+  if (!apiUrl) return { results: [], error: null };
+  try {
+    apiUrl = apiUrl.replace(/\/+$/, '');
+    var url = apiUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&pageno=1&categories=general';
+    var resp = await fetch(url, {
+      headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!resp.ok) return { results: [], error: 'CustomApi status=' + resp.status };
+    var data = await resp.json();
+    var raw = data && data.results;
+    if (!Array.isArray(raw) || !raw.length) return { results: [], error: 'CustomApi returned 0 results' };
+    var results = raw.map(function(r) {
+      return {
+        title: String(r.title || '').trim().slice(0, 200),
+        url: String(r.url || '').trim(),
+        snippet: String(r.content || r.snippet || '').trim().slice(0, 500),
+        source: r.engine || 'custom',
+        published_at: r.publishedDate || ''
+      };
+    }).filter(function(r) { return r.title && r.url; });
+    return { results: results.slice(0, maxResults || 5), error: null };
+  } catch (e) {
+    return { results: [], error: 'CustomApi error: ' + (e.message || 'unknown') };
+  }
+}
+
+// Provider 5: SearXNG 公共实例
+async function searchSearxng(query, maxResults) {
+  var instances = [
+    'https://search.sapti.me', 'https://searx.be', 'https://search.projectsegfau.lt',
+    'https://searx.raghav.site', 'https://northboot.xyz', 'https://searx.frankfurt.systems',
+    'https://searx.foss.family'
+  ];
+  if (process.env.SEARCH_API_URL) {
+    var customUrl = process.env.SEARCH_API_URL.replace(/\/+$/, '');
+    if (instances.indexOf(customUrl) < 0) instances.unshift(customUrl);
+  }
+  var category = /新闻|资讯|报道|快讯|新闻|头条/i.test(query) ? 'news' : 'general';
+  var fetchers = instances.map(function(baseUrl) {
+    var url = baseUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
+    return fetch(url, {
+      headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      signal: AbortSignal.timeout(5000)
+    }).then(function(r) {
+      if (!r.ok) throw new Error(baseUrl.slice(0, 30) + ' status=' + r.status);
+      return r.json();
+    }).then(function(data) {
+      var raw = data && data.results;
+      if (!Array.isArray(raw) || !raw.length) throw new Error(baseUrl.slice(0, 30) + ' no results');
+      return raw.map(function(item) {
+        return {
+          title: String(item.title || '').trim().slice(0, 200),
+          url: String(item.url || '').trim(),
+          snippet: String(item.content || item.snippet || '').trim().slice(0, 500),
+          source: item.engine || 'searxng',
+          published_at: item.publishedDate || ''
+        };
+      }).filter(function(r) { return r.title && r.url; });
+    }).catch(function(e) {
+      throw new Error(e.message || 'unknown error');
+    });
+  });
+  try {
+    var winner = await Promise.any(fetchers);
+    return { results: (winner || []).slice(0, maxResults || 5), error: null };
+  } catch (e) {
+    return { results: [], error: 'SearXNG error: all instances failed' };
+  }
+}
+
+// Provider 6: Bing HTML 解析（最后兜底）
+async function searchBingHtml(query, maxResults) {
+  try {
+    var url = 'https://www.bing.com/search?q=' + encodeURIComponent(query) + '&count=' + (maxResults || 5) + '&mkt=zh-CN';
+    var resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml'
+      },
+      signal: AbortSignal.timeout(6000)
+    });
+    if (!resp.ok) return { results: [], error: 'BingHtml status=' + resp.status };
+    var html = await resp.text();
+    var items = [];
+    var pos = 0;
+    while (true) {
+      var start = html.indexOf('b_algo', pos);
+      if (start < 0) break;
+      var liStart = html.lastIndexOf('<li', start);
+      if (liStart < 0) { pos = start + 1; continue; }
+      var liEnd = html.indexOf('</li>', liStart);
+      if (liEnd < 0) { pos = start + 1; continue; }
+      var block = html.slice(liStart, liEnd + 5);
+      var aHref = block.match(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>(.*?)<\/a>/i);
+      var title = aHref ? aHref[2].replace(/<[^>]+>/g, '').trim() : '';
+      var urlVal = aHref ? aHref[1] : '';
+      var pMatch = block.match(/<p[^>]*>(.*?)<\/p>/i);
+      var snippet = pMatch ? pMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+      if (title && urlVal) items.push({ title: title, url: urlVal, snippet: snippet, source: 'bing', published_at: '' });
+      pos = liEnd + 5;
+    }
+    return { results: items.slice(0, maxResults || 5), error: null };
+  } catch (e) {
+    return { results: [], error: 'BingHtml error: ' + (e.message || 'unknown') };
+  }
+}
+
+// 主搜索函数：按优先级依次调用 provider，返回统一格式
+async function searchWeb(query, maxResults) {
+  maxResults = maxResults || 5;
+  var searchQuery = buildSearchQuery(query);
+  if (!searchQuery) searchQuery = String(query || '').trim().slice(0, 120);
+  var cacheKey = searchQuery.toLowerCase().trim().slice(0, 100);
+  var cached = searchCache.get(cacheKey);
+  if (cached && cached.results) {
+    var cachedResults = cached.results.results || [];
+    var cacheTtl = cachedResults.length > 0 ? SEARCH_CACHE_TTL_MS : SEARCH_EMPTY_CACHE_TTL_MS;
+    if ((Date.now() - cached.ts) < cacheTtl) return cached.results;
+    searchCache.delete(cacheKey);
+  }
+
+  // 按优先级定义 provider 列表
+  var providerList = [
+    { name: 'Tavily', fn: function() { return searchTavily(searchQuery, maxResults); }, requiresEnv: 'TAVILY_API_KEY', enabled: !!process.env.TAVILY_API_KEY },
+    { name: 'Brave', fn: function() { return searchBrave(searchQuery, maxResults); }, requiresEnv: 'BRAVE_SEARCH_API_KEY', enabled: !!process.env.BRAVE_SEARCH_API_KEY },
+    { name: 'Serper', fn: function() { return searchSerper(searchQuery, maxResults); }, requiresEnv: 'SERPER_API_KEY', enabled: !!process.env.SERPER_API_KEY },
+    { name: 'CustomApi', fn: function() { return searchCustomApi(searchQuery, maxResults); }, requiresEnv: 'SEARCH_API_URL', enabled: !!process.env.SEARCH_API_URL },
+    { name: 'SearXNG', fn: function() { return searchSearxng(searchQuery, maxResults); }, requiresEnv: null, enabled: true },
+    { name: 'BingHtml', fn: function() { return searchBingHtml(searchQuery, maxResults); }, requiresEnv: null, enabled: true }
+  ];
+
+  var diagnostics = {
+    query: searchQuery,
+    enabled_providers: [],
+    missing_env: [],
+    provider_results: [],
+    provider_errors: []
+  };
+
+  var mergedResults = [];
+  var usedProvider = null;
+
+  for (var pi = 0; pi < providerList.length; pi++) {
+    var provider = providerList[pi];
+    if (!provider.enabled) {
+      diagnostics.missing_env.push(provider.requiresEnv);
+      continue;
+    }
+    diagnostics.enabled_providers.push(provider.name);
+    try {
+      var result = await provider.fn();
+      if (result.error) {
+        diagnostics.provider_errors.push({ provider: provider.name, error: result.error });
+      } else if (result.results && result.results.length > 0) {
+        diagnostics.provider_results.push({ provider: provider.name, count: result.results.length });
+        // 取第一个有结果的 provider
+        mergedResults = result.results;
+        usedProvider = provider.name;
+        break;
+      } else {
+        diagnostics.provider_results.push({ provider: provider.name, count: 0 });
+      }
+    } catch (e) {
+      diagnostics.provider_errors.push({ provider: provider.name, error: e.message || 'unknown' });
+    }
+  }
+
+  var finalResult = {
+    results: mergedResults,
+    diagnostics: diagnostics,
+    used_provider: usedProvider
+  };
+
+  // 缓存
+  var cacheTtl = mergedResults.length > 0 ? SEARCH_CACHE_TTL_MS : SEARCH_EMPTY_CACHE_TTL_MS;
+  searchCache.set(cacheKey, { ts: Date.now(), results: finalResult });
+
+  return finalResult;
+}
+
+// 清洗 AI 最终回复正文，删除括号舞台动作/心理动作/环境描写
+// 策略：
+//   1. 删除所有独立成行的括号内容（（...）、(...)、【...】）
+//   2. 删除以明显动作描述词开头的行
+//   3. 删除正文中内联的括号舞台动作
+//   保留合法的括号内容：API 说明、价格、编号、技术术语、英文缩写
 function sanitizeAssistantVisibleText(text) {
   var s = String(text || '');
-  var actionKeywords = '爪子|尾巴|猫耳|耳朵|毛茸茸|键盘|瞪着|甩了甩|舔了舔|趴在|蹲在|缩成|抖了抖|眯起|叹气|喵|猫猫|小猫';
-  var fullWidthLine = new RegExp('^\\s*（[^）]{0,80}(' + actionKeywords + ')[^）]{0,80}）\\s*$', 'gmi');
-  var halfWidthLine = new RegExp('^\\s*\\([^\\)]{0,80}(' + actionKeywords + ')[^\\)]{0,80}\\)\\s*$', 'gmi');
-  s = s.replace(fullWidthLine, '');
-  s = s.replace(halfWidthLine, '');
+  if (!s) return s;
+
+  // 动作/舞台/心理/环境描写的强特征词（不含过于通用的词如"没有""已经""突然"）
+  var actionWords = '屏幕|镜头|背景|画面|空气[里中]?|灯光|白芒|光芒|裂纹|裂缝|低声|笑了笑|轻笑|沉默|沉默[了半]|抬头|低头|偏[了]?头|歪[了]?头|侧[了]?头|扭[了]?头|转[过]?头|转[过]?身|伸[出手爪]|伸[了]?[出手]?|缩[回了成]|抖[了]?抖|晃[了]?晃|点[了]?点[头]|摇[了]?摇[头手]|摆[了]?摆[手]|挥[了]?挥[手]|站[起立]|坐[下]|趴[下在]|蹲[下在]|走[向到进过]|退[后回了]|看[向着清]|望[着向]|想[了到起]|听[到见着]|叹[气口]|眯[起眼]|瞪[着大]|睁[大开]|眨[了]?眨[眼]?|抿[了]?[嘴唇]|舔[了]?舔|吞[了]?[吞]?|咽[了]?[咽]?|尾巴|猫耳|耳朵|毛茸茸|喵[喵]?|键盘|敲[击打着]|靠[在着]|抱[着起]|搂[着]|发[出]|传[来]|响[起]|回[荡]|充[满]|浮[现]|感[到觉]|仿[佛]|一[股阵道]|猛[地然]|瞬[间]|顿[了]?[顿]?|愣[了]?|怔[了]?|呆[了]?|张[嘴]|闭[嘴上]|合[上]|按[下了]|周[围]|四[周]|窗[外]|门[外]|不[再]|再[也]|终[于]|仍[然]|依[然]|瞄[了]?|瞥[了]?|盯[着]?|看[了]?[看看]?|扯[了]?[嘴嘴角]?|勾[了]?[嘴角]?|扬[了]?[眉嘴角]?|挑[了]?[眉]?|皱[了]?[眉]?|叹[了]?[口气]|呼[出]|吸[了]?|深[吸呼]|爪子|猫猫|小猫|开[了]?口|闭[了]?[嘴眼]|合[了]?[上眼]|摇[头]?|甩[了]?[头]?|敲[了]?[键盘桌]?';
+
+  // 1. 删除所有独立成行的括号内容（允许全角/半角/方括号，至少 3 个字符）
+  s = s.replace(/^\s*[（(【][^）)】]{3,200}[）)】]\s*$/gm, '');
+
+  // 2. 删除以动作特征词开头的行（无括号的裸描写行）
+  s = s.replace(new RegExp('^\\s*(' + actionWords + ')[^。！？\\n]{0,100}[。！？]?\\s*$', 'gmi'), '');
+
+  // 3. 删除正文中内联的括号舞台动作（包含动作特征词的括号内容）
+  s = s.replace(new RegExp('[（(【][^）)】]{0,60}(' + actionWords + ')[^）)】]{0,80}[）)】]', 'gmi'), '');
+
+  // 4. 清理多余空行
   s = s.replace(/\n{3,}/g, '\n\n').trim();
+
+  // 5. 如果清洗后为空，返回标记字符串
+  if (!s) return '我刚刚生成了不合规的动作描写，已自动删除。请重新问一次。';
+
   return s;
 }
 
@@ -290,9 +611,99 @@ async function searchWeb(query, maxResults) {
 }
 
 function writeSse(res, payload) {
-  if (res.headersSent) {
-    try { res.write('data: ' + JSON.stringify(payload) + '\n\n'); } catch (e) {}
+  try {
+    if (res && !res.writableEnded && res.headersSent) {
+      res.write('data: ' + JSON.stringify(payload) + '\n\n');
+    }
+  } catch (e) {
+    console.error('[SSE] write error:', e && e.message);
   }
+}
+
+// 统一流结束收尾：保存消息 + 发送 done
+async function finishStream(res, opt) {
+  var rawContent = String(opt.contentBuffer || '');
+  var content = sanitizeAssistantVisibleText(rawContent);
+  var reasoning = String(opt.reasoningBuffer || '');
+  var hasContent = content.length > 0;
+  var saved = false;
+  var finishReason = opt.finishReason || 'upstream_closed';
+  var thinkingMode = opt.thinkingMode || 'off';
+  var useThinking = opt.useThinking || false;
+  var usedModel = opt.usedModel || DEEPSEEK_MODEL_REASONER;
+  var isComplete = finishReason === 'stop' || finishReason === 'length';
+  var contentWasFiltered = rawContent.length > 0 && content !== rawContent;
+
+  // 有内容时尽量保存
+  if (hasContent && opt.userName && opt.convId && opt.message) {
+    try {
+      var nowSave = Date.now();
+      var usageToStore = {
+        thinking_mode: thinkingMode,
+        model: usedModel,
+        requested_thinking_mode: thinkingMode,
+        applied_thinking_mode: useThinking ? thinkingMode : 'off'
+      };
+      var seqUser = (opt.streamSeq || 0) + 1;
+      var seqAssistant = (opt.streamSeq || 0) + 2;
+      var userCreatedAt = new Date(nowSave).toISOString();
+      var assistantCreatedAt = new Date(nowSave + 1).toISOString();
+      await supabase.from('posts').insert([
+        {
+          user_name: opt.userName,
+          content: opt.message,
+          media_type: AI_AGENT_MESSAGE_MARKER,
+          media_url: buildMsgMeta('user', opt.convId, null, null, seqUser),
+          actor_key: 'ai_msg_conv_' + opt.convId + '_user_' + opt.userName + '_' + nowSave,
+          created_at: userCreatedAt
+        },
+        {
+          user_name: opt.userName,
+          content: content,
+          media_type: AI_AGENT_MESSAGE_MARKER,
+          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant),
+          actor_key: 'ai_msg_conv_' + opt.convId + '_agent_' + opt.userName + '_' + (nowSave + 1),
+          created_at: assistantCreatedAt
+        }
+      ]);
+      saved = true;
+      console.log('[AGENT-STREAM] saved', 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'finish_reason:', finishReason);
+    } catch (saveErr) {
+      console.error('[AGENT-STREAM] save failed:', saveErr && saveErr.message, 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length);
+    }
+  }
+
+  // 发送 done
+  writeSse(res, {
+    type: 'done',
+    complete: isComplete,
+    interrupted: !isComplete,
+    saved: saved,
+    finish_reason: finishReason,
+    content: hasContent ? content : '',
+    sanitized_content: contentWasFiltered ? content : undefined,
+    filtered: contentWasFiltered || undefined,
+    reasoning: thinkingMode !== 'off' ? reasoning : '',
+    usage: null,
+    model: usedModel,
+    thinking_mode: thinkingMode,
+    requested_thinking_mode: thinkingMode,
+    applied_thinking_mode: useThinking ? thinkingMode : 'off',
+    reasoning_length: reasoning.length,
+    content_length: content.length
+  });
+
+  console.log('[AGENT-STREAM] done finish_reason=', finishReason, 'complete=', isComplete, 'saved=', saved, 'content_len=', content.length);
+
+  // 异步更新 memory/summary（仅成功保存时）
+  if (hasContent && saved) {
+    var memBox = opt.memoryData ? opt.memoryData.memoryBox : null;
+    var histArr = opt.ctx ? (opt.ctx.history || []) : [];
+    maybeUpdateUserMemory(opt.userName, opt.convId, opt.message, content, memBox).catch(function() {});
+    maybeUpdateConversationSummary(opt.userName, opt.convId, histArr).catch(function() {});
+  }
+
+  return { saved: saved, content: content };
 }
 
 function buildSearchQuery(message) {
@@ -5859,15 +6270,18 @@ function buildAiCorePrompt(config) {
 
   // 角色扮演
   if (rp.enabled) {
-    lines.push('【角色扮演】你可以进行适当角色扮演，反映身份设定。');
-    if (rp.allow_stage_directions) {
-      lines.push('角色扮演中可以使用括号动作描述。');
+    if (rp.allow_stage_directions && rp.allow_cat_actions) {
+      lines.push('【角色扮演】你可以进行角色扮演，允许使用括号动作描述和猫咪动作。');
+    } else if (rp.allow_stage_directions) {
+      lines.push('【角色扮演】你可以进行角色扮演，允许使用括号动作描述（但不能写猫咪动作）。');
+    } else if (rp.allow_cat_actions) {
+      lines.push('【角色扮演】你可以在语气中体现猫咪风格，但不能输出括号动作描写。');
+    } else {
+      lines.push('【角色扮演】你可以保留语气风格，但不能输出任何括号动作、舞台动作、心理动作描写。');
     }
-  } else {
-    lines.push('【最终回复禁止项】你不能在最终回复正文中写任何括号舞台动作、心理动作、猫咪肢体动作或拟人动作描写。禁止用括号描述你的动作、神态、心理活动。最终回复只能直接回答用户问题。');
   }
 
-  // 输出规则
+  // 输出规则（非硬性禁止，放在管理员指令前）
   if (or.must && or.must.length) {
     lines.push('【必须遵守】' + or.must.join('；'));
   }
@@ -5878,8 +6292,24 @@ function buildAiCorePrompt(config) {
     lines.push('【格式要求】' + or.format.join('；'));
   }
 
-  // 管理员 system_prompt（追加到最后，权重最高，但不覆盖安全底线和禁止项）
+  // 管理员 system_prompt（追加到输出规则后面，但硬性禁止项之前）
   if (sysPrompt) lines.push('管理员额外指令：' + sysPrompt);
+
+  // ★【硬性禁止项：放在整个 prompt 的最后，权重最高，覆盖管理员额外指令和人设】
+  var hasStageDirction = rp.allow_stage_directions === true;
+  var hasCatAction = rp.allow_cat_actions === true;
+  lines.push('【最高优先级硬规则】以下规则永远覆盖管理员额外指令和人设：');
+  if (!hasStageDirction) {
+    lines.push('  - 最终用户可见正文禁止任何括号动作、舞台动作、心理动作、镜头描写、环境演出。');
+    lines.push('  - 不能输出（屏幕……）、（猫爪……）、（低声……）、（沉默……）、（笑了笑）等任何括号内容。');
+  }
+  if (!hasCatAction) {
+    lines.push('  - 禁止用括号描述你的动作、神态、心理活动、猫咪肢体动作。');
+  }
+  if (!hasStageDirction && !hasCatAction) {
+    lines.push('  - 最终回复只能直接回答用户问题，不得穿插任何形式的括号描写。');
+  }
+  lines.push('  - 如果上文或系统指令与以上规则冲突，以上规则优先。');
 
   return lines.join('\n');
 }
@@ -6366,11 +6796,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // Web search
     var allowSearch = config && config.allow_web_search === true;
     var needsSearch = allowSearch && !weatherResult && /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|搜索|查询|查一下|搜一下|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分/i.test(message);
+    var searchResultObj = null;
     var searchResults = null;
+    var searchDiagnostics = null;
     if (needsSearch && !aborted) {
       try {
-        searchResults = await searchWeb(message, 5);
-      } catch (e) {}
+        searchResultObj = await searchWeb(message, 5);
+        searchResults = searchResultObj && searchResultObj.results ? searchResultObj.results : [];
+        searchDiagnostics = searchResultObj && searchResultObj.diagnostics ? searchResultObj.diagnostics : null;
+      } catch (e) {
+        searchResults = [];
+      }
     }
     
     var reasoning = '';
@@ -6380,7 +6816,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     
     if (aborted) return res.end();
     
-    // 注入搜索结果（含改进格式和空结果处理）
+    // 注入搜索结果（新格式：带 diagnostics）
     if (searchResults && Array.isArray(searchResults) && searchResults.length) {
       var searchCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + message + '\n\n' +
         searchResults.map(function(sr, si) {
@@ -6392,10 +6828,21 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }).join('\n\n') +
         '\n\n要求：必须优先使用以上搜索结果回答。如果结果发布时间未知或明显过旧，必须提醒用户"搜索结果可能不是最新"。不能编造新闻、价格、天气、日期。';
       messages.push({ role: 'system', content: searchCtx });
-      res.write('data: ' + JSON.stringify({ type: 'search', count: searchResults.length, results: searchResults }) + '\n\n');
+      res.write('data: ' + JSON.stringify({ type: 'search', count: searchResults.length, results: searchResults, diagnostics: searchDiagnostics || null }) + '\n\n');
     } else if (needsSearch) {
-      messages.push({ role: 'system', content: '【联网搜索】本次搜索没有返回有效结果。你必须如实告诉用户没有搜到，不能编造实时信息。' });
-      res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [] }) + '\n\n');
+      var hasProviderErrors = searchDiagnostics && searchDiagnostics.provider_errors && searchDiagnostics.provider_errors.length > 0;
+      var hasProviderMissing = searchDiagnostics && searchDiagnostics.missing_env && searchDiagnostics.missing_env.length > 0;
+      if (hasProviderErrors) {
+        var errorSummary = searchDiagnostics.provider_errors.map(function(pe) { return pe.provider + ':' + pe.error; }).join(' / ');
+        if (hasProviderMissing) {
+          errorSummary += ' / 未配置:' + searchDiagnostics.missing_env.join(',');
+        }
+        messages.push({ role: 'system', content: '【联网搜索】本次联网搜索失败（' + errorSummary + '）。不能编造实时信息，必须如实告诉用户搜索不可用。' });
+        res.write('data: ' + JSON.stringify({ type: 'search_error', error: '联网搜索失败: ' + errorSummary, diagnostics: searchDiagnostics }) + '\n\n');
+      } else {
+        messages.push({ role: 'system', content: '【联网搜索】本次搜索没有返回有效结果。你必须如实告诉用户没有搜到，不能编造实时信息。' });
+        res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [], diagnostics: searchDiagnostics }) + '\n\n');
+      }
     }
     
     messages.push({ role: 'user', content: message });
@@ -6458,18 +6905,42 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var contentBuffer = '';
     var reasoningSent = false;
     
+    var lastChunkTime = Date.now();
     while (true) {
       if (aborted) {
         controller.abort();
         return res.end();
       }
-      var readResult;
-      try {
-        readResult = await reader.read();
-      } catch (e) {
-        break;
+      // idle timeout: 20 秒无 chunk 则中断
+      var idleElapsed = Date.now() - lastChunkTime;
+      if (idleElapsed > 20000) {
+        console.log('[AGENT-STREAM] idle timeout 20s, aborting');
+        controller.abort();
+        if (!aborted) {
+          if (contentBuffer && contentBuffer.length > 0) {
+            await finishStream(res, {
+              contentBuffer: contentBuffer,
+              reasoningBuffer: reasoningBuffer,
+              thinkingMode: thinkingMode,
+              useThinking: useThinking,
+              usedModel: usedModel,
+              finishReason: 'idle_timeout',
+              userName: userName,
+              convId: convId,
+              message: message,
+              streamSeq: streamSeq,
+              memoryData: memoryData,
+              ctx: ctx
+            });
+          } else {
+            writeSse(res, { type: 'error', error: 'AI 回复超时（20 秒无响应），请重试' });
+          }
+        }
+        return res.end();
       }
+      var readResult = await reader.read();
       if (readResult.done) break;
+      lastChunkTime = Date.now();
       
       buffer += decoder.decode(readResult.value, { stream: true });
       var lines = buffer.split('\n');
@@ -6507,102 +6978,83 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }
         
         if (finish === 'stop' || finish === 'length') {
-          reasoning = reasoningBuffer;
-          content = contentBuffer;
-          usageResult = usageInStream;
-          
-          if (usageResult) {
-            usedModel = usageResult.model || usedModel;
+          // 统一收尾
+          if (!aborted) {
+            var finishOpt = {
+              contentBuffer: contentBuffer,
+              reasoningBuffer: reasoningBuffer,
+              thinkingMode: thinkingMode,
+              useThinking: useThinking,
+              usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
+              finishReason: finish,
+              userName: userName,
+              convId: convId,
+              message: message,
+              streamSeq: streamSeq,
+              memoryData: memoryData,
+              ctx: ctx
+            };
+            await finishStream(res, finishOpt);
           }
-          
-          if (aborted) return res.end();
-          
-          // 保存消息
-          var nowSave = Date.now();
-          var usageToStore = Object.assign({}, usageResult || {}, {
-            thinking_mode: thinkingMode,
-            model: usedModel,
-            requested_thinking_mode: thinkingMode,
-            applied_thinking_mode: useThinking ? thinkingMode : 'off'
-          });
-          
-          try {
-            streamSeq += 1;
-            var seqUser = streamSeq;
-            streamSeq += 1;
-            var seqAssistant = streamSeq;
-            var userCreatedAt = new Date(nowSave).toISOString();
-            var assistantCreatedAt = new Date(nowSave + 1).toISOString();
-            await supabase.from('posts').insert([
-              {
-                user_name: userName,
-                content: message,
-                media_type: AI_AGENT_MESSAGE_MARKER,
-                media_url: buildMsgMeta('user', convId, null, null, seqUser),
-                actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowSave,
-                created_at: userCreatedAt
-              },
-              {
-                user_name: userName,
-                content: content,
-                media_type: AI_AGENT_MESSAGE_MARKER,
-                media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, seqAssistant),
-                actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowSave + 1),
-                created_at: assistantCreatedAt
-              }
-            ]);
-          } catch (e) {
-            console.error('[AGENT-STREAM] save failed:', e && e.message);
-          }
-          
-          // 异步更新记忆和摘要（不阻塞回复）
-          maybeUpdateUserMemory(userName, convId, message, content, memoryData.memoryBox).catch(function() {});
-          maybeUpdateConversationSummary(userName, convId, ctx.history || []).catch(function() {});
-          
-          // 发送完成事件
-          writeSse(res, {
-            type: 'done',
-            reasoning: (thinkingMode !== 'off' ? reasoning : ''),
-            usage: usageResult,
-            model: usedModel,
-            thinking_mode: thinkingMode,
-            requested_thinking_mode: thinkingMode,
-            applied_thinking_mode: useThinking ? thinkingMode : 'off',
-            reasoning_length: reasoningBuffer.length,
-            content_length: contentBuffer.length,
-            remaining: { hour: rl.remainingHour, day: rl.remainingDay }
-          });
-          console.log('[AGENT-STREAM] done thinking_mode=', thinkingMode, 'reasoning_len=', reasoningBuffer.length, 'content_len=', contentBuffer.length);
           return res.end();
         }
       }
     }
     
     // 流意外结束但没收到 finish_reason
-    if (contentBuffer && !aborted) {
-      writeSse(res, {
-        type: 'done',
-        content: sanitizeAssistantVisibleText(contentBuffer),
-        reasoning: (thinkingMode !== 'off' ? reasoningBuffer : ''),
-        usage: null,
-        model: usedModel,
-        thinking_mode: thinkingMode,
-        requested_thinking_mode: thinkingMode,
-        applied_thinking_mode: useThinking ? thinkingMode : 'off',
-        reasoning_length: reasoningBuffer.length,
-        content_length: contentBuffer.length
-      });
-    }
-    res.end();
-  } catch (e) {
-    console.error('[AGENT-STREAM] exception:', e && e.message);
     if (!aborted) {
-      try {
-        res.write('data: ' + JSON.stringify({ type: 'error', error: '聊天失败，请稍后再试' }) + '\n\n');
-        res.end();
-      } catch (e2) {}
+      var contentHasSomething = contentBuffer && contentBuffer.length > 0;
+      var reasoningHasSomething = reasoningBuffer && reasoningBuffer.length > 0;
+      
+      if (!contentHasSomething && !reasoningHasSomething) {
+        writeSse(res, { type: 'error', error: 'AI 没有返回内容，请稍后重试' });
+      } else if (!contentHasSomething && reasoningHasSomething) {
+        writeSse(res, { type: 'error', error: 'AI 只返回了思考过程，正文生成中断，请重试' });
+      } else {
+        // 有 content，尝试保存并标记中断
+        await finishStream(res, {
+          contentBuffer: contentBuffer,
+          reasoningBuffer: reasoningBuffer,
+          thinkingMode: thinkingMode,
+          useThinking: useThinking,
+          usedModel: usedModel,
+          finishReason: 'upstream_closed',
+          userName: userName,
+          convId: convId,
+          message: message,
+          streamSeq: streamSeq,
+          memoryData: memoryData,
+          ctx: ctx
+        });
+      }
     }
-  }
+    return res.end();
+    } catch (streamErr) {
+      if (aborted) return res.end();
+      console.error('[AGENT-STREAM] stream read error:', streamErr && streamErr.message);
+      // 如果已有 content，尝试保存并标记中断
+      if (contentBuffer && contentBuffer.length > 0 && !aborted) {
+        await finishStream(res, {
+          contentBuffer: contentBuffer,
+          reasoningBuffer: reasoningBuffer,
+          thinkingMode: thinkingMode,
+          useThinking: useThinking,
+          usedModel: usedModel,
+          finishReason: 'upstream_read_error',
+          userName: userName,
+          convId: convId,
+          message: message,
+          streamSeq: streamSeq,
+          memoryData: memoryData,
+          ctx: ctx
+        });
+      } else if (reasoningBuffer && reasoningBuffer.length > 0 && !aborted) {
+        writeSse(res, { type: 'error', error: 'AI 只返回了思考过程，正文生成中断，请重试' });
+      } else if (!aborted) {
+        writeSse(res, { type: 'error', error: 'AI 流式读取错误，请稍后重试' });
+      }
+      return res.end();
+    }
 });
 
 // GET /api/agent/chat/conversations - 获取用户会话列表
@@ -6691,21 +7143,38 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
   }
 });
 
-// GET /api/agent/search-health - 搜索健康检查（验证 SearXNG 可用性）
+// GET /api/agent/search-health - 搜索健康检查（验证搜索 Provider 可用性）
 app.get('/api/agent/search-health', authenticateUser, async (req, res) => {
   try {
     var q = String(req.query.q || '济州岛最新新闻').trim().slice(0, 100);
-    var results = await searchWeb(q, 3);
+    var result = await searchWeb(q, 3);
+    var diagnostics = result && result.diagnostics ? result.diagnostics : {};
     return res.json({
-      ok: true,
+      ok: diagnostics.provider_results && diagnostics.provider_results.length > 0,
       query: q,
-      count: results.length,
-      results: results,
-      timestamp: new Date().toISOString(),
-      instances_checked: process.env.SEARCH_API_URL ? [process.env.SEARCH_API_URL] : ['search.sapti.me', 'searx.be', 'search.projectsegfau.lt']
+      used_provider: result && result.used_provider || null,
+      results: result && result.results || [],
+      diagnostics: {
+        enabled_providers: diagnostics.enabled_providers || [],
+        missing_env: diagnostics.missing_env || [],
+        provider_results: diagnostics.provider_results || [],
+        provider_errors: diagnostics.provider_errors || [],
+        env_status: {
+          TAVILY_API_KEY: !!process.env.TAVILY_API_KEY,
+          BRAVE_SEARCH_API_KEY: !!process.env.BRAVE_SEARCH_API_KEY,
+          SERPER_API_KEY: !!process.env.SERPER_API_KEY,
+          SEARCH_API_URL: !!process.env.SEARCH_API_URL
+        }
+      },
+      timestamp: new Date().toISOString()
     });
   } catch (e) {
-    return res.json({ ok: false, error: e && e.message || '搜索检查失败', results: [] });
+    return res.json({ ok: false, error: e && e.message || '搜索检查失败', results: [], diagnostics: { enabled_providers: [], missing_env: [], provider_results: [], provider_errors: [], env_status: {
+      TAVILY_API_KEY: !!process.env.TAVILY_API_KEY,
+      BRAVE_SEARCH_API_KEY: !!process.env.BRAVE_SEARCH_API_KEY,
+      SERPER_API_KEY: !!process.env.SERPER_API_KEY,
+      SEARCH_API_URL: !!process.env.SEARCH_API_URL
+    } } });
   }
 });
 
