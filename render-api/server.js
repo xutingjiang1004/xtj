@@ -330,7 +330,7 @@ async function searchBingHtml(query, maxResults) {
 }
 
 // 主搜索函数：按优先级依次调用 provider，返回统一格式
-async function searchWeb(query, maxResults) {
+async function searchWebLegacy(query, maxResults) {
   maxResults = maxResults || 5;
   var searchQuery = buildSearchQuery(query);
   if (!searchQuery) searchQuery = String(query || '').trim().slice(0, 120);
@@ -6794,7 +6794,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // Web search
-    var allowSearch = config && config.allow_web_search === true;
+    var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
     var needsSearch = allowSearch && !weatherResult && /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|搜索|查询|查一下|搜一下|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分/i.test(message);
     var searchResultObj = null;
     var searchResults = null;
