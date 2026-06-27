@@ -48,6 +48,7 @@
     avatarPopTimer: null,
     statusTimer: null,
     replyTimer: null,
+    streamCleanup: null,
     abortController: null,
     clientRequestId: 0,
     currentStreamAborted: false,
@@ -102,10 +103,10 @@
     return node;
   }
 
-  function notify(msg) {
+  function notify(msg, type, duration) {
     try {
-      if (typeof window.showToast === 'function') { window.showToast(msg); return; }
-      if (typeof window.showNotify === 'function') { window.showNotify(msg); return; }
+      if (typeof window.showToast === 'function') { window.showToast(msg, type || 'info', duration); return; }
+      if (typeof window.showNotify === 'function') { window.showNotify(msg, type); return; }
     } catch (e) {}
   }
 
@@ -265,6 +266,12 @@
     if (!S.replyTimer) return;
     try { clearTimeout(S.replyTimer); } catch (e) {}
     S.replyTimer = null;
+  }
+
+  function clearStreamCleanup() {
+    if (!S.streamCleanup) return;
+    try { S.streamCleanup(); } catch (e) {}
+    S.streamCleanup = null;
   }
 
   function triggerAvatarPop() {
@@ -472,6 +479,7 @@
   }
   
   function abortCurrentRequest() {
+    clearStreamCleanup();
     if (S.abortController) {
       try { S.abortController.abort(); } catch (e) {}
       S.abortController = null;
@@ -683,11 +691,19 @@
 
   async function ensureConfig() {
     var now = Date.now();
-    if (S.config && now - S.configFetchedAt < CONFIG_CACHE_TTL) return S.config;
+    if (S.config && now - S.configFetchedAt < CONFIG_CACHE_TTL) {
+      if (S._lastConfigVersion && S.config.config_version !== S._lastConfigVersion) {
+        S.configFetchedAt = 0;
+        S.config = null;
+      } else {
+        return S.config;
+      }
+    }
     var r = await apiRequest('GET', '/config');
     if (r.ok && r.data && r.data.config) {
       S.config = r.data.config;
       S.configFetchedAt = now;
+      S._lastConfigVersion = r.data.config.config_version || 0;
       return S.config;
     }
     S.config = S.config || {
@@ -888,61 +904,121 @@
     return segments.length ? segments : [normalized];
   }
 
-  function finalizeAssistantNode(aiNode, aiBubble, payload, messagesEl) {
-    aiNode.classList.remove('generating');
-    aiBubble.classList.remove('ai-typing');
-    if (payload.usage) {
-      var usageLine = buildUsageLine(payload.usage);
-      if (usageLine) aiNode.appendChild(el('div', { class: 'ai-msg-usage', text: usageLine }));
+  function takeSmoothTextChunk(pending, options) {
+    pending = String(pending || '');
+    if (!pending) return '';
+    var minChunk = Math.max(1, options && options.minChunk || 4);
+    var maxChunk = Math.max(minChunk, options && options.maxChunk || 12);
+    if (pending.length <= maxChunk) return pending;
+
+    var punctuation = /[，。！？；：、,.!?;:\n]/;
+    for (var i = Math.min(maxChunk - 1, pending.length - 1); i >= minChunk - 1; i--) {
+      if (punctuation.test(pending.charAt(i))) return pending.slice(0, i + 1);
     }
-    if (payload.created_at) aiNode.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(payload.created_at) }));
-    setAiRootState('ai-idle');
-    scrollToBottom(messagesEl, false);
-    clearReplyTimer();
+
+    if (/^[\x00-\x7F]/.test(pending)) {
+      for (var j = Math.min(maxChunk, pending.length - 1); j >= minChunk; j--) {
+        var ch = pending.charAt(j);
+        if (/\s/.test(ch) || /[,.!?;:]/.test(ch)) return pending.slice(0, j + 1);
+      }
+    }
+
+    return pending.slice(0, maxChunk);
   }
 
-  function startAssistantReply(aiNode, aiBubble, fullText, payload, messagesEl) {
-    clearReplyTimer();
-    setAiRootState('ai-replying');
-    aiNode.classList.add('generating');
-    aiBubble.classList.add('ai-typing');
+  function createSmoothTextRenderer(targetEl, options) {
+    options = options || {};
+    var reducedMotion = prefersReducedMotion();
+    var pending = '';
+    var rendered = '';
+    var rafId = 0;
+    var cancelled = false;
+    var streamClass = options.streamClass || 'ai-streaming-soft';
+    var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
+    var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
 
-    if (prefersReducedMotion()) {
-      aiBubble.textContent = fullText;
-      finalizeAssistantNode(aiNode, aiBubble, payload, messagesEl);
-      return;
+    function clearFrame() {
+      if (!rafId) return;
+      try { cancelFrame(rafId); } catch (e) {}
+      rafId = 0;
     }
 
-    if (fullText.length > 800) {
-      var segments = buildLongReplySegments(fullText);
-      var index = 0;
-      var rendered = '';
-      (function renderSegment() {
-        rendered += segments[index] || '';
-        aiBubble.textContent = rendered;
-        scrollToBottom(messagesEl, false);
-        index += 1;
-        if (index >= segments.length) {
-          finalizeAssistantNode(aiNode, aiBubble, payload, messagesEl);
-          return;
-        }
-        S.replyTimer = setTimeout(renderSegment, 8);
-      })();
-      return;
-    }
-
-    var charsPerTick = fullText.length > 360 ? 10 : 5;
-    var pos = 0;
-    (function typeTick() {
-      pos = Math.min(fullText.length, pos + charsPerTick);
-      aiBubble.textContent = fullText.slice(0, pos);
-      scrollToBottom(messagesEl, false);
-      if (pos >= fullText.length) {
-        finalizeAssistantNode(aiNode, aiBubble, payload, messagesEl);
+    function emitText(forceAll) {
+      if (cancelled || !targetEl) return;
+      if (!pending) {
+        targetEl.classList.remove(streamClass);
         return;
       }
-      S.replyTimer = setTimeout(typeTick, 8);
-    })();
+      targetEl.classList.add(streamClass);
+      var next = '';
+      if (reducedMotion || forceAll) {
+        next = pending;
+        pending = '';
+      } else {
+        var frameBudget = pending.length > 160 ? 24 : (pending.length > 72 ? 16 : 10);
+        while (pending && next.length < frameBudget) {
+          var chunk = takeSmoothTextChunk(pending, options);
+          if (!chunk) break;
+          next += chunk;
+          pending = pending.slice(chunk.length);
+        }
+      }
+      if (!next) return;
+      rendered += next;
+      targetEl.textContent = rendered;
+      if (typeof options.onRender === 'function') {
+        try { options.onRender(rendered); } catch (e2) {}
+      }
+      if (!pending) {
+        targetEl.classList.remove(streamClass);
+      }
+    }
+
+    function tick() {
+      rafId = 0;
+      if (cancelled) return;
+      emitText(false);
+      if (pending) schedule();
+    }
+
+    function schedule() {
+      if (cancelled || !pending || rafId) return;
+      if (reducedMotion) {
+        emitText(true);
+        return;
+      }
+      rafId = requestFrame(tick);
+    }
+
+    return {
+      append: function(text) {
+        if (cancelled || !targetEl || !text) return;
+        pending += String(text);
+        schedule();
+      },
+      flush: function() {
+        if (cancelled || !targetEl) return;
+        clearFrame();
+        emitText(true);
+      },
+      finish: function(finalText) {
+        if (cancelled || !targetEl) return;
+        clearFrame();
+        pending = '';
+        rendered = String(finalText || '');
+        targetEl.textContent = rendered;
+        targetEl.classList.remove(streamClass);
+        if (typeof options.onRender === 'function') {
+          try { options.onRender(rendered); } catch (e3) {}
+        }
+      },
+      cancel: function() {
+        cancelled = true;
+        clearFrame();
+        pending = '';
+        if (targetEl) targetEl.classList.remove(streamClass);
+      }
+    };
   }
 
   function getOverflowClipRect(node) {
@@ -1256,11 +1332,28 @@
       var aiNode = null;
       var aiBubble = null;
       var reasoningContainer = null;
+      var contentRenderer = null;
+      var reasoningRenderer = null;
       var usageResult = null;
       var finalModel = '';
       var finalThinkingMode = '';
       var streamConvId = null;
       var doneReceived = false;
+
+      function cleanupRenderers() {
+        if (contentRenderer) {
+          try { contentRenderer.cancel(); } catch (e) {}
+          contentRenderer = null;
+        }
+        if (reasoningRenderer) {
+          try { reasoningRenderer.cancel(); } catch (e2) {}
+          reasoningRenderer = null;
+        }
+        if (S.streamCleanup === cleanupRenderers) {
+          S.streamCleanup = null;
+        }
+      }
+      S.streamCleanup = cleanupRenderers;
 
       function ensureAssistantNode() {
         if (!aiNode) {
@@ -1284,6 +1377,26 @@
           setThinkingExpanded(reasoningContainer, true, messagesEl);
         }
         return reasoningContainer;
+      }
+
+      function ensureAssistantBubble() {
+        ensureAssistantNode();
+        aiBubble = aiNode.querySelector('.ai-msg-bubble');
+        if (!aiBubble) {
+          aiBubble = el('div', { class: 'ai-msg-bubble ai-typing', text: '' });
+          setupBubbleCopy(aiBubble, messagesEl);
+          aiNode.appendChild(aiBubble);
+        }
+        if (!contentRenderer) {
+          contentRenderer = createSmoothTextRenderer(aiBubble, {
+            minChunk: 4,
+            maxChunk: 12,
+            onRender: function() {
+              scrollToBottom(messagesEl, false);
+            }
+          });
+        }
+        return aiBubble;
       }
       
       while (true) {
@@ -1379,23 +1492,27 @@
             if ((finalThinkingMode && finalThinkingMode !== 'off') || (!finalThinkingMode && S.thinkingMode !== 'off')) {
               var rn = ensureReasoningNode();
               var body = rn.querySelector('.ai-thinking-body');
-              if (body) body.textContent = aiReasoning || '思考中...';
-              scrollToBottom(messagesEl, false);
+              if (body) {
+                if (!reasoningRenderer) {
+                  body.textContent = '';
+                  reasoningRenderer = createSmoothTextRenderer(body, {
+                    minChunk: 4,
+                    maxChunk: 12,
+                    onRender: function() {
+                      if (rn.classList.contains('expanded')) scrollToBottom(messagesEl, false);
+                    }
+                  });
+                }
+                reasoningRenderer.append(evt.text || '');
+              }
             }
             continue;
           }
           
           if (evt.type === 'content') {
-            ensureAssistantNode();
             aiContent += evt.text || '';
-            aiBubble = aiNode.querySelector('.ai-msg-bubble');
-            if (!aiBubble) {
-              aiBubble = el('div', { class: 'ai-msg-bubble ai-typing', text: '' });
-              setupBubbleCopy(aiBubble, messagesEl);
-              aiNode.appendChild(aiBubble);
-            }
-            aiBubble.textContent = aiContent;
-            scrollToBottom(messagesEl, false);
+            ensureAssistantBubble();
+            if (contentRenderer) contentRenderer.append(evt.text || '');
             continue;
           }
           
@@ -1413,6 +1530,7 @@
       
       if (myReqId !== reqId || aborted) {
         // 被新请求取代，删除当前创建的任何节点
+        cleanupRenderers();
         if (aiNode) try { aiNode.remove(); } catch (e) {}
         try { typingNode.remove(); } catch (e) {}
         S.sending = false;
@@ -1424,6 +1542,9 @@
       try { typingNode.remove(); } catch (e) {}
       
       if (aiNode && aiContent) {
+        if (reasoningRenderer) reasoningRenderer.finish(aiReasoning || '');
+        if (contentRenderer) contentRenderer.finish(aiContent || '');
+        cleanupRenderers();
         aiNode.classList.remove('generating');
         if (aiBubble) aiBubble.classList.remove('ai-typing');
         setAiRootState('ai-idle');
@@ -1438,6 +1559,9 @@
             var finalBody = reasoningNode.querySelector('.ai-thinking-body');
             if (finalBody) finalBody.textContent = aiReasoning;
           }
+        } else if (reasoningContainer) {
+          try { reasoningContainer.remove(); } catch (e) {}
+          reasoningContainer = null;
         }
         
         var aiMsg = {
@@ -1459,12 +1583,16 @@
           if (usageLine) aiNode.appendChild(el('div', { class: 'ai-msg-usage', text: usageLine }));
         }
         if (aiMsg.created_at) aiNode.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
+      } else if (doneReceived) {
+        cleanupRenderers();
       } else if (!doneReceived) {
+        cleanupRenderers();
         S.messages.pop();
         removeLastUserMessage(messagesEl);
         notify('AI 暂时没有回应，请稍后再试');
       }
     } catch (fetchErr) {
+      cleanupRenderers();
       if (myReqId !== reqId) {
         S.sending = false;
         S.abortController = null;
@@ -1619,9 +1747,9 @@
           'data-conv-id': conv.conversation_id
         });
         item.appendChild(el('div', { class: 'ai-conv-title', text: conv.title || '新对话' }));
+        item.appendChild(el('div', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' }));
         item.appendChild(el('div', { class: 'ai-conv-preview', text: getConversationPreview(conv) }));
         var meta = el('div', { class: 'ai-conv-meta' });
-        meta.appendChild(el('span', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' }));
         meta.appendChild(el('span', { class: 'ai-conv-count', text: getConversationCountText(conv) }));
         item.appendChild(meta);
         item.addEventListener('click', function() {
@@ -1789,6 +1917,40 @@ function showChatMessages() {
       }
     });
     header.appendChild(histBtn);
+
+    // 记忆按钮
+    var memoryBtn = el('button', { type: 'button', class: 'ai-chat-hist-btn', 'aria-label': 'AI 记忆', title: '查看 AI 记住了什么' }, '记忆');
+    memoryBtn.addEventListener('click', async function() {
+      try {
+        var r = await apiRequest('GET', '/memory');
+        if (r && r.ok && r.memory) {
+          var memory = r.memory;
+          var lines = [];
+          lines.push('--- AI 长期记忆 ---');
+          lines.push('');
+          if (memory.display_name) lines.push('用户称呼：' + memory.display_name);
+          if (memory.reply_preferences && memory.reply_preferences.tone && memory.reply_preferences.tone.length) lines.push('语气偏好：' + memory.reply_preferences.tone.join('、'));
+          if (memory.reply_preferences && memory.reply_preferences.avoid && memory.reply_preferences.avoid.length) lines.push('避免：' + memory.reply_preferences.avoid.join('、'));
+          if (memory.likes && memory.likes.length) lines.push('喜欢：' + memory.likes.join('、'));
+          if (memory.dislikes && memory.dislikes.length) lines.push('不喜欢：' + memory.dislikes.join('、'));
+          if (memory.do_not_do && memory.do_not_do.length) lines.push('项目禁区：' + memory.do_not_do.join('、'));
+          if (memory.important_notes && memory.important_notes.length) lines.push('重要提醒：' + memory.important_notes.join('、'));
+          if (memory.long_term_goals && memory.long_term_goals.length) lines.push('长期目标：' + memory.long_term_goals.join('、'));
+          if (lines.length <= 2) {
+            lines = ['--- AI 长期记忆 ---', '', '(当前没有记录任何长期记忆，多聊一聊我会记住你的偏好)', ''];
+          }
+          lines.push('');
+          lines.push('---');
+          lines.push('[清空记忆]  [关闭记忆]');
+          notify(lines.join('\n'), 'info', 8000);
+        } else {
+          notify('无法加载记忆');
+        }
+      } catch (e) {
+        notify('记忆加载失败');
+      }
+    });
+    header.insertBefore(memoryBtn, histBtn.nextSibling);
 
     var newBtn = el('button', {
       type: 'button',
@@ -2019,6 +2181,8 @@ function showChatMessages() {
     if (!S.active) return;
     S.active = false;
     clearReplyTimer();
+    abortCurrentRequest();
+    clearStreamCleanup();
     if (S.thinkMenuController) {
       try { S.thinkMenuController.close(); } catch (e) {}
       S.thinkMenuController = null;
