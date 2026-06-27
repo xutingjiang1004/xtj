@@ -5289,6 +5289,29 @@ function parseMsgMeta(r) {
   return { role: raw === 'assistant' ? 'assistant' : 'user' };
 }
 
+function getConvIdFromActorKey(actorKey) {
+  var ak = String(actorKey || '');
+  var prefix = 'ai_msg_conv_';
+  if (ak.indexOf(prefix) !== 0) return '';
+  var rest = ak.slice(prefix.length);
+  var markerUser = '_user_';
+  var markerAgent = '_agent_';
+  var idxUser = rest.indexOf(markerUser);
+  var idxAgent = rest.indexOf(markerAgent);
+  var idx = -1;
+  if (idxUser >= 0 && idxAgent >= 0) idx = Math.min(idxUser, idxAgent);
+  else if (idxUser >= 0) idx = idxUser;
+  else if (idxAgent >= 0) idx = idxAgent;
+  if (idx < 0) return '';
+  return rest.slice(0, idx);
+}
+
+function resolveConvId(r) {
+  var meta = parseMsgMeta(r);
+  if (meta && meta.convId) return String(meta.convId);
+  return getConvIdFromActorKey(r.actor_key);
+}
+
 function buildMsgMeta(role, convId, usage, reasoning, seq) {
   var obj = { role: role, convId: convId };
   if (usage) obj.usage = usage;
@@ -6010,26 +6033,14 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
     
     // 按 convId 分组，统计所有消息
     // 用两个 pass：第一遍按时间倒序拿最新一条；第二遍计数 & 找第一条 user 消息
-    var convData = {}; // convId -> { firstUserMsg, lastMsg, updated_at, msgCount, totalUser, firstRole }
+    var convData = {};
     for (var i = rows.length - 1; i >= 0; i--) {
-      // 倒序遍历更容易拿第一条 user 消息
       var r = rows[i];
-      var ak = String(r.actor_key || '');
-      if (!ak) continue;
-      var parts = ak.split('_');
-      if (parts[0] !== 'ai' || parts[1] !== 'msg' || parts.length < 5) continue;
-      var convId = parts[2];
-      if (!convId || convId === 'conv') continue;
+      var convId = resolveConvId(r);
+      if (!convId) continue;
       
       if (!convData[convId]) {
-        convData[convId] = {
-          firstUserMsg: null,
-          lastMsg: null,
-          updated_at: null,
-          msgCount: 0,
-          firstRole: null,
-          title: ''
-        };
+        convData[convId] = { firstUserMsg: null, lastMsg: null, updated_at: null, msgCount: 0, firstRole: null, title: '' };
       }
       convData[convId].msgCount++;
       
@@ -6042,7 +6053,6 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
         } catch (e) {}
       }
       
-      // 第一条 user 消息作为 title
       if (meta.role === 'user' && !convData[convId].firstUserMsg) {
         convData[convId].firstUserMsg = msgContent.slice(0, 20);
       }
@@ -6051,13 +6061,8 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
     // 第二遍：按时间倒序拿最新消息的 updated_at 和 lastMsg
     for (var j = 0; j < rows.length; j++) {
       var r2 = rows[j];
-      var ak2 = String(r2.actor_key || '');
-      if (!ak2) continue;
-      var parts2 = ak2.split('_');
-      if (parts2[0] !== 'ai' || parts2[1] !== 'msg' || parts2.length < 5) continue;
-      var convId2 = parts2[2];
-      if (!convId2 || convId2 === 'conv') continue;
-      if (!convData[convId2]) continue;
+      var convId2 = resolveConvId(r2);
+      if (!convId2 || !convData[convId2]) continue;
       
       if (!convData[convId2].updated_at) {
         convData[convId2].updated_at = r2.created_at;
@@ -6077,14 +6082,15 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
       return (convData[b].updated_at || '') > (convData[a].updated_at || '') ? 1 : -1;
     }).slice(0, limit).map(function(k) {
       var d = convData[k];
-      return {
-        conversation_id: k,
-        title: d.firstUserMsg || '新对话',
-        last_message: d.lastMsgString || '',
-        updated_at: d.updated_at,
-        message_count: d.msgCount
-      };
+      return { conversation_id: k, title: d.firstUserMsg || '新对话', last_message: d.lastMsgString || '', updated_at: d.updated_at, message_count: d.msgCount };
     });
+    
+    console.log('[AGENT-CONV] rows=', rows.length, 'conversations=', conversations.length);
+    if (rows.length > 0 && conversations.length === 0) {
+      for (var di = 0; di < Math.min(3, rows.length); di++) {
+        console.log('[AGENT-CONV] sample row', di, 'actor_key=', rows[di].actor_key, 'media_url=', rows[di].media_url);
+      }
+    }
     
     return res.json({ ok: true, conversations: conversations });
   } catch (e) {
