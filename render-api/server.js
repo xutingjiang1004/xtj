@@ -90,6 +90,77 @@ const DEEPSEEK_CURRENCY = process.env.DEEPSEEK_CURRENCY || 'CNY';
 console.log('[AI-CONFIG] DEEPSEEK_API_KEY:', DEEPSEEK_API_KEY ? '已设置' : '未设置（开发模式将使用 mock 回复）');
 console.log('[AI-CONFIG] DEEPSEEK_MODEL_REASONER:', DEEPSEEK_MODEL_REASONER);
 
+const AI_AGENT_CONVERSATION_LIST_LIMIT = 50;
+
+// Web Search config
+const SEARCH_CACHE_TTL_MS = 60000;
+const searchCache = new Map();
+
+// Simple in-memory web search function
+// Uses SERPAPI (or Brave/Tavily) - configurable via env
+// SEARCH_API_KEY / SEARCH_API_URL / SEARCH_ENGINE
+async function searchWeb(query, maxResults) {
+  maxResults = maxResults || 5;
+  var cacheKey = query.toLowerCase().trim().slice(0, 100);
+  var cached = searchCache.get(cacheKey);
+  if (cached && (Date.now() - cached.ts) < SEARCH_CACHE_TTL_MS) return cached.results;
+  
+  var results = [];
+  try {
+    var searchApiKey = process.env.SEARCH_API_KEY || process.env.BRAVE_API_KEY || process.env.TAVILY_API_KEY || '';
+    var searchEngine = process.env.SEARCH_ENGINE || 'brave';
+    var searchApiUrl = process.env.SEARCH_API_URL || '';
+    
+    if (!searchApiKey) {
+      results.push({ title: '搜索未配置', url: '', snippet: '管理员未配置搜索 API Key', source: '' });
+    } else if (searchEngine === 'brave' || (!searchApiUrl && searchEngine === 'brave')) {
+      var braveUrl = searchApiUrl || 'https://api.search.brave.com/res/v1/web/search';
+      var braveRes = await fetch(braveUrl + '?q=' + encodeURIComponent(query) + '&count=' + maxResults, {
+        headers: { 'Accept': 'application/json', 'Accept-Encoding': 'gzip', 'X-Subscription-Token': searchApiKey }
+      });
+      if (braveRes.ok) {
+        var braveData = await braveRes.json();
+        var webResults = braveData.web && braveData.web.results;
+        if (Array.isArray(webResults)) {
+          results = webResults.slice(0, maxResults).map(function(r) {
+            return {
+              title: String(r.title || '').slice(0, 200),
+              url: String(r.url || ''),
+              snippet: String(r.description || '').slice(0, 300),
+              source: 'brave',
+              published_at: r.age || r.published_time || ''
+            };
+          });
+        }
+      }
+    } else if (searchEngine === 'tavily') {
+      var tavilyRes = await fetch(searchApiUrl || 'https://api.tavily.com/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: searchApiKey, query: query, max_results: maxResults })
+      });
+      if (tavilyRes.ok) {
+        var tavilyData = await tavilyRes.json();
+        var tavilyResults = tavilyData.results;
+        if (Array.isArray(tavilyResults)) {
+          results = tavilyResults.slice(0, maxResults).map(function(r) {
+            return { title: String(r.title || '').slice(0, 200), url: String(r.url || ''), snippet: String(r.content || '').slice(0, 300), source: 'tavily', published_at: '' };
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[SEARCH] searchWeb error:', e && e.message);
+  }
+  
+  if (!results.length) {
+    results.push({ title: '未找到结果', url: '', snippet: '没有搜索到相关内容', source: '' });
+  }
+  
+  searchCache.set(cacheKey, { ts: Date.now(), results: results });
+  return results;
+}
+
 // ===================== Gmail SMTP 邮件配置 =====================
 const GMAIL_USER = process.env.GMAIL_USER || '';
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || '';
@@ -5178,7 +5249,8 @@ app.get('/api/agent/config', authenticateUser, async (req, res) => {
         name: config.name || '徐旭泽的小猫',
         avatar: config.avatar || '🐱',
         description: config.description || '陪你聊天的小猫',
-        welcome_message: config.welcome_message || '喵，来聊天吧。'
+        welcome_message: config.welcome_message || '喵，来聊天吧。',
+        allow_web_search: config.allow_web_search === true
       }
     });
   } catch (e) {
@@ -5247,6 +5319,7 @@ const AI_DEFAULT_CONFIG = {
   tone: '',
   system_prompt: '',
   welcome_message: '喵，来聊天吧。',
+  allow_web_search: false,
   updated_at: null,
   updated_by: null
 };
@@ -5399,6 +5472,8 @@ async function loadAiContext(userName, convId) {
 
 // POST /api/agent/chat
 app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
+  var aborted = false;
+  req.on('close', function() { aborted = true; });
   try {
     var userName = req.userName;
 
@@ -5453,10 +5528,12 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     // off 模式强制 reasoning = ''（即使模型返回 reasoning_content）
     try {
       var result = await callDeepSeek(messages, { thinking_mode: thinkingMode });
+      if (aborted) return;
       reply = result.content;
       usage = result.usage;
       if (thinkingMode !== 'off') reasoning = result.reasoning || '';
     } catch (e) {
+      if (aborted) return;
       console.error('[AGENT-CHAT] callDeepSeek failed:', e && e.message);
       return res.status(502).json({
         error: 'AI 调用失败，请稍后再试',
@@ -5467,6 +5544,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     if (reply.length > 4000) reply = reply.slice(0, 4000) + '\n…（已截断）';
 
     // 9. 保存消息（含 conversation_id，不物理删除旧数据）
+    if (aborted) return;
     var nowIso = new Date().toISOString();
     var nowTs = Date.now();
     // 把 thinking_mode + model 也写进 usage，方便后台按 conv 统计
@@ -5518,6 +5596,351 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       return res.status(400).json({ error: e.message });
     }
     return res.status(500).json({ error: '聊天失败，请稍后再试' });
+  }
+});
+
+// POST /api/agent/chat/stream - 流式 SSE 输出
+app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
+  var userName = req.userName;
+  var aborted = false;
+  var clientReqId = req.body && req.body.client_request_id;
+  
+  req.on('close', function() {
+    aborted = true;
+    try { console.log('[AGENT-STREAM] client disconnected, reqId:', clientReqId || '?'); } catch (e) {}
+  });
+  
+  try {
+    // 限流
+    var rl = checkAiUserRateLimit(userName);
+    if (!rl.allowed) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      return res.end('data: ' + JSON.stringify({ error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : '今日 AI 聊天次数已达上限' }) + '\n\n');
+    }
+    
+    // 验证输入
+    var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
+    if (message && message.error) { res.setHeader('Content-Type', 'text/event-stream'); return res.end('data: ' + JSON.stringify({ error: message.error }) + '\n\n'); }
+    if (!message) { res.setHeader('Content-Type', 'text/event-stream'); return res.end('data: ' + JSON.stringify({ error: '消息内容不能为空' }) + '\n\n'); }
+    if (aborted) return res.end();
+    
+    // 会话管理
+    var convId = String(req.body && req.body.conversation_id || '').trim();
+    if (!convId) convId = genConvId();
+    if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
+    
+    // 读取配置和上下文
+    var config = await getAiConfig();
+    var ctx = await loadAiContext(userName, convId);
+    
+    // 组装 system prompt
+    var corePrompt = buildAiCorePrompt(config);
+    var dynamicContext = buildAiDynamicContext(ctx, config);
+    
+    var messages = [
+      { role: 'system', content: corePrompt },
+      { role: 'system', content: dynamicContext }
+    ];
+    var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
+    for (var h = 0; h < histSlice.length; h++) {
+      messages.push({ role: histSlice[h].role, content: histSlice[h].content });
+    }
+    messages.push({ role: 'user', content: message });
+    
+    // 思考模式
+    var thinkingMode = (req.body && req.body.thinking_mode) || 'off';
+    if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'off';
+    var useThinking = thinkingMode !== 'off';
+    
+    // Web search - 判断是否需要搜索
+    var allowSearch = config && config.allow_web_search === true;
+    var needsSearch = allowSearch && /最新|今天|现在|价格|政策|新闻|天气|搜索|查询|实时|百度|google/i.test(message);
+    var searchResults = null;
+    if (needsSearch && !aborted) {
+      try {
+        searchResults = await searchWeb(message, 5);
+      } catch (e) {}
+    }
+    
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    
+    var reasoning = '';
+    var content = '';
+    var usageResult = null;
+    var usedModel = DEEPSEEK_MODEL_REASONER;
+    
+    if (aborted) return res.end();
+    
+    // 发送 convId
+    res.write('data: ' + JSON.stringify({ type: 'meta', conversation_id: convId }) + '\n\n');
+    
+    // 发送搜索摘要（如果有）
+    if (searchResults && Array.isArray(searchResults) && searchResults.length) {
+      var searchCtx = '【搜索结果】\n' + searchResults.map(function(sr, si) {
+        return (si + 1) + '. ' + sr.title + (sr.url ? ' (' + sr.url + ')' : '') + '\n' + (sr.snippet || '');
+      }).join('\n\n') + '\n\n请基于以上搜索结果回答。结果来自网络，可靠性不确定，需要注意核实。每条信息请标注来源。';
+      messages.push({ role: 'system', content: searchCtx });
+      res.write('data: ' + JSON.stringify({ type: 'search', results: searchResults }) + '\n\n');
+    }
+    
+    // 调用 DeepSeek（流式）
+    var apiBody = {
+      model: usedModel,
+      messages: messages,
+      stream: true
+    };
+    if (useThinking) {
+      apiBody.thinking = { type: 'enabled' };
+      apiBody.reasoning_effort = thinkingMode;
+    }
+    
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
+    
+    var streamResp;
+    try {
+      streamResp = await fetch(DEEPSEEK_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
+        body: JSON.stringify(apiBody),
+        signal: controller.signal
+      });
+    } catch (fetchErr) {
+      clearTimeout(timer);
+      if (aborted) return res.end();
+      res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败，请稍后再试' }) + '\n\n');
+      return res.end();
+    }
+    clearTimeout(timer);
+    
+    if (!streamResp.ok) {
+      try {
+        var errData = await streamResp.json().catch(function(){ return {}; });
+        var errMsg = errData && errData.error && errData.error.message ? String(errData.error.message).slice(0, 200) : '';
+        console.error('[AGENT-STREAM] API error', streamResp.status, errMsg);
+        if (useThinking && (errMsg.indexOf('thinking') >= 0 || errMsg.indexOf('reasoning_effort') >= 0)) {
+          res.write('data: ' + JSON.stringify({ type: 'error', error: '当前模型不支持思考模式，请关闭思考模式后重试' }) + '\n\n');
+        } else {
+          res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败（' + streamResp.status + '）' }) + '\n\n');
+        }
+      } catch (e2) {
+        res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败' }) + '\n\n');
+      }
+      return res.end();
+    }
+    
+    // 读取流
+    var reader = streamResp.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    var usageInStream = null;
+    var hasReasoningContent = false;
+    var reasoningBuffer = '';
+    var contentBuffer = '';
+    var reasoningSent = false;
+    
+    while (true) {
+      if (aborted) {
+        controller.abort();
+        return res.end();
+      }
+      var readResult;
+      try {
+        readResult = await reader.read();
+      } catch (e) {
+        break;
+      }
+      if (readResult.done) break;
+      
+      buffer += decoder.decode(readResult.value, { stream: true });
+      var lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+      
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line) continue;
+        if (line === 'data: [DONE]') continue;
+        if (!line.startsWith('data: ')) continue;
+        
+        var jsonStr = line.slice(6);
+        var chunk;
+        try { chunk = JSON.parse(jsonStr); } catch (e) { continue; }
+        if (!chunk || !chunk.choices || !chunk.choices[0]) continue;
+        
+        var delta = chunk.choices[0].delta || {};
+        var finish = chunk.choices[0].finish_reason;
+        usageInStream = chunk.usage || usageInStream;
+        
+        if (delta.reasoning_content) {
+          hasReasoningContent = true;
+          reasoningBuffer += delta.reasoning_content;
+          if (thinkingMode !== 'off') {
+            if (!reasoningSent) {
+              res.write('data: ' + JSON.stringify({ type: 'reasoning_start' }) + '\n\n');
+              reasoningSent = true;
+            }
+            res.write('data: ' + JSON.stringify({ type: 'reasoning', text: delta.reasoning_content }) + '\n\n');
+          }
+        }
+        if (delta.content) {
+          contentBuffer += delta.content;
+          res.write('data: ' + JSON.stringify({ type: 'content', text: delta.content }) + '\n\n');
+        }
+        
+        if (finish === 'stop' || finish === 'length') {
+          reasoning = reasoningBuffer;
+          content = contentBuffer;
+          usageResult = usageInStream;
+          
+          if (usageResult) {
+            usedModel = usageResult.model || usedModel;
+          }
+          
+          if (aborted) return res.end();
+          
+          // 保存消息
+          var nowIso = new Date().toISOString();
+          var nowTs = Date.now();
+          var usageToStore = Object.assign({}, usageResult || {}, {
+            thinking_mode: thinkingMode,
+            model: usedModel,
+            requested_thinking_mode: thinkingMode,
+            applied_thinking_mode: useThinking ? thinkingMode : 'off'
+          });
+          
+          try {
+            await supabase.from('posts').insert([
+              {
+                user_name: userName,
+                content: message,
+                media_type: AI_AGENT_MESSAGE_MARKER,
+                media_url: buildMsgMeta('user', convId),
+                actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
+              },
+              {
+                user_name: userName,
+                content: content,
+                media_type: AI_AGENT_MESSAGE_MARKER,
+                media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning),
+                actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
+              }
+            ]);
+          } catch (e) {
+            console.error('[AGENT-STREAM] save failed:', e && e.message);
+          }
+          
+          // 异步更新长期记忆
+          try { updateLongTermMemory(userName, ctx, message, content).catch(function() {}); } catch (e) {}
+          
+          // 发送完成事件
+          res.write('data: ' + JSON.stringify({
+            type: 'done',
+            reasoning: (thinkingMode !== 'off' ? reasoning : ''),
+            usage: usageResult,
+            model: usedModel,
+            thinking_mode: thinkingMode,
+            remaining: { hour: rl.remainingHour, day: rl.remainingDay }
+          }) + '\n\n');
+          return res.end();
+        }
+      }
+    }
+    
+    // 流意外结束但没收到 finish_reason
+    if (contentBuffer && !aborted) {
+      res.write('data: ' + JSON.stringify({
+        type: 'done',
+        content: contentBuffer,
+        reasoning: (thinkingMode !== 'off' ? reasoningBuffer : ''),
+        usage: null,
+        model: usedModel,
+        thinking_mode: thinkingMode
+      }) + '\n\n');
+    }
+    res.end();
+  } catch (e) {
+    console.error('[AGENT-STREAM] exception:', e && e.message);
+    if (!aborted) {
+      try {
+        res.write('data: ' + JSON.stringify({ type: 'error', error: '聊天失败，请稍后再试' }) + '\n\n');
+        res.end();
+      } catch (e2) {}
+    }
+  }
+});
+
+// GET /api/agent/chat/conversations - 获取用户会话列表
+app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
+  try {
+    var userName = req.userName;
+    var limit = Math.min(Math.max(parseInt(req.query.limit) || AI_AGENT_CONVERSATION_LIST_LIMIT, 1), 100);
+
+    // 按 actor_key 分组查询，每个 convId 获取最新一条消息
+    var { data: rows } = await supabase.from('posts')
+      .select('actor_key, content, media_url, created_at')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .neq('actor_key', '')
+      .order('created_at', { ascending: false });
+    
+    if (!Array.isArray(rows)) {
+      return res.json({ ok: true, conversations: [] });
+    }
+    
+    // 按 convId 分组
+    var convMap = {};
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var ak = String(r.actor_key || '');
+      if (!ak) continue;
+      var parts = ak.split('_');
+      // ai_msg_conv_{convId}_user_{userName}_{timestamp}
+      var convIdIdx = 2; // 从第3段开始
+      if (parts[0] !== 'ai' || parts[1] !== 'msg' || parts.length < 5) continue;
+      // 找回 convId（跳过 ai_msg_conv_ 前缀）
+      var convId = parts[convIdIdx]; // ai, msg, conv, {convId}, ...
+      if (!convId || convId === 'conv') continue;
+      
+      if (convMap[convId]) continue; // 已处理过（按时间倒序，第一个就是最新的）
+      
+      var meta = parseMsgMeta(r);
+      var msgContent = String(r.content || '').slice(0, 100);
+      // 兼容旧格式
+      if (meta.role === 'assistant') {
+        try {
+          var c = JSON.parse(r.content || '{}');
+          if (c && typeof c.reply === 'string') msgContent = c.reply.slice(0, 100);
+        } catch (e) {}
+      }
+      
+      convMap[convId] = {
+        conversation_id: convId,
+        title: '',
+        last_message: msgContent,
+        updated_at: r.created_at,
+        message_count: 1,
+        role: meta.role || 'user'
+      };
+      if (convMap[convId].role === 'user' && !convMap[convId].title) {
+        convMap[convId].title = msgContent.slice(0, 20);
+      }
+    }
+    
+    var conversations = Object.keys(convMap).sort(function(a, b) {
+      return (convMap[b].updated_at || '') > (convMap[a].updated_at || '') ? 1 : -1;
+    }).slice(0, limit).map(function(k) {
+      var c = convMap[k];
+      if (!c.title) c.title = '新对话';
+      return c;
+    });
+    
+    return res.json({ ok: true, conversations: conversations });
+  } catch (e) {
+    console.error('[AGENT-CONV] list error:', e && e.message);
+    return res.status(500).json({ error: '查询失败' });
   }
 });
 
@@ -5642,6 +6065,7 @@ app.post('/admin/ai-agent/config', verifyToken, async (req, res) => {
     var payload = {
       name: name, avatar: avatar, description: description, persona: persona,
       tone: tone, system_prompt: systemPrompt, welcome_message: welcomeMessage,
+      allow_web_search: body.allow_web_search === true,
       updated_at: nowIso, updated_by: req.adminName || 'admin'
     };
 

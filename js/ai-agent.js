@@ -47,7 +47,13 @@
     keyboardResetTimer: null,
     avatarPopTimer: null,
     statusTimer: null,
-    replyTimer: null
+    replyTimer: null,
+    abortController: null,
+    clientRequestId: 0,
+    currentStreamAborted: false,
+    conversations: [],
+    conversationsEl: null,
+    showingHistory: false
   };
 
   function getAiStatusText() {
@@ -224,6 +230,24 @@
       } catch (e2) {}
     }
     return '';
+  }
+
+  function generateRequestId() {
+    return 'req_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+  }
+  
+  function abortCurrentRequest() {
+    if (S.abortController) {
+      try { S.abortController.abort(); } catch (e) {}
+      S.abortController = null;
+    }
+    S.currentStreamAborted = true;
+  }
+  
+  function isAdminUser() {
+    try {
+      return !!(window.currentUser && window.ADMIN_USERNAME && window.currentUser === window.ADMIN_USERNAME);
+    } catch (e) { return false; }
   }
 
   function diagCollectContext() {
@@ -443,13 +467,15 @@
   function buildUsageLine(usage) {
     if (!usage || typeof usage !== 'object') return null;
     var parts = [];
-    if (usage.prompt_tokens) parts.push('输入 ' + usage.prompt_tokens);
-    if (usage.completion_tokens) parts.push('输出 ' + usage.completion_tokens);
-    if (typeof usage.prompt_cache_hit_tokens === 'number' && usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + usage.prompt_cache_hit_tokens);
-    if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + usage.prompt_cache_miss_tokens);
-    if (typeof usage.cost === 'number' && usage.cost > 0) parts.push('¥' + usage.cost.toFixed(6) + ' ' + (usage.currency || 'CNY'));
+    var isAdmin = isAdminUser();
+    if (isAdmin) {
+      if (usage.prompt_tokens) parts.push('输入 ' + usage.prompt_tokens);
+      if (usage.completion_tokens) parts.push('输出 ' + usage.completion_tokens);
+      if (typeof usage.prompt_cache_hit_tokens === 'number' && usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + usage.prompt_cache_hit_tokens);
+      if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + usage.prompt_cache_miss_tokens);
+      if (typeof usage.cost === 'number' && usage.cost > 0) parts.push('¥' + usage.cost.toFixed(6) + ' ' + (usage.currency || 'CNY'));
+    }
     if (usage.thinking_mode && usage.thinking_mode !== 'off') parts.push('思考 ' + usage.thinking_mode);
-    if (usage.model) parts.push(usage.model);
     return parts.length ? parts.join(' · ') : null;
   }
 
@@ -885,83 +911,286 @@
   }
 
   async function handleSendMessage(input, sendBtn, messagesEl) {
-    if (S.sending) return;
     var text = String(input.value || '').trim();
     if (!text) return;
-
+    
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) return;
-
+    
+    // 如果有正在进行的请求，中断它
+    if (S.sending) {
+      abortCurrentRequest();
+      // 等待上一个 typing 清理
+      try { await new Promise(function(resolve) { setTimeout(resolve, 100); }); } catch (e) {}
+    }
+    
+    S.clientRequestId++;
+    var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
     S.sending = true;
     clearReplyTimer();
-    setAiRootState('ai-thinking');
-    sendBtn.disabled = true;
-    sendBtn.textContent = '发送中…';
-    var oldPlaceholder = input.placeholder;
-    input.disabled = true;
-
+    
     var nowIso = new Date().toISOString();
     var userMsg = { role: 'user', content: text, created_at: nowIso };
     S.messages.push(userMsg);
     appendMessage(messagesEl, userMsg);
     S.autoScrollPinned = true;
     scrollToBottom(messagesEl, true);
-
+    
     var typingNode = buildTypingNode();
     messagesEl.appendChild(typingNode);
     scrollToBottom(messagesEl, true);
-
-    var r = await apiRequest('POST', '/chat', {
-      message: text,
-      thinking_mode: S.thinkingMode,
-      conversation_id: S.conversationId
-    });
-
-    try { typingNode.remove(); } catch (e) {}
-
-    if (r && r.ok && r.data && r.data.reply) {
-      var d = r.data;
-      if (d.conversation_id) {
-        S.conversationId = d.conversation_id;
-        writeConvId(d.conversation_id);
-      }
-      var aiMsg = {
-        role: 'assistant',
-        content: d.reply,
-        reasoning: d.reasoning || '',
-        created_at: d.created_at || new Date().toISOString(),
-        thinking_mode: d.thinking_mode || 'off',
-        usage: Object.assign({}, d.usage || {}, {
-          model: d.model || '',
-          thinking_mode: d.thinking_mode || 'off'
-        })
-      };
-      S.messages.push(aiMsg);
-
-      var aiNode = el('div', { class: 'ai-msg assistant entering generating' });
-      if (shouldRenderReasoning(aiMsg)) aiNode.appendChild(buildReasoningNode(aiMsg.reasoning, messagesEl));
-      var aiBubble = el('div', { class: 'ai-msg-bubble ai-typing', text: '' });
-      aiNode.appendChild(aiBubble);
-      messagesEl.appendChild(aiNode);
-      S.autoScrollPinned = true;
-      scrollToBottom(messagesEl, true);
-      startAssistantReply(aiNode, aiBubble, d.reply, aiMsg, messagesEl);
-    } else {
-      S.messages.pop();
-      removeLastUserMessage(messagesEl);
-      setAiRootState('ai-idle');
-      notify(describeError(r, 'AI 暂时没有回应，请稍后再试'));
-    }
-
-    S.sending = false;
-    sendBtn.disabled = false;
-    sendBtn.textContent = '发送';
-    input.disabled = false;
+    
+    // 清空输入框
     input.value = '';
     input.style.height = 'auto';
-    input.placeholder = oldPlaceholder;
     updateInputMetrics();
     try { input.focus(); } catch (e2) {}
+    
+    var aborted = false;
+    var myReqId = reqId;
+    
+    // 创建 AbortController
+    var controller = new AbortController();
+    S.abortController = controller;
+    S.currentStreamAborted = false;
+    
+    var url = API_BASE + '/chat/stream';
+    var auth = await getUserAuthPayload({ forceNoToken: false });
+    var headers = auth.headers || {};
+    
+    var fetchBody = JSON.stringify({
+      message: text,
+      thinking_mode: S.thinkingMode,
+      conversation_id: S.conversationId,
+      client_request_id: reqId
+    });
+    
+    try {
+      var resp = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: fetchBody,
+        signal: controller.signal
+      });
+      
+      if (!resp.ok) {
+        try {
+          var errJson = await resp.json().catch(function(){ return {}; });
+          if (errJson && errJson.error) {
+            if (myReqId !== reqId) return;
+            try { typingNode.remove(); } catch (e) {}
+            notify(errJson.error);
+          }
+        } catch(e) {}
+        S.sending = false;
+        S.abortController = null;
+        return;
+      }
+      
+      if (!resp.body) {
+        try { typingNode.remove(); } catch (e) {}
+        notify('AI 没有响应');
+        S.sending = false;
+        S.abortController = null;
+        return;
+      }
+      
+      // 读取 SSE 流
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+      var aiContent = '';
+      var aiReasoning = '';
+      var reasoningStarted = false;
+      var aiNode = null;
+      var aiBubble = null;
+      var reasoningContainer = null;
+      var usageResult = null;
+      var finalModel = '';
+      var finalThinkingMode = '';
+      var streamConvId = null;
+      var doneReceived = false;
+      
+      while (true) {
+        if (myReqId !== reqId || controller.signal.aborted) {
+          aborted = true;
+          if (reader) try { reader.cancel(); } catch (e) {}
+          break;
+        }
+        
+        var readResult;
+        try { readResult = await reader.read(); } catch (e) { break; }
+        if (readResult.done) break;
+        
+        buffer += decoder.decode(readResult.value, { stream: true });
+        var lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (var li = 0; li < lines.length; li++) {
+          var line = lines[li].trim();
+          if (!line || !line.startsWith('data: ')) continue;
+          
+          var eventStr = line.slice(6);
+          var evt;
+          try { evt = JSON.parse(eventStr); } catch (e) { continue; }
+          if (!evt) continue;
+          
+          // 检查是否被新请求取代
+          if (myReqId !== reqId) { aborted = true; break; }
+          
+          if (evt.type === 'meta') {
+            streamConvId = evt.conversation_id;
+            if (streamConvId) {
+              S.conversationId = streamConvId;
+              writeConvId(streamConvId);
+            }
+            continue;
+          }
+          
+          if (evt.type === 'search') {
+            // 搜索结果事件，仅记录不展示
+            continue;
+          }
+          
+          if (evt.type === 'error') {
+            try { typingNode.remove(); } catch (e) {}
+            notify(evt.error || 'AI 调用失败');
+            S.sending = false;
+            S.abortController = null;
+            if (reader) try { reader.cancel(); } catch (e) {}
+            aborted = true;
+            break;
+          }
+          
+          if (evt.type === 'reasoning_start' && !reasoningStarted) {
+            reasoningStarted = true;
+            // 创建 AI 消息节点（如果还没创建）
+            if (!aiNode) {
+              try { typingNode.remove(); } catch (e) {}
+              aiNode = el('div', { class: 'ai-msg assistant entering generating' });
+              messagesEl.appendChild(aiNode);
+              S.autoScrollPinned = true;
+              scrollToBottom(messagesEl, true);
+            }
+            aiBubble = aiNode.querySelector('.ai-msg-bubble');
+            if (!aiBubble) {
+              aiBubble = el('div', { class: 'ai-msg-bubble ai-typing', text: '' });
+              aiNode.appendChild(aiBubble);
+            }
+            continue;
+          }
+          
+          if (evt.type === 'reasoning') {
+            aiReasoning += evt.text || '';
+            continue;
+          }
+          
+          if (evt.type === 'content') {
+            if (!aiNode) {
+              try { typingNode.remove(); } catch (e) {}
+              aiNode = el('div', { class: 'ai-msg assistant entering generating' });
+              messagesEl.appendChild(aiNode);
+              S.autoScrollPinned = true;
+              scrollToBottom(messagesEl, true);
+            }
+            aiContent += evt.text || '';
+            aiBubble = aiNode.querySelector('.ai-msg-bubble');
+            if (!aiBubble) {
+              aiBubble = el('div', { class: 'ai-msg-bubble ai-typing', text: '' });
+              aiNode.appendChild(aiBubble);
+            }
+            aiBubble.textContent = aiContent;
+            scrollToBottom(messagesEl, false);
+            continue;
+          }
+          
+          if (evt.type === 'done') {
+            doneReceived = true;
+            usageResult = evt.usage || null;
+            finalModel = evt.model || '';
+            finalThinkingMode = evt.thinking_mode || S.thinkingMode;
+            break;
+          }
+        }
+        
+        if (doneReceived || aborted) break;
+      }
+      
+      if (myReqId !== reqId || aborted) {
+        // 被新请求取代，删除当前创建的任何节点
+        if (aiNode) try { aiNode.remove(); } catch (e) {}
+        try { typingNode.remove(); } catch (e) {}
+        S.sending = false;
+        S.abortController = null;
+        return;
+      }
+      
+      // 完成处理
+      try { typingNode.remove(); } catch (e) {}
+      
+      if (aiNode && aiContent) {
+        aiNode.classList.remove('generating');
+        if (aiBubble) aiBubble.classList.remove('ai-typing');
+        setAiRootState('ai-idle');
+        
+        // 如果有 reasoning 且思考模式不为 off，显示折叠 reasoning
+        if (aiReasoning && finalThinkingMode !== 'off') {
+          var reasoningNode = aiNode.querySelector('.ai-thinking');
+          if (!reasoningNode) {
+            reasoningNode = buildReasoningNode(aiReasoning, messagesEl);
+            aiNode.insertBefore(reasoningNode, aiNode.firstChild);
+          }
+        }
+        
+        var aiMsg = {
+          role: 'assistant',
+          content: aiContent,
+          reasoning: (finalThinkingMode !== 'off' ? aiReasoning : ''),
+          created_at: new Date().toISOString(),
+          thinking_mode: finalThinkingMode,
+          usage: Object.assign({}, usageResult || {}, {
+            model: finalModel,
+            thinking_mode: finalThinkingMode
+          })
+        };
+        S.messages.push(aiMsg);
+        
+        // 显示 usage 行（对普通用户隐藏 tokens/cost/model）
+        if (usageResult || finalModel || finalThinkingMode) {
+          var usageLine = buildUsageLine(aiMsg.usage);
+          if (usageLine) aiNode.appendChild(el('div', { class: 'ai-msg-usage', text: usageLine }));
+        }
+        if (aiMsg.created_at) aiNode.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
+      } else if (!doneReceived) {
+        S.messages.pop();
+        removeLastUserMessage(messagesEl);
+        notify('AI 暂时没有回应，请稍后再试');
+      }
+    } catch (fetchErr) {
+      if (myReqId !== reqId) {
+        S.sending = false;
+        S.abortController = null;
+        return;
+      }
+      // 网络错误或 abort
+      if (fetchErr && fetchErr.name !== 'AbortError') {
+        try { typingNode.remove(); } catch (e) {}
+        S.messages.pop();
+        removeLastUserMessage(messagesEl);
+        notify('网络异常，请检查连接后重试');
+      } else {
+        try { typingNode.remove(); } catch (e) {}
+        if (!aiContent) {
+          S.messages.pop();
+          removeLastUserMessage(messagesEl);
+        }
+      }
+    }
+    
+    S.sending = false;
+    S.abortController = null;
+    updateInputMetrics();
+    scrollToBottom(messagesEl, true);
   }
 
   async function loadHistory(messagesEl, before) {
@@ -1025,6 +1254,103 @@
       S.loading = false;
       S.loadingMore = false;
     }
+  }
+
+  // 获取会话列表
+  async function fetchConversations() {
+    try {
+      var r = await apiRequest('GET', '/chat/conversations?limit=50');
+      if (r && r.ok && r.data && Array.isArray(r.data.conversations)) {
+        S.conversations = r.data.conversations;
+      }
+    } catch (e) {}
+  }
+  
+  // 渲染会话列表
+  function renderConversationList(container) {
+    container.innerHTML = '';
+    if (!S.conversations.length) {
+      container.appendChild(el('div', { class: 'ai-no-history', text: '暂无聊天记录' }));
+      return;
+    }
+    S.conversations.forEach(function(conv) {
+      var item = el('div', { class: 'ai-conv-item' + (conv.conversation_id === S.conversationId ? ' active' : '') });
+      item.setAttribute('data-conv-id', conv.conversation_id);
+      
+      var titleEl = el('div', { class: 'ai-conv-title', text: conv.title || '新对话' });
+      var timeEl = el('div', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' });
+      item.appendChild(titleEl);
+      item.appendChild(timeEl);
+      
+      item.addEventListener('click', function() {
+        if (S.sending) return;
+        var cid = this.getAttribute('data-conv-id');
+        switchConversation(cid);
+      });
+      
+      container.appendChild(item);
+    });
+  }
+  
+  // 切换会话
+  async function switchConversation(cid) {
+    if (!cid || cid === S.conversationId) return;
+    if (S.sending) {
+      abortCurrentRequest();
+      await new Promise(function(resolve) { setTimeout(resolve, 100); });
+    }
+    
+    S.conversationId = cid;
+    writeConvId(cid);
+    S.messages = [];
+    S.oldestCursor = null;
+    S.hasMore = false;
+    if (S.messagesEl) S.messagesEl.innerHTML = '';
+    setAiRootState('ai-loading');
+    
+    try {
+      var r = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(cid) + '&limit=' + HISTORY_PAGE_SIZE);
+      if (r && r.ok && r.data && r.data.messages) {
+        S.messages = r.data.messages;
+        S.hasMore = r.data.has_more;
+        S.oldestCursor = r.data.oldest || null;
+      }
+    } catch (e) {}
+    
+    if (S.messagesEl) {
+      S.messagesEl.innerHTML = '';
+      if (S.messages.length) {
+        S.messages.forEach(function(msg) {
+          appendMessage(S.messagesEl, msg);
+        });
+      } else {
+        S.messagesEl.appendChild(buildEmptyState());
+      }
+      scrollToBottom(S.messagesEl, true);
+    }
+    setAiRootState('ai-idle');
+    showChatMessages();
+  }
+  
+  function showChatMessages() {
+    if (S.conversationsEl) S.conversationsEl.style.display = 'none';
+    if (S.messagesEl) S.messagesEl.style.display = '';
+    var infoBar = document.getElementById('aiChatHistoryInfo');
+    if (infoBar) infoBar.style.display = 'none';
+    var inputBar = document.getElementById('aiChatInputBar');
+    if (inputBar) inputBar.style.display = '';
+  }
+  
+  function showConversationList() {
+    if (S.messagesEl) S.messagesEl.style.display = 'none';
+    if (S.conversationsEl) {
+      S.conversationsEl.style.display = '';
+      renderConversationList(S.conversationsEl);
+    }
+    var infoBar = document.getElementById('aiChatHistoryInfo');
+    if (infoBar) infoBar.style.display = '';
+    var inputBar = document.getElementById('aiChatInputBar');
+    if (inputBar) inputBar.style.display = 'none';
   }
 
   function renderAiRoot() {
@@ -1095,6 +1421,26 @@
     thinkWrap.appendChild(thinkMenu);
     header.appendChild(thinkWrap);
 
+    // 历史会话按钮
+    var histBtn = el('button', {
+      type: 'button', class: 'ai-chat-hist-btn', 'aria-label': '历史会话',
+      title: '历史会话'
+    }, '历史');
+    histBtn.addEventListener('click', function() {
+      if (S.showingHistory) {
+        showChatMessages();
+        S.showingHistory = false;
+        histBtn.textContent = '历史';
+      } else {
+        fetchConversations().then(function() {
+          showConversationList();
+          S.showingHistory = true;
+          histBtn.textContent = '返回';
+        });
+      }
+    });
+    header.appendChild(histBtn);
+
     var newBtn = el('button', {
       type: 'button',
       class: 'ai-chat-new-btn',
@@ -1139,7 +1485,18 @@
     });
     root.appendChild(messagesEl);
 
+    // 历史会话提示栏
+    var histInfo = el('div', { id: 'aiChatHistoryInfo', style: 'display:none;padding:8px 12px;font-size:12px;color:#666;text-align:center;border-bottom:1px solid var(--border,rgba(140,196,158,0.30))' });
+    histInfo.textContent = '点击下方会话继续聊天';
+    root.appendChild(histInfo);
+    
+    // 会话列表
+    var convList = el('div', { style: 'display:none;flex:1;overflow-y:auto;padding:8px' });
+    root.appendChild(convList);
+    S.conversationsEl = convList;
+
     var inputBar = el('div', { class: 'ai-chat-input-bar' });
+    inputBar.id = 'aiChatInputBar';
     var input = el('textarea', {
       class: 'ai-chat-input',
       id: 'aiChatMsgInput',
