@@ -168,6 +168,20 @@
   pointer-events: auto;
   user-select: text;
   -webkit-user-select: text;
+  position: relative;
+}
+
+/* 打字机动画：闪烁光标 */
+.ai-msg-bubble.ai-typing::after {
+  content: '▍';
+  animation: aiCursorBlink 0.7s infinite;
+  opacity: 0.55;
+  margin-left: 1px;
+  font-size: 15px;
+}
+@keyframes aiCursorBlink {
+  0%, 50% { opacity: 0.55; }
+  51%, 100% { opacity: 0; }
 }
 .ai-msg.user .ai-msg-bubble {
   background: linear-gradient(135deg, rgba(46,148,101,0.95), rgba(68,176,118,0.95));
