@@ -102,10 +102,10 @@
     return node;
   }
 
-  function notify(msg) {
+  function notify(msg, type, duration) {
     try {
-      if (typeof window.showToast === 'function') { window.showToast(msg); return; }
-      if (typeof window.showNotify === 'function') { window.showNotify(msg); return; }
+      if (typeof window.showToast === 'function') { window.showToast(msg, type || 'info', duration); return; }
+      if (typeof window.showNotify === 'function') { window.showNotify(msg, type); return; }
     } catch (e) {}
   }
 
@@ -1789,6 +1789,40 @@ function showChatMessages() {
       }
     });
     header.appendChild(histBtn);
+
+    // 记忆按钮
+    var memoryBtn = el('button', { type: 'button', class: 'ai-chat-hist-btn', 'aria-label': 'AI 记忆', title: '查看 AI 记住了什么' }, '记忆');
+    memoryBtn.addEventListener('click', async function() {
+      try {
+        var r = await apiRequest('GET', '/memory');
+        if (r && r.ok && r.memory) {
+          var memory = r.memory;
+          var lines = [];
+          lines.push('--- AI 长期记忆 ---');
+          lines.push('');
+          if (memory.display_name) lines.push('用户称呼：' + memory.display_name);
+          if (memory.reply_preferences && memory.reply_preferences.tone && memory.reply_preferences.tone.length) lines.push('语气偏好：' + memory.reply_preferences.tone.join('、'));
+          if (memory.reply_preferences && memory.reply_preferences.avoid && memory.reply_preferences.avoid.length) lines.push('避免：' + memory.reply_preferences.avoid.join('、'));
+          if (memory.likes && memory.likes.length) lines.push('喜欢：' + memory.likes.join('、'));
+          if (memory.dislikes && memory.dislikes.length) lines.push('不喜欢：' + memory.dislikes.join('、'));
+          if (memory.do_not_do && memory.do_not_do.length) lines.push('项目禁区：' + memory.do_not_do.join('、'));
+          if (memory.important_notes && memory.important_notes.length) lines.push('重要提醒：' + memory.important_notes.join('、'));
+          if (memory.long_term_goals && memory.long_term_goals.length) lines.push('长期目标：' + memory.long_term_goals.join('、'));
+          if (lines.length <= 2) {
+            lines = ['--- AI 长期记忆 ---', '', '(当前没有记录任何长期记忆，多聊一聊我会记住你的偏好)', ''];
+          }
+          lines.push('');
+          lines.push('---');
+          lines.push('[清空记忆]  [关闭记忆]');
+          notify(lines.join('\n'), 'info', 8000);
+        } else {
+          notify('无法加载记忆');
+        }
+      } catch (e) {
+        notify('记忆加载失败');
+      }
+    });
+    header.insertBefore(memoryBtn, histBtn.nextSibling);
 
     var newBtn = el('button', {
       type: 'button',
