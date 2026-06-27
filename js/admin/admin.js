@@ -5106,6 +5106,10 @@ async function initAdminClient() {
                 '<div class="form-group"><label>性格设定 persona（最多 500 字）</label><textarea id="aiCfgPersona" maxlength="500">' + escapeHtml(cfg.persona || '') + '</textarea></div>',
                 '<div class="form-group"><label>说话风格 tone（最多 200 字）</label><textarea id="aiCfgTone" maxlength="200">' + escapeHtml(cfg.tone || '') + '</textarea></div>',
                 '<div class="form-group"><label>系统提示词 system_prompt（最多 2000 字）</label><textarea id="aiCfgSysPrompt" maxlength="2000" style="min-height:120px">' + escapeHtml(cfg.system_prompt || '') + '</textarea></div>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;padding-top:4px;">',
+                '<input type="checkbox" id="aiCfgWebSearch"' + (cfg.allow_web_search ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);cursor:pointer;" />',
+                '<label for="aiCfgWebSearch" style="font-size:13px;cursor:pointer;margin:0;">启用联网搜索（需配置 SEARCH_API_KEY 环境变量）</label>',
+                '</div>',
                 '<button class="save-btn" id="aiCfgSaveBtn">保存配置</button>',
                 '</div>'
             ].join('\n');
@@ -5175,7 +5179,8 @@ async function initAdminClient() {
                         welcome_message: document.getElementById('aiCfgWelcome').value,
                         persona: document.getElementById('aiCfgPersona').value,
                         tone: document.getElementById('aiCfgTone').value,
-                        system_prompt: document.getElementById('aiCfgSysPrompt').value
+                        system_prompt: document.getElementById('aiCfgSysPrompt').value,
+                        allow_web_search: document.getElementById('aiCfgWebSearch').checked
                     });
                     showToast('AI 配置保存成功');
                 } catch(e) {
