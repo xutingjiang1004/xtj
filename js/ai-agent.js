@@ -793,6 +793,69 @@
     }
   }
 
+  function formatThinkingElapsed(ms) {
+    var totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+    if (totalSeconds < 60) return totalSeconds + '秒';
+    var minutes = Math.floor(totalSeconds / 60);
+    var seconds = totalSeconds % 60;
+    return seconds > 0 ? (minutes + '分' + seconds + '秒') : (minutes + '分钟');
+  }
+
+  function setThinkingStatus(node, text) {
+    if (!node || !node.querySelector) return;
+    var status = node.querySelector('.ai-thinking-status');
+    if (!status) return;
+    status.textContent = text || '';
+  }
+
+  function createThinkingTimer(reasoningNode) {
+    var intervalId = null;
+    var startedAt = 0;
+    var stopped = false;
+
+    function update(prefix, elapsedMs) {
+      if (!reasoningNode || !reasoningNode.isConnected) return;
+      setThinkingStatus(reasoningNode, prefix + ' ' + formatThinkingElapsed(elapsedMs));
+    }
+
+    return {
+      start: function() {
+        if (stopped || intervalId) return;
+        startedAt = Date.now();
+        update('思考中', 0);
+        intervalId = setInterval(function() {
+          if (!reasoningNode || !reasoningNode.isConnected) return;
+          update('思考中', Date.now() - startedAt);
+        }, 500);
+      },
+      stop: function() {
+        if (intervalId) {
+          try { clearInterval(intervalId); } catch (e) {}
+          intervalId = null;
+        }
+        stopped = true;
+        return startedAt ? Math.max(0, Date.now() - startedAt) : 0;
+      },
+      cancel: function() {
+        if (intervalId) {
+          try { clearInterval(intervalId); } catch (e) {}
+          intervalId = null;
+        }
+        stopped = true;
+      },
+      syncFinal: function(ms) {
+        if (intervalId) {
+          try { clearInterval(intervalId); } catch (e) {}
+          intervalId = null;
+        }
+        stopped = true;
+        if (reasoningNode && reasoningNode.isConnected) {
+          setThinkingStatus(reasoningNode, '已思考 ' + formatThinkingElapsed(ms));
+        }
+      }
+    };
+  }
+
   function buildReasoningNode(reasoning, messagesEl) {
     var container = el('div', { class: 'ai-thinking' });
     var toggle = el('button', {
@@ -804,6 +867,7 @@
     var label = el('span', { class: 'ai-thinking-label' });
     label.appendChild(el('span', { text: '思考' }));
     toggle.appendChild(label);
+    toggle.appendChild(el('span', { class: 'ai-thinking-status', text: '' }));
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
     var panel = el('div', { class: 'ai-thinking-panel' });
@@ -1334,13 +1398,77 @@
       var reasoningContainer = null;
       var contentRenderer = null;
       var reasoningRenderer = null;
+      var thinkingTimer = null;
+      var thinkingStartedAt = 0;
+      var finalThinkingElapsedMs = 0;
       var usageResult = null;
       var finalModel = '';
       var finalThinkingMode = '';
       var streamConvId = null;
       var doneReceived = false;
+      var evtHandled = false;
+
+      function finishAiMessage(node, content, thinking, evt) {
+        if (thinkingTimer) {
+          finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
+        }
+        if (reasoningRenderer) reasoningRenderer.finish(thinking || '');
+        if (contentRenderer) contentRenderer.finish(content || '');
+        cleanupRenderers();
+        if (node) {
+          node.classList.remove('generating');
+        }
+        if (aiBubble) aiBubble.classList.remove('ai-typing');
+        setAiRootState('ai-idle');
+        
+        if (thinking && finalThinkingMode !== 'off') {
+          var rNode = reasoningContainer || (node ? node.querySelector('.ai-thinking') : null);
+          if (!rNode && node) {
+            rNode = buildReasoningNode(thinking, messagesEl);
+            node.insertBefore(rNode, node.firstChild);
+          } else if (rNode) {
+            var body = rNode.querySelector('.ai-thinking-body');
+            if (body) body.textContent = thinking;
+          }
+          if (rNode) {
+            setThinkingExpanded(rNode, !!rNode.classList.contains('expanded'), messagesEl);
+            if (thinkingTimer) {
+              thinkingTimer.syncFinal(finalThinkingElapsedMs);
+            } else {
+              setThinkingStatus(rNode, '已思考 ' + formatThinkingElapsed(finalThinkingElapsedMs));
+            }
+          }
+        } else if (reasoningContainer) {
+          if (thinkingTimer) thinkingTimer.cancel();
+          try { reasoningContainer.remove(); } catch (e) {}
+          reasoningContainer = null;
+        }
+        
+        var aiMsg = {
+          role: 'assistant',
+          content: content,
+          reasoning: (finalThinkingMode !== 'off' ? thinking : ''),
+          created_at: new Date().toISOString(),
+          thinking_mode: finalThinkingMode,
+          usage: Object.assign({}, usageResult || {}, {
+            model: finalModel,
+            thinking_mode: finalThinkingMode
+          })
+        };
+        S.messages.push(aiMsg);
+        
+        if (usageResult || finalModel || finalThinkingMode) {
+          var usageLine = buildUsageLine(aiMsg.usage);
+          if (usageLine && node) node.appendChild(el('div', { class: 'ai-msg-usage', text: usageLine }));
+        }
+        if (aiMsg.created_at && node) node.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
+      }
 
       function cleanupRenderers() {
+        if (thinkingTimer) {
+          try { thinkingTimer.cancel(); } catch (e0) {}
+          thinkingTimer = null;
+        }
         if (contentRenderer) {
           try { contentRenderer.cancel(); } catch (e) {}
           contentRenderer = null;
@@ -1377,6 +1505,17 @@
           setThinkingExpanded(reasoningContainer, true, messagesEl);
         }
         return reasoningContainer;
+      }
+
+      function ensureThinkingTimer() {
+        var rn = ensureReasoningNode();
+        if (!thinkingTimer) {
+          thinkingTimer = createThinkingTimer(rn);
+          thinkingStartedAt = Date.now();
+          finalThinkingElapsedMs = 0;
+          thinkingTimer.start();
+        }
+        return thinkingTimer;
       }
 
       function ensureAssistantBubble() {
@@ -1438,6 +1577,7 @@
           if (evt.type === 'search') {
             // 显示搜索状态条
             var searchCount = evt.count;
+            var searchDiag = evt.diagnostics;
             var searchBar = messagesEl.querySelector('.ai-search-status');
             if (!searchBar) {
               searchBar = el('div', { class: 'ai-search-status' });
@@ -1446,7 +1586,14 @@
             if (searchCount > 0) {
               searchBar.textContent = '已联网搜索 · ' + searchCount + ' 条结果';
             } else {
-              searchBar.textContent = '联网搜索无有效结果';
+              searchBar.textContent = '联网搜索完成 · 没有找到相关结果';
+            }
+            // 显示使用的 provider
+            if (searchDiag && searchDiag.provider_results && searchDiag.provider_results.length) {
+              var firstProv = searchDiag.provider_results[0];
+              if (firstProv && firstProv.provider) {
+                searchBar.textContent += ' (' + firstProv.provider + ')';
+              }
             }
             // 3 秒后自动消失
             clearTimeout(searchBar._hideTimer);
@@ -1456,10 +1603,52 @@
             continue;
           }
           
+          if (evt.type === 'search_error') {
+            var searchDiag2 = evt.diagnostics;
+            var searchBar2 = messagesEl.querySelector('.ai-search-status');
+            if (!searchBar2) {
+              searchBar2 = el('div', { class: 'ai-search-status' });
+              messagesEl.appendChild(searchBar2);
+            }
+            searchBar2.textContent = evt.error || '联网搜索失败';
+            // 显示详细失败原因（可展开）
+            if (searchDiag2) {
+              var errorDetail = el('div', { style: 'font-size:10px;color:#999;margin-top:2px;max-height:60px;overflow:hidden;text-overflow:ellipsis;line-height:1.3;' });
+              if (searchDiag2.provider_errors && searchDiag2.provider_errors.length) {
+                errorDetail.textContent = searchDiag2.provider_errors.map(function(pe) {
+                  var shortErr = (pe.error || '').slice(0, 60);
+                  return pe.provider + ': ' + shortErr;
+                }).join(' | ');
+              } else if (searchDiag2.missing_env && searchDiag2.missing_env.length) {
+                errorDetail.textContent = '未配置: ' + searchDiag2.missing_env.join(', ');
+              }
+              if (errorDetail.textContent) searchBar2.appendChild(errorDetail);
+            }
+            // 5 秒后自动消失
+            clearTimeout(searchBar2._hideTimer);
+            searchBar2._hideTimer = setTimeout(function() {
+              try { searchBar2.remove(); } catch (e) {}
+            }, 5000);
+            continue;
+          }
+          
           if (evt.type === 'error') {
             try { typingNode.remove(); } catch (e) {}
-            notify(evt.error || 'AI 调用失败');
-            restoreInputText();
+            var errMsg = evt.error || 'AI 调用失败';
+            
+            if (aiContent) {
+              // 已有部分回复，保留内容并追加错误提示
+              var errNote = el('div', { class: 'ai-error-note', style: 'font-size:11px;color:#c44;margin-top:4px;text-align:left;' }, errMsg);
+              try { aiNode.appendChild(errNote); } catch (e) {}
+              finishAiMessage(aiNode, aiContent, aiReasoning, evt);
+            } else {
+              // 没有内容，回滚
+              notify(errMsg);
+              S.messages.pop();
+              removeLastUserMessage(messagesEl);
+              restoreInputText();
+            }
+            
             S.sending = false;
             S.abortController = null;
             if (reader) try { reader.cancel(); } catch (e) {}
@@ -1470,8 +1659,17 @@
           // 兼容旧错误格式（无 type 但有 error）
           if (evt.error && !evt.type) {
             try { typingNode.remove(); } catch (e) {}
-            notify(evt.error || 'AI 调用失败');
-            restoreInputText();
+            var errMsg2 = evt.error || 'AI 调用失败';
+            
+            if (aiContent) {
+              var errNote2 = el('div', { class: 'ai-error-note', style: 'font-size:11px;color:#c44;margin-top:4px;text-align:left;' }, errMsg2);
+              try { aiNode.appendChild(errNote2); } catch (e) {}
+              finishAiMessage(aiNode, aiContent, aiReasoning, evt);
+            } else {
+              notify(errMsg2);
+              restoreInputText();
+            }
+            
             S.sending = false;
             S.abortController = null;
             if (reader) try { reader.cancel(); } catch (e) {}
@@ -1483,6 +1681,7 @@
             reasoningStarted = true;
             if ((finalThinkingMode && finalThinkingMode !== 'off') || (!finalThinkingMode && S.thinkingMode !== 'off')) {
               ensureReasoningNode();
+              ensureThinkingTimer();
             }
             continue;
           }
@@ -1517,10 +1716,69 @@
           }
           
           if (evt.type === 'done') {
+            try { typingNode.remove(); } catch (e) {}
+            S.sending = false;
+            S.abortController = null;
+            if (thinkingTimer) {
+              finalThinkingElapsedMs = thinkingTimer.stop();
+            }
+            
+            // 更新 usage / done 数据
+            try {
+              usageResult = evt.usage || null;
+              finalModel = evt.model || '';
+              finalThinkingMode = evt.thinking_mode || S.thinkingMode;
+              // sanitized_content 优先：后端清洗后的正文
+              if (evt.sanitized_content) {
+                aiContent = evt.sanitized_content;
+              } else if (evt.content) {
+                aiContent = evt.content;
+              }
+            } catch (e) {}
+            
+            // 如果后端做了清洗，替换已流式输出的气泡内容
+            if (evt.sanitized_content && aiBubble) {
+              // 替换气泡中已输出的原始内容为清洗后正文
+              if (contentRenderer) {
+                try { contentRenderer.cancel(); } catch (e) {}
+                contentRenderer = null;
+              }
+              aiBubble.textContent = '';
+              // 重新逐字渲染清洗后内容（立即完成）
+              aiBubble.textContent = evt.sanitized_content;
+            }
+            
+            // 标记流是否完成
+            var streamInterrupted = evt.interrupted === true;
+            var streamComplete = evt.complete === true;
+            var streamSaved = evt.saved === true;
+            
+            if (aiContent) {
+              // 有内容就显示
+              finishAiMessage(aiNode, aiContent, aiReasoning, evt);
+            } else if (aiReasoning) {
+              // 只有思考内容没有正文
+              if (aiNode) aiNode.textContent = 'AI 思考过程已返回，但正文生成中断，请重试';
+            }
+            
+            // 中断/未保存提示
+            if (streamInterrupted && aiContent) {
+              var interrNote = el('div', { class: 'ai-interrupt-note', style: 'font-size:11px;color:#999;margin-top:4px;text-align:left;' }, '回复中断，内容可能不完整');
+              if (aiNode) aiNode.appendChild(interrNote);
+            }
+            if (!streamSaved && aiContent) {
+              var saveNote = el('div', { class: 'ai-save-note', style: 'font-size:11px;color:#e68a2e;margin-top:2px;text-align:left;' }, '本次回复未保存，刷新后可能丢失');
+              if (aiNode) aiNode.appendChild(saveNote);
+            }
+            
+            // 显示清洗提示
+            if (evt.filtered && aiContent) {
+              var filteredNote = el('div', { class: 'ai-filtered-note', style: 'font-size:11px;color:#888;margin-top:2px;text-align:left;' }, '已自动清理动作描写');
+              if (aiNode) aiNode.appendChild(filteredNote);
+            }
+            
             doneReceived = true;
-            usageResult = evt.usage || null;
-            finalModel = evt.model || '';
-            finalThinkingMode = evt.thinking_mode || S.thinkingMode;
+            evtHandled = true;
             break;
           }
         }
@@ -1541,7 +1799,9 @@
       // 完成处理
       try { typingNode.remove(); } catch (e) {}
       
-      if (aiNode && aiContent) {
+      if (evtHandled) {
+        // 已在 done/error 事件中完成渲染
+      } else if (aiNode && aiContent) {
         if (reasoningRenderer) reasoningRenderer.finish(aiReasoning || '');
         if (contentRenderer) contentRenderer.finish(aiContent || '');
         cleanupRenderers();
@@ -1549,7 +1809,6 @@
         if (aiBubble) aiBubble.classList.remove('ai-typing');
         setAiRootState('ai-idle');
         
-        // 如果有 reasoning 且思考模式不为 off，保持 reasoning 在正文前方
         if (aiReasoning && finalThinkingMode !== 'off') {
           var reasoningNode = reasoningContainer || aiNode.querySelector('.ai-thinking');
           if (!reasoningNode) {
@@ -1577,7 +1836,6 @@
         };
         S.messages.push(aiMsg);
         
-        // 显示 usage 行（对普通用户隐藏 tokens/cost/model）
         if (usageResult || finalModel || finalThinkingMode) {
           var usageLine = buildUsageLine(aiMsg.usage);
           if (usageLine) aiNode.appendChild(el('div', { class: 'ai-msg-usage', text: usageLine }));
@@ -1592,7 +1850,6 @@
         notify('AI 暂时没有回应，请稍后再试');
       }
     } catch (fetchErr) {
-      cleanupRenderers();
       if (myReqId !== reqId) {
         S.sending = false;
         S.abortController = null;
@@ -1601,16 +1858,27 @@
       // 网络错误或 abort
       if (fetchErr && fetchErr.name !== 'AbortError') {
         try { typingNode.remove(); } catch (e) {}
-        S.messages.pop();
-        removeLastUserMessage(messagesEl);
-        restoreInputText();
-        notify('网络异常，请检查连接后重试');
-      } else {
-        try { typingNode.remove(); } catch (e) {}
-        if (!aiContent) {
+        if (aiContent) {
+          // 已有部分回复，保留并提示连接中断
+          var connNote = el('div', { class: 'ai-error-note', style: 'font-size:11px;color:#c44;margin-top:4px;text-align:left;' }, '连接中断，已保留部分回复');
+          try { aiNode.appendChild(connNote); } catch (e) {}
+          finishAiMessage(aiNode, aiContent, aiReasoning, null);
+        } else {
           S.messages.pop();
           removeLastUserMessage(messagesEl);
           restoreInputText();
+          notify('网络异常，请检查连接后重试');
+        }
+      } else {
+        try { typingNode.remove(); } catch (e) {}
+        if (aiContent) {
+          finishAiMessage(aiNode, aiContent, aiReasoning, null);
+        } else {
+          if (!aiContent) {
+            S.messages.pop();
+            removeLastUserMessage(messagesEl);
+            restoreInputText();
+          }
         }
       }
     }
