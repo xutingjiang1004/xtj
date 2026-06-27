@@ -1,5 +1,50 @@
 # 更新日志
 
+## v0.92 - 2026-06-27
+AI 括号动作清洗 + 搜索 Provider 架构重构 + 流式响应加固 + 长期记忆系统 + 照片墙预览安全兜底
+
+### 新增
+- **搜索 Provider 架构**：Tavily > Brave > Serper > Custom API > SearXNG > Bing HTML 六层降级链，按环境变量自动选择可用 Provider
+- **搜索健康检查端点**：`GET /api/agent/search-health?q=关键词` 返回每个 Provider 状态、环境变量配置、错误详情
+- **管理员搜索健康检查按钮**：后台 AI 配置页一键检查搜索 Provider 可用性，显示具体失败原因
+- **长期用户记忆系统**：基于 DeepSeek 提取用户偏好/习惯，存入 `posts` 表，每次对话自动注入相关摘要
+- **对话摘要系统**：每次对话结束后异步生成摘要，按关键词匹配注入相关上下文
+- **完整 AI 配置系统 V2**：12 模块后台配置 UI（人设/语气/回复风格/角色扮演/输出规则/搜索/记忆/模型/调式），全部可后台调整
+- **管理员生效 Prompt 预览**：`GET /admin/ai-agent/effective-prompt` 实时查看当前生效的系统提示词
+- **天气工具**：Open-Meteo 免费天气 API，按城市坐标查询实时天气
+- **前端搜索状态条分级显示**：有结果显示"已联网搜索 · N 条结果(Provider)"，无结果显示"联网搜索完成 · 没有找到相关结果"，失败显示具体 Provider 错误
+- **照片墙预览图片加载失败兜底**：显示"图片加载失败"占位文字，不显示黑块/破碎图标
+- **照片墙预览关闭状态清理**：关闭时重置 transform/scale/translate/currentIndex/loading 状态
+
+### 修复
+- **括号动作/舞台动作全面清洗**：重写 `sanitizeAssistantVisibleText`，删除所有独立成行或内联的括号动作（全角/半角/方括号），删除以明显动作描写词开头的裸行，保留合法括号内容（API、价格、技术术语）
+- **buildAiCorePrompt 硬性禁止项优先级**：禁止括号动作规则放在 Prompt 最后一行，明确标注"以下规则永远覆盖管理员额外指令和人设"
+- **流式回复漏清洗**：流式 `/api/agent/chat/stream` 最终 contentBuffer 强制调用清洗，done 事件返回 `sanitized_content` 和 `filtered` 字段
+- **前端清洗后内容替换**：前端收到 `sanitized_content` 后替换气泡正文，保留 `filtered` 标记显示"已自动清理动作描写"
+- **搜索失败时 AI 不编造**：所有 Provider 失败时注入"本次联网搜索失败"系统提示，禁止模型编造实时信息
+- **空结果缓存策略**：有结果缓存 60 秒，空结果最多缓存 5 秒或不缓存
+- **流式中途断连恢复**：统一 `finishStream` 函数处理所有结束路径，前端保留已输出内容，显示"回复中断"提示
+- **Idle Timeout**：20 秒无数据块自动终止连接，不陷入永久挂起
+- **前端 SSE 双重处理**：`evtHandled` 防重复标记
+- **聊天历史加载**：`resolveConvId` 函数修复 convId 提取，确保历史会话正确加载
+- **头像上传 404**：API 路由注册 + base64 JSON 提交替代 multipart
+- **邮箱 Pro 活动/Pro 会员与邮件模块修复**：多项兼容性修复
+
+### 重构
+- **搜索引擎从 Brave（付费）→ SearXNG（免费）→ Bing HTML + SearXNG 双引擎 → Provider 架构**：演进四轮，最终实现六层降级链
+- **消息排序系统**：显式 `created_at` 时间戳（用户 1ms 优先于 AI）+ `getMsgSortKey` 稳定排序函数
+- **AI System Prompt 从硬编码到完全配置驱动**：`buildAiCorePrompt` 从硬编码猫娘人设改为从 `migrateConfig` 读取配置，所有风格/规则/限制统一从后台管理
+
+### 安全
+- **不需要付费 API Key**：搜索功能全免费（SearXNG 公共实例 + Bing HTML 解析 + 可选稳定 API Key）
+- **前端 XSS 预防**：搜索结果显示、错误文案统一转义
+- **记忆数据隔离**：用户记忆按 `actor_key` 隔离，管理端仅 admin 可查看
+
+### Remade
+- **搜索功能从四轮迭代演进为稳定 Provider 架构**：Brave（付费被拒）→ SearXNG（DNS 失败）→ Bing + SearXNG（Promise.race 空数组）→ Provider 六层降级
+- **AI 聊天可靠性从"基本可用"到"生产级"**：消息排序、流式断连、超时保护、内容清洗、记忆系统、配置管理全链路加固
+- **前端 SSE 处理从"只看 content"到"全事件响应"**：支持 meta/status/search/search_error/content/done/error，内容清洗后替换，错误时保留已输出内容
+
 ## v0.90 - 2026-06-25
 邮件发送记录展示重构 + 历史邮箱双保险持久化
 - 删除 from_email 列、详情列、收件人合计列
