@@ -115,7 +115,12 @@
       '#photoPreviewOverlay .pp-rotate-btn svg g{transform:none!important;}',
       '#photoPreviewOverlay .pp-info-modal{z-index:48!important;}',
       '#photoPreviewOverlay .pp-info-modal-content{pointer-events:auto!important;}',
-      '@media (max-width:480px){#photoPreviewOverlay .pp-preview-toolbar{gap:8px!important;padding:7px 8px!important;bottom:calc(14px + env(safe-area-inset-bottom,0px))!important;}#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn{width:38px!important;height:38px!important;min-width:38px!important;min-height:38px!important;}}'
+      '@media (max-width:480px){#photoPreviewOverlay .pp-preview-toolbar{gap:8px!important;padding:7px 8px!important;bottom:calc(14px + env(safe-area-inset-bottom,0px))!important;}#photoPreviewOverlay .pp-preview-toolbar .pp-zoom-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-info-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-share-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-rotate-btn,#photoPreviewOverlay .pp-preview-toolbar .pp-delete-btn{width:38px!important;height:38px!important;min-width:38px!important;min-height:38px!important;}}',
+      '#photoPreviewOverlay.pp-img-error{background:rgba(0,0,0,.75)!important;}',
+      '#photoPreviewOverlay.pp-img-error .pp-error-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.5);font-size:15px;letter-spacing:.3px;background:transparent;user-select:none;pointer-events:none;z-index:12;}',
+      '#photoPreviewOverlay.pp-img-error #photoPreviewImage{display:none!important;}',
+      '#photoPreviewOverlay.pp-img-error .pp-slide-track{transform:none!important;}',
+      '#photoPreviewOverlay.pp-img-error .photo-preview-close{pointer-events:auto!important;}'
     ].join('');
     document.head.appendChild(style);
   }
@@ -812,8 +817,10 @@
         releasePointerCapture(root || wrapper(), state.activePointerId);
       }
       clearInteractionState();
+      clearImageError();
       delete window.__xtjPreviewExplicitPhotos;
       window.__xtjPhotoPreviewContext = null;
+      window.photoPreviewCurrent = null;
       state.scale = 1;
       state.tx = 0;
       state.ty = 0;
@@ -1098,6 +1105,44 @@
     }, true);
   }
 
+  function installImageErrorHandler() {
+    var img = previewImage();
+    if (!img) return;
+    img.onerror = function () {
+      var root = overlay();
+      if (!root) return;
+      if (root.classList.contains('pp-img-error')) return;
+      root.classList.add('pp-img-error');
+      var slot = img.parentElement;
+      if (!slot) return;
+      var existing = root.querySelector('.pp-error-placeholder');
+      if (existing) return;
+      img.style.display = 'none';
+      var placeholder = document.createElement('div');
+      placeholder.className = 'pp-error-placeholder';
+      placeholder.textContent = '图片加载失败';
+      slot.appendChild(placeholder);
+    };
+    img.onload = function () {
+      clearImageError();
+    };
+  }
+
+  function clearImageError() {
+    var root = overlay();
+    var img = previewImage();
+    if (root) {
+      root.classList.remove('pp-img-error');
+      var ph = root.querySelector('.pp-error-placeholder');
+      if (ph) ph.remove();
+    }
+    if (img) {
+      img.style.display = '';
+      img.onerror = null;
+      img.onload = null;
+    }
+  }
+
   function afterOpen() {
     clearCloseFallbackTimer();
     closeLegacyViewer();
@@ -1118,6 +1163,8 @@
     bindInfoButton();
     bindInfoModal();
     installUnifiedPointerHandlers();
+    clearImageError();
+    installImageErrorHandler();
     syncPreviewMeta(activePhoto());
     applyImageTransform(false);
     syncTrackTransform(0, false);
@@ -1197,6 +1244,8 @@
       var safeIndex = Number(index || 0);
       if (safeIndex < 0) safeIndex = 0;
       if (safeIndex >= explicitPhotos.length) safeIndex = explicitPhotos.length - 1;
+      resetPreviewState({ resetRotation: true, animate: false, keepSuppressTap: true });
+      clearImageError();
       var result = openWithExplicitPhotos(safeIndex, explicitPhotos, options || null);
       requestAnimationFrame(function () {
         requestAnimationFrame(afterOpen);
