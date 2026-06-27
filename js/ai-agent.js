@@ -411,6 +411,24 @@
   function buildMessageNode(msg) {
     var role = msg.role === 'assistant' ? 'assistant' : 'user';
     var node = el('div', { class: 'ai-msg ' + role });
+    // 思考过程（assistant + 有 reasoning 时展示）
+    if (role === 'assistant' && msg.reasoning) {
+      var thinkingContainer = el('div', { class: 'ai-thinking' });
+      var thinkingHeader = el('div', { class: 'ai-thinking-header', text: '💭 思考过程' });
+      var thinkingBody = el('div', { class: 'ai-thinking-body' });
+      thinkingBody.textContent = msg.reasoning;
+      thinkingBody.style.display = 'none';
+      thinkingHeader.addEventListener('click', function() {
+        var isHidden = thinkingBody.style.display === 'none';
+        thinkingBody.style.display = isHidden ? 'block' : 'none';
+        thinkingContainer.classList.toggle('expanded', isHidden);
+        thinkingHeader.textContent = isHidden ? '💭 收起思考' : '💭 思考过程';
+        try { requestAnimationFrame(function() { var p = document.getElementById('aiChatRoot'); if (p && p.parentNode) p.parentNode.scrollTop = p.parentNode.scrollHeight; }); } catch (e) {}
+      });
+      thinkingContainer.appendChild(thinkingHeader);
+      thinkingContainer.appendChild(thinkingBody);
+      node.appendChild(thinkingContainer);
+    }
     node.appendChild(el('div', { class: 'ai-msg-bubble', text: msg.content || '' }));
     if (role === 'assistant' && msg.usage) {
       var line = buildUsageLine(msg.usage);
@@ -441,17 +459,26 @@
     var text = (input.value || '').trim();
     if (!text) return;
 
-    // 发送前记录鉴权状态，但不拦截——下方的 401/403 重试逻辑会处理
+    // ★ 发送前硬检查鉴权状态：token 和 password_hash 都没有时直接拦截
     if (typeof window.ensureRealUserAuth === 'function') {
       try {
         var auth = await window.ensureRealUserAuth();
         if (!auth || !auth.ok) {
+          var reason = auth && auth.reason;
+          if (reason === 'missing_auth_credentials' || reason === 'refresh_failed') {
+            notify('鉴权凭据缺失，请退出后重新登录再使用 AI 聊天');
+            return;
+          }
+          if (reason === 'no_user') {
+            notify('请先登录后再和 AI 聊天');
+            return;
+          }
           try {
             console.warn('[AI-AUTH] sendMessage auth not ready, proceeding anyway', {
               hasUser: !!readUserName(),
               hasToken: !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')),
               hasPwHash: !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')),
-              reason: auth && auth.reason
+              reason: reason
             });
           } catch (e) {}
         }
@@ -541,12 +568,62 @@
       var aiMsg = {
         role: 'assistant',
         content: d.reply,
+        reasoning: d.reasoning || '',
         created_at: d.created_at || new Date().toISOString(),
         usage: d.usage || null
       };
       S.messages.push(aiMsg);
-      appendMessage(messagesEl, aiMsg);
+
+      // 手动构建 AI 消息节点以支持打字机动画
+      var aiNode = el('div', { class: 'ai-msg assistant' });
+      var aiBubble = el('div', { class: 'ai-msg-bubble ai-typing' });
+      // 思考过程块
+      if (d.reasoning) {
+        var thinkingContainer = el('div', { class: 'ai-thinking' });
+        var thinkingHeader = el('div', { class: 'ai-thinking-header', text: '💭 思考过程' });
+        var thinkingBody = el('div', { class: 'ai-thinking-body' });
+        thinkingBody.textContent = d.reasoning;
+        thinkingBody.style.display = 'none';
+        thinkingHeader.addEventListener('click', function() {
+          var isHidden = thinkingBody.style.display === 'none';
+          thinkingBody.style.display = isHidden ? 'block' : 'none';
+          thinkingContainer.classList.toggle('expanded', isHidden);
+          thinkingHeader.textContent = isHidden ? '💭 收起思考' : '💭 思考过程';
+          try { requestAnimationFrame(function() { scrollToBottom(messagesEl); }); } catch (e) {}
+        });
+        thinkingContainer.appendChild(thinkingHeader);
+        thinkingContainer.appendChild(thinkingBody);
+        aiNode.appendChild(thinkingContainer);
+      }
+      aiNode.appendChild(aiBubble);
+      messagesEl.appendChild(aiNode);
       scrollToBottom(messagesEl);
+
+      // 打字机逐字动画
+      var fullText = d.reply;
+      var charsPerTick = fullText.length > 400 ? 5 : 3;
+      var charDelayMs = 10;
+      var pos = 0;
+      function typeTick() {
+        if (pos >= fullText.length) {
+          aiBubble.classList.remove('ai-typing');
+          aiBubble.textContent = fullText;
+          if (d.usage) {
+            var usageLine = buildUsageLine(d.usage);
+            if (usageLine) aiNode.appendChild(el('div', { class: 'ai-msg-usage', text: usageLine }));
+          }
+          if (d.created_at) aiNode.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(d.created_at || nowIso) }));
+          scrollToBottom(messagesEl);
+          return;
+        }
+        pos += charsPerTick;
+        if (pos > fullText.length) pos = fullText.length;
+        aiBubble.textContent = fullText.slice(0, pos);
+        scrollToBottom(messagesEl);
+        setTimeout(typeTick, charDelayMs);
+      }
+      aiBubble.textContent = '';
+      setTimeout(typeTick, 30);
     } else {
       S.messages.pop();
       removeLastUserMessage(messagesEl);
@@ -780,18 +857,22 @@
       notify('请先登录后再和徐旭泽的小猫聊天');
       return;
     }
-    // 记录鉴权状态但不拦截（有 currentUser 就放行）
-    // 真正的鉴权问题由 handleSendMessage 中的 401/403 重试逻辑处理
+    // 打开前硬检查鉴权：没有 token 且没有 password_hash → 无法恢复
     if (typeof window.ensureRealUserAuth === 'function') {
       try {
         var auth = await window.ensureRealUserAuth();
         if (!auth || !auth.ok) {
+          var reason = auth && auth.reason;
+          if (reason === 'missing_auth_credentials' || reason === 'refresh_failed') {
+            notify('鉴权凭据缺失，请退出后重新登录再使用 AI 聊天');
+            return;
+          }
           try {
             console.warn('[AI-AUTH] openAiChat auth not ready, proceeding anyway', {
               hasUser: !!readUserName(),
               hasToken: !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token')),
               hasPwHash: !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash')),
-              reason: auth && auth.reason
+              reason: reason
             });
           } catch (e) {}
         } else {

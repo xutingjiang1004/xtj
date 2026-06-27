@@ -1412,6 +1412,9 @@ async function callDeepSeek(messages, options) {
     var content = data.choices[0].message.content;
     if (typeof content !== 'string') content = '';
 
+    var reasoning = data.choices[0].message.reasoning_content;
+    if (typeof reasoning !== 'string') reasoning = '';
+
     // 解析 usage
     var usage = null;
     if (data.usage) {
@@ -1444,7 +1447,7 @@ async function callDeepSeek(messages, options) {
       usage.currency = DEEPSEEK_CURRENCY;
     }
 
-    return { content: content, usage: usage, model: model };
+    return { content: content, reasoning: reasoning, usage: usage, model: model };
   } catch (e) {
     clearTimeout(timer);
     if (e && e.name === 'AbortError') {
@@ -5353,7 +5356,14 @@ async function loadAiContext(userName, convId) {
       // desc 拿到的是最新在前，reverse 后变正序（旧→新），再 slice 取最近 15 条
       ctx.history = msgRows.slice().reverse().map(function(r) {
         var meta = parseMsgMeta(r);
-        return { role: meta.role || 'user', content: String(r.content || '').slice(0, 800) };
+        var content = String(r.content || '');
+        if (meta.role === 'assistant') {
+          try {
+            var c = JSON.parse(r.content || '{}');
+            if (c && typeof c.reply === 'string') content = c.reply;
+          } catch (e) {}
+        }
+        return { role: meta.role || 'user', content: content.slice(0, 800) };
       });
     }
 
@@ -5429,10 +5439,12 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var usage = null;
     var model = DEEPSEEK_MODEL;
     var thinkingMode = (req.body && req.body.thinking_mode) || 'off';
+    var reasoning = '';
     if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'off';
     try {
       var result = await callDeepSeek(messages, { model: DEEPSEEK_MODEL, thinking_mode: thinkingMode });
       reply = result.content;
+      reasoning = result.reasoning || '';
       usage = result.usage;
       if (result.model) model = result.model;
     } catch (e) {
@@ -5464,7 +5476,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
         },
         {
           user_name: userName,
-          content: reply,
+          content: JSON.stringify({ reply: reply, reasoning: reasoning }),
           media_type: AI_AGENT_MESSAGE_MARKER,
           media_url: buildMsgMeta('assistant', convId, usageToStore),
           actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
@@ -5483,6 +5495,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     return res.json({
       ok: true,
       reply: reply,
+      reasoning: reasoning,
       conversation_id: convId,
       usage: usage,
       model: model,
@@ -5559,10 +5572,23 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       oldest: sortedRows.length ? sortedRows[0].created_at : null,
       messages: sortedRows.map(function(r) {
         var m = parseMsgMeta(r);
+        var content = r.content || '';
+        var reasoning = '';
+        // assistant 消息 content 可能为 JSON { reply, reasoning }
+        if (m.role === 'assistant') {
+          try {
+            var c = JSON.parse(r.content || '{}');
+            if (c && typeof c.reply === 'string') {
+              reasoning = c.reasoning || '';
+              content = c.reply;
+            }
+          } catch (e) {}
+        }
         return {
           id: r.id,
           role: m.role || 'user',
-          content: r.content || '',
+          content: content,
+          reasoning: reasoning,
           created_at: r.created_at,
           conversation_id: m.convId || convId,
           usage: m.usage || null
