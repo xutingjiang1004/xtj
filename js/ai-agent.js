@@ -411,6 +411,24 @@
   function buildMessageNode(msg) {
     var role = msg.role === 'assistant' ? 'assistant' : 'user';
     var node = el('div', { class: 'ai-msg ' + role });
+    // 思考过程（assistant + 有 reasoning 时展示）
+    if (role === 'assistant' && msg.reasoning) {
+      var thinkingContainer = el('div', { class: 'ai-thinking' });
+      var thinkingHeader = el('div', { class: 'ai-thinking-header', text: '💭 思考过程' });
+      var thinkingBody = el('div', { class: 'ai-thinking-body' });
+      thinkingBody.textContent = msg.reasoning;
+      thinkingBody.style.display = 'none';
+      thinkingHeader.addEventListener('click', function() {
+        var isHidden = thinkingBody.style.display === 'none';
+        thinkingBody.style.display = isHidden ? 'block' : 'none';
+        thinkingContainer.classList.toggle('expanded', isHidden);
+        thinkingHeader.textContent = isHidden ? '💭 收起思考' : '💭 思考过程';
+        try { requestAnimationFrame(function() { var p = document.getElementById('aiChatRoot'); if (p && p.parentNode) p.parentNode.scrollTop = p.parentNode.scrollHeight; }); } catch (e) {}
+      });
+      thinkingContainer.appendChild(thinkingHeader);
+      thinkingContainer.appendChild(thinkingBody);
+      node.appendChild(thinkingContainer);
+    }
     node.appendChild(el('div', { class: 'ai-msg-bubble', text: msg.content || '' }));
     if (role === 'assistant' && msg.usage) {
       var line = buildUsageLine(msg.usage);
@@ -550,6 +568,7 @@
       var aiMsg = {
         role: 'assistant',
         content: d.reply,
+        reasoning: d.reasoning || '',
         created_at: d.created_at || new Date().toISOString(),
         usage: d.usage || null
       };
