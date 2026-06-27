@@ -350,11 +350,13 @@
   function describeError(r, fallback) {
     if (!r) return fallback || '请求失败';
     if (r.status === 401 || r.status === 403) {
-      // ★ 关键修复：根据本地凭据状态给出更精准的提示
       var hasPw = !!(sessionStorage.getItem('xtj_pw_hash') || localStorage.getItem('xtj_pw_hash'));
       var hasTok = !!(sessionStorage.getItem('xtj_user_token') || localStorage.getItem('xtj_user_token'));
-      if (!hasPw && !hasTok) return '登录状态已过期，请重新登录后再使用 AI 聊天';
-      return '账号凭据失效，请重新登录';
+      if (!hasPw && !hasTok && window.currentUser && typeof window.refreshUserToken === 'function') {
+        try { console.warn('[AI-AUTH] describeError attempting token refresh'); } catch(e) {}
+        window.refreshUserToken(true).catch(function(){});
+      }
+      return '凭据异常，请尝试重新登录后使用 AI 聊天';
     }
     if (r.status === 404) return 'AI 后端接口不存在，请检查 API_BASE / 部署域名';
     if (r.status === 405) return 'AI 后端方法不允许，请检查 API_BASE / 部署域名';
