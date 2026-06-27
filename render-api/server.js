@@ -6435,9 +6435,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             console.error('[AGENT-STREAM] save failed:', e && e.message);
           }
           
-          // 异步更新长期记忆
-          try { updateLongTermMemory(userName, ctx, message, content).catch(function() {}); } catch (e) {}
-          
           // 异步更新记忆和摘要（不阻塞回复）
           maybeUpdateUserMemory(userName, convId, message, content, memoryData.memoryBox).catch(function() {});
           maybeUpdateConversationSummary(userName, convId, ctx.history || []).catch(function() {});
