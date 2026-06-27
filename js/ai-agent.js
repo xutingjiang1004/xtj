@@ -1888,6 +1888,21 @@ function showChatMessages() {
 
     await loadHistory(r.messagesEl, null);
 
+    // fallback: localStorage 的 convId 无效（没有历史消息），尝试加载最近会话
+    if (!S.messages.length && S.conversationId) {
+      try {
+        var convR = await apiRequest('GET', '/chat/conversations?limit=1');
+        if (convR && convR.ok && convR.data && convR.data.conversations && convR.data.conversations.length) {
+          var recent = convR.data.conversations[0];
+          if (recent && recent.conversation_id && recent.conversation_id !== S.conversationId) {
+            S.conversationId = recent.conversation_id;
+            writeConvId(recent.conversation_id);
+            await loadHistory(r.messagesEl, null);
+          }
+        }
+      } catch (e5) {}
+    }
+
     try {
       var hdr = document.querySelector('#dockChatContainer .chat-header');
       if (hdr) hdr.style.display = 'none';
