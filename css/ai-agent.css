@@ -738,8 +738,21 @@
 
 .ai-conversation-list {
   flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  padding: 4px 10px 10px;
+  overflow-x: hidden;
+  padding: 8px 12px 10px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(140, 196, 158, 0.34) transparent;
+}
+
+.ai-conversation-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.ai-conversation-list::-webkit-scrollbar-thumb {
+  background: rgba(140, 196, 158, 0.34);
+  border-radius: 999px;
 }
 
 .ai-conv-group + .ai-conv-group {
@@ -755,15 +768,24 @@
 
 .ai-conv-item {
   width: 100%;
-  display: block;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "title time"
+    "preview preview"
+    "count count";
+  align-items: start;
+  gap: 6px 10px;
   text-align: left;
   margin: 0 0 8px;
-  padding: 12px 12px 11px;
+  padding: 13px 13px 12px;
   border: 1px solid rgba(140, 196, 158, 0.18);
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.58);
   box-shadow: 0 8px 18px rgba(106, 142, 135, 0.06);
   cursor: pointer;
+  overflow: hidden;
   transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
 }
 
@@ -777,21 +799,43 @@
 }
 
 .ai-conv-item.active {
-  border-color: rgba(102, 186, 154, 0.34);
-  background: linear-gradient(135deg, rgba(237, 251, 244, 0.9), rgba(239, 246, 255, 0.76));
+  border-color: rgba(102, 186, 154, 0.3);
+  background: linear-gradient(135deg, rgba(241, 252, 246, 0.92), rgba(241, 247, 255, 0.8));
+  box-shadow: 0 10px 22px rgba(101, 155, 143, 0.08);
 }
 
 .ai-conv-title {
+  grid-area: title;
+  min-width: 0;
   font-size: 13px;
   font-weight: 700;
   color: var(--ai-text);
-  margin-bottom: 4px;
+  line-height: 1.45;
+  margin: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.ai-conv-time {
+  grid-area: time;
+  white-space: nowrap;
+  justify-self: end;
+  align-self: start;
+  font-size: 10px;
+  line-height: 1.2;
+  color: rgba(111, 124, 130, 0.72);
+  opacity: 0.88;
 }
 
 .ai-conv-preview {
+  grid-area: preview;
+  min-width: 0;
   font-size: 12px;
   line-height: 1.5;
   color: rgba(99, 115, 122, 0.88);
+  margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -799,13 +843,20 @@
 }
 
 .ai-conv-meta {
-  margin-top: 7px;
+  grid-area: count;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 8px;
   font-size: 10px;
+  line-height: 1.2;
   color: rgba(111, 124, 130, 0.72);
+  min-width: 0;
+}
+
+.ai-conv-count {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .ai-no-history {
