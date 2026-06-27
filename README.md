@@ -1,6 +1,6 @@
 # XTJ
 
-当前版本：`v0.90`
+当前版本：`v0.92`
 
 
 
@@ -70,6 +70,39 @@ npm start
 - 后端入口：`render-api/server.js`
 
 ## 最近重点更新
+
+### v0.92 - 2026-06-27 AI 括号动作清洗 + 搜索 Provider 架构 + 流式加固 + 长期记忆
+
+**括号动作全面清洗（render-api/server.js sanitizeAssistantVisibleText）**：
+- 删除所有独立成行或内联的括号动作（全角/半角/方括号）
+- 删除以明显动作描写词开头的裸行
+- 保留合法括号内容（API、价格、技术术语）
+- 流式/非流式回复均强制清洗，done 事件返回 sanitized_content
+
+**搜索 Provider 架构（render-api/server.js searchWeb）**：
+- Tavily > Brave > Serper > Custom API > SearXNG > Bing HTML 六层降级链
+- 统一返回值格式 `{ results, diagnostics }`，含 provider 错误追踪
+- search-health 端点返回完整 Provider 状态与环境变量配置
+
+**AI 配置系统 V2（js/admin/admin.js + render-api/server.js）**：
+- 12 模块后台配置 UI：人设/语气/回复风格/角色扮演/输出规则/搜索/记忆/模型/调试
+- buildAiCorePrompt 完全从 migrateConfig 读取，硬性禁止项放在 Prompt 最后
+
+**长期用户记忆系统（render-api/server.js）**：
+- 基于 DeepSeek 提取用户偏好，存入 posts 表
+- 对话摘要异步生成 + 关键词匹配注入
+- 管理后台可查看/管理用户记忆
+
+**流式回复加固（render-api/server.js finishStream + js/ai-agent.js）**：
+- 统一 finishStream 函数处理所有结束路径
+- 20 秒 Idle Timeout 保底
+- 前端保留已输出内容 + 显示"回复中断"提示
+- 支持 sanitized_content 替换气泡正文 + filtered 标记
+
+**照片墙预览安全兜底（js/photo-wall/preview-hotfix.js）**：
+- 图片加载失败显示"图片加载失败"占位文字
+- 关闭时重置所有状态（transform/scale/translate/currentIndex/loading）
+- 打开新预览前调用 resetPreviewState()
 
 ### v0.90 - 2026-06-25 邮件发送记录重构 + 历史邮箱双保险
 
