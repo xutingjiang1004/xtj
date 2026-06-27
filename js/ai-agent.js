@@ -1313,7 +1313,23 @@
           }
           
           if (evt.type === 'search') {
-            // 搜索结果事件，仅记录不展示
+            // 显示搜索状态条
+            var searchCount = evt.count;
+            var searchBar = messagesEl.querySelector('.ai-search-status');
+            if (!searchBar) {
+              searchBar = el('div', { class: 'ai-search-status' });
+              messagesEl.appendChild(searchBar);
+            }
+            if (searchCount > 0) {
+              searchBar.textContent = '已联网搜索 · ' + searchCount + ' 条结果';
+            } else {
+              searchBar.textContent = '联网搜索无有效结果';
+            }
+            // 3 秒后自动消失
+            clearTimeout(searchBar._hideTimer);
+            searchBar._hideTimer = setTimeout(function() {
+              try { searchBar.remove(); } catch (e) {}
+            }, 3000);
             continue;
           }
           

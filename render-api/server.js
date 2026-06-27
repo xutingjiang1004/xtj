@@ -96,69 +96,126 @@ const AI_AGENT_CONVERSATION_LIST_LIMIT = 50;
 const SEARCH_CACHE_TTL_MS = 60000;
 const searchCache = new Map();
 
+// Open-Meteo 免费天气查询（无需 API Key）
+var CITY_COORDS = {
+  '北京': { lat: 39.9042, lon: 116.4074 },
+  '上海': { lat: 31.2304, lon: 121.4737 },
+  '广州': { lat: 23.1291, lon: 113.2644 },
+  '深圳': { lat: 22.5431, lon: 114.0579 },
+  '杭州': { lat: 30.2741, lon: 120.1551 },
+  '湖州': { lat: 30.8932, lon: 120.0963 },
+  '安吉': { lat: 30.6249, lon: 119.6766 },
+  '东京': { lat: 35.6762, lon: 139.6503 },
+  '大阪': { lat: 34.6937, lon: 135.5023 },
+  '首尔': { lat: 37.5665, lon: 126.978 },
+  '济州岛': { lat: 33.489, lon: 126.4983 },
+  '巴黎': { lat: 48.8566, lon: 2.3522 },
+  '伦敦': { lat: 51.5074, lon: -0.1278 },
+  '纽约': { lat: 40.7128, lon: -74.006 }
+};
+
+async function queryWeather(query) {
+  try {
+    var matchedCity = null;
+    for (var cityName in CITY_COORDS) {
+      if (query.indexOf(cityName) >= 0) {
+        matchedCity = { name: cityName, coords: CITY_COORDS[cityName] };
+        break;
+      }
+    }
+    if (!matchedCity) return null;
+
+    var lat = matchedCity.coords.lat;
+    var lon = matchedCity.coords.lon;
+    var weatherUrl = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=Asia%2FShanghai';
+
+    var resp = await fetch(weatherUrl);
+    if (!resp.ok) return null;
+    var data = await resp.json();
+    if (!data || !data.current) return null;
+
+    var current = data.current;
+    var daily = data.daily;
+
+    // WMO 天气代码转中文
+    var weatherCodes = { 0:'晴天', 1:'大部晴', 2:'多云', 3:'阴天', 45:'雾', 48:'雾凇', 51:'小毛毛雨', 53:'中毛毛雨', 55:'大毛毛雨', 61:'小雨', 63:'中雨', 65:'大雨', 71:'小雪', 73:'中雪', 75:'大雪', 80:'阵雨', 81:'中阵雨', 82:'大阵雨', 85:'小阵雪', 86:'大阵雪', 95:'雷暴', 96:'雷暴加小冰雹', 99:'雷暴加大冰雹' };
+    var wmoCode = current.weather_code;
+    var weatherDesc = weatherCodes[wmoCode] || ('天气代码 ' + wmoCode);
+
+    var result = '【天气工具结果】\n查询时间：' + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }) + '（北京时间）\n地点：' + matchedCity.name + '\n天气状况：' + weatherDesc + '\n当前温度：' + current.temperature_2m + '°C\n湿度：' + current.relative_humidity_2m + '%\n风速：' + current.wind_speed_10m + 'km/h';
+    if (daily) {
+      if (daily.temperature_2m_max && daily.temperature_2m_max[0] !== undefined) result += '\n今日最高：' + daily.temperature_2m_max[0] + '°C';
+      if (daily.temperature_2m_min && daily.temperature_2m_min[0] !== undefined) result += '\n今日最低：' + daily.temperature_2m_min[0] + '°C';
+      if (daily.precipitation_probability_max && daily.precipitation_probability_max[0] !== undefined) result += '\n降雨概率：' + daily.precipitation_probability_max[0] + '%';
+    }
+    result += '\n\n要求：必须基于以上工具结果回答，不准编造天气数据。';
+    return result;
+  } catch (e) {
+    console.error('[WEATHER] query error:', e && e.message);
+    return null;
+  }
+}
+
 // Simple in-memory web search function
-// Uses SERPAPI (or Brave/Tavily) - configurable via env
-// SEARCH_API_KEY / SEARCH_API_URL / SEARCH_ENGINE
+// Uses SearXNG public instances - no API Key required
 async function searchWeb(query, maxResults) {
   maxResults = maxResults || 5;
   var cacheKey = query.toLowerCase().trim().slice(0, 100);
   var cached = searchCache.get(cacheKey);
   if (cached && (Date.now() - cached.ts) < SEARCH_CACHE_TTL_MS) return cached.results;
-  
+
   var results = [];
   try {
-    // SearXNG — 免费开源元搜索引擎，无需 API Key
-    // 使用多个公开实例做 fallback
-    // 也可通过 SEARCH_API_URL 环境变量自定义
     var searchApiUrl = process.env.SEARCH_API_URL || '';
     var instances = searchApiUrl ? [searchApiUrl] : [
       'https://search.sapti.me',
       'https://searx.be',
       'https://search.us.projectsegfau.lt'
     ];
-    
+
     for (var instIdx = 0; instIdx < instances.length; instIdx++) {
       if (results.length) break;
       var baseUrl = instances[instIdx].replace(/\/+$/, '');
-      var searxngUrl = baseUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&number_of_results=' + maxResults + '&language=zh-CN';
-      
+      var category = /新闻|资讯|报道|新闻/i.test(query) ? 'news' : 'general';
+      var searxngUrl = baseUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
+
       try {
         var searxngRes = await fetch(searxngUrl, {
           headers: { 'Accept': 'application/json', 'User-Agent': 'XTJ-AI/1.0' },
-          signal: AbortSignal.timeout(5000)
+          signal: AbortSignal.timeout(6000)
         });
-        
+
         if (searxngRes.ok) {
           var searxngData = await searxngRes.json();
           var searxngResults = searxngData && searxngData.results;
           if (Array.isArray(searxngResults)) {
-            results = searxngResults.slice(0, maxResults).map(function(r) {
-              return {
-                title: String(r.title || '').slice(0, 200),
-                url: String(r.url || ''),
-                snippet: String(r.content || r.snippet || '').slice(0, 300),
+            for (var ri = 0; ri < searxngResults.length && results.length < maxResults; ri++) {
+              var r = searxngResults[ri];
+              var title = String(r.title || '').trim();
+              var url = String(r.url || '').trim();
+              if (!title || !url) continue;
+              results.push({
+                title: title.slice(0, 200),
+                url: url,
+                snippet: String(r.content || r.snippet || '').trim().slice(0, 300),
                 source: r.engine || 'web',
                 published_at: r.publishedDate || ''
-              };
-            });
+              });
+            }
           }
         }
       } catch (instErr) {
         console.warn('[SEARCH] instance failed', baseUrl.slice(0, 30), instErr && instErr.message);
       }
     }
-    
+
     if (!results.length) {
       console.warn('[SEARCH] all instances failed for', query.slice(0, 30));
     }
   } catch (e) {
     console.error('[SEARCH] searchWeb error:', e && e.message);
   }
-  
-  if (!results.length) {
-    results.push({ title: '未找到结果', url: '', snippet: '没有搜索到相关内容', source: '' });
-  }
-  
+
   searchCache.set(cacheKey, { ts: Date.now(), results: results });
   return results;
 }
@@ -5530,7 +5587,8 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     // 7. 组装 messages
     var messages = [
       { role: 'system', content: corePrompt },
-      { role: 'system', content: dynamicContext }
+      { role: 'system', content: dynamicContext },
+      { role: 'system', content: '【当前时间】现在是北京时间：' + _currentDateCN + '。ISO 时间：' + _currentDateISO + '。回答"今天、现在、最新、刚刚、当前"等问题时，必须以这个时间为准。不能编造其他日期。如果搜索结果与当前日期不一致，要明确指出可能是旧内容。' }
     ];
     var histSlice = ctx.history.slice(-AI_CHAT_HISTORY_LIMIT);
     for (var h = 0; h < histSlice.length; h++) {
@@ -5667,6 +5725,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var config = contextResults[0];
     var ctx = contextResults[1];
     
+    // 当前时间上下文
+    var _now = new Date();
+    var _currentDateISO = _now.toISOString();
+    var _currentDateCN = _now.toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false
+    });
+
     // 组装 system prompt
     var corePrompt = buildAiCorePrompt(config);
     var dynamicContext = buildAiDynamicContext(ctx, config);
@@ -5679,16 +5746,26 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     for (var h = 0; h < histSlice.length; h++) {
       messages.push({ role: histSlice[h].role, content: histSlice[h].content });
     }
-    messages.push({ role: 'user', content: message });
     
     // 思考模式
     var thinkingMode = (req.body && req.body.thinking_mode) || 'off';
     if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'off';
     var useThinking = thinkingMode !== 'off';
     
-    // Web search - 判断是否需要搜索
+    // 天气查询（Open-Meteo 免费 API）
+    var isWeatherQuery = /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
+    var weatherResult = null;
+    if (isWeatherQuery && !aborted) {
+      weatherResult = await queryWeather(message);
+      if (weatherResult) {
+        messages.push({ role: 'system', content: weatherResult });
+        res.write('data: ' + JSON.stringify({ type: 'weather', text: weatherResult.slice(0, 200) }) + '\n\n');
+      }
+    }
+
+    // Web search
     var allowSearch = config && config.allow_web_search === true;
-    var needsSearch = allowSearch && /最新|今天|现在|价格|政策|新闻|天气|搜索|查询|实时|百度|google/i.test(message);
+    var needsSearch = allowSearch && !weatherResult && /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|搜索|查询|查一下|搜一下|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分/i.test(message);
     var searchResults = null;
     if (needsSearch && !aborted) {
       try {
@@ -5703,14 +5780,25 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     
     if (aborted) return res.end();
     
-    // 发送搜索摘要（如果有）
+    // 注入搜索结果（含改进格式和空结果处理）
     if (searchResults && Array.isArray(searchResults) && searchResults.length) {
-      var searchCtx = '【搜索结果】\n' + searchResults.map(function(sr, si) {
-        return (si + 1) + '. ' + sr.title + (sr.url ? ' (' + sr.url + ')' : '') + '\n' + (sr.snippet || '');
-      }).join('\n\n') + '\n\n请基于以上搜索结果回答。结果来自网络，可靠性不确定，需要注意核实。每条信息请标注来源。';
+      var searchCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + message + '\n\n' +
+        searchResults.map(function(sr, si) {
+          return (si + 1) + '. ' + (sr.title || '无标题') +
+            '\n来源：' + (sr.source || 'web') +
+            '\n发布时间：' + (sr.published_at || '未知') +
+            '\n链接：' + (sr.url || '无') +
+            '\n摘要：' + (sr.snippet || '无摘要');
+        }).join('\n\n') +
+        '\n\n要求：必须优先使用以上搜索结果回答。如果结果发布时间未知或明显过旧，必须提醒用户"搜索结果可能不是最新"。不能编造新闻、价格、天气、日期。';
       messages.push({ role: 'system', content: searchCtx });
-      res.write('data: ' + JSON.stringify({ type: 'search', results: searchResults }) + '\n\n');
+      res.write('data: ' + JSON.stringify({ type: 'search', count: searchResults.length, results: searchResults }) + '\n\n');
+    } else if (needsSearch) {
+      messages.push({ role: 'system', content: '【联网搜索】本次搜索没有返回有效结果。你必须如实告诉用户没有搜到，不能编造实时信息。' });
+      res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [] }) + '\n\n');
     }
+    
+    messages.push({ role: 'user', content: message });
     
     // 调用 DeepSeek（流式）
     var apiBody = {
