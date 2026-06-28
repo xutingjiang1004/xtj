@@ -541,6 +541,12 @@ async function searchWeb(query, maxResults) {
     searchCache.delete(cacheKey);
   }
 
+  // 缓存大小限制（最多 500 条，超出删最旧的）
+  if (searchCache.size >= 500) {
+    var oldKey = searchCache.keys().next().value;
+    if (oldKey) searchCache.delete(oldKey);
+  }
+
   // 按优先级定义 provider 列表（串行：前面的成功就不走后面的，省 API 配额）
   var providerList = [
     { name: 'Tavily', fn: function() { return searchTavily(searchQuery, maxResults); }, requiresEnv: 'TAVILY_API_KEY', enabled: !!process.env.TAVILY_API_KEY },
