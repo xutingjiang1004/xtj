@@ -800,6 +800,7 @@ const AI_AGENT_CONFIG_MARKER = '__ai_agent_config__';
 const AI_AGENT_MEMORY_BOX_MARKER = '**ai_agent_memory_box**';
 const AI_AGENT_CONV_SUMMARY_MARKER = '**ai_agent_conv_summary**';
 const AI_AGENT_MEMORY_LOG_MARKER = '**ai_agent_memory_log**';
+const USER_STYLE_MARKER = '__user_style__';
 
 const LOGIN_LOG_RETENTION_DAYS = 90;
 const SECURITY_LOG_RETENTION_DAYS = 90;
@@ -827,7 +828,7 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', VIP_MARKER)
     .neq('media_type', VIP_ORDER_MARKER)
     .neq('media_type', VIP_PLAN_MARKER)
-    .neq('media_type', '__user_style__')
+    .neq('media_type', USER_STYLE_MARKER)
     .neq('media_type', PRO_GIFT_MARKER)
     .neq('media_type', PRO_GIFT_CLAIM_MARKER)
     .neq('media_type', LOGIN_EVENT_MARKER)
@@ -843,7 +844,8 @@ function applyPublicPostExclusions(query) {
     .neq('media_type', AI_AGENT_CONFIG_MARKER)
     .neq('media_type', AI_AGENT_MEMORY_BOX_MARKER)
     .neq('media_type', AI_AGENT_CONV_SUMMARY_MARKER)
-    .neq('media_type', AI_AGENT_MEMORY_LOG_MARKER);
+    .neq('media_type', AI_AGENT_MEMORY_LOG_MARKER)
+    .neq('media_type', REVOKED_TOKEN_MARKER);
 }
 
 // 统计数据内存缓存（减少数据库查询，带 promise 锁防并发重复查询）
