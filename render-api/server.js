@@ -6302,13 +6302,13 @@ async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assist
   
   var skipPattern = /^(嗯|继续|不对|哈哈|好的|收到|可以|行|好|ok|对|是|不是|没有|知道了|明白了|了解|懂|嗯嗯|哦|哦哦|好的吧|好吧|那好|然后|还有|再来|继续聊|还有吗|然后呢|之后呢|后面呢|接着说)$/i;
   if (skipPattern.test(latestUserMessage.trim())) return;
-  
-  var triggerWords = /我叫|我喜欢|我不喜欢|以后不要|以后都|记住|我的要求|我的偏好|我正在做|这个项目|不准|必须|请记住|记得|偏好|讨厌|爱|恨|指定|要求|注意/i;
-  if (!triggerWords.test(latestUserMessage)) return;
+
+  // 移除严格的触发关键词，让 AI 自主判断是否值得记忆
+  // 改为每 3 次对话尝试更新一次（而非依赖关键词）
   
   var lastUpdateKey = 'memory_update_' + userName;
   var lastUpdate = (function() { try { return parseInt(globalThis[lastUpdateKey] || '0', 10); } catch(e) { return 0; } })();
-  if (Date.now() - lastUpdate < 5 * 60 * 1000) return;
+  if (Date.now() - lastUpdate < 3 * 60 * 1000) return;
   
   try {
     globalThis[lastUpdateKey] = String(Date.now());
@@ -6680,7 +6680,7 @@ async function updateLongTermMemory(userName, ctx, lastUserMsg, lastAiReply) {
 
   var now = Date.now();
   var lock = aiMemoryUpdateLock[userName];
-  if (lock && (now - lock.ts) < 5 * 60 * 1000) return;
+  if (lock && (now - lock.ts) < 3 * 60 * 1000) return;
   aiMemoryUpdateLock[userName] = { ts: now, pending: null };
 
   try {
@@ -7399,6 +7399,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // 调用 DeepSeek（流式）
     if (aborted) return safeEnd();
 
+    var MAX_TOOL_ROUNDS = 3;
+    var toolRound = 0;
+    var roundMessages = messages;
+
     var apiBody = {
       model: usedModel,
       messages: roundMessages,
@@ -7413,10 +7417,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     if (allowSearch && !useThinking) {
       apiBody.tools = AI_TOOLS;
     }
-    
-    var MAX_TOOL_ROUNDS = 3;
-    var toolRound = 0;
-    var roundMessages = messages;
     
     while (toolRound < MAX_TOOL_ROUNDS && !aborted) {
 
@@ -7980,6 +7980,7 @@ app.post('/api/agent/memory/clear', authenticateUser, async (req, res) => {
   try {
     await supabase.from('posts').delete().eq('user_name', userName).eq('media_type', AI_AGENT_MEMORY_BOX_MARKER);
     await supabase.from('posts').delete().eq('user_name', userName).eq('media_type', AI_AGENT_MEMORY_LOG_MARKER);
+    await supabase.from('posts').delete().eq('user_name', userName).eq('media_type', AI_AGENT_MEMORY_MARKER);
     memoryBoxCache.delete(userName);
     console.log('[MEMORY] cleared for', userName);
     return res.json({ ok: true, message: '记忆已清空' });
@@ -8440,6 +8441,7 @@ app.get('/admin/ai-agent/conversations', verifyToken, async (req, res) => {
         id: r.id,
         role: meta.role || 'user',
         content: r.content || '',
+        reasoning: meta.reasoning || '',
         created_at: r.created_at,
         usage: meta.usage || null,
         conversation_id: meta.convId || null
@@ -8527,6 +8529,18 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%')
       .order('created_at', { ascending: true });
+
+    var msgs = (rows || []).map(function(r) {
+      var meta = parseMsgMeta(r);
+      return {
+        id: r.id,
+        role: meta.role || 'user',
+        content: r.content || '',
+        reasoning: meta.reasoning || '',
+        created_at: r.created_at,
+        usage: meta.usage || null
+      };
+    });
 
     return res.json({
       ok: true,
