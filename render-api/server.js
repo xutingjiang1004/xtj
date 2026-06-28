@@ -508,7 +508,7 @@ async function searchBingHtml(query, maxResults) {
   }
 }
 
-// 主搜索函数：并发向所有可用 Provider 发起请求，取最快的结果
+// 主搜索函数：按优先级依次尝试 Provider，取第一个成功的结果（避免浪费 API 配额）
 async function searchWeb(query, maxResults) {
   maxResults = maxResults || 5;
   var searchQuery = buildSearchQuery(query);
@@ -522,8 +522,8 @@ async function searchWeb(query, maxResults) {
     searchCache.delete(cacheKey);
   }
 
-  // 定义 provider 列表
-  var providers = [
+  // 按优先级定义 provider 列表（串行：前面的成功就不走后面的，省 API 配额）
+  var providerList = [
     { name: 'Tavily', fn: function() { return searchTavily(searchQuery, maxResults); }, requiresEnv: 'TAVILY_API_KEY', enabled: !!process.env.TAVILY_API_KEY },
     { name: 'Brave', fn: function() { return searchBrave(searchQuery, maxResults); }, requiresEnv: 'BRAVE_SEARCH_API_KEY', enabled: !!process.env.BRAVE_SEARCH_API_KEY },
     { name: 'Serper', fn: function() { return searchSerper(searchQuery, maxResults); }, requiresEnv: 'SERPER_API_KEY', enabled: !!process.env.SERPER_API_KEY },
@@ -540,45 +540,31 @@ async function searchWeb(query, maxResults) {
     provider_errors: []
   };
 
-  // 并发：所有已启用的 Provider 同时发起请求
-  var enabledFns = [];
-  for (var pi = 0; pi < providers.length; pi++) {
-    var p = providers[pi];
-    if (!p.enabled) {
-      diagnostics.missing_env.push(p.requiresEnv);
-      continue;
-    }
-    diagnostics.enabled_providers.push(p.name);
-    enabledFns.push(p);
-  }
-
-  if (enabledFns.length === 0) {
-    var finalResult = { results: [], diagnostics: diagnostics, used_provider: null };
-    searchCache.set(cacheKey, { ts: Date.now(), results: finalResult });
-    return finalResult;
-  }
-
-  var parallelPromises = enabledFns.map(function(p) {
-    return p.fn().then(function(result) {
-      return { provider: p.name, result: result };
-    });
-  });
-
-  var settledResults = await Promise.all(parallelPromises);
-
   var mergedResults = [];
   var usedProvider = null;
-  for (var si = 0; si < settledResults.length; si++) {
-    var sr = settledResults[si];
-    var res = sr.result;
-    if (!res.error && res.results && res.results.length > 0) {
-      diagnostics.provider_results.push({ provider: sr.provider, count: res.results.length });
-      if (!usedProvider) {
-        mergedResults = res.results;
-        usedProvider = sr.provider;
+
+  for (var pi = 0; pi < providerList.length; pi++) {
+    var provider = providerList[pi];
+    if (!provider.enabled) {
+      diagnostics.missing_env.push(provider.requiresEnv);
+      continue;
+    }
+    diagnostics.enabled_providers.push(provider.name);
+    try {
+      var result = await provider.fn();
+      if (result.error) {
+        diagnostics.provider_errors.push({ provider: provider.name, error: result.error });
+      } else if (result.results && result.results.length > 0) {
+        diagnostics.provider_results.push({ provider: provider.name, count: result.results.length });
+        // 取第一个有结果的 provider
+        mergedResults = result.results;
+        usedProvider = provider.name;
+        break;
+      } else {
+        diagnostics.provider_results.push({ provider: provider.name, count: 0 });
       }
-    } else {
-      diagnostics.provider_errors.push({ provider: sr.provider, error: res.error || '0 results' });
+    } catch (e) {
+      diagnostics.provider_errors.push({ provider: provider.name, error: e.message || 'unknown' });
     }
   }
 
