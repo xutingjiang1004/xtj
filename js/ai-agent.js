@@ -1531,6 +1531,20 @@
             }
           }
 
+          // 思考后决定补充搜索：清除当前不完整的回复，等待新的流
+          if (evt.type === 'restart') {
+            cleanupRenderers();
+            if (aiNode) try { aiNode.remove(); } catch (e) {}
+            try { typingNode.remove(); } catch (e) {}
+            aiContent = '';
+            aiReasoning = '';
+            reasoningStarted = false;
+            doneReceived = false;
+            finalThinkingElapsedMs = 0;
+            finalThinkingMode = null;
+            continue;
+          }
+
           if (evt.type === 'search') {
             // 显示搜索状态条
             var searchCount = evt.count;
