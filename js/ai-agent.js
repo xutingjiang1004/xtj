@@ -764,12 +764,6 @@
       if (typeof usage.prompt_cache_miss_tokens === 'number' && usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + usage.prompt_cache_miss_tokens);
       if (typeof usage.cost === 'number' && usage.cost > 0) parts.push('¥' + usage.cost.toFixed(6) + ' ' + (usage.currency || 'CNY'));
     }
-    if (usage.thinking_mode && usage.thinking_mode !== 'off') {
-      parts.push('思考 ' + usage.thinking_mode);
-      if (typeof usage.reasoning_length === 'number' && usage.reasoning_length === 0) {
-        parts.push('当前模型未返回思考内容');
-      }
-    }
     return parts.length ? parts.join(' · ') : null;
   }
 
@@ -928,16 +922,48 @@
     bubble.innerHTML = renderMarkdown(msg.content || '');
     setupBubbleCopy(bubble, messagesEl);
     node.appendChild(bubble);
+    // 底部信息栏：时间 · 思考程度 · 用量（仅 assistant 有思考标签和用量）
+    var footer = el('div', { class: 'ai-msg-footer' });
+    if (msg.created_at) {
+      footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
+    }
     if (role === 'assistant') {
+      // 搜索状态（可点击展开）
       if (msg.search_count > 0) {
-        node.appendChild(el('div', { class: 'ai-search-status', text: '已联网搜索 · ' + msg.search_count + ' 条结果' }));
+        var searchBar = el('div', { class: 'ai-search-status', text: '已联网搜索 · ' + msg.search_count + ' 条结果' });
+        var queryStr = msg.search_query || '';
+        if (queryStr) {
+          var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▶');
+          searchBar.appendChild(toggleBtn);
+          searchBar.style.cursor = 'pointer';
+          var detailPanel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+          searchBar.appendChild(detailPanel);
+          detailPanel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr }));
+          searchBar.onclick = function(e) {
+            if (e.target.tagName === 'A') return;
+            var isHidden = detailPanel.style.display === 'none';
+            detailPanel.style.display = isHidden ? '' : 'none';
+            toggleBtn.textContent = isHidden ? ' ▼' : ' ▶';
+          };
+        }
+        node.appendChild(searchBar);
       }
-      if (msg.usage) {
-        var line = buildUsageLine(msg.usage);
-        if (line) node.appendChild(el('div', { class: 'ai-msg-usage', text: line }));
+      // 搜索到此处结束
+      var thinkingMode = getMessageThinkingMode(msg);
+      if (thinkingMode && thinkingMode !== 'off') {
+        footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 ' + thinkingMode }));
+      }
+      if (msg.usage && isAdminUser()) {
+        var parts = [];
+        if (msg.usage.prompt_tokens) parts.push('输入 ' + msg.usage.prompt_tokens);
+        if (msg.usage.completion_tokens) parts.push('输出 ' + msg.usage.completion_tokens);
+        if (typeof msg.usage.prompt_cache_hit_tokens === 'number' && msg.usage.prompt_cache_hit_tokens > 0) parts.push('命中 ' + msg.usage.prompt_cache_hit_tokens);
+        if (typeof msg.usage.prompt_cache_miss_tokens === 'number' && msg.usage.prompt_cache_miss_tokens > 0) parts.push('未命中 ' + msg.usage.prompt_cache_miss_tokens);
+        if (typeof msg.usage.cost === 'number' && msg.usage.cost > 0) parts.push('¥' + msg.usage.cost.toFixed(6) + ' ' + (msg.usage.currency || 'CNY'));
+        if (parts.length) footer.appendChild(el('span', { class: 'ai-msg-usage', text: parts.join(' · ') }));
       }
     }
-    if (msg.created_at) node.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
+    if (footer.children.length > 0) node.appendChild(footer);
     return node;
   }
 
@@ -1442,11 +1468,18 @@
         };
         S.messages.push(aiMsg);
         
-        if (usageResult || finalModel || finalThinkingMode) {
-          var usageLine = buildUsageLine(aiMsg.usage);
-          if (usageLine && node) node.appendChild(el('div', { class: 'ai-msg-usage', text: usageLine }));
+        if (node) {
+          var footer = el('div', { class: 'ai-msg-footer' });
+          if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
+          if (finalThinkingMode && finalThinkingMode !== 'off') {
+            footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 ' + finalThinkingMode }));
+          }
+          if (usageResult || finalModel) {
+            var usageLine = buildUsageLine(aiMsg.usage);
+            if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
+          }
+          if (footer.children.length > 0) node.appendChild(footer);
         }
-        if (aiMsg.created_at && node) node.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
       }
 
       function cleanupRenderers() {
