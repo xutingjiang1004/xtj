@@ -1598,6 +1598,20 @@
         table { font-size: 11px; }
         th, td { padding: 8px 6px; }
         .toast-item { max-width: 280px; font-size: 13px; padding: 10px 18px; }
+        /* AI 管理移动端适配 */
+        .ai-admin-tabs { width: 100%; overflow-x: auto; }
+        .ai-admin-tab { padding: 7px 14px; font-size: 12px; }
+        .ai-admin-settings { max-width: 100%; }
+        .ai-settings-section { padding: 14px; }
+        .ai-usage-cards { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+        .ai-usage-card { padding: 12px; }
+        .ai-usage-card .val { font-size: 18px; }
+        .ai-conv-users-list li { padding: 10px 12px; flex-direction: column; align-items: flex-start; gap: 6px; }
+        .ai-conv-users-list .user-meta { text-align: left; }
+        .ai-conversation-item { padding: 10px 12px; }
+        .ai-conv-view .msg-row { max-width: 92%; }
+        .ai-conv-view .msg-bubble { padding: 8px 11px; font-size: 12px; }
+        .ai-admin-settings .save-btn { width: 100%; }
     }
 
     /* ===== 新用户列表美化样式 ===== */
