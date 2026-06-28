@@ -7356,8 +7356,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       apiBody.thinking = { type: 'enabled' };
       apiBody.reasoning_effort = thinkingMode;
     }
-    // 思考模式下也允许 tool calls（AI 思考过程中可以自主决定搜索）
-    if (allowSearch) {
+    // 思考模式下不同时发 tools（DeepSeek reasoning 模型不支持
+    // thinking + tools 并存，会返回 400），搜索靠 regex 回退注入
+    if (allowSearch && !useThinking) {
       apiBody.tools = AI_TOOLS;
     }
     
