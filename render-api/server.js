@@ -7393,7 +7393,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // ----- 多 Agent 协作：拆解问题 → 搜索 → 合成 -----
     // 需要管理员在后台开启 multi_agent，思考/非思考模式均可
     var multiAgentEnabled = config && config.model && config.model.multi_agent === true;
-    if (multiAgentEnabled && allowSearch && !aborted && messages.length > 0) {
+    // 思考模式下，先不阻塞stream，让 AI 立即开始思考，搜索并行进行
+    if (multiAgentEnabled && allowSearch && !aborted && messages.length > 0 && !useThinking) {
       var daMsg = [
         { role: 'system', content: '你是一个问题分析专家。你的任务是把用户的问题拆解成2-3个最适合联网搜索的关键词短语，每个短语独立、具体、可直接用于搜索引擎。只返回JSON数组，不要多余内容。格式：["关键词1", "关键词2", "关键词3"]' },
         { role: 'user', content: message }
@@ -7454,6 +7455,20 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var persistentReasoning = '';
     // 防止后置搜索重复触发
     var _postSearchDone = false;
+    // 并行搜索：不阻塞stream，让思考立即开始，搜索异步进行
+    var parallelSearchPromise = null;
+    var parallelSearchResults = null;
+    if (useThinking && allowSearch && !aborted && message.trim().length > 3) {
+      var _psQuery = message.slice(0, 80);
+      parallelSearchPromise = searchWeb(_psQuery, 10).then(function(sr) {
+        if (sr && Array.isArray(sr.results) && sr.results.length > 0) {
+          var _psR = cleanSearchResults(sr.results, 8);
+          if (_psR.length > 0) {
+            parallelSearchResults = { query: _psQuery, results: _psR };
+          }
+        }
+      }).catch(function() {});
+    }
 
     var apiBody = {
       model: usedModel,
@@ -7651,6 +7666,26 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             }
           }
           if (needsPostSearch) {
+            // ★ 先检查并行搜索（思考期间异步进行）是否已有结果
+            if (parallelSearchPromise) {
+              try {
+                var _par = await parallelSearchPromise;
+              } catch (e) {}
+            }
+            if (parallelSearchResults && parallelSearchResults.results && parallelSearchResults.results.length > 0 && !_postSearchDone) {
+              // 并行搜索已有结果，直接注入，无需再调 searchWeb
+              var psResults2 = parallelSearchResults.results;
+              var pCtx2 = '【联网搜索结果（思考后补充检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + parallelSearchResults.query + '\n\n' +
+                psResults2.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
+                '\n\n要求：必须优先使用以上搜索结果回答。不能编造。';
+              roundMessages.push({ role: 'system', content: pCtx2 });
+              res.write('data: ' + JSON.stringify({ type: 'search', count: psResults2.length, results: psResults2, query: parallelSearchResults.query }) + '\n\n');
+              res.write('data: ' + JSON.stringify({ type: 'search_supplement', query: parallelSearchResults.query }) + '\n\n');
+              _postSearchDone = true;
+              finishReason = 'post_reasoning_search';
+              console.log('[AGENT-STREAM] parallel search completed during thinking, injected results');
+            } else {
+            // 并行搜索未完成或无结果，fallback 到常规后置搜索
             // ★ 先保存第一轮生成的内容（不发送done事件），再触发补充搜索
             if (!aborted && contentBuffer.length > 2 && userName && convId && message) {
               try {
@@ -7689,6 +7724,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             } catch (e) {
               try { console.warn('[POST-REASONING-SEARCH] error:', e && e.message); } catch(ee) {}
             }
+            } // end else (fallback to normal post-search)
           }
           if (finishReason === 'stop' || finishReason === 'length') {
             // 正常收尾，没有触发后置搜索
