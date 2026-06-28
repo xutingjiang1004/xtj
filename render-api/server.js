@@ -854,17 +854,18 @@ async function finishStream(res, opt) {
   var usedModel = opt.usedModel || DEEPSEEK_MODEL_REASONER;
   var isComplete = finishReason === 'stop' || finishReason === 'length';
   var contentWasFiltered = rawContent.length > 0 && content !== rawContent;
+  var searchMeta = opt.searchMeta || null;
 
   // 有内容时尽量保存
   if (hasContent && opt.userName && opt.convId && opt.message) {
     try {
       var nowSave = Date.now();
-      var usageToStore = {
+      var usageToStore = Object.assign({}, opt.usage || {}, {
         thinking_mode: thinkingMode,
         model: usedModel,
         requested_thinking_mode: thinkingMode,
         applied_thinking_mode: useThinking ? thinkingMode : 'off'
-      };
+      });
       var seqUser = (opt.streamSeq || 0) + 1;
       var seqAssistant = (opt.streamSeq || 0) + 2;
       var userCreatedAt = new Date(nowSave).toISOString();
@@ -882,7 +883,7 @@ async function finishStream(res, opt) {
           user_name: opt.userName,
           content: content,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant),
+          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta),
           actor_key: 'ai_msg_conv_' + opt.convId + '_agent_' + opt.userName + '_' + (nowSave + 1),
           created_at: assistantCreatedAt
         }
@@ -911,7 +912,9 @@ async function finishStream(res, opt) {
     requested_thinking_mode: thinkingMode,
     applied_thinking_mode: useThinking ? thinkingMode : 'off',
     reasoning_length: reasoning.length,
-    content_length: content.length
+    content_length: content.length,
+    search_count: searchMeta ? searchMeta.count : undefined,
+    search_query: searchMeta ? searchMeta.query : undefined
   });
 
   console.log('[AGENT-STREAM] done finish_reason=', finishReason, 'complete=', isComplete, 'saved=', saved, 'content_len=', content.length);
@@ -6079,11 +6082,15 @@ function resolveConvId(r) {
   return getConvIdFromActorKey(r.actor_key);
 }
 
-function buildMsgMeta(role, convId, usage, reasoning, seq) {
+function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta) {
   var obj = { role: role, convId: convId };
   if (usage) obj.usage = usage;
   if (reasoning) obj.reasoning = reasoning;
   if (typeof seq === 'number') obj.seq = seq;
+  if (searchMeta) {
+    if (searchMeta.count) obj.search_count = searchMeta.count;
+    if (searchMeta.query) obj.search_query = searchMeta.query;
+  }
   return JSON.stringify(obj);
 }
 
@@ -7637,7 +7644,27 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             }
           }
           if (needsPostSearch) {
-            // 执行搜索，然后继续 toolRound 让 AI 重新生成回答
+            // ★ 先保存第一轮生成的内容（不发送done事件），再触发补充搜索
+            if (!aborted && contentBuffer.length > 2 && userName && convId && message) {
+              try {
+                var _now1 = Date.now();
+                var _usage1 = Object.assign({}, usageInStream || {}, { thinking_mode: thinkingMode, model: usedModel });
+                await supabase.from('posts').insert([
+                  { user_name: userName, content: message, media_type: AI_AGENT_MESSAGE_MARKER,
+                    media_url: buildMsgMeta('user', convId, null, null, (streamSeq || 0) + 1),
+                    actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + _now1,
+                    created_at: new Date(_now1).toISOString() },
+                  { user_name: userName, content: sanitizeAssistantVisibleText(contentBuffer), media_type: AI_AGENT_MESSAGE_MARKER,
+                    media_url: buildMsgMeta('assistant', convId, _usage1, persistentReasoning || reasoningBuffer, (streamSeq || 0) + 2),
+                    actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (_now1 + 1),
+                    created_at: new Date(_now1 + 1).toISOString() }
+                ]);
+                console.log('[AGENT-STREAM] saved first round before post-search, userName:', userName, 'convId:', String(convId).slice(0, 8), 'content_len:', contentBuffer.length);
+              } catch (_sve) {
+                console.error('[AGENT-STREAM] save first round failed:', _sve && _sve.message);
+              }
+            }
+            // 执行搜索
             try {
               var psSr = await searchWeb(postSearchKeyword, 15);
               if (psSr && Array.isArray(psSr.results) && psSr.results.length > 0) {
@@ -7665,6 +7692,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 thinkingMode: thinkingMode,
                 useThinking: useThinking,
                 usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
+                usage: usageInStream || null,
+                searchMeta: { count: sResults.length, query: searchQuery },
                 finishReason: finish,
                 userName: userName,
                 convId: convId,
@@ -8080,7 +8109,9 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           reasoning: reasoning,
           created_at: r.created_at,
           conversation_id: m.convId || convId,
-          usage: m.usage || null
+          usage: m.usage || null,
+          search_count: m.search_count || 0,
+          search_query: m.search_query || ''
         };
       })
     });
@@ -8571,7 +8602,9 @@ app.get('/admin/ai-agent/conversations', verifyToken, async (req, res) => {
         reasoning: meta.reasoning || '',
         created_at: r.created_at,
         usage: meta.usage || null,
-        conversation_id: meta.convId || null
+        conversation_id: meta.convId || null,
+        search_count: meta.search_count || 0,
+        search_query: meta.search_query || ''
       });
       if (meta.role === 'assistant' && meta.usage) {
         var x = meta.usage;
@@ -8665,7 +8698,9 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
         content: r.content || '',
         reasoning: meta.reasoning || '',
         created_at: r.created_at,
-        usage: meta.usage || null
+        usage: meta.usage || null,
+        search_count: meta.search_count || 0,
+        search_query: meta.search_query || ''
       };
     });
 
@@ -8673,13 +8708,7 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
       ok: true,
       user_name: targetUser,
       conversation_id: convId,
-      messages: (rows || []).map(function(r) {
-        var meta = parseMsgMeta(r);
-        return {
-          id: r.id, role: meta.role || 'user', content: r.content || '',
-          created_at: r.created_at, usage: meta.usage || null
-        };
-      })
+      messages: msgs
     });
   } catch (e) {
     console.error('[ADMIN-AI] GET conversation exception:', e.message);
