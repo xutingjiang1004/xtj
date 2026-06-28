@@ -5038,9 +5038,9 @@ async function initAdminClient() {
     function renderAiTab(el) {
         if (!el) return;
         el.innerHTML = [
-            '<div style="display:flex;gap:8px;margin-bottom:14px;">',
-            '<button class="btn" id="aiSubTabSettingsBtn" onclick="window._switchAiAdminSubTab(\'settings\')">智能体设置</button>',
-            '<button class="btn" id="aiSubTabUsersBtn" onclick="window._switchAiAdminSubTab(\'users\')">用户对话记录</button>',
+            '<div class="ai-admin-tabs">',
+            '<button class="ai-admin-tab' + (_aiAdminSubTab === 'settings' ? ' active' : '') + '" id="aiSubTabSettingsBtn" onclick="window._switchAiAdminSubTab(\'settings\')">智能体设置</button>',
+            '<button class="ai-admin-tab' + (_aiAdminSubTab === 'users' ? ' active' : '') + '" id="aiSubTabUsersBtn" onclick="window._switchAiAdminSubTab(\'users\')">用户对话记录</button>',
             '</div>',
             '<div id="aiAdminContent"></div>'
         ].join('');
@@ -5052,8 +5052,8 @@ async function initAdminClient() {
                 _aiAdminConvId = null;
                 var settingsBtn = document.getElementById('aiSubTabSettingsBtn');
                 var usersBtn = document.getElementById('aiSubTabUsersBtn');
-                if (settingsBtn) settingsBtn.style.opacity = sub === 'settings' ? '1' : '0.55';
-                if (usersBtn) usersBtn.style.opacity = sub === 'users' ? '1' : '0.55';
+                if (settingsBtn) settingsBtn.className = 'ai-admin-tab' + (sub === 'settings' ? ' active' : '');
+                if (usersBtn) usersBtn.className = 'ai-admin-tab' + (sub === 'users' ? ' active' : '');
                 renderAiAdminContent();
             };
         }
@@ -5538,7 +5538,7 @@ async function initAdminClient() {
             if (!users.length) {
                 html.push('<div style="text-align:center;padding:30px;color:var(--text-muted)">暂无用户 AI 聊天记录</div>');
             } else {
-                html.push('<h3 style="font-size:13px;font-weight:700;margin-bottom:8px;">用户列表（' + users.length + ' 人）</h3>');
+                html.push('<div class="ai-section-header">用户列表（' + users.length + ' 人）</div>');
                 html.push('<ul class="ai-conv-users-list">');
                 users.forEach(function(u) {
                     var lastAt = u.last_at ? new Date(u.last_at).toLocaleString() : '未知';
@@ -5585,7 +5585,7 @@ async function initAdminClient() {
 
             var html = [
                 '<button class="ai-admin-back" onclick="window._backAiUserList()">← 返回用户列表</button>',
-                '<h3 style="margin-bottom:8px;font-size:14px;font-weight:700;">' + escapeHtml(_aiAdminConvUser) + ' 的会话列表（共 ' + convs.length + ' 个会话）</h3>'
+                '<div class="ai-conv-header"><h3>' + escapeHtml(_aiAdminConvUser) + ' 的会话</h3><div class="conv-stat-line">共 ' + convs.length + ' 个会话</div></div>'
             ];
 
             if (!convs.length) {
@@ -5598,7 +5598,7 @@ async function initAdminClient() {
                     var lastAt = c.last_at ? new Date(c.last_at).toLocaleString() : '';
                     html.push('<div class="ai-conversation-item" data-conv-id="' + cid + '">');
                     html.push('<div><div class="conv-id">' + (c.conversation_id === 'legacy' ? '旧数据' : c.conversation_id.slice(0, 14)) + '</div>');
-                    html.push('<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + created + '</div></div>');
+                    html.push('<div class="ai-conv-time">' + created + '</div></div>');
                     html.push('<div class="conv-stats">');
                     html.push('<span>' + c.message_count + ' 条</span>');
                     if (c.total_tokens) html.push('<span>' + (c.total_tokens || 0).toLocaleString() + ' tokens</span>');
@@ -5653,8 +5653,7 @@ async function initAdminClient() {
 
             var html = [
                 '<button class="ai-admin-back" onclick="window._backAiConvList()">← 返回会话列表</button>',
-                '<h3 style="margin-bottom:4px;font-size:14px;font-weight:700;">' + escapeHtml(_aiAdminConvUser) + ' · 会话 ' + _aiAdminConvId.slice(0, 14) + '</h3>',
-                '<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">' + msgs.length + ' 条消息 · ' + (totalTokens || 0).toLocaleString() + ' tokens · ¥' + totalCost.toFixed(6) + '</div>',
+                '<div class="ai-conv-header"><h3>' + escapeHtml(_aiAdminConvUser) + ' · ' + _aiAdminConvId.slice(0, 14) + '</h3><div class="conv-stat-line">' + msgs.length + ' 条消息 · ' + (totalTokens || 0).toLocaleString() + ' tokens · ¥' + totalCost.toFixed(6) + '</div></div>',
                 '<div class="ai-conv-view">'
             ];
 
@@ -5663,12 +5662,20 @@ async function initAdminClient() {
                 var label = role === 'assistant' ? 'AI' : escapeHtml(_aiAdminConvUser);
                 var time = m.created_at ? new Date(m.created_at).toLocaleString() : '';
                 html.push('<div class="msg-row ' + role + '">');
-                // 思考过程（如果有）
+                html.push('<div class="msg-content-wrap">');
+                // 思考过程（与前端一致的可折叠样式）
                 if (m.reasoning) {
-                    html.push('<details style="font-size:11px;margin-bottom:4px;opacity:0.7;"><summary style="cursor:pointer;user-select:none;color:var(--text-muted);">思考过程</summary><pre style="white-space:pre-wrap;word-break:break-word;margin:4px 0 0 0;padding:6px;background:rgba(0,0,0,0.03);border-radius:4px;font-size:11px;line-height:1.5;max-height:300px;overflow-y:auto;">' + escapeHtml(m.reasoning) + '</pre></details>');
+                    var rId = 'think_' + (m.id || Math.random().toString(36).slice(2, 8));
+                    html.push('<div class="ai-thinking-admin" id="' + rId + '">');
+                    html.push('<button type="button" class="ai-thinking-toggle-admin" onclick="var p=document.getElementById(\'' + rId + '\');p.classList.toggle(\'expanded\');" aria-expanded="false">');
+                    html.push('<span class="ai-thinking-label-admin">思考</span>');
+                    html.push('<span class="ai-thinking-caret-admin">▾</span>');
+                    html.push('</button>');
+                    html.push('<div class="ai-thinking-panel-admin">' + escapeHtml(m.reasoning) + '</div>');
+                    html.push('</div>');
                 }
-                html.push('<div><div class="msg-bubble">' + escapeHtml(m.content || '') + '</div>');
-                html.push('<div class="msg-time">' + label + ' · ' + time + '</div>');
+                html.push('<div class="msg-bubble">' + escapeHtml(m.content || '') + '</div>');
+                html.push('<div class="msg-role-label">' + label + ' · ' + time + '</div>');
                 // token 信息
                 if (m.role === 'assistant' && m.usage) {
                     html.push('<div class="ai-token-meta">');
