@@ -5206,6 +5206,9 @@ async function initAdminClient() {
                 '<div class="form-group"><label>reasoner 模型名</label><input id="modelReasoner" value="' + escapeHtml(mdl.reasoner_model || '') + '" placeholder="例如: deepseek-reasoner" /></div>',
                 '<div class="form-group"><label>默认思考模式</label><select id="modelThinkingMode">' + selOpts(mdl.default_thinking_mode, [{val:'off',label:'关闭'},{val:'low',label:'低'},{val:'medium',label:'中'},{val:'high',label:'高'}]) + '</select></div>',
                 '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="modelMultiAgent"' + (mdl.multi_agent ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 多Agent协作（拆解问题→多关键词并行搜索→合成回答，仅在非思考模式生效）</label>',
+                '</div>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
                 '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;opacity:0.5;pointer-events:none;"><input type="checkbox" id="modelUserSwitch" disabled style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 允许用户切换（已禁用，由后台统一控制）</label>',
                 '</div>',
                 '</div>',
@@ -5357,7 +5360,8 @@ async function initAdminClient() {
                             model: {
                                 reasoner_model: document.getElementById('modelReasoner').value.trim(),
                                 default_thinking_mode: document.getElementById('modelThinkingMode').value,
-                                allow_user_thinking_switch: document.getElementById('modelUserSwitch').checked
+                                allow_user_thinking_switch: document.getElementById('modelUserSwitch').checked,
+                                multi_agent: document.getElementById('modelMultiAgent').checked
                             },
                             admin_debug: {
                                 show_effective_prompt: document.getElementById('debugPrompt').checked,
@@ -5659,6 +5663,10 @@ async function initAdminClient() {
                 var label = role === 'assistant' ? 'AI' : escapeHtml(_aiAdminConvUser);
                 var time = m.created_at ? new Date(m.created_at).toLocaleString() : '';
                 html.push('<div class="msg-row ' + role + '">');
+                // 思考过程（如果有）
+                if (m.reasoning) {
+                    html.push('<details style="font-size:11px;margin-bottom:4px;opacity:0.7;"><summary style="cursor:pointer;user-select:none;color:var(--text-muted);">思考过程</summary><pre style="white-space:pre-wrap;word-break:break-word;margin:4px 0 0 0;padding:6px;background:rgba(0,0,0,0.03);border-radius:4px;font-size:11px;line-height:1.5;max-height:300px;overflow-y:auto;">' + escapeHtml(m.reasoning) + '</pre></details>');
+                }
                 html.push('<div><div class="msg-bubble">' + escapeHtml(m.content || '') + '</div>');
                 html.push('<div class="msg-time">' + label + ' · ' + time + '</div>');
                 // token 信息

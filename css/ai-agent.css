@@ -875,6 +875,30 @@
   min-width: 0;
 }
 
+.ai-conv-del {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-tertiary, #999);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  user-select: none;
+  opacity: 0;
+}
+.ai-conv-item:hover .ai-conv-del {
+  opacity: 1;
+}
+.ai-conv-del:hover {
+  background: rgba(200, 60, 60, 0.12);
+  color: #c44;
+}
+
 .ai-conv-count {
   flex: 0 0 auto;
   white-space: nowrap;
