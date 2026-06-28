@@ -92,6 +92,103 @@ console.log('[AI-CONFIG] DEEPSEEK_MODEL_REASONER:', DEEPSEEK_MODEL_REASONER);
 
 const AI_AGENT_CONVERSATION_LIST_LIMIT = 50;
 
+// ===================== DeepSeek Function Calling 工具定义 =====================
+const AI_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'search_web',
+      description: '搜索网络获取实时信息。当你需要查询新闻、资讯、实时数据、攻略、路线、政策、价格、百科知识等用户问题中涉及的最新信息时使用。如果用户已经提到某个话题但你需要更多上下文，也使用这个工具。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '搜索关键词，用中文' },
+          max_results: { type: 'integer', description: '返回结果数量，默认5', default: 5 }
+        },
+        required: ['query']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_weather',
+      description: '查询某个城市的当前天气和今日天气预报，包括温度、湿度、风速、天气状况、降雨概率。只有在用户明确询问天气时才使用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          location: { type: 'string', description: '城市名称或地区名称，如北京、上海、巴黎、东京等' }
+        },
+        required: ['location']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_current_time',
+      description: '获取当前的日期、时间、星期几、时区信息。当用户问"几点了""今天几号""今天星期几""现在几点"等时间相关问题时使用。',
+      parameters: {
+        type: 'object',
+        properties: {}
+      }
+    }
+  }
+];
+
+// Function Calling 工具执行器
+async function executeToolCall(toolCall) {
+  var name = toolCall.function && toolCall.function.name ? toolCall.function.name : '';
+  var rawArgs = toolCall.function && toolCall.function.arguments ? toolCall.function.arguments : '{}';
+  var args;
+  try { args = JSON.parse(rawArgs); } catch (e) { args = {}; }
+
+  switch (name) {
+    case 'search_web': {
+      var q = String(args.query || '').trim().slice(0, 200);
+      var maxR = Math.min(Math.max(parseInt(args.max_results) || 5, 1), 10);
+      if (!q) return { tool_name: name, error: '搜索关键词为空' };
+      try {
+        var result = await searchWeb(q, maxR);
+        var resultsArr = result && result.results ? result.results : [];
+        return {
+          tool_name: name,
+          query: q,
+          results_count: resultsArr.length,
+          content: JSON.stringify(resultsArr.slice(0, 8)),
+          diagnostics: result && result.diagnostics ? result.diagnostics : null
+        };
+      } catch (e) {
+        return { tool_name: name, query: q, error: e && e.message || '搜索失败' };
+      }
+    }
+    case 'get_weather': {
+      var loc = String(args.location || '').trim().slice(0, 50);
+      if (!loc) return { tool_name: name, error: '位置为空' };
+      try {
+        var weatherResult = await queryWeather(loc);
+        if (weatherResult) {
+          return { tool_name: name, location: loc, content: weatherResult };
+        }
+        // 如果不在已知城市列表，尝试搜索
+        return { tool_name: name, location: loc, error: '暂不支持该城市天气查询，支持的城市：北京、上海、广州、深圳、杭州、湖州、安吉、东京、大阪、首尔、济州岛、巴黎、伦敦、纽约' };
+      } catch (e) {
+        return { tool_name: name, location: loc, error: e && e.message || '天气查询失败' };
+      }
+    }
+    case 'get_current_time': {
+      var now = new Date();
+      var weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+      var cnf = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(now);
+      var weekday = weekdays[now.getDay()];
+      var timeResult = '【当前时间】\n北京时间：' + cnf + '\n星期：' + weekday + '\n时区：Asia/Shanghai (UTC+8)';
+      return { tool_name: name, content: timeResult };
+    }
+    default:
+      return { tool_name: name, error: '未知工具: ' + name };
+  }
+}
+
 // AI 配置缓存
 var aiConfigCache = null;
 var aiConfigFetchedAt = 0;
@@ -250,9 +347,10 @@ async function searchCustomApi(query, maxResults) {
 // Provider 5: SearXNG 公共实例
 async function searchSearxng(query, maxResults) {
   var instances = [
+    'https://searx.work', 'https://search.leptons.xyz', 'https://searx.si',
     'https://search.sapti.me', 'https://searx.be', 'https://search.projectsegfau.lt',
-    'https://searx.raghav.site', 'https://northboot.xyz', 'https://searx.frankfurt.systems',
-    'https://searx.foss.family'
+    'https://searx.raghav.site', 'https://searx.frankfurt.systems',
+    'https://searx.foss.family', 'https://searx.tuxcloud.net'
   ];
   if (process.env.SEARCH_API_URL) {
     var customUrl = process.env.SEARCH_API_URL.replace(/\/+$/, '');
@@ -263,7 +361,7 @@ async function searchSearxng(query, maxResults) {
     var url = baseUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
     return fetch(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(4000)
     }).then(function(r) {
       if (!r.ok) throw new Error(baseUrl.slice(0, 30) + ' status=' + r.status);
       return r.json();
@@ -301,7 +399,7 @@ async function searchBingHtml(query, maxResults) {
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Accept': 'text/html,application/xhtml+xml'
       },
-      signal: AbortSignal.timeout(6000)
+      signal: AbortSignal.timeout(10000)
     });
     if (!resp.ok) return { results: [], error: 'BingHtml status=' + resp.status };
     var html = await resp.text();
@@ -349,8 +447,8 @@ async function searchWeb(query, maxResults) {
     { name: 'Brave', fn: function() { return searchBrave(searchQuery, maxResults); }, requiresEnv: 'BRAVE_SEARCH_API_KEY', enabled: !!process.env.BRAVE_SEARCH_API_KEY },
     { name: 'Serper', fn: function() { return searchSerper(searchQuery, maxResults); }, requiresEnv: 'SERPER_API_KEY', enabled: !!process.env.SERPER_API_KEY },
     { name: 'CustomApi', fn: function() { return searchCustomApi(searchQuery, maxResults); }, requiresEnv: 'SEARCH_API_URL', enabled: !!process.env.SEARCH_API_URL },
-    { name: 'SearXNG', fn: function() { return searchSearxng(searchQuery, maxResults); }, requiresEnv: null, enabled: true },
-    { name: 'BingHtml', fn: function() { return searchBingHtml(searchQuery, maxResults); }, requiresEnv: null, enabled: true }
+    { name: 'BingHtml', fn: function() { return searchBingHtml(searchQuery, maxResults); }, requiresEnv: null, enabled: true },
+    { name: 'SearXNG', fn: function() { return searchSearxng(searchQuery, maxResults); }, requiresEnv: null, enabled: true }
   ];
 
   var diagnostics = {
@@ -6795,63 +6893,163 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
     }
 
-    // Web search
     var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
-    var needsSearch = allowSearch && !weatherResult && /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|搜索|查询|查一下|搜一下|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分/i.test(message);
-    var searchResultObj = null;
-    var searchResults = null;
-    var searchDiagnostics = null;
-    if (needsSearch && !aborted) {
-      try {
-        searchResultObj = await searchWeb(message, 5);
-        searchResults = searchResultObj && searchResultObj.results ? searchResultObj.results : [];
-        searchDiagnostics = searchResultObj && searchResultObj.diagnostics ? searchResultObj.diagnostics : null;
-      } catch (e) {
-        searchResults = [];
-      }
-    }
-    
-    var reasoning = '';
-    var content = '';
-    var usageResult = null;
     var usedModel = DEEPSEEK_MODEL_REASONER;
-    
     if (aborted) return res.end();
-    
-    // 注入搜索结果（新格式：带 diagnostics）
-    if (searchResults && Array.isArray(searchResults) && searchResults.length) {
-      var searchCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + message + '\n\n' +
-        searchResults.map(function(sr, si) {
-          return (si + 1) + '. ' + (sr.title || '无标题') +
-            '\n来源：' + (sr.source || 'web') +
-            '\n发布时间：' + (sr.published_at || '未知') +
-            '\n链接：' + (sr.url || '无') +
-            '\n摘要：' + (sr.snippet || '无摘要');
-        }).join('\n\n') +
-        '\n\n要求：必须优先使用以上搜索结果回答。如果结果发布时间未知或明显过旧，必须提醒用户"搜索结果可能不是最新"。不能编造新闻、价格、天气、日期。';
-      messages.push({ role: 'system', content: searchCtx });
-      res.write('data: ' + JSON.stringify({ type: 'search', count: searchResults.length, results: searchResults, diagnostics: searchDiagnostics || null }) + '\n\n');
-    } else if (needsSearch) {
-      var hasProviderErrors = searchDiagnostics && searchDiagnostics.provider_errors && searchDiagnostics.provider_errors.length > 0;
-      var hasProviderMissing = searchDiagnostics && searchDiagnostics.missing_env && searchDiagnostics.missing_env.length > 0;
-      if (hasProviderErrors) {
-        var errorSummary = searchDiagnostics.provider_errors.map(function(pe) { return pe.provider + ':' + pe.error; }).join(' / ');
-        if (hasProviderMissing) {
-          errorSummary += ' / 未配置:' + searchDiagnostics.missing_env.join(',');
+
+    messages.push({ role: 'user', content: message });
+
+    console.log('[AGENT-STREAM] thinking_mode=', thinkingMode, 'useThinking=', useThinking, 'model=', usedModel, 'reasoning_effort=', useThinking ? thinkingMode : 'off', '|| message_len=', message.length, 'history_messages=', messages.length);
+
+    // ===== Function Calling：让 AI 自主决定调用工具 =====
+    var shouldUseTools = allowSearch && !useThinking && !aborted;
+    var hasCalledTools = false;
+    var hasFCFallbackContent = false;
+    var fcFallbackContent = null;
+    var fcFallbackUsage = null;
+
+    if (shouldUseTools && !aborted) {
+      var fcBody = {
+        model: usedModel,
+        messages: messages,
+        stream: false,
+        tools: AI_TOOLS,
+        tool_choice: 'auto'
+      };
+
+      var fcController = new AbortController();
+      var fcTimer = setTimeout(function() { fcController.abort(); }, 15000);
+
+      try {
+        var fcResp = await fetch(DEEPSEEK_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
+          body: JSON.stringify(fcBody),
+          signal: fcController.signal
+        });
+        clearTimeout(fcTimer);
+
+        if (fcResp.ok) {
+          var fcData = await fcResp.json();
+          var fcMessage = fcData && fcData.choices && fcData.choices[0] && fcData.choices[0].message;
+
+          if (fcMessage && fcMessage.tool_calls && fcMessage.tool_calls.length > 0) {
+            hasCalledTools = true;
+
+            var toolCallsInfo = fcMessage.tool_calls.map(function(tc) {
+              var a;
+              try { a = JSON.parse(tc.function.arguments); } catch (e) { a = {}; }
+              return { id: tc.id, name: tc.function.name, args: a };
+            });
+            res.write('data: ' + JSON.stringify({ type: 'tool_calls', tools: toolCallsInfo }) + '\n\n');
+
+            messages.push({
+              role: 'assistant',
+              content: fcMessage.content || null,
+              tool_calls: fcMessage.tool_calls
+            });
+
+            for (var tci = 0; tci < fcMessage.tool_calls.length; tci++) {
+              var tc = fcMessage.tool_calls[tci];
+              if (aborted) break;
+              var toolResult = await executeToolCall(tc);
+              messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(toolResult) });
+              res.write('data: ' + JSON.stringify({
+                type: 'tool_result',
+                tool_name: toolResult.tool_name || '',
+                success: !toolResult.error,
+                count: toolResult.results_count || 0,
+                error: toolResult.error || null,
+                location: toolResult.location || null
+              }) + '\n\n');
+            }
+          } else {
+            hasFCFallbackContent = true;
+            fcFallbackContent = fcMessage ? fcMessage.content || '' : '';
+            fcFallbackUsage = fcData.usage || null;
+          }
+        } else {
+          try {
+            var fcErrData = await fcResp.json();
+            var fcErrMsg = fcErrData && fcErrData.error && fcErrData.error.message ? String(fcErrData.error.message).slice(0, 200) : '';
+            console.error('[AGENT-STREAM] FC API error', fcResp.status, fcErrMsg);
+          } catch (e) {}
         }
-        messages.push({ role: 'system', content: '【联网搜索】本次联网搜索失败（' + errorSummary + '）。不能编造实时信息，必须如实告诉用户搜索不可用。' });
-        res.write('data: ' + JSON.stringify({ type: 'search_error', error: '联网搜索失败: ' + errorSummary, diagnostics: searchDiagnostics }) + '\n\n');
-      } else {
-        messages.push({ role: 'system', content: '【联网搜索】本次搜索没有返回有效结果。你必须如实告诉用户没有搜到，不能编造实时信息。' });
-        res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [], diagnostics: searchDiagnostics }) + '\n\n');
+      } catch (fcErr) {
+        clearTimeout(fcTimer);
+        console.error('[AGENT-STREAM] FC error:', fcErr && fcErr.message);
       }
     }
-    
-    messages.push({ role: 'user', content: message });
-    
-    console.log('[AGENT-STREAM] thinking_mode=', thinkingMode, 'useThinking=', useThinking, 'model=', usedModel, 'reasoning_effort=', useThinking ? thinkingMode : 'off', '|| message_len=', message.length, 'history_messages=', messages.length);
-    
+
+    // FC fallback：AI 直接回答了，模拟流式输出
+    if (hasFCFallbackContent && fcFallbackContent && !aborted) {
+      var fcFallbackSanitized = sanitizeAssistantVisibleText(fcFallbackContent);
+      if (fcFallbackSanitized) {
+        var fcChunkSize = 20;
+        for (var fcCi = 0; fcCi < fcFallbackSanitized.length; fcCi += fcChunkSize) {
+          if (aborted) break;
+          res.write('data: ' + JSON.stringify({ type: 'content', text: fcFallbackSanitized.slice(fcCi, fcCi + fcChunkSize) }) + '\n\n');
+        }
+        var fcModel = fcFallbackUsage && fcFallbackUsage.model ? fcFallbackUsage.model : usedModel;
+        await finishStream(res, {
+          contentBuffer: fcFallbackSanitized,
+          reasoningBuffer: '',
+          thinkingMode: 'off',
+          useThinking: false,
+          usedModel: fcModel,
+          finishReason: 'stop',
+          userName: userName,
+          convId: convId,
+          message: message,
+          streamSeq: streamSeq,
+          memoryData: memoryData,
+          ctx: ctx
+        });
+      }
+      return res.end();
+    }
+
+    // 如果 FC 没启用或没触发 tool_calls，回退旧正则搜索注入
+    if (!hasCalledTools && !aborted && allowSearch && !weatherResult) {
+      var needsSearch = /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|搜索|查询|查一下|搜一下|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分/i.test(message);
+      var srObj = null;
+      var sResults = null;
+      var sDiag = null;
+      if (needsSearch && !aborted) {
+        try {
+          srObj = await searchWeb(message, 5);
+          sResults = srObj && srObj.results ? srObj.results : [];
+          sDiag = srObj && srObj.diagnostics ? srObj.diagnostics : null;
+        } catch (e) { sResults = []; }
+      }
+      if (sResults && Array.isArray(sResults) && sResults.length) {
+        var sCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + message + '\n\n' +
+          sResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
+          '\n\n要求：必须优先使用以上搜索结果回答。不能编造新闻、价格、天气、日期。';
+        messages.push({ role: 'system', content: sCtx });
+        res.write('data: ' + JSON.stringify({ type: 'search', count: sResults.length, results: sResults, diagnostics: sDiag || null }) + '\n\n');
+      } else if (needsSearch) {
+        var hasProviderErrors2 = sDiag && sDiag.provider_errors && sDiag.provider_errors.length > 0;
+        var hasProviderMissing2 = sDiag && sDiag.missing_env && sDiag.missing_env.length > 0;
+        if (hasProviderErrors2) {
+          var errSum = sDiag.provider_errors.map(function(pe) { return pe.provider + ':' + pe.error; }).join(' / ');
+          if (hasProviderMissing2) errSum += ' / 未配置:' + sDiag.missing_env.join(',');
+          messages.push({ role: 'system', content: '【联网搜索】本次联网搜索失败（' + errSum + '）。不能编造实时信息。' });
+          res.write('data: ' + JSON.stringify({ type: 'search_error', error: '联网搜索失败: ' + errSum, diagnostics: sDiag }) + '\n\n');
+        } else {
+          messages.push({ role: 'system', content: '【联网搜索】本次搜索没有返回有效结果。你必须如实告诉用户没有搜到。' });
+          res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [], diagnostics: sDiag }) + '\n\n');
+        }
+      }
+    }
+
+    var content = '';
+    var reasoning = '';
+    var usageResult = null;
+
     // 调用 DeepSeek（流式）
+    if (aborted) return res.end();
+
     var apiBody = {
       model: usedModel,
       messages: messages,
