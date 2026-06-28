@@ -133,6 +133,7 @@
     }
 
     function showCopyMenu(ev) {
+      if (_copyMenuActive) return;
       ev.preventDefault();
       ev.stopPropagation();
       var text = getBubbleText();
@@ -140,15 +141,13 @@
       closeCopyMenu();
       var rect = bubbleEl.getBoundingClientRect();
       var menu = el('div', { class: 'ai-copy-menu' });
-      menu.style.cssText = 'position:fixed;z-index:9999;background:var(--bg-card,#fff);border:1px solid var(--border,rgba(140,196,158,0.30));border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.12);padding:4px 0;min-width:60px;';
       var btn = el('button', {
         type: 'button',
         class: 'ai-copy-btn',
         text: '复制'
       });
-      btn.style.cssText = 'display:block;width:100%;padding:8px 16px;text-align:left;background:none;border:none;font-size:12px;color:var(--text,#1d1d24);cursor:pointer;';
       btn.addEventListener('mouseenter', function() { btn.style.background = 'rgba(46,148,101,0.06)'; });
-      btn.addEventListener('mouseleave', function() { btn.style.background = 'none'; });
+      btn.addEventListener('mouseleave', function() { btn.style.background = ''; });
       btn.addEventListener('click', function(ce) {
         ce.preventDefault(); ce.stopPropagation();
         doCopy(text);
@@ -1210,13 +1209,21 @@
         notify('请先登录后再使用 AI 聊天');
         return false;
       }
-    } catch (e) {}
-    return true;
+    } catch (e) {
+      try { console.warn('[AI-AUTH] ensureRealUserAuth error:', e && e.message); } catch(ee) {}
+    }
+    notify('登录状态异常，请尝试刷新页面后重新登录');
+    return false;
   }
 
   async function handleSendMessage(input, sendBtn, messagesEl) {
     var text = String(input.value || '').trim();
     if (!text) { S.sending = false; return; }
+    if (text.length > 6000) {
+      notify('消息过长（最多 6000 字符），请精简后重试');
+      S.sending = false;
+      return;
+    }
     
     var originalText = text;
     
@@ -1308,7 +1315,7 @@
           if (errJson && errJson.error) {
             if (S._currentReqId !== reqId) return;
             try { typingNode.remove(); } catch (e) {}
-            notify(errJson.error);
+            notify(String(errJson.error));
           }
         } catch(e) {}
         resetSendingIfCurrent();
@@ -1523,6 +1530,20 @@
             }
           }
 
+          // 思考后决定补充搜索：清除当前不完整的回复，等待新的流
+          if (evt.type === 'restart') {
+            cleanupRenderers();
+            if (aiNode) try { aiNode.remove(); } catch (e) {}
+            try { typingNode.remove(); } catch (e) {}
+            aiContent = '';
+            aiReasoning = '';
+            reasoningStarted = false;
+            doneReceived = false;
+            finalThinkingElapsedMs = 0;
+            finalThinkingMode = null;
+            continue;
+          }
+
           if (evt.type === 'search') {
             // 显示搜索状态条
             var searchCount = evt.count;
@@ -1688,7 +1709,7 @@
             
             if (aiContent) {
               // 已有部分回复，保留内容并追加错误提示
-              var errNote = el('div', { class: 'ai-error-note', style: 'font-size:11px;color:#c44;margin-top:4px;text-align:left;' }, errMsg);
+              var errNote = el('div', { class: 'ai-error-note' }, errMsg);
               try { aiNode.appendChild(errNote); } catch (e) {}
               if (!aiNode) ensureAssistantBubble();
               finishAiMessage(aiNode, aiContent, aiReasoning, evt);
@@ -1712,7 +1733,7 @@
             var errMsg2 = evt.error || 'AI 调用失败';
             
             if (aiContent) {
-              var errNote2 = el('div', { class: 'ai-error-note', style: 'font-size:11px;color:#c44;margin-top:4px;text-align:left;' }, errMsg2);
+              var errNote2 = el('div', { class: 'ai-error-note' }, errMsg2);
               try { aiNode.appendChild(errNote2); } catch (e) {}
               finishAiMessage(aiNode, aiContent, aiReasoning, evt);
             } else {
@@ -1816,17 +1837,17 @@
             
             // 中断/未保存提示
             if (streamInterrupted && aiContent) {
-              var interrNote = el('div', { class: 'ai-interrupt-note', style: 'font-size:11px;color:#999;margin-top:4px;text-align:left;' }, '回复中断，内容可能不完整');
+              var interrNote = el('div', { class: 'ai-interrupt-note' }, '回复中断，内容可能不完整');
               if (aiNode) aiNode.appendChild(interrNote);
             }
             if (!streamSaved && aiContent) {
-              var saveNote = el('div', { class: 'ai-save-note', style: 'font-size:11px;color:#e68a2e;margin-top:2px;text-align:left;' }, '本次回复未保存，刷新后可能丢失');
+              var saveNote = el('div', { class: 'ai-save-note' }, '本次回复未保存，刷新后可能丢失');
               if (aiNode) aiNode.appendChild(saveNote);
             }
             
             // 显示清洗提示
             if (evt.filtered && aiContent) {
-              var filteredNote = el('div', { class: 'ai-filtered-note', style: 'font-size:11px;color:#888;margin-top:2px;text-align:left;' }, '已自动清理动作描写');
+              var filteredNote = el('div', { class: 'ai-filtered-note' }, '已自动清理动作描写');
               if (aiNode) aiNode.appendChild(filteredNote);
             }
             
@@ -1870,7 +1891,7 @@
         try { typingNode.remove(); } catch (e) {}
         if (aiContent) {
           // 已有部分回复，保留并提示连接中断
-          var connNote = el('div', { class: 'ai-error-note', style: 'font-size:11px;color:#c44;margin-top:4px;text-align:left;' }, '连接中断，已保留部分回复');
+          var connNote = el('div', { class: 'ai-error-note' }, '连接中断，已保留部分回复');
           try { aiNode.appendChild(connNote); } catch (e) {}
           finishAiMessage(aiNode, aiContent, aiReasoning, null);
         } else {
@@ -1973,7 +1994,9 @@
       if (r && r.ok && r.data && Array.isArray(r.data.conversations)) {
         S.conversations = r.data.conversations;
       }
-    } catch (e) {}
+    } catch (e) {
+      try { console.warn('[AI-CONV] fetchConversations error:', e && e.message); } catch(ee) {}
+    }
   }
   
   // 渲染会话列表
@@ -2103,7 +2126,10 @@
         S.hasMore = r.data.has_more;
         S.oldestCursor = r.data.oldest || null;
       }
-    } catch (e) {}
+    } catch (e) {
+      try { console.warn('[AI-CONV] switchConversation error:', e && e.message); } catch(ee) {}
+      notify('加载对话历史失败');
+    }
     
     if (S.messagesEl) {
       S.messagesEl.innerHTML = '';
@@ -2220,12 +2246,15 @@ function showChatMessages() {
         }
         lines.push('</div>');
         lines.push('<div style="display:flex;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border,rgba(0,0,0,0.08));">');
-        lines.push('<button class="ai-memory-clear" style="flex:1;padding:6px;border:1px solid rgba(200,60,60,0.3);border-radius:6px;background:transparent;color:#c44;font-size:12px;cursor:pointer;">清空记忆</button>');
-        lines.push('<button class="ai-memory-close" style="flex:1;padding:6px;border:1px solid var(--border,rgba(0,0,0,0.15));border-radius:6px;background:var(--bg-secondary,#f5f5f5);color:var(--text,#333);font-size:12px;cursor:pointer;">关闭</button>');
+        lines.push('<button class="ai-memory-clear">清空记忆</button>');
+        lines.push('<button class="ai-memory-close">关闭</button>');
         lines.push('</div>');
 
-        var overlay = el('div', { class: 'ai-memory-overlay', style: 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);z-index:10000;display:flex;align-items:center;justify-content:center;' });
-        var box = el('div', { class: 'ai-memory-box', style: 'background:var(--bg,#fff);border-radius:12px;padding:16px 20px;max-width:380px;width:90%;max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.15);' });
+        // 防止多次叠加
+        if (document.querySelector('.ai-memory-overlay')) return;
+
+        var overlay = el('div', { class: 'ai-memory-overlay' });
+        var box = el('div', { class: 'ai-memory-box' });
         box.innerHTML = lines.join('\n');
         overlay.appendChild(box);
         document.body.appendChild(overlay);
@@ -2388,7 +2417,7 @@ function showChatMessages() {
 
     sendBtn.addEventListener('click', doSend);
     input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         doSend();
       }
@@ -2399,7 +2428,7 @@ function showChatMessages() {
     inputBar.appendChild(sendBtn);
     root.appendChild(inputBar);
 
-    setTimeout(autoresize, 0);
+    S.resizeTimer = setTimeout(autoresize, 0);
 
     return {
       root: root,
@@ -2551,6 +2580,10 @@ function showChatMessages() {
     if (S.avatarPopTimer) {
       try { clearTimeout(S.avatarPopTimer); } catch (e5) {}
       S.avatarPopTimer = null;
+    }
+    if (S.resizeTimer) {
+      try { clearTimeout(S.resizeTimer); } catch (e6) {}
+      S.resizeTimer = null;
     }
     if (S.headerButtonsCleanup) {
       try { S.headerButtonsCleanup(); } catch (e6) {}

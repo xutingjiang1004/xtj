@@ -6312,7 +6312,9 @@ async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assist
   
   try {
     globalThis[lastUpdateKey] = String(Date.now());
-  } catch(e) {}
+  } catch(e) {
+    try { console.warn('[AI-MEMORY] set update lock error:', e && e.message); } catch(ee) {}
+  }
   
   var memoryModel = process.env.DEEPSEEK_MODEL_REASONER || 'deepseek-v4-flash';
   
@@ -6330,7 +6332,9 @@ async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assist
     if (latestRow && latestRow.content) {
       existingMemoryBox = (function() { try { return JSON.parse(latestRow.content); } catch(e) { return null; } })();
     }
-  } catch (e) {}
+  } catch(e) {
+    try { console.warn('[AI-MEMORY] query existing box error:', e && e.message); } catch(ee) {}
+  }
   if (!existingMemoryBox) existingMemoryBox = _existingMemoryBox || createEmptyMemoryBox(userName);
   
   var memoryBoxJson = JSON.stringify(existingMemoryBox || {});
@@ -6338,23 +6342,19 @@ async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assist
   var extractPrompt = '你是一个用户记忆提取助手。根据以下内容，输出 JSON patch 用于更新用户的长期记忆。\n\n当前记忆：\n' + memoryBoxJson.slice(0, 2000) + '\n\n用户消息：' + latestUserMessage.slice(0, 500) + '\n\nAI 回复：' + (assistantReply || '').slice(0, 500) + '\n\n当前日期：' + new Date().toISOString() + '\n\n规则：\n1. 只记录长期稳定信息，不记录一次性闲聊。\n2. 不记录密码、token、密钥、银行卡。\n3. 健康、性、身份敏感信息默认不写入，除非用户明确说"记住"。\n4. 不确定就不写。\n5. 同类内容合并，不要重复。\n\n必须输出纯 JSON，不要加任何其他文字：\n{"should_update":true或false,"changes":{"likes":[],"dislikes":[],"project_preferences":[],"do_not_do":[],"important_notes":[],"long_term_goals":[],"reply_preferences":{"tone":[],"format":[],"avoid":[]},"stable_profile":{}},"reason":"原因"}';
   
   try {
-    var apiResp = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (process.env.DEEPSEEK_API_KEY || '') },
-      body: JSON.stringify({
-        model: memoryModel,
-        messages: [{ role: 'user', content: extractPrompt }],
-        temperature: 0.1,
-        max_tokens: 2000,
-        stream: false
-      }),
-      signal: AbortSignal.timeout(15000)
-    });
+    var extractResp = await callDeepSeek([{ role: 'user', content: extractPrompt }], { model: DEEPSEEK_MODEL_REASONER, temperature: 0.1 });
     
-    if (!apiResp.ok) return;
-    var apiData = await apiResp.json();
-    var patchText = (apiData.choices && apiData.choices[0] && apiData.choices[0].message && apiData.choices[0].message.content) || '';
-    var patch = (function() { try { return JSON.parse(patchText); } catch(e) { return null; } })();
+    var patchText = extractResp.content || '';
+    // 推理模型可能输出推理文本再输出 JSON，尝试从响应中提取 JSON
+    var patch = (function() {
+      try { return JSON.parse(patchText); } catch(e) {}
+      // 尝试提取第一个 { } 包围的 JSON 对象
+      var jsonMatch = patchText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try { return JSON.parse(jsonMatch[0]); } catch(e2) {}
+      }
+      return null;
+    })();
     
     if (!patch || !patch.should_update) return;
     
@@ -6429,22 +6429,9 @@ async function maybeUpdateConversationSummary(userName, convId, messages) {
   var summaryPrompt = '根据以下对话内容，生成 JSON 格式的会话摘要。只输出 JSON，不要加任何其他文字。\n\n' + msgText.slice(0, 3000) + '\n\n{"title":"精简标题","summary":"摘要（300字以内）","tags":["标签1","标签2"],"important_facts":["重要事实"],"user_preferences_found":["发现的偏好"],"open_tasks":["待办任务"],"importance":1}';
   
   try {
-    var apiResp = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (process.env.DEEPSEEK_API_KEY || '') },
-      body: JSON.stringify({
-        model: process.env.DEEPSEEK_MODEL_REASONER || 'deepseek-v4-flash',
-        messages: [{ role: 'user', content: summaryPrompt }],
-        temperature: 0.2,
-        max_tokens: 1000,
-        stream: false
-      }),
-      signal: AbortSignal.timeout(10000)
-    });
+    var summaryResp = await callDeepSeek([{ role: 'user', content: summaryPrompt }], { model: DEEPSEEK_MODEL_REASONER, temperature: 0.2 });
     
-    if (!apiResp.ok) return;
-    var apiData = await apiResp.json();
-    var summaryText = (apiData.choices && apiData.choices[0] && apiData.choices[0].message && apiData.choices[0].message.content) || '';
+    var summaryText = summaryResp.content || '';
     var summaryObj = (function() { try { return JSON.parse(summaryText); } catch(e) { return null; } })();
     if (!summaryObj) return;
     
@@ -6713,6 +6700,15 @@ async function updateLongTermMemory(userName, ctx, lastUserMsg, lastAiReply) {
     var newMemory = result && result.content;
     if (typeof newMemory !== 'string' || !newMemory.trim()) return;
     newMemory = newMemory.trim().slice(0, AI_MEMORY_MAX_LEN);
+    // 推理模型可能先输出推理文本再输出最终摘要，取最后一段有意义的内容
+    var lines = newMemory.split('\n').filter(function(l) { return l.trim(); });
+    if (lines.length > 1) {
+      var lastLine = lines[lines.length - 1];
+      // 如果最后一行看起来像总结（包含中文字符且长度合适），就使用它
+      if (/[\u4e00-\u9fff]/.test(lastLine) && lastLine.length > 10) {
+        newMemory = lastLine.slice(0, AI_MEMORY_MAX_LEN);
+      }
+    }
 
     var { data: existing } = await supabase.from('posts')
       .select('id')
@@ -6774,7 +6770,9 @@ async function loadAiContext(userName, convId) {
           try {
             var c = JSON.parse(r.content || '{}');
             if (c && typeof c.reply === 'string') content = c.reply;
-          } catch (e) {}
+          } catch(e) {
+            try { console.warn('[AI-PARSE] parseMsgMeta error:', e && e.message); } catch(ee) {}
+          }
         }
         return { role: meta.role || 'user', content: content.slice(0, AI_CHAT_MESSAGE_MAX_LEN) };
       });
@@ -6819,7 +6817,9 @@ async function loadAiContext(userName, convId) {
           }
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      try { console.warn('[AI-MEMORY] load memory_box interior error:', e && e.message); } catch(ee) {}
+    }
   } catch (e) {
     console.error('[AGENT-CHAT] loadAiContext exception:', e.message);
   }
@@ -6859,6 +6859,11 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 
     // 5. 读取上下文（按 conversation_id 过滤）
     var ctx = await loadAiContext(userName, convId);
+
+    // 5b. 当前时间
+    var _now = new Date();
+    var _currentDateISO = _now.toISOString();
+    var _currentDateCN = _now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
 
     // 6. 组装 system prompt
     var corePrompt = buildAiCorePrompt(config);
@@ -6934,8 +6939,12 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 
     // 10. 异步更新长期记忆
     try {
-      updateLongTermMemory(userName, ctx, message, reply).catch(function() {});
-    } catch (e) {}
+      updateLongTermMemory(userName, ctx, message, reply).catch(function(e) {
+        try { console.warn('[AI-MEMORY] updateLongTermMemory fire-and-forget error:', e && e.message); } catch(ee) {}
+      });
+    } catch (e) {
+      try { console.warn('[AI-MEMORY] updateLongTermMemory fire-and-forget sync error:', e && e.message); } catch(ee) {}
+    }
 
     // 11. 返回
     return res.json({
@@ -7152,7 +7161,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               var item = toolResults[tri];
               messages.push({ role: 'tool', tool_call_id: item.toolCallId, content: JSON.stringify(item.toolResult) });
               var trItems = null;
-              try { trItems = JSON.parse(item.toolResult.content || '[]'); } catch (e) {}
+              try { trItems = JSON.parse(item.toolResult.content || '[]'); } catch(e) {
+                try { console.warn('[AI-FC] parse tool result error:', e && e.message); } catch(ee) {}
+              }
               res.write('data: ' + JSON.stringify({
                 type: 'tool_result',
                 tool_name: item.toolResult.tool_name || '',
@@ -7183,7 +7194,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                         items.forEach(function(item) { allResults.push(item); });
                       }
                     }
-                  } catch (e) {}
+                  } catch(e) {
+                    try { console.warn('[AI-SEARCH] search error:', e && e.message); } catch(ee) {}
+                  }
                 }
               }
 
@@ -7249,7 +7262,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             var fcErrData = await fcResp.json();
             var fcErrMsg = fcErrData && fcErrData.error && fcErrData.error.message ? String(fcErrData.error.message).slice(0, 200) : '';
             console.error('[AGENT-STREAM] FC API error', fcResp.status, fcErrMsg);
-          } catch (e) {}
+          } catch(e) {
+            try { console.warn('[AI-FC] FC res text error:', e && e.message); } catch(ee) {}
+          }
         }
       } catch (fcErr) {
         clearTimeout(_fcTimer);
@@ -7287,20 +7302,25 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     // 如果 FC 没启用或没触发 tool_calls，回退旧正则搜索注入
     if (!hasCalledTools && !aborted && allowSearch && !weatherResult) {
-      var needsSearch = /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分/i.test(message);
-      // 注意：搜一下/搜索/查一下 不在此正则中，它们应通过 tool calls 由 AI 自主决定搜索关键词，
-      // 而不是直接用 "搜一下" 这个字面量去联网搜索（那样会搜到无关结果）
-      
-      // 思考模式下，如果用户说搜一下/查一下，从对话上下文中提取搜索关键词
+      var needsSearch = /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分|搜索|查一下|搜一下|查询|景点|旅游|攻略|推荐|怎么样|好不好|评价|评测|价格表/i.test(message);
+
+      // 构建搜索关键词
       var searchQuery = message;
-      var isSearchMetaCmd = useThinking && /搜索|查一下|搜一下|百度|google|谷歌|查询/.test(message);
-      if (isSearchMetaCmd) {
-        // 从历史消息中提取最近一条 user 消息作为搜索关键词（排除当前 meta 指令）
-        for (var si = messages.length - 1; si >= 0; si--) {
-          var pm = messages[si];
-          if (pm.role === 'user' && pm.content !== message && pm.content) {
-            searchQuery = String(pm.content).slice(0, 150);
-            break;
+      var isSearchCmd = /搜索|查一下|搜一下|百度|google|谷歌|查询/i.test(message);
+      if (isSearchCmd) {
+        // 从当前消息中剥离"搜一下"等命令前缀，提取真实搜索内容
+        var stripped = message.replace(/^(?:搜索|查一下|搜一下|百度|google|谷歌|查询)\s*/i, '').trim();
+        if (stripped.length >= 3) {
+          // 当前消息包含实际搜索内容，用剥离后的文本搜索（如"搜一下济州岛"→"济州岛"）
+          searchQuery = stripped.slice(0, 150);
+        } else {
+          // 纯元指令（如只说"搜一下"）→ 回退到上一条用户消息
+          for (var si = messages.length - 1; si >= 0; si--) {
+            var pm = messages[si];
+            if (pm.role === 'user' && pm.content !== message && pm.content) {
+              searchQuery = String(pm.content).slice(0, 150);
+              break;
+            }
           }
         }
       }
@@ -7341,9 +7361,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // ----- 多 Agent 协作：拆解问题 → 搜索 → 合成 -----
-    // 仅非思考模式下启用，且需要管理员在后台开启 multi_agent
+    // 需要管理员在后台开启 multi_agent，思考/非思考模式均可
     var multiAgentEnabled = config && config.model && config.model.multi_agent === true;
-    if (multiAgentEnabled && !useThinking && allowSearch && !aborted && messages.length > 0) {
+    if (multiAgentEnabled && allowSearch && !aborted && messages.length > 0) {
       var daMsg = [
         { role: 'system', content: '你是一个问题分析专家。你的任务是把用户的问题拆解成2-3个最适合联网搜索的关键词短语，每个短语独立、具体、可直接用于搜索引擎。只返回JSON数组，不要多余内容。格式：["关键词1", "关键词2", "关键词3"]' },
         { role: 'user', content: message }
@@ -7563,28 +7583,74 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         
         if (finish === 'stop' || finish === 'length') {
           finishReason = finish;
-          // 统一收尾
-          if (!aborted) {
-            var finishOpt = {
-              contentBuffer: contentBuffer,
-              reasoningBuffer: reasoningBuffer,
-              thinkingMode: thinkingMode,
-              useThinking: useThinking,
-              usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
-              finishReason: finish,
-              userName: userName,
-              convId: convId,
-              message: message,
-              streamSeq: streamSeq,
-              memoryData: memoryData,
-              ctx: ctx
-            };
-            await finishStream(res, finishOpt);
+          // 思考模式下：检查 reasoning 是否提到需要搜索，且此前未注入搜索结果
+          var needsPostSearch = false;
+          var postSearchKeyword = '';
+          if (useThinking && allowSearch && reasoningBuffer && reasoningBuffer.length > 50 && !aborted) {
+            var hasSearched = roundMessages.some(function(mm) {
+              return mm.role === 'system' && typeof mm.content === 'string' && (mm.content.indexOf('【联网搜索结果】') >= 0 || mm.content.indexOf('【多Agent协作搜索结果】') >= 0);
+            }) || roundMessages.some(function(mm) { return mm.role === 'tool' && mm.content && mm.content.indexOf('search_results') >= 0; });
+            if (!hasSearched && /搜索|查|查询|需要(联网|搜索)|应该(搜索|查)|让我(搜|查|百度|google|谷歌)|我没有搜|没(有|找到)|搜不到|查不到|没有(搜索|查到)/i.test(reasoningBuffer)) {
+               // 从 reasoning 中提取搜索关键词
+               var rpParts = reasoningBuffer.split(/[\n。！？；]/);
+              var rpLine = '';
+              for (var rppi = rpParts.length - 1; rppi >= 0; rppi--) {
+                if (/搜索|搜|查|百度|google|谷歌/.test(rpParts[rppi])) {
+                  rpLine = rpParts[rppi].trim().slice(0, 100);
+                  break;
+                }
+              }
+              postSearchKeyword = (rpLine || message).replace(/^(?:搜索|查一下|搜一下|百度|google|谷歌|查询|需要|应该|让我)\s*/i, '').trim().slice(0, 80);
+              if (postSearchKeyword.length >= 3) needsPostSearch = true;
+            }
           }
-          return safeEnd();
+          if (needsPostSearch) {
+            // 执行搜索，然后继续 toolRound 让 AI 重新生成回答
+            try {
+              var psSr = await searchWeb(postSearchKeyword, 15);
+              if (psSr && Array.isArray(psSr.results) && psSr.results.length > 0) {
+                var psResults = psSr.results.slice(0, 15);
+                var psCtx = '【联网搜索结果（思考后补充检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + postSearchKeyword + '\n\n' +
+                  psResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
+                  '\n\n要求：必须优先使用以上搜索结果回答。不能编造。';
+                roundMessages.push({ role: 'system', content: psCtx });
+                res.write('data: ' + JSON.stringify({ type: 'search', count: psResults.length, results: psResults, query: postSearchKeyword }) + '\n\n');
+                // 模拟 tool_calls 以触发外层循环重启 stream
+                finishReason = 'post_reasoning_search';
+                // 告诉前端清除之前不完整的内容，以干净状态重启
+                res.write('data: ' + JSON.stringify({ type: 'restart', reason: 'AI在思考后决定补充搜索' }) + '\n\n');
+              }
+            } catch (e) {
+              try { console.warn('[POST-REASONING-SEARCH] error:', e && e.message); } catch(ee) {}
+            }
+          }
+          if (finishReason === 'stop' || finishReason === 'length') {
+            // 正常收尾，没有触发后置搜索
+            if (!aborted) {
+              var finishOpt = {
+                contentBuffer: contentBuffer,
+                reasoningBuffer: reasoningBuffer,
+                thinkingMode: thinkingMode,
+                useThinking: useThinking,
+                usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
+                finishReason: finish,
+                userName: userName,
+                convId: convId,
+                message: message,
+                streamSeq: streamSeq,
+                memoryData: memoryData,
+                ctx: ctx
+              };
+              await finishStream(res, finishOpt);
+            }
+            return safeEnd();
+          }
+          // 触发了后置搜索，break 让外层循环重启 stream
+          break;
         }
       }
       if (finishReason === 'tool_calls') break;
+      if (finishReason === 'post_reasoning_search') break;
     }
     
     // 处理 tool calls
@@ -7623,6 +7689,16 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
          delete apiBody.reasoning_effort;
        }
        continue;
+    }
+    
+    // 后置搜索触发：思考结束后补充搜索并重新生成回答
+    if (finishReason === 'post_reasoning_search' && !aborted) {
+      toolRound++;
+      if (useThinking) {
+        delete apiBody.thinking;
+        delete apiBody.reasoning_effort;
+      }
+      continue;
     }
     
     // 流意外结束但没收到 finish_reason
@@ -7727,7 +7803,9 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
         try {
           var c = JSON.parse(r.content || '{}');
           if (c && typeof c.reply === 'string') msgContent = c.reply;
-        } catch (e) {}
+        } catch(e) {
+          try { console.warn('[AI-CONV] parse msg meta error:', e && e.message); } catch(ee) {}
+        }
       }
       
       if (meta.role === 'user' && !convData[convId].firstUserMsg) {
@@ -7750,7 +7828,9 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
           try {
             var c2 = JSON.parse(r2.content || '{}');
             if (c2 && typeof c2.reply === 'string') msg2 = c2.reply;
-          } catch (e) {}
+          } catch(e) {
+            try { console.warn('[AI-CONV] parse msg meta2 error:', e && e.message); } catch(ee) {}
+          }
         }
         convData[convId2].lastMsgString = msg2.slice(0, 100);
       }
@@ -7944,7 +8024,9 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
               reasoning = c.reasoning || '';
               content = c.reply;
             }
-          } catch (e) {}
+          } catch(e) {
+            try { console.warn('[AI-HIST] parse msg meta error:', e && e.message); } catch(ee) {}
+          }
         }
         return {
           id: r.id,
