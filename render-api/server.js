@@ -6345,7 +6345,16 @@ async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assist
     var extractResp = await callDeepSeek([{ role: 'user', content: extractPrompt }], { model: DEEPSEEK_MODEL_REASONER, temperature: 0.1 });
     
     var patchText = extractResp.content || '';
-    var patch = (function() { try { return JSON.parse(patchText); } catch(e) { return null; } })();
+    // 推理模型可能输出推理文本再输出 JSON，尝试从响应中提取 JSON
+    var patch = (function() {
+      try { return JSON.parse(patchText); } catch(e) {}
+      // 尝试提取第一个 { } 包围的 JSON 对象
+      var jsonMatch = patchText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try { return JSON.parse(jsonMatch[0]); } catch(e2) {}
+      }
+      return null;
+    })();
     
     if (!patch || !patch.should_update) return;
     
@@ -6691,6 +6700,15 @@ async function updateLongTermMemory(userName, ctx, lastUserMsg, lastAiReply) {
     var newMemory = result && result.content;
     if (typeof newMemory !== 'string' || !newMemory.trim()) return;
     newMemory = newMemory.trim().slice(0, AI_MEMORY_MAX_LEN);
+    // 推理模型可能先输出推理文本再输出最终摘要，取最后一段有意义的内容
+    var lines = newMemory.split('\n').filter(function(l) { return l.trim(); });
+    if (lines.length > 1) {
+      var lastLine = lines[lines.length - 1];
+      // 如果最后一行看起来像总结（包含中文字符且长度合适），就使用它
+      if (/[\u4e00-\u9fff]/.test(lastLine) && lastLine.length > 10) {
+        newMemory = lastLine.slice(0, AI_MEMORY_MAX_LEN);
+      }
+    }
 
     var { data: existing } = await supabase.from('posts')
       .select('id')
