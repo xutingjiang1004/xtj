@@ -6614,7 +6614,7 @@ const AI_DEFAULT_CONFIG = {
   },
   search: { allow_web_search: false, search_provider: 'searxng', max_results: 5, timeout_ms: 4000, use_weather_tool: true },
   memory: { enabled: true, memory_box_enabled: true, summary_enabled: true, max_memory_prompt_chars: 1500, recent_messages_limit: 8, relevant_summaries_limit: 3 },
-  model: { reasoner_model: '', default_thinking_mode: 'medium', allow_user_thinking_switch: false },
+  model: { reasoner_model: '', default_thinking_mode: 'medium', allow_user_thinking_switch: false, multi_agent: false },
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',
   updated_by: ''
@@ -7340,6 +7340,58 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
     }
 
+    // ----- 多 Agent 协作：拆解问题 → 搜索 → 合成 -----
+    // 仅非思考模式下启用，且需要管理员在后台开启 multi_agent
+    var multiAgentEnabled = config && config.model && config.model.multi_agent === true;
+    if (multiAgentEnabled && !useThinking && allowSearch && !aborted && messages.length > 0) {
+      var daMsg = [
+        { role: 'system', content: '你是一个问题分析专家。你的任务是把用户的问题拆解成2-3个最适合联网搜索的关键词短语，每个短语独立、具体、可直接用于搜索引擎。只返回JSON数组，不要多余内容。格式：["关键词1", "关键词2", "关键词3"]' },
+        { role: 'user', content: message }
+      ];
+      try {
+        var daResp = await fetch(DEEPSEEK_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
+          body: JSON.stringify({ model: usedModel, messages: daMsg, stream: false, temperature: 0.3, max_tokens: 200 })
+        });
+        if (daResp.ok) {
+          var daJson = await daResp.json();
+          var daText = (daJson && daJson.choices && daJson.choices[0] && daJson.choices[0].message && daJson.choices[0].message.content) || '';
+          var searchQueries = [];
+          try { searchQueries = JSON.parse(daText); } catch (e) {
+            var m = daText.match(/\[.*?\]/);
+            if (m) try { searchQueries = JSON.parse(m[0]); } catch (e2) {}
+          }
+          if (Array.isArray(searchQueries) && searchQueries.length > 0 && searchQueries.length <= 5) {
+            // 并行执行所有搜索
+            var allResults = [];
+            res.write('data: ' + JSON.stringify({ type: 'multi_agent', action: 'searching', queries: searchQueries }) + '\n\n');
+            var searchPromises = searchQueries.map(function(q) {
+              return searchWeb(String(q).trim(), 10).then(function(sr) {
+                return (sr && Array.isArray(sr.results) ? sr.results : []).slice(0, 5);
+              }).catch(function() { return []; });
+            });
+            var searchResults = await Promise.all(searchPromises);
+            for (var si = 0; si < searchResults.length; si++) {
+              allResults = allResults.concat(searchResults[si]);
+            }
+            if (allResults.length > 0) {
+              // 去重
+              var seen = {};
+              allResults = allResults.filter(function(r) { var u = r.url || ''; if (!u || seen[u]) return false; seen[u] = true; return true; });
+              var maCtx = '【多Agent协作搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n拆解问题：' + message + '\n搜索关键词：' + searchQueries.join('、') + '\n\n' +
+                allResults.map(function(sr, idx) { return (idx + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
+                '\n\n要求：基于以上搜索结果回答用户问题。如果没有找到相关信息，如实告诉用户。';
+              messages.push({ role: 'system', content: maCtx });
+              res.write('data: ' + JSON.stringify({ type: 'search', count: allResults.length, results: allResults.slice(0, 20), query: message }) + '\n\n');
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[AGENT-MULTI] decompose error:', e.message);
+      }
+    }
+
     var content = '';
     var reasoning = '';
     var usageResult = null;
@@ -7659,6 +7711,8 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
     var convData = {};
     for (var i = rows.length - 1; i >= 0; i--) {
       var r = rows[i];
+      var meta = parseMsgMeta(r);
+      if (meta && meta.deleted) continue; // 用户已删除的跳过
       var convId = resolveConvId(r);
       if (!convId) continue;
       
@@ -7684,12 +7738,13 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
     // 第二遍：按时间倒序拿最新消息的 updated_at 和 lastMsg
     for (var j = 0; j < rows.length; j++) {
       var r2 = rows[j];
+      var meta2 = parseMsgMeta(r2);
+      if (meta2 && meta2.deleted) continue;
       var convId2 = resolveConvId(r2);
       if (!convId2 || !convData[convId2]) continue;
       
       if (!convData[convId2].updated_at) {
         convData[convId2].updated_at = r2.created_at;
-        var meta2 = parseMsgMeta(r2);
         var msg2 = String(r2.content || '');
         if (meta2.role === 'assistant') {
           try {
@@ -7757,6 +7812,44 @@ app.get('/api/agent/search-health', authenticateUser, async (req, res) => {
   }
 });
 
+// POST /api/agent/chat/delete - 删除用户指定的对话（软删除，管理员仍可查看）
+app.post('/api/agent/chat/delete', authenticateUser, async (req, res) => {
+  try {
+    var userName = req.userName;
+    var convId = String(req.body && req.body.conversation_id || '').trim();
+    if (!convId) return res.status(400).json({ error: '缺少 conversation_id' });
+
+    // 查该 conv 的所有消息
+    var { data: rows } = await supabase.from('posts')
+      .select('id, media_url')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .filter('actor_key', 'like', 'ai_msg_conv_' + convId + '_%');
+
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return res.json({ ok: true, deleted: 0 });
+    }
+
+    // 逐条标记 deleted: true
+    var updated = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var meta = parseMsgMeta(rows[i]);
+      if (meta.deleted) continue; // 已删除
+      meta.deleted = true;
+      meta.deleted_at = new Date().toISOString();
+      var { error: upErr } = await supabase.from('posts')
+        .update({ media_url: JSON.stringify(meta) })
+        .eq('id', rows[i].id);
+      if (!upErr) updated++;
+    }
+
+    console.log('[AGENT-CONV] user=' + userName + ' deleted conv=' + convId + ' messages=' + updated);
+    return res.json({ ok: true, deleted: updated });
+  } catch (e) {
+    console.error('[AGENT-CONV] delete error:', e && e.message);
+    return res.status(500).json({ error: '删除失败' });
+  }
+});
 // POST /api/agent/chat/new - 开始新对话（生成新 conversation_id，不删除旧记录）
 app.post('/api/agent/chat/new', authenticateUser, async (req, res) => {
   return res.json({ ok: true, conversation_id: genConvId() });
@@ -7812,6 +7905,12 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       return res.status(500).json({ error: '查询失败' });
     }
 
+    // 过滤用户已删除的消息
+    var filteredRows = (rows || []).filter(function(r2) {
+      var meta = parseMsgMeta(r2);
+      return !(meta && meta.deleted);
+    });
+
     // 内存中稳定排序（created_at > seq > roleWeight）
     function getMsgSortKey(row) {
       var meta = parseMsgMeta(row);
@@ -7820,7 +7919,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
       var roleWeight = meta.role === 'user' ? 1 : 2;
       return { created: created, seq: seq, roleWeight: roleWeight };
     }
-    var sortedRows = (rows || []).slice().sort(function(a, b) {
+    var sortedRows = (filteredRows || []).slice().sort(function(a, b) {
       var A = getMsgSortKey(a);
       var B = getMsgSortKey(b);
       if (A.created !== B.created) return A.created - B.created;
@@ -7831,7 +7930,7 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
     return res.json({
       ok: true,
       conversation_id: convId,
-      has_more: (rows || []).length >= limit,
+      has_more: (filteredRows || []).length >= limit,
       oldest: sortedRows.length ? sortedRows[0].created_at : null,
       messages: sortedRows.map(function(r) {
         var m = parseMsgMeta(r);
