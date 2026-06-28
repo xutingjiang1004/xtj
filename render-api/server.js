@@ -854,17 +854,18 @@ async function finishStream(res, opt) {
   var usedModel = opt.usedModel || DEEPSEEK_MODEL_REASONER;
   var isComplete = finishReason === 'stop' || finishReason === 'length';
   var contentWasFiltered = rawContent.length > 0 && content !== rawContent;
+  var searchMeta = opt.searchMeta || null;
 
   // 有内容时尽量保存
   if (hasContent && opt.userName && opt.convId && opt.message) {
     try {
       var nowSave = Date.now();
-      var usageToStore = {
+      var usageToStore = Object.assign({}, opt.usage || {}, {
         thinking_mode: thinkingMode,
         model: usedModel,
         requested_thinking_mode: thinkingMode,
         applied_thinking_mode: useThinking ? thinkingMode : 'off'
-      };
+      });
       var seqUser = (opt.streamSeq || 0) + 1;
       var seqAssistant = (opt.streamSeq || 0) + 2;
       var userCreatedAt = new Date(nowSave).toISOString();
@@ -882,7 +883,7 @@ async function finishStream(res, opt) {
           user_name: opt.userName,
           content: content,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant),
+          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta),
           actor_key: 'ai_msg_conv_' + opt.convId + '_agent_' + opt.userName + '_' + (nowSave + 1),
           created_at: assistantCreatedAt
         }
@@ -911,7 +912,9 @@ async function finishStream(res, opt) {
     requested_thinking_mode: thinkingMode,
     applied_thinking_mode: useThinking ? thinkingMode : 'off',
     reasoning_length: reasoning.length,
-    content_length: content.length
+    content_length: content.length,
+    search_count: searchMeta ? searchMeta.count : undefined,
+    search_query: searchMeta ? searchMeta.query : undefined
   });
 
   console.log('[AGENT-STREAM] done finish_reason=', finishReason, 'complete=', isComplete, 'saved=', saved, 'content_len=', content.length);
@@ -941,6 +944,28 @@ function buildSearchQuery(message) {
     return ''; // 天气不走搜素
   }
   return cleaned.slice(0, 120);
+}
+
+function cleanSearchResults(results, maxCount) {
+  maxCount = maxCount || 15;
+  if (!Array.isArray(results)) return [];
+  var out = [];
+  var seen = {};
+  results.forEach(function(r) {
+    if (!r) return;
+    var u = (r.url || '').trim();
+    var t = (r.title || '').trim();
+    var s = (r.snippet || '').trim();
+    // 跳过完全没有内容的结果
+    if (!u && !t && !s) return;
+    // URL 去重
+    if (u && seen[u]) return;
+    if (u) seen[u] = true;
+    // 标题兜底
+    if (!t) t = (s || u || '').slice(0, 40);
+    out.push({ url: u, title: t, snippet: s, source: (r.source || 'web'), published_at: r.published_at || '' });
+  });
+  return out.slice(0, maxCount);
 }
 
 // ===================== Gmail SMTP 邮件配置 =====================
@@ -6057,11 +6082,15 @@ function resolveConvId(r) {
   return getConvIdFromActorKey(r.actor_key);
 }
 
-function buildMsgMeta(role, convId, usage, reasoning, seq) {
+function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta) {
   var obj = { role: role, convId: convId };
   if (usage) obj.usage = usage;
   if (reasoning) obj.reasoning = reasoning;
   if (typeof seq === 'number') obj.seq = seq;
+  if (searchMeta) {
+    if (searchMeta.count) obj.search_count = searchMeta.count;
+    if (searchMeta.query) obj.search_query = searchMeta.query;
+  }
   return JSON.stringify(obj);
 }
 
@@ -7337,6 +7366,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           if (sResults && sResults.length > 0 && sResults.length < 5) {
             sResults = await autoSupplementSearch(searchQuery, sResults, 20);
           }
+          sResults = cleanSearchResults(sResults, 20);
         } catch (e) { sResults = []; }
       }
       if (sResults && Array.isArray(sResults) && sResults.length) {
@@ -7363,7 +7393,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // ----- 多 Agent 协作：拆解问题 → 搜索 → 合成 -----
     // 需要管理员在后台开启 multi_agent，思考/非思考模式均可
     var multiAgentEnabled = config && config.model && config.model.multi_agent === true;
-    if (multiAgentEnabled && allowSearch && !aborted && messages.length > 0) {
+    // 思考模式下，先不阻塞stream，让 AI 立即开始思考，搜索并行进行
+    if (multiAgentEnabled && allowSearch && !aborted && messages.length > 0 && !useThinking) {
       var daMsg = [
         { role: 'system', content: '你是一个问题分析专家。你的任务是把用户的问题拆解成2-3个最适合联网搜索的关键词短语，每个短语独立、具体、可直接用于搜索引擎。只返回JSON数组，不要多余内容。格式：["关键词1", "关键词2", "关键词3"]' },
         { role: 'user', content: message }
@@ -7396,9 +7427,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               allResults = allResults.concat(searchResults[si]);
             }
             if (allResults.length > 0) {
-              // 去重
-              var seen = {};
-              allResults = allResults.filter(function(r) { var u = r.url || ''; if (!u || seen[u]) return false; seen[u] = true; return true; });
+              allResults = cleanSearchResults(allResults, 20);
               var maCtx = '【多Agent协作搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n拆解问题：' + message + '\n搜索关键词：' + searchQueries.join('、') + '\n\n' +
                 allResults.map(function(sr, idx) { return (idx + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
                 '\n\n要求：基于以上搜索结果回答用户问题。如果没有找到相关信息，如实告诉用户。';
@@ -7422,6 +7451,24 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var MAX_TOOL_ROUNDS = 3;
     var toolRound = 0;
     var roundMessages = messages;
+    // 跨轮次保留的推理内容（第一次流产生的，第二次流不会重复）
+    var persistentReasoning = '';
+    // 防止后置搜索重复触发
+    var _postSearchDone = false;
+    // 并行搜索：不阻塞stream，让思考立即开始，搜索异步进行
+    var parallelSearchPromise = null;
+    var parallelSearchResults = null;
+    if (useThinking && allowSearch && !aborted && message.trim().length > 3) {
+      var _psQuery = message.slice(0, 80);
+      parallelSearchPromise = searchWeb(_psQuery, 10).then(function(sr) {
+        if (sr && Array.isArray(sr.results) && sr.results.length > 0) {
+          var _psR = cleanSearchResults(sr.results, 8);
+          if (_psR.length > 0) {
+            parallelSearchResults = { query: _psQuery, results: _psR };
+          }
+        }
+      }).catch(function() {});
+    }
 
     var apiBody = {
       model: usedModel,
@@ -7484,7 +7531,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var buffer = '';
     var usageInStream = null;
     var hasReasoningContent = false;
-    var reasoningBuffer = '';
+    var reasoningBuffer = persistentReasoning || '';
     var contentBuffer = '';
     var reasoningSent = false;
     var pendingToolCalls = {};
@@ -7505,17 +7552,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           if (contentBuffer && contentBuffer.length > 0) {
             await finishStream(res, {
               contentBuffer: contentBuffer,
-              reasoningBuffer: reasoningBuffer,
-              thinkingMode: thinkingMode,
-              useThinking: useThinking,
-              usedModel: usedModel,
-              finishReason: 'idle_timeout',
-              userName: userName,
-              convId: convId,
-              message: message,
-              streamSeq: streamSeq,
-              memoryData: memoryData,
-              ctx: ctx
+              reasoningBuffer: persistentReasoning || reasoningBuffer,
+                  thinkingMode: thinkingMode,
+                  useThinking: useThinking,
+                  usedModel: usedModel,
+                  finishReason: 'idle_timeout',
+                  userName: userName,
+                  convId: convId,
+                  message: message,
+                  streamSeq: streamSeq,
+                  memoryData: memoryData,
+                  ctx: ctx
             });
           } else {
             writeSse(res, { type: 'error', error: 'AI 回复超时（20 秒无响应），请重试' });
@@ -7549,6 +7596,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         if (delta.reasoning_content) {
           hasReasoningContent = true;
           reasoningBuffer += delta.reasoning_content;
+          persistentReasoning += delta.reasoning_content;
           if (thinkingMode !== 'off') {
             if (!reasoningSent) {
               res.write('data: ' + JSON.stringify({ type: 'reasoning_start' }) + '\n\n');
@@ -7586,13 +7634,14 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           // 思考模式下：检查 reasoning 是否提到需要搜索，且此前未注入搜索结果
           var needsPostSearch = false;
           var postSearchKeyword = '';
-          if (useThinking && allowSearch && reasoningBuffer && reasoningBuffer.length > 50 && !aborted) {
+          if (useThinking && allowSearch && reasoningBuffer && reasoningBuffer.length > 50 && !aborted && !_postSearchDone) {
             var hasSearched = roundMessages.some(function(mm) {
-              return mm.role === 'system' && typeof mm.content === 'string' && (mm.content.indexOf('【联网搜索结果】') >= 0 || mm.content.indexOf('【多Agent协作搜索结果】') >= 0);
+              return mm.role === 'system' && typeof mm.content === 'string' && (mm.content.indexOf('【联网搜索结果】') >= 0 || mm.content.indexOf('【多Agent协作搜索结果】') >= 0 || mm.content.indexOf('【联网搜索结果（思考后补充检索）】') >= 0);
             }) || roundMessages.some(function(mm) { return mm.role === 'tool' && mm.content && mm.content.indexOf('search_results') >= 0; });
             if (!hasSearched && /搜索|查|查询|需要(联网|搜索)|应该(搜索|查)|让我(搜|查|百度|google|谷歌)|我没有搜|没(有|找到)|搜不到|查不到|没有(搜索|查到)/i.test(reasoningBuffer)) {
                // 从 reasoning 中提取搜索关键词
-               var rpParts = reasoningBuffer.split(/[\n。！？；]/);
+              postSearchKeyword = message.slice(0, 80);
+              var rpParts = reasoningBuffer.split(/[\n。！？；]/);
               var rpLine = '';
               for (var rppi = rpParts.length - 1; rppi >= 0; rppi--) {
                 if (/搜索|搜|查|百度|google|谷歌/.test(rpParts[rppi])) {
@@ -7600,39 +7649,94 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   break;
                 }
               }
-              postSearchKeyword = (rpLine || message).replace(/^(?:搜索|查一下|搜一下|百度|google|谷歌|查询|需要|应该|让我)\s*/i, '').trim().slice(0, 80);
+              var searchIntent = (rpLine || '');
+              // 递归去除前缀中的搜索元语言，直到内容稳定
+              while (true) {
+                var _prev = searchIntent;
+                searchIntent = searchIntent.replace(/^(?:搜索|搜一下|查一下|搜|查|百度|google|谷歌|查询|需要|应该|让我|让我先|先|去|来|再)\s*/i, '').trim();
+                if (searchIntent === _prev) break;
+              }
+              searchIntent = searchIntent.slice(0, 60);
+              if (searchIntent.length >= 3 && searchIntent.length < 25 && !/^(一下|相关|信息|资料|情况|内容|数据|东西|这个|那个|这些|那些|相关(的)?信息|说明|介绍|是否|什么|怎么|如何|有哪些|有没有|有|没有|的|了|在)$/i.test(searchIntent)) {
+                postSearchKeyword = (message + ' ' + searchIntent).slice(0, 80);
+              } else {
+                postSearchKeyword = message.slice(0, 80);
+              }
               if (postSearchKeyword.length >= 3) needsPostSearch = true;
             }
           }
           if (needsPostSearch) {
-            // 执行搜索，然后继续 toolRound 让 AI 重新生成回答
+            // ★ 先检查并行搜索（思考期间异步进行）是否已有结果
+            if (parallelSearchPromise) {
+              try {
+                var _par = await parallelSearchPromise;
+              } catch (e) {}
+            }
+            if (parallelSearchResults && parallelSearchResults.results && parallelSearchResults.results.length > 0 && !_postSearchDone) {
+              // 并行搜索已有结果，直接注入，无需再调 searchWeb
+              var psResults2 = parallelSearchResults.results;
+              var pCtx2 = '【联网搜索结果（思考后补充检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + parallelSearchResults.query + '\n\n' +
+                psResults2.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
+                '\n\n要求：必须优先使用以上搜索结果回答。不能编造。';
+              roundMessages.push({ role: 'system', content: pCtx2 });
+              res.write('data: ' + JSON.stringify({ type: 'search', count: psResults2.length, results: psResults2, query: parallelSearchResults.query }) + '\n\n');
+              res.write('data: ' + JSON.stringify({ type: 'search_supplement', query: parallelSearchResults.query }) + '\n\n');
+              _postSearchDone = true;
+              finishReason = 'post_reasoning_search';
+              console.log('[AGENT-STREAM] parallel search completed during thinking, injected results');
+            } else {
+            // 并行搜索未完成或无结果，fallback 到常规后置搜索
+            // ★ 先保存第一轮生成的内容（不发送done事件），再触发补充搜索
+            if (!aborted && contentBuffer.length > 2 && userName && convId && message) {
+              try {
+                var _now1 = Date.now();
+                var _usage1 = Object.assign({}, usageInStream || {}, { thinking_mode: thinkingMode, model: usedModel });
+                await supabase.from('posts').insert([
+                  { user_name: userName, content: message, media_type: AI_AGENT_MESSAGE_MARKER,
+                    media_url: buildMsgMeta('user', convId, null, null, (streamSeq || 0) + 1),
+                    actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + _now1,
+                    created_at: new Date(_now1).toISOString() },
+                  { user_name: userName, content: sanitizeAssistantVisibleText(contentBuffer), media_type: AI_AGENT_MESSAGE_MARKER,
+                    media_url: buildMsgMeta('assistant', convId, _usage1, persistentReasoning || reasoningBuffer, (streamSeq || 0) + 2),
+                    actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (_now1 + 1),
+                    created_at: new Date(_now1 + 1).toISOString() }
+                ]);
+                console.log('[AGENT-STREAM] saved first round before post-search, userName:', userName, 'convId:', String(convId).slice(0, 8), 'content_len:', contentBuffer.length);
+              } catch (_sve) {
+                console.error('[AGENT-STREAM] save first round failed:', _sve && _sve.message);
+              }
+            }
+            // 执行搜索
             try {
               var psSr = await searchWeb(postSearchKeyword, 15);
               if (psSr && Array.isArray(psSr.results) && psSr.results.length > 0) {
-                var psResults = psSr.results.slice(0, 15);
+                var psResults = cleanSearchResults(psSr.results, 15);
                 var psCtx = '【联网搜索结果（思考后补充检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + postSearchKeyword + '\n\n' +
                   psResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
                   '\n\n要求：必须优先使用以上搜索结果回答。不能编造。';
                 roundMessages.push({ role: 'system', content: psCtx });
                 res.write('data: ' + JSON.stringify({ type: 'search', count: psResults.length, results: psResults, query: postSearchKeyword }) + '\n\n');
-                // 模拟 tool_calls 以触发外层循环重启 stream
+                // 通知前端搜索中，不清除已有思考过程
+                res.write('data: ' + JSON.stringify({ type: 'search_supplement', query: postSearchKeyword }) + '\n\n');
+                _postSearchDone = true;
                 finishReason = 'post_reasoning_search';
-                // 告诉前端清除之前不完整的内容，以干净状态重启
-                res.write('data: ' + JSON.stringify({ type: 'restart', reason: 'AI在思考后决定补充搜索' }) + '\n\n');
               }
             } catch (e) {
               try { console.warn('[POST-REASONING-SEARCH] error:', e && e.message); } catch(ee) {}
             }
+            } // end else (fallback to normal post-search)
           }
           if (finishReason === 'stop' || finishReason === 'length') {
             // 正常收尾，没有触发后置搜索
             if (!aborted) {
               var finishOpt = {
                 contentBuffer: contentBuffer,
-                reasoningBuffer: reasoningBuffer,
+                reasoningBuffer: persistentReasoning || reasoningBuffer,
                 thinkingMode: thinkingMode,
                 useThinking: useThinking,
                 usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
+                usage: usageInStream || null,
+                searchMeta: { count: sResults.length, query: searchQuery },
                 finishReason: finish,
                 userName: userName,
                 convId: convId,
@@ -7685,8 +7789,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       toolRound++;
        // 后续轮次不再走思考模式，直接让模型用已有的思考+结果生成回答
        if (useThinking) {
-         delete apiBody.thinking;
-         delete apiBody.reasoning_effort;
+         var freshMsgs = roundMessages.slice();
+         apiBody = {
+           model: usedModel,
+           messages: freshMsgs,
+           stream: true
+         };
+         if (allowSearch) {
+           apiBody.tools = AI_TOOLS;
+         }
        }
        continue;
     }
@@ -7694,9 +7805,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // 后置搜索触发：思考结束后补充搜索并重新生成回答
     if (finishReason === 'post_reasoning_search' && !aborted) {
       toolRound++;
-      if (useThinking) {
-        delete apiBody.thinking;
-        delete apiBody.reasoning_effort;
+      // 用新消息数组重建 apiBody（第二路不走思考模式）
+      var freshMessages = roundMessages.slice();
+      apiBody = {
+        model: usedModel,
+        messages: freshMessages,
+        stream: true
+      };
+      if (allowSearch) {
+        apiBody.tools = AI_TOOLS;
       }
       continue;
     }
@@ -7713,7 +7830,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } else {
         await finishStream(res, {
           contentBuffer: contentBuffer,
-          reasoningBuffer: reasoningBuffer,
+          reasoningBuffer: persistentReasoning || reasoningBuffer,
           thinkingMode: thinkingMode,
           useThinking: useThinking,
           usedModel: usedModel,
@@ -7742,7 +7859,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       if (contentBuffer && contentBuffer.length > 0 && !aborted) {
         await finishStream(res, {
           contentBuffer: contentBuffer,
-          reasoningBuffer: reasoningBuffer,
+          reasoningBuffer: persistentReasoning || reasoningBuffer,
           thinkingMode: thinkingMode,
           useThinking: useThinking,
           usedModel: usedModel,
@@ -8035,7 +8152,9 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           reasoning: reasoning,
           created_at: r.created_at,
           conversation_id: m.convId || convId,
-          usage: m.usage || null
+          usage: m.usage || null,
+          search_count: m.search_count || 0,
+          search_query: m.search_query || ''
         };
       })
     });
@@ -8526,7 +8645,9 @@ app.get('/admin/ai-agent/conversations', verifyToken, async (req, res) => {
         reasoning: meta.reasoning || '',
         created_at: r.created_at,
         usage: meta.usage || null,
-        conversation_id: meta.convId || null
+        conversation_id: meta.convId || null,
+        search_count: meta.search_count || 0,
+        search_query: meta.search_query || ''
       });
       if (meta.role === 'assistant' && meta.usage) {
         var x = meta.usage;
@@ -8620,7 +8741,9 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
         content: r.content || '',
         reasoning: meta.reasoning || '',
         created_at: r.created_at,
-        usage: meta.usage || null
+        usage: meta.usage || null,
+        search_count: meta.search_count || 0,
+        search_query: meta.search_query || ''
       };
     });
 
@@ -8628,13 +8751,7 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
       ok: true,
       user_name: targetUser,
       conversation_id: convId,
-      messages: (rows || []).map(function(r) {
-        var meta = parseMsgMeta(r);
-        return {
-          id: r.id, role: meta.role || 'user', content: r.content || '',
-          created_at: r.created_at, usage: meta.usage || null
-        };
-      })
+      messages: msgs
     });
   } catch (e) {
     console.error('[ADMIN-AI] GET conversation exception:', e.message);
