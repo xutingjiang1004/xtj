@@ -7095,14 +7095,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       { role: 'system', content: '【当前时间】现在是北京时间：' + _currentDateCN + '。ISO 时间：' + _currentDateISO + '。回答"今天、现在、最新、刚刚、当前"等问题时，必须以这个时间为准。不能编造其他日期。如果搜索结果与当前日期不一致，要明确指出可能是旧内容。' }
     ];
     
-    // 用户长期记忆
-    var memoryData = await loadAiMemoryBox(userName);
+    // 用户长期记忆 + 相关历史摘要（并行）
+    var [memoryData, relevantSummaries] = await Promise.all([
+      loadAiMemoryBox(userName),
+      loadRelevantConversationSummaries(userName, message, 3)
+    ]);
     if (memoryData.compressedText) {
       messages.push({ role: 'system', content: memoryData.compressedText + '\n【说明】这些是用户长期记忆，帮助更好理解用户偏好。如果记忆与用户当前说法不一致，以当前说法为准。' });
     }
     
-    // 相关历史摘要
-    var relevantSummaries = await loadRelevantConversationSummaries(userName, message, 3);
     if (relevantSummaries && relevantSummaries.length) {
       messages.push({ role: 'system', content: '【相关历史摘要】\n' + relevantSummaries.join('\n---\n') });
     }
@@ -7340,7 +7341,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // 如果 FC 没启用或没触发 tool_calls，回退旧正则搜索注入
-    if (!hasCalledTools && !aborted && allowSearch && !weatherResult) {
+    if (!hasCalledTools && !aborted && allowSearch && !weatherResult && !useThinking) {
       var needsSearch = /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分|搜索|查一下|搜一下|查询|景点|旅游|攻略|推荐|怎么样|好不好|评价|评测|价格表/i.test(message);
 
       // 构建搜索关键词
