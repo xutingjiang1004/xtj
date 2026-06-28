@@ -43,7 +43,7 @@ function isRecipientAllowed(to) {
 let sendFn = null;
 
 async function initProvider() {
-  if (sendFn) return;
+  if (sendFn && PROVIDER !== "smtp") return;
   if (PROVIDER === "sendgrid") {
     const sgMail = (await import("@sendgrid/mail")).default;
     if (!process.env.SENDGRID_API_KEY) throw new Error("需要 SENDGRID_API_KEY");
@@ -51,9 +51,12 @@ async function initProvider() {
     sendFn = async (o) => { await sgMail.send({ to: o.to, from: { email: FROM_EMAIL, name: FROM_NAME }, subject: o.subject, text: o.text, html: o.html }); };
   } else if (PROVIDER === "smtp") {
     const nodemailer = (await import("nodemailer")).default;
-    const t = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: parseInt(process.env.SMTP_PORT||"587"), secure: process.env.SMTP_PORT==="465", auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
-    await t.verify();
-    sendFn = async (o) => { await t.sendMail({ from: `"${FROM_NAME}" <${FROM_EMAIL}>`, to: o.to, subject: o.subject, text: o.text, html: o.html }); };
+    sendFn = async (o) => {
+      const t = nodemailer.createTransport({ host: process.env.SMTP_HOST, port: parseInt(process.env.SMTP_PORT||"587"), secure: process.env.SMTP_PORT==="465", auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } });
+      await t.verify();
+      await t.sendMail({ from: `"${FROM_NAME}" <${FROM_EMAIL}>`, to: o.to, subject: o.subject, text: o.text, html: o.html });
+      await t.close();
+    };
   } else throw new Error(`不支持: ${PROVIDER}`);
 }
 
