@@ -5663,6 +5663,10 @@ async function initAdminClient() {
                 var label = role === 'assistant' ? 'AI' : escapeHtml(_aiAdminConvUser);
                 var time = m.created_at ? new Date(m.created_at).toLocaleString() : '';
                 html.push('<div class="msg-row ' + role + '">');
+                // 思考过程（如果有）
+                if (m.reasoning) {
+                    html.push('<details style="font-size:11px;margin-bottom:4px;opacity:0.7;"><summary style="cursor:pointer;user-select:none;color:var(--text-muted);">思考过程</summary><pre style="white-space:pre-wrap;word-break:break-word;margin:4px 0 0 0;padding:6px;background:rgba(0,0,0,0.03);border-radius:4px;font-size:11px;line-height:1.5;max-height:300px;overflow-y:auto;">' + escapeHtml(m.reasoning) + '</pre></details>');
+                }
                 html.push('<div><div class="msg-bubble">' + escapeHtml(m.content || '') + '</div>');
                 html.push('<div class="msg-time">' + label + ' · ' + time + '</div>');
                 // token 信息
