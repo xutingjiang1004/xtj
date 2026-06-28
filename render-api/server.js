@@ -7453,8 +7453,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var roundMessages = messages;
     // 跨轮次保留的推理内容（第一次流产生的，第二次流不会重复）
     var persistentReasoning = '';
-    // 防止后置搜索重复触发
-    var _postSearchDone = false;
     // 并行搜索：不阻塞stream，让思考立即开始，搜索异步进行
     var parallelSearchPromise = null;
     var parallelSearchResults = null;
@@ -7628,133 +7626,55 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           finishReason = 'tool_calls';
           break;
         }
-        
-        if (finish === 'stop' || finish === 'length') {
+                if (finish === 'stop' || finish === 'length') {
           finishReason = finish;
-          // 思考模式下：检查 reasoning 是否提到需要搜索，且此前未注入搜索结果
-          var needsPostSearch = false;
-          var postSearchKeyword = '';
-          if (useThinking && allowSearch && reasoningBuffer && reasoningBuffer.length > 50 && !aborted && !_postSearchDone) {
-            var hasSearched = roundMessages.some(function(mm) {
-              return mm.role === 'system' && typeof mm.content === 'string' && (mm.content.indexOf('【联网搜索结果】') >= 0 || mm.content.indexOf('【多Agent协作搜索结果】') >= 0 || mm.content.indexOf('【联网搜索结果（思考后补充检索）】') >= 0);
-            }) || roundMessages.some(function(mm) { return mm.role === 'tool' && mm.content && mm.content.indexOf('search_results') >= 0; });
-            if (!hasSearched && /搜索|查|查询|需要(联网|搜索)|应该(搜索|查)|让我(搜|查|百度|google|谷歌)|我没有搜|没(有|找到)|搜不到|查不到|没有(搜索|查到)/i.test(reasoningBuffer)) {
-               // 从 reasoning 中提取搜索关键词
-              postSearchKeyword = message.slice(0, 80);
-              var rpParts = reasoningBuffer.split(/[\n。！？；]/);
-              var rpLine = '';
-              for (var rppi = rpParts.length - 1; rppi >= 0; rppi--) {
-                if (/搜索|搜|查|百度|google|谷歌/.test(rpParts[rppi])) {
-                  rpLine = rpParts[rppi].trim().slice(0, 100);
-                  break;
+          // 直接收尾，不重新搜索不重新生成
+          if (!aborted) {
+            // 检查并行搜索结果，有则注入（fire-and-forget 思考期间已完成）
+            if (useThinking && allowSearch && parallelSearchPromise) {
+              try { await parallelSearchPromise; } catch (_e) {}
+              if (parallelSearchResults && parallelSearchResults.results && parallelSearchResults.results.length > 0) {
+                var hasSearched = roundMessages.some(function(mm) {
+                  return mm.role === 'system' && typeof mm.content === 'string' && 
+                    (mm.content.indexOf('【联网搜索结果】') >= 0 || mm.content.indexOf('【多Agent协作搜索结果】') >= 0);
+                });
+                if (!hasSearched) {
+                  var _pCtx = '【联网搜索结果（思考并行检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + parallelSearchResults.query + '\n\n' +
+                    parallelSearchResults.results.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n');
+                  roundMessages.push({ role: 'system', content: _pCtx });
+                  res.write('data: ' + JSON.stringify({ type: 'search', count: parallelSearchResults.results.length, results: parallelSearchResults.results, query: parallelSearchResults.query }) + '\n\n');
+                  console.log('[AGENT-STREAM] parallel search results injected (no restart)');
                 }
               }
-              var searchIntent = (rpLine || '');
-              // 递归去除前缀中的搜索元语言，直到内容稳定
-              while (true) {
-                var _prev = searchIntent;
-                searchIntent = searchIntent.replace(/^(?:搜索|搜一下|查一下|搜|查|百度|google|谷歌|查询|需要|应该|让我|让我先|先|去|来|再)\s*/i, '').trim();
-                if (searchIntent === _prev) break;
-              }
-              searchIntent = searchIntent.slice(0, 60);
-              if (searchIntent.length >= 3 && searchIntent.length < 25 && !/^(一下|相关|信息|资料|情况|内容|数据|东西|这个|那个|这些|那些|相关(的)?信息|说明|介绍|是否|什么|怎么|如何|有哪些|有没有|有|没有|的|了|在)$/i.test(searchIntent)) {
-                postSearchKeyword = (message + ' ' + searchIntent).slice(0, 80);
-              } else {
-                postSearchKeyword = message.slice(0, 80);
-              }
-              if (postSearchKeyword.length >= 3) needsPostSearch = true;
             }
+            // 构建 searchMeta：优先用 regex 搜索结果，次之并行搜索结果
+            var _searchMeta = sResults ? { count: sResults.length, query: searchQuery } : null;
+            if (!_searchMeta && parallelSearchResults) {
+              _searchMeta = { count: parallelSearchResults.results.length, query: parallelSearchResults.query };
+            }
+            var finishOpt = {
+              contentBuffer: contentBuffer,
+              reasoningBuffer: persistentReasoning || reasoningBuffer,
+              thinkingMode: thinkingMode,
+              useThinking: useThinking,
+              usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
+              usage: usageInStream || null,
+              searchMeta: _searchMeta,
+              finishReason: finish,
+              userName: userName,
+              convId: convId,
+              message: message,
+              streamSeq: streamSeq,
+              memoryData: memoryData,
+              ctx: ctx
+            };
+            await finishStream(res, finishOpt);
           }
-          if (needsPostSearch) {
-            // ★ 先检查并行搜索（思考期间异步进行）是否已有结果
-            if (parallelSearchPromise) {
-              try {
-                var _par = await parallelSearchPromise;
-              } catch (e) {}
-            }
-            if (parallelSearchResults && parallelSearchResults.results && parallelSearchResults.results.length > 0 && !_postSearchDone) {
-              // 并行搜索已有结果，直接注入，无需再调 searchWeb
-              var psResults2 = parallelSearchResults.results;
-              var pCtx2 = '【联网搜索结果（思考后补充检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + parallelSearchResults.query + '\n\n' +
-                psResults2.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
-                '\n\n要求：必须优先使用以上搜索结果回答。不能编造。';
-              roundMessages.push({ role: 'system', content: pCtx2 });
-              res.write('data: ' + JSON.stringify({ type: 'search', count: psResults2.length, results: psResults2, query: parallelSearchResults.query }) + '\n\n');
-              res.write('data: ' + JSON.stringify({ type: 'search_supplement', query: parallelSearchResults.query }) + '\n\n');
-              _postSearchDone = true;
-              finishReason = 'post_reasoning_search';
-              console.log('[AGENT-STREAM] parallel search completed during thinking, injected results');
-            } else {
-            // 并行搜索未完成或无结果，fallback 到常规后置搜索
-            // ★ 先保存第一轮生成的内容（不发送done事件），再触发补充搜索
-            if (!aborted && contentBuffer.length > 2 && userName && convId && message) {
-              try {
-                var _now1 = Date.now();
-                var _usage1 = Object.assign({}, usageInStream || {}, { thinking_mode: thinkingMode, model: usedModel });
-                await supabase.from('posts').insert([
-                  { user_name: userName, content: message, media_type: AI_AGENT_MESSAGE_MARKER,
-                    media_url: buildMsgMeta('user', convId, null, null, (streamSeq || 0) + 1),
-                    actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + _now1,
-                    created_at: new Date(_now1).toISOString() },
-                  { user_name: userName, content: sanitizeAssistantVisibleText(contentBuffer), media_type: AI_AGENT_MESSAGE_MARKER,
-                    media_url: buildMsgMeta('assistant', convId, _usage1, persistentReasoning || reasoningBuffer, (streamSeq || 0) + 2),
-                    actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (_now1 + 1),
-                    created_at: new Date(_now1 + 1).toISOString() }
-                ]);
-                console.log('[AGENT-STREAM] saved first round before post-search, userName:', userName, 'convId:', String(convId).slice(0, 8), 'content_len:', contentBuffer.length);
-              } catch (_sve) {
-                console.error('[AGENT-STREAM] save first round failed:', _sve && _sve.message);
-              }
-            }
-            // 执行搜索
-            try {
-              var psSr = await searchWeb(postSearchKeyword, 15);
-              if (psSr && Array.isArray(psSr.results) && psSr.results.length > 0) {
-                var psResults = cleanSearchResults(psSr.results, 15);
-                var psCtx = '【联网搜索结果（思考后补充检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + postSearchKeyword + '\n\n' +
-                  psResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
-                  '\n\n要求：必须优先使用以上搜索结果回答。不能编造。';
-                roundMessages.push({ role: 'system', content: psCtx });
-                res.write('data: ' + JSON.stringify({ type: 'search', count: psResults.length, results: psResults, query: postSearchKeyword }) + '\n\n');
-                // 通知前端搜索中，不清除已有思考过程
-                res.write('data: ' + JSON.stringify({ type: 'search_supplement', query: postSearchKeyword }) + '\n\n');
-                _postSearchDone = true;
-                finishReason = 'post_reasoning_search';
-              }
-            } catch (e) {
-              try { console.warn('[POST-REASONING-SEARCH] error:', e && e.message); } catch(ee) {}
-            }
-            } // end else (fallback to normal post-search)
-          }
-          if (finishReason === 'stop' || finishReason === 'length') {
-            // 正常收尾，没有触发后置搜索
-            if (!aborted) {
-              var finishOpt = {
-                contentBuffer: contentBuffer,
-                reasoningBuffer: persistentReasoning || reasoningBuffer,
-                thinkingMode: thinkingMode,
-                useThinking: useThinking,
-                usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
-                usage: usageInStream || null,
-                searchMeta: { count: sResults.length, query: searchQuery },
-                finishReason: finish,
-                userName: userName,
-                convId: convId,
-                message: message,
-                streamSeq: streamSeq,
-                memoryData: memoryData,
-                ctx: ctx
-              };
-              await finishStream(res, finishOpt);
-            }
-            return safeEnd();
-          }
-          // 触发了后置搜索，break 让外层循环重启 stream
-          break;
+          return safeEnd();
         }
+
       }
       if (finishReason === 'tool_calls') break;
-      if (finishReason === 'post_reasoning_search') break;
     }
     
     // 处理 tool calls
@@ -7800,22 +7720,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
          }
        }
        continue;
-    }
-    
-    // 后置搜索触发：思考结束后补充搜索并重新生成回答
-    if (finishReason === 'post_reasoning_search' && !aborted) {
-      toolRound++;
-      // 用新消息数组重建 apiBody（第二路不走思考模式）
-      var freshMessages = roundMessages.slice();
-      apiBody = {
-        model: usedModel,
-        messages: freshMessages,
-        stream: true
-      };
-      if (allowSearch) {
-        apiBody.tools = AI_TOOLS;
-      }
-      continue;
     }
     
     // 流意外结束但没收到 finish_reason
