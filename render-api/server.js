@@ -323,7 +323,7 @@ async function searchTavily(query, maxResults) {
       body: JSON.stringify({
         api_key: apiKey,
         query: query,
-        max_results: Math.min(maxResults || 5, 10),
+        max_results: Math.min(maxResults || 5, 20),
         search_depth: 'basic',
         include_answer: false
       }),
@@ -392,7 +392,7 @@ async function searchSerper(query, maxResults) {
     var resp = await fetch('https://google.serper.dev/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': apiKey },
-      body: JSON.stringify({ q: query, num: Math.min(maxResults || 5, 10) }),
+      body: JSON.stringify({ q: query, num: Math.min(maxResults || 5, 20) }),
       signal: AbortSignal.timeout(10000)
     });
     if (!resp.ok) return { results: [], error: 'Serper status=' + resp.status };
@@ -957,7 +957,7 @@ function buildSearchQuery(message) {
 }
 
 function cleanSearchResults(results, maxCount) {
-  maxCount = maxCount || 15;
+  maxCount = maxCount || 25;
   if (!Array.isArray(results)) return [];
   var out = [];
   var seen = {};
@@ -7255,7 +7255,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 var expandedQueries = generateExpandedQueries(message, allQueries, 3);
                 expandedQueries.forEach(function(eq) {
                   parallelTasks.push(
-                    searchWeb(eq, 10).then(function(sr) {
+                    searchWeb(eq, 20).then(function(sr) {
                       return (sr && sr.results) || [];
                     })
                   );
@@ -7378,11 +7378,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           }
           sResults = cleanSearchResults(sResults, 20);
         } catch (e) { sResults = []; }
+        _sharedSearchMeta = sResults && sResults.length > 0 ? { count: sResults.length, query: searchQuery } : null;
       }
       if (sResults && Array.isArray(sResults) && sResults.length) {
         var sCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + searchQuery + '\n\n' +
           sResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
-          '\n\n要求：必须优先使用以上搜索结果回答。不能编造新闻、价格、天气、日期。';
+          '\n\n要求：必须优先使用以上搜索结果回答。不要在回答中列出来源、链接、网址等参考信息，直接给出答案内容即可。不能编造新闻、价格、天气、日期。';
         messages.push({ role: 'system', content: sCtx });
         res.write('data: ' + JSON.stringify({ type: 'search', count: sResults.length, results: sResults, diagnostics: sDiag || null, query: searchQuery }) + '\n\n');
       } else if (needsSearch) {
@@ -7399,6 +7400,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         }
       }
     }
+
+    // 共享搜索结果元数据（跨所有 finishStream 路径：正常、超时、错误）
+    var _sharedSearchMeta = null;
 
     // ----- 多 Agent 协作：拆解问题 → 搜索 → 合成 -----
     // 需要管理员在后台开启 multi_agent，思考/非思考模式均可
@@ -7428,8 +7432,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             var allResults = [];
             res.write('data: ' + JSON.stringify({ type: 'multi_agent', action: 'searching', queries: searchQueries }) + '\n\n');
             var searchPromises = searchQueries.map(function(q) {
-              return searchWeb(String(q).trim(), 10).then(function(sr) {
-                return (sr && Array.isArray(sr.results) ? sr.results : []).slice(0, 5);
+              return searchWeb(String(q).trim(), 20).then(function(sr) {
+                return (sr && Array.isArray(sr.results) ? sr.results : []).slice(0, 20);
               }).catch(function() { return []; });
             });
             var searchResults = await Promise.all(searchPromises);
@@ -7440,8 +7444,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               allResults = cleanSearchResults(allResults, 20);
               var maCtx = '【多Agent协作搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n拆解问题：' + message + '\n搜索关键词：' + searchQueries.join('、') + '\n\n' +
                 allResults.map(function(sr, idx) { return (idx + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
-                '\n\n要求：基于以上搜索结果回答用户问题。如果没有找到相关信息，如实告诉用户。';
+                '\n\n要求：基于以上搜索结果回答。不要在回答中列出来源、链接、网址等参考信息，直接给出答案内容即可。';
               messages.push({ role: 'system', content: maCtx });
+              _sharedSearchMeta = { count: allResults.length, query: message };
               res.write('data: ' + JSON.stringify({ type: 'search', count: allResults.length, results: allResults.slice(0, 20), query: message }) + '\n\n');
             }
           }
@@ -7454,6 +7459,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var content = '';
     var reasoning = '';
     var usageResult = null;
+    var _toolSearchMeta = null;
 
     // 调用 DeepSeek（流式）
     if (aborted) return safeEnd();
@@ -7468,9 +7474,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var parallelSearchResults = null;
     if (useThinking && allowSearch && !aborted && message.trim().length > 3) {
       var _psQuery = message.slice(0, 80);
-      parallelSearchPromise = searchWeb(_psQuery, 10).then(function(sr) {
+      parallelSearchPromise = searchWeb(_psQuery, 20).then(function(sr) {
         if (sr && Array.isArray(sr.results) && sr.results.length > 0) {
-          var _psR = cleanSearchResults(sr.results, 8);
+          var _psR = cleanSearchResults(sr.results, 20);
           if (_psR.length > 0) {
             parallelSearchResults = { query: _psQuery, results: _psR };
           }
@@ -7564,6 +7570,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   thinkingMode: thinkingMode,
                   useThinking: useThinking,
                   usedModel: usedModel,
+                  searchMeta: _toolSearchMeta || _sharedSearchMeta,
                   finishReason: 'idle_timeout',
                   userName: userName,
                   convId: convId,
@@ -7650,7 +7657,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 });
                 if (!hasSearched) {
                   var _pCtx = '【联网搜索结果（思考并行检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + parallelSearchResults.query + '\n\n' +
-                    parallelSearchResults.results.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n');
+                    parallelSearchResults.results.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
+                    '\n\n要求：基于以上搜索结果回答。不要在回答中列出来源、链接、网址等参考信息，直接给出答案内容即可。不能编造新闻、价格、天气、日期。';
                   roundMessages.push({ role: 'system', content: _pCtx });
                   res.write('data: ' + JSON.stringify({ type: 'search', count: parallelSearchResults.results.length, results: parallelSearchResults.results, query: parallelSearchResults.query }) + '\n\n');
                   console.log('[AGENT-STREAM] parallel search results injected (no restart)');
@@ -7658,10 +7666,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               }
             }
             // 构建 searchMeta：优先用 regex 搜索结果，次之并行搜索结果
-            var _searchMeta = sResults ? { count: sResults.length, query: searchQuery } : null;
-            if (!_searchMeta && parallelSearchResults) {
-              _searchMeta = { count: parallelSearchResults.results.length, query: parallelSearchResults.query };
-            }
+            var _searchMeta = _sharedSearchMeta || _toolSearchMeta || (parallelSearchResults ? { count: parallelSearchResults.results.length, query: parallelSearchResults.query } : null);
             var finishOpt = {
               contentBuffer: contentBuffer,
               reasoningBuffer: persistentReasoning || reasoningBuffer,
@@ -7702,6 +7707,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       for (var ti = 0; ti < toolCallsArr.length; ti++) {
         var tcExec = { function: { name: toolCallsArr[ti].name, arguments: toolCallsArr[ti].args } };
         var toolResult = await executeToolCall(tcExec);
+        
+        // 捕获 search_web 工具的搜索结果元数据
+        if (toolResult.tool_name === 'search_web' && !toolResult.error && toolResult.results_count > 0) {
+          _toolSearchMeta = { count: toolResult.results_count, query: toolResult.query || toolCallsArr[ti].name };
+        }
         
         res.write('data: ' + JSON.stringify({
           type: 'tool_result',
@@ -7748,6 +7758,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           thinkingMode: thinkingMode,
           useThinking: useThinking,
           usedModel: usedModel,
+          searchMeta: _toolSearchMeta || _sharedSearchMeta,
           finishReason: 'upstream_closed',
           userName: userName,
           convId: convId,
@@ -7777,6 +7788,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           thinkingMode: thinkingMode,
           useThinking: useThinking,
           usedModel: usedModel,
+          searchMeta: _toolSearchMeta || _sharedSearchMeta,
           finishReason: 'upstream_read_error',
           userName: userName,
           convId: convId,
