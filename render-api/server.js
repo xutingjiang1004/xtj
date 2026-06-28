@@ -98,12 +98,12 @@ const AI_TOOLS = [
     type: 'function',
     function: {
       name: 'search_web',
-      description: '搜索网络获取实时信息。当你需要查询新闻、资讯、实时数据、攻略、路线、政策、价格、百科知识等用户问题中涉及的最新信息时使用。如果用户已经提到某个话题但你需要更多上下文，也使用这个工具。',
+      description: '搜索网络获取实时信息。如果用户的问题比较复杂（例如旅游攻略、对比评测、事件调查），你应该拆解成多个不同关键词分别搜索来获取更全面的信息，可以多次调用此工具。返回结果包含标题、链接、摘要和来源。',
       parameters: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: '搜索关键词，用中文' },
-          max_results: { type: 'integer', description: '返回结果数量，默认5', default: 5 }
+          query: { type: 'string', description: '搜索关键词，要精准、具体。一个复杂问题可以拆成多个关键词分多次搜索，每次搜索一个具体方面' },
+          max_results: { type: 'integer', description: '返回结果数量，默认20', default: 20 }
         },
         required: ['query']
       }
@@ -146,7 +146,7 @@ async function executeToolCall(toolCall) {
   switch (name) {
     case 'search_web': {
       var q = String(args.query || '').trim().slice(0, 200);
-      var maxR = Math.min(Math.max(parseInt(args.max_results) || 5, 1), 10);
+      var maxR = Math.min(Math.max(parseInt(args.max_results) || 20, 1), 20);
       if (!q) return { tool_name: name, error: '搜索关键词为空' };
       try {
         var result = await searchWeb(q, maxR);
@@ -155,7 +155,7 @@ async function executeToolCall(toolCall) {
           tool_name: name,
           query: q,
           results_count: resultsArr.length,
-          content: JSON.stringify(resultsArr.slice(0, 8)),
+          content: JSON.stringify(resultsArr.slice(0, 20)),
           diagnostics: result && result.diagnostics ? result.diagnostics : null
         };
       } catch (e) {
@@ -187,6 +187,44 @@ async function executeToolCall(toolCall) {
     default:
       return { tool_name: name, error: '未知工具: ' + name };
   }
+}
+
+// 搜索结果自动补全：当结果不足时，从已有结果提取关键词补充搜索
+async function autoSupplementSearch(originalQuery, currentResults, maxR) {
+  if (!Array.isArray(currentResults)) currentResults = [];
+  if (currentResults.length >= 5) return currentResults;
+  // 从已有结果的标题/摘要中提取中文关键词
+  var keywords = [];
+  currentResults.forEach(function(r) {
+    var text = (r.title || '') + ' ' + (r.snippet || '');
+    var words = text.match(/[\u4e00-\u9fff]{2,6}/g) || [];
+    words.forEach(function(w) {
+      if (w.length >= 2 && keywords.indexOf(w) < 0) keywords.push(w);
+    });
+  });
+  // 过滤掉原始查询中已出现的词
+  var queryWords = originalQuery.match(/[\u4e00-\u9fff]{2,6}/g) || [];
+  var newKeywords = keywords.filter(function(k) {
+    return !queryWords.some(function(qw) { return qw.indexOf(k) >= 0 || k.indexOf(qw) >= 0; });
+  });
+  newKeywords = newKeywords.slice(0, 3);
+  if (newKeywords.length === 0) return currentResults;
+  var existingUrls = {};
+  currentResults.forEach(function(r) { if (r.url) existingUrls[r.url] = true; });
+  for (var ki = 0; ki < newKeywords.length; ki++) {
+    var supplementQ = newKeywords[ki];
+    try {
+      var sr = await searchWeb(supplementQ, Math.ceil(maxR / 2));
+      var extra = (sr && sr.results) || [];
+      extra.forEach(function(r) {
+        if (r.url && !existingUrls[r.url] && r.title) {
+          existingUrls[r.url] = true;
+          currentResults.push(r);
+        }
+      });
+    } catch (e) {}
+  }
+  return currentResults.slice(0, maxR);
 }
 
 // AI 配置缓存
@@ -6963,6 +7001,41 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 location: toolResult.location || null
               }) + '\n\n');
             }
+
+            // 自动补全：如果 AI 只搜了少量结果，提取关键词补充搜索
+            if (!aborted) {
+              var allResults = [];
+              var firstQuery = '';
+              for (var sci = 0; sci < messages.length; sci++) {
+                var msgCheck = messages[sci];
+                if (msgCheck.role === 'tool') {
+                  try {
+                    var parsed = JSON.parse(msgCheck.content || '{}');
+                    if (parsed.tool_name === 'search_web' && Array.isArray(JSON.parse(parsed.content || '[]'))) {
+                      var items = JSON.parse(parsed.content || '[]');
+                      items.forEach(function(item) { allResults.push(item); });
+                      if (!firstQuery && parsed.query) firstQuery = parsed.query;
+                    }
+                  } catch (e) {}
+                }
+              }
+              if (allResults.length > 0 && allResults.length < 5 && firstQuery) {
+                var supplemented = await autoSupplementSearch(firstQuery, allResults, 20);
+                if (supplemented.length > allResults.length) {
+                  var newCount = supplemented.length;
+                  var extraContent = JSON.stringify(supplemented.slice(allResults.length));
+                  messages.push({ role: 'tool', tool_call_id: 'auto_supplement', content: JSON.stringify({ tool_name: 'search_web', query: '补充搜索', results_count: newCount - allResults.length, content: extraContent }) });
+                  res.write('data: ' + JSON.stringify({
+                    type: 'tool_result',
+                    tool_name: 'search_web',
+                    success: true,
+                    count: newCount - allResults.length,
+                    error: null,
+                    location: null
+                  }) + '\n\n');
+                }
+              }
+            }
           } else {
             hasFCFallbackContent = true;
             fcFallbackContent = fcMessage ? fcMessage.content || '' : '';
@@ -7017,9 +7090,13 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       var sDiag = null;
       if (needsSearch && !aborted) {
         try {
-          srObj = await searchWeb(message, 5);
+          srObj = await searchWeb(message, 20);
           sResults = srObj && srObj.results ? srObj.results : [];
           sDiag = srObj && srObj.diagnostics ? srObj.diagnostics : null;
+          // 结果不足时自动补全
+          if (sResults && sResults.length > 0 && sResults.length < 5) {
+            sResults = await autoSupplementSearch(message, sResults, 20);
+          }
         } catch (e) { sResults = []; }
       }
       if (sResults && Array.isArray(sResults) && sResults.length) {
