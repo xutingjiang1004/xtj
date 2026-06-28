@@ -2201,28 +2201,56 @@ function showChatMessages() {
       try {
         var r = await apiRequest('GET', '/memory');
         var memory = r && r.ok && r.data && r.data.memory ? r.data.memory : null;
-        if (memory) {
-          var lines = [];
-          lines.push('--- AI 长期记忆 ---');
-          lines.push('');
-          if (memory.display_name) lines.push('用户称呼：' + memory.display_name);
-          if (memory.reply_preferences && memory.reply_preferences.tone && memory.reply_preferences.tone.length) lines.push('语气偏好：' + memory.reply_preferences.tone.join('、'));
-          if (memory.reply_preferences && memory.reply_preferences.avoid && memory.reply_preferences.avoid.length) lines.push('避免：' + memory.reply_preferences.avoid.join('、'));
-          if (memory.likes && memory.likes.length) lines.push('喜欢：' + memory.likes.join('、'));
-          if (memory.dislikes && memory.dislikes.length) lines.push('不喜欢：' + memory.dislikes.join('、'));
-          if (memory.do_not_do && memory.do_not_do.length) lines.push('项目禁区：' + memory.do_not_do.join('、'));
-          if (memory.important_notes && memory.important_notes.length) lines.push('重要提醒：' + memory.important_notes.join('、'));
-          if (memory.long_term_goals && memory.long_term_goals.length) lines.push('长期目标：' + memory.long_term_goals.join('、'));
-          if (lines.length <= 2) {
-            lines = ['--- AI 长期记忆 ---', '', '(当前没有记录任何长期记忆，多聊一聊我会记住你的偏好)', ''];
-          }
-          lines.push('');
-          lines.push('---');
-          lines.push('[清空记忆]  [关闭记忆]');
-          notify(lines.join('\n'), 'info', 8000);
-        } else {
+        if (!memory) {
           notify('无法加载记忆');
+          return;
         }
+        // 构建记忆内容 HTML
+        var lines = [];
+        lines.push('<div style="font-weight:700;font-size:14px;margin-bottom:8px;color:var(--primary,#2E9465);">AI 长期记忆</div>');
+        lines.push('<div style="font-size:12px;line-height:1.8;color:var(--text,#333);">');
+        var hasContent = false;
+        function addLine(label, val) { if (val) { hasContent = true; lines.push('<div><span style="color:var(--text-muted,#999);">' + label + '：</span>' + escapeHtml(val) + '</div>'); } }
+        if (memory.display_name) addLine('用户称呼', memory.display_name);
+        if (memory.reply_preferences && memory.reply_preferences.tone && memory.reply_preferences.tone.length) addLine('语气偏好', memory.reply_preferences.tone.join('、'));
+        if (memory.reply_preferences && memory.reply_preferences.avoid && memory.reply_preferences.avoid.length) addLine('避免', memory.reply_preferences.avoid.join('、'));
+        if (memory.likes && memory.likes.length) addLine('喜欢', memory.likes.join('、'));
+        if (memory.dislikes && memory.dislikes.length) addLine('不喜欢', memory.dislikes.join('、'));
+        if (memory.do_not_do && memory.do_not_do.length) addLine('项目禁区', memory.do_not_do.join('、'));
+        if (memory.important_notes && memory.important_notes.length) addLine('重要提醒', memory.important_notes.join('、'));
+        if (memory.long_term_goals && memory.long_term_goals.length) addLine('长期目标', memory.long_term_goals.join('、'));
+        if (!hasContent) {
+          lines.push('<div style="color:var(--text-muted,#999);text-align:center;padding:16px 0;">（当前没有记录任何长期记忆，多聊一聊我会记住你的偏好）</div>');
+        }
+        lines.push('</div>');
+        lines.push('<div style="display:flex;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border,rgba(0,0,0,0.08));">');
+        lines.push('<button class="ai-memory-clear" style="flex:1;padding:6px;border:1px solid rgba(200,60,60,0.3);border-radius:6px;background:transparent;color:#c44;font-size:12px;cursor:pointer;">清空记忆</button>');
+        lines.push('<button class="ai-memory-close" style="flex:1;padding:6px;border:1px solid var(--border,rgba(0,0,0,0.15));border-radius:6px;background:var(--bg-secondary,#f5f5f5);color:var(--text,#333);font-size:12px;cursor:pointer;">关闭</button>');
+        lines.push('</div>');
+
+        var overlay = el('div', { class: 'ai-memory-overlay', style: 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);z-index:10000;display:flex;align-items:center;justify-content:center;' });
+        var box = el('div', { class: 'ai-memory-box', style: 'background:var(--bg,#fff);border-radius:12px;padding:16px 20px;max-width:380px;width:90%;max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.15);' });
+        box.innerHTML = lines.join('\n');
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        // 绑定按钮事件
+        box.querySelector('.ai-memory-close').addEventListener('click', function() { overlay.remove(); });
+        box.querySelector('.ai-memory-clear').addEventListener('click', async function() {
+          if (!confirm('确定清空所有记忆吗？此操作不可恢复。')) return;
+          try {
+            var cr = await apiRequest('POST', '/memory/clear');
+            if (cr && cr.ok) {
+              notify('记忆已清空');
+              overlay.remove();
+            } else {
+              notify('清空失败');
+            }
+          } catch (e) {
+            notify('清空失败');
+          }
+        });
+        overlay.addEventListener('click', function(ev) { if (ev.target === overlay) overlay.remove(); });
       } catch (e) {
         notify('记忆加载失败');
       }
