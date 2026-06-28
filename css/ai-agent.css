@@ -1333,8 +1333,9 @@
   animation: none !important;
 }
 
-/* 搜索状态条 */
-.ai-search-status {
+/* 搜索/工具状态条 */
+.ai-search-status,
+.ai-tool-status {
   font-size: 11px;
   color: #888;
   text-align: center;
