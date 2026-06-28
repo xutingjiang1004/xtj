@@ -1445,3 +1445,112 @@
   color: #bbb;
   margin-top: 1px;
 }
+
+/* ===== 内联style提取CSS类 ===== */
+.ai-copy-menu {
+  position: fixed;
+  z-index: 9999;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.05);
+  overflow: hidden;
+  min-width: 100px;
+}
+.ai-copy-btn {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  color: #333;
+}
+.ai-copy-btn:hover {
+  background: rgba(0,0,0,0.04);
+}
+
+.ai-memory-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.3);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ai-memory-box {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px 20px;
+  max-width: 380px;
+  width: 90%;
+  max-height: 70vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.15);
+}
+.ai-memory-clear {
+  flex: 1;
+  padding: 6px;
+  border: 1px solid rgba(200,60,60,0.3);
+  border-radius: 6px;
+  background: transparent;
+  color: #c44;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ai-memory-clear:hover {
+  background: rgba(200,60,60,0.06);
+}
+.ai-memory-close {
+  flex: 1;
+  padding: 6px;
+  border: 1px solid var(--ai-border, rgba(140,196,158,0.24));
+  border-radius: 6px;
+  background: var(--ai-surface, #f7f7f7);
+  color: var(--ai-text, #223130);
+  font-size: 12px;
+  cursor: pointer;
+}
+.ai-memory-close:hover {
+  background: var(--ai-surface-hover, #eee);
+}
+
+.ai-error-note {
+  font-size: 11px;
+  color: #c44;
+  margin-top: 4px;
+  text-align: left;
+}
+.ai-interrupt-note,
+.ai-save-note,
+.ai-filtered-note {
+  text-align: center;
+  padding: 6px 12px;
+  font-size: 11px;
+  border-radius: 6px;
+  margin: 4px 0;
+}
+.ai-interrupt-note {
+  background: rgba(200,160,60,0.1);
+  color: #a87d2a;
+}
+.ai-save-note {
+  background: rgba(60,160,200,0.08);
+  color: #2a7da8;
+}
+.ai-filtered-note {
+  background: rgba(200,60,60,0.06);
+  color: #a82a2a;
+}
+
+[data-theme="dark"] .ai-copy-menu {
+  background: #222;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.06);
+}
+[data-theme="dark"] .ai-copy-btn { color: #ddd; }
+[data-theme="dark"] .ai-copy-btn:hover { background: rgba(255,255,255,0.06); }
+[data-theme="dark"] .ai-memory-box { background: #1a1a24; color: #e8e8f0; }
+[data-theme="dark"] .ai-memory-clear { border-color: rgba(200,60,60,0.4); }
+[data-theme="dark"] .ai-memory-close { border-color: rgba(255,255,255,0.1); background: rgba(255,255,255,0.04); color: #e8e8f0; }
