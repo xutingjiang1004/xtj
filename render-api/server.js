@@ -6312,7 +6312,9 @@ async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assist
   
   try {
     globalThis[lastUpdateKey] = String(Date.now());
-  } catch(e) {}
+  } catch(e) {
+    try { console.warn('[AI-MEMORY] set update lock error:', e && e.message); } catch(ee) {}
+  }
   
   var memoryModel = process.env.DEEPSEEK_MODEL_REASONER || 'deepseek-v4-flash';
   
@@ -6330,7 +6332,9 @@ async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assist
     if (latestRow && latestRow.content) {
       existingMemoryBox = (function() { try { return JSON.parse(latestRow.content); } catch(e) { return null; } })();
     }
-  } catch (e) {}
+  } catch(e) {
+    try { console.warn('[AI-MEMORY] query existing box error:', e && e.message); } catch(ee) {}
+  }
   if (!existingMemoryBox) existingMemoryBox = _existingMemoryBox || createEmptyMemoryBox(userName);
   
   var memoryBoxJson = JSON.stringify(existingMemoryBox || {});
@@ -6338,22 +6342,9 @@ async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assist
   var extractPrompt = '你是一个用户记忆提取助手。根据以下内容，输出 JSON patch 用于更新用户的长期记忆。\n\n当前记忆：\n' + memoryBoxJson.slice(0, 2000) + '\n\n用户消息：' + latestUserMessage.slice(0, 500) + '\n\nAI 回复：' + (assistantReply || '').slice(0, 500) + '\n\n当前日期：' + new Date().toISOString() + '\n\n规则：\n1. 只记录长期稳定信息，不记录一次性闲聊。\n2. 不记录密码、token、密钥、银行卡。\n3. 健康、性、身份敏感信息默认不写入，除非用户明确说"记住"。\n4. 不确定就不写。\n5. 同类内容合并，不要重复。\n\n必须输出纯 JSON，不要加任何其他文字：\n{"should_update":true或false,"changes":{"likes":[],"dislikes":[],"project_preferences":[],"do_not_do":[],"important_notes":[],"long_term_goals":[],"reply_preferences":{"tone":[],"format":[],"avoid":[]},"stable_profile":{}},"reason":"原因"}';
   
   try {
-    var apiResp = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (process.env.DEEPSEEK_API_KEY || '') },
-      body: JSON.stringify({
-        model: memoryModel,
-        messages: [{ role: 'user', content: extractPrompt }],
-        temperature: 0.1,
-        max_tokens: 2000,
-        stream: false
-      }),
-      signal: AbortSignal.timeout(15000)
-    });
+    var extractResp = await callDeepSeek([{ role: 'user', content: extractPrompt }], { model: DEEPSEEK_MODEL_REASONER, temperature: 0.1 });
     
-    if (!apiResp.ok) return;
-    var apiData = await apiResp.json();
-    var patchText = (apiData.choices && apiData.choices[0] && apiData.choices[0].message && apiData.choices[0].message.content) || '';
+    var patchText = extractResp.content || '';
     var patch = (function() { try { return JSON.parse(patchText); } catch(e) { return null; } })();
     
     if (!patch || !patch.should_update) return;
@@ -6429,22 +6420,9 @@ async function maybeUpdateConversationSummary(userName, convId, messages) {
   var summaryPrompt = '根据以下对话内容，生成 JSON 格式的会话摘要。只输出 JSON，不要加任何其他文字。\n\n' + msgText.slice(0, 3000) + '\n\n{"title":"精简标题","summary":"摘要（300字以内）","tags":["标签1","标签2"],"important_facts":["重要事实"],"user_preferences_found":["发现的偏好"],"open_tasks":["待办任务"],"importance":1}';
   
   try {
-    var apiResp = await fetch('https://api.deepseek.com/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (process.env.DEEPSEEK_API_KEY || '') },
-      body: JSON.stringify({
-        model: process.env.DEEPSEEK_MODEL_REASONER || 'deepseek-v4-flash',
-        messages: [{ role: 'user', content: summaryPrompt }],
-        temperature: 0.2,
-        max_tokens: 1000,
-        stream: false
-      }),
-      signal: AbortSignal.timeout(10000)
-    });
+    var summaryResp = await callDeepSeek([{ role: 'user', content: summaryPrompt }], { model: DEEPSEEK_MODEL_REASONER, temperature: 0.2 });
     
-    if (!apiResp.ok) return;
-    var apiData = await apiResp.json();
-    var summaryText = (apiData.choices && apiData.choices[0] && apiData.choices[0].message && apiData.choices[0].message.content) || '';
+    var summaryText = summaryResp.content || '';
     var summaryObj = (function() { try { return JSON.parse(summaryText); } catch(e) { return null; } })();
     if (!summaryObj) return;
     
@@ -6774,7 +6752,9 @@ async function loadAiContext(userName, convId) {
           try {
             var c = JSON.parse(r.content || '{}');
             if (c && typeof c.reply === 'string') content = c.reply;
-          } catch (e) {}
+          } catch(e) {
+            try { console.warn('[AI-PARSE] parseMsgMeta error:', e && e.message); } catch(ee) {}
+          }
         }
         return { role: meta.role || 'user', content: content.slice(0, AI_CHAT_MESSAGE_MAX_LEN) };
       });
@@ -6819,7 +6799,9 @@ async function loadAiContext(userName, convId) {
           }
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      try { console.warn('[AI-MEMORY] load memory_box interior error:', e && e.message); } catch(ee) {}
+    }
   } catch (e) {
     console.error('[AGENT-CHAT] loadAiContext exception:', e.message);
   }
@@ -6939,8 +6921,12 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
 
     // 10. 异步更新长期记忆
     try {
-      updateLongTermMemory(userName, ctx, message, reply).catch(function() {});
-    } catch (e) {}
+      updateLongTermMemory(userName, ctx, message, reply).catch(function(e) {
+        try { console.warn('[AI-MEMORY] updateLongTermMemory fire-and-forget error:', e && e.message); } catch(ee) {}
+      });
+    } catch (e) {
+      try { console.warn('[AI-MEMORY] updateLongTermMemory fire-and-forget sync error:', e && e.message); } catch(ee) {}
+    }
 
     // 11. 返回
     return res.json({
@@ -7157,7 +7143,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               var item = toolResults[tri];
               messages.push({ role: 'tool', tool_call_id: item.toolCallId, content: JSON.stringify(item.toolResult) });
               var trItems = null;
-              try { trItems = JSON.parse(item.toolResult.content || '[]'); } catch (e) {}
+              try { trItems = JSON.parse(item.toolResult.content || '[]'); } catch(e) {
+                try { console.warn('[AI-FC] parse tool result error:', e && e.message); } catch(ee) {}
+              }
               res.write('data: ' + JSON.stringify({
                 type: 'tool_result',
                 tool_name: item.toolResult.tool_name || '',
@@ -7188,7 +7176,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                         items.forEach(function(item) { allResults.push(item); });
                       }
                     }
-                  } catch (e) {}
+                  } catch(e) {
+                    try { console.warn('[AI-SEARCH] search error:', e && e.message); } catch(ee) {}
+                  }
                 }
               }
 
@@ -7254,7 +7244,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             var fcErrData = await fcResp.json();
             var fcErrMsg = fcErrData && fcErrData.error && fcErrData.error.message ? String(fcErrData.error.message).slice(0, 200) : '';
             console.error('[AGENT-STREAM] FC API error', fcResp.status, fcErrMsg);
-          } catch (e) {}
+          } catch(e) {
+            try { console.warn('[AI-FC] FC res text error:', e && e.message); } catch(ee) {}
+          }
         }
       } catch (fcErr) {
         clearTimeout(_fcTimer);
@@ -7793,7 +7785,9 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
         try {
           var c = JSON.parse(r.content || '{}');
           if (c && typeof c.reply === 'string') msgContent = c.reply;
-        } catch (e) {}
+        } catch(e) {
+          try { console.warn('[AI-CONV] parse msg meta error:', e && e.message); } catch(ee) {}
+        }
       }
       
       if (meta.role === 'user' && !convData[convId].firstUserMsg) {
@@ -7816,7 +7810,9 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
           try {
             var c2 = JSON.parse(r2.content || '{}');
             if (c2 && typeof c2.reply === 'string') msg2 = c2.reply;
-          } catch (e) {}
+          } catch(e) {
+            try { console.warn('[AI-CONV] parse msg meta2 error:', e && e.message); } catch(ee) {}
+          }
         }
         convData[convId2].lastMsgString = msg2.slice(0, 100);
       }
@@ -8010,7 +8006,9 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
               reasoning = c.reasoning || '';
               content = c.reply;
             }
-          } catch (e) {}
+          } catch(e) {
+            try { console.warn('[AI-HIST] parse msg meta error:', e && e.message); } catch(ee) {}
+          }
         }
         return {
           id: r.id,
