@@ -7361,9 +7361,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // ----- 多 Agent 协作：拆解问题 → 搜索 → 合成 -----
-    // 仅非思考模式下启用，且需要管理员在后台开启 multi_agent
+    // 需要管理员在后台开启 multi_agent，思考/非思考模式均可
     var multiAgentEnabled = config && config.model && config.model.multi_agent === true;
-    if (multiAgentEnabled && !useThinking && allowSearch && !aborted && messages.length > 0) {
+    if (multiAgentEnabled && allowSearch && !aborted && messages.length > 0) {
       var daMsg = [
         { role: 'system', content: '你是一个问题分析专家。你的任务是把用户的问题拆解成2-3个最适合联网搜索的关键词短语，每个短语独立、具体、可直接用于搜索引擎。只返回JSON数组，不要多余内容。格式：["关键词1", "关键词2", "关键词3"]' },
         { role: 'user', content: message }
