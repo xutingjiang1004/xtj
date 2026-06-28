@@ -1511,6 +1511,18 @@
             continue;
           }
           
+          if (evt.type === 'multi_agent') {
+            var maStatus = messagesEl.querySelector('.ai-search-status');
+            if (!maStatus) {
+              maStatus = el('div', { class: 'ai-search-status' });
+              if (aiNode && aiNode.parentElement) aiNode.parentElement.insertBefore(maStatus, aiNode);
+            }
+            if (evt.action === 'searching') {
+              var qs = evt.queries || [];
+              maStatus.textContent = '🧠 多Agent协作：正在并行搜索 ' + qs.join('、');
+            }
+          }
+
           if (evt.type === 'search') {
             // 显示搜索状态条
             var searchCount = evt.count;
@@ -2025,6 +2037,16 @@
         item.appendChild(el('div', { class: 'ai-conv-preview', text: getConversationPreview(conv) }));
         var meta = el('div', { class: 'ai-conv-meta' });
         meta.appendChild(el('span', { class: 'ai-conv-count', text: getConversationCountText(conv) }));
+        // 删除按钮
+        var delBtn = el('span', { class: 'ai-conv-del', title: '删除此对话', 'aria-label': '删除对话' }, '✕');
+        (function(cid, elRef) {
+          delBtn.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            if (!confirm('确定删除此对话吗？删除后不可恢复。')) return;
+            deleteConversation(cid, elRef);
+          });
+        })(conv.conversation_id, item);
+        meta.appendChild(delBtn);
         item.appendChild(meta);
         item.addEventListener('click', function() {
           if (S.sending) return;
@@ -2035,6 +2057,32 @@
       });
       container.appendChild(section);
     });
+  }
+
+  async function deleteConversation(cid, itemEl) {
+    if (!cid) return;
+    try {
+      var r = await apiRequest('POST', '/chat/delete', { conversation_id: cid });
+      if (r && r.ok) {
+        if (itemEl && itemEl.parentElement) itemEl.remove();
+        // 从 S.conversations 中移除
+        S.conversations = (S.conversations || []).filter(function(c) { return c.conversation_id !== cid; });
+        // 如果删除的是当前对话，重置
+        if (cid === S.conversationId) {
+          S.conversationId = null;
+          S.messages = [];
+          S.oldestCursor = null;
+          S.hasMore = false;
+          if (S.messagesEl) S.messagesEl.innerHTML = '';
+          setAiRootState('ai-empty');
+        }
+        showConversationList();
+      } else {
+        notify('删除失败');
+      }
+    } catch (e) {
+      notify('删除失败');
+    }
   }
 
   async function switchConversation(cid) {
