@@ -1445,6 +1445,15 @@
   color: #bbb;
   margin-top: 1px;
 }
+.ai-search-supplement {
+  text-align: center;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--ai-text-muted, #667674);
+  background: rgba(120,188,164,0.06);
+  border-radius: 8px;
+  margin: 6px 0;
+}
 
 /* ===== 内联style提取CSS类 ===== */
 .ai-copy-menu {
