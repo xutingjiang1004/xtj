@@ -2490,7 +2490,7 @@ function showChatMessages() {
     if (!cfg) return;
     var avatarEl = document.getElementById('aiChatHeaderAvatar');
     var nameEl = document.getElementById('aiChatHeaderName');
-    if (avatarEl) renderHeaderAvatar(avatarEl);
+    if (avatarEl) renderHeaderAvatar(avatarEl, cfg.avatar_url, cfg.avatar_version);
     if (nameEl) nameEl.textContent = cfg.name || '徐旭泽的小猫';
     updateAiStatus();
 
