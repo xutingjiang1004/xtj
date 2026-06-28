@@ -7287,27 +7287,44 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     // 如果 FC 没启用或没触发 tool_calls，回退旧正则搜索注入
     if (!hasCalledTools && !aborted && allowSearch && !weatherResult) {
-      var needsSearch = /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|搜索|查询|查一下|搜一下|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分/i.test(message);
+      var needsSearch = /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分/i.test(message);
+      // 注意：搜一下/搜索/查一下 不在此正则中，它们应通过 tool calls 由 AI 自主决定搜索关键词，
+      // 而不是直接用 "搜一下" 这个字面量去联网搜索（那样会搜到无关结果）
+      
+      // 思考模式下，如果用户说搜一下/查一下，从对话上下文中提取搜索关键词
+      var searchQuery = message;
+      var isSearchMetaCmd = useThinking && /搜索|查一下|搜一下|百度|google|谷歌|查询/.test(message);
+      if (isSearchMetaCmd) {
+        // 从历史消息中提取最近一条 user 消息作为搜索关键词（排除当前 meta 指令）
+        for (var si = messages.length - 1; si >= 0; si--) {
+          var pm = messages[si];
+          if (pm.role === 'user' && pm.content !== message && pm.content) {
+            searchQuery = String(pm.content).slice(0, 150);
+            break;
+          }
+        }
+      }
+      
       var srObj = null;
       var sResults = null;
       var sDiag = null;
       if (needsSearch && !aborted) {
         try {
-          srObj = await searchWeb(message, 20);
+          srObj = await searchWeb(searchQuery, 20);
           sResults = srObj && srObj.results ? srObj.results : [];
           sDiag = srObj && srObj.diagnostics ? srObj.diagnostics : null;
           // 结果不足时自动补全
           if (sResults && sResults.length > 0 && sResults.length < 5) {
-            sResults = await autoSupplementSearch(message, sResults, 20);
+            sResults = await autoSupplementSearch(searchQuery, sResults, 20);
           }
         } catch (e) { sResults = []; }
       }
       if (sResults && Array.isArray(sResults) && sResults.length) {
-        var sCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + message + '\n\n' +
+        var sCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + searchQuery + '\n\n' +
           sResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
           '\n\n要求：必须优先使用以上搜索结果回答。不能编造新闻、价格、天气、日期。';
         messages.push({ role: 'system', content: sCtx });
-        res.write('data: ' + JSON.stringify({ type: 'search', count: sResults.length, results: sResults, diagnostics: sDiag || null, query: message }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'search', count: sResults.length, results: sResults, diagnostics: sDiag || null, query: searchQuery }) + '\n\n');
       } else if (needsSearch) {
         var hasProviderErrors2 = sDiag && sDiag.provider_errors && sDiag.provider_errors.length > 0;
         var hasProviderMissing2 = sDiag && sDiag.missing_env && sDiag.missing_env.length > 0;
