@@ -19,6 +19,7 @@
     { value: 'medium', label: '中', icon: '◌' },
     { value: 'high', label: '高', icon: '✦' }
   ];
+  var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
 
   var S = {
     config: null,
@@ -1237,8 +1238,8 @@
       }
       S.keyboardResetTimer = setTimeout(function() {
         S.keyboardResetTimer = null;
-        resetViewport();
-      }, 150);
+        if (!S.sending) resetViewport();
+      }, 100);
     };
     var onFocus = function() {
       applyViewport();
@@ -1298,7 +1299,7 @@
       input.style.height = 'auto';
       try {
         input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-        input.focus();
+        if (!_isTouchMobile) input.focus();
       } catch (e) {}
       updateInputMetrics();
     }
@@ -1337,7 +1338,11 @@
     input.value = '';
     input.style.height = 'auto';
     updateInputMetrics();
-    try { input.focus(); } catch (e2) {}
+    if (_isTouchMobile) {
+      try { input.blur(); } catch (e2) {}
+    } else {
+      try { input.focus(); } catch (e2) {}
+    }
     
     var aborted = false;
     var myReqId = reqId;
@@ -1824,6 +1829,7 @@
             try { typingNode.remove(); } catch (e) {}
             S.sending = false;
             S.abortController = null;
+            if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
             if (thinkingTimer) {
               finalThinkingElapsedMs = thinkingTimer.stop();
             }
@@ -1953,6 +1959,7 @@
     
     S.sending = false;
     S.abortController = null;
+    if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
     updateInputMetrics();
     scrollToBottom(messagesEl, true);
   }
@@ -2376,6 +2383,8 @@ function showChatMessages() {
     }
 
     function doSend() {
+      // 移动端先收起键盘再发送，避免 viewport 闪烁
+      if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
       handleSendMessage(input, sendBtn, messagesEl);
     }
 
