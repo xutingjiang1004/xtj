@@ -2206,7 +2206,7 @@ function showChatMessages() {
         lines.push('<div style="font-weight:700;font-size:14px;margin-bottom:8px;color:var(--primary,#2E9465);">AI 长期记忆</div>');
         lines.push('<div style="font-size:12px;line-height:1.8;color:var(--text,#333);">');
         var hasContent = false;
-        function addLine(label, val) { if (val) { hasContent = true; lines.push('<div><span style="color:var(--text-muted,#999);">' + label + '：</span>' + escapeHtml(val) + '</div>'); } }
+        function addLine(label, val) { if (val) { hasContent = true; lines.push('<div><span style="color:var(--text-muted,#999);">' + label + '：</span>' + String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') + '</div>'); } }
         if (memory.display_name) addLine('用户称呼', memory.display_name);
         if (memory.reply_preferences && memory.reply_preferences.tone && memory.reply_preferences.tone.length) addLine('语气偏好', memory.reply_preferences.tone.join('、'));
         if (memory.reply_preferences && memory.reply_preferences.avoid && memory.reply_preferences.avoid.length) addLine('避免', memory.reply_preferences.avoid.join('、'));
@@ -2252,6 +2252,45 @@ function showChatMessages() {
       }
     });
     header.insertBefore(memoryBtn, histBtn.nextSibling);
+
+    // 删除当前对话按钮
+    var delBtn = el('button', {
+      type: 'button',
+      class: 'ai-chat-del-btn',
+      'aria-label': '删除当前对话',
+      title: '删除当前对话'
+    }, '删除');
+    delBtn.addEventListener('click', async function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (!S.conversationId) return;
+      if (!confirm('确定删除当前对话吗？删除后不可恢复。')) return;
+      delBtn.disabled = true;
+      try {
+        var dr = await apiRequest('POST', '/chat/delete', { conversation_id: S.conversationId });
+        if (dr && dr.ok) {
+          S.messages = [];
+          S.oldestCursor = null;
+          S.hasMore = false;
+          S.conversationId = null;
+          if (S.messagesEl) S.messagesEl.innerHTML = '';
+          setAiRootState('ai-empty');
+          // 开启新对话
+          var r2 = await apiRequest('POST', '/chat/new', null);
+          if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
+            S.conversationId = r2.data.conversation_id;
+            writeConvId(r2.data.conversation_id);
+          }
+        } else {
+          notify('删除失败');
+        }
+      } catch (e) {
+        notify('删除失败');
+      } finally {
+        delBtn.disabled = false;
+      }
+    });
+    header.insertBefore(delBtn, newBtn);
 
     var newBtn = el('button', {
       type: 'button',
