@@ -1534,6 +1534,10 @@
           if (evt.type === 'search_supplement') {
             var searchNote = el('div', { class: 'ai-search-supplement', text: '🔍 正在联网补充信息...' });
             if (aiNode && aiNode.parentElement) aiNode.parentElement.appendChild(searchNote);
+            // 清空旧内容，让第二轮 stream 重新生成
+            cleanupRenderers();
+            try { typingNode.remove(); } catch (e) {}
+            if (aiBubble) try { aiBubble.textContent = ''; } catch (e) {}
             aiContent = '';
             aiReasoning = '';
             reasoningStarted = false;
