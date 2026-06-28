@@ -1210,13 +1210,21 @@
         notify('请先登录后再使用 AI 聊天');
         return false;
       }
-    } catch (e) {}
-    return true;
+    } catch (e) {
+      try { console.warn('[AI-AUTH] ensureRealUserAuth error:', e && e.message); } catch(ee) {}
+    }
+    notify('登录状态异常，请尝试刷新页面后重新登录');
+    return false;
   }
 
   async function handleSendMessage(input, sendBtn, messagesEl) {
     var text = String(input.value || '').trim();
     if (!text) { S.sending = false; return; }
+    if (text.length > 6000) {
+      notify('消息过长（最多 6000 字符），请精简后重试');
+      S.sending = false;
+      return;
+    }
     
     var originalText = text;
     
@@ -1308,7 +1316,7 @@
           if (errJson && errJson.error) {
             if (S._currentReqId !== reqId) return;
             try { typingNode.remove(); } catch (e) {}
-            notify(errJson.error);
+            notify(String(errJson.error));
           }
         } catch(e) {}
         resetSendingIfCurrent();
@@ -2103,7 +2111,10 @@
         S.hasMore = r.data.has_more;
         S.oldestCursor = r.data.oldest || null;
       }
-    } catch (e) {}
+    } catch (e) {
+      try { console.warn('[AI-CONV] switchConversation error:', e && e.message); } catch(ee) {}
+      notify('加载对话历史失败');
+    }
     
     if (S.messagesEl) {
       S.messagesEl.innerHTML = '';
@@ -2223,6 +2234,9 @@ function showChatMessages() {
         lines.push('<button class="ai-memory-clear" style="flex:1;padding:6px;border:1px solid rgba(200,60,60,0.3);border-radius:6px;background:transparent;color:#c44;font-size:12px;cursor:pointer;">清空记忆</button>');
         lines.push('<button class="ai-memory-close" style="flex:1;padding:6px;border:1px solid var(--border,rgba(0,0,0,0.15));border-radius:6px;background:var(--bg-secondary,#f5f5f5);color:var(--text,#333);font-size:12px;cursor:pointer;">关闭</button>');
         lines.push('</div>');
+
+        // 防止多次叠加
+        if (document.querySelector('.ai-memory-overlay')) return;
 
         var overlay = el('div', { class: 'ai-memory-overlay', style: 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.3);z-index:10000;display:flex;align-items:center;justify-content:center;' });
         var box = el('div', { class: 'ai-memory-box', style: 'background:var(--bg,#fff);border-radius:12px;padding:16px 20px;max-width:380px;width:90%;max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.15);' });
@@ -2388,7 +2402,7 @@ function showChatMessages() {
 
     sendBtn.addEventListener('click', doSend);
     input.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
         doSend();
       }

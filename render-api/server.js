@@ -6860,6 +6860,11 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     // 5. 读取上下文（按 conversation_id 过滤）
     var ctx = await loadAiContext(userName, convId);
 
+    // 5b. 当前时间
+    var _now = new Date();
+    var _currentDateISO = _now.toISOString();
+    var _currentDateCN = _now.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+
     // 6. 组装 system prompt
     var corePrompt = buildAiCorePrompt(config);
     var dynamicContext = buildAiDynamicContext(ctx, config);
