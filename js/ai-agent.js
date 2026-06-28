@@ -928,24 +928,15 @@
       footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
     }
     if (role === 'assistant') {
-      // 搜索状态（可点击展开）
+      // 搜索状态（历史重建：只显示条数和关键词，结果详情仅在直播时有）
       if (msg.search_count > 0) {
-        var searchBar = el('div', { class: 'ai-search-status', text: '已联网搜索 · ' + msg.search_count + ' 条结果' });
+        var searchBar = el('div', { class: 'ai-search-status' });
+        var searchLabel = '已联网搜索 · ' + msg.search_count + ' 条结果';
         var queryStr = msg.search_query || '';
         if (queryStr) {
-          var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▶');
-          searchBar.appendChild(toggleBtn);
-          searchBar.style.cursor = 'pointer';
-          var detailPanel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
-          searchBar.appendChild(detailPanel);
-          detailPanel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr }));
-          searchBar.onclick = function(e) {
-            if (e.target.tagName === 'A') return;
-            var isHidden = detailPanel.style.display === 'none';
-            detailPanel.style.display = isHidden ? '' : 'none';
-            toggleBtn.textContent = isHidden ? ' ▼' : ' ▶';
-          };
+          searchLabel += ' · 搜索：' + queryStr;
         }
+        searchBar.textContent = searchLabel;
         node.appendChild(searchBar);
       }
       // 搜索到此处结束
@@ -1455,12 +1446,16 @@
           reasoningContainer = null;
         }
         
+        var searchCount = evt ? evt.search_count : 0;
+        var searchQuery = evt ? evt.search_query : '';
         var aiMsg = {
           role: 'assistant',
           content: content,
           reasoning: (finalThinkingMode !== 'off' ? thinking : ''),
           created_at: new Date().toISOString(),
           thinking_mode: finalThinkingMode,
+          search_count: searchCount,
+          search_query: searchQuery,
           usage: Object.assign({}, usageResult || {}, {
             model: finalModel,
             thinking_mode: finalThinkingMode
@@ -1469,6 +1464,33 @@
         S.messages.push(aiMsg);
         
         if (node) {
+          // 如果有搜索结果，把已有的搜索条移入消息节点（而非单独在 container 里）
+          var liveSearchBar = null;
+          if (searchCount > 0) {
+            liveSearchBar = messagesEl.querySelector('.ai-search-status');
+          }
+          if (liveSearchBar) {
+            node.appendChild(liveSearchBar);
+          } else if (searchCount > 0) {
+            // 没有直播搜索条（如历史重建），创建一个简版
+            var sb = el('div', { class: 'ai-search-status', text: '已联网搜索 · ' + searchCount + ' 条结果' });
+            var sq = searchQuery || '';
+            if (sq) {
+              var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▶');
+              sb.appendChild(toggleBtn);
+              sb.style.cursor = 'pointer';
+              var panel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+              sb.appendChild(panel);
+              panel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + sq }));
+              sb.onclick = function(e) {
+                if (e.target.tagName === 'A') return;
+                var h = panel.style.display === 'none';
+                panel.style.display = h ? '' : 'none';
+                toggleBtn.textContent = h ? ' ▼' : ' ▶';
+              };
+            }
+            node.appendChild(sb);
+          }
           var footer = el('div', { class: 'ai-msg-footer' });
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
           if (finalThinkingMode && finalThinkingMode !== 'off') {
