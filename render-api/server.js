@@ -8370,8 +8370,8 @@ async function handleAvatarUpload(req, res) {
   }
 }
 
-app.post('/api/admin/ai-agent/avatar', verifyToken, handleAvatarUpload);
-app.post('/admin/ai-agent/avatar', verifyToken, handleAvatarUpload);
+app.post('/api/admin/ai-agent/avatar', verifyToken, express.json({ limit: '10mb' }), handleAvatarUpload);
+app.post('/admin/ai-agent/avatar', verifyToken, express.json({ limit: '10mb' }), handleAvatarUpload);
 
 
 // GET /admin/ai-agent/usage-summary - 管理员获取统计
