@@ -320,8 +320,17 @@
 
   function renderHeaderAvatar(target, avatarUrl, avatarVersion) {
     if (!target) return;
+    target.innerHTML = '';
     if (avatarUrl) {
-      target.innerHTML = '<span class="ai-avatar-image-wrapper"><img class="ai-avatar-image" src="' + avatarUrl + (avatarVersion ? '?v=' + avatarVersion : '') + '" alt="" loading="lazy" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'' + buildCatAvatarMarkup('') + '\'"></span>';
+      var wrapper = el('span', { class: 'ai-avatar-image-wrapper' });
+      var img = el('img', { class: 'ai-avatar-image', alt: '', loading: 'lazy' });
+      img.src = avatarUrl + (avatarVersion ? '?v=' + avatarVersion : '');
+      img.addEventListener('error', function() {
+        img.style.display = 'none';
+        wrapper.innerHTML = buildCatAvatarMarkup('');
+      });
+      wrapper.appendChild(img);
+      target.appendChild(wrapper);
     } else {
       target.innerHTML = buildCatAvatarMarkup('');
     }
@@ -329,8 +338,17 @@
 
   function renderCatAvatarNode(target, extraClass, avatarUrl, avatarVersion) {
     if (!target) return;
+    target.innerHTML = '';
     if (avatarUrl) {
-      target.innerHTML = '<span class="ai-avatar-image-wrapper"><img class="ai-avatar-image" src="' + avatarUrl + (avatarVersion ? '?v=' + avatarVersion : '') + '" alt="" loading="lazy" onerror="this.style.display=\'none\';this.parentElement.innerHTML=\'' + buildCatAvatarMarkup(extraClass || '') + '\'"></span>';
+      var wrapper = el('span', { class: 'ai-avatar-image-wrapper' });
+      var img = el('img', { class: 'ai-avatar-image', alt: '', loading: 'lazy' });
+      img.src = avatarUrl + (avatarVersion ? '?v=' + avatarVersion : '');
+      img.addEventListener('error', function() {
+        img.style.display = 'none';
+        wrapper.innerHTML = buildCatAvatarMarkup(extraClass || '');
+      });
+      wrapper.appendChild(img);
+      target.appendChild(wrapper);
     } else {
       target.innerHTML = buildCatAvatarMarkup(extraClass || '');
     }
@@ -1228,6 +1246,13 @@
     
     S.clientRequestId++;
     var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
+    S._currentReqId = reqId;
+    function resetSendingIfCurrent() {
+      if (S._currentReqId === reqId) {
+        S.sending = false;
+        S.abortController = null;
+      }
+    }
     S.sending = true;
     clearReplyTimer();
     
@@ -1253,7 +1278,6 @@
     }
     
     var aborted = false;
-    var myReqId = reqId;
     
     // 创建 AbortController
     var controller = new AbortController();
@@ -1282,21 +1306,19 @@
         try {
           var errJson = await resp.json().catch(function(){ return {}; });
           if (errJson && errJson.error) {
-            if (myReqId !== reqId) return;
+            if (S._currentReqId !== reqId) return;
             try { typingNode.remove(); } catch (e) {}
             notify(errJson.error);
           }
         } catch(e) {}
-        S.sending = false;
-        S.abortController = null;
+        resetSendingIfCurrent();
         return;
       }
       
       if (!resp.body) {
         try { typingNode.remove(); } catch (e) {}
         notify('AI 没有响应');
-        S.sending = false;
-        S.abortController = null;
+        resetSendingIfCurrent();
         return;
       }
       
@@ -1453,7 +1475,7 @@
       }
       
       while (true) {
-        if (myReqId !== reqId || controller.signal.aborted) {
+        if (S._currentReqId !== reqId || controller.signal.aborted) {
           aborted = true;
           if (reader) try { reader.cancel(); } catch (e) {}
           break;
@@ -1478,7 +1500,7 @@
           if (!evt) continue;
           
           // 检查是否被新请求取代
-          if (myReqId !== reqId) { aborted = true; break; }
+          if (S._currentReqId !== reqId) { aborted = true; break; }
           
           if (evt.type === 'meta') {
             streamConvId = evt.conversation_id;
@@ -1666,8 +1688,7 @@
               restoreInputText();
             }
             
-            S.sending = false;
-            S.abortController = null;
+            resetSendingIfCurrent();
             if (reader) try { reader.cancel(); } catch (e) {}
             aborted = true;
             break;
@@ -1687,8 +1708,7 @@
               restoreInputText();
             }
             
-            S.sending = false;
-            S.abortController = null;
+            resetSendingIfCurrent();
             if (reader) try { reader.cancel(); } catch (e) {}
             aborted = true;
             break;
@@ -1811,13 +1831,12 @@
         if (doneReceived || aborted) break;
       }
       
-      if (myReqId !== reqId || aborted) {
+      if (S._currentReqId !== reqId || aborted) {
         // 被新请求取代，删除当前创建的任何节点
         cleanupRenderers();
         if (aiNode) try { aiNode.remove(); } catch (e) {}
         try { typingNode.remove(); } catch (e) {}
-        S.sending = false;
-        S.abortController = null;
+        resetSendingIfCurrent();
         return;
       }
       
@@ -1837,11 +1856,7 @@
         notify('AI 暂时没有回应，请稍后再试');
       }
     } catch (fetchErr) {
-      if (myReqId !== reqId) {
-        S.sending = false;
-        S.abortController = null;
-        return;
-      }
+      if (S._currentReqId !== reqId) return;
       // 网络错误或 abort
       if (fetchErr && fetchErr.name !== 'AbortError') {
         try { typingNode.remove(); } catch (e) {}
@@ -1870,8 +1885,7 @@
       }
     }
     
-    S.sending = false;
-    S.abortController = null;
+    resetSendingIfCurrent();
     if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
     updateInputMetrics();
     scrollToBottom(messagesEl, true);
@@ -1927,7 +1941,11 @@
         scrollToBottom(messagesEl, true);
       } else {
         var oldScroll = messagesEl.scrollHeight;
-        msgs.forEach(function(m) { messagesEl.insertBefore(buildMessageNode(m, messagesEl), messagesEl.firstChild); });
+        var frag = document.createDocumentFragment();
+        for (var mi = 0; mi < msgs.length; mi++) {
+          frag.appendChild(buildMessageNode(msgs[mi], messagesEl));
+        }
+        messagesEl.insertBefore(frag, messagesEl.firstChild);
         try {
           requestAnimationFrame(function() {
             messagesEl.scrollTop = messagesEl.scrollHeight - oldScroll;
@@ -2251,9 +2269,9 @@ function showChatMessages() {
     }
 
     function doSend() {
+      S.sending = true;
       // 移动端先收起键盘再发送，避免 viewport 闪烁
       if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
-      S.sending = true;
       handleSendMessage(input, sendBtn, messagesEl);
     }
 
@@ -2287,10 +2305,13 @@ function showChatMessages() {
       notify('请先登录后再和徐旭泽的小猫聊天');
       return;
     }
-    var authOk = await ensureUserAuthOrNotify();
-    if (!authOk) return;
-
     S.active = true;
+    var authOk = await ensureUserAuthOrNotify();
+    if (!authOk) {
+      S.active = false;
+      return;
+    }
+
     S.autoScrollPinned = true;
 
     if (typeof window.switchDockTab === 'function') {
@@ -2396,6 +2417,14 @@ function showChatMessages() {
     clearReplyTimer();
     abortCurrentRequest();
     clearStreamCleanup();
+    // 重置所有状态，避免重开后残留
+    S.sending = false;
+    S.messages = [];
+    S.oldestCursor = null;
+    S.hasMore = false;
+    S.loading = false;
+    S.loadingMore = false;
+    S.clientRequestId = 0;
     if (S.viewportCleanup) {
       try { S.viewportCleanup(); } catch (e2) {}
       S.viewportCleanup = null;
