@@ -6944,7 +6944,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // 共享搜索结果元数据（跨所有 finishStream 路径：正常、超时、错误）
-    var _sharedSearchMeta = null;
+    // _sharedSearchMeta 在非思考模式搜索 (line 6923) 或思考模式搜索中赋值
+    var _sharedSearchMeta;
 
     // ----- 多 Agent 协作：拆解问题 → 搜索 → 合成 -----
     // 需要管理员在后台开启 multi_agent，思考/非思考模式均可
@@ -7046,19 +7047,37 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       return false;
     }
 
-    // 并行搜索：不阻塞stream，让思考立即开始，搜索异步进行
-    var parallelSearchPromise = null;
-    var parallelSearchResults = null;
+    // 搜索 → 思考 → 回复：先执行搜索（阻塞），再将搜索结果注入上下文，最后开始思考流
     if (useThinking && allowSearch && !aborted && needsWebSearch(message)) {
       var _psQuery = message.slice(0, 80);
-      parallelSearchPromise = searchWeb(_psQuery, 20).then(function(sr) {
-        if (sr && Array.isArray(sr.results) && sr.results.length > 0) {
-          var _psR = cleanSearchResults(sr.results, 20);
-          if (_psR.length > 0) {
-            parallelSearchResults = { query: _psQuery, results: _psR };
+      var _psStripped = message.replace(/^(?:搜索|查一下|搜一下|搜搜|百度|google|谷歌|查询|查查|查资料)\s*/i, '').trim().slice(0, 150);
+      if (_psStripped.length >= 3) {
+        _psQuery = _psStripped;
+      } else {
+        for (var _psi = messages.length - 1; _psi >= 0; _psi--) {
+          var _psm = messages[_psi];
+          if (_psm.role === 'user' && _psm.content !== message && _psm.content) {
+            _psQuery = String(_psm.content).slice(0, 150);
+            break;
           }
         }
-      }).catch(function() {});
+      }
+      try {
+        var _psSr = await searchWeb(_psQuery, 20);
+        var _psResults = _psSr && Array.isArray(_psSr.results) ? cleanSearchResults(_psSr.results, 20) : [];
+        if (_psResults.length > 0) {
+          var _psCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + _psQuery + '\n\n' +
+            _psResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
+            '\n\n要求：必须优先使用以上搜索结果回答。不要在回答中列出来源、链接、网址等参考信息，直接给出答案内容即可。不能编造新闻、价格、天气、日期。';
+          roundMessages.push({ role: 'system', content: _psCtx });
+          res.write('data: ' + JSON.stringify({ type: 'search', count: _psResults.length, results: _psResults.slice(0, 20), query: _psQuery }) + '\n\n');
+          _sharedSearchMeta = { count: _psResults.length, query: _psQuery };
+        } else {
+          res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [], query: _psQuery }) + '\n\n');
+        }
+      } catch (e) {
+        console.error('[AGENT-STREAM] thinking mode search error:', e && e.message);
+      }
     }
 
     var apiBody = {
@@ -7226,26 +7245,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           finishReason = finish;
           // 直接收尾，不重新搜索不重新生成
           if (!aborted) {
-            // 检查并行搜索结果，有则注入（fire-and-forget 思考期间已完成）
-            if (useThinking && allowSearch && parallelSearchPromise) {
-              try { await parallelSearchPromise; } catch (_e) {}
-              if (parallelSearchResults && parallelSearchResults.results && parallelSearchResults.results.length > 0) {
-                var hasSearched = roundMessages.some(function(mm) {
-                  return mm.role === 'system' && typeof mm.content === 'string' && 
-                    (mm.content.indexOf('【联网搜索结果】') >= 0 || mm.content.indexOf('【多Agent协作搜索结果】') >= 0);
-                });
-                if (!hasSearched) {
-                  var _pCtx = '【联网搜索结果（思考并行检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + parallelSearchResults.query + '\n\n' +
-                    parallelSearchResults.results.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
-                    '\n\n要求：基于以上搜索结果回答。不要在回答中列出来源、链接、网址等参考信息，直接给出答案内容即可。不能编造新闻、价格、天气、日期。';
-                  roundMessages.push({ role: 'system', content: _pCtx });
-                  res.write('data: ' + JSON.stringify({ type: 'search', count: parallelSearchResults.results.length, results: parallelSearchResults.results, query: parallelSearchResults.query }) + '\n\n');
-                  console.log('[AGENT-STREAM] parallel search results injected (no restart)');
-                }
-              }
-            }
-            // 构建 searchMeta：优先用 regex 搜索结果，次之并行搜索结果
-            var _searchMeta = _sharedSearchMeta || _toolSearchMeta || (parallelSearchResults ? { count: parallelSearchResults.results.length, query: parallelSearchResults.query } : null);
+            // 搜索结果已在思考前注入，此处直接用 _sharedSearchMeta
+            var _searchMeta = _sharedSearchMeta || _toolSearchMeta;
             var finishOpt = {
               contentBuffer: contentBuffer,
               reasoningBuffer: persistentReasoning || reasoningBuffer,
