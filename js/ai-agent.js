@@ -1208,9 +1208,19 @@
         keyboardHeight = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
         viewportHeight = Math.max(280, Math.round(vv.height));
       }
-      updateRootVar('--ai-keyboard-offset', keyboardHeight + 'px');
-      updateRootVar('--ai-viewport-height', viewportHeight ? viewportHeight + 'px' : '100%');
       root.classList.toggle('ai-keyboard-open', keyboardHeight > 0);
+      
+      if (_isTouchMobile) {
+        // 移动端：不缩放容器高度，用 translateY 把内容推上去，输入框自然浮在键盘上方
+        updateRootVar('--ai-keyboard-offset', keyboardHeight + 'px');
+        if (!keyboardHeight) {
+          updateRootVar('--ai-viewport-height', '100%');
+        }
+      } else {
+        // 桌面端：保持原有行为（缩放高度）
+        updateRootVar('--ai-keyboard-offset', keyboardHeight + 'px');
+        updateRootVar('--ai-viewport-height', viewportHeight ? viewportHeight + 'px' : '100%');
+      }
       updateInputMetrics();
       if (keyboardHeight > 0 && isNearBottom(messagesEl, 120)) {
         S.autoScrollPinned = true;
