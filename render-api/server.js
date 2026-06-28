@@ -7699,6 +7699,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // 后置搜索触发：思考结束后补充搜索并重新生成回答
     if (finishReason === 'post_reasoning_search' && !aborted) {
       toolRound++;
+      // 第二路不再走思考模式，AI 直接基于注入的搜索结果生成回答
+      if (useThinking) {
+        delete apiBody.thinking;
+        delete apiBody.reasoning_effort;
+      }
       continue;
     }
     
