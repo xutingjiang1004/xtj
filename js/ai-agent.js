@@ -9,16 +9,9 @@
   var HISTORY_PAGE_SIZE = 30;
   var CONFIG_CACHE_TTL = 5 * 60 * 1000;
   var CONV_ID_KEY = 'xtj_ai_last_conversation_id';
-  var THINKING_MODE_KEY = 'xtj_ai_thinking_mode';
   var REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
   var USER_NAME_KEYS = ['xtj_user', 'xtj_username', 'xtj_user_name'];
   var PW_HASH_KEYS = ['xtj_pw_hash', 'xtj_password_hash'];
-  var THINKING_LEVELS = [
-    { value: 'off', label: '关', icon: '' },
-    { value: 'low', label: '低', icon: '·' },
-    { value: 'medium', label: '中', icon: '◌' },
-    { value: 'high', label: '高', icon: '✦' }
-  ];
   var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
 
   var S = {
@@ -31,10 +24,7 @@
     sending: false,
     loading: false,
     loadingMore: false,
-    thinkingMode: (function() {
-      try { return localStorage.getItem(THINKING_MODE_KEY) || 'off'; }
-      catch (e) { return 'off'; }
-    })(),
+    thinkingMode: 'off',
     active: false,
     rootEl: null,
     messagesEl: null,
@@ -350,10 +340,6 @@
     return window.innerWidth <= 640;
   }
 
-  function getThinkButtonText(label) {
-    return isCompactAiHeader() ? label : ('思考 ' + label);
-  }
-
   function getNewButtonText() {
     return isCompactAiHeader() ? '新' : '新对话';
   }
@@ -363,17 +349,15 @@
     return '历史';
   }
 
-  function syncAiHeaderButtons(thinkBtn, histBtn, newBtn) {
-    if (!thinkBtn || !histBtn || !newBtn) return;
-    var label = thinkBtn.getAttribute('data-short-label') || '关';
-    thinkBtn.textContent = getThinkButtonText(label);
+  function syncAiHeaderButtons(histBtn, newBtn) {
+    if (!histBtn || !newBtn) return;
     histBtn.textContent = getHistoryButtonText(!!S.showingHistory);
     newBtn.textContent = getNewButtonText();
   }
 
-  function bindAiHeaderButtons(thinkBtn, histBtn, newBtn) {
+  function bindAiHeaderButtons(histBtn, newBtn) {
     function onResize() {
-      syncAiHeaderButtons(thinkBtn, histBtn, newBtn);
+      syncAiHeaderButtons(histBtn, newBtn);
     }
     window.addEventListener('resize', onResize);
     onResize();
@@ -796,10 +780,10 @@
 
   function formatThinkingElapsed(ms) {
     var totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
-    if (totalSeconds < 60) return totalSeconds + '秒';
+    if (totalSeconds < 60) return totalSeconds + 's';
     var minutes = Math.floor(totalSeconds / 60);
     var seconds = totalSeconds % 60;
-    return seconds > 0 ? (minutes + '分' + seconds + '秒') : (minutes + '分钟');
+    return seconds > 0 ? (minutes + 'm' + seconds + 's') : (minutes + 'min');
   }
 
   function setThinkingStatus(node, text) {
@@ -823,10 +807,10 @@
       start: function() {
         if (stopped || intervalId) return;
         startedAt = Date.now();
-        update('思考中', 0);
+        update('正在思考中', 0);
         intervalId = setInterval(function() {
           if (!reasoningNode || !reasoningNode.isConnected) return;
-          update('思考中', Date.now() - startedAt);
+          update('正在思考中', Date.now() - startedAt);
         }, 500);
       },
       stop: function() {
@@ -1084,118 +1068,7 @@
     };
   }
 
-  function getOverflowClipRect(node) {
-    var current = node && node.parentElement;
-    while (current && current !== document.body && current !== document.documentElement) {
-      var style = window.getComputedStyle(current);
-      var ox = style.overflowX;
-      var oy = style.overflowY;
-      if ((ox && ox !== 'visible') || (oy && oy !== 'visible')) {
-        return current.getBoundingClientRect();
-      }
-      current = current.parentElement;
-    }
-    return null;
-  }
-
-  function menuNeedsFixed(menu, wrap) {
-    if (!menu || !wrap) return false;
-    var rect = menu.getBoundingClientRect();
-    if (rect.bottom > window.innerHeight - 8 || rect.right > window.innerWidth - 8 || rect.left < 8 || rect.top < 0) return true;
-    var clipRect = getOverflowClipRect(wrap);
-    if (!clipRect) return false;
-    return rect.bottom > clipRect.bottom - 4 || rect.top < clipRect.top + 4 || rect.right > clipRect.right - 4 || rect.left < clipRect.left + 4;
-  }
-
-  function createThinkMenuController(thinkWrap, thinkBtn, thinkMenu) {
-    var cleanup = null;
-
-    function detachObservers() {
-      if (!cleanup) return;
-      try { cleanup(); } catch (e) {}
-      cleanup = null;
-    }
-
-    function positionThinkMenu() {
-      if (!thinkMenu.classList.contains('open')) return;
-      thinkMenu.classList.remove('is-fixed');
-      thinkMenu.style.left = '';
-      thinkMenu.style.top = '';
-      thinkMenu.style.minWidth = '';
-      if (!menuNeedsFixed(thinkMenu, thinkWrap)) return;
-      var btnRect = thinkBtn.getBoundingClientRect();
-      var menuRect = thinkMenu.getBoundingClientRect();
-      var width = Math.max(132, btnRect.width, menuRect.width);
-      var left = Math.min(window.innerWidth - width - 12, Math.max(12, btnRect.right - width));
-      thinkMenu.classList.add('is-fixed');
-      thinkMenu.style.left = Math.round(left) + 'px';
-      thinkMenu.style.top = Math.round(btnRect.bottom + 6) + 'px';
-      thinkMenu.style.minWidth = Math.round(Math.max(btnRect.width, 132)) + 'px';
-    }
-
-    function closeThinkMenu() {
-      thinkMenu.classList.remove('open', 'is-fixed');
-      thinkBtn.classList.remove('menu-open');
-      thinkMenu.style.left = '';
-      thinkMenu.style.top = '';
-      thinkMenu.style.minWidth = '';
-      detachObservers();
-    }
-
-    function openThinkMenu() {
-      thinkMenu.classList.add('open');
-      thinkBtn.classList.add('menu-open');
-      positionThinkMenu();
-      var onPointerDown = function(ev) {
-        if (!thinkWrap.contains(ev.target)) closeThinkMenu();
-      };
-      var onKeyDown = function(ev) {
-        if (ev.key === 'Escape') closeThinkMenu();
-      };
-      var onWindowChange = function() {
-        positionThinkMenu();
-      };
-      document.addEventListener('pointerdown', onPointerDown, true);
-      document.addEventListener('keydown', onKeyDown, true);
-      window.addEventListener('resize', onWindowChange, true);
-      window.addEventListener('scroll', onWindowChange, true);
-      var vv = window.visualViewport;
-      if (vv) {
-        vv.addEventListener('resize', onWindowChange);
-        vv.addEventListener('scroll', onWindowChange);
-      }
-      cleanup = function() {
-        document.removeEventListener('pointerdown', onPointerDown, true);
-        document.removeEventListener('keydown', onKeyDown, true);
-        window.removeEventListener('resize', onWindowChange, true);
-        window.removeEventListener('scroll', onWindowChange, true);
-        if (vv) {
-          vv.removeEventListener('resize', onWindowChange);
-          vv.removeEventListener('scroll', onWindowChange);
-        }
-      };
-    }
-
-    function toggleThinkMenu() {
-      if (thinkMenu.classList.contains('open')) closeThinkMenu();
-      else openThinkMenu();
-    }
-
-    thinkBtn.addEventListener('click', function(ev) {
-      ev.preventDefault();
-      ev.stopPropagation();
-      toggleThinkMenu();
-    });
-
-    return {
-      open: openThinkMenu,
-      close: closeThinkMenu,
-      toggle: toggleThinkMenu,
-      reposition: positionThinkMenu
-    };
-  }
-
-  function bindVisualViewport(messagesEl, input) {
+  function bindVisualViewport(messagesEl, input, inputBar) {
     var root = getAiRoot();
     if (!root) return function() {};
 
@@ -1209,12 +1082,25 @@
         viewportHeight = Math.max(280, Math.round(vv.height));
       }
       root.classList.toggle('ai-keyboard-open', keyboardHeight > 0);
-      
+
       if (_isTouchMobile) {
-        // 移动端：不缩放容器高度，用 translateY 把内容推上去，输入框自然浮在键盘上方
-        updateRootVar('--ai-keyboard-offset', keyboardHeight + 'px');
-        if (!keyboardHeight) {
-          updateRootVar('--ai-viewport-height', '100%');
+        // 移动端：输入栏 position:fixed 浮在键盘上方，容器不缩放
+        if (keyboardHeight > 0) {
+          var barRect = inputBar.getBoundingClientRect();
+          var rootRect = root.getBoundingClientRect();
+          inputBar.style.position = 'fixed';
+          inputBar.style.bottom = keyboardHeight + 'px';
+          inputBar.style.left = rootRect.left + 'px';
+          inputBar.style.width = rootRect.width + 'px';
+          inputBar.style.zIndex = '100';
+          messagesEl.style.paddingBottom = 'calc(var(--ai-input-height, 72px) + ' + keyboardHeight + 'px + 14px)';
+        } else {
+          inputBar.style.position = '';
+          inputBar.style.bottom = '';
+          inputBar.style.left = '';
+          inputBar.style.width = '';
+          inputBar.style.zIndex = '';
+          messagesEl.style.paddingBottom = '';
         }
       } else {
         // 桌面端：保持原有行为（缩放高度）
@@ -1229,11 +1115,17 @@
     }
 
     function resetViewport() {
-      var root2 = getAiRoot();
-      if (!root2) return;
+      if (_isTouchMobile) {
+        inputBar.style.position = '';
+        inputBar.style.bottom = '';
+        inputBar.style.left = '';
+        inputBar.style.width = '';
+        inputBar.style.zIndex = '';
+        messagesEl.style.paddingBottom = '';
+      }
+      root.classList.remove('ai-keyboard-open');
       updateRootVar('--ai-keyboard-offset', '0px');
       updateRootVar('--ai-viewport-height', '100%');
-      root2.classList.remove('ai-keyboard-open');
       updateInputMetrics();
       if (isNearBottom(messagesEl, 120)) {
         S.autoScrollPinned = true;
@@ -1277,6 +1169,12 @@
       window.removeEventListener('resize', onViewportChange);
       input.removeEventListener('blur', onBlur);
       input.removeEventListener('focus', onFocus);
+      inputBar.style.position = '';
+      inputBar.style.bottom = '';
+      inputBar.style.left = '';
+      inputBar.style.width = '';
+      inputBar.style.zIndex = '';
+      messagesEl.style.paddingBottom = '';
     };
   }
 
@@ -1300,7 +1198,7 @@
 
   async function handleSendMessage(input, sendBtn, messagesEl) {
     var text = String(input.value || '').trim();
-    if (!text) return;
+    if (!text) { S.sending = false; return; }
     
     var originalText = text;
     
@@ -1315,7 +1213,7 @@
     }
     
     var authOk = await ensureUserAuthOrNotify();
-    if (!authOk) return;
+    if (!authOk) { S.sending = false; return; }
     
     // 如果有正在进行的请求，中断它
     if (S.sending) {
@@ -1368,7 +1266,6 @@
     
     var fetchBody = JSON.stringify({
       message: text,
-      thinking_mode: S.thinkingMode,
       conversation_id: S.conversationId,
       client_request_id: reqId
     });
@@ -1809,6 +1706,12 @@
           if (evt.type === 'reasoning') {
             aiReasoning += evt.text || '';
             if ((finalThinkingMode && finalThinkingMode !== 'off') || (!finalThinkingMode && S.thinkingMode !== 'off')) {
+              // 如果 reasoning_start 事件丢失，首次收到 reasoning 也启动计时器
+              if (!reasoningStarted) {
+                reasoningStarted = true;
+                ensureReasoningNode();
+                ensureThinkingTimer();
+              }
               var rn = ensureReasoningNode();
               var body = rn.querySelector('.ai-thinking-body');
               if (body) {
@@ -2208,76 +2111,31 @@ function showChatMessages() {
     info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: getAiStatusText() }));
     header.appendChild(info);
 
-    function getLevelMeta(v) {
-      for (var i = 0; i < THINKING_LEVELS.length; i++) {
-        if (THINKING_LEVELS[i].value === v) return THINKING_LEVELS[i];
-      }
-      return THINKING_LEVELS[0];
-    }
-
-    var thinkWrap = el('div', { class: 'ai-chat-think-wrap' });
-    var curLvl = getLevelMeta(S.thinkingMode);
-    var thinkBtn = el('button', {
-      type: 'button',
-      class: 'ai-chat-think-btn' + (S.thinkingMode !== 'off' ? ' active' : ''),
-      'aria-label': '思考模式',
-      title: '思考模式：' + curLvl.label
-    }, '思考 ' + curLvl.label);
-    thinkBtn.setAttribute('data-short-label', curLvl.label);
-    var thinkMenu = el('div', { class: 'ai-chat-think-menu' });
-    THINKING_LEVELS.forEach(function(level) {
-      var opt = el('button', {
-        type: 'button',
-        class: 'ai-chat-think-opt' + (level.value === S.thinkingMode ? ' selected' : ''),
-        'data-value': level.value
-      }, level.label);
-      opt.addEventListener('click', function(ev) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        S.thinkingMode = level.value;
-        try { localStorage.setItem(THINKING_MODE_KEY, level.value); } catch (e) {}
-        thinkBtn.setAttribute('data-short-label', level.label);
-        thinkBtn.textContent = '思考 ' + level.label;
-        thinkBtn.title = '思考模式：' + level.label;
-        thinkBtn.classList.toggle('active', level.value !== 'off');
-        syncAiHeaderButtons(thinkBtn, histBtn, newBtn);
-        var opts = thinkMenu.querySelectorAll('.ai-chat-think-opt');
-        for (var i = 0; i < opts.length; i++) {
-          opts[i].classList.toggle('selected', opts[i].getAttribute('data-value') === level.value);
-        }
-        if (S.thinkMenuController) S.thinkMenuController.close();
-      });
-      thinkMenu.appendChild(opt);
-    });
-    thinkWrap.appendChild(thinkBtn);
-    thinkWrap.appendChild(thinkMenu);
-    header.appendChild(thinkWrap);
-
     // 历史会话按钮
     var histBtn = el('button', {
       type: 'button', class: 'ai-chat-hist-btn', 'aria-label': '历史会话',
       title: '历史会话'
-    }, '历史');
+    }, '历史对话');
     histBtn.addEventListener('click', function() {
       if (S.showingHistory) {
         showChatMessages();
-        syncAiHeaderButtons(thinkBtn, histBtn, newBtn);
+        syncAiHeaderButtons(histBtn, newBtn);
       } else {
         fetchConversations().then(function() {
           showConversationList();
-          syncAiHeaderButtons(thinkBtn, histBtn, newBtn);
+          syncAiHeaderButtons(histBtn, newBtn);
         });
       }
     });
     header.appendChild(histBtn);
 
     // 记忆按钮
-    var memoryBtn = el('button', { type: 'button', class: 'ai-chat-hist-btn', 'aria-label': 'AI 记忆', title: '查看 AI 记住了什么' }, '记忆');
+    var memoryBtn = el('button', { type: 'button', class: 'ai-chat-hist-btn', 'aria-label': 'AI 记忆', title: '查看 AI 记住了什么' }, 'AI记忆');
     memoryBtn.addEventListener('click', async function() {
       try {
         var r = await apiRequest('GET', '/memory');
-        if (r && r.ok && r.memory) {
-          var memory = r.memory;
+        var memory = r && r.ok && r.data && r.data.memory ? r.data.memory : null;
+        if (memory) {
           var lines = [];
           lines.push('--- AI 长期记忆 ---');
           lines.push('');
@@ -2341,7 +2199,7 @@ function showChatMessages() {
     if (S.headerButtonsCleanup) {
       try { S.headerButtonsCleanup(); } catch (eCleanup) {}
     }
-    S.headerButtonsCleanup = bindAiHeaderButtons(thinkBtn, histBtn, newBtn);
+    S.headerButtonsCleanup = bindAiHeaderButtons(histBtn, newBtn);
     root.appendChild(header);
 
     var messagesEl = el('div', { class: 'ai-chat-messages', id: 'aiChatMessagesArea' });
@@ -2395,6 +2253,7 @@ function showChatMessages() {
     function doSend() {
       // 移动端先收起键盘再发送，避免 viewport 闪烁
       if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+      S.sending = true;
       handleSendMessage(input, sendBtn, messagesEl);
     }
 
@@ -2411,7 +2270,6 @@ function showChatMessages() {
     inputBar.appendChild(sendBtn);
     root.appendChild(inputBar);
 
-    S.thinkMenuController = createThinkMenuController(thinkWrap, thinkBtn, thinkMenu);
     setTimeout(autoresize, 0);
 
     return {
@@ -2465,7 +2323,7 @@ function showChatMessages() {
     if (S.viewportCleanup) {
       try { S.viewportCleanup(); } catch (e3) {}
     }
-    S.viewportCleanup = bindVisualViewport(r.messagesEl, r.input);
+    S.viewportCleanup = bindVisualViewport(r.messagesEl, r.input, r.inputBar);
 
     S.conversationId = readConvId();
 
@@ -2538,10 +2396,6 @@ function showChatMessages() {
     clearReplyTimer();
     abortCurrentRequest();
     clearStreamCleanup();
-    if (S.thinkMenuController) {
-      try { S.thinkMenuController.close(); } catch (e) {}
-      S.thinkMenuController = null;
-    }
     if (S.viewportCleanup) {
       try { S.viewportCleanup(); } catch (e2) {}
       S.viewportCleanup = null;
