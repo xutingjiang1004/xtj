@@ -2766,7 +2766,6 @@ function showChatMessages() {
     item.appendChild(listAvatar);
     var meta = el('div', { class: 'chat-list-meta' });
     meta.appendChild(el('div', { class: 'chat-list-name', text: name }));
-    meta.appendChild(el('div', { class: 'chat-list-preview', text: desc }));
     item.appendChild(meta);
     item.appendChild(el('span', { class: 'chat-list-arrow', text: '›' }));
 
