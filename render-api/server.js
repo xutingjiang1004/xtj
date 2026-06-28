@@ -74,7 +74,7 @@ const supabase = createClient(
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const DEEPSEEK_MODEL_REASONER = process.env.DEEPSEEK_MODEL_REASONER || process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
-const DEEPSEEK_TIMEOUT_MS = 25000; // 25 秒超时
+const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
 const AI_AGENT_DAILY_LIMIT = 300; // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = 50; // 每用户每小时 AI 调用次数
 // 单价配置（CNY / 1M tokens），可通过环境变量覆盖
@@ -327,10 +327,10 @@ async function searchTavily(query, maxResults) {
         search_depth: 'basic',
         include_answer: false
       }),
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(15000)
     });
     if (!resp.ok) {
-      var errBody = await resp.text().catch(function(){ return ''; });
+      var errBody = await resp.text().catch(function() { return ''; });
       return { results: [], error: 'Tavily status=' + resp.status + ' ' + errBody.slice(0, 100) };
     }
     var data = await resp.json();
@@ -362,7 +362,7 @@ async function searchBrave(query, maxResults) {
         'Accept-Encoding': 'gzip',
         'X-Subscription-Token': apiKey
       },
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(15000)
     });
     if (!resp.ok) return { results: [], error: 'Brave status=' + resp.status };
     var data = await resp.json();
@@ -393,7 +393,7 @@ async function searchSerper(query, maxResults) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': apiKey },
       body: JSON.stringify({ q: query, num: Math.min(maxResults || 5, 10) }),
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(10000)
     });
     if (!resp.ok) return { results: [], error: 'Serper status=' + resp.status };
     var data = await resp.json();
@@ -423,7 +423,7 @@ async function searchCustomApi(query, maxResults) {
     var url = apiUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&pageno=1&categories=general';
     var resp = await fetch(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(10000)
     });
     if (!resp.ok) return { results: [], error: 'CustomApi status=' + resp.status };
     var data = await resp.json();
@@ -461,7 +461,7 @@ async function searchSearxng(query, maxResults) {
     var url = baseUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
     return fetch(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(4000)
+      signal: AbortSignal.timeout(15000)
     }).then(function(r) {
       if (!r.ok) throw new Error(baseUrl.slice(0, 30) + ' status=' + r.status);
       return r.json();
@@ -499,7 +499,7 @@ async function searchBingHtml(query, maxResults) {
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Accept': 'text/html,application/xhtml+xml'
       },
-      signal: AbortSignal.timeout(10000)
+      signal: AbortSignal.timeout(15000)
     });
     if (!resp.ok) return { results: [], error: 'BingHtml status=' + resp.status };
     var html = await resp.text();
@@ -568,7 +568,12 @@ async function searchWeb(query, maxResults) {
   var mergedResults = [];
   var usedProvider = null;
 
+  // 整体搜索总超时 25 秒
+  var searchTimedOut = false;
+  var searchTimer = setTimeout(function() { searchTimedOut = true; }, 25000);
+
   for (var pi = 0; pi < providerList.length; pi++) {
+    if (searchTimedOut) break;
     var provider = providerList[pi];
     if (!provider.enabled) {
       diagnostics.missing_env.push(provider.requiresEnv);
@@ -601,6 +606,11 @@ async function searchWeb(query, maxResults) {
 
   var cacheTtl = mergedResults.length > 0 ? SEARCH_CACHE_TTL_MS : SEARCH_EMPTY_CACHE_TTL_MS;
   searchCache.set(cacheKey, { ts: Date.now(), results: finalResult });
+  clearTimeout(searchTimer);
+
+  if (searchTimedOut && mergedResults.length === 0) {
+    console.warn('[SEARCH] total search timeout (25s) for:', searchQuery);
+  }
 
   return finalResult;
 }
@@ -738,7 +748,7 @@ async function searchWebLegacy(query, maxResults) {
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Accept': 'text/html,application/xhtml+xml'
       },
-      signal: AbortSignal.timeout(6000)
+      signal: AbortSignal.timeout(15000)
     }).then(function(r) {
       if (!r.ok) throw new Error('bing status=' + r.status);
       return r.text();
@@ -779,7 +789,7 @@ async function searchWebLegacy(query, maxResults) {
       var url = baseUrl + '/search?q=' + encodeURIComponent(searchQuery) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
       return fetch(url, {
         headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(15000)
       }).then(function(r) {
         if (!r.ok) throw new Error('status=' + r.status);
         return r.json();
@@ -797,7 +807,7 @@ async function searchWebLegacy(query, maxResults) {
     });
     return Promise.race([
       Promise.any(fetchers),
-      new Promise(function(_, reject) { setTimeout(function() { reject(new Error('searxng timeout')); }, 7000); })
+      new Promise(function(_, reject) { setTimeout(function() { reject(new Error('searxng timeout')); }, 20000); })
     ]);
   }
 
@@ -2257,7 +2267,7 @@ async function callDeepSeek(messages, options) {
   var reasoningEffort = useThinking ? thinkingLevel : '';
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort); } catch (e) {}
   var controller = new AbortController();
-  var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
+  var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
 
   try {
     var apiBody = {
@@ -7487,7 +7497,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     var controller = new AbortController();
     _controller = controller;
-    var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
+    var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
     _timer = timer;
     
     var streamResp;
