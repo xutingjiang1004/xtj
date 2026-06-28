@@ -1309,9 +1309,13 @@
     // 如果有正在进行的请求，中断它
     if (S.sending) {
       abortCurrentRequest();
-      // 等待上一个 typing 清理
       try { await new Promise(function(resolve) { setTimeout(resolve, 100); }); } catch (e) {}
     }
+    
+    // 快速双击去重：同一秒内相同文本的请求忽略
+    var msgDedupKey = text + Math.floor(Date.now() / 1000);
+    if (S._lastMsgDedupKey === msgDedupKey) { S.sending = false; return; }
+    S._lastMsgDedupKey = msgDedupKey;
     
     S.clientRequestId++;
     var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
@@ -1546,6 +1550,7 @@
         var readResult;
         try { readResult = await reader.read(); } catch (e) { break; }
         if (readResult.done) break;
+        if (!S.active) { reader.cancel().catch(function(){}); break; }
         
         buffer += decoder.decode(readResult.value, { stream: true });
         var lines = buffer.split('\n');
