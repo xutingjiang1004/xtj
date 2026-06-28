@@ -211,20 +211,63 @@ async function autoSupplementSearch(originalQuery, currentResults, maxR) {
   if (newKeywords.length === 0) return currentResults;
   var existingUrls = {};
   currentResults.forEach(function(r) { if (r.url) existingUrls[r.url] = true; });
-  for (var ki = 0; ki < newKeywords.length; ki++) {
-    var supplementQ = newKeywords[ki];
-    try {
-      var sr = await searchWeb(supplementQ, Math.ceil(maxR / 2));
-      var extra = (sr && sr.results) || [];
-      extra.forEach(function(r) {
-        if (r.url && !existingUrls[r.url] && r.title) {
-          existingUrls[r.url] = true;
-          currentResults.push(r);
-        }
-      });
-    } catch (e) {}
-  }
+  // 并行补充搜索
+  var supplementPromises = newKeywords.map(function(kw) {
+    return searchWeb(kw, Math.ceil(maxR / 2)).then(function(sr) {
+      return (sr && sr.results) || [];
+    });
+  });
+  var extraResultsArrays = await Promise.all(supplementPromises);
+  extraResultsArrays.forEach(function(extra) {
+    extra.forEach(function(r) {
+      if (r.url && !existingUrls[r.url] && r.title) {
+        existingUrls[r.url] = true;
+        currentResults.push(r);
+      }
+    });
+  });
   return currentResults.slice(0, maxR);
+}
+
+// 搜索扩展：当 AI 只搜了少量关键词时，自动提取用户问题中的实体并生成更多搜索
+function generateExpandedQueries(userMessage, existingQueries, maxExtra) {
+  maxExtra = maxExtra || 3;
+  var extra = [];
+  var msg = String(userMessage || '').trim().slice(0, 300);
+
+  // 提取地点/主题等关键词
+  var locations = (msg.match(/[在去来]?\s*([\u4e00-\u9fff]{2,6}(?:市|区|县|岛|山|河|湖|海|公园|广场|街|路|大学|学院|博物馆|景区|旅游)?)/g) || [])
+    .map(function(s) { return s.replace(/[在去来]/g, '').trim(); })
+    .filter(function(s) { return s.length >= 2; });
+
+  var topics = [];
+  // 从用户消息提取可能的搜索方向
+  if (/攻略|旅游|玩|景点|去/.test(msg)) {
+    topics = topics.concat(['攻略', '景点推荐', '美食', '交通', '住宿', '路线', '最佳季节', '注意事项']);
+  } else if (/对比|区别|哪个好|vs|VS|还是/.test(msg)) {
+    topics = topics.concat(['对比', '评测', '推荐', '价格', '性价比']);
+  } else if (/新闻|资讯|最新|报道/.test(msg)) {
+    topics = topics.concat(['最新消息', '最新进展', '动态']);
+  } else if (/价格|多少钱|费用|预算/.test(msg)) {
+    topics = topics.concat(['价格', '费用', '性价比', '优惠']);
+  }
+
+  // 已有查询去重
+  var existingStr = existingQueries.join('');
+  var uniqueTopics = [];
+  for (var ti = 0; ti < topics.length; ti++) {
+    if (uniqueTopics.length >= maxExtra) break;
+    var t = topics[ti];
+    if (existingStr.indexOf(t) < 0) uniqueTopics.push(t);
+  }
+
+  // 用地点+主题组合生成新搜索词
+  var usedLoc = locations.length > 0 ? locations[0] : '';
+  for (var ui = 0; ui < uniqueTopics.length; ui++) {
+    var q = usedLoc ? usedLoc + uniqueTopics[ui] : uniqueTopics[ui];
+    extra.push(q);
+  }
+  return extra.slice(0, maxExtra);
 }
 
 // AI 配置缓存
@@ -265,7 +308,7 @@ async function searchTavily(query, maxResults) {
         search_depth: 'basic',
         include_answer: false
       }),
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(5000)
     });
     if (!resp.ok) {
       var errBody = await resp.text().catch(function(){ return ''; });
@@ -300,7 +343,7 @@ async function searchBrave(query, maxResults) {
         'Accept-Encoding': 'gzip',
         'X-Subscription-Token': apiKey
       },
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(5000)
     });
     if (!resp.ok) return { results: [], error: 'Brave status=' + resp.status };
     var data = await resp.json();
@@ -331,7 +374,7 @@ async function searchSerper(query, maxResults) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': apiKey },
       body: JSON.stringify({ q: query, num: Math.min(maxResults || 5, 10) }),
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(5000)
     });
     if (!resp.ok) return { results: [], error: 'Serper status=' + resp.status };
     var data = await resp.json();
@@ -361,7 +404,7 @@ async function searchCustomApi(query, maxResults) {
     var url = apiUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&pageno=1&categories=general';
     var resp = await fetch(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(8000)
+      signal: AbortSignal.timeout(5000)
     });
     if (!resp.ok) return { results: [], error: 'CustomApi status=' + resp.status };
     var data = await resp.json();
@@ -465,7 +508,7 @@ async function searchBingHtml(query, maxResults) {
   }
 }
 
-// 主搜索函数：按优先级依次调用 provider，返回统一格式
+// 主搜索函数：并发向所有可用 Provider 发起请求，取最快的结果
 async function searchWeb(query, maxResults) {
   maxResults = maxResults || 5;
   var searchQuery = buildSearchQuery(query);
@@ -479,8 +522,8 @@ async function searchWeb(query, maxResults) {
     searchCache.delete(cacheKey);
   }
 
-  // 按优先级定义 provider 列表
-  var providerList = [
+  // 定义 provider 列表
+  var providers = [
     { name: 'Tavily', fn: function() { return searchTavily(searchQuery, maxResults); }, requiresEnv: 'TAVILY_API_KEY', enabled: !!process.env.TAVILY_API_KEY },
     { name: 'Brave', fn: function() { return searchBrave(searchQuery, maxResults); }, requiresEnv: 'BRAVE_SEARCH_API_KEY', enabled: !!process.env.BRAVE_SEARCH_API_KEY },
     { name: 'Serper', fn: function() { return searchSerper(searchQuery, maxResults); }, requiresEnv: 'SERPER_API_KEY', enabled: !!process.env.SERPER_API_KEY },
@@ -497,31 +540,45 @@ async function searchWeb(query, maxResults) {
     provider_errors: []
   };
 
-  var mergedResults = [];
-  var usedProvider = null;
-
-  for (var pi = 0; pi < providerList.length; pi++) {
-    var provider = providerList[pi];
-    if (!provider.enabled) {
-      diagnostics.missing_env.push(provider.requiresEnv);
+  // 并发：所有已启用的 Provider 同时发起请求
+  var enabledFns = [];
+  for (var pi = 0; pi < providers.length; pi++) {
+    var p = providers[pi];
+    if (!p.enabled) {
+      diagnostics.missing_env.push(p.requiresEnv);
       continue;
     }
-    diagnostics.enabled_providers.push(provider.name);
-    try {
-      var result = await provider.fn();
-      if (result.error) {
-        diagnostics.provider_errors.push({ provider: provider.name, error: result.error });
-      } else if (result.results && result.results.length > 0) {
-        diagnostics.provider_results.push({ provider: provider.name, count: result.results.length });
-        // 取第一个有结果的 provider
-        mergedResults = result.results;
-        usedProvider = provider.name;
-        break;
-      } else {
-        diagnostics.provider_results.push({ provider: provider.name, count: 0 });
+    diagnostics.enabled_providers.push(p.name);
+    enabledFns.push(p);
+  }
+
+  if (enabledFns.length === 0) {
+    var finalResult = { results: [], diagnostics: diagnostics, used_provider: null };
+    searchCache.set(cacheKey, { ts: Date.now(), results: finalResult });
+    return finalResult;
+  }
+
+  var parallelPromises = enabledFns.map(function(p) {
+    return p.fn().then(function(result) {
+      return { provider: p.name, result: result };
+    });
+  });
+
+  var settledResults = await Promise.all(parallelPromises);
+
+  var mergedResults = [];
+  var usedProvider = null;
+  for (var si = 0; si < settledResults.length; si++) {
+    var sr = settledResults[si];
+    var res = sr.result;
+    if (!res.error && res.results && res.results.length > 0) {
+      diagnostics.provider_results.push({ provider: sr.provider, count: res.results.length });
+      if (!usedProvider) {
+        mergedResults = res.results;
+        usedProvider = sr.provider;
       }
-    } catch (e) {
-      diagnostics.provider_errors.push({ provider: provider.name, error: e.message || 'unknown' });
+    } else {
+      diagnostics.provider_errors.push({ provider: sr.provider, error: res.error || '0 results' });
     }
   }
 
@@ -531,7 +588,6 @@ async function searchWeb(query, maxResults) {
     used_provider: usedProvider
   };
 
-  // 缓存
   var cacheTtl = mergedResults.length > 0 ? SEARCH_CACHE_TTL_MS : SEARCH_EMPTY_CACHE_TTL_MS;
   searchCache.set(cacheKey, { ts: Date.now(), results: finalResult });
 
@@ -6956,7 +7012,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       };
 
       var fcController = new AbortController();
-      var fcTimer = setTimeout(function() { fcController.abort(); }, 15000);
+      var fcTimer = setTimeout(function() { fcController.abort(); }, 6000);
 
       try {
         var fcResp = await fetch(DEEPSEEK_API_URL, {
@@ -6987,49 +7043,92 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               tool_calls: fcMessage.tool_calls
             });
 
-            for (var tci = 0; tci < fcMessage.tool_calls.length; tci++) {
-              var tc = fcMessage.tool_calls[tci];
-              if (aborted) break;
-              var toolResult = await executeToolCall(tc);
-              messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(toolResult) });
+            // 并行执行所有工具调用
+            var toolResults = await Promise.all(fcMessage.tool_calls.map(function(tc) {
+              return executeToolCall(tc).then(function(tr) {
+                return { toolCallId: tc.id, toolResult: tr };
+              });
+            }));
+            // 串行写入结果（SSE 保证顺序）
+            for (var tri = 0; tri < toolResults.length; tri++) {
+              var item = toolResults[tri];
+              messages.push({ role: 'tool', tool_call_id: item.toolCallId, content: JSON.stringify(item.toolResult) });
               res.write('data: ' + JSON.stringify({
                 type: 'tool_result',
-                tool_name: toolResult.tool_name || '',
-                success: !toolResult.error,
-                count: toolResult.results_count || 0,
-                error: toolResult.error || null,
-                location: toolResult.location || null
+                tool_name: item.toolResult.tool_name || '',
+                success: !item.toolResult.error,
+                count: item.toolResult.results_count || 0,
+                error: item.toolResult.error || null,
+                location: item.toolResult.location || null
               }) + '\n\n');
             }
 
-            // 自动补全：如果 AI 只搜了少量结果，提取关键词补充搜索
+            // 自动补全 + 搜索扩展：像多 Agent 并行工作
             if (!aborted) {
               var allResults = [];
+              var allQueries = [];
               var firstQuery = '';
               for (var sci = 0; sci < messages.length; sci++) {
                 var msgCheck = messages[sci];
                 if (msgCheck.role === 'tool') {
                   try {
                     var parsed = JSON.parse(msgCheck.content || '{}');
-                    if (parsed.tool_name === 'search_web' && Array.isArray(JSON.parse(parsed.content || '[]'))) {
-                      var items = JSON.parse(parsed.content || '[]');
-                      items.forEach(function(item) { allResults.push(item); });
+                    if (parsed.tool_name === 'search_web') {
+                      if (parsed.query) allQueries.push(parsed.query);
                       if (!firstQuery && parsed.query) firstQuery = parsed.query;
+                      if (Array.isArray(JSON.parse(parsed.content || '[]'))) {
+                        var items = JSON.parse(parsed.content || '[]');
+                        items.forEach(function(item) { allResults.push(item); });
+                      }
                     }
                   } catch (e) {}
                 }
               }
+
+              var parallelTasks = [];
+
+              // 任务1：结果不足时自动补全
               if (allResults.length > 0 && allResults.length < 5 && firstQuery) {
-                var supplemented = await autoSupplementSearch(firstQuery, allResults, 20);
-                if (supplemented.length > allResults.length) {
-                  var newCount = supplemented.length;
-                  var extraContent = JSON.stringify(supplemented.slice(allResults.length));
-                  messages.push({ role: 'tool', tool_call_id: 'auto_supplement', content: JSON.stringify({ tool_name: 'search_web', query: '补充搜索', results_count: newCount - allResults.length, content: extraContent }) });
+                parallelTasks.push(
+                  autoSupplementSearch(firstQuery, allResults.slice(), 20).then(function(supplemented) {
+                    return supplemented.length > allResults.length ? supplemented.slice(allResults.length) : [];
+                  })
+                );
+              }
+
+              // 任务2：AI 只搜了 1-2 个词时，自动扩展多个方向并行搜索
+              if (allQueries.length <= 2) {
+                var expandedQueries = generateExpandedQueries(message, allQueries, 3);
+                expandedQueries.forEach(function(eq) {
+                  parallelTasks.push(
+                    searchWeb(eq, 10).then(function(sr) {
+                      return (sr && sr.results) || [];
+                    })
+                  );
+                });
+              }
+
+              if (parallelTasks.length > 0) {
+                var extraArrays = await Promise.all(parallelTasks);
+                var existingUrls = {};
+                allResults.forEach(function(r) { if (r.url) existingUrls[r.url] = true; });
+                var newItems = [];
+                extraArrays.forEach(function(arr) {
+                  arr.forEach(function(r) {
+                    if (r.url && !existingUrls[r.url] && r.title) {
+                      existingUrls[r.url] = true;
+                      newItems.push(r);
+                    }
+                  });
+                });
+                if (newItems.length > 0) {
+                  var extraContent = JSON.stringify(newItems);
+                  messages.push({ role: 'tool', tool_call_id: 'auto_expand', content: JSON.stringify({ tool_name: 'search_web', query: '多 Agent 并行搜索', results_count: newItems.length, content: extraContent }) });
                   res.write('data: ' + JSON.stringify({
                     type: 'tool_result',
                     tool_name: 'search_web',
                     success: true,
-                    count: newCount - allResults.length,
+                    count: newItems.length,
                     error: null,
                     location: null
                   }) + '\n\n');
