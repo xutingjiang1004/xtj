@@ -5206,6 +5206,9 @@ async function initAdminClient() {
                 '<div class="form-group"><label>reasoner 模型名</label><input id="modelReasoner" value="' + escapeHtml(mdl.reasoner_model || '') + '" placeholder="例如: deepseek-reasoner" /></div>',
                 '<div class="form-group"><label>默认思考模式</label><select id="modelThinkingMode">' + selOpts(mdl.default_thinking_mode, [{val:'off',label:'关闭'},{val:'low',label:'低'},{val:'medium',label:'中'},{val:'high',label:'高'}]) + '</select></div>',
                 '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="modelMultiAgent"' + (mdl.multi_agent ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 多Agent协作（拆解问题→多关键词并行搜索→合成回答，仅在非思考模式生效）</label>',
+                '</div>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
                 '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;opacity:0.5;pointer-events:none;"><input type="checkbox" id="modelUserSwitch" disabled style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 允许用户切换（已禁用，由后台统一控制）</label>',
                 '</div>',
                 '</div>',
@@ -5357,7 +5360,8 @@ async function initAdminClient() {
                             model: {
                                 reasoner_model: document.getElementById('modelReasoner').value.trim(),
                                 default_thinking_mode: document.getElementById('modelThinkingMode').value,
-                                allow_user_thinking_switch: document.getElementById('modelUserSwitch').checked
+                                allow_user_thinking_switch: document.getElementById('modelUserSwitch').checked,
+                                multi_agent: document.getElementById('modelMultiAgent').checked
                             },
                             admin_debug: {
                                 show_effective_prompt: document.getElementById('debugPrompt').checked,
