@@ -74,7 +74,7 @@ const supabase = createClient(
 const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
 const DEEPSEEK_MODEL_REASONER = process.env.DEEPSEEK_MODEL_REASONER || process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash';
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
-const DEEPSEEK_TIMEOUT_MS = 25000; // 25 秒超时
+const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
 const AI_AGENT_DAILY_LIMIT = 300; // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = 50; // 每用户每小时 AI 调用次数
 // 单价配置（CNY / 1M tokens），可通过环境变量覆盖
@@ -327,10 +327,10 @@ async function searchTavily(query, maxResults) {
         search_depth: 'basic',
         include_answer: false
       }),
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(15000)
     });
     if (!resp.ok) {
-      var errBody = await resp.text().catch(function(){ return ''; });
+      var errBody = await resp.text().catch(function() { return ''; });
       return { results: [], error: 'Tavily status=' + resp.status + ' ' + errBody.slice(0, 100) };
     }
     var data = await resp.json();
@@ -362,7 +362,7 @@ async function searchBrave(query, maxResults) {
         'Accept-Encoding': 'gzip',
         'X-Subscription-Token': apiKey
       },
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(15000)
     });
     if (!resp.ok) return { results: [], error: 'Brave status=' + resp.status };
     var data = await resp.json();
@@ -393,7 +393,7 @@ async function searchSerper(query, maxResults) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-KEY': apiKey },
       body: JSON.stringify({ q: query, num: Math.min(maxResults || 5, 10) }),
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(10000)
     });
     if (!resp.ok) return { results: [], error: 'Serper status=' + resp.status };
     var data = await resp.json();
@@ -423,7 +423,7 @@ async function searchCustomApi(query, maxResults) {
     var url = apiUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&pageno=1&categories=general';
     var resp = await fetch(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(10000)
     });
     if (!resp.ok) return { results: [], error: 'CustomApi status=' + resp.status };
     var data = await resp.json();
@@ -461,7 +461,7 @@ async function searchSearxng(query, maxResults) {
     var url = baseUrl + '/search?q=' + encodeURIComponent(query) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
     return fetch(url, {
       headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(4000)
+      signal: AbortSignal.timeout(15000)
     }).then(function(r) {
       if (!r.ok) throw new Error(baseUrl.slice(0, 30) + ' status=' + r.status);
       return r.json();
@@ -499,7 +499,7 @@ async function searchBingHtml(query, maxResults) {
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Accept': 'text/html,application/xhtml+xml'
       },
-      signal: AbortSignal.timeout(10000)
+      signal: AbortSignal.timeout(15000)
     });
     if (!resp.ok) return { results: [], error: 'BingHtml status=' + resp.status };
     var html = await resp.text();
@@ -568,7 +568,12 @@ async function searchWeb(query, maxResults) {
   var mergedResults = [];
   var usedProvider = null;
 
+  // 整体搜索总超时 25 秒
+  var searchTimedOut = false;
+  var searchTimer = setTimeout(function() { searchTimedOut = true; }, 25000);
+
   for (var pi = 0; pi < providerList.length; pi++) {
+    if (searchTimedOut) break;
     var provider = providerList[pi];
     if (!provider.enabled) {
       diagnostics.missing_env.push(provider.requiresEnv);
@@ -601,6 +606,11 @@ async function searchWeb(query, maxResults) {
 
   var cacheTtl = mergedResults.length > 0 ? SEARCH_CACHE_TTL_MS : SEARCH_EMPTY_CACHE_TTL_MS;
   searchCache.set(cacheKey, { ts: Date.now(), results: finalResult });
+  clearTimeout(searchTimer);
+
+  if (searchTimedOut && mergedResults.length === 0) {
+    console.warn('[SEARCH] total search timeout (25s) for:', searchQuery);
+  }
 
   return finalResult;
 }
@@ -738,7 +748,7 @@ async function searchWebLegacy(query, maxResults) {
         'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
         'Accept': 'text/html,application/xhtml+xml'
       },
-      signal: AbortSignal.timeout(6000)
+      signal: AbortSignal.timeout(15000)
     }).then(function(r) {
       if (!r.ok) throw new Error('bing status=' + r.status);
       return r.text();
@@ -779,7 +789,7 @@ async function searchWebLegacy(query, maxResults) {
       var url = baseUrl + '/search?q=' + encodeURIComponent(searchQuery) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
       return fetch(url, {
         headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(5000)
+        signal: AbortSignal.timeout(15000)
       }).then(function(r) {
         if (!r.ok) throw new Error('status=' + r.status);
         return r.json();
@@ -797,7 +807,7 @@ async function searchWebLegacy(query, maxResults) {
     });
     return Promise.race([
       Promise.any(fetchers),
-      new Promise(function(_, reject) { setTimeout(function() { reject(new Error('searxng timeout')); }, 7000); })
+      new Promise(function(_, reject) { setTimeout(function() { reject(new Error('searxng timeout')); }, 20000); })
     ]);
   }
 
@@ -2257,7 +2267,7 @@ async function callDeepSeek(messages, options) {
   var reasoningEffort = useThinking ? thinkingLevel : '';
   try { console.log('[DEEPSEEK] thinking_mode:', thinkingLevel, 'useThinking:', useThinking, 'model:', model, 'reasoning_effort:', reasoningEffort); } catch (e) {}
   var controller = new AbortController();
-  var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
+  var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
 
   try {
     var apiBody = {
@@ -7453,8 +7463,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var roundMessages = messages;
     // 跨轮次保留的推理内容（第一次流产生的，第二次流不会重复）
     var persistentReasoning = '';
-    // 防止后置搜索重复触发
-    var _postSearchDone = false;
     // 并行搜索：不阻塞stream，让思考立即开始，搜索异步进行
     var parallelSearchPromise = null;
     var parallelSearchResults = null;
@@ -7489,7 +7497,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     var controller = new AbortController();
     _controller = controller;
-    var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
+    var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
     _timer = timer;
     
     var streamResp;
@@ -7628,133 +7636,55 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           finishReason = 'tool_calls';
           break;
         }
-        
-        if (finish === 'stop' || finish === 'length') {
+                if (finish === 'stop' || finish === 'length') {
           finishReason = finish;
-          // 思考模式下：检查 reasoning 是否提到需要搜索，且此前未注入搜索结果
-          var needsPostSearch = false;
-          var postSearchKeyword = '';
-          if (useThinking && allowSearch && reasoningBuffer && reasoningBuffer.length > 50 && !aborted && !_postSearchDone) {
-            var hasSearched = roundMessages.some(function(mm) {
-              return mm.role === 'system' && typeof mm.content === 'string' && (mm.content.indexOf('【联网搜索结果】') >= 0 || mm.content.indexOf('【多Agent协作搜索结果】') >= 0 || mm.content.indexOf('【联网搜索结果（思考后补充检索）】') >= 0);
-            }) || roundMessages.some(function(mm) { return mm.role === 'tool' && mm.content && mm.content.indexOf('search_results') >= 0; });
-            if (!hasSearched && /搜索|查|查询|需要(联网|搜索)|应该(搜索|查)|让我(搜|查|百度|google|谷歌)|我没有搜|没(有|找到)|搜不到|查不到|没有(搜索|查到)/i.test(reasoningBuffer)) {
-               // 从 reasoning 中提取搜索关键词
-              postSearchKeyword = message.slice(0, 80);
-              var rpParts = reasoningBuffer.split(/[\n。！？；]/);
-              var rpLine = '';
-              for (var rppi = rpParts.length - 1; rppi >= 0; rppi--) {
-                if (/搜索|搜|查|百度|google|谷歌/.test(rpParts[rppi])) {
-                  rpLine = rpParts[rppi].trim().slice(0, 100);
-                  break;
+          // 直接收尾，不重新搜索不重新生成
+          if (!aborted) {
+            // 检查并行搜索结果，有则注入（fire-and-forget 思考期间已完成）
+            if (useThinking && allowSearch && parallelSearchPromise) {
+              try { await parallelSearchPromise; } catch (_e) {}
+              if (parallelSearchResults && parallelSearchResults.results && parallelSearchResults.results.length > 0) {
+                var hasSearched = roundMessages.some(function(mm) {
+                  return mm.role === 'system' && typeof mm.content === 'string' && 
+                    (mm.content.indexOf('【联网搜索结果】') >= 0 || mm.content.indexOf('【多Agent协作搜索结果】') >= 0);
+                });
+                if (!hasSearched) {
+                  var _pCtx = '【联网搜索结果（思考并行检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + parallelSearchResults.query + '\n\n' +
+                    parallelSearchResults.results.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n');
+                  roundMessages.push({ role: 'system', content: _pCtx });
+                  res.write('data: ' + JSON.stringify({ type: 'search', count: parallelSearchResults.results.length, results: parallelSearchResults.results, query: parallelSearchResults.query }) + '\n\n');
+                  console.log('[AGENT-STREAM] parallel search results injected (no restart)');
                 }
               }
-              var searchIntent = (rpLine || '');
-              // 递归去除前缀中的搜索元语言，直到内容稳定
-              while (true) {
-                var _prev = searchIntent;
-                searchIntent = searchIntent.replace(/^(?:搜索|搜一下|查一下|搜|查|百度|google|谷歌|查询|需要|应该|让我|让我先|先|去|来|再)\s*/i, '').trim();
-                if (searchIntent === _prev) break;
-              }
-              searchIntent = searchIntent.slice(0, 60);
-              if (searchIntent.length >= 3 && searchIntent.length < 25 && !/^(一下|相关|信息|资料|情况|内容|数据|东西|这个|那个|这些|那些|相关(的)?信息|说明|介绍|是否|什么|怎么|如何|有哪些|有没有|有|没有|的|了|在)$/i.test(searchIntent)) {
-                postSearchKeyword = (message + ' ' + searchIntent).slice(0, 80);
-              } else {
-                postSearchKeyword = message.slice(0, 80);
-              }
-              if (postSearchKeyword.length >= 3) needsPostSearch = true;
             }
+            // 构建 searchMeta：优先用 regex 搜索结果，次之并行搜索结果
+            var _searchMeta = sResults ? { count: sResults.length, query: searchQuery } : null;
+            if (!_searchMeta && parallelSearchResults) {
+              _searchMeta = { count: parallelSearchResults.results.length, query: parallelSearchResults.query };
+            }
+            var finishOpt = {
+              contentBuffer: contentBuffer,
+              reasoningBuffer: persistentReasoning || reasoningBuffer,
+              thinkingMode: thinkingMode,
+              useThinking: useThinking,
+              usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
+              usage: usageInStream || null,
+              searchMeta: _searchMeta,
+              finishReason: finish,
+              userName: userName,
+              convId: convId,
+              message: message,
+              streamSeq: streamSeq,
+              memoryData: memoryData,
+              ctx: ctx
+            };
+            await finishStream(res, finishOpt);
           }
-          if (needsPostSearch) {
-            // ★ 先检查并行搜索（思考期间异步进行）是否已有结果
-            if (parallelSearchPromise) {
-              try {
-                var _par = await parallelSearchPromise;
-              } catch (e) {}
-            }
-            if (parallelSearchResults && parallelSearchResults.results && parallelSearchResults.results.length > 0 && !_postSearchDone) {
-              // 并行搜索已有结果，直接注入，无需再调 searchWeb
-              var psResults2 = parallelSearchResults.results;
-              var pCtx2 = '【联网搜索结果（思考后补充检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + parallelSearchResults.query + '\n\n' +
-                psResults2.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
-                '\n\n要求：必须优先使用以上搜索结果回答。不能编造。';
-              roundMessages.push({ role: 'system', content: pCtx2 });
-              res.write('data: ' + JSON.stringify({ type: 'search', count: psResults2.length, results: psResults2, query: parallelSearchResults.query }) + '\n\n');
-              res.write('data: ' + JSON.stringify({ type: 'search_supplement', query: parallelSearchResults.query }) + '\n\n');
-              _postSearchDone = true;
-              finishReason = 'post_reasoning_search';
-              console.log('[AGENT-STREAM] parallel search completed during thinking, injected results');
-            } else {
-            // 并行搜索未完成或无结果，fallback 到常规后置搜索
-            // ★ 先保存第一轮生成的内容（不发送done事件），再触发补充搜索
-            if (!aborted && contentBuffer.length > 2 && userName && convId && message) {
-              try {
-                var _now1 = Date.now();
-                var _usage1 = Object.assign({}, usageInStream || {}, { thinking_mode: thinkingMode, model: usedModel });
-                await supabase.from('posts').insert([
-                  { user_name: userName, content: message, media_type: AI_AGENT_MESSAGE_MARKER,
-                    media_url: buildMsgMeta('user', convId, null, null, (streamSeq || 0) + 1),
-                    actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + _now1,
-                    created_at: new Date(_now1).toISOString() },
-                  { user_name: userName, content: sanitizeAssistantVisibleText(contentBuffer), media_type: AI_AGENT_MESSAGE_MARKER,
-                    media_url: buildMsgMeta('assistant', convId, _usage1, persistentReasoning || reasoningBuffer, (streamSeq || 0) + 2),
-                    actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (_now1 + 1),
-                    created_at: new Date(_now1 + 1).toISOString() }
-                ]);
-                console.log('[AGENT-STREAM] saved first round before post-search, userName:', userName, 'convId:', String(convId).slice(0, 8), 'content_len:', contentBuffer.length);
-              } catch (_sve) {
-                console.error('[AGENT-STREAM] save first round failed:', _sve && _sve.message);
-              }
-            }
-            // 执行搜索
-            try {
-              var psSr = await searchWeb(postSearchKeyword, 15);
-              if (psSr && Array.isArray(psSr.results) && psSr.results.length > 0) {
-                var psResults = cleanSearchResults(psSr.results, 15);
-                var psCtx = '【联网搜索结果（思考后补充检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + postSearchKeyword + '\n\n' +
-                  psResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
-                  '\n\n要求：必须优先使用以上搜索结果回答。不能编造。';
-                roundMessages.push({ role: 'system', content: psCtx });
-                res.write('data: ' + JSON.stringify({ type: 'search', count: psResults.length, results: psResults, query: postSearchKeyword }) + '\n\n');
-                // 通知前端搜索中，不清除已有思考过程
-                res.write('data: ' + JSON.stringify({ type: 'search_supplement', query: postSearchKeyword }) + '\n\n');
-                _postSearchDone = true;
-                finishReason = 'post_reasoning_search';
-              }
-            } catch (e) {
-              try { console.warn('[POST-REASONING-SEARCH] error:', e && e.message); } catch(ee) {}
-            }
-            } // end else (fallback to normal post-search)
-          }
-          if (finishReason === 'stop' || finishReason === 'length') {
-            // 正常收尾，没有触发后置搜索
-            if (!aborted) {
-              var finishOpt = {
-                contentBuffer: contentBuffer,
-                reasoningBuffer: persistentReasoning || reasoningBuffer,
-                thinkingMode: thinkingMode,
-                useThinking: useThinking,
-                usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
-                usage: usageInStream || null,
-                searchMeta: { count: sResults.length, query: searchQuery },
-                finishReason: finish,
-                userName: userName,
-                convId: convId,
-                message: message,
-                streamSeq: streamSeq,
-                memoryData: memoryData,
-                ctx: ctx
-              };
-              await finishStream(res, finishOpt);
-            }
-            return safeEnd();
-          }
-          // 触发了后置搜索，break 让外层循环重启 stream
-          break;
+          return safeEnd();
         }
+
       }
       if (finishReason === 'tool_calls') break;
-      if (finishReason === 'post_reasoning_search') break;
     }
     
     // 处理 tool calls
@@ -7800,22 +7730,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
          }
        }
        continue;
-    }
-    
-    // 后置搜索触发：思考结束后补充搜索并重新生成回答
-    if (finishReason === 'post_reasoning_search' && !aborted) {
-      toolRound++;
-      // 用新消息数组重建 apiBody（第二路不走思考模式）
-      var freshMessages = roundMessages.slice();
-      apiBody = {
-        model: usedModel,
-        messages: freshMessages,
-        stream: true
-      };
-      if (allowSearch) {
-        apiBody.tools = AI_TOOLS;
-      }
-      continue;
     }
     
     // 流意外结束但没收到 finish_reason
