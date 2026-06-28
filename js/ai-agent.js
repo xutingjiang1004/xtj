@@ -1195,7 +1195,7 @@
     };
   }
 
-  function bindVisualViewport(messagesEl, input) {
+  function bindVisualViewport(messagesEl, input, inputBar) {
     var root = getAiRoot();
     if (!root) return function() {};
 
@@ -1209,12 +1209,25 @@
         viewportHeight = Math.max(280, Math.round(vv.height));
       }
       root.classList.toggle('ai-keyboard-open', keyboardHeight > 0);
-      
+
       if (_isTouchMobile) {
-        // 移动端：不缩放容器高度，用 translateY 把内容推上去，输入框自然浮在键盘上方
-        updateRootVar('--ai-keyboard-offset', keyboardHeight + 'px');
-        if (!keyboardHeight) {
-          updateRootVar('--ai-viewport-height', '100%');
+        // 移动端：输入栏 position:fixed 浮在键盘上方，容器不缩放
+        if (keyboardHeight > 0) {
+          var barRect = inputBar.getBoundingClientRect();
+          var rootRect = root.getBoundingClientRect();
+          inputBar.style.position = 'fixed';
+          inputBar.style.bottom = keyboardHeight + 'px';
+          inputBar.style.left = rootRect.left + 'px';
+          inputBar.style.width = rootRect.width + 'px';
+          inputBar.style.zIndex = '100';
+          messagesEl.style.paddingBottom = 'calc(var(--ai-input-height, 72px) + ' + keyboardHeight + 'px + 14px)';
+        } else {
+          inputBar.style.position = '';
+          inputBar.style.bottom = '';
+          inputBar.style.left = '';
+          inputBar.style.width = '';
+          inputBar.style.zIndex = '';
+          messagesEl.style.paddingBottom = '';
         }
       } else {
         // 桌面端：保持原有行为（缩放高度）
@@ -1229,11 +1242,17 @@
     }
 
     function resetViewport() {
-      var root2 = getAiRoot();
-      if (!root2) return;
+      if (_isTouchMobile) {
+        inputBar.style.position = '';
+        inputBar.style.bottom = '';
+        inputBar.style.left = '';
+        inputBar.style.width = '';
+        inputBar.style.zIndex = '';
+        messagesEl.style.paddingBottom = '';
+      }
+      root.classList.remove('ai-keyboard-open');
       updateRootVar('--ai-keyboard-offset', '0px');
       updateRootVar('--ai-viewport-height', '100%');
-      root2.classList.remove('ai-keyboard-open');
       updateInputMetrics();
       if (isNearBottom(messagesEl, 120)) {
         S.autoScrollPinned = true;
@@ -1277,6 +1296,12 @@
       window.removeEventListener('resize', onViewportChange);
       input.removeEventListener('blur', onBlur);
       input.removeEventListener('focus', onFocus);
+      inputBar.style.position = '';
+      inputBar.style.bottom = '';
+      inputBar.style.left = '';
+      inputBar.style.width = '';
+      inputBar.style.zIndex = '';
+      messagesEl.style.paddingBottom = '';
     };
   }
 
@@ -1300,7 +1325,7 @@
 
   async function handleSendMessage(input, sendBtn, messagesEl) {
     var text = String(input.value || '').trim();
-    if (!text) return;
+    if (!text) { S.sending = false; return; }
     
     var originalText = text;
     
@@ -1315,7 +1340,7 @@
     }
     
     var authOk = await ensureUserAuthOrNotify();
-    if (!authOk) return;
+    if (!authOk) { S.sending = false; return; }
     
     // 如果有正在进行的请求，中断它
     if (S.sending) {
@@ -2395,6 +2420,7 @@ function showChatMessages() {
     function doSend() {
       // 移动端先收起键盘再发送，避免 viewport 闪烁
       if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+      S.sending = true;
       handleSendMessage(input, sendBtn, messagesEl);
     }
 
@@ -2465,7 +2491,7 @@ function showChatMessages() {
     if (S.viewportCleanup) {
       try { S.viewportCleanup(); } catch (e3) {}
     }
-    S.viewportCleanup = bindVisualViewport(r.messagesEl, r.input);
+    S.viewportCleanup = bindVisualViewport(r.messagesEl, r.input, r.inputBar);
 
     S.conversationId = readConvId();
 
