@@ -1593,11 +1593,6 @@
                 searchBar.textContent += ' (' + firstProv.provider + ')';
               }
             }
-            // 3 秒后自动消失
-            clearTimeout(searchBar._hideTimer);
-            searchBar._hideTimer = setTimeout(function() {
-              try { searchBar.remove(); } catch (e) {}
-            }, 3000);
             continue;
           }
           
@@ -1622,11 +1617,44 @@
               }
               if (errorDetail.textContent) searchBar2.appendChild(errorDetail);
             }
-            // 5 秒后自动消失
-            clearTimeout(searchBar2._hideTimer);
-            searchBar2._hideTimer = setTimeout(function() {
-              try { searchBar2.remove(); } catch (e) {}
-            }, 5000);
+            continue;
+          }
+          
+          if (evt.type === 'tool_calls') {
+            var toolList = evt.tools || [];
+            var toolDesc = toolList.map(function(t) {
+              var nameMap = { search_web: '联网搜索', get_weather: '查询天气', get_current_time: '获取时间' };
+              var label = nameMap[t.name] || t.name;
+              if (t.args && t.args.query) return label + ' "' + t.args.query + '"';
+              if (t.args && t.args.location) return label + ' ' + t.args.location;
+              return label;
+            }).join('、');
+            var toolBar = messagesEl.querySelector('.ai-tool-status');
+            if (!toolBar) {
+              toolBar = el('div', { class: 'ai-tool-status' });
+              messagesEl.appendChild(toolBar);
+            }
+            toolBar.textContent = 'AI 正在使用：' + toolDesc;
+            continue;
+          }
+          
+          if (evt.type === 'tool_result') {
+            var toolBar2 = messagesEl.querySelector('.ai-tool-status');
+            if (!toolBar2) {
+              toolBar2 = el('div', { class: 'ai-tool-status' });
+              messagesEl.appendChild(toolBar2);
+            }
+            var nameMap = { search_web: '已联网搜索', get_weather: '已查询天气', get_current_time: '已获取时间' };
+            var label = nameMap[evt.tool_name] || evt.tool_name;
+            if (evt.success) {
+              if (evt.count > 0) {
+                toolBar2.textContent = label + ' · ' + evt.count + ' 条结果' + (evt.location ? ' · ' + evt.location : '');
+              } else {
+                toolBar2.textContent = label + ' · 完成' + (evt.location ? ' · ' + evt.location : '');
+              }
+            } else {
+              toolBar2.textContent = label + ' · 失败' + (evt.error ? ': ' + evt.error.slice(0, 80) : '');
+            }
             continue;
           }
           
