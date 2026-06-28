@@ -6982,13 +6982,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     console.log('[AGENT-STREAM] thinking_mode=', thinkingMode, 'useThinking=', useThinking, 'model=', usedModel, 'reasoning_effort=', useThinking ? thinkingMode : 'off', '|| message_len=', message.length, 'history_messages=', messages.length);
 
     // ===== Function Calling：让 AI 自主决定调用工具 =====
-    var shouldUseTools = allowSearch && !useThinking && !aborted;
+    // 快速检测：只有明显需要搜索的消息才走 FC 非流式调用，普通对话直接秒回
+    var needsFcCheck = allowSearch && !useThinking && !aborted;
+    var fcQuickIntent = /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何/i.test(message);
+    var fcWeatherIntent = !weatherResult && /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
+    needsFcCheck = needsFcCheck && (fcQuickIntent || fcWeatherIntent);
     var hasCalledTools = false;
     var hasFCFallbackContent = false;
     var fcFallbackContent = null;
     var fcFallbackUsage = null;
 
-    if (shouldUseTools && !aborted) {
+    if (needsFcCheck && !aborted) {
       var fcBody = {
         model: usedModel,
         messages: messages,
@@ -6998,7 +7002,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       };
 
       var fcController = new AbortController();
-      var fcTimer = setTimeout(function() { fcController.abort(); }, 6000);
+      var fcTimer = setTimeout(function() { fcController.abort(); }, 4000);
 
       try {
         var fcResp = await fetch(DEEPSEEK_API_URL, {
