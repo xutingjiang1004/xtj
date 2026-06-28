@@ -330,7 +330,7 @@ async function searchBingHtml(query, maxResults) {
 }
 
 // 主搜索函数：按优先级依次调用 provider，返回统一格式
-async function searchWebLegacy(query, maxResults) {
+async function searchWeb(query, maxResults) {
   maxResults = maxResults || 5;
   var searchQuery = buildSearchQuery(query);
   if (!searchQuery) searchQuery = String(query || '').trim().slice(0, 120);
@@ -499,7 +499,7 @@ async function queryWeather(query) {
 
 // 网页搜素函数 - 双引擎并行：Bing（全局可用）+ SearXNG（Render US 可用）
 // 无需 API Key，取最快返回有效结果的那一个
-async function searchWeb(query, maxResults) {
+async function searchWebLegacy(query, maxResults) {
   maxResults = maxResults || 5;
   var searchQuery = buildSearchQuery(query);
   if (!searchQuery) searchQuery = String(query || '').trim().slice(0, 120);
