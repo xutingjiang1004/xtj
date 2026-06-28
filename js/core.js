@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -9487,29 +9487,10 @@ function renderProfileActivityList(kind) {
                 return Array.from(window.getLocalAnnouncementReadSet());
             };
 
-            // 红点更新：使用稳定 ID + 本地 + 远端（远端异步加载不影响本次）
+            // 红点更新：已禁用红点提醒
             window.updateAnnouncementBadge = function() {
-                if (!announcements || !announcements.length) {
-                    var badge0 = document.getElementById('announcementBadge');
-                    if (badge0) badge0.style.display = 'none';
-                    return;
-                }
-                var readSet = window.getLocalAnnouncementReadSet();
-                var unreadCount = 0;
-                announcements.forEach(function(a) {
-                    var id = window.getAnnouncementId(a);
-                    if (!id) return;
-                    if (!readSet.has(id)) unreadCount++;
-                });
                 var badge = document.getElementById('announcementBadge');
-                if (badge) {
-                    if (unreadCount > 0) {
-                        badge.textContent = unreadCount > 99 ? '99+' : String(unreadCount);
-                        badge.style.display = 'flex';
-                    } else {
-                        badge.style.display = 'none';
-                    }
-                }
+                if (badge) badge.style.display = 'none';
             };
 
             // 旧函数名（保留兼容）
