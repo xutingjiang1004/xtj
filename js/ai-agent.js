@@ -2301,8 +2301,8 @@ function showChatMessages() {
     memoryBtn.addEventListener('click', async function() {
       try {
         var r = await apiRequest('GET', '/memory');
-        if (r && r.ok && r.memory) {
-          var memory = r.memory;
+        var memory = r && r.ok && r.data && r.data.memory ? r.data.memory : null;
+        if (memory) {
           var lines = [];
           lines.push('--- AI 长期记忆 ---');
           lines.push('');
