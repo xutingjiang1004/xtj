@@ -518,7 +518,6 @@
       try { S.abortController.abort(); } catch (e) {}
       S.abortController = null;
     }
-    S.currentStreamAborted = true;
   }
   
   function isAdminUser() {
@@ -1682,7 +1681,7 @@
               for (var ri = 0; ri < resultsArr.length; ri++) {
                 var r = resultsArr[ri];
                 var itemEl = el('div', { class: 'ai-search-detail-item' });
-                var linkEl = el('a', { class: 'ai-search-detail-title', href: r.url || '#', target: '_blank', text: r.title || '无标题' });
+                var linkEl = el('a', { class: 'ai-search-detail-title', href: r.url || '#', target: '_blank', rel: 'noopener noreferrer', text: r.title || '无标题' });
                 itemEl.appendChild(linkEl);
                 if (r.snippet) {
                   itemEl.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r.snippet.slice(0, 200) }));
@@ -2343,6 +2342,16 @@ function showChatMessages() {
           if (r2 && r2.ok && r2.data && r2.data.conversation_id) {
             S.conversationId = r2.data.conversation_id;
             writeConvId(r2.data.conversation_id);
+            // 恢复 empty state（先清 loading 再追加）
+            if (S.messagesEl) {
+              S.messagesEl.innerHTML = '';
+              if (typeof appendEmptyState === 'function') appendEmptyState(S.messagesEl);
+            }
+          } else {
+            if (S.messagesEl) {
+              S.messagesEl.innerHTML = '';
+              if (typeof appendEmptyState === 'function') appendEmptyState(S.messagesEl);
+            }
           }
         } else {
           notify('删除失败');
@@ -2443,7 +2452,6 @@ function showChatMessages() {
     }
 
     function doSend() {
-      S.sending = true;
       // 移动端先收起键盘再发送，避免 viewport 闪烁
       if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
       handleSendMessage(input, sendBtn, messagesEl);
@@ -2589,8 +2597,7 @@ function showChatMessages() {
     if (!S.active) return;
     S.active = false;
     clearReplyTimer();
-    abortCurrentRequest();
-    clearStreamCleanup();
+    abortCurrentRequest(); // 内部已调用 clearStreamCleanup
     // 重置所有状态，避免重开后残留
     S.sending = false;
     S.messages = [];
