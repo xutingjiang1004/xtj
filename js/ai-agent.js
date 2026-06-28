@@ -864,8 +864,7 @@
       'aria-expanded': 'false',
       'aria-label': '思考过程'
     });
-    var label = el('span', { class: 'ai-thinking-label' });
-    label.appendChild(el('span', { text: '思考' }));
+    var label = el('span', { class: 'ai-thinking-label', text: '思考' });
     toggle.appendChild(label);
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
@@ -1754,11 +1753,12 @@
             var streamSaved = evt.saved === true;
             
             if (aiContent) {
+              if (!aiNode) ensureAssistantBubble();
               // 有内容就显示
               finishAiMessage(aiNode, aiContent, aiReasoning, evt);
             } else if (aiReasoning) {
-              // 只有思考内容没有正文
-              if (aiNode) aiNode.textContent = 'AI 思考过程已返回，但正文生成中断，请重试';
+              if (!aiNode) ensureReasoningNode();
+              finishAiMessage(aiNode, '', aiReasoning, evt);
             }
             
             // 中断/未保存提示
@@ -1801,47 +1801,7 @@
       
       if (evtHandled) {
         // 已在 done/error 事件中完成渲染
-      } else if (aiNode && aiContent) {
-        if (reasoningRenderer) reasoningRenderer.finish(aiReasoning || '');
-        if (contentRenderer) contentRenderer.finish(aiContent || '');
-        cleanupRenderers();
-        aiNode.classList.remove('generating');
-        if (aiBubble) aiBubble.classList.remove('ai-typing');
-        setAiRootState('ai-idle');
-        
-        if (aiReasoning && finalThinkingMode !== 'off') {
-          var reasoningNode = reasoningContainer || aiNode.querySelector('.ai-thinking');
-          if (!reasoningNode) {
-            reasoningNode = buildReasoningNode(aiReasoning, messagesEl);
-            aiNode.insertBefore(reasoningNode, aiNode.firstChild);
-          } else {
-            var finalBody = reasoningNode.querySelector('.ai-thinking-body');
-            if (finalBody) finalBody.textContent = aiReasoning;
-          }
-        } else if (reasoningContainer) {
-          try { reasoningContainer.remove(); } catch (e) {}
-          reasoningContainer = null;
-        }
-        
-        var aiMsg = {
-          role: 'assistant',
-          content: aiContent,
-          reasoning: (finalThinkingMode !== 'off' ? aiReasoning : ''),
-          created_at: new Date().toISOString(),
-          thinking_mode: finalThinkingMode,
-          usage: Object.assign({}, usageResult || {}, {
-            model: finalModel,
-            thinking_mode: finalThinkingMode
-          })
-        };
-        S.messages.push(aiMsg);
-        
-        if (usageResult || finalModel || finalThinkingMode) {
-          var usageLine = buildUsageLine(aiMsg.usage);
-          if (usageLine) aiNode.appendChild(el('div', { class: 'ai-msg-usage', text: usageLine }));
-        }
-        if (aiMsg.created_at) aiNode.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
-      } else if (aiNode) {
+      } else if (aiNode && (aiContent || aiReasoning)) {
         finishAiMessage(aiNode, aiContent, aiReasoning, null);
       } else if (doneReceived) {
         cleanupRenderers();
