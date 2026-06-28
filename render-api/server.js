@@ -7625,7 +7625,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             }) || roundMessages.some(function(mm) { return mm.role === 'tool' && mm.content && mm.content.indexOf('search_results') >= 0; });
             if (!hasSearched && /搜索|查|查询|需要(联网|搜索)|应该(搜索|查)|让我(搜|查|百度|google|谷歌)|我没有搜|没(有|找到)|搜不到|查不到|没有(搜索|查到)/i.test(reasoningBuffer)) {
                // 从 reasoning 中提取搜索关键词
-               var rpParts = reasoningBuffer.split(/[\n。！？；]/);
+              postSearchKeyword = message.slice(0, 80);
+              var rpParts = reasoningBuffer.split(/[\n。！？；]/);
               var rpLine = '';
               for (var rppi = rpParts.length - 1; rppi >= 0; rppi--) {
                 if (/搜索|搜|查|百度|google|谷歌/.test(rpParts[rppi])) {
@@ -7633,9 +7634,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   break;
                 }
               }
-              var searchIntent = (rpLine || '').replace(/^(?:搜索|查一下|搜一下|百度|google|谷歌|查询|需要|应该|让我)\s*/i, '').trim().slice(0, 60);
-              if (searchIntent.length >= 3) {
-                // 结合用户原始消息和推理中提取的意图，如"牛岛"+"船班时间"→"牛岛 船班时间"
+              var searchIntent = (rpLine || '');
+              // 递归去除前缀中的搜索元语言，直到内容稳定
+              while (true) {
+                var _prev = searchIntent;
+                searchIntent = searchIntent.replace(/^(?:搜索|搜一下|查一下|搜|查|百度|google|谷歌|查询|需要|应该|让我|让我先|先|去|来|再)\s*/i, '').trim();
+                if (searchIntent === _prev) break;
+              }
+              searchIntent = searchIntent.slice(0, 60);
+              if (searchIntent.length >= 3 && searchIntent.length < 25 && !/^(一下|相关|信息|资料|情况|内容|数据|东西|这个|那个|这些|那些|相关(的)?信息|说明|介绍|是否|什么|怎么|如何|有哪些|有没有|有|没有|的|了|在)$/i.test(searchIntent)) {
                 postSearchKeyword = (message + ' ' + searchIntent).slice(0, 80);
               } else {
                 postSearchKeyword = message.slice(0, 80);
