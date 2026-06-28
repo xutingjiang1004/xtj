@@ -6614,7 +6614,7 @@ const AI_DEFAULT_CONFIG = {
   },
   search: { allow_web_search: false, search_provider: 'searxng', max_results: 5, timeout_ms: 4000, use_weather_tool: true },
   memory: { enabled: true, memory_box_enabled: true, summary_enabled: true, max_memory_prompt_chars: 1500, recent_messages_limit: 8, relevant_summaries_limit: 3 },
-  model: { reasoner_model: '', default_thinking_mode: 'medium', allow_user_thinking_switch: true },
+  model: { reasoner_model: '', default_thinking_mode: 'medium', allow_user_thinking_switch: false },
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',
   updated_by: ''
@@ -6879,7 +6879,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     // 8. 调用 DeepSeek
     var reply = '';
     var usage = null;
-    var thinkingMode = (req.body && req.body.thinking_mode) || 'off';
+    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'off';
     if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'off';
     var reasoning = '';
     // off 模式强制 reasoning = ''（即使模型返回 reasoning_content）
@@ -7067,7 +7067,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     
     // 思考模式
-    var thinkingMode = (req.body && req.body.thinking_mode) || 'off';
+    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'off';
     if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'off';
     var useThinking = thinkingMode !== 'off';
     
