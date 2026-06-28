@@ -123,6 +123,42 @@
     }
   }
 
+  // 简单 Markdown → HTML 渲染
+  function renderMarkdown(txt) {
+    if (!txt) return '';
+    var s = String(txt);
+    // HTML 转义
+    s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // 代码块（先处理，避免内部 markdown 被二次转换）
+    s = s.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
+      return '<pre><code>' + code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</code></pre>';
+    });
+    // 行内代码
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // 粗体
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // 斜体
+    s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    // 链接
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // 无序列表
+    s = s.replace(/^- (.+)$/gm, '<li>$1</li>');
+    s = s.replace(/(<li>.*<\/li>\n?)+/g, function(m) { return '<ul>' + m + '</ul>'; });
+    // 有序列表
+    s = s.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    s = s.replace(/(<li>.*<\/li>\n?)+/g, function(m) { return '<ol>' + m + '</ol>'; });
+    // 标题
+    s = s.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
+    s = s.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
+    s = s.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+    s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    // 换行转 <br>
+    s = s.replace(/\n/g, '<br>');
+    return s;
+  }
+
   function setupBubbleCopy(bubbleEl, containerEl) {
     if (!bubbleEl || !bubbleEl.parentNode) return;
     var _longPressTimer = null;
@@ -888,12 +924,18 @@
     if (role === 'assistant' && shouldRenderReasoning(msg)) {
       node.appendChild(buildReasoningNode(msg.reasoning, messagesEl));
     }
-    var bubble = el('div', { class: 'ai-msg-bubble', text: msg.content || '' });
+    var bubble = el('div', { class: 'ai-msg-bubble' });
+    bubble.innerHTML = renderMarkdown(msg.content || '');
     setupBubbleCopy(bubble, messagesEl);
     node.appendChild(bubble);
-    if (role === 'assistant' && msg.usage) {
-      var line = buildUsageLine(msg.usage);
-      if (line) node.appendChild(el('div', { class: 'ai-msg-usage', text: line }));
+    if (role === 'assistant') {
+      if (msg.search_count > 0) {
+        node.appendChild(el('div', { class: 'ai-search-status', text: '已联网搜索 · ' + msg.search_count + ' 条结果' }));
+      }
+      if (msg.usage) {
+        var line = buildUsageLine(msg.usage);
+        if (line) node.appendChild(el('div', { class: 'ai-msg-usage', text: line }));
+      }
     }
     if (msg.created_at) node.appendChild(el('div', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
     return node;
@@ -1029,7 +1071,7 @@
       }
       if (!next) return;
       rendered += next;
-      targetEl.textContent = rendered;
+      targetEl.innerHTML = renderMarkdown(rendered);
       if (typeof options.onRender === 'function') {
         try { options.onRender(rendered); } catch (e2) {}
       }
@@ -1070,7 +1112,7 @@
         clearFrame();
         pending = '';
         rendered = String(finalText || '');
-        targetEl.textContent = rendered;
+        targetEl.innerHTML = renderMarkdown(rendered);
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
           try { options.onRender(rendered); } catch (e3) {}
@@ -1530,11 +1572,14 @@
             }
           }
 
-          // 思考后决定补充搜索：清除当前不完整的回复，等待新的流
-          if (evt.type === 'restart') {
+          // 思考后补充搜索：重置内容状态以接收新一轮 stream，保留已显示的思考过程
+          if (evt.type === 'search_supplement') {
+            var searchNote = el('div', { class: 'ai-search-supplement', text: '🔍 正在联网补充信息...' });
+            if (aiNode && aiNode.parentElement) aiNode.parentElement.appendChild(searchNote);
+            // 清空旧内容，让第二轮 stream 重新生成
             cleanupRenderers();
-            if (aiNode) try { aiNode.remove(); } catch (e) {}
             try { typingNode.remove(); } catch (e) {}
+            if (aiBubble) try { aiBubble.innerHTML = ''; } catch (e) {}
             aiContent = '';
             aiReasoning = '';
             reasoningStarted = false;
@@ -1816,9 +1861,8 @@
                 try { contentRenderer.cancel(); } catch (e) {}
                 contentRenderer = null;
               }
-              aiBubble.textContent = '';
-              // 重新逐字渲染清洗后内容（立即完成）
-              aiBubble.textContent = evt.sanitized_content;
+              aiBubble.innerHTML = '';
+              aiBubble.innerHTML = renderMarkdown(evt.sanitized_content);
             }
             
             // 标记流是否完成
