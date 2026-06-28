@@ -863,6 +863,7 @@ async function finishStream(res, opt) {
   var isComplete = finishReason === 'stop' || finishReason === 'length';
   var contentWasFiltered = rawContent.length > 0 && content !== rawContent;
   var searchMeta = opt.searchMeta || null;
+  var thinkingElapsedMs = opt.reasoningStartedAt > 0 ? Date.now() - opt.reasoningStartedAt : 0;
 
   // 有内容时尽量保存
   if (hasContent && opt.userName && opt.convId && opt.message) {
@@ -891,7 +892,7 @@ async function finishStream(res, opt) {
           user_name: opt.userName,
           content: content,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta),
+          media_url: buildMsgMeta('assistant', opt.convId, usageToStore, reasoning, seqAssistant, searchMeta, thinkingElapsedMs),
           actor_key: 'ai_msg_conv_' + opt.convId + '_agent_' + opt.userName + '_' + (nowSave + 1),
           created_at: assistantCreatedAt
         }
@@ -6080,11 +6081,12 @@ function resolveConvId(r) {
   return getConvIdFromActorKey(r.actor_key);
 }
 
-function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta) {
+function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingElapsedMs) {
   var obj = { role: role, convId: convId };
   if (usage) obj.usage = usage;
   if (reasoning) obj.reasoning = reasoning;
   if (typeof seq === 'number') obj.seq = seq;
+  if (typeof thinkingElapsedMs === 'number' && thinkingElapsedMs > 0) obj.thinking_elapsed_ms = thinkingElapsedMs;
   if (searchMeta) {
     if (searchMeta.count) obj.search_count = searchMeta.count;
     if (searchMeta.query) obj.search_query = searchMeta.query;
@@ -7123,6 +7125,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var reasoningBuffer = persistentReasoning || '';
     var contentBuffer = '';
     var reasoningSent = false;
+    var reasoningStartedAt = 0;
     var pendingToolCalls = {};
     var finishReason = '';
     
@@ -7151,7 +7154,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   convId: convId,
                   message: message,
                   streamSeq: streamSeq,
-                  ctx: ctx
+                  ctx: ctx,
+                  reasoningStartedAt: reasoningStartedAt
             });
           } else {
             writeSse(res, { type: 'error', error: 'AI 回复超时（20 秒无响应），请重试' });
@@ -7183,6 +7187,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         usageInStream = chunk.usage || usageInStream;
         
         if (delta.reasoning_content) {
+          if (!hasReasoningContent) reasoningStartedAt = Date.now();
           hasReasoningContent = true;
           reasoningBuffer += delta.reasoning_content;
           persistentReasoning += delta.reasoning_content;
@@ -7337,7 +7342,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           convId: convId,
           message: message,
           streamSeq: streamSeq,
-          ctx: ctx
+          ctx: ctx,
+          reasoningStartedAt: reasoningStartedAt
         });
       }
     }
@@ -7366,7 +7372,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           convId: convId,
           message: message,
           streamSeq: streamSeq,
-          ctx: ctx
+          ctx: ctx,
+          reasoningStartedAt: reasoningStartedAt
         });
       } else if (reasoningBuffer && reasoningBuffer.length > 0 && !aborted) {
         writeSse(res, { type: 'error', error: 'AI 只返回了思考过程，正文生成中断，请重试' });
@@ -7651,7 +7658,8 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           conversation_id: m.convId || convId,
           usage: m.usage || null,
           search_count: m.search_count || 0,
-          search_query: m.search_query || ''
+          search_query: m.search_query || '',
+          thinking_elapsed_ms: m.thinking_elapsed_ms || 0
         };
       })
     });

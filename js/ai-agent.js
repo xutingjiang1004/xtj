@@ -50,11 +50,7 @@
   };
 
   function getAiStatusText() {
-    var hr = new Date().getHours();
-    if (hr >= 5 && hr < 12) return '懒得理人但在线';
-    if (hr >= 12 && hr < 18) return '盯着你';
-    if (hr >= 18 && hr < 24) return '精神上班';
-    return '阴间营业';
+    return '在线';
   }
 
   function updateAiStatus() {
@@ -888,7 +884,7 @@
     };
   }
 
-  function buildReasoningNode(reasoning, messagesEl) {
+  function buildReasoningNode(reasoning, messagesEl, elapsedMs) {
     var container = el('div', { class: 'ai-thinking' });
     var toggle = el('button', {
       type: 'button',
@@ -896,7 +892,7 @@
       'aria-expanded': 'false',
       'aria-label': '思考过程'
     });
-    var label = el('span', { class: 'ai-thinking-label', text: '思考' });
+    var label = el('span', { class: 'ai-thinking-label', text: elapsedMs > 0 ? '已思考 ' + formatThinkingElapsed(elapsedMs) : '思考' });
     toggle.appendChild(label);
     toggle.appendChild(el('span', { class: 'ai-thinking-caret', text: '\u25be', 'aria-hidden': 'true' }));
 
@@ -916,7 +912,7 @@
     var role = msg.role === 'assistant' ? 'assistant' : 'user';
     var node = el('div', { class: 'ai-msg ' + role + ' entering' });
     if (role === 'assistant' && shouldRenderReasoning(msg)) {
-      node.appendChild(buildReasoningNode(msg.reasoning, messagesEl));
+      node.appendChild(buildReasoningNode(msg.reasoning, messagesEl, msg.thinking_elapsed_ms));
     }
     var bubble = el('div', { class: 'ai-msg-bubble' });
     bubble.innerHTML = renderMarkdown(msg.content || '');
@@ -942,7 +938,8 @@
       // 搜索到此处结束
       var thinkingMode = getMessageThinkingMode(msg);
       if (thinkingMode && thinkingMode !== 'off') {
-        footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 ' + thinkingMode }));
+        var badgeText = msg.thinking_elapsed_ms > 0 ? '思考 ' + formatThinkingElapsed(msg.thinking_elapsed_ms) : '思考 ' + thinkingMode;
+        footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: badgeText }));
       }
       if (msg.usage && isAdminUser()) {
         var parts = [];
