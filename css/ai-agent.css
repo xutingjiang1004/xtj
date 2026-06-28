@@ -405,26 +405,41 @@
   transition: opacity 120ms ease, filter 160ms ease;
 }
 
+.ai-msg-footer {
+  max-width: min(82%, 680px);
+  padding: 0 6px;
+  margin-top: 3px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .ai-msg-usage,
 .ai-msg-time,
 .ai-msg-warn {
-  max-width: min(82%, 680px);
-  padding: 0 6px;
   font-size: 10px;
   line-height: 1.35;
 }
 
-.ai-msg-usage {
-  margin-top: 4px;
+.ai-msg-footer .ai-msg-usage {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: rgba(95, 116, 113, 0.72);
 }
 
-.ai-msg-time {
-  margin-top: 1px;
+.ai-msg-footer .ai-msg-time {
   color: rgba(116, 128, 132, 0.72);
+}
+
+.ai-msg-thinking-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(127, 187, 172, 0.12);
+  color: rgba(95, 116, 113, 0.82);
+  line-height: 1.4;
 }
 
 .ai-msg-warn {
@@ -1000,8 +1015,7 @@
   }
 
   .ai-msg-bubble,
-  .ai-msg-usage,
-  .ai-msg-time,
+  .ai-msg-footer,
   .ai-msg-warn,
   .ai-thinking {
     max-width: 88%;
@@ -1133,12 +1147,45 @@
   border-color: rgba(127, 187, 172, 0.12);
 }
 
-[data-theme="dark"] .ai-msg-usage {
+[data-theme="dark"] .ai-msg-footer .ai-msg-usage {
   color: rgba(194, 208, 205, 0.78);
 }
 
-[data-theme="dark"] .ai-msg-time {
+[data-theme="dark"] .ai-msg-footer .ai-msg-time {
   color: rgba(162, 176, 178, 0.7);
+}
+
+[data-theme="dark"] .ai-msg-thinking-badge {
+  background: rgba(127, 187, 172, 0.18);
+  color: rgba(194, 208, 205, 0.82);
+}
+
+[data-theme="dark"] .ai-search-status {
+  color: rgba(162, 176, 178, 0.7);
+}
+
+[data-theme="dark"] .ai-search-detail {
+  border-top-color: rgba(127, 187, 172, 0.12);
+}
+
+[data-theme="dark"] .ai-search-detail-query {
+  color: rgba(162, 176, 178, 0.6);
+}
+
+[data-theme="dark"] .ai-search-detail-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .ai-search-detail-title {
+  color: #6ab0f3;
+}
+
+[data-theme="dark"] .ai-search-detail-snippet {
+  color: rgba(194, 208, 205, 0.7);
+}
+
+[data-theme="dark"] .ai-search-detail-source {
+  color: rgba(162, 176, 178, 0.5);
 }
 
 [data-theme="dark"] .ai-msg-warn {
