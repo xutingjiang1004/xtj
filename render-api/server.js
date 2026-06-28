@@ -609,18 +609,34 @@ function sanitizeAssistantVisibleText(text) {
   var s = String(text || '');
   if (!s) return s;
 
-  // 动作/舞台/心理/环境描写的强特征词（仅保留明确是舞台动作的多词组合）
-  var actionWords = '屏幕[上中前里]|镜头[拉推切]|背景[音乐音效]|空气[里中]?[仿佛凝]|灯光[暗亮闪]|白芒|光芒[闪四]|裂纹|裂缝|低声[说笑]|笑了笑|轻轻一笑|轻笑[着]?[道说]?|苦笑[着]?[道说]?|沉默[了半片]|叹了[口]?气|叹道|叹了口气|抬起头|低下头|偏了偏头|歪了歪头|侧了侧头|扭了扭头|转过头|转过身|伸出手|伸出爪|缩回[了手成]|抖了抖|晃了晃|点了点头|摇了摇头|摆了摆手|挥了挥手|站起[身来]?|坐[了下]?下|趴[了下]?下|蹲[了下]?下|走[向到进过]|退了[几步回]|眯起眼|瞪[大了]|睁[大了]|眨了眨眼|抿了抿嘴|舔了舔|吞了吞|咽了咽|摇了摇[头尾]|甩了甩[头尾]|敲了敲|靠在[了]?[床头墙椅]?|抱着[了]?[手臂胸]?|搂着[了]?|发出[一]?[阵阵声]|传来[一]?[阵阵声]|响起[一]?[阵阵声]|回荡[着在]|充满[了]?|浮现[出在]|感到[一]?[阵阵]?|仿佛[一]?[股阵道]|猛[地然]|瞬间[间]?|顿[了]?[顿]?|愣[了]?[愣]?|怔[了]?[怔]?|呆[了]?[呆]?|张[了]?[嘴口]|闭[了]?[嘴眼]|合[了]?[上眼]|按下[了]?|周[围的环境]|四[周环]|窗[外口]|门[外口]|不再[说言语]|再也[不没]|终于[还]|仍然[还]|依然[还]|瞥[了]?[一]?眼|盯[着]?[了]?|扯[了]?[嘴嘴角]?|勾[了]?[嘴角]?|扬[了]?[眉嘴角]?|挑[了]?[眉]?|皱[了]?[眉]?|呼出[一]?[口气]?|深吸[一]?[口气]?|爪子[轻挠挠]|猫耳[竖抖]|毛茸茸[的尾巴脑袋]?|尾巴[轻晃摇]';
-
-
   // 1. 删除所有独立成行的括号内容（允许全角/半角/方括号，至少 3 个字符）
   s = s.replace(/^\s*[（(【][^）)】]{3,200}[）)】]\s*$/gm, '');
 
-  // 2. 删除以动作特征词开头的行（无括号的裸描写行）
-  s = s.replace(new RegExp('^\\s*(' + actionWords + ')[^。！？\\n]{0,100}[。！？]?\\s*$', 'gmi'), '');
+  // 2-3. 拆分清洗正则避免单次超长表达式导致的 ReDoS
+  var actionSets = [
+    '屏幕[上中前里]|镜头[拉推切]|背景[音乐音效]|空气[里中]?[仿佛凝]|灯光[暗亮闪]|白芒|光芒[闪四]',
+    '低声[说笑]|笑了笑|轻轻一笑|轻笑[着]?[道说]?|苦笑[着]?[道说]?|沉默[了半片]|叹了[口]?气|叹道|叹了口气',
+    '抬起头|低下头|偏了偏头|歪了歪头|侧了侧头|扭了扭头|转过头|转过身|伸出手|伸出爪|缩回[了手成]|抖了抖|晃了晃',
+    '点了点头|摇了摇头|摆了摆手|挥了挥手|站起[身来]?|坐[了下]?下|趴[了下]?下|蹲[了下]?下',
+    '走[向到进过]|退了[几步回]|眯起眼|瞪[大了]|睁[大了]|眨了眨眼|抿了抿嘴|舔了舔|吞了吞|咽了咽',
+    '摇了摇[头尾]|甩了甩[头尾]|敲了敲|靠在[了]?[床头墙椅]?|抱着[了]?[手臂胸]?|搂着[了]?',
+    '发出[一]?[阵阵声]|传来[一]?[阵阵声]|响起[一]?[阵阵声]|回荡[着在]|充满[了]?|浮现[出在]',
+    '感到[一]?[阵阵]?|仿佛[一]?[股阵道]|猛[地然]|瞬间[间]?|顿[了]?[顿]?|愣[了]?[愣]?|怔[了]?[怔]?|呆[了]?[呆]?',
+    '张[了]?[嘴口]|闭[了]?[嘴眼]|合[了]?[上眼]|按下[了]?|周[围的环境]|四[周环]|窗[外口]|门[外口]',
+    '不再[说言语]|再也[不没]|终于[还]|仍然[还]|依然[还]|瞥[了]?[一]?眼|盯[着]?[了]?',
+    '扯[了]?[嘴嘴角]?|勾[了]?[嘴角]?|扬[了]?[眉嘴角]?|挑[了]?[眉]?|皱[了]?[眉]?',
+    '呼出[一]?[口气]?|深吸[一]?[口气]?|爪子[轻挠挠]|猫耳[竖抖]|毛茸茸[的尾巴脑袋]?|尾巴[轻晃摇]'
+  ];
 
-  // 3. 删除正文中内联的括号舞台动作（包含动作特征词的括号内容）
-  s = s.replace(new RegExp('[（(【][^）)】]{0,60}(' + actionWords + ')[^）)】]{0,80}[）)】]', 'gmi'), '');
+  for (var ai = 0; ai < actionSets.length; ai++) {
+    var pattern = '^\\s*(' + actionSets[ai] + ')[^。！？\\n]{0,100}[。！？]?\\s*$';
+    s = s.replace(new RegExp(pattern, 'gmi'), '');
+  }
+
+  for (var ai2 = 0; ai2 < actionSets.length; ai2++) {
+    var pattern2 = '[（(【][^）)】]{0,60}(' + actionSets[ai2] + ')[^）)】]{0,80}[）)】]';
+    s = s.replace(new RegExp(pattern2, 'gmi'), '');
+  }
 
   // 4. 清理多余空行
   s = s.replace(/\n{3,}/g, '\n\n').trim();
@@ -820,6 +836,7 @@ function writeSse(res, payload) {
 
 // 统一流结束收尾：保存消息 + 发送 done
 async function finishStream(res, opt) {
+  if (res.writableEnded) return;
   var rawContent = String(opt.contentBuffer || '');
   var content = sanitizeAssistantVisibleText(rawContent);
   var reasoning = String(opt.reasoningBuffer || '');
@@ -2315,30 +2332,37 @@ var aiUserRateStore = new Map(); // userName -> { hourly: {count, resetAt}, dail
 function checkAiUserRateLimit(userName) {
   if (!userName) return { allowed: false, reason: 'no_user' };
   var now = Date.now();
-  var record = aiUserRateStore.get(userName) || {
-    hourly: { count: 0, resetAt: now + 3600000 },
-    daily:  { count: 0, resetAt: now + 86400000 }
-  };
+  var record = aiUserRateStore.get(userName);
+  if (!record) {
+    record = {
+      hourly: { count: 1, resetAt: now + 3600000 },
+      daily:  { count: 1, resetAt: now + 86400000 }
+    };
+    aiUserRateStore.set(userName, record);
+    return {
+      allowed: true,
+      remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - 1),
+      remainingDay:  Math.max(0, AI_AGENT_DAILY_LIMIT  - 1)
+    };
+  }
 
-  // 重置窗口
+  // 只在新窗口内先递增，达到上限则不递增直接拒绝
   if (now > record.hourly.resetAt) {
     record.hourly = { count: 1, resetAt: now + 3600000 };
+  } else if (record.hourly.count >= AI_AGENT_HOURLY_LIMIT) {
+    return { allowed: false, reason: 'hourly_limit', remainingHour: 0, remainingDay: Math.max(0, AI_AGENT_DAILY_LIMIT - record.daily.count) };
   } else {
     record.hourly.count++;
   }
+
   if (now > record.daily.resetAt) {
     record.daily = { count: 1, resetAt: now + 86400000 };
+  } else if (record.daily.count >= AI_AGENT_DAILY_LIMIT) {
+    return { allowed: false, reason: 'daily_limit', remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count), remainingDay: 0 };
   } else {
     record.daily.count++;
   }
-  aiUserRateStore.set(userName, record);
 
-  if (record.hourly.count > AI_AGENT_HOURLY_LIMIT) {
-    return { allowed: false, reason: 'hourly_limit', remainingHour: 0, remainingDay: Math.max(0, AI_AGENT_DAILY_LIMIT - record.daily.count) };
-  }
-  if (record.daily.count > AI_AGENT_DAILY_LIMIT) {
-    return { allowed: false, reason: 'daily_limit', remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count), remainingDay: 0 };
-  }
   return {
     allowed: true,
     remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count),
@@ -5986,7 +6010,7 @@ const AI_CHAT_MESSAGE_MAX_LEN = Math.min(
   20000
 );
 const AI_CHAT_HISTORY_LIMIT = 10;
-const AI_CHAT_HOURLY_IP_LIMIT = 30;
+const AI_CHAT_HOURLY_IP_LIMIT = 200;
 const AI_MEMORY_MAX_LEN = 800;
 const AI_MEMORY_SUMMARIZE_HISTORY = 10;
 
@@ -6267,7 +6291,7 @@ async function loadRelevantConversationSummaries(userName, message, limit) {
   }
 }
 
-async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assistantReply, existingMemoryBox) {
+async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assistantReply, _existingMemoryBox) {
   if (!userName || !latestUserMessage || latestUserMessage.length < 20) return;
   
   var skipPattern = /^(嗯|继续|不对|哈哈|好的|收到|可以|行|好|ok|对|是|不是|没有|知道了|明白了|了解|懂|嗯嗯|哦|哦哦|好的吧|好吧|那好|然后|还有|再来|继续聊|还有吗|然后呢|之后呢|后面呢|接着说)$/i;
@@ -6285,6 +6309,24 @@ async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assist
   } catch(e) {}
   
   var memoryModel = process.env.DEEPSEEK_MODEL_REASONER || 'deepseek-v4-flash';
+  
+  // 在更新前重新加载最新记忆，避免多设备竞态覆盖
+  var existingMemoryBox = null;
+  try {
+    var { data: latestRow } = await supabase.from('posts')
+      .select('content')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MEMORY_BOX_MARKER)
+      .eq('media_url', 'memory_box')
+      .limit(1)
+      .order('created_at', { ascending: false })
+      .maybeSingle();
+    if (latestRow && latestRow.content) {
+      existingMemoryBox = (function() { try { return JSON.parse(latestRow.content); } catch(e) { return null; } })();
+    }
+  } catch (e) {}
+  if (!existingMemoryBox) existingMemoryBox = _existingMemoryBox || createEmptyMemoryBox(userName);
+  
   var memoryBoxJson = JSON.stringify(existingMemoryBox || {});
   
   var extractPrompt = '你是一个用户记忆提取助手。根据以下内容，输出 JSON patch 用于更新用户的长期记忆。\n\n当前记忆：\n' + memoryBoxJson.slice(0, 2000) + '\n\n用户消息：' + latestUserMessage.slice(0, 500) + '\n\nAI 回复：' + (assistantReply || '').slice(0, 500) + '\n\n当前日期：' + new Date().toISOString() + '\n\n规则：\n1. 只记录长期稳定信息，不记录一次性闲聊。\n2. 不记录密码、token、密钥、银行卡。\n3. 健康、性、身份敏感信息默认不写入，除非用户明确说"记住"。\n4. 不确定就不写。\n5. 同类内容合并，不要重复。\n\n必须输出纯 JSON，不要加任何其他文字：\n{"should_update":true或false,"changes":{"likes":[],"dislikes":[],"project_preferences":[],"do_not_do":[],"important_notes":[],"long_term_goals":[],"reply_preferences":{"tone":[],"format":[],"avoid":[]},"stable_profile":{}},"reason":"原因"}';
@@ -6625,7 +6667,10 @@ async function getAiConfig() {
 const aiMemoryUpdateLock = {};
 async function updateLongTermMemory(userName, ctx, lastUserMsg, lastAiReply) {
   if (!DEEPSEEK_API_KEY) return;
-  if (!lastUserMsg || !/记住|记得|不要忘记|别忘了|记一下|记录下来/.test(lastUserMsg)) return;
+  if (!lastUserMsg || lastUserMsg.length < 20) return;
+  // 放宽触发条件：不再依赖特定关键词
+  var skipPattern = /^(嗯|继续|不对|哈哈|好的|收到|可以|行|好|ok|对|是|不是|没有|知道了|明白了|了解|懂|嗯嗯|哦|哦哦|好的吧|好吧|那好|然后|还有|再来|继续聊|还有吗|然后呢|之后呢|后面呢|接着说)$/i;
+  if (skipPattern.test(lastUserMsg.trim())) return;
 
   var now = Date.now();
   var lock = aiMemoryUpdateLock[userName];
@@ -6743,6 +6788,32 @@ async function loadAiContext(userName, convId) {
     if (ctx.memory) {
       ctx.contextBlock += '[长期记忆]\n' + ctx.memory + '\n';
     }
+
+    // 也加载 memory_box（系统 B）内容，合并到上下文
+    try {
+      var { data: boxRow } = await supabase.from('posts')
+        .select('content')
+        .eq('user_name', userName)
+        .eq('media_type', AI_AGENT_MEMORY_BOX_MARKER)
+        .eq('media_url', 'memory_box')
+        .limit(1)
+        .order('created_at', { ascending: false })
+        .maybeSingle();
+      if (boxRow && boxRow.content) {
+        var boxObj = (function() { try { return JSON.parse(boxRow.content); } catch(e) { return null; } })();
+        if (boxObj) {
+          var boxParts = [];
+          if (boxObj.likes && boxObj.likes.length) boxParts.push('用户喜欢的：' + boxObj.likes.join('、'));
+          if (boxObj.dislikes && boxObj.dislikes.length) boxParts.push('用户不喜欢的：' + boxObj.dislikes.join('、'));
+          if (boxObj.important_notes && boxObj.important_notes.length) boxParts.push('重要信息：' + boxObj.important_notes.join('；'));
+          if (boxObj.do_not_do && boxObj.do_not_do.length) boxParts.push('不要做：' + boxObj.do_not_do.join('、'));
+          if (boxObj.project_preferences && boxObj.project_preferences.length) boxParts.push('项目偏好：' + boxObj.project_preferences.join('、'));
+          if (boxParts.length) {
+            ctx.contextBlock += '[用户偏好]\n' + boxParts.join('\n') + '\n';
+          }
+        }
+      }
+    } catch (e) {}
   } catch (e) {
     console.error('[AGENT-CHAT] loadAiContext exception:', e.message);
   }
@@ -6840,14 +6911,14 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
           user_name: userName,
           content: message,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('user', convId),
+          media_url: buildMsgMeta('user', convId, null, null, 1),
           actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
         },
         {
           user_name: userName,
           content: reply,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning),
+          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2),
           actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
         }
       ]);
@@ -7469,13 +7540,14 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
     var userName = req.userName;
     var limit = Math.min(Math.max(parseInt(req.query.limit) || AI_AGENT_CONVERSATION_LIST_LIMIT, 1), 100);
 
-    // 取该用户所有 AI 消息，按时间倒序
+    // 取该用户所有 AI 消息，按时间倒序（限制最多 1000 条避免内存膨胀）
     var { data: rows } = await supabase.from('posts')
       .select('actor_key, content, media_url, created_at')
       .eq('user_name', userName)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .neq('actor_key', '')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(1000);
     
     if (!Array.isArray(rows)) {
       return res.json({ ok: true, conversations: [] });
