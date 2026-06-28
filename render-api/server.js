@@ -7259,7 +7259,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               convId: convId,
               message: message,
               streamSeq: streamSeq,
-              ctx: ctx
+              ctx: ctx,
+              reasoningStartedAt: reasoningStartedAt
             };
             await finishStream(res, finishOpt);
           }
