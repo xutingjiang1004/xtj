@@ -1530,11 +1530,10 @@
             }
           }
 
-          // 思考后决定补充搜索：清除当前不完整的回复，等待新的流
-          if (evt.type === 'restart') {
-            cleanupRenderers();
-            if (aiNode) try { aiNode.remove(); } catch (e) {}
-            try { typingNode.remove(); } catch (e) {}
+          // 思考后补充搜索：重置内容状态以接收新一轮 stream，保留已显示的思考过程
+          if (evt.type === 'search_supplement') {
+            var searchNote = el('div', { class: 'ai-search-supplement', text: '🔍 正在联网补充信息...' });
+            if (aiNode && aiNode.parentElement) aiNode.parentElement.appendChild(searchNote);
             aiContent = '';
             aiReasoning = '';
             reasoningStarted = false;

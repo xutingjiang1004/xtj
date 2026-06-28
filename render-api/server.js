@@ -7600,7 +7600,13 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   break;
                 }
               }
-              postSearchKeyword = (rpLine || message).replace(/^(?:搜索|查一下|搜一下|百度|google|谷歌|查询|需要|应该|让我)\s*/i, '').trim().slice(0, 80);
+              var searchIntent = (rpLine || '').replace(/^(?:搜索|查一下|搜一下|百度|google|谷歌|查询|需要|应该|让我)\s*/i, '').trim().slice(0, 60);
+              if (searchIntent.length >= 3) {
+                // 结合用户原始消息和推理中提取的意图，如"牛岛"+"船班时间"→"牛岛 船班时间"
+                postSearchKeyword = (message + ' ' + searchIntent).slice(0, 80);
+              } else {
+                postSearchKeyword = message.slice(0, 80);
+              }
               if (postSearchKeyword.length >= 3) needsPostSearch = true;
             }
           }
@@ -7615,10 +7621,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                   '\n\n要求：必须优先使用以上搜索结果回答。不能编造。';
                 roundMessages.push({ role: 'system', content: psCtx });
                 res.write('data: ' + JSON.stringify({ type: 'search', count: psResults.length, results: psResults, query: postSearchKeyword }) + '\n\n');
-                // 模拟 tool_calls 以触发外层循环重启 stream
+                // 通知前端搜索中，不清除已有思考过程
+                res.write('data: ' + JSON.stringify({ type: 'search_supplement', query: postSearchKeyword }) + '\n\n');
                 finishReason = 'post_reasoning_search';
-                // 告诉前端清除之前不完整的内容，以干净状态重启
-                res.write('data: ' + JSON.stringify({ type: 'restart', reason: 'AI在思考后决定补充搜索' }) + '\n\n');
               }
             } catch (e) {
               try { console.warn('[POST-REASONING-SEARCH] error:', e && e.message); } catch(ee) {}
@@ -7694,10 +7699,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // 后置搜索触发：思考结束后补充搜索并重新生成回答
     if (finishReason === 'post_reasoning_search' && !aborted) {
       toolRound++;
-      if (useThinking) {
-        delete apiBody.thinking;
-        delete apiBody.reasoning_effort;
-      }
       continue;
     }
     
