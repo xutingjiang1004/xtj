@@ -1581,17 +1581,55 @@
               searchBar = el('div', { class: 'ai-search-status' });
               messagesEl.appendChild(searchBar);
             }
+            var summaryText = '';
             if (searchCount > 0) {
-              searchBar.textContent = '已联网搜索 · ' + searchCount + ' 条结果';
+              summaryText = '已联网搜索 · ' + searchCount + ' 条结果';
             } else {
-              searchBar.textContent = '联网搜索完成 · 没有找到相关结果';
+              summaryText = '联网搜索完成 · 没有找到相关结果';
             }
             // 显示使用的 provider
             if (searchDiag && searchDiag.provider_results && searchDiag.provider_results.length) {
               var firstProv = searchDiag.provider_results[0];
               if (firstProv && firstProv.provider) {
-                searchBar.textContent += ' (' + firstProv.provider + ')';
+                summaryText += ' (' + firstProv.provider + ')';
               }
+            }
+            // 清空并重建（避免重复 append）
+            searchBar.innerHTML = '';
+            searchBar.textContent = summaryText;
+            var resultsArr = evt.results;
+            var queryStr = evt.query || '';
+            if (resultsArr && resultsArr.length > 0) {
+              var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▶');
+              searchBar.appendChild(toggleBtn);
+              searchBar.style.cursor = 'pointer';
+              var detailPanel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+              searchBar.appendChild(detailPanel);
+              // 显示搜索关键词
+              if (queryStr) {
+                detailPanel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr }));
+              }
+              // 列表
+              for (var ri = 0; ri < resultsArr.length; ri++) {
+                var r = resultsArr[ri];
+                var itemEl = el('div', { class: 'ai-search-detail-item' });
+                var linkEl = el('a', { class: 'ai-search-detail-title', href: r.url || '#', target: '_blank', text: r.title || '无标题' });
+                itemEl.appendChild(linkEl);
+                if (r.snippet) {
+                  itemEl.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r.snippet.slice(0, 200) }));
+                }
+                itemEl.appendChild(el('div', { class: 'ai-search-detail-source', text: (r.source || '') + ' · ' + (r.published_at || '') }));
+                detailPanel.appendChild(itemEl);
+              }
+              searchBar.toggleFn = function() {
+                var isHidden = detailPanel.style.display === 'none';
+                detailPanel.style.display = isHidden ? '' : 'none';
+                toggleBtn.textContent = isHidden ? ' ▼' : ' ▶';
+              };
+              searchBar.onclick = function(e) {
+                if (e.target.tagName === 'A') return;
+                if (this.toggleFn) this.toggleFn();
+              };
             }
             continue;
           }
@@ -1646,14 +1684,49 @@
             }
             var nameMap = { search_web: '已联网搜索', get_weather: '已查询天气', get_current_time: '已获取时间' };
             var label = nameMap[evt.tool_name] || evt.tool_name;
+            var summaryText = '';
             if (evt.success) {
               if (evt.count > 0) {
-                toolBar2.textContent = label + ' · ' + evt.count + ' 条结果' + (evt.location ? ' · ' + evt.location : '');
+                summaryText = label + ' · ' + evt.count + ' 条结果' + (evt.location ? ' · ' + evt.location : '');
               } else {
-                toolBar2.textContent = label + ' · 完成' + (evt.location ? ' · ' + evt.location : '');
+                summaryText = label + ' · 完成' + (evt.location ? ' · ' + evt.location : '');
               }
             } else {
-              toolBar2.textContent = label + ' · 失败' + (evt.error ? ': ' + evt.error.slice(0, 80) : '');
+              summaryText = label + ' · 失败' + (evt.error ? ': ' + evt.error.slice(0, 80) : '');
+            }
+            toolBar2.innerHTML = '';
+            toolBar2.textContent = summaryText;
+            var itemsArr = evt.items;
+            var queryStr2 = evt.query || '';
+            if (itemsArr && itemsArr.length > 0) {
+              var toggleBtn2 = el('span', { class: 'ai-search-toggle' }, ' ▶');
+              toolBar2.appendChild(toggleBtn2);
+              toolBar2.style.cursor = 'pointer';
+              var detailPanel2 = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+              toolBar2.appendChild(detailPanel2);
+              if (queryStr2) {
+                detailPanel2.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr2 }));
+              }
+              for (var ri2 = 0; ri2 < itemsArr.length; ri2++) {
+                var r2 = itemsArr[ri2];
+                var itemEl2 = el('div', { class: 'ai-search-detail-item' });
+                var linkEl2 = el('a', { class: 'ai-search-detail-title', href: r2.url || '#', target: '_blank', text: r2.title || '无标题' });
+                itemEl2.appendChild(linkEl2);
+                if (r2.snippet) {
+                  itemEl2.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r2.snippet.slice(0, 200) }));
+                }
+                itemEl2.appendChild(el('div', { class: 'ai-search-detail-source', text: (r2.source || '') + ' · ' + (r2.published_at || '') }));
+                detailPanel2.appendChild(itemEl2);
+              }
+              toolBar2.toggleFn = function() {
+                var isHidden = detailPanel2.style.display === 'none';
+                detailPanel2.style.display = isHidden ? '' : 'none';
+                toggleBtn2.textContent = isHidden ? ' ▼' : ' ▶';
+              };
+              toolBar2.onclick = function(e) {
+                if (e.target.tagName === 'A') return;
+                if (this.toggleFn) this.toggleFn();
+              };
             }
             continue;
           }

@@ -7039,13 +7039,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             for (var tri = 0; tri < toolResults.length; tri++) {
               var item = toolResults[tri];
               messages.push({ role: 'tool', tool_call_id: item.toolCallId, content: JSON.stringify(item.toolResult) });
+              var trItems = null;
+              try { trItems = JSON.parse(item.toolResult.content || '[]'); } catch (e) {}
               res.write('data: ' + JSON.stringify({
                 type: 'tool_result',
                 tool_name: item.toolResult.tool_name || '',
                 success: !item.toolResult.error,
                 count: item.toolResult.results_count || 0,
                 error: item.toolResult.error || null,
-                location: item.toolResult.location || null
+                location: item.toolResult.location || null,
+                query: item.toolResult.query || null,
+                items: trItems && trItems.length > 0 ? trItems.slice(0, 20) : null
               }) + '\n\n');
             }
 
@@ -7116,7 +7120,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                     success: true,
                     count: newItems.length,
                     error: null,
-                    location: null
+                    location: null,
+                    query: '多 Agent 并行搜索',
+                    items: newItems.slice(0, 20)
                   }) + '\n\n');
                 }
               }
@@ -7189,7 +7195,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           sResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
           '\n\n要求：必须优先使用以上搜索结果回答。不能编造新闻、价格、天气、日期。';
         messages.push({ role: 'system', content: sCtx });
-        res.write('data: ' + JSON.stringify({ type: 'search', count: sResults.length, results: sResults, diagnostics: sDiag || null }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'search', count: sResults.length, results: sResults, diagnostics: sDiag || null, query: message }) + '\n\n');
       } else if (needsSearch) {
         var hasProviderErrors2 = sDiag && sDiag.provider_errors && sDiag.provider_errors.length > 0;
         var hasProviderMissing2 = sDiag && sDiag.missing_env && sDiag.missing_env.length > 0;
@@ -7200,7 +7206,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           res.write('data: ' + JSON.stringify({ type: 'search_error', error: '联网搜索失败: ' + errSum, diagnostics: sDiag }) + '\n\n');
         } else {
           messages.push({ role: 'system', content: '【联网搜索】本次搜索没有返回有效结果。你必须如实告诉用户没有搜到。' });
-          res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [], diagnostics: sDiag }) + '\n\n');
+          res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [], diagnostics: sDiag, query: message }) + '\n\n');
         }
       }
     }
