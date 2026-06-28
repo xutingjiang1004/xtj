@@ -235,10 +235,29 @@ function generateExpandedQueries(userMessage, existingQueries, maxExtra) {
   var extra = [];
   var msg = String(userMessage || '').trim().slice(0, 300);
 
-  // 提取地点/主题等关键词
-  var locations = (msg.match(/[在去来]?\s*([\u4e00-\u9fff]{2,6}(?:市|区|县|岛|山|河|湖|海|公园|广场|街|路|大学|学院|博物馆|景区|旅游)?)/g) || [])
-    .map(function(s) { return s.replace(/[在去来]/g, '').trim(); })
-    .filter(function(s) { return s.length >= 2; });
+  // 提取地点关键词（严格模式：只提取明显是地名的词）
+  var msgClean = msg.replace(/[在去来]/g, ' ').trim();
+  var locations = [];
+  // 方式1：匹配已知常见地点/城市名（按使用频率排序）
+  var knownPlaces = [
+    '北京','上海','广州','深圳','杭州','成都','重庆','武汉','西安','南京','苏州','天津','长沙','郑州','东莞','青岛',
+    '昆明','大连','厦门','合肥','佛山','福州','哈尔滨','济南','温州','贵阳','南宁','长春','泉州','珠海','太原','南昌',
+    '巴黎','伦敦','纽约','东京','悉尼','新加坡','曼谷','香港','澳门','台北','首尔','济州岛','巴厘岛','普吉岛',
+    '北海道','大阪','京都','马尔代夫','罗马','米兰','威尼斯','佛罗伦萨','巴塞罗那','马德里','阿姆斯特丹',
+    '柏林','慕尼黑','苏黎世','日内瓦','维也纳','布拉格','布达佩斯','迪拜','伊斯坦布尔','开罗','清迈',
+    '三亚','丽江','大理','桂林','黄山','张家界','敦煌','拉萨','林芝','九寨沟','峨眉山','长城','故宫'
+  ];
+  knownPlaces.forEach(function(p) {
+    if (msgClean.indexOf(p) >= 0 && locations.indexOf(p) < 0) locations.push(p);
+  });
+  // 方式2：匹配"X地"模式（X地旅游/攻略/美食等），只取明显带地名的后缀
+  var placeSuffixHits = (msgClean.match(/([\u4e00-\u9fff]{2,4})(?:旅游|景点|攻略|美食|天气|新闻|大学|机场|车站|广场|公园|博物馆|美术馆|图书馆|景区)/g) || []);
+  placeSuffixHits.forEach(function(s) {
+    var place = s.replace(/(旅游|景点|攻略|美食|天气|新闻|大学|机场|车站|广场|公园|博物馆|美术馆|图书馆|景区)$/, '');
+    if (!/^(我们|他们|你们|大家|自己|这个|那个|什么|怎么|哪个|这些|那些|所有|没有|还是|或者|可以|需要|应该|想要|正在|已经|之前|之后|目前|一直|经常|有时|很少|不能|可能|必须|一定|随便|一般|基本|整体|感觉|觉得|知道|考虑|打算|计划|建议|推荐|分享|提供|选择|决定|比较|了解|看看|问问|试试|结果|情况|消息|内容|方面|部分|方式|方法|原因|理由|目的|意义|影响|关系)$/.test(place) && place.length >= 2) {
+      if (locations.indexOf(place) < 0) locations.push(place);
+    }
+  });
 
   var topics = [];
   // 从用户消息提取可能的搜索方向
@@ -508,7 +527,7 @@ async function searchBingHtml(query, maxResults) {
   }
 }
 
-// 主搜索函数：并发向所有可用 Provider 发起请求，取最快的结果
+// 主搜索函数：按优先级依次尝试 Provider，取第一个成功的结果（避免浪费 API 配额）
 async function searchWeb(query, maxResults) {
   maxResults = maxResults || 5;
   var searchQuery = buildSearchQuery(query);
@@ -522,8 +541,8 @@ async function searchWeb(query, maxResults) {
     searchCache.delete(cacheKey);
   }
 
-  // 定义 provider 列表
-  var providers = [
+  // 按优先级定义 provider 列表（串行：前面的成功就不走后面的，省 API 配额）
+  var providerList = [
     { name: 'Tavily', fn: function() { return searchTavily(searchQuery, maxResults); }, requiresEnv: 'TAVILY_API_KEY', enabled: !!process.env.TAVILY_API_KEY },
     { name: 'Brave', fn: function() { return searchBrave(searchQuery, maxResults); }, requiresEnv: 'BRAVE_SEARCH_API_KEY', enabled: !!process.env.BRAVE_SEARCH_API_KEY },
     { name: 'Serper', fn: function() { return searchSerper(searchQuery, maxResults); }, requiresEnv: 'SERPER_API_KEY', enabled: !!process.env.SERPER_API_KEY },
@@ -540,45 +559,31 @@ async function searchWeb(query, maxResults) {
     provider_errors: []
   };
 
-  // 并发：所有已启用的 Provider 同时发起请求
-  var enabledFns = [];
-  for (var pi = 0; pi < providers.length; pi++) {
-    var p = providers[pi];
-    if (!p.enabled) {
-      diagnostics.missing_env.push(p.requiresEnv);
-      continue;
-    }
-    diagnostics.enabled_providers.push(p.name);
-    enabledFns.push(p);
-  }
-
-  if (enabledFns.length === 0) {
-    var finalResult = { results: [], diagnostics: diagnostics, used_provider: null };
-    searchCache.set(cacheKey, { ts: Date.now(), results: finalResult });
-    return finalResult;
-  }
-
-  var parallelPromises = enabledFns.map(function(p) {
-    return p.fn().then(function(result) {
-      return { provider: p.name, result: result };
-    });
-  });
-
-  var settledResults = await Promise.all(parallelPromises);
-
   var mergedResults = [];
   var usedProvider = null;
-  for (var si = 0; si < settledResults.length; si++) {
-    var sr = settledResults[si];
-    var res = sr.result;
-    if (!res.error && res.results && res.results.length > 0) {
-      diagnostics.provider_results.push({ provider: sr.provider, count: res.results.length });
-      if (!usedProvider) {
-        mergedResults = res.results;
-        usedProvider = sr.provider;
+
+  for (var pi = 0; pi < providerList.length; pi++) {
+    var provider = providerList[pi];
+    if (!provider.enabled) {
+      diagnostics.missing_env.push(provider.requiresEnv);
+      continue;
+    }
+    diagnostics.enabled_providers.push(provider.name);
+    try {
+      var result = await provider.fn();
+      if (result.error) {
+        diagnostics.provider_errors.push({ provider: provider.name, error: result.error });
+      } else if (result.results && result.results.length > 0) {
+        diagnostics.provider_results.push({ provider: provider.name, count: result.results.length });
+        // 取第一个有结果的 provider
+        mergedResults = result.results;
+        usedProvider = provider.name;
+        break;
+      } else {
+        diagnostics.provider_results.push({ provider: provider.name, count: 0 });
       }
-    } else {
-      diagnostics.provider_errors.push({ provider: sr.provider, error: res.error || '0 results' });
+    } catch (e) {
+      diagnostics.provider_errors.push({ provider: provider.name, error: e.message || 'unknown' });
     }
   }
 
@@ -604,17 +609,34 @@ function sanitizeAssistantVisibleText(text) {
   var s = String(text || '');
   if (!s) return s;
 
-  // 动作/舞台/心理/环境描写的强特征词（不含过于通用的词如"没有""已经""突然"）
-  var actionWords = '屏幕|镜头|背景|画面|空气[里中]?|灯光|白芒|光芒|裂纹|裂缝|低声|笑了笑|轻笑|沉默|沉默[了半]|抬头|低头|偏[了]?头|歪[了]?头|侧[了]?头|扭[了]?头|转[过]?头|转[过]?身|伸[出手爪]|伸[了]?[出手]?|缩[回了成]|抖[了]?抖|晃[了]?晃|点[了]?点[头]|摇[了]?摇[头手]|摆[了]?摆[手]|挥[了]?挥[手]|站[起立]|坐[下]|趴[下在]|蹲[下在]|走[向到进过]|退[后回了]|看[向着清]|望[着向]|想[了到起]|听[到见着]|叹[气口]|眯[起眼]|瞪[着大]|睁[大开]|眨[了]?眨[眼]?|抿[了]?[嘴唇]|舔[了]?舔|吞[了]?[吞]?|咽[了]?[咽]?|尾巴|猫耳|耳朵|毛茸茸|喵[喵]?|键盘|敲[击打着]|靠[在着]|抱[着起]|搂[着]|发[出]|传[来]|响[起]|回[荡]|充[满]|浮[现]|感[到觉]|仿[佛]|一[股阵道]|猛[地然]|瞬[间]|顿[了]?[顿]?|愣[了]?|怔[了]?|呆[了]?|张[嘴]|闭[嘴上]|合[上]|按[下了]|周[围]|四[周]|窗[外]|门[外]|不[再]|再[也]|终[于]|仍[然]|依[然]|瞄[了]?|瞥[了]?|盯[着]?|看[了]?[看看]?|扯[了]?[嘴嘴角]?|勾[了]?[嘴角]?|扬[了]?[眉嘴角]?|挑[了]?[眉]?|皱[了]?[眉]?|叹[了]?[口气]|呼[出]|吸[了]?|深[吸呼]|爪子|猫猫|小猫|开[了]?口|闭[了]?[嘴眼]|合[了]?[上眼]|摇[头]?|甩[了]?[头]?|敲[了]?[键盘桌]?';
-
   // 1. 删除所有独立成行的括号内容（允许全角/半角/方括号，至少 3 个字符）
   s = s.replace(/^\s*[（(【][^）)】]{3,200}[）)】]\s*$/gm, '');
 
-  // 2. 删除以动作特征词开头的行（无括号的裸描写行）
-  s = s.replace(new RegExp('^\\s*(' + actionWords + ')[^。！？\\n]{0,100}[。！？]?\\s*$', 'gmi'), '');
+  // 2-3. 拆分清洗正则避免单次超长表达式导致的 ReDoS
+  var actionSets = [
+    '屏幕[上中前里]|镜头[拉推切]|背景[音乐音效]|空气[里中]?[仿佛凝]|灯光[暗亮闪]|白芒|光芒[闪四]',
+    '低声[说笑]|笑了笑|轻轻一笑|轻笑[着]?[道说]?|苦笑[着]?[道说]?|沉默[了半片]|叹了[口]?气|叹道|叹了口气',
+    '抬起头|低下头|偏了偏头|歪了歪头|侧了侧头|扭了扭头|转过头|转过身|伸出手|伸出爪|缩回[了手成]|抖了抖|晃了晃',
+    '点了点头|摇了摇头|摆了摆手|挥了挥手|站起[身来]?|坐[了下]?下|趴[了下]?下|蹲[了下]?下',
+    '走[向到进过]|退了[几步回]|眯起眼|瞪[大了]|睁[大了]|眨了眨眼|抿了抿嘴|舔了舔|吞了吞|咽了咽',
+    '摇了摇[头尾]|甩了甩[头尾]|敲了敲|靠在[了]?[床头墙椅]?|抱着[了]?[手臂胸]?|搂着[了]?',
+    '发出[一]?[阵阵声]|传来[一]?[阵阵声]|响起[一]?[阵阵声]|回荡[着在]|充满[了]?|浮现[出在]',
+    '感到[一]?[阵阵]?|仿佛[一]?[股阵道]|猛[地然]|瞬间[间]?|顿[了]?[顿]?|愣[了]?[愣]?|怔[了]?[怔]?|呆[了]?[呆]?',
+    '张[了]?[嘴口]|闭[了]?[嘴眼]|合[了]?[上眼]|按下[了]?|周[围的环境]|四[周环]|窗[外口]|门[外口]',
+    '不再[说言语]|再也[不没]|终于[还]|仍然[还]|依然[还]|瞥[了]?[一]?眼|盯[着]?[了]?',
+    '扯[了]?[嘴嘴角]?|勾[了]?[嘴角]?|扬[了]?[眉嘴角]?|挑[了]?[眉]?|皱[了]?[眉]?',
+    '呼出[一]?[口气]?|深吸[一]?[口气]?|爪子[轻挠挠]|猫耳[竖抖]|毛茸茸[的尾巴脑袋]?|尾巴[轻晃摇]'
+  ];
 
-  // 3. 删除正文中内联的括号舞台动作（包含动作特征词的括号内容）
-  s = s.replace(new RegExp('[（(【][^）)】]{0,60}(' + actionWords + ')[^）)】]{0,80}[）)】]', 'gmi'), '');
+  for (var ai = 0; ai < actionSets.length; ai++) {
+    var pattern = '^\\s*(' + actionSets[ai] + ')[^。！？\\n]{0,100}[。！？]?\\s*$';
+    s = s.replace(new RegExp(pattern, 'gmi'), '');
+  }
+
+  for (var ai2 = 0; ai2 < actionSets.length; ai2++) {
+    var pattern2 = '[（(【][^）)】]{0,60}(' + actionSets[ai2] + ')[^）)】]{0,80}[）)】]';
+    s = s.replace(new RegExp(pattern2, 'gmi'), '');
+  }
 
   // 4. 清理多余空行
   s = s.replace(/\n{3,}/g, '\n\n').trim();
@@ -814,6 +836,7 @@ function writeSse(res, payload) {
 
 // 统一流结束收尾：保存消息 + 发送 done
 async function finishStream(res, opt) {
+  if (res.writableEnded) return;
   var rawContent = String(opt.contentBuffer || '');
   var content = sanitizeAssistantVisibleText(rawContent);
   var reasoning = String(opt.reasoningBuffer || '');
@@ -2309,30 +2332,37 @@ var aiUserRateStore = new Map(); // userName -> { hourly: {count, resetAt}, dail
 function checkAiUserRateLimit(userName) {
   if (!userName) return { allowed: false, reason: 'no_user' };
   var now = Date.now();
-  var record = aiUserRateStore.get(userName) || {
-    hourly: { count: 0, resetAt: now + 3600000 },
-    daily:  { count: 0, resetAt: now + 86400000 }
-  };
+  var record = aiUserRateStore.get(userName);
+  if (!record) {
+    record = {
+      hourly: { count: 1, resetAt: now + 3600000 },
+      daily:  { count: 1, resetAt: now + 86400000 }
+    };
+    aiUserRateStore.set(userName, record);
+    return {
+      allowed: true,
+      remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - 1),
+      remainingDay:  Math.max(0, AI_AGENT_DAILY_LIMIT  - 1)
+    };
+  }
 
-  // 重置窗口
+  // 只在新窗口内先递增，达到上限则不递增直接拒绝
   if (now > record.hourly.resetAt) {
     record.hourly = { count: 1, resetAt: now + 3600000 };
+  } else if (record.hourly.count >= AI_AGENT_HOURLY_LIMIT) {
+    return { allowed: false, reason: 'hourly_limit', remainingHour: 0, remainingDay: Math.max(0, AI_AGENT_DAILY_LIMIT - record.daily.count) };
   } else {
     record.hourly.count++;
   }
+
   if (now > record.daily.resetAt) {
     record.daily = { count: 1, resetAt: now + 86400000 };
+  } else if (record.daily.count >= AI_AGENT_DAILY_LIMIT) {
+    return { allowed: false, reason: 'daily_limit', remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count), remainingDay: 0 };
   } else {
     record.daily.count++;
   }
-  aiUserRateStore.set(userName, record);
 
-  if (record.hourly.count > AI_AGENT_HOURLY_LIMIT) {
-    return { allowed: false, reason: 'hourly_limit', remainingHour: 0, remainingDay: Math.max(0, AI_AGENT_DAILY_LIMIT - record.daily.count) };
-  }
-  if (record.daily.count > AI_AGENT_DAILY_LIMIT) {
-    return { allowed: false, reason: 'daily_limit', remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count), remainingDay: 0 };
-  }
   return {
     allowed: true,
     remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count),
@@ -2351,6 +2381,10 @@ setInterval(function() {
   });
   revokedTokens.forEach(function(expiry, token) {
     if (now > expiry) revokedTokens.delete(token);
+  });
+  // 清理过期的限流记录（超过上次重置后 48h 的肯定用不上了）
+  aiUserRateStore.forEach(function(record, name) {
+    if (now > record.daily.resetAt + 86400000) aiUserRateStore.delete(name);
   });
 }, 600000);
 
@@ -5976,7 +6010,7 @@ const AI_CHAT_MESSAGE_MAX_LEN = Math.min(
   20000
 );
 const AI_CHAT_HISTORY_LIMIT = 10;
-const AI_CHAT_HOURLY_IP_LIMIT = 30;
+const AI_CHAT_HOURLY_IP_LIMIT = 200;
 const AI_MEMORY_MAX_LEN = 800;
 const AI_MEMORY_SUMMARIZE_HISTORY = 10;
 
@@ -6257,7 +6291,7 @@ async function loadRelevantConversationSummaries(userName, message, limit) {
   }
 }
 
-async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assistantReply, existingMemoryBox) {
+async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assistantReply, _existingMemoryBox) {
   if (!userName || !latestUserMessage || latestUserMessage.length < 20) return;
   
   var skipPattern = /^(嗯|继续|不对|哈哈|好的|收到|可以|行|好|ok|对|是|不是|没有|知道了|明白了|了解|懂|嗯嗯|哦|哦哦|好的吧|好吧|那好|然后|还有|再来|继续聊|还有吗|然后呢|之后呢|后面呢|接着说)$/i;
@@ -6275,6 +6309,24 @@ async function maybeUpdateUserMemory(userName, convId, latestUserMessage, assist
   } catch(e) {}
   
   var memoryModel = process.env.DEEPSEEK_MODEL_REASONER || 'deepseek-v4-flash';
+  
+  // 在更新前重新加载最新记忆，避免多设备竞态覆盖
+  var existingMemoryBox = null;
+  try {
+    var { data: latestRow } = await supabase.from('posts')
+      .select('content')
+      .eq('user_name', userName)
+      .eq('media_type', AI_AGENT_MEMORY_BOX_MARKER)
+      .eq('media_url', 'memory_box')
+      .limit(1)
+      .order('created_at', { ascending: false })
+      .maybeSingle();
+    if (latestRow && latestRow.content) {
+      existingMemoryBox = (function() { try { return JSON.parse(latestRow.content); } catch(e) { return null; } })();
+    }
+  } catch (e) {}
+  if (!existingMemoryBox) existingMemoryBox = _existingMemoryBox || createEmptyMemoryBox(userName);
+  
   var memoryBoxJson = JSON.stringify(existingMemoryBox || {});
   
   var extractPrompt = '你是一个用户记忆提取助手。根据以下内容，输出 JSON patch 用于更新用户的长期记忆。\n\n当前记忆：\n' + memoryBoxJson.slice(0, 2000) + '\n\n用户消息：' + latestUserMessage.slice(0, 500) + '\n\nAI 回复：' + (assistantReply || '').slice(0, 500) + '\n\n当前日期：' + new Date().toISOString() + '\n\n规则：\n1. 只记录长期稳定信息，不记录一次性闲聊。\n2. 不记录密码、token、密钥、银行卡。\n3. 健康、性、身份敏感信息默认不写入，除非用户明确说"记住"。\n4. 不确定就不写。\n5. 同类内容合并，不要重复。\n\n必须输出纯 JSON，不要加任何其他文字：\n{"should_update":true或false,"changes":{"likes":[],"dislikes":[],"project_preferences":[],"do_not_do":[],"important_notes":[],"long_term_goals":[],"reply_preferences":{"tone":[],"format":[],"avoid":[]},"stable_profile":{}},"reason":"原因"}';
@@ -6343,7 +6395,7 @@ async function maybeUpdateConversationSummary(userName, convId, messages) {
   if (!userName || !convId) return;
   
   var { data: lastSummary } = await supabase.from('posts')
-    .select('content')
+    .select('id, content')
     .eq('user_name', userName)
     .eq('media_type', AI_AGENT_CONV_SUMMARY_MARKER)
     .eq('media_url', convId)
@@ -6615,7 +6667,10 @@ async function getAiConfig() {
 const aiMemoryUpdateLock = {};
 async function updateLongTermMemory(userName, ctx, lastUserMsg, lastAiReply) {
   if (!DEEPSEEK_API_KEY) return;
-  if (!lastUserMsg || !/记住|记得|不要忘记|别忘了|记一下|记录下来/.test(lastUserMsg)) return;
+  if (!lastUserMsg || lastUserMsg.length < 20) return;
+  // 放宽触发条件：不再依赖特定关键词
+  var skipPattern = /^(嗯|继续|不对|哈哈|好的|收到|可以|行|好|ok|对|是|不是|没有|知道了|明白了|了解|懂|嗯嗯|哦|哦哦|好的吧|好吧|那好|然后|还有|再来|继续聊|还有吗|然后呢|之后呢|后面呢|接着说)$/i;
+  if (skipPattern.test(lastUserMsg.trim())) return;
 
   var now = Date.now();
   var lock = aiMemoryUpdateLock[userName];
@@ -6733,6 +6788,32 @@ async function loadAiContext(userName, convId) {
     if (ctx.memory) {
       ctx.contextBlock += '[长期记忆]\n' + ctx.memory + '\n';
     }
+
+    // 也加载 memory_box（系统 B）内容，合并到上下文
+    try {
+      var { data: boxRow } = await supabase.from('posts')
+        .select('content')
+        .eq('user_name', userName)
+        .eq('media_type', AI_AGENT_MEMORY_BOX_MARKER)
+        .eq('media_url', 'memory_box')
+        .limit(1)
+        .order('created_at', { ascending: false })
+        .maybeSingle();
+      if (boxRow && boxRow.content) {
+        var boxObj = (function() { try { return JSON.parse(boxRow.content); } catch(e) { return null; } })();
+        if (boxObj) {
+          var boxParts = [];
+          if (boxObj.likes && boxObj.likes.length) boxParts.push('用户喜欢的：' + boxObj.likes.join('、'));
+          if (boxObj.dislikes && boxObj.dislikes.length) boxParts.push('用户不喜欢的：' + boxObj.dislikes.join('、'));
+          if (boxObj.important_notes && boxObj.important_notes.length) boxParts.push('重要信息：' + boxObj.important_notes.join('；'));
+          if (boxObj.do_not_do && boxObj.do_not_do.length) boxParts.push('不要做：' + boxObj.do_not_do.join('、'));
+          if (boxObj.project_preferences && boxObj.project_preferences.length) boxParts.push('项目偏好：' + boxObj.project_preferences.join('、'));
+          if (boxParts.length) {
+            ctx.contextBlock += '[用户偏好]\n' + boxParts.join('\n') + '\n';
+          }
+        }
+      }
+    } catch (e) {}
   } catch (e) {
     console.error('[AGENT-CHAT] loadAiContext exception:', e.message);
   }
@@ -6830,14 +6911,14 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
           user_name: userName,
           content: message,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('user', convId),
+          media_url: buildMsgMeta('user', convId, null, null, 1),
           actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
         },
         {
           user_name: userName,
           content: reply,
           media_type: AI_AGENT_MESSAGE_MARKER,
-          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning),
+          media_url: buildMsgMeta('assistant', convId, usageToStore, reasoning, 2),
           actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
         }
       ]);
@@ -6877,9 +6958,16 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   var clientReqId = req.body && req.body.client_request_id;
   var streamSeq = 0;
   
+  var _controller, _reader, _timer, _fcTimer;
+  function safeEnd() { if (!res.writableEnded) res.end(); }
+  
   req.on('close', function() {
     aborted = true;
     try { console.log('[AGENT-STREAM] client disconnected, reqId:', clientReqId || '?'); } catch (e) {}
+    try { _controller && _controller.abort(); } catch (e) {}
+    try { _reader && _reader.cancel(); } catch (e) {}
+    try { clearTimeout(_timer); } catch (e) {}
+    try { clearTimeout(_fcTimer); } catch (e) {}
   });
   
   try {
@@ -6891,7 +6979,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
       writeSse(res, { type: 'error', error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : '今日 AI 聊天次数已达上限' });
-      return res.end();
+      return safeEnd();
     }
     
     // 验证输入
@@ -6902,7 +6990,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
       writeSse(res, { type: 'error', error: message.error });
-      return res.end();
+      return safeEnd();
     }
     if (!message) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -6910,9 +6998,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
       writeSse(res, { type: 'error', error: '消息内容不能为空' });
-      return res.end();
+      return safeEnd();
     }
-    if (aborted) return res.end();
+    if (aborted) return safeEnd();
     
     // 会话管理
     var convId = String(req.body && req.body.conversation_id || '').trim();
@@ -6924,10 +7012,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    if (aborted) return res.end();
+    if (aborted) return safeEnd();
 
     writeSse(res, { type: 'meta', conversation_id: convId });
-    if (aborted) return res.end();
+    if (aborted) return safeEnd();
     
     // 读取全局 AI 配置 + 上下文
     var configPromise = getAiConfig();
@@ -6989,20 +7077,24 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
     var usedModel = DEEPSEEK_MODEL_REASONER;
-    if (aborted) return res.end();
+    if (aborted) return safeEnd();
 
     messages.push({ role: 'user', content: message });
 
     console.log('[AGENT-STREAM] thinking_mode=', thinkingMode, 'useThinking=', useThinking, 'model=', usedModel, 'reasoning_effort=', useThinking ? thinkingMode : 'off', '|| message_len=', message.length, 'history_messages=', messages.length);
 
     // ===== Function Calling：让 AI 自主决定调用工具 =====
-    var shouldUseTools = allowSearch && !useThinking && !aborted;
+    // 快速检测：只有明显需要搜索的消息才走 FC 非流式调用，普通对话直接秒回
+    var needsFcCheck = allowSearch && !useThinking && !aborted;
+    var fcQuickIntent = /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何/i.test(message);
+    var fcWeatherIntent = !weatherResult && /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
+    needsFcCheck = needsFcCheck && (fcQuickIntent || fcWeatherIntent);
     var hasCalledTools = false;
     var hasFCFallbackContent = false;
     var fcFallbackContent = null;
     var fcFallbackUsage = null;
 
-    if (shouldUseTools && !aborted) {
+    if (needsFcCheck && !aborted) {
       var fcBody = {
         model: usedModel,
         messages: messages,
@@ -7012,7 +7104,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       };
 
       var fcController = new AbortController();
-      var fcTimer = setTimeout(function() { fcController.abort(); }, 6000);
+      _fcTimer = setTimeout(function() { fcController.abort(); }, 4000);
 
       try {
         var fcResp = await fetch(DEEPSEEK_API_URL, {
@@ -7021,7 +7113,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           body: JSON.stringify(fcBody),
           signal: fcController.signal
         });
-        clearTimeout(fcTimer);
+        clearTimeout(_fcTimer);
 
         if (fcResp.ok) {
           var fcData = await fcResp.json();
@@ -7053,13 +7145,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             for (var tri = 0; tri < toolResults.length; tri++) {
               var item = toolResults[tri];
               messages.push({ role: 'tool', tool_call_id: item.toolCallId, content: JSON.stringify(item.toolResult) });
+              var trItems = null;
+              try { trItems = JSON.parse(item.toolResult.content || '[]'); } catch (e) {}
               res.write('data: ' + JSON.stringify({
                 type: 'tool_result',
                 tool_name: item.toolResult.tool_name || '',
                 success: !item.toolResult.error,
                 count: item.toolResult.results_count || 0,
                 error: item.toolResult.error || null,
-                location: item.toolResult.location || null
+                location: item.toolResult.location || null,
+                query: item.toolResult.query || null,
+                items: trItems && trItems.length > 0 ? trItems.slice(0, 20) : null
               }) + '\n\n');
             }
 
@@ -7130,7 +7226,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                     success: true,
                     count: newItems.length,
                     error: null,
-                    location: null
+                    location: null,
+                    query: '多 Agent 并行搜索',
+                    items: newItems.slice(0, 20)
                   }) + '\n\n');
                 }
               }
@@ -7148,7 +7246,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           } catch (e) {}
         }
       } catch (fcErr) {
-        clearTimeout(fcTimer);
+        clearTimeout(_fcTimer);
         console.error('[AGENT-STREAM] FC error:', fcErr && fcErr.message);
       }
     }
@@ -7178,7 +7276,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           ctx: ctx
         });
       }
-      return res.end();
+      return safeEnd();
     }
 
     // 如果 FC 没启用或没触发 tool_calls，回退旧正则搜索注入
@@ -7203,7 +7301,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           sResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
           '\n\n要求：必须优先使用以上搜索结果回答。不能编造新闻、价格、天气、日期。';
         messages.push({ role: 'system', content: sCtx });
-        res.write('data: ' + JSON.stringify({ type: 'search', count: sResults.length, results: sResults, diagnostics: sDiag || null }) + '\n\n');
+        res.write('data: ' + JSON.stringify({ type: 'search', count: sResults.length, results: sResults, diagnostics: sDiag || null, query: message }) + '\n\n');
       } else if (needsSearch) {
         var hasProviderErrors2 = sDiag && sDiag.provider_errors && sDiag.provider_errors.length > 0;
         var hasProviderMissing2 = sDiag && sDiag.missing_env && sDiag.missing_env.length > 0;
@@ -7214,7 +7312,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           res.write('data: ' + JSON.stringify({ type: 'search_error', error: '联网搜索失败: ' + errSum, diagnostics: sDiag }) + '\n\n');
         } else {
           messages.push({ role: 'system', content: '【联网搜索】本次搜索没有返回有效结果。你必须如实告诉用户没有搜到。' });
-          res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [], diagnostics: sDiag }) + '\n\n');
+          res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [], diagnostics: sDiag, query: message }) + '\n\n');
         }
       }
     }
@@ -7224,7 +7322,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var usageResult = null;
 
     // 调用 DeepSeek（流式）
-    if (aborted) return res.end();
+    if (aborted) return safeEnd();
 
     var apiBody = {
       model: usedModel,
@@ -7237,7 +7335,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     
     var controller = new AbortController();
+    _controller = controller;
     var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
+    _timer = timer;
     
     var streamResp;
     try {
@@ -7249,9 +7349,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       });
     } catch (fetchErr) {
       clearTimeout(timer);
-      if (aborted) return res.end();
+      if (aborted) return safeEnd();
       res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败，请稍后再试' }) + '\n\n');
-      return res.end();
+      return safeEnd();
     }
     clearTimeout(timer);
     
@@ -7268,11 +7368,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } catch (e2) {
         res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败' }) + '\n\n');
       }
-      return res.end();
+      return safeEnd();
     }
     
     // 读取流
     var reader = streamResp.body.getReader();
+    _reader = reader;
     var decoder = new TextDecoder();
     var buffer = '';
     var usageInStream = null;
@@ -7285,7 +7386,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     while (true) {
       if (aborted) {
         controller.abort();
-        return res.end();
+        return safeEnd();
       }
       // idle timeout: 20 秒无 chunk 则中断
       var idleElapsed = Date.now() - lastChunkTime;
@@ -7312,7 +7413,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             writeSse(res, { type: 'error', error: 'AI 回复超时（20 秒无响应），请重试' });
           }
         }
-        return res.end();
+        return safeEnd();
       }
       var readResult = await reader.read();
       if (readResult.done) break;
@@ -7372,7 +7473,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             };
             await finishStream(res, finishOpt);
           }
-          return res.end();
+          return safeEnd();
         }
       }
     }
@@ -7404,9 +7505,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         });
       }
     }
-    return res.end();
+    return safeEnd();
     } catch (streamErr) {
-      if (aborted) return res.end();
+      if (aborted) return safeEnd();
       console.error('[AGENT-STREAM] stream read error:', streamErr && streamErr.message);
       // 如果已有 content，尝试保存并标记中断
       if (contentBuffer && contentBuffer.length > 0 && !aborted) {
@@ -7429,7 +7530,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } else if (!aborted) {
         writeSse(res, { type: 'error', error: 'AI 流式读取错误，请稍后重试' });
       }
-      return res.end();
+      return safeEnd();
     }
 });
 
@@ -7439,13 +7540,14 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
     var userName = req.userName;
     var limit = Math.min(Math.max(parseInt(req.query.limit) || AI_AGENT_CONVERSATION_LIST_LIMIT, 1), 100);
 
-    // 取该用户所有 AI 消息，按时间倒序
+    // 取该用户所有 AI 消息，按时间倒序（限制最多 1000 条避免内存膨胀）
     var { data: rows } = await supabase.from('posts')
       .select('actor_key, content, media_url, created_at')
       .eq('user_name', userName)
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .neq('actor_key', '')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(1000);
     
     if (!Array.isArray(rows)) {
       return res.json({ ok: true, conversations: [] });
