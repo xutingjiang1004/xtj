@@ -943,6 +943,28 @@ function buildSearchQuery(message) {
   return cleaned.slice(0, 120);
 }
 
+function cleanSearchResults(results, maxCount) {
+  maxCount = maxCount || 15;
+  if (!Array.isArray(results)) return [];
+  var out = [];
+  var seen = {};
+  results.forEach(function(r) {
+    if (!r) return;
+    var u = (r.url || '').trim();
+    var t = (r.title || '').trim();
+    var s = (r.snippet || '').trim();
+    // 跳过完全没有内容的结果
+    if (!u && !t && !s) return;
+    // URL 去重
+    if (u && seen[u]) return;
+    if (u) seen[u] = true;
+    // 标题兜底
+    if (!t) t = (s || u || '').slice(0, 40);
+    out.push({ url: u, title: t, snippet: s, source: (r.source || 'web'), published_at: r.published_at || '' });
+  });
+  return out.slice(0, maxCount);
+}
+
 // ===================== Gmail SMTP 邮件配置 =====================
 const GMAIL_USER = process.env.GMAIL_USER || '';
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD || '';
@@ -7337,6 +7359,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           if (sResults && sResults.length > 0 && sResults.length < 5) {
             sResults = await autoSupplementSearch(searchQuery, sResults, 20);
           }
+          sResults = cleanSearchResults(sResults, 20);
         } catch (e) { sResults = []; }
       }
       if (sResults && Array.isArray(sResults) && sResults.length) {
@@ -7396,9 +7419,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
               allResults = allResults.concat(searchResults[si]);
             }
             if (allResults.length > 0) {
-              // 去重
-              var seen = {};
-              allResults = allResults.filter(function(r) { var u = r.url || ''; if (!u || seen[u]) return false; seen[u] = true; return true; });
+              allResults = cleanSearchResults(allResults, 20);
               var maCtx = '【多Agent协作搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n拆解问题：' + message + '\n搜索关键词：' + searchQueries.join('、') + '\n\n' +
                 allResults.map(function(sr, idx) { return (idx + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
                 '\n\n要求：基于以上搜索结果回答用户问题。如果没有找到相关信息，如实告诉用户。';
@@ -7422,6 +7443,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var MAX_TOOL_ROUNDS = 3;
     var toolRound = 0;
     var roundMessages = messages;
+    // 跨轮次保留的推理内容（第一次流产生的，第二次流不会重复）
+    var persistentReasoning = '';
+    // 防止后置搜索重复触发
+    var _postSearchDone = false;
 
     var apiBody = {
       model: usedModel,
@@ -7484,7 +7509,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var buffer = '';
     var usageInStream = null;
     var hasReasoningContent = false;
-    var reasoningBuffer = '';
+    var reasoningBuffer = persistentReasoning || '';
     var contentBuffer = '';
     var reasoningSent = false;
     var pendingToolCalls = {};
@@ -7505,17 +7530,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           if (contentBuffer && contentBuffer.length > 0) {
             await finishStream(res, {
               contentBuffer: contentBuffer,
-              reasoningBuffer: reasoningBuffer,
-              thinkingMode: thinkingMode,
-              useThinking: useThinking,
-              usedModel: usedModel,
-              finishReason: 'idle_timeout',
-              userName: userName,
-              convId: convId,
-              message: message,
-              streamSeq: streamSeq,
-              memoryData: memoryData,
-              ctx: ctx
+              reasoningBuffer: persistentReasoning || reasoningBuffer,
+                  thinkingMode: thinkingMode,
+                  useThinking: useThinking,
+                  usedModel: usedModel,
+                  finishReason: 'idle_timeout',
+                  userName: userName,
+                  convId: convId,
+                  message: message,
+                  streamSeq: streamSeq,
+                  memoryData: memoryData,
+                  ctx: ctx
             });
           } else {
             writeSse(res, { type: 'error', error: 'AI 回复超时（20 秒无响应），请重试' });
@@ -7549,6 +7574,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         if (delta.reasoning_content) {
           hasReasoningContent = true;
           reasoningBuffer += delta.reasoning_content;
+          persistentReasoning += delta.reasoning_content;
           if (thinkingMode !== 'off') {
             if (!reasoningSent) {
               res.write('data: ' + JSON.stringify({ type: 'reasoning_start' }) + '\n\n');
@@ -7586,9 +7612,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           // 思考模式下：检查 reasoning 是否提到需要搜索，且此前未注入搜索结果
           var needsPostSearch = false;
           var postSearchKeyword = '';
-          if (useThinking && allowSearch && reasoningBuffer && reasoningBuffer.length > 50 && !aborted) {
+          if (useThinking && allowSearch && reasoningBuffer && reasoningBuffer.length > 50 && !aborted && !_postSearchDone) {
             var hasSearched = roundMessages.some(function(mm) {
-              return mm.role === 'system' && typeof mm.content === 'string' && (mm.content.indexOf('【联网搜索结果】') >= 0 || mm.content.indexOf('【多Agent协作搜索结果】') >= 0);
+              return mm.role === 'system' && typeof mm.content === 'string' && (mm.content.indexOf('【联网搜索结果】') >= 0 || mm.content.indexOf('【多Agent协作搜索结果】') >= 0 || mm.content.indexOf('【联网搜索结果（思考后补充检索）】') >= 0);
             }) || roundMessages.some(function(mm) { return mm.role === 'tool' && mm.content && mm.content.indexOf('search_results') >= 0; });
             if (!hasSearched && /搜索|查|查询|需要(联网|搜索)|应该(搜索|查)|让我(搜|查|百度|google|谷歌)|我没有搜|没(有|找到)|搜不到|查不到|没有(搜索|查到)/i.test(reasoningBuffer)) {
                // 从 reasoning 中提取搜索关键词
@@ -7615,7 +7641,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             try {
               var psSr = await searchWeb(postSearchKeyword, 15);
               if (psSr && Array.isArray(psSr.results) && psSr.results.length > 0) {
-                var psResults = psSr.results.slice(0, 15);
+                var psResults = cleanSearchResults(psSr.results, 15);
                 var psCtx = '【联网搜索结果（思考后补充检索）】\n搜索时间：' + _currentDateCN + '（北京时间）\n搜索关键词：' + postSearchKeyword + '\n\n' +
                   psResults.map(function(sr, si) { return (si + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n发布时间：' + (sr.published_at || '未知') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
                   '\n\n要求：必须优先使用以上搜索结果回答。不能编造。';
@@ -7623,6 +7649,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 res.write('data: ' + JSON.stringify({ type: 'search', count: psResults.length, results: psResults, query: postSearchKeyword }) + '\n\n');
                 // 通知前端搜索中，不清除已有思考过程
                 res.write('data: ' + JSON.stringify({ type: 'search_supplement', query: postSearchKeyword }) + '\n\n');
+                _postSearchDone = true;
                 finishReason = 'post_reasoning_search';
               }
             } catch (e) {
@@ -7634,7 +7661,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             if (!aborted) {
               var finishOpt = {
                 contentBuffer: contentBuffer,
-                reasoningBuffer: reasoningBuffer,
+                reasoningBuffer: persistentReasoning || reasoningBuffer,
                 thinkingMode: thinkingMode,
                 useThinking: useThinking,
                 usedModel: usageInStream && usageInStream.model ? usageInStream.model : usedModel,
@@ -7690,8 +7717,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       toolRound++;
        // 后续轮次不再走思考模式，直接让模型用已有的思考+结果生成回答
        if (useThinking) {
-         delete apiBody.thinking;
-         delete apiBody.reasoning_effort;
+         var freshMsgs = roundMessages.slice();
+         apiBody = {
+           model: usedModel,
+           messages: freshMsgs,
+           stream: true
+         };
+         if (allowSearch) {
+           apiBody.tools = AI_TOOLS;
+         }
        }
        continue;
     }
@@ -7699,10 +7733,15 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // 后置搜索触发：思考结束后补充搜索并重新生成回答
     if (finishReason === 'post_reasoning_search' && !aborted) {
       toolRound++;
-      // 第二路不再走思考模式，AI 直接基于注入的搜索结果生成回答
-      if (useThinking) {
-        delete apiBody.thinking;
-        delete apiBody.reasoning_effort;
+      // 用新消息数组重建 apiBody（第二路不走思考模式）
+      var freshMessages = roundMessages.slice();
+      apiBody = {
+        model: usedModel,
+        messages: freshMessages,
+        stream: true
+      };
+      if (allowSearch) {
+        apiBody.tools = AI_TOOLS;
       }
       continue;
     }
@@ -7719,7 +7758,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } else {
         await finishStream(res, {
           contentBuffer: contentBuffer,
-          reasoningBuffer: reasoningBuffer,
+          reasoningBuffer: persistentReasoning || reasoningBuffer,
           thinkingMode: thinkingMode,
           useThinking: useThinking,
           usedModel: usedModel,
@@ -7748,7 +7787,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       if (contentBuffer && contentBuffer.length > 0 && !aborted) {
         await finishStream(res, {
           contentBuffer: contentBuffer,
-          reasoningBuffer: reasoningBuffer,
+          reasoningBuffer: persistentReasoning || reasoningBuffer,
           thinkingMode: thinkingMode,
           useThinking: useThinking,
           usedModel: usedModel,
