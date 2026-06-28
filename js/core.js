@@ -4445,6 +4445,10 @@ function renderProfileActivityList(kind) {
                     if (session.postEl && session.postEl.parentNode) {
                         try { session.postEl.remove(); } catch (e) {}
                     }
+                    // 同步更新帖子计数（DOM 已移除，sPosts 随之更新）
+                    if (typeof updateFeedStats === 'function') {
+                        try { updateFeedStats(); } catch (e) {}
+                    }
                     finished = true;
                     cleanupDeleteSession({ restoreVisual: false, hideModal: true, resetTarget: true });
                     showToast("帖子已删除");
@@ -5219,11 +5223,8 @@ function renderProfileActivityList(kind) {
                 const visiblePosts = posts.filter(p => p.media_type !== AUTH_MARKER && p.media_type !== ADMIN_AUTH_MARKER && p.media_type !== ADMIN_META_MARKER && p.media_type !== DM_MARKER && p.media_type !== REPORT_MARKER && p.media_type !== '__avatar__' && p.media_type !== '__user_info__' && p.media_type !== '__photo_wall__' && p.media_type !== '__visit__' && p.media_type !== '__attack__' && p.media_type !== '__user_visit__' && p.media_type !== '__ann__' && p.media_type !== '__email_sent__' && p.media_type !== '__email_recipient_history__' && p.media_type !== '__ai_agent_profile__' && p.media_type !== '__ai_agent_msg__' && p.media_type !== '__ai_agent_memory__' && p.media_type !== '__ai_agent_config__' && p.media_type !== '**ai_agent_memory_box**' && p.media_type !== '**ai_agent_conv_summary**' && p.media_type !== '**ai_agent_memory_log**' && p.user_name);
                 feedVisiblePostsCache = visiblePosts; // 缓存
                 feedMapsCache = buildPostMaps(comments, likes); // 缓存
-                document.getElementById("sPosts").textContent = visiblePosts.length;
-                document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
-                document.getElementById("sLikes").textContent = likes.length + comments.length;
 
-                // 濉厖帖子淇℃伅缂撳瓨閿涘奔绶垫祻瑙堣褰曟担璺拷??
+                // 填充帖子信息缓存
                 visiblePosts.forEach(p => {
                     postInfoCache[p.id] = {
                         content: p.content,
@@ -5240,11 +5241,35 @@ function renderProfileActivityList(kind) {
                 visiblePosts.forEach(p => allUsers.add(p.user_name));
                 comments.forEach(c => allUsers.add(c.user_name));
 
-                // 先收集所有需要头像的用户名，再批量加载头像并渲染
                 // 先渲染内容（此时头像为字母占位），再后台加载真实头像并更新 DOM
                 const firstPage = visiblePosts.slice(0, FEED_PAGE_SIZE);
                 feedPage = 1;
-                renderFeedWithAvatars(firstPage, comments, likes);
+                try {
+                    renderFeedWithAvatars(firstPage, comments, likes);
+                } catch (e) {
+                    console.error('[renderFeed] render error, retrying with reduced page:', e || e.message);
+                    // 尝试逐个安全渲染：跳过坏帖
+                    var safePosts = [];
+                    firstPage.forEach(function(p) {
+                        try {
+                            var np = normalizePost(p);
+                            if (np && np.id) safePosts.push(p);
+                        } catch (e2) {
+                            console.warn('[renderFeed] skip bad post', p && p.id, e2 && e2.message);
+                        }
+                    });
+                    if (!safePosts.length) {
+                        var feed = document.getElementById('feed');
+                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载失败，请刷新重试</div>';
+                        return;
+                    }
+                    renderFeedWithAvatars(safePosts, comments, likes);
+                }
+
+                // 渲染成功后才更新统计计数，避免计数与内容不同步
+                document.getElementById("sPosts").textContent = visiblePosts.length;
+                document.getElementById("sViews").textContent = visiblePosts.reduce((s,p)=>s+(p.views||0),0);
+                document.getElementById("sLikes").textContent = likes.length + comments.length;
                 
                 // 后台异步加载真实头像，不阻塞内容渲染
                 loadAvatarsForUsers(Array.from(allUsers)).then(function() {
@@ -5494,42 +5519,21 @@ function renderProfileActivityList(kind) {
                 const feed = document.getElementById("feed");
                 const { commentMap, likeMap, likeUserMap } = buildPostMaps(comments, likes);
 
-                feed.innerHTML = visiblePosts.length ? visiblePosts.map(function(post) {
-                    const p = normalizePost(post);
-                    const pLikes = likeMap[p.id] || [];
-                    const pComms = commentMap[p.id] || [];
-                    const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
-                    const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
-                    return `
-                <div class="post glass" data-post-id="${escapeHtml(p.id)}">
-                  <div class="post-header">
-                    ${getAvatarHtml(p.user_name, post)}
-                    <div class="user-info">
-                      <span class="user-name">${escapeHtml(p.user_name)}</span>
-                      <span class="post-time">${new Date(p.created_at).toLocaleString()}</span>
-                    </div>
-                  </div>
-                  <div class="content">${escapeHtml(p.content)}</div>
-                  ${p.media_url?`<div class="media">${p.media_type==='video'?`<video src="${escapeHtml(p.media_url)}" controls preload="none" playsinline></video>`:`<img data-post-id="${escapeHtml(p.id)}" data-post-user="${escapeHtml(p.user_name || '')}" data-post-created-at="${escapeHtml(p.created_at || '')}" data-post-views="${escapeHtml(String(p.views || 0))}" data-actor-key="${escapeHtml(String(p.actor_key || ''))}" data-can-delete="${canDelPost ? '1' : '0'}" src="${escapeHtml(p.media_url)}" loading="lazy" onclick="openImageViewer('${safeJsStr(p.media_url)}', this)">`}</div>`:''}
-                  <div class="post-stats-text">浏览 ${p.views||0} | 点赞 ${pLikes.length} | 评论 ${pComms.length}</div>
-                  <div class="actions">
-                    <button class="action-btn ${isLiked?'liked':''}" aria-pressed="${isLiked ? 'true' : 'false'}" onclick="toggleLike(this, '${safeJsStr(p.id)}')">${isLiked?'已赞':'点赞'}</button>
-                    <button class="action-btn" onclick="openComment('${safeJsStr(p.id)}')">评论</button>
-                    ${canPinPost(p)?`<button type="button" class="action-btn pin" data-post-id="${escapeHtml(p.id)}">${normalizePost(p).is_pinned ? '取消置顶' : '置顶'}</button>`:''}
-                    ${canDelPost?`<button type="button" class="action-btn del" onclick="openDelete('${safeJsStr(p.id)}', '${safeJsStr(p.actor_key)}')">删除</button>`:''}
-                  </div>
-                  ${pComms.length?`
-                  <div class="comments">
-                    ${pComms.map(c=>`
-                    <div class="comment-item" data-comment-id="${escapeHtml(c.id)}">
-                      <div><b>${escapeHtml(c.user_name)}:</b> ${escapeHtml(c.content)}</div>
-                    </div>
-                    `).join('')}
-                  </div>
-                  `:''}
-                </div>
-              `;
-                }).join('') : `<div class="loading">快来发布第一条动态吧~</div>`;
+                var htmlChunks = [];
+                visiblePosts.forEach(function(post) {
+                    try {
+                        const p = normalizePost(post);
+                        const pLikes = likeMap[p.id] || [];
+                        const pComms = commentMap[p.id] || [];
+                        const isLiked = isPostLikedByCurrentUser(likeUserMap, p.id);
+                        const canDelPost = p.actor_key === deviceId || p.actor_key === currentUser || isAdmin();
+                        htmlChunks.push('\n                <div class="post glass" data-post-id="' + escapeHtml(p.id) + '">\n                  <div class="post-header">\n                    ' + getAvatarHtml(p.user_name, post) + '\n                    <div class="user-info">\n                      <span class="user-name">' + escapeHtml(p.user_name) + '</span>\n                      <span class="post-time">' + new Date(p.created_at).toLocaleString() + '</span>\n                    </div>\n                  </div>\n                  <div class="content">' + escapeHtml(p.content) + '</div>\n                  ' + (p.media_url ? '<div class="media">' + (p.media_type === 'video' ? '<video src="' + escapeHtml(p.media_url) + '" controls preload="none" playsinline></video>' : '<img data-post-id="' + escapeHtml(p.id) + '" data-post-user="' + escapeHtml(p.user_name || '') + '" data-post-created-at="' + escapeHtml(p.created_at || '') + '" data-post-views="' + escapeHtml(String(p.views || 0)) + '" data-actor-key="' + escapeHtml(String(p.actor_key || '')) + '" data-can-delete="' + (canDelPost ? '1' : '0') + '" src="' + escapeHtml(p.media_url) + '" loading="lazy" onclick="openImageViewer(\'' + safeJsStr(p.media_url) + '\', this)">') + '</div>' : '') + '\n                  <div class="post-stats-text">浏览 ' + (p.views || 0) + ' | 点赞 ' + pLikes.length + ' | 评论 ' + pComms.length + '</div>\n                  <div class="actions">\n                    <button class="action-btn ' + (isLiked ? 'liked' : '') + '" aria-pressed="' + (isLiked ? 'true' : 'false') + '" onclick="toggleLike(this, \'' + safeJsStr(p.id) + '\')">' + (isLiked ? '已赞' : '点赞') + '</button>\n                    <button class="action-btn" onclick="openComment(\'' + safeJsStr(p.id) + '\')">评论</button>\n                    ' + (canPinPost(p) ? '<button type="button" class="action-btn pin" data-post-id="' + escapeHtml(p.id) + '">' + (normalizePost(p).is_pinned ? '取消置顶' : '置顶') + '</button>' : '') + '\n                    ' + (canDelPost ? '<button type="button" class="action-btn del" onclick="openDelete(\'' + safeJsStr(p.id) + '\', \'' + safeJsStr(p.actor_key) + '\')">删除</button>' : '') + '\n                  </div>\n                  ' + (pComms.length ? '\n                  <div class="comments">\n                    ' + pComms.map(function(c) { return '\n                    <div class="comment-item" data-comment-id="' + escapeHtml(c.id) + '">\n                      <div><b>' + escapeHtml(c.user_name) + ':</b> ' + escapeHtml(c.content) + '</div>\n                    </div>\n                    '; }).join('') + '\n                  </div>\n                  ' : '') + '\n                </div>\n              ');
+                    } catch (e) {
+                        console.warn('[renderFeed] skip bad post (render):', post && post.id, e && e.message);
+                    }
+                });
+
+                feed.innerHTML = htmlChunks.length ? htmlChunks.join('') : '<div class="loading">快来发布第一条动态吧~</div>';
 
                 initPostScrollAnimation();
             }
@@ -8330,6 +8334,8 @@ function renderProfileActivityList(kind) {
                     if (postsPanel) restorePostsScroll = postsPanel.scrollTop;
                 }
                 dockChatActiveUser = userName;
+                // 清除渲染签名，确保缓存加载不会因签名匹配跳过（当前 innerHTML 是 loading 状态）
+                if (typeof _chatRenderSignature !== 'undefined') _chatRenderSignature[userName] = undefined;
                 document.getElementById('dockChatMessages').innerHTML = getXtjLoadingHtml('加载中..', '正在打开聊天通道', 'chat-detail');
                 renderChatLoadingState(document.getElementById('dockChatMessages'), {
                     title: '加载中..',
