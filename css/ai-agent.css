@@ -51,16 +51,6 @@
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
-/* 移动端键盘打开时：不缩放容器，translateY 把内容自然推到键盘上方，只有输入栏可见 */
-@media (hover: none) and (pointer: coarse) {
-  .ai-chat-root.ai-keyboard-open {
-    height: 100% !important;
-    transform: translateY(calc(-1 * var(--ai-keyboard-offset, 0px)));
-    will-change: transform;
-    border-radius: 22px 22px 0 0;
-  }
-}
-
 .ai-chat-root::before {
   content: "";
   position: absolute;
@@ -642,6 +632,7 @@
   z-index: 5;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
+  transition: transform 0.16s ease, padding 0.16s ease, border-color 0.16s ease;
 }
 
 .ai-chat-input-bar::before {
@@ -1038,11 +1029,6 @@
   .ai-conv-meta,
   .ai-conv-count {
     font-size: 10px;
-  }
-
-  /* 移动端键盘打开时：消息区底部留出输入栏+键盘的空间，最后一条消息不会被挡住 */
-  .ai-chat-root.ai-keyboard-open .ai-chat-messages {
-    padding-bottom: calc(var(--ai-input-height, 72px) + var(--ai-keyboard-offset, 0px) + 14px);
   }
 }
 
