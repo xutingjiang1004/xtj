@@ -2316,70 +2316,8 @@ function showChatMessages() {
     });
     header.appendChild(histBtn);
 
-    // 记忆按钮
-    var memoryBtn = el('button', { type: 'button', class: 'ai-chat-hist-btn', 'aria-label': 'AI 记忆', title: '查看 AI 记住了什么' }, 'AI记忆');
-    memoryBtn.addEventListener('click', async function() {
-      try {
-        var r = await apiRequest('GET', '/memory');
-        var memory = r && r.ok && r.data && r.data.memory ? r.data.memory : null;
-        if (!memory) {
-          notify('无法加载记忆');
-          return;
-        }
-        // 构建记忆内容 HTML
-        var lines = [];
-        lines.push('<div style="font-weight:700;font-size:14px;margin-bottom:8px;color:var(--primary,#2E9465);">AI 长期记忆</div>');
-        lines.push('<div style="font-size:12px;line-height:1.8;color:var(--text,#333);">');
-        var hasContent = false;
-        function addLine(label, val) { if (val) { hasContent = true; lines.push('<div><span style="color:var(--text-muted,#999);">' + label + '：</span>' + String(val).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') + '</div>'); } }
-        if (memory.display_name) addLine('用户称呼', memory.display_name);
-        if (memory.reply_preferences && memory.reply_preferences.tone && memory.reply_preferences.tone.length) addLine('语气偏好', memory.reply_preferences.tone.join('、'));
-        if (memory.reply_preferences && memory.reply_preferences.avoid && memory.reply_preferences.avoid.length) addLine('避免', memory.reply_preferences.avoid.join('、'));
-        if (memory.likes && memory.likes.length) addLine('喜欢', memory.likes.join('、'));
-        if (memory.dislikes && memory.dislikes.length) addLine('不喜欢', memory.dislikes.join('、'));
-        if (memory.do_not_do && memory.do_not_do.length) addLine('项目禁区', memory.do_not_do.join('、'));
-        if (memory.important_notes && memory.important_notes.length) addLine('重要提醒', memory.important_notes.join('、'));
-        if (memory.long_term_goals && memory.long_term_goals.length) addLine('长期目标', memory.long_term_goals.join('、'));
-        if (!hasContent) {
-          lines.push('<div style="color:var(--text-muted,#999);text-align:center;padding:16px 0;">（当前没有记录任何长期记忆，多聊一聊我会记住你的偏好）</div>');
-        }
-        lines.push('</div>');
-        lines.push('<div style="display:flex;gap:8px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border,rgba(0,0,0,0.08));">');
-        lines.push('<button class="ai-memory-clear">清空记忆</button>');
-        lines.push('<button class="ai-memory-close">关闭</button>');
-        lines.push('</div>');
 
-        // 防止多次叠加
-        if (document.querySelector('.ai-memory-overlay')) return;
 
-        var overlay = el('div', { class: 'ai-memory-overlay' });
-        var box = el('div', { class: 'ai-memory-box' });
-        box.innerHTML = lines.join('\n');
-        overlay.appendChild(box);
-        document.body.appendChild(overlay);
-
-        // 绑定按钮事件
-        box.querySelector('.ai-memory-close').addEventListener('click', function() { overlay.remove(); });
-        box.querySelector('.ai-memory-clear').addEventListener('click', async function() {
-          if (!confirm('确定清空所有记忆吗？此操作不可恢复。')) return;
-          try {
-            var cr = await apiRequest('POST', '/memory/clear');
-            if (cr && cr.ok) {
-              notify('记忆已清空');
-              overlay.remove();
-            } else {
-              notify('清空失败');
-            }
-          } catch (e) {
-            notify('清空失败');
-          }
-        });
-        overlay.addEventListener('click', function(ev) { if (ev.target === overlay) overlay.remove(); });
-      } catch (e) {
-        notify('记忆加载失败');
-      }
-    });
-    header.insertBefore(memoryBtn, histBtn.nextSibling);
 
     // 删除当前对话按钮
     var delBtn = el('button', {
