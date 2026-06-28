@@ -6329,7 +6329,7 @@ async function maybeUpdateConversationSummary(userName, convId, messages) {
   if (!userName || !convId) return;
   
   var { data: lastSummary } = await supabase.from('posts')
-    .select('content')
+    .select('id, content')
     .eq('user_name', userName)
     .eq('media_type', AI_AGENT_CONV_SUMMARY_MARKER)
     .eq('media_url', convId)
@@ -6863,9 +6863,16 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
   var clientReqId = req.body && req.body.client_request_id;
   var streamSeq = 0;
   
+  var _controller, _reader, _timer, _fcTimer;
+  function safeEnd() { if (!res.writableEnded) res.end(); }
+  
   req.on('close', function() {
     aborted = true;
     try { console.log('[AGENT-STREAM] client disconnected, reqId:', clientReqId || '?'); } catch (e) {}
+    try { _controller && _controller.abort(); } catch (e) {}
+    try { _reader && _reader.cancel(); } catch (e) {}
+    try { clearTimeout(_timer); } catch (e) {}
+    try { clearTimeout(_fcTimer); } catch (e) {}
   });
   
   try {
@@ -6877,7 +6884,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
       writeSse(res, { type: 'error', error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : '今日 AI 聊天次数已达上限' });
-      return res.end();
+      return safeEnd();
     }
     
     // 验证输入
@@ -6888,7 +6895,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
       writeSse(res, { type: 'error', error: message.error });
-      return res.end();
+      return safeEnd();
     }
     if (!message) {
       res.setHeader('Content-Type', 'text/event-stream');
@@ -6896,9 +6903,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
       writeSse(res, { type: 'error', error: '消息内容不能为空' });
-      return res.end();
+      return safeEnd();
     }
-    if (aborted) return res.end();
+    if (aborted) return safeEnd();
     
     // 会话管理
     var convId = String(req.body && req.body.conversation_id || '').trim();
@@ -6910,10 +6917,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    if (aborted) return res.end();
+    if (aborted) return safeEnd();
 
     writeSse(res, { type: 'meta', conversation_id: convId });
-    if (aborted) return res.end();
+    if (aborted) return safeEnd();
     
     // 读取全局 AI 配置 + 上下文
     var configPromise = getAiConfig();
@@ -6975,7 +6982,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     var allowSearch = !!(config && (config.allow_web_search === true || (config.search && config.search.allow_web_search === true)));
     var usedModel = DEEPSEEK_MODEL_REASONER;
-    if (aborted) return res.end();
+    if (aborted) return safeEnd();
 
     messages.push({ role: 'user', content: message });
 
@@ -7002,7 +7009,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       };
 
       var fcController = new AbortController();
-      var fcTimer = setTimeout(function() { fcController.abort(); }, 4000);
+      _fcTimer = setTimeout(function() { fcController.abort(); }, 4000);
 
       try {
         var fcResp = await fetch(DEEPSEEK_API_URL, {
@@ -7011,7 +7018,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           body: JSON.stringify(fcBody),
           signal: fcController.signal
         });
-        clearTimeout(fcTimer);
+        clearTimeout(_fcTimer);
 
         if (fcResp.ok) {
           var fcData = await fcResp.json();
@@ -7144,7 +7151,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           } catch (e) {}
         }
       } catch (fcErr) {
-        clearTimeout(fcTimer);
+        clearTimeout(_fcTimer);
         console.error('[AGENT-STREAM] FC error:', fcErr && fcErr.message);
       }
     }
@@ -7174,7 +7181,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           ctx: ctx
         });
       }
-      return res.end();
+      return safeEnd();
     }
 
     // 如果 FC 没启用或没触发 tool_calls，回退旧正则搜索注入
@@ -7220,7 +7227,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var usageResult = null;
 
     // 调用 DeepSeek（流式）
-    if (aborted) return res.end();
+    if (aborted) return safeEnd();
 
     var apiBody = {
       model: usedModel,
@@ -7233,7 +7240,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     
     var controller = new AbortController();
+    _controller = controller;
     var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
+    _timer = timer;
     
     var streamResp;
     try {
@@ -7245,9 +7254,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       });
     } catch (fetchErr) {
       clearTimeout(timer);
-      if (aborted) return res.end();
+      if (aborted) return safeEnd();
       res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败，请稍后再试' }) + '\n\n');
-      return res.end();
+      return safeEnd();
     }
     clearTimeout(timer);
     
@@ -7264,11 +7273,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } catch (e2) {
         res.write('data: ' + JSON.stringify({ type: 'error', error: 'AI 调用失败' }) + '\n\n');
       }
-      return res.end();
+      return safeEnd();
     }
     
     // 读取流
     var reader = streamResp.body.getReader();
+    _reader = reader;
     var decoder = new TextDecoder();
     var buffer = '';
     var usageInStream = null;
@@ -7281,7 +7291,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     while (true) {
       if (aborted) {
         controller.abort();
-        return res.end();
+        return safeEnd();
       }
       // idle timeout: 20 秒无 chunk 则中断
       var idleElapsed = Date.now() - lastChunkTime;
@@ -7308,7 +7318,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             writeSse(res, { type: 'error', error: 'AI 回复超时（20 秒无响应），请重试' });
           }
         }
-        return res.end();
+        return safeEnd();
       }
       var readResult = await reader.read();
       if (readResult.done) break;
@@ -7368,7 +7378,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             };
             await finishStream(res, finishOpt);
           }
-          return res.end();
+          return safeEnd();
         }
       }
     }
@@ -7400,9 +7410,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         });
       }
     }
-    return res.end();
+    return safeEnd();
     } catch (streamErr) {
-      if (aborted) return res.end();
+      if (aborted) return safeEnd();
       console.error('[AGENT-STREAM] stream read error:', streamErr && streamErr.message);
       // 如果已有 content，尝试保存并标记中断
       if (contentBuffer && contentBuffer.length > 0 && !aborted) {
@@ -7425,7 +7435,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } else if (!aborted) {
         writeSse(res, { type: 'error', error: 'AI 流式读取错误，请稍后重试' });
       }
-      return res.end();
+      return safeEnd();
     }
 });
 
