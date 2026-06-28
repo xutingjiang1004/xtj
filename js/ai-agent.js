@@ -19,6 +19,7 @@
     { value: 'medium', label: '中', icon: '◌' },
     { value: 'high', label: '高', icon: '✦' }
   ];
+  var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
 
   var S = {
     config: null,
@@ -1207,9 +1208,19 @@
         keyboardHeight = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
         viewportHeight = Math.max(280, Math.round(vv.height));
       }
-      updateRootVar('--ai-keyboard-offset', keyboardHeight + 'px');
-      updateRootVar('--ai-viewport-height', viewportHeight ? viewportHeight + 'px' : '100%');
       root.classList.toggle('ai-keyboard-open', keyboardHeight > 0);
+      
+      if (_isTouchMobile) {
+        // 移动端：不缩放容器高度，用 translateY 把内容推上去，输入框自然浮在键盘上方
+        updateRootVar('--ai-keyboard-offset', keyboardHeight + 'px');
+        if (!keyboardHeight) {
+          updateRootVar('--ai-viewport-height', '100%');
+        }
+      } else {
+        // 桌面端：保持原有行为（缩放高度）
+        updateRootVar('--ai-keyboard-offset', keyboardHeight + 'px');
+        updateRootVar('--ai-viewport-height', viewportHeight ? viewportHeight + 'px' : '100%');
+      }
       updateInputMetrics();
       if (keyboardHeight > 0 && isNearBottom(messagesEl, 120)) {
         S.autoScrollPinned = true;
@@ -1237,8 +1248,8 @@
       }
       S.keyboardResetTimer = setTimeout(function() {
         S.keyboardResetTimer = null;
-        resetViewport();
-      }, 150);
+        if (!S.sending) resetViewport();
+      }, 100);
     };
     var onFocus = function() {
       applyViewport();
@@ -1298,7 +1309,7 @@
       input.style.height = 'auto';
       try {
         input.style.height = Math.min(input.scrollHeight, 120) + 'px';
-        input.focus();
+        if (!_isTouchMobile) input.focus();
       } catch (e) {}
       updateInputMetrics();
     }
@@ -1309,9 +1320,13 @@
     // 如果有正在进行的请求，中断它
     if (S.sending) {
       abortCurrentRequest();
-      // 等待上一个 typing 清理
       try { await new Promise(function(resolve) { setTimeout(resolve, 100); }); } catch (e) {}
     }
+    
+    // 快速双击去重：同一秒内相同文本的请求忽略
+    var msgDedupKey = text + Math.floor(Date.now() / 1000);
+    if (S._lastMsgDedupKey === msgDedupKey) { S.sending = false; return; }
+    S._lastMsgDedupKey = msgDedupKey;
     
     S.clientRequestId++;
     var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
@@ -1333,7 +1348,11 @@
     input.value = '';
     input.style.height = 'auto';
     updateInputMetrics();
-    try { input.focus(); } catch (e2) {}
+    if (_isTouchMobile) {
+      try { input.blur(); } catch (e2) {}
+    } else {
+      try { input.focus(); } catch (e2) {}
+    }
     
     var aborted = false;
     var myReqId = reqId;
@@ -1546,6 +1565,7 @@
         var readResult;
         try { readResult = await reader.read(); } catch (e) { break; }
         if (readResult.done) break;
+        if (!S.active) { reader.cancel().catch(function(){}); break; }
         
         buffer += decoder.decode(readResult.value, { stream: true });
         var lines = buffer.split('\n');
@@ -1581,17 +1601,55 @@
               searchBar = el('div', { class: 'ai-search-status' });
               messagesEl.appendChild(searchBar);
             }
+            var summaryText = '';
             if (searchCount > 0) {
-              searchBar.textContent = '已联网搜索 · ' + searchCount + ' 条结果';
+              summaryText = '已联网搜索 · ' + searchCount + ' 条结果';
             } else {
-              searchBar.textContent = '联网搜索完成 · 没有找到相关结果';
+              summaryText = '联网搜索完成 · 没有找到相关结果';
             }
             // 显示使用的 provider
             if (searchDiag && searchDiag.provider_results && searchDiag.provider_results.length) {
               var firstProv = searchDiag.provider_results[0];
               if (firstProv && firstProv.provider) {
-                searchBar.textContent += ' (' + firstProv.provider + ')';
+                summaryText += ' (' + firstProv.provider + ')';
               }
+            }
+            // 清空并重建（避免重复 append）
+            searchBar.innerHTML = '';
+            searchBar.textContent = summaryText;
+            var resultsArr = evt.results;
+            var queryStr = evt.query || '';
+            if (resultsArr && resultsArr.length > 0) {
+              var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▶');
+              searchBar.appendChild(toggleBtn);
+              searchBar.style.cursor = 'pointer';
+              var detailPanel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+              searchBar.appendChild(detailPanel);
+              // 显示搜索关键词
+              if (queryStr) {
+                detailPanel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr }));
+              }
+              // 列表
+              for (var ri = 0; ri < resultsArr.length; ri++) {
+                var r = resultsArr[ri];
+                var itemEl = el('div', { class: 'ai-search-detail-item' });
+                var linkEl = el('a', { class: 'ai-search-detail-title', href: r.url || '#', target: '_blank', text: r.title || '无标题' });
+                itemEl.appendChild(linkEl);
+                if (r.snippet) {
+                  itemEl.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r.snippet.slice(0, 200) }));
+                }
+                itemEl.appendChild(el('div', { class: 'ai-search-detail-source', text: (r.source || '') + ' · ' + (r.published_at || '') }));
+                detailPanel.appendChild(itemEl);
+              }
+              searchBar.toggleFn = function() {
+                var isHidden = detailPanel.style.display === 'none';
+                detailPanel.style.display = isHidden ? '' : 'none';
+                toggleBtn.textContent = isHidden ? ' ▼' : ' ▶';
+              };
+              searchBar.onclick = function(e) {
+                if (e.target.tagName === 'A') return;
+                if (this.toggleFn) this.toggleFn();
+              };
             }
             continue;
           }
@@ -1646,14 +1704,49 @@
             }
             var nameMap = { search_web: '已联网搜索', get_weather: '已查询天气', get_current_time: '已获取时间' };
             var label = nameMap[evt.tool_name] || evt.tool_name;
+            var summaryText = '';
             if (evt.success) {
               if (evt.count > 0) {
-                toolBar2.textContent = label + ' · ' + evt.count + ' 条结果' + (evt.location ? ' · ' + evt.location : '');
+                summaryText = label + ' · ' + evt.count + ' 条结果' + (evt.location ? ' · ' + evt.location : '');
               } else {
-                toolBar2.textContent = label + ' · 完成' + (evt.location ? ' · ' + evt.location : '');
+                summaryText = label + ' · 完成' + (evt.location ? ' · ' + evt.location : '');
               }
             } else {
-              toolBar2.textContent = label + ' · 失败' + (evt.error ? ': ' + evt.error.slice(0, 80) : '');
+              summaryText = label + ' · 失败' + (evt.error ? ': ' + evt.error.slice(0, 80) : '');
+            }
+            toolBar2.innerHTML = '';
+            toolBar2.textContent = summaryText;
+            var itemsArr = evt.items;
+            var queryStr2 = evt.query || '';
+            if (itemsArr && itemsArr.length > 0) {
+              var toggleBtn2 = el('span', { class: 'ai-search-toggle' }, ' ▶');
+              toolBar2.appendChild(toggleBtn2);
+              toolBar2.style.cursor = 'pointer';
+              var detailPanel2 = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+              toolBar2.appendChild(detailPanel2);
+              if (queryStr2) {
+                detailPanel2.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + queryStr2 }));
+              }
+              for (var ri2 = 0; ri2 < itemsArr.length; ri2++) {
+                var r2 = itemsArr[ri2];
+                var itemEl2 = el('div', { class: 'ai-search-detail-item' });
+                var linkEl2 = el('a', { class: 'ai-search-detail-title', href: r2.url || '#', target: '_blank', text: r2.title || '无标题' });
+                itemEl2.appendChild(linkEl2);
+                if (r2.snippet) {
+                  itemEl2.appendChild(el('div', { class: 'ai-search-detail-snippet', text: r2.snippet.slice(0, 200) }));
+                }
+                itemEl2.appendChild(el('div', { class: 'ai-search-detail-source', text: (r2.source || '') + ' · ' + (r2.published_at || '') }));
+                detailPanel2.appendChild(itemEl2);
+              }
+              toolBar2.toggleFn = function() {
+                var isHidden = detailPanel2.style.display === 'none';
+                detailPanel2.style.display = isHidden ? '' : 'none';
+                toggleBtn2.textContent = isHidden ? ' ▼' : ' ▶';
+              };
+              toolBar2.onclick = function(e) {
+                if (e.target.tagName === 'A') return;
+                if (this.toggleFn) this.toggleFn();
+              };
             }
             continue;
           }
@@ -1746,6 +1839,7 @@
             try { typingNode.remove(); } catch (e) {}
             S.sending = false;
             S.abortController = null;
+            if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
             if (thinkingTimer) {
               finalThinkingElapsedMs = thinkingTimer.stop();
             }
@@ -1875,6 +1969,7 @@
     
     S.sending = false;
     S.abortController = null;
+    if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
     updateInputMetrics();
     scrollToBottom(messagesEl, true);
   }
@@ -2298,6 +2393,8 @@ function showChatMessages() {
     }
 
     function doSend() {
+      // 移动端先收起键盘再发送，避免 viewport 闪烁
+      if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
       handleSendMessage(input, sendBtn, messagesEl);
     }
 
@@ -2417,7 +2514,7 @@ function showChatMessages() {
     if (!cfg) return;
     var avatarEl = document.getElementById('aiChatHeaderAvatar');
     var nameEl = document.getElementById('aiChatHeaderName');
-    if (avatarEl) renderHeaderAvatar(avatarEl);
+    if (avatarEl) renderHeaderAvatar(avatarEl, cfg.avatar_url, cfg.avatar_version);
     if (nameEl) nameEl.textContent = cfg.name || '徐旭泽的小猫';
     updateAiStatus();
 

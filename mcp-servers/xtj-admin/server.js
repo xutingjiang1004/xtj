@@ -66,6 +66,14 @@ async function login(username, password) {
 }
 
 // ===================== 辅助格式化函数 =====================
+var auditLog = [];
+function logAudit(action, detail) {
+  var entry = { time: new Date().toISOString(), action: action, detail: detail };
+  auditLog.push(entry);
+  if (auditLog.length > 500) auditLog.shift();
+  console.error('[xtj-admin-audit]', JSON.stringify(entry));
+}
+
 function formatStats(data) {
   let t = `📊 XTJ 统计数据\n━━━━━━━━━━━━━━━━━━━━\n`;
   t += `👥 用户数: ${data.total_users || 0}\n📝 帖子数: ${data.total_posts || 0}\n💬 评论数: ${data.total_comments || 0}\n`;
@@ -127,20 +135,22 @@ server.tool("admin_get_user_stats", "获取用户统计仪表盘", {}, async () 
 });
 
 // --- 用户管理 ---
-server.tool("admin_get_users", "获取所有用户列表", {}, async () => {
+server.tool("admin_get_users", "获取所有用户列表（隐藏敏感字段）", {}, async () => {
   await ensureLoggedIn();
   const data = await apiRequest("GET", "/admin/users");
   const users = data.data || [];
   let t = `📋 用户列表 (共 ${users.length} 人)\n\n`;
-  users.forEach((u, i) => { t += `${i+1}. ${u.user_name||u.username||"?"} | 注册: ${(u.created_at||"").slice(0,10)} | 最后: ${(u.last_login||"").slice(0,10)} | IP: ${u.last_ip||"-"}\n`; });
+  users.forEach((u, i) => { t += `${i+1}. ${u.user_name||u.username||"?"} | 注册: ${(u.created_at||"").slice(0,10)} | 最后: ${(u.last_login||"").slice(0,10)}\n`; });
   return { content: [{ type: "text", text: t }] };
 });
 
-server.tool("admin_delete_user", "彻底删除用户账号", { userName: z.string() }, async ({ userName }) => {
+server.tool("admin_delete_user", "彻底删除用户账号（高风险！需要传入 confirm=true 确认）", { userName: z.string(), confirm: z.boolean() }, async ({ userName, confirm }) => {
+  if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！删除用户 ${userName} 将永久删除其所有数据。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   const data = await apiRequest("DELETE", `/admin/user/${encodeURIComponent(userName)}`);
   if (!data.ok) return { content: [{ type: "text", text: `❌ 删除失败: ${data.error||"未知错误"}` }] };
   const d = data.deleted || {};
+  logAudit('delete_user', { userName, deleted: d });
   return { content: [{ type: "text", text: `✅ 用户 ${userName} 已删除\n帖子: ${d.posts} | 点赞: ${d.likes} | 评论: ${d.comments} | 封禁: ${d.bans} | 禁言: ${d.mutes} | 黑名单: ${d.blacklist} | 文件: ${d.storage_files}` }] };
 });
 
@@ -151,9 +161,11 @@ server.tool("admin_get_data", "获取管理后台全部数据", {}, async () => 
   return { content: [{ type: "text", text: formatAdminData(data) }] };
 });
 
-server.tool("admin_delete_post", "删除指定帖子", { id: z.string() }, async ({ id }) => {
+server.tool("admin_delete_post", "删除指定帖子（高风险，需要 confirm=true 确认）", { id: z.string(), confirm: z.boolean() }, async ({ id, confirm }) => {
+  if (!confirm) return { content: [{ type: "text", text: `⚠️ 高危操作！删除帖子 ${id} 不可撤销。请在参数中传入 confirm=true 确认。` }] };
   await ensureLoggedIn();
   await apiRequest("DELETE", `/admin/post/${id}`);
+  logAudit('delete_post', { id });
   return { content: [{ type: "text", text: `✅ 帖子 ${id} 已删除` }] };
 });
 
