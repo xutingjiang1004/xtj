@@ -796,10 +796,10 @@
 
   function formatThinkingElapsed(ms) {
     var totalSeconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
-    if (totalSeconds < 60) return totalSeconds + '秒';
+    if (totalSeconds < 60) return totalSeconds + 's';
     var minutes = Math.floor(totalSeconds / 60);
     var seconds = totalSeconds % 60;
-    return seconds > 0 ? (minutes + '分' + seconds + '秒') : (minutes + '分钟');
+    return seconds > 0 ? (minutes + 'm' + seconds + 's') : (minutes + 'min');
   }
 
   function setThinkingStatus(node, text) {
@@ -823,10 +823,10 @@
       start: function() {
         if (stopped || intervalId) return;
         startedAt = Date.now();
-        update('思考中', 0);
+        update('正在思考中', 0);
         intervalId = setInterval(function() {
           if (!reasoningNode || !reasoningNode.isConnected) return;
-          update('思考中', Date.now() - startedAt);
+          update('正在思考中', Date.now() - startedAt);
         }, 500);
       },
       stop: function() {
@@ -1834,6 +1834,12 @@
           if (evt.type === 'reasoning') {
             aiReasoning += evt.text || '';
             if ((finalThinkingMode && finalThinkingMode !== 'off') || (!finalThinkingMode && S.thinkingMode !== 'off')) {
+              // 如果 reasoning_start 事件丢失，首次收到 reasoning 也启动计时器
+              if (!reasoningStarted) {
+                reasoningStarted = true;
+                ensureReasoningNode();
+                ensureThinkingTimer();
+              }
               var rn = ensureReasoningNode();
               var body = rn.querySelector('.ai-thinking-body');
               if (body) {
