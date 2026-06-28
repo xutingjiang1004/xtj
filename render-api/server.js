@@ -7051,6 +7051,20 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var parallelSearchResults = null;
     if (useThinking && allowSearch && !aborted && needsWebSearch(message)) {
       var _psQuery = message.slice(0, 80);
+      // 剥离"搜一下"等命令前缀，提取真实查询词
+      var _psStripped = message.replace(/^(?:搜索|查一下|搜一下|搜搜|百度|google|谷歌|查询|查查|查资料)\s*/i, '').trim().slice(0, 150);
+      if (_psStripped.length >= 3) {
+        _psQuery = _psStripped;
+      } else {
+        // 纯命令词（只说"搜一下"）→ 用上一条用户消息作为搜索内容
+        for (var _psi = messages.length - 1; _psi >= 0; _psi--) {
+          var _psm = messages[_psi];
+          if (_psm.role === 'user' && _psm.content !== message && _psm.content) {
+            _psQuery = String(_psm.content).slice(0, 150);
+            break;
+          }
+        }
+      }
       parallelSearchPromise = searchWeb(_psQuery, 20).then(function(sr) {
         if (sr && Array.isArray(sr.results) && sr.results.length > 0) {
           var _psR = cleanSearchResults(sr.results, 20);
