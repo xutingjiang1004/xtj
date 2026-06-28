@@ -7332,14 +7332,24 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     var apiBody = {
       model: usedModel,
-      messages: messages,
+      messages: roundMessages,
       stream: true
     };
     if (useThinking) {
       apiBody.thinking = { type: 'enabled' };
       apiBody.reasoning_effort = thinkingMode;
     }
+    // 思考模式下也允许 tool calls（AI 思考过程中可以自主决定搜索）
+    if (allowSearch) {
+      apiBody.tools = AI_TOOLS;
+    }
     
+    var MAX_TOOL_ROUNDS = 3;
+    var toolRound = 0;
+    var roundMessages = messages;
+    
+    while (toolRound < MAX_TOOL_ROUNDS && !aborted) {
+
     var controller = new AbortController();
     _controller = controller;
     var timer = setTimeout(function() { controller.abort(); }, useThinking ? 60000 : DEEPSEEK_TIMEOUT_MS);
@@ -7387,6 +7397,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var reasoningBuffer = '';
     var contentBuffer = '';
     var reasoningSent = false;
+    var pendingToolCalls = {};
+    var finishReason = '';
     
     var lastChunkTime = Date.now();
     while (true) {
@@ -7460,7 +7472,27 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           res.write('data: ' + JSON.stringify({ type: 'content', text: delta.content }) + '\n\n');
         }
         
+        // 收集 tool calls（思考模式下的搜索请求）
+        if (delta.tool_calls) {
+          for (var tci = 0; tci < delta.tool_calls.length; tci++) {
+            var tc = delta.tool_calls[tci];
+            var tIdx = tc.index;
+            if (!pendingToolCalls[tIdx]) pendingToolCalls[tIdx] = { id: '', name: '', args: '' };
+            if (tc.id) pendingToolCalls[tIdx].id = tc.id;
+            if (tc.function) {
+              if (tc.function.name) pendingToolCalls[tIdx].name = tc.function.name;
+              if (tc.function.arguments) pendingToolCalls[tIdx].args += tc.function.arguments;
+            }
+          }
+        }
+        
+        if (finish === 'tool_calls') {
+          finishReason = 'tool_calls';
+          break;
+        }
+        
         if (finish === 'stop' || finish === 'length') {
+          finishReason = finish;
           // 统一收尾
           if (!aborted) {
             var finishOpt = {
@@ -7482,6 +7514,45 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           return safeEnd();
         }
       }
+      if (finishReason === 'tool_calls') break;
+    }
+    
+    // 处理 tool calls
+    var toolCallsArr = Object.values(pendingToolCalls).filter(function(t) { return t.id && t.name; });
+    if (toolCallsArr.length > 0 && finishReason === 'tool_calls' && !aborted) {
+      // 通知前端 AI 正在使用工具
+      var toolsInfo = toolCallsArr.map(function(t) {
+        var args;
+        try { args = JSON.parse(t.args); } catch (e) { args = {}; }
+        return { name: t.name, args: args };
+      });
+      res.write('data: ' + JSON.stringify({ type: 'tool_calls', tools: toolsInfo }) + '\n\n');
+      
+      // 执行所有工具
+      for (var ti = 0; ti < toolCallsArr.length; ti++) {
+        var tcExec = { function: { name: toolCallsArr[ti].name, arguments: toolCallsArr[ti].args } };
+        var toolResult = await executeToolCall(tcExec);
+        
+        res.write('data: ' + JSON.stringify({
+          type: 'tool_result',
+          tool_name: toolResult.tool_name || '',
+          success: !toolResult.error,
+          count: toolResult.results_count || 0,
+          items: toolResult.content || '',
+          query: toolResult.query || '',
+          error: toolResult.error || null
+        }) + '\n\n');
+        
+        roundMessages.push({ role: 'tool', content: JSON.stringify(toolResult), tool_call_id: toolCallsArr[ti].id });
+      }
+      
+      toolRound++;
+       // 后续轮次不再走思考模式，直接让模型用已有的思考+结果生成回答
+       if (useThinking) {
+         delete apiBody.thinking;
+         delete apiBody.reasoning_effort;
+       }
+       continue;
     }
     
     // 流意外结束但没收到 finish_reason
@@ -7494,7 +7565,6 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       } else if (!contentHasSomething && reasoningHasSomething) {
         writeSse(res, { type: 'error', error: 'AI 只返回了思考过程，正文生成中断，请重试' });
       } else {
-        // 有 content，尝试保存并标记中断
         await finishStream(res, {
           contentBuffer: contentBuffer,
           reasoningBuffer: reasoningBuffer,
@@ -7510,6 +7580,13 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           ctx: ctx
         });
       }
+    }
+    return safeEnd();
+
+    }
+    // toolRound 超限兜底
+    if (!aborted) {
+      writeSse(res, { type: 'error', error: 'AI 工具调用次数过多，请简化后重试' });
     }
     return safeEnd();
     } catch (streamErr) {
