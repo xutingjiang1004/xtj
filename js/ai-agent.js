@@ -1728,37 +1728,33 @@
           
           if (evt.type === 'reasoning_start' && !reasoningStarted) {
             reasoningStarted = true;
-            if ((finalThinkingMode && finalThinkingMode !== 'off') || (!finalThinkingMode && S.thinkingMode !== 'off')) {
-              ensureReasoningNode();
-              ensureThinkingTimer();
-            }
+            ensureReasoningNode();
+            ensureThinkingTimer();
             continue;
           }
           
           if (evt.type === 'reasoning') {
             aiReasoning += evt.text || '';
-            if ((finalThinkingMode && finalThinkingMode !== 'off') || (!finalThinkingMode && S.thinkingMode !== 'off')) {
-              // 如果 reasoning_start 事件丢失，首次收到 reasoning 也启动计时器
-              if (!reasoningStarted) {
-                reasoningStarted = true;
-                ensureReasoningNode();
-                ensureThinkingTimer();
+            // 如果 reasoning_start 事件丢失，首次收到 reasoning 也启动计时器
+            if (!reasoningStarted) {
+              reasoningStarted = true;
+              ensureReasoningNode();
+              ensureThinkingTimer();
+            }
+            var rn = ensureReasoningNode();
+            var body = rn.querySelector('.ai-thinking-body');
+            if (body) {
+              if (!reasoningRenderer) {
+                body.textContent = '';
+                reasoningRenderer = createSmoothTextRenderer(body, {
+                  minChunk: 4,
+                  maxChunk: 12,
+                  onRender: function() {
+                    if (rn.classList.contains('expanded')) scrollToBottom(messagesEl, false);
+                  }
+                });
               }
-              var rn = ensureReasoningNode();
-              var body = rn.querySelector('.ai-thinking-body');
-              if (body) {
-                if (!reasoningRenderer) {
-                  body.textContent = '';
-                  reasoningRenderer = createSmoothTextRenderer(body, {
-                    minChunk: 4,
-                    maxChunk: 12,
-                    onRender: function() {
-                      if (rn.classList.contains('expanded')) scrollToBottom(messagesEl, false);
-                    }
-                  });
-                }
-                reasoningRenderer.append(evt.text || '');
-              }
+              reasoningRenderer.append(evt.text || '');
             }
             continue;
           }
