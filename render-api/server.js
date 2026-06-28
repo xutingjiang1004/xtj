@@ -7470,27 +7470,45 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var roundMessages = messages;
     // 跨轮次保留的推理内容（第一次流产生的，第二次流不会重复）
     var persistentReasoning = '';
-    // 判断是否为"问候/闲聊/简单确认"等无需联网搜索的消息
-    function isSimpleChat(text) {
-      var t = text.trim().toLowerCase();
-      if (t.length <= 2) return true;
-      // 纯表情或符号
-      if (/^[\s\-+=_*~#@!?.,。，、！]+$/.test(t)) return true;
-      if (t.length <= 4) {
-        // 超短英文：hi/hello/hey/ok/nice/good/fine/yes/no/thx/ty/kk/hh/666/nb/tql/woc/1-9
-        if (/^(hi|hello|hey|ok|okay|nice|great|good|fine|yes|no|thx|thanks|ty|kk|hh|xswl|666|nb|tql|woc|\+?1|2|3|4|5|6|7|8|9|0)$/i.test(t)) return true;
-        // 超短中文：在吗/好的/嗯/哦/行/可以/谢谢/拜拜/再见
-        if (/^(好的|是的|对的|嗯|哦|噢|啊|呀|行|可以|知道|谢谢|感谢|拜拜|再见|晚安|早安|午安|你好|您好|嗨|哈喽|哈哈|嘿嘿|嘻嘻|呵呵|在吗|收到|明白|懂了|了解|不错|好吧|行吧|没事|没有|有|是|不是|对|不对|嗯好|好叭|牛|牛逼|厉害|强|秀|真实|确实|的确|当然|必然|肯定|必须|一定|绝对|完全|同意|赞同|支持|顶|附议|加一|卧槽|我去|我靠|我晕|天啊|晕死|无语|服了|绝了|好吧|好叭|好伐|好嘞|好咧|好哦|好喔|好耶|棒|优秀|够了|知道|明白|了解|不错|可以|行吧|好吧)$/i.test(t)) return true;
-      }
-      // 纯疑问词
-      if (/^(什么|为什么|怎么|如何|哪个|谁|哪|啥|干嘛|干啥|为啥|真的吗|是吗|是吧|对么|对吗|好不好|行不行|可不可以|能不能|会不会|要不要|是不是|有没有|在不在|了解吗|明白吗|懂吗|知道吗)$/i.test(t)) return true;
+    // 判断是否需要联网搜索：只有明确需要实时/网络信息才搜索
+    function needsWebSearch(text) {
+      var t = text.trim();
+      // 太短不搜
+      if (t.length <= 2) return false;
+      // 纯符号/表情不搜
+      if (/^[\s\-+=_*~#@!?.,。，、！…·、]+$/i.test(t)) return false;
+      // 纯数字不搜
+      if (/^\d+$/.test(t)) return false;
+      // 纯问候/感谢/告别/语气（无论长短）
+      if (/^(你好|您好|嗨|哈喽|hello|hi|hey|谢谢|感谢|再见|拜拜|晚安|早安|午安|在吗|在不在|嗯|哦|噢|啊|呀|哈哈|嘿嘿|嘻嘻|呵呵|好吧|好的|好的吧|好叭|行吧|可以|知道|明白|懂了|了解|收到|不错|棒|nice|great|good|ok|okay|fine|yes|no|thx|thanks|ty|拜|告辞|走了|溜了|睡了|吃饭|洗澡|忙|先这样|回头聊|回聊)$/i.test(t)) return false;
+      
+      // ↓↓↓ 白名单：只有包含以下关键词才触发搜索 ↓↓↓
+      if (/搜索|查一下|搜一下|搜搜|百度查|谷歌查|查查|查资料/i.test(t)) return true;
+      if (/最新|新闻|资讯|今天.*?(天气|温度|新闻)|现在.*?(时间|几点|天气)|当前.*?(汇率|价格|政策)|实时/i.test(t)) return true;
+      if (/天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么|多少度|台风|地震/i.test(t)) return true;
+      if (/价格|多少钱|多少钱一|什么价|报价|售价|行情|房价|股价|汇率|兑换|利率/i.test(t)) return true;
+      if (/攻略|旅游|景点|门票|开放时间|营业时间|地址|电话|在哪里|怎么去|怎么走|路线|导航/i.test(t)) return true;
+      if (/排行|排名|榜单|排行榜|top\s*\d+|推荐|推荐几个|推荐一下|哪个好|哪个品牌|哪个牌子|什么牌子|什么品牌|十大|品牌/i.test(t)) return true;
+      if (/教程|方法|步骤|怎么做|如何做|怎么弄|怎么办|怎么解决/i.test(t)) return true;
+      if (/区别|对比|vs|和.*?区别|与.*?不同|区别是什么|哪个更|哪个比较/i.test(t)) return true;
+      if (/IPO|上市|发布|发布.*?(了|的)|新款|新品|发布会|公布/i.test(t)) return true;
+      if (/比赛|比分|赛程|赛果|赛况|谁赢了|谁输了|结果|成绩|晋级|淘汰|夺冠|冠军|亚军|季军|决赛|半决赛|小组赛|预选赛/i.test(t)) return true;
+      if (/政策|公告|通知|法规|法律|条例|新规|调整|变动/i.test(t)) return true;
+      if (/百科|介绍|是什么|什么是|谁是|是谁|简介|背景|资料|信息/i.test(t)) return true;
+      if (/电影|电视剧|综艺|纪录片|动漫|动画|番剧|剧集|影评|评分|豆瓣/i.test(t)) return true;
+      if (/iPhone|iPad|Mac|安卓|鸿蒙|华为|小米|苹果|三星|oppo|vivo|荣耀|小米.*?(手机|平板|电脑)/i.test(t)) return true;
+      if (/下载|安装|使用|配置|设置|注册|登录|账号|密码|找回/i.test(t)) return true;
+      // 包含明确实体 + 疑问词的长查询
+      if (/^(什么|哪个|谁|哪|哪里|怎么|如何|为什么)\s*\S{4,}/i.test(t)) return true;
+      if (/\S{4,}.*?(是什么|有哪些|怎么样|好不好|值得吗|靠谱吗|安全吗|好用吗|有效吗|怎么用|有什么用|怎么选|怎么买|在哪里|哪里有|多少钱|什么时候|为什么)/i.test(t)) return true;
+      
       return false;
     }
 
     // 并行搜索：不阻塞stream，让思考立即开始，搜索异步进行
     var parallelSearchPromise = null;
     var parallelSearchResults = null;
-    if (useThinking && allowSearch && !aborted && message.trim().length > 3 && !isSimpleChat(message)) {
+    if (useThinking && allowSearch && !aborted && needsWebSearch(message)) {
       var _psQuery = message.slice(0, 80);
       parallelSearchPromise = searchWeb(_psQuery, 20).then(function(sr) {
         if (sr && Array.isArray(sr.results) && sr.results.length > 0) {
