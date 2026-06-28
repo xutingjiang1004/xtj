@@ -7470,10 +7470,27 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     var roundMessages = messages;
     // 跨轮次保留的推理内容（第一次流产生的，第二次流不会重复）
     var persistentReasoning = '';
+    // 判断是否为"问候/闲聊/简单确认"等无需联网搜索的消息
+    function isSimpleChat(text) {
+      var t = text.trim().toLowerCase();
+      if (t.length <= 2) return true;
+      // 纯表情或符号
+      if (/^[\s\-+=_*~#@!?.,。，、！]+$/.test(t)) return true;
+      if (t.length <= 4) {
+        // 超短英文：hi/hello/hey/ok/nice/good/fine/yes/no/thx/ty/kk/hh/666/nb/tql/woc/1-9
+        if (/^(hi|hello|hey|ok|okay|nice|great|good|fine|yes|no|thx|thanks|ty|kk|hh|xswl|666|nb|tql|woc|\+?1|2|3|4|5|6|7|8|9|0)$/i.test(t)) return true;
+        // 超短中文：在吗/好的/嗯/哦/行/可以/谢谢/拜拜/再见
+        if (/^(好的|是的|对的|嗯|哦|噢|啊|呀|行|可以|知道|谢谢|感谢|拜拜|再见|晚安|早安|午安|你好|您好|嗨|哈喽|哈哈|嘿嘿|嘻嘻|呵呵|在吗|收到|明白|懂了|了解|不错|好吧|行吧|没事|没有|有|是|不是|对|不对|嗯好|好叭|牛|牛逼|厉害|强|秀|真实|确实|的确|当然|必然|肯定|必须|一定|绝对|完全|同意|赞同|支持|顶|附议|加一|卧槽|我去|我靠|我晕|天啊|晕死|无语|服了|绝了|好吧|好叭|好伐|好嘞|好咧|好哦|好喔|好耶|棒|优秀|够了|知道|明白|了解|不错|可以|行吧|好吧)$/i.test(t)) return true;
+      }
+      // 纯疑问词
+      if (/^(什么|为什么|怎么|如何|哪个|谁|哪|啥|干嘛|干啥|为啥|真的吗|是吗|是吧|对么|对吗|好不好|行不行|可不可以|能不能|会不会|要不要|是不是|有没有|在不在|了解吗|明白吗|懂吗|知道吗)$/i.test(t)) return true;
+      return false;
+    }
+
     // 并行搜索：不阻塞stream，让思考立即开始，搜索异步进行
     var parallelSearchPromise = null;
     var parallelSearchResults = null;
-    if (useThinking && allowSearch && !aborted && message.trim().length > 3) {
+    if (useThinking && allowSearch && !aborted && message.trim().length > 3 && !isSimpleChat(message)) {
       var _psQuery = message.slice(0, 80);
       parallelSearchPromise = searchWeb(_psQuery, 20).then(function(sr) {
         if (sr && Array.isArray(sr.results) && sr.results.length > 0) {
