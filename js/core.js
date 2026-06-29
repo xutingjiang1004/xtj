@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -1833,12 +1833,14 @@ const ADMIN_NAME = "xxz";
             if (!isVipUser()) return false;
             var p = normalizePost(post);
             if (!p || p.user_name !== currentUser) return false;
-            // Count existing pinned posts by this user
-            var { data: pinnedPosts } = await sb.from('posts')
-                .select('id')
-                .eq('user_name', currentUser)
-                .eq('is_pinned', true);
-            return !pinnedPosts || pinnedPosts.length < 1;
+            try {
+                if (!sb) return false;
+                var { data: pinnedPosts } = await sb.from('posts')
+                    .select('id')
+                    .eq('user_name', currentUser)
+                    .eq('is_pinned', true);
+                return !pinnedPosts || pinnedPosts.length < 1;
+            } catch(e) { return false; }
         }
 
         function canDeletePost(post) {
