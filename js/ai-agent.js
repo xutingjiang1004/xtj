@@ -1541,10 +1541,18 @@
       if (logBox) {
         if (logBox.style.display === 'none') logBox.style.display = '';
         var roleLabel = evt.agent_role || 'AI';
-        var entry = el('div', { class: 'ai-thought-entry' });
-        entry.innerHTML = '<div class="ai-thought-role">' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
-        entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 4000);
-        logBox.appendChild(entry);
+        // 同角色累积到最后一个条目, 不每字创建新条目
+        var lastEntry = logBox.lastElementChild;
+        if (lastEntry && lastEntry._role === roleLabel) {
+          var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
+          if (lastChunk) lastChunk.textContent = (lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000);
+        } else {
+          var entry = el('div', { class: 'ai-thought-entry' });
+          entry._role = roleLabel;
+          entry.innerHTML = '<div class="ai-thought-role">' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
+          entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 4000);
+          logBox.appendChild(entry);
+        }
         try { logBox.scrollTop = logBox.scrollHeight; } catch (e) {}
         while (logBox.children.length > 50) logBox.removeChild(logBox.firstChild);
       }
@@ -1998,15 +2006,21 @@
               var summaryEl = aiNode.querySelector('.ai-think-thinking summary span:last-child');
               if (thinkBody) {
                 var roleLabel = evt.agent_role || 'AI 智能体';
-                var entry = document.createElement('div');
-                entry.className = 'ai-thought-entry';
-                entry.innerHTML = '<div class="ai-thought-role">▸ ' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
-                entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 4000);
-                thinkBody.appendChild(entry);
-                try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
-                while (thinkBody.children.length > 80) {
-                  thinkBody.removeChild(thinkBody.firstChild);
+                // 同角色累积, 不每字创建新条目
+                var lastEntry = thinkBody.lastElementChild;
+                if (lastEntry && lastEntry._role === roleLabel) {
+                  var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
+                  if (lastChunk) lastChunk.textContent = (lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000);
+                } else {
+                  var entry = document.createElement('div');
+                  entry.className = 'ai-thought-entry';
+                  entry._role = roleLabel;
+                  entry.innerHTML = '<div class="ai-thought-role">▸ ' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
+                  entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 4000);
+                  thinkBody.appendChild(entry);
                 }
+                try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
+                while (thinkBody.children.length > 80) thinkBody.removeChild(thinkBody.firstChild);
               }
               if (summaryEl) {
                 var entryCount = thinkBody ? thinkBody.children.length : 0;
