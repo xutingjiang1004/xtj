@@ -29,6 +29,9 @@
     //   管理员可在后台 /admin/ai-agent/config 切换为 low/medium/high/max
     //   普通用户不能在 UI 切换 (allow_user_thinking_switch: false)
     thinkingMode: 'max',
+    // ★ P 新增: 深度思考专用思考程度 (从后端 config 同步, 与普通聊天分开)
+    deepThinkEffort: 'max',
+    deepThinkEnabled: true,    // 后端 config.deep_think.enabled
     // ★ M: 深度思考模式 toggle 状态
     //   开启后本会话所有消息走 Planner→Workers→Synthesizer 多 agent 流程
     //   持久化到 localStorage, 重开对话框后恢复
@@ -1487,6 +1490,11 @@
   // ===================== M: 深度思考模式 — 进度卡 / toggle / cancel =====================
   // 切换深度思考模式 (持久化到 localStorage, 重开对话框后恢复)
   function toggleDeepThink() {
+    // ★ P 新增: 后端禁用时不允许开启
+    if (!S.deepThinkEnabled) {
+      notify('深度思考模式已被管理员关闭');
+      return;
+    }
     if (S.sending) {
       notify('当前消息处理中, 请稍后再切换');
       return;
@@ -1505,6 +1513,14 @@
     if (btn) {
       if (S.deepThink) btn.classList.add('on');
       else btn.classList.remove('on');
+      // ★ P 新增: 后端禁用时显示禁用样式
+      if (!S.deepThinkEnabled) {
+        btn.classList.add('disabled');
+        btn.setAttribute('title', '深度思考模式已被管理员关闭');
+      } else {
+        btn.classList.remove('disabled');
+        btn.removeAttribute('title');
+      }
     }
   }
 
@@ -1776,14 +1792,17 @@
       message: text,
       conversation_id: S.conversationId,
       client_request_id: reqId,
-      deep_think: true
+      deep_think: true,
+      // ★ P 新增: 传思考程度给后端 runMultiAgentFlow (后端会用这个, 不用 config)
+      thinking_mode: S.deepThinkEffort || 'max'
     });
 
     var aborted = false;
     var aiContent = '';
     var finalMeta = null;
     var finalModel = '';
-    var finalThinkingMode = 'high';
+    // ★ P 改: 用 S.deepThinkEffort (从后端 config 同步) 替代写死 'high'
+    var finalThinkingMode = S.deepThinkEffort || 'max';
     var streamConvId = null;
     var aiNode = null;
     var aiBubble = null;
@@ -1875,7 +1894,8 @@
         content: content,
         reasoning: '',
         created_at: new Date().toISOString(),
-        thinking_mode: 'max',
+        // ★ P 改: 用 finalThinkingMode (后端动态) 替代写死 'max'
+        thinking_mode: finalThinkingMode,
         deep_think: true,
         agent_count: agentCount,
         planner: plannerInfo,
@@ -1886,7 +1906,8 @@
         search_query: searchQuery,
         search_results: searchResults,
         search_expires_at: searchExpiresAt,
-        usage: Object.assign({}, usage || {}, { model: finalModel, thinking_mode: 'max', deep_think: true, agent_count: agentCount })
+        // ★ P 改: usage.thinking_mode 同步实际值
+        usage: Object.assign({}, usage || {}, { model: finalModel, thinking_mode: finalThinkingMode, deep_think: true, agent_count: agentCount })
       };
       S.messages.push(aiMsg);
 
@@ -1990,12 +2011,13 @@
         var titleLabel = node.querySelector('.ai-think-title');
         if (titleLabel) titleLabel.textContent = '⚡ 深度思考 · ' + (agentCount || 1) + ' 个 agent';
 
-        // footer (时间 + 思考 high/max + 用量)
+        // footer (时间 + 思考程度 + 用量)
         var footer = node.querySelector('.ai-msg-footer');
         if (footer) {
           footer.innerHTML = '';
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
-          footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 max · ⚡深度' }));
+          // ★ P 改: 用 finalThinkingMode (动态) 替代写死 'max'
+          footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 ' + (finalThinkingMode || 'max') + ' · ⚡深度' }));
           if (usage || finalModel) {
             var usageLine = buildUsageLine(aiMsg.usage);
             if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
@@ -2109,7 +2131,8 @@
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
             try {
               finalModel = evt.model || 'deepseek-v4-flash';
-              finalThinkingMode = evt.thinking_mode || 'max';
+              // ★ P 改: 用 S.deepThinkEffort fallback, 不用写死 'max'
+              finalThinkingMode = evt.thinking_mode || S.deepThinkEffort || 'max';
               if (evt.sanitized_content) aiContent = evt.sanitized_content;
               else if (evt.content) aiContent = evt.content;
               finalMeta = evt;
@@ -3536,6 +3559,27 @@ function showChatMessages() {
       if (e2) e2.textContent = '和 ' + (cfg.name || '徐旭泽的小猫') + ' 聊聊天';
       var e3 = empty.querySelector('.ai-chat-empty-tip');
       if (e3) e3.textContent = cfg.welcome_message || '喵，来聊天吧。';
+    }
+
+    // ★ P 新增: 同步后端深度思考子配置 (思考程度 + 启用开关)
+    try {
+      if (cfg.deep_think) {
+        if (['low', 'medium', 'high', 'max'].indexOf(cfg.deep_think.default_thinking_mode) >= 0) {
+          S.deepThinkEffort = cfg.deep_think.default_thinking_mode;
+        }
+        S.deepThinkEnabled = cfg.deep_think.enabled !== false;
+      }
+      // 普通聊天的 thinkingMode 也同步 (从 model.default_thinking_mode 读)
+      if (cfg.model && ['low', 'medium', 'high', 'max', 'off'].indexOf(cfg.model.default_thinking_mode) >= 0) {
+        S.thinkingMode = cfg.model.default_thinking_mode;
+      }
+    } catch (e) { /* 容错 */ }
+
+    // ★ P 新增: 如果后端禁用了深度思考, 强制关闭 toggle
+    if (!S.deepThinkEnabled && S.deepThink) {
+      S.deepThink = false;
+      try { localStorage.setItem('xtj_ai_deep_think', '0'); } catch (e) {}
+      try { refreshDeepThinkToggle(); } catch (e) {}
     }
   }
 
