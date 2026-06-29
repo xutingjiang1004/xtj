@@ -2567,7 +2567,7 @@ async function callDeepSeek(messages, options) {
           id: tcId, name: tcName, args: tcArgs, elapsed_ms: tElapsed,
           ok: !toolResult || !toolResult.error
         };
-        if (tcName === 'search_web' && toolResult && toolResult.results) infoObj.results_count = toolResult.results.length;
+        if (tcName === 'search_web' && toolResult && typeof toolResult.results_count === 'number') infoObj.results_count = toolResult.results_count;
         toolCallsInfo.push(infoObj);
         var toolContent = toolResult ? JSON.stringify(toolResult).slice(0, 8000) : '{}';
         workingMessages.push({ role: 'tool', tool_call_id: tcId, content: toolContent });
@@ -3520,17 +3520,14 @@ app.delete('/admin/announcement/:id', verifyToken, async (req, res) => {
 // ===================== 公告已读（跨设备同步） ======================
 // 复用 posts marker（media_type=__ann_read__, media_url=announcementId）
 // 同一用户对同一公告只允许一条记录（actor_key 唯一 + 23505 错误处理）
-app.get('/api/announcements/read', async (req, res) => {
+app.get('/api/announcements/read', authenticateUser, async (req, res) => {
   try {
-    const auth = await authenticateUser(req);
-    if (!auth) {
-      return res.status(401).json({ error: '未授权' });
-    }
+    const userName = req.userName;
     const { data, error } = await supabase
       .from('posts')
       .select('media_url, created_at')
       .eq('media_type', ANN_READ_MARKER)
-      .eq('user_name', auth.userName);
+      .eq('user_name', userName);
     if (error) {
       console.error('[ann_read_get]', error);
       return res.status(500).json({ error: '查询已读记录失败' });
@@ -3549,12 +3546,9 @@ app.get('/api/announcements/read', async (req, res) => {
   }
 });
 
-app.post('/api/announcements/read', async (req, res) => {
+app.post('/api/announcements/read', authenticateUser, async (req, res) => {
   try {
-    const auth = await authenticateUser(req);
-    if (!auth) {
-      return res.status(401).json({ error: '未授权' });
-    }
+    const userName = req.userName;
     const body = req.body || {};
     let ids = body.announcement_ids;
     if (!Array.isArray(ids)) {
@@ -3583,7 +3577,7 @@ app.post('/api/announcements/read', async (req, res) => {
       .from('posts')
       .select('media_url')
       .eq('media_type', ANN_READ_MARKER)
-      .eq('user_name', auth.userName)
+      .eq('user_name', userName)
       .in('media_url', cleanIds);
     if (existErr) {
       console.error('[ann_read_existing]', existErr);
@@ -3597,11 +3591,11 @@ app.post('/api/announcements/read', async (req, res) => {
     // 批量插入（每条记录 actor_key 唯一）
     const rows = toInsert.map(function(id) {
       return {
-        user_name: auth.userName,
+        user_name: userName,
         content: '',
         media_type: ANN_READ_MARKER,
         media_url: id,
-        actor_key: 'ann_read:' + auth.userName + ':' + id
+        actor_key: 'ann_read:' + userName + ':' + id
       };
     });
     const { error: insErr } = await supabase
@@ -3705,7 +3699,7 @@ app.post('/api/report/notifications/mark-read', authenticateUser, async (req, re
   try {
     const { data, error } = await supabase.from('posts')
       .select('id, content')
-      .eq('user_name', user_name)
+      .eq('user_name', userName)
       .eq('media_type', '__report__');
     if (error) return res.status(400).json({ error: sanitizeError(error) });
     for (var i = 0; i < (data || []).length; i++) {
@@ -7501,8 +7495,15 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
       // ★ wrapper：拦截 search_web 的真实 results 数组
       deepSeekOptions.tool_executor = async function(toolCall) {
         var res = await executeToolCall(toolCall);
-        if (res && res.tool_name === 'search_web' && Array.isArray(res.results)) {
-          searchResultsCollected = searchResultsCollected.concat(res.results);
+        if (res && res.tool_name === 'search_web') {
+          if (res.content) {
+            try {
+              var parsedResults = JSON.parse(res.content);
+              if (Array.isArray(parsedResults)) searchResultsCollected = searchResultsCollected.concat(parsedResults);
+            } catch (e) {}
+          } else if (Array.isArray(res.results)) {
+            searchResultsCollected = searchResultsCollected.concat(res.results);
+          }
           try {
             var argsStr = toolCall && toolCall.function && toolCall.function.arguments;
             if (argsStr) {
