@@ -1639,49 +1639,21 @@
   color: rgb(48, 138, 106);
   font-size: 13px;
 }
-.ai-progress-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: rgb(66, 155, 122);
+.ai-progress-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px; height: 18px;
   flex-shrink: 0;
-  animation: dt-dot-pulse 1.4s ease-in-out infinite;
+  animation: dt-icon-pulse 2s ease-in-out infinite;
 }
+.ai-progress-icon svg { width: 100%; height: 100%; }
 .ai-progress-title { flex: 1; }
 .ai-progress-elapsed {
   font-size: 11px;
   font-weight: 500;
   color: rgba(120, 132, 130, .7);
   font-family: ui-monospace, monospace;
-}
-
-.ai-progress-stage {
-  color: rgba(108, 120, 118, .8);
-  margin: 6px 0 0 16px;
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.ai-progress-stage-dot {
-  width: 4px; height: 4px;
-  border-radius: 50%;
-  background: rgb(66, 155, 122);
-  animation: dt-dot-pulse 1.4s ease-in-out infinite;
-}
-.ai-progress-stage-text {
-  color: var(--text-primary, #1f2937);
-  font-weight: 500;
-}
-
-.ai-progress-detail {
-  font-size: 11px;
-  line-height: 1.6;
-  color: rgba(108, 120, 118, .8);
-  min-height: 14px;
-  margin: 4px 0 4px 16px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 /* 思考过程实时日志 */
@@ -1739,9 +1711,9 @@
 }
 .ai-progress-stop:active { transform: scale(.97); }
 
-@keyframes dt-dot-pulse {
-  0%, 100% { opacity: .4; transform: scale(1); }
-  50% { opacity: 1; transform: scale(1.25); }
+@keyframes dt-icon-pulse {
+  0%, 100% { opacity: .6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
 }
 
 /* ===================== Q: 深度思考 think-card (ChatGPT/Gemini 风格) ===================== */
