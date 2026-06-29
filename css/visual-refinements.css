@@ -136,31 +136,31 @@
 
 /* ========== 4. 间距优化 ========== */
 /* 统计卡片 — 更多呼吸空间 */
-.stat-card {
-  padding: 14px 16px !important;
+.stats .stat-card {
+  padding: 14px 16px;
 }
 
 /* 发布框 — 更舒适的内部间距 */
-.publish-box {
-  padding: 14px 18px !important;
+#panelPosts .publish-box {
+  padding: 14px 18px;
 }
 
 /* Dock 标签文字 — 从 9px 提升到 11px 可读性 */
-.dock-tab .dt-label {
-  font-size: 11px !important;
+.dock-bar .dock-tab .dt-label {
+  font-size: 11px;
 }
 
 /* 帖子卡片 — 内部间距优化 */
-.post {
-  padding: 14px 18px !important;
+#panelPosts .post {
+  padding: 14px 18px;
 }
 
 /* 评论区 — 更舒适 */
-.comments {
-  padding: 12px 18px 14px !important;
+#panelPosts .post .comments {
+  padding: 12px 18px 14px;
 }
-.comment-item {
-  padding: 10px 14px !important;
+.comments .comment-item {
+  padding: 10px 14px;
 }
 
 /* ========== 5. 字体与排版优化 ========== */
@@ -178,9 +178,9 @@
 }
 
 /* 统计数值 — 更大更醒目 */
-.stat-value {
-  font-size: 18px !important;
-  font-weight: 700 !important;
+.stats .stat-value {
+  font-size: 18px;
+  font-weight: 700;
   letter-spacing: -0.01em;
 }
 .stat-label {
