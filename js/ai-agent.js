@@ -24,7 +24,11 @@
     sending: false,
     loading: false,
     loadingMore: false,
-    thinkingMode: 'off',
+    // ★ D 修复：thinking_mode 默认从 off 改成 low
+    //   让 AI 默认多想一下（chain-of-thought）
+    //   节省 deepseek 思考成本（low 比 medium 便宜）
+    //   用户可在 UI 切换
+    thinkingMode: 'low',
     active: false,
     rootEl: null,
     messagesEl: null,
@@ -913,8 +917,32 @@
     if (role === 'assistant' && shouldRenderReasoning(msg)) {
       node.appendChild(buildReasoningNode(msg.reasoning, messagesEl, msg.thinking_elapsed_ms));
     }
+    // ★ C 关键修复：把 [来源N] 标记渲染成可点击链接
+    //   AI prompt 要求引用具体事实时必须用 [来源N]（N 从 1 开始）
+    //   这里把 N 替换成 [来源N](url)，让 renderMarkdown 转成 <a>
+    var contentForRender = msg.content || '';
+    if (role === 'assistant' && Array.isArray(msg.search_results) && msg.search_results.length > 0) {
+      contentForRender = contentForRender.replace(/\[来源(\d+)\]/g, function(m, n) {
+        var idx = parseInt(n, 10);
+        if (isNaN(idx) || idx < 1 || idx > msg.search_results.length) return m;
+        var sr = msg.search_results[idx - 1] || {};
+        if (!sr.url) return m;
+        return '[来源' + n + '](' + sr.url + ')';
+      });
+    }
     var bubble = el('div', { class: 'ai-msg-bubble' });
-    bubble.innerHTML = renderMarkdown(msg.content || '');
+    bubble.innerHTML = renderMarkdown(contentForRender);
+    // ★ C 关键修复：给 [来源N] 链接加专属 className
+    //   链接文本是 "来源1"/"来源2"... 时加 .ai-source-link，CSS 可以加特殊样式
+    try {
+      var as = bubble.querySelectorAll('a');
+      for (var ai = 0; ai < as.length; ai++) {
+        var atxt = (as[ai].textContent || '').trim();
+        if (/^来源\d+$/.test(atxt)) {
+          as[ai].className = 'ai-source-link';
+        }
+      }
+    } catch (e) {}
     setupBubbleCopy(bubble, messagesEl);
     node.appendChild(bubble);
     // 底部信息栏：时间 · 思考程度 · 用量（仅 assistant 有思考标签和用量）
