@@ -642,6 +642,7 @@ async function initAdminClient() {
         }
         startRegisterAlertPolling();
 
+        if (_adminReportPollTimer) clearInterval(_adminReportPollTimer);
         _adminReportPollTimer = setInterval(async function() {
             var prevLen = reportsData.length;
             await loadReportsData();
@@ -1806,18 +1807,17 @@ async function initAdminClient() {
         });
     };
 
-    window.doRespondReport = function(id) {
+    window.doRespondReport = async function(id) {
         var textarea = document.getElementById('reportResponse_' + id);
         if (!textarea) return;
         var response = textarea.value.trim();
         if (!response) { showToast('请输入回复内容', 'error'); return; }
         try {
-            apiCall('PUT', '/admin/report/' + id + '/respond', { response: response }).then(async function() {
-                await loadReportsData();
-                document.querySelector('.report-detail-modal')?.remove();
-                renderTab('reports');
-                showToast('已回复并处理', 'success');
-            }).catch(function(e) { showToast('操作失败: ' + e.message, 'error'); });
+            await apiCall('PUT', '/admin/report/' + id + '/respond', { response: response });
+            await loadReportsData();
+            document.querySelector('.report-detail-modal')?.remove();
+            renderTab('reports');
+            showToast('已回复并处理', 'success');
         } catch(e) { showToast('操作失败: ' + e.message, 'error'); }
     };
 
@@ -5275,7 +5275,7 @@ async function initAdminClient() {
                     }
                     if (statusEl) statusEl.textContent = '上传中...';
                     try {
-                        var adminToken = window._adminToken || '';
+                        var adminToken = getToken();
                         var reader = new FileReader();
                         var ext = (file.name.split('.').pop() || 'png').toLowerCase();
                         var base64Data = await new Promise(function(resolve, reject) {
@@ -5283,7 +5283,7 @@ async function initAdminClient() {
                             reader.onerror = reject;
                             reader.readAsDataURL(file);
                         });
-                        var resp = await fetch('/api/admin/ai-agent/avatar', {
+                        var resp = await fetch(API_BASE + '/admin/ai-agent/avatar', {
                             method: 'POST',
                             headers: adminToken ? {
                                 'Authorization': 'Bearer ' + adminToken,
