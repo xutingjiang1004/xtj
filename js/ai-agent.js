@@ -1731,7 +1731,7 @@
     function ensureThinkCardNode() {
       if (aiNode) return aiNode;
       safeRemoveProgressCard()
-      var node = el('div', { class: 'ai-think-card collapsed' });
+      var node = el('div', { class: 'ai-think-card expanded' });
       node.innerHTML =
         '<div class="ai-think-header">' +
           '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
