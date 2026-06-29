@@ -1918,6 +1918,35 @@
         }
 
         // 标题 + 时间 (放 header)
+        // Show search sources in think-card
+        if (searchResults && searchResults.length > 0 && searchQuery) {
+          var searchBox = document.createElement('div');
+          searchBox.className = 'ai-search-supplement';
+          var searchHtml = '🔍 搜索来源: <strong>' + escapeHtml(searchQuery) + '</strong> (' + searchResults.length + ' 条结果)<br>';
+          var shownResults = searchResults.slice(0, 5);
+          for (var si = 0; si < shownResults.length; si++) {
+            var sr = shownResults[si];
+            if (sr.title && sr.url) {
+              searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(sr.url) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.title) + '</a><br>';
+            } else if (sr.url) {
+              searchHtml += '<a class="ai-search-detail-title" href="' + escapeHtml(sr.url) + '" target="_blank" rel="noopener">[' + (si + 1) + '] ' + escapeHtml(sr.url) + '</a><br>';
+            }
+          }
+          if (searchResults.length > 5) {
+            searchHtml += '<span style="font-size:10px;color:#999">... 还有 ' + (searchResults.length - 5) + ' 条来源</span>';
+          }
+          searchBox.innerHTML = searchHtml;
+          var thinkBody = node.querySelector('.ai-think-body');
+          if (thinkBody) {
+            var answerEl = node.querySelector('.ai-think-answer');
+            if (answerEl) {
+              thinkBody.insertBefore(searchBox, answerEl);
+            } else {
+              thinkBody.appendChild(searchBox);
+            }
+          }
+        }
+
         var durationSec = Math.round(thinkDurationMs / 1000);
         var min = Math.floor(durationSec / 60);
         var sec = durationSec % 60;
@@ -2006,10 +2035,30 @@
             updateDeepThinkProgressCard(progressCard, evt);
             continue;
           }
-          if (evt.type === 'thinking_chunk' || evt.type === 'deep_think_init') {
-            // Show thinking process in real-time: create/reuse think-card and stream chunks
+          if (evt.type === 'deep_think_init') {
+            // Just update the progress card, don't create think-card yet
+            if (evt.message) {
+              var dt = progressCard.querySelector('.ai-progress-detail');
+              if (dt) dt.textContent = evt.message;
+            }
+            continue;
+          }
+          if (evt.type === 'deep_think_tool') {
+            // Show search tool usage in progress card
+            if (evt.tool_name === 'search_web') {
+              var dt2 = progressCard.querySelector('.ai-progress-detail');
+              var st = progressCard.querySelector('.ai-progress-stage-text');
+              if (dt2) dt2.textContent = '🔍 正在搜索相关资料...';
+              if (st) st.textContent = '搜索中';
+              var fill = progressCard.querySelector('.ai-progress-fill');
+              if (fill) fill.style.width = '35%';
+            }
+            continue;
+          }
+          if (evt.type === 'thinking_chunk') {
+            // Real thinking content arrived - create think-card, remove progress card
             if (!aiNode) ensureThinkCardNode();
-            if (evt.type === 'thinking_chunk' && evt.chunk) {
+            if (evt.chunk) {
               var thinkBody = aiNode.querySelector('.ai-think-thinking-body');
               var detailsEl = aiNode.querySelector('.ai-think-thinking');
               var summaryEl = aiNode.querySelector('.ai-think-thinking summary span:last-child');
@@ -2021,30 +2070,21 @@
                 entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 4000);
                 thinkBody.appendChild(entry);
                 try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
-                // Limit log entries to avoid memory issues
                 while (thinkBody.children.length > 80) {
                   thinkBody.removeChild(thinkBody.firstChild);
                 }
               }
-              // Update summary count
               if (summaryEl) {
                 var entryCount = thinkBody ? thinkBody.children.length : 0;
                 summaryEl.textContent = '查看思考过程 (' + entryCount + ' 步)';
               }
-              // Auto-expand thinking details on first chunk
               if (detailsEl && !detailsEl.open) {
                 detailsEl.open = true;
               }
-              // Update header title to show thinking state
               var titleEl = aiNode.querySelector('.ai-think-title');
               if (titleEl && titleEl.textContent.indexOf('思考中') < 0) {
                 titleEl.textContent = '🧠 思考中...';
               }
-            }
-            // Still update progress card heartbeat etc.
-            if (evt.type === 'deep_think_init' && evt.message) {
-              var titleEl2 = aiNode.querySelector('.ai-think-title');
-              if (titleEl2) titleEl2.textContent = '🧠 ' + evt.message;
             }
             scrollToBottom(messagesEl, true);
             continue;
