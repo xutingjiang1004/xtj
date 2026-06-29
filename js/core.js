@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -1275,8 +1275,7 @@ const ADMIN_NAME = "xxz";
                 if (badge) { badge.textContent = '查看活动'; badge.className = 'xtj-vip-card-badge'; }
                 if (sub) sub.textContent = '活动由管理员限时发布';
             }
-            // 刷新帖子列表以显示VIP徽章
-            if (typeof refreshFeedDisplay === 'function') refreshFeedDisplay();
+            // 刷新帖子列表
             applyCurrentUserStyle();
         }
 
@@ -1697,7 +1696,6 @@ const ADMIN_NAME = "xxz";
             if (typeof window.__xtjApplyProTheme === 'function') window.__xtjApplyProTheme(false);
 
             // 4. 刷新帖子列表
-            if (typeof refreshFeedDisplay === 'function') refreshFeedDisplay();
 
             showToast('已取消 Pro 订阅');
         };
