@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -6649,10 +6649,11 @@ function renderProfileActivityList(kind) {
                 if (forceRefresh) {
                     feedPage = 0;
                     feedEndReached = false;
+                    // P0 修复: 不在这里清 localStorage cache, 否则 forceRefresh 失败后没数据回退
+                    // clearFeedCache() 改为在 Supabase 查询成功 + 写入新 cache 之后由正常流程覆盖
                     feedAllPosts = [];
                     feedAllComments = [];
                     feedAllLikes = [];
-                    clearFeedCache();
                 }
                 bindPostFilterEvents();
                 if (!forceRefresh) {
@@ -6679,17 +6680,34 @@ function renderProfileActivityList(kind) {
                 try {
                     // Supabase 查询加 12s 兜底超时，避免永久 hang
                     const queries = [
-                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").order("created_at", { ascending: false }),
-                        sb.from("comments").select("*").order("created_at"),
-                        sb.from("likes").select("*")
+                        sb.from("posts").select("*").neq("media_type", AUTH_MARKER).neq("media_type", ADMIN_AUTH_MARKER).neq("media_type", ADMIN_META_MARKER).neq("media_type", DM_MARKER).neq("media_type", REPORT_MARKER).neq("media_type", "__avatar__").neq("media_type", "__user_info__").neq("media_type", "__photo_wall__").neq("media_type", "__visit__").neq("media_type", "__attack__").neq("media_type", "__user_visit__").neq("media_type", "__ann__").neq("media_type", "__vip__").neq("media_type", "__vip_order__").neq("media_type", "__login_event__").neq("media_type", "__security_alert__").neq("media_type", "__admin_audit__").neq("media_type", "__client_error__").neq("media_type", "__email_sent__").neq("media_type", "__email_recipient_history__").neq("media_type", "__user_style__").neq("media_type", "__ai_agent_profile__").neq("media_type", "__ai_agent_msg__").neq("media_type", "__ai_agent_memory__").neq("media_type", "__ai_agent_config__").neq("media_type", "**ai_agent_memory_box**").neq("media_type", "**ai_agent_conv_summary**").neq("media_type", "**ai_agent_memory_log**").order("created_at", { ascending: false }).limit(200),
+                        sb.from("comments").select("*").order("created_at").limit(500),
+                        sb.from("likes").select("*").limit(1000)
                     ];
                     const fetchTimeout = new Promise(function(_, reject) { setTimeout(function() { reject(new Error('feed_fetch_timeout')); }, 12000); });
                     var results;
                     try {
                         results = await Promise.race([Promise.all(queries), fetchTimeout]);
                     } catch (fetchErr) {
-                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载超时，请刷新重试</div>';
+                        if (feed) feed.innerHTML = '<div class="loading" style="color:#ff3b60;">加载超时，正在用旧数据...</div>';
                         console.error('[loadFeed] 查询超时:', fetchErr);
+                        // P0 修复: 超时时回退到旧 cache, 不让用户看白屏
+                        try {
+                            var fallbackRaw = localStorage.getItem(CACHE_KEY);
+                            if (fallbackRaw) {
+                                var fallbackParsed = JSON.parse(fallbackRaw);
+                                if (fallbackParsed && fallbackParsed.data) {
+                                    feedAllPosts = normalizePosts(fallbackParsed.data.posts || []);
+                                    feedAllComments = fallbackParsed.data.comments || [];
+                                    feedAllLikes = fallbackParsed.data.likes || [];
+                                    await renderFeed({ posts: feedAllPosts, comments: feedAllComments, likes: feedAllLikes });
+                                    setupFeedInfiniteScroll();
+                                    console.warn('[loadFeed] 已回退到旧 cache, posts=' + feedAllPosts.length);
+                                }
+                            }
+                        } catch (fbErr) {
+                            console.error('[loadFeed] cache 回退失败:', fbErr);
+                        }
                         return;
                     }
                     var postRes = results[0];
