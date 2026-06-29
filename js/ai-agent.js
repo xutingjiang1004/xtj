@@ -1450,22 +1450,20 @@
   // ===================== M: 深度思考模式 — 进度卡 / toggle / cancel =====================
   // 切换深度思考模式 (持久化到 localStorage, 重开对话框后恢复)
   function toggleDeepThink() {
-    // ★ P 新增: 后端禁用时不允许开启
     if (!S.deepThinkEnabled) {
       notify('深度思考模式已被管理员关闭');
       return;
     }
-    if (S.sending) {
-      notify('当前消息处理中, 请稍后再切换');
+    if (S.sending && !S.deepThink) {
+      notify('当前消息处理中, 请稍后再开启深度思考');
       return;
     }
     S.deepThink = !S.deepThink;
     try { localStorage.setItem('xtj_ai_deep_think', S.deepThink ? '1' : '0'); } catch (e) {}
     refreshDeepThinkToggle();
-    if (!S.deepThink && S.deepThinkJob) {
-      // 关闭时如果正在跑, 取消
-      cancelDeepThink();
-    }
+    // 关闭深度思考时, 不取消当前正在进行的深度思考请求
+    // 允许用户切换模式, 后续消息用新模式发送
+    // 当前深度思考继续在后台运行
   }
 
   function refreshDeepThinkToggle() {
@@ -1987,28 +1985,8 @@
             updateDeepThinkProgressCard(progressCard, evt);
             continue;
           }
-          if (evt.type === 'deep_think_stage' || evt.type === 'deep_think_planned' || evt.type === 'deep_think_worker' || evt.type === 'deep_think_tool') {
+          if (evt.type === 'deep_think_stage' || evt.type === 'deep_think_planned' || evt.type === 'deep_think_worker' || evt.type === 'deep_think_tool' || evt.type === 'deep_think_init') {
             updateDeepThinkProgressCard(progressCard, evt);
-            continue;
-          }
-          if (evt.type === 'deep_think_init') {
-            // Just update the progress card, don't create think-card yet
-            if (evt.message) {
-              var dt = progressCard.querySelector('.ai-progress-detail');
-              if (dt) dt.textContent = evt.message;
-            }
-            continue;
-          }
-          if (evt.type === 'deep_think_tool') {
-            // Show search tool usage in progress card
-            if (evt.tool_name === 'search_web') {
-              var dt2 = progressCard.querySelector('.ai-progress-detail');
-              var st = progressCard.querySelector('.ai-progress-stage-text');
-              if (dt2) dt2.textContent = '🔍 正在搜索相关资料...';
-              if (st) st.textContent = '搜索中';
-              var fill = progressCard.querySelector('.ai-progress-fill');
-              if (fill) fill.style.width = '35%';
-            }
             continue;
           }
           if (evt.type === 'thinking_chunk') {
