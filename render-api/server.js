@@ -406,16 +406,6 @@ const SEARCH_CACHE_TTL_MS = 60000;
 const SEARCH_EMPTY_CACHE_TTL_MS = 5000;
 const searchCache = new Map();
 
-// 在文件顶部收集已配置的环境变量信息
-var searchEnvSummary = (function() {
-  return {
-    TAVILY_API_KEY: !!process.env.TAVILY_API_KEY,
-    BRAVE_SEARCH_API_KEY: !!process.env.BRAVE_SEARCH_API_KEY,
-    SERPER_API_KEY: !!process.env.SERPER_API_KEY,
-    SEARCH_API_URL: !!process.env.SEARCH_API_URL
-  };
-})();
-
 // ===================== 搜索 Provider 架构 =====================
 // 每个 provider 返回 { results: [...], error: string|null }
 // results 每条为 { title, url, snippet, source, published_at }
@@ -833,117 +823,6 @@ async function queryWeather(query) {
 
 // 网页搜素函数 - 双引擎并行：Bing（全局可用）+ SearXNG（Render US 可用）
 // 无需 API Key，取最快返回有效结果的那一个
-async function searchWebLegacy(query, maxResults) {
-  maxResults = maxResults || 5;
-  var searchQuery = buildSearchQuery(query);
-  if (!searchQuery) searchQuery = String(query || '').trim().slice(0, 120);
-  var cacheKey = searchQuery.toLowerCase().trim().slice(0, 100);
-  var cached = searchCache.get(cacheKey);
-  if (cached && (Date.now() - cached.ts) < SEARCH_CACHE_TTL_MS) return cached.results;
-
-  var results = [];
-
-  // Bing HTML 解析
-  function searchBing() {
-    var url = 'https://www.bing.com/search?q=' + encodeURIComponent(searchQuery) + '&count=' + maxResults + '&mkt=zh-CN';
-    return fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'Accept': 'text/html,application/xhtml+xml'
-      },
-      signal: AbortSignal.timeout(15000)
-    }).then(function(r) {
-      if (!r.ok) throw new Error('bing status=' + r.status);
-      return r.text();
-    }).then(function(html) {
-      var items = [];
-      var pos = 0;
-      while (true) {
-        var start = html.indexOf('b_algo', pos);
-        if (start < 0) break;
-        var liStart = html.lastIndexOf('<li', start);
-        if (liStart < 0) { pos = start + 1; continue; }
-        var liEnd = html.indexOf('</li>', liStart);
-        if (liEnd < 0) { pos = start + 1; continue; }
-        var block = html.slice(liStart, liEnd + 5);
-
-        var aHref = block.match(/<a[^>]*href="(https?:\/\/[^"]+)"[^>]*>(.*?)<\/a>/i);
-        var title = aHref ? aHref[2].replace(/<[^>]+>/g, '').trim() : '';
-        var urlVal = aHref ? aHref[1] : '';
-        var pMatch = block.match(/<p[^>]*>(.*?)<\/p>/i);
-        var snippet = pMatch ? pMatch[1].replace(/<[^>]+>/g, '').trim() : '';
-
-        if (title && urlVal) items.push({ title: title, url: urlVal, snippet: snippet });
-        pos = liEnd + 5;
-      }
-      return items;
-    });
-  }
-
-  // SearXNG 并行
-  function searchSearxng() {
-    var searchApiUrl = process.env.SEARCH_API_URL || '';
-    var instances = searchApiUrl ? [searchApiUrl] : [
-      'https://search.sapti.me', 'https://searx.be', 'https://search.projectsegfau.lt'
-    ];
-    var category = /新闻|资讯|报道|新闻/i.test(searchQuery) ? 'news' : 'general';
-    var fetchers = instances.map(function(baseUrl) {
-      baseUrl = baseUrl.replace(/\/+$/, '');
-      var url = baseUrl + '/search?q=' + encodeURIComponent(searchQuery) + '&format=json&language=zh-CN&safesearch=1&categories=' + category + '&pageno=1';
-      return fetch(url, {
-        headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(15000)
-      }).then(function(r) {
-        if (!r.ok) throw new Error('status=' + r.status);
-        return r.json();
-      }).then(function(data) {
-        var raw = data && data.results;
-        if (!Array.isArray(raw) || !raw.length) throw new Error('no results');
-        return raw.map(function(r) {
-          var title = String(r.title || '').trim();
-          var url = String(r.url || '').trim();
-          return { title: title, url: url, snippet: String(r.content || r.snippet || '').trim(), source: r.engine || 'web', published_at: r.publishedDate || '' };
-        });
-      }).catch(function(e) {
-        throw new Error(baseUrl.slice(0, 30) + ': ' + (e.message || 'unknown'));
-      });
-    });
-    return Promise.race([
-      Promise.any(fetchers),
-      new Promise(function(_, reject) { setTimeout(function() { reject(new Error('searxng timeout')); }, 20000); })
-    ]);
-  }
-
-  // 等两个引擎都返回（或超时），哪个有结果用哪个
-  try {
-    var settled = await Promise.allSettled([searchBing(), searchSearxng()]);
-    for (var si = 0; si < settled.length && !results.length; si++) {
-      if (settled[si].status !== 'fulfilled') continue;
-      var winner = settled[si].value;
-      if (!Array.isArray(winner) || !winner.length) continue;
-      for (var ri = 0; ri < winner.length && results.length < maxResults; ri++) {
-        var r2 = winner[ri];
-        var title2 = String(r2.title || '').trim();
-        var url2 = String(r2.url || '').trim();
-        if (!title2 || !url2) continue;
-        results.push({
-          title: title2.slice(0, 200),
-          url: url2,
-          snippet: String(r2.snippet || '').trim().slice(0, 500),
-          source: r2.source || 'web',
-          published_at: r2.published_at || ''
-        });
-      }
-    }
-  } catch (e) {
-    console.warn('[SEARCH] all engines failed:', e && e.message);
-  }
-
-  searchCache.set(cacheKey, { ts: Date.now(), results: results });
-  return results;
-}
-
 function writeSse(res, payload) {
   try {
     if (res && !res.writableEnded && res.headersSent) {
@@ -2813,6 +2692,15 @@ async function runDeepThinkAgent(opts) {
   var usage = null;
   var finalModel = DEEPSEEK_MODEL_REASONER;
   var toolCallsInfo = [];
+  // ★ U3: thinking chunk 节流缓冲区 (200ms 合并推送)
+  var _thinkingChunkBuf = '';
+  var _thinkingChunkTimer = null;
+  function _flushThinkingChunk() {
+    if (_thinkingChunkTimer) { clearTimeout(_thinkingChunkTimer); _thinkingChunkTimer = null; }
+    var flushed = _thinkingChunkBuf;
+    _thinkingChunkBuf = '';
+    if (flushed) sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: flushed.slice(0, 4000) });
+  }
 
   try {
     // ★ R: 1 个 callDeepSeek, thinking + tool_use 自由决定
@@ -2875,9 +2763,12 @@ async function runDeepThinkAgent(opts) {
     usage = result.usage;
     finalModel = result.model || DEEPSEEK_MODEL_REASONER;
     toolCallsInfo = result.tool_calls_info || [];
+    // ★ U3: 推送最后残留的 thinking chunk buffer
+    _flushThinkingChunk();
     // thinking_chunk 已通过 onThinkingChunk 流式推送, thinkingLog 已由 sseSend 记录
   } catch (e) {
     console.error('[DEEP-THINK] agent failed:', e && e.message);
+    _flushThinkingChunk();
     sseSend({ type: 'deep_think_stage', stage: 'error', message: 'AI 思考失败: ' + (e.message || '未知错误') });
     return {
       cancelled: isCancelled(),
@@ -4151,20 +4042,14 @@ app.delete('/admin/user/:userName', verifyToken, rateLimit(60000, 5), async (req
 
     // 删除帖子的同时，级联删除该帖子下的点赞和评论
     if (userPostIds.length > 0) {
-      // 级联删除这些帖子的点赞
-      for (var pi = 0; pi < userPostIds.length; pi++) {
-        try {
-          var cascadeLikeRes = await supabase.from('likes').delete().eq('post_id', userPostIds[pi]);
-          if (!cascadeLikeRes.error) deletedLikes += (cascadeLikeRes.count || 0);
-        } catch(e) { console.warn('[admin] 级联删除 likes 失败:', e.message); }
-      }
-      // 级联删除这些帖子的评论
-      for (var ci = 0; ci < userPostIds.length; ci++) {
-        try {
-          var cascadeCommentRes = await supabase.from('comments').delete().eq('post_id', userPostIds[ci]);
-          if (!cascadeCommentRes.error) deletedComments += (cascadeCommentRes.count || 0);
-        } catch(e) { console.warn('[admin] 级联删除 comments 失败:', e.message); }
-      }
+      try {
+        var cascadeLikeRes = await supabase.from('likes').delete().in('post_id', userPostIds);
+        if (!cascadeLikeRes.error) deletedLikes += (cascadeLikeRes.count || 0);
+      } catch(e) { console.warn('[admin] 级联删除 likes 失败:', e.message); }
+      try {
+        var cascadeCommentRes = await supabase.from('comments').delete().in('post_id', userPostIds);
+        if (!cascadeCommentRes.error) deletedComments += (cascadeCommentRes.count || 0);
+      } catch(e) { console.warn('[admin] 级联删除 comments 失败:', e.message); }
     }
 
     // 删除 posts 表（用户发布的帖子）
@@ -7032,9 +6917,8 @@ function buildAiCorePrompt(config) {
 }
 
 // 动态上下文：每次可能变，独立 token 段
-function buildAiDynamicContext(ctx, config) {
-  return '';
-}
+// buildAiDynamicContext 已废弃，不再注入额外动态上下文
+function buildAiDynamicContext() { return ''; }
 
 // ===================== 全局 AI 配置读取 =====================
 const AI_DEFAULT_CONFIG = {
@@ -7118,6 +7002,8 @@ function migrateConfig(config) {
 }
 
 async function getAiConfig() {
+  var now = Date.now();
+  if (aiConfigCache && (now - aiConfigFetchedAt) < 30000) return aiConfigCache;
   try {
     var { data: row } = await supabase.from('posts')
       .select('content, media_url, created_at')
@@ -7128,13 +7014,19 @@ async function getAiConfig() {
     if (row && row.media_url) {
       try {
         var cfg = JSON.parse(row.media_url);
-        if (cfg && cfg.name) return migrateConfig(cfg);
+        if (cfg && cfg.name) {
+          aiConfigCache = migrateConfig(cfg);
+          aiConfigFetchedAt = now;
+          return aiConfigCache;
+        }
       } catch (e) { /* fall through */ }
     }
   } catch (e) {
     console.error('[AI-CONFIG] getAiConfig error:', e.message);
   }
-  return JSON.parse(JSON.stringify(AI_DEFAULT_CONFIG));
+  aiConfigCache = JSON.parse(JSON.stringify(AI_DEFAULT_CONFIG));
+  aiConfigFetchedAt = now;
+  return aiConfigCache;
 }
 
 
@@ -7778,7 +7670,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       };
 
       var fcController = new AbortController();
-      _fcTimer = setTimeout(function() { fcController.abort(); }, 4000);
+      _fcTimer = setTimeout(function() { fcController.abort(); }, 2000);
 
       try {
         var fcResp = await fetch(DEEPSEEK_API_URL, {
