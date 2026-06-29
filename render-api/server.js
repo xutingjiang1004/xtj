@@ -7100,7 +7100,14 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           }
           sResults = cleanSearchResults(sResults, 20);
         } catch (e) { sResults = []; }
-        _sharedSearchMeta = sResults && sResults.length > 0 ? { count: sResults.length, query: searchQuery } : null;
+        _sharedSearchMeta = sResults && sResults.length > 0 ? {
+          count: sResults.length,
+          query: searchQuery,
+          // ★ P1 关键修复：保存完整 results 数组，1 天后过期
+          //   重新打开对话时仍可展开看标题/链接/摘要
+          results: sResults.slice(0, 50),
+          expires_at: Date.now() + 86400000
+        } : null;
       }
       if (sResults && Array.isArray(sResults) && sResults.length) {
         var sCtx = '【联网搜索结果】\n搜索时间：' + _currentDateCN + '（北京时间）\n用户查询：' + searchQuery + '\n\n' +
@@ -7169,7 +7176,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
                 allResults.map(function(sr, idx) { return (idx + 1) + '. ' + (sr.title || '无标题') + '\n来源：' + (sr.source || 'web') + '\n链接：' + (sr.url || '无') + '\n摘要：' + (sr.snippet || '无摘要'); }).join('\n\n') +
                 '\n\n要求：基于以上搜索结果回答。不要在回答中列出来源、链接、网址等参考信息，直接给出答案内容即可。';
               messages.push({ role: 'system', content: maCtx });
-              _sharedSearchMeta = { count: allResults.length, query: message };
+              _sharedSearchMeta = {
+                count: allResults.length,
+                query: message,
+                results: allResults.slice(0, 50),
+                expires_at: Date.now() + 86400000
+              };
               res.write('data: ' + JSON.stringify({ type: 'search', count: allResults.length, results: allResults.slice(0, 20), query: message }) + '\n\n');
             }
           }
@@ -7251,7 +7263,12 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
             '\n\n要求：必须优先使用以上搜索结果回答。不要在回答中列出来源、链接、网址等参考信息，直接给出答案内容即可。不能编造新闻、价格、天气、日期。';
           roundMessages.push({ role: 'system', content: _psCtx });
           res.write('data: ' + JSON.stringify({ type: 'search', count: _psResults.length, results: _psResults.slice(0, 20), query: _psQuery }) + '\n\n');
-          _sharedSearchMeta = { count: _psResults.length, query: _psQuery };
+          _sharedSearchMeta = {
+            count: _psResults.length,
+            query: _psQuery,
+            results: _psResults.slice(0, 50),
+            expires_at: Date.now() + 86400000
+          };
         } else {
           res.write('data: ' + JSON.stringify({ type: 'search', count: 0, results: [], query: _psQuery }) + '\n\n');
         }
