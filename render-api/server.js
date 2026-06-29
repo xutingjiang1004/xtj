@@ -78,17 +78,21 @@ const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
 const AI_AGENT_DAILY_LIMIT = 300; // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = 50; // 每用户每小时 AI 调用次数
 
-// ===================== M: 深度思考模式 (Deep Think / Multi-Agent) =====================
-// 深度思考模式由 Planner 自主决定 1-10 个并行 worker agent
-// Planner → Workers (parallel) → Synthesizer → SSE progress
+// ===================== P: 深度思考模式 (Deep Think / Multi-Agent) =====================
+// P 改动:
+//   - MAX_WORKERS 10 -> 5
+//   - Planner 自主动态决策 (可拆 0/1/2..5 agent, 简单问题不调 agent)
+//   - Planner 可决定每个 agent 是否搜索
+//   - Synthesizer 风格改成 ChatGPT pro thinking (不要研究报告, 简单问题直接答)
+// Planner → Workers (parallel, optional) → Synthesizer → SSE progress
 const DEEP_THINK_CONFIG = {
   MAX_DURATION_MS: 10 * 60 * 1000,   // 10 分钟总预算
   PLANNER_TIMEOUT_MS: 60 * 1000,      // Planner 1 分钟
   WORKER_TIMEOUT_MS: 5 * 60 * 1000,   // 单 worker 5 分钟上限
   SYNTHESIZER_TIMEOUT_MS: 3 * 60 * 1000, // Synthesizer 3 分钟
-  MAX_WORKERS: 10,                    // Planner 最多拆 10 个
-  MIN_WORKERS: 1,                     // 最少 1 个 (单 agent 模式)
-  DEFAULT_WORKERS_IF_PLANNER_FAILS: 1, // Planner 失败时 fallback
+  MAX_WORKERS: 5,                     // ★ P 改: Planner 最多拆 5 个 (原 10)
+  MIN_WORKERS: 0,                     // ★ P 改: 0 = Planner 可决定不调 agent (直接答)
+  DEFAULT_WORKERS_IF_PLANNER_FAILS: 1, // Planner 失败时 fallback 1 个
   WORKER_MAX_TOOL_ROUNDS: 5,          // 单 worker 内部最多 tool_use 5 轮
   HEARTBEAT_MS: 3000                  // 3s 推一次进度
 };
@@ -96,43 +100,91 @@ const DEEP_THINK_CONFIG = {
 // 全局活跃深度思考任务 (按 conv_id 索引) — 用于 cancel
 const activeDeepThinkJobs = new Map(); // conv_id → { cancelled, startTime, controller }
 
-// Planner 提示词 — 决定 1-10 个 agent
-const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规划器.
-分析用户任务复杂度, 自主决定需要 1-10 个并行 agent (worker).
+// Planner 提示词 — 动态决策 0-5 个 agent (★ P 重写)
+// 核心思想: 简单问题不调 agent, 复杂问题才拆; 允许 agent 不搜索
+const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规划器 (Planner).
+你的职责: 判断问题复杂度, 决定要不要拆解成多个并行 agent, 拆几个, 是否需要搜索.
+目标是像 ChatGPT pro thinking 一样 —— **自然、不啰嗦、按需拆解**, 而不是机械地把所有问题都做成研究报告.
 
 输出严格 JSON (无 markdown 代码块, 无任何额外文字):
 {
   "complexity": "low|medium|high",
-  "reasoning": "为什么需要 N 个 agent (简短一句)",
+  "reasoning": "为什么这样安排 (简短一句, 20 字内)",
   "agents": [
     {
-      "role": "角色名 (2-6字中文, 如'景点探索师')",
-      "task_description": "该 agent 负责什么, 要具体",
-      "search_queries": ["关键词1", "关键词2", "关键词3"]
+      "role": "角色名 (2-6字中文, 如'景点探索师', 不需要写'师'也行, 如'景点')",
+      "task_description": "该 agent 负责什么, 要具体 (60 字内)",
+      "need_search": true|false,
+      "search_queries": ["关键词1", "关键词2"]
     }
   ]
 }
 
-决策规则:
-- 简单闲聊/单点问题/单方面查询: 1 个 agent
-- 多方面问题 (如'介绍一个城市'): 3-5 个 agent
-- 复杂研究型 (攻略/方案/对比/报告): 5-10 个 agent
-- 每个 agent 负责一个独立方面, agent 之间职责不重叠
-- 每个 agent 配 2-5 个搜索关键词
-- 关键词要适合搜索引擎, 中英文皆可, 简洁具体`;
+**关键决策规则 (像 ChatGPT pro thinking 那样判断, 别机械拆):**
 
-const DEEP_THINK_SYNTHESIZER_PROMPT = `你是 XTJ AI 深度思考模式的答案整合专家.
-你有 N 个并行专家 agent 的小报告, 请整合成结构清晰、引用完整、用户友好的最终答案.
+1. **极简单问题 (1+1=?, 你好, 你叫什么, 简单定义/常识)**: agents = []
+   - 直接给答案就行, 别拆, 别搜, 别装专业
+   - reasoning: "简单问题, 无需拆解"
 
-要求:
-1. 保留所有重要信息, 不要遗漏关键细节
-2. 用 [来源N] 标注具体事实/数据, N 对应下方"搜索结果列表"中的编号
-3. 失败的 agent 部分用 "[该方面暂无数据]" 标注, 不要硬编
-4. 结构清晰: 用标题分段、关键信息用列表、时间/价格/数字用粗体
-5. 总长 1500-5000 字, 用户要的是"详细攻略", 不要写 100 字应付
-6. 保留每个 agent 的独特洞察, 不要磨平个性
-7. 不要列出来源链接原始 URL, 引用处直接 [来源N] 即可
-8. 不要使用"作为一个 AI"等废话开头, 直接给答案`;
+2. **单点问题 (Jennie 生日, 巴黎在哪, 北京天气, 一首歌名)**: agents = []
+   - 1 个 agent 都嫌多, 直接答
+   - reasoning: "单点查询, 无需拆解"
+
+3. **多方面问题 (介绍一个城市, 怎么做蛋糕, 学英语方法)**: 2-3 个 agent
+   - 几个不同角度, 不要超过 3 个
+   - 需要事实/数据时, agent 配搜索
+
+4. **复杂研究型 (旅游攻略, 方案对比, 报告)**: 3-5 个 agent
+   - 最多 5 个, 别拆更细
+   - 每个 agent 独立方面, 互不重叠
+
+**搜索判断 (need_search):**
+- 闲聊/常识/简单计算: need_search = false
+- 实时信息/具体数据/事件: need_search = true
+- 你确信的事实 (历史, 经典知识): need_search = false
+- 不确定就 true
+
+**搜索关键词:**
+- need_search = false 时, search_queries 留空 []
+- need_search = true 时, 1-3 个精准关键词
+- 关键词要适合搜索引擎, 中英文皆可
+
+**agents = [] 时:**
+- 表示"直接答, 不拆"
+- reasoning 说明为什么简单
+- Synthesizer 会直接基于用户问题给一个简短自然的答案`;
+
+const DEEP_THINK_SYNTHESIZER_PROMPT = `你是 XTJ AI 深度思考模式的答案整合者 (Synthesizer).
+你的职责: 把 Planner 拆出来的 agent 报告整合成最终答案, 或者在 agents=[] 时直接回答用户问题.
+
+**风格: 像 ChatGPT pro thinking 一样 —— 自然、有温度、不啰嗦、像朋友聊天, 而不是写研究报告.**
+
+整合规则 (按问题复杂度自适应):
+
+1. **agents = [] (Planner 判定简单问题)**:
+   - 直接基于用户问题给一个简短自然的答案
+   - **严禁**展开成长篇大论, **严禁**搞成研究报告格式
+   - 1+1=? 就答 "1+1 = 2", 别说 "从皮亚诺公理的角度..." 之类的废话
+   - 简单定义/事实就 1-3 句话, 像朋友解释
+   - 总长 50-200 字
+
+2. **agents 1-2 个 (单点或多角度)**:
+   - 整合 agent 内容, 但保留自然口语化风格
+   - 不要分段标题堆砌, 1-3 段连贯文字
+   - 总长 200-800 字
+
+3. **agents 3-5 个 (复杂研究)**:
+   - 整合 agent 报告, 结构化呈现 (用标题/列表)
+   - 引用 agent 关键洞察, 用 [来源N] 标注 (N 对应搜索结果列表编号)
+   - 总长 800-2500 字 (按问题实际需要, 别硬撑)
+   - **避免**写成"## 一、引言 ## 二、背景"这种论文体
+
+**通用规则:**
+- 直接给答案, 不要说"作为一个 AI"、"以下是..."
+- 不要列原始 URL, 引用处直接 [来源N] 即可
+- 中文回复, 自然口语化
+- 不确定就说不确定, 别编
+- 代码/列表/标题该用就用, 但**别为了显示专业而过度格式化**`;
 
 // 单价配置（CNY / 1M tokens），可通过环境变量覆盖
 //   缓存未命中输入 1 元/1M tokens → DEEPSEEK_INPUT_PRICE_PER_1M
@@ -2644,6 +2696,15 @@ async function runMultiAgentFlow(opts) {
   // ★ O 修复 Bug 2: 收集每个 agent 的思考过程 (给前端展示)
   var thinkingLog = []; // [{ agent_role, chunk, round, ts }]
 
+  // ★ P 新增: 从 config 读取深度思考的思考程度 (管理员可独立设置)
+  //   顺序: 客户端 req body > config.deep_think.default_thinking_mode > 'max'
+  var deepThinkThinkingMode = (opts.thinking_mode)
+    || (config && config.deep_think && config.deep_think.default_thinking_mode)
+    || 'max';
+  // 校验合法值
+  if (['low', 'medium', 'high', 'max'].indexOf(deepThinkThinkingMode) < 0) deepThinkThinkingMode = 'max';
+  console.log('[DEEP-THINK] thinking_mode =', deepThinkThinkingMode, '| user=', userName);
+
   // === 阶段 1: Planner ===
   sseSend({ type: 'deep_think_stage', stage: 'planning', message: '正在分析任务, 决定需要多少个 agent' });
   if (isCancelled()) return { cancelled: true, partial: true };
@@ -2661,7 +2722,7 @@ async function runMultiAgentFlow(opts) {
       ],
       stream: false,
       thinking: { type: 'enabled' },
-      reasoning_effort: 'max',
+      reasoning_effort: deepThinkThinkingMode,  // ★ P 改: 用 config 读取, 不再写死 'max'
       response_format: { type: 'json_object' },
       max_tokens: 4096
     };
@@ -2691,7 +2752,7 @@ async function runMultiAgentFlow(opts) {
     planResult = JSON.stringify({
       complexity: 'low',
       reasoning: 'Planner 失败, 使用单 agent 模式',
-      agents: [{ role: 'AI 助手', task_description: message, search_queries: [] }]
+      agents: [{ role: 'AI 助手', task_description: message, need_search: false, search_queries: [] }]
     });
   }
 
@@ -2703,14 +2764,15 @@ async function runMultiAgentFlow(opts) {
   } catch (e) {
     console.error('[DEEP-THINK] planner JSON parse failed:', e && e.message);
   }
-  if (!plan || !Array.isArray(plan.agents) || plan.agents.length === 0) {
+  if (!plan || !Array.isArray(plan.agents)) {
     plan = {
       complexity: 'low',
       reasoning: 'Planner 输出解析失败, fallback 单 agent',
-      agents: [{ role: 'AI 助手', task_description: message, search_queries: [] }]
+      agents: [{ role: 'AI 助手', task_description: message, need_search: false, search_queries: [] }]
     };
   }
-  // 限制 agent 数量 1-10
+  // ★ P 改: agents = [] 是合法状态 (Planner 判定简单问题, 不拆解)
+  // 限制 agent 数量 0-5
   if (plan.agents.length > DEEP_THINK_CONFIG.MAX_WORKERS) {
     plan.agents = plan.agents.slice(0, DEEP_THINK_CONFIG.MAX_WORKERS);
   }
@@ -2722,6 +2784,7 @@ async function runMultiAgentFlow(opts) {
     agents: plan.agents.map(function(a) { return {
       role: String(a.role || '专家').slice(0, 12),
       task_description: String(a.task_description || '').slice(0, 200),
+      need_search: a.need_search !== false,  // ★ P 新增: 是否需要搜索 (缺省 true)
       search_queries: Array.isArray(a.search_queries) ? a.search_queries.slice(0, 5).map(function(q) { return String(q).slice(0, 100); }) : []
     }; })
   };
@@ -2730,13 +2793,20 @@ async function runMultiAgentFlow(opts) {
     type: 'deep_think_planned',
     complexity: plannerInfo.complexity,
     reasoning: plannerInfo.reasoning,
-    agents: plannerInfo.agents.map(function(a) { return { role: a.role, status: 'pending' }; })
+    agents: plannerInfo.agents.map(function(a) { return { role: a.role, status: 'pending', need_search: a.need_search }; })
   });
-  console.log('[DEEP-THINK] planner decided', plannerInfo.agent_count, 'agents:', plannerInfo.agents.map(function(a) { return a.role; }).join(','));
+  console.log('[DEEP-THINK] planner decided', plannerInfo.agent_count, 'agents:', plannerInfo.agents.map(function(a) { return a.role; }).join(','), '| reasoning:', plannerInfo.reasoning);
 
   if (isCancelled()) return { cancelled: true, partial: true, planner: plannerInfo, worker_results: workerResults };
 
-  // === 阶段 2: Workers 并行 ===
+  // ★ P 新增: Planner 判定 agents = [] 时 (简单问题), 跳过 Worker 阶段, Synthesizer 直接答
+  if (plannerInfo.agent_count === 0) {
+    sseSend({ type: 'deep_think_stage', stage: 'synthesizing', message: 'Planner 判定为简单问题, 直接生成答案' });
+    // 直接进 Synthesizer (用空 workers 列表)
+    workerResults = [];
+  }
+
+  // === 阶段 2: Workers 并行 (agent_count > 0 时才执行) ===
   // 进度推送: 状态变更
   function updateWorkerStatus(idx, status, extra) {
     sseSend(Object.assign({
@@ -2754,6 +2824,7 @@ async function runMultiAgentFlow(opts) {
     updateWorkerStatus(wi, 'pending');
   }
 
+  // ★ P 改: Planner agents=[] 时跳过 worker 执行
   var workerPromises = plannerInfo.agents.map(function(agent, idx) {
     return (async function() {
       var wStart = Date.now();
@@ -2770,6 +2841,8 @@ async function runMultiAgentFlow(opts) {
           cancelToken: cancelToken,
           timeLeft: timeLeft,
           sseSend: sseSend,
+          thinkingMode: deepThinkThinkingMode,  // ★ P 改: 传思考程度给 worker
+          needSearch: agent.need_search !== false,  // ★ P 新增: 是否需要搜索
           onRound: function(round) { updateWorkerStatus(idx, 'running', { round: round, max_rounds: DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS }); }
         });
         var elapsed = Date.now() - wStart;
@@ -2833,7 +2906,7 @@ async function runMultiAgentFlow(opts) {
       ],
       stream: false,
       thinking: { type: 'enabled' },
-      reasoning_effort: 'max',
+      reasoning_effort: deepThinkThinkingMode,  // ★ P 改: 用 config 读取, 不再写死 'max'
       max_tokens: 32768
     };
     var synthResp = await fetch(DEEPSEEK_API_URL, {
@@ -2897,26 +2970,38 @@ async function runDeepThinkWorker(opts) {
   var timeLeft = opts.timeLeft;
   var sseSend = opts.sseSend;
   var onRound = opts.onRound;
+  // ★ P 新增: thinkingMode (从 config 读) + needSearch (Planner 决定)
+  var thinkingMode = opts.thinkingMode || 'max';
+  if (['low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
+  var needSearch = opts.needSearch !== false;  // 缺省 true (向后兼容)
 
   var sources = [];
   var queries = [];
 
+  // ★ P 改: 允许 worker 不调搜索 (简单/常识问题)
+  //  need_search=false 时, worker 直接基于自身知识产出 100-500 字
+  var searchHint = needSearch
+    ? '**本任务需要搜索**: 请调用 search_web 工具获取最新/具体数据 (1-3 次足够, 别刷屏)'
+    : '**本任务不需要搜索**: 直接基于你的知识回答, 别调用 search_web 浪费 token';
+
   var workerSystemPrompt = '你是 XTJ 深度思考模式下的 [' + agent.role + '] 专家.\n' +
     '你的具体任务: ' + agent.task_description + '\n' +
-    '建议搜索关键词: ' + (agent.search_queries || []).join(' | ') + '\n\n' +
+    (needSearch ? '建议搜索关键词: ' + (agent.search_queries || []).join(' | ') + '\n' : '') +
     (historyContext || '') + '\n\n' +
+    searchHint + '\n\n' +
     '执行规则:\n' +
-    '1. 主动调用 search_web 工具获取最新信息 (可多次调用, 每次一个具体关键词)\n' +
-    '2. 基于搜索结果产出 500-1500 字的本方面专业分析\n' +
-    '3. 输出末尾列出本 agent 收集的所有引用 (title + url), 供 Synthesizer 统一编号\n' +
+    '1. ' + (needSearch ? '主动调用 search_web 工具获取最新信息 (1-3 次足够, 别反复搜同样的)' : '**不调用** search_web, 直接基于知识回答') + '\n' +
+    '2. 产出 200-800 字的本方面分析 (按问题需要, 别硬撑字数)\n' +
+    '3. ' + (needSearch ? '输出末尾列出本 agent 收集的所有引用 (title + url), 供 Synthesizer 统一编号' : '不需要引用列表') + '\n' +
     '4. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
     '5. 不要做最终总结, Synthesizer 会整合所有 agent 的报告\n' +
     '6. 不要使用"作为一个 AI"等废话, 直接开始分析\n' +
-    '7. ★ 必须看 [历史对话上下文], 不要把用户的补充 (如"你卡了") 当成新问题去搜';
+    '7. ★ 必须看 [历史对话上下文], 不要把用户的补充 (如"你卡了") 当成新问题去搜\n' +
+    '8. ★ 别写成研究报告, 保持自然简洁';
 
   var messages = [
     { role: 'system', content: workerSystemPrompt },
-    { role: 'user', content: '用户原始问题: ' + originalMessage + '\n\n请基于你的任务开始专业分析, 必要时调用 search_web.' }
+    { role: 'user', content: '用户原始问题: ' + originalMessage + '\n\n请基于你的任务开始' + (needSearch ? '专业分析, 必要时调用 search_web' : '回答 (不需要搜索)') + '.' }
   ];
 
   for (var round = 1; round <= DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS; round++) {
@@ -2927,13 +3012,16 @@ async function runDeepThinkWorker(opts) {
 
     var r = null;
     try {
-      r = await callDeepSeek(messages, {
-        thinking_mode: 'max',
-        tools: AI_TOOLS,
-        tool_choice: 'auto',
-        max_tool_rounds: 1,  // 单轮只允许 1 个 tool call
+      var callOpts = {
+        thinking_mode: thinkingMode,  // ★ P 改: 用 config 读取, 不再写死 'max'
         max_tokens: 8192,
-        tool_executor: async function(tc) {
+        max_tool_rounds: 1
+      };
+      // ★ P 改: needSearch=false 时不传 tools, 避免 AI 仍调用 search_web
+      if (needSearch) {
+        callOpts.tools = AI_TOOLS;
+        callOpts.tool_choice = 'auto';
+        callOpts.tool_executor = async function(tc) {
           var tRes = await executeToolCall(tc);
           // 收集 search_web 结果
           if (tc.function && tc.function.name === 'search_web') {
@@ -2954,8 +3042,9 @@ async function runDeepThinkWorker(opts) {
             sseSend({ type: 'deep_think_tool', agent_role: agent.role, tool_name: 'search_web', count: tRes.results_count || 0 });
           }
           return tRes;
-        }
-      });
+        };
+      }
+      r = await callDeepSeek(messages, callOpts);
     } catch (e) {
       console.error('[DEEP-THINK] worker callDeepSeek failed:', e && e.message);
       throw e;
@@ -7003,6 +7092,13 @@ const AI_DEFAULT_CONFIG = {
   //   用户要求: 普通聊天也用 max 思考程度
   //   管理员可在 /admin/ai-agent/config 切换为 low/medium/high/max
   model: { reasoner_model: '', default_thinking_mode: 'max', allow_user_thinking_switch: false, multi_agent: true },
+  // ★ P 新增: 深度思考模式子配置 (与普通聊天分开, 管理员独立切换)
+  deep_think: {
+    enabled: true,                    // 是否启用深度思考模式 (前端 toggle 可用)
+    default_thinking_mode: 'max',     // Planner/Worker/Synthesizer 默认思考程度 (low/medium/high/max)
+    max_workers: 5,                   // Planner 最多拆几个 agent (运行时也受 DEEP_THINK_CONFIG.MAX_WORKERS 限制)
+    require_history_injection: true   // 是否把 history 注入到 Planner/Worker/Synthesizer
+  },
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',
   updated_by: ''
@@ -7025,6 +7121,8 @@ function migrateConfig(config) {
       Object.assign(merged.search, config.search);
     } else if (k === 'model' && typeof config.model === 'object') {
       Object.assign(merged.model, config.model);
+    } else if (k === 'deep_think' && typeof config.deep_think === 'object') {  // ★ P 新增
+      Object.assign(merged.deep_think, config.deep_think);
     } else if (k === 'admin_debug' && typeof config.admin_debug === 'object') {
       Object.assign(merged.admin_debug, config.admin_debug);
     } else {
@@ -7193,6 +7291,9 @@ async function handleDeepThinkChat(req, res) {
     // 6. 运行多 agent 流程
     var flowResult = null;
     try {
+      // ★ P 新增: 从 req.body / config 读取深度思考的思考程度
+      //   顺序: 客户端 req body > config.deep_think.default_thinking_mode > 'max'
+      var clientThinkingMode = (req.body && req.body.thinking_mode) || '';
       flowResult = await runMultiAgentFlow({
         res: res,
         userName: userName,
@@ -7201,7 +7302,8 @@ async function handleDeepThinkChat(req, res) {
         config: config,
         ctx: ctx,
         startTime: startTime,
-        cancelToken: cancelToken
+        cancelToken: cancelToken,
+        thinking_mode: clientThinkingMode  // ★ P 传思考程度 (空则用 config)
       });
     } catch (e) {
       console.error('[DEEP-THINK] runMultiAgentFlow exception:', e && e.message);
