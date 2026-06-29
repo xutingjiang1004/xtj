@@ -2397,28 +2397,26 @@ async function callDeepSeek(messages, options) {
     var lastUsage = null;
 
     for (var round = 0; round < maxToolRounds; round++) {
-      // 每次只用一个超时计时器，循环内由 controller 复用
+      var useStream = !!(round === 0 && useThinking && options && typeof options.onThinkingChunk === 'function');
       var apiBody = {
         model: model,
         messages: workingMessages,
-        stream: false
+        stream: useStream
       };
       if (useThinking) {
         apiBody.thinking = { type: 'enabled' };
         apiBody.reasoning_effort = thinkingLevel;
       }
-      // ★ P0 修复：response_format 透传（用于 Planner 强制 JSON 输出）
-  if (options && options.response_format) {
-    apiBody.response_format = options.response_format;
-  }
-  if (useTools) {
-    apiBody.tools = options.tools;
-    if (toolChoice) apiBody.tool_choice = toolChoice;
-  }
-  // ★ M: max_tokens 透传（深度思考模式需要更大 token 上限）
-  if (options && options.max_tokens && typeof options.max_tokens === 'number') {
-    apiBody.max_tokens = options.max_tokens;
-  }
+      if (options && options.response_format) {
+        apiBody.response_format = options.response_format;
+      }
+      if (useTools && !(useStream && round === 0)) {
+        apiBody.tools = options.tools;
+        if (toolChoice) apiBody.tool_choice = toolChoice;
+      }
+      if (options && options.max_tokens && typeof options.max_tokens === 'number') {
+        apiBody.max_tokens = options.max_tokens;
+      }
 
       var resp = await fetch(DEEPSEEK_API_URL, {
         method: 'POST',
@@ -2430,52 +2428,125 @@ async function callDeepSeek(messages, options) {
         signal: controller.signal
       });
 
-      var data = await resp.json().catch(function() { return {}; });
-
       if (!resp.ok) {
-        var deepErr = data && data.error && data.error.message ? String(data.error.message).slice(0, 200) : '';
-        console.error('[DEEPSEEK] API error', resp.status, deepErr, 'round', round);
-        if (useThinking && (deepErr.indexOf('thinking') >= 0 || deepErr.indexOf('reasoning_effort') >= 0 || resp.status === 400)) {
+        var errTxt = '';
+        try { var ej = await resp.json().catch(function() { return {}; }); errTxt = (ej && ej.error && ej.error.message) ? String(ej.error.message).slice(0, 200) : ''; } catch (e) {}
+        console.error('[DEEPSEEK] API error', resp.status, errTxt, 'round', round);
+        if (useThinking && (errTxt.indexOf('thinking') >= 0 || errTxt.indexOf('reasoning_effort') >= 0 || resp.status === 400)) {
           throw new Error('AI 调用失败：当前模型不支持思考模式，请关闭思考模式后重试');
         }
         throw new Error('AI 调用失败（HTTP ' + resp.status + '）');
       }
 
-      if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-        console.error('[DEEPSEEK] unexpected response shape');
-        throw new Error('AI 返回格式异常');
-      }
+      var content = '';
+      var toolCalls = [];
+      var streamToolCallMap = {};
 
-      var choice = data.choices[0];
-      var message = choice.message || {};
-      var content = typeof message.content === 'string' ? message.content : '';
-      var toolCalls = message.tool_calls || [];
+      if (useStream) {
+        // ===== 流式解析 (round 0 with thinking) =====
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var sBuffer = '';
+        var streamDone = false;
 
-      // 累计 usage（取最后一次的 usage，因为 cache 累计在最后一轮）
-      if (data.usage) {
-        lastUsage = data.usage;
-        totalUsage.prompt_tokens += data.usage.prompt_tokens || 0;
-        totalUsage.completion_tokens += data.usage.completion_tokens || 0;
-        totalUsage.total_tokens += data.usage.total_tokens || 0;
-        if (typeof data.usage.prompt_cache_hit_tokens === 'number') {
-          totalUsage.prompt_cache_hit_tokens = data.usage.prompt_cache_hit_tokens;
+        while (!streamDone) {
+          var rd;
+          try { rd = await reader.read(); } catch (e) { break; }
+          if (rd.done) break;
+          sBuffer += decoder.decode(rd.value, { stream: true });
+          var sLines = sBuffer.split('\n');
+          sBuffer = sLines.pop() || '';
+
+          for (var sl = 0; sl < sLines.length; sl++) {
+            var sLine = sLines[sl].trim();
+            if (!sLine || sLine.indexOf('data: ') !== 0) continue;
+            var sData = sLine.slice(6);
+            if (sData === '[DONE]') { streamDone = true; break; }
+            var sJson;
+            try { sJson = JSON.parse(sData); } catch (e) { continue; }
+            if (!sJson || !sJson.choices || !sJson.choices[0]) continue;
+            var sChoice = sJson.choices[0];
+            var sDelta = sChoice.delta || {};
+
+            // reasoning_content chunk → 推给回调
+            if (typeof sDelta.reasoning_content === 'string' && sDelta.reasoning_content) {
+              try { options.onThinkingChunk(String(sDelta.reasoning_content).slice(0, 4000)); } catch (e) {}
+            }
+            // content chunk → 累积
+            if (typeof sDelta.content === 'string' && sDelta.content) {
+              content += sDelta.content;
+            }
+            // tool_calls chunk → 累积
+            if (Array.isArray(sDelta.tool_calls)) {
+              for (var st=0; st < sDelta.tool_calls.length; st++) {
+                var stc = sDelta.tool_calls[st];
+                var stcIdx = stc.index || 0;
+                if (!streamToolCallMap[stcIdx]) {
+                  streamToolCallMap[stcIdx] = {
+                    id: stc.id || '',
+                    type: 'function',
+                    function: { name: '', arguments: '' }
+                  };
+                }
+                if (stc.id) streamToolCallMap[stcIdx].id = stc.id;
+                if (stc.function) {
+                  if (stc.function.name) streamToolCallMap[stcIdx].function.name = (streamToolCallMap[stcIdx].function.name || '') + stc.function.name;
+                  if (stc.function.arguments) streamToolCallMap[stcIdx].function.arguments += stc.function.arguments;
+                }
+              }
+            }
+            // usage (last delta usually)
+            if (sJson.usage) {
+              lastUsage = sJson.usage;
+              totalUsage.prompt_tokens += sJson.usage.prompt_tokens || 0;
+              totalUsage.completion_tokens += sJson.usage.completion_tokens || 0;
+              totalUsage.total_tokens += sJson.usage.total_tokens || 0;
+              if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens = sJson.usage.prompt_cache_hit_tokens;
+              if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens = sJson.usage.prompt_cache_miss_tokens;
+            }
+          }
         }
-        if (typeof data.usage.prompt_cache_miss_tokens === 'number') {
-          totalUsage.prompt_cache_miss_tokens = data.usage.prompt_cache_miss_tokens;
-        }
-      }
+        try { reader.cancel(); } catch (e) {}
 
-      // 没 tool_calls：这是最终回复
-      if (!toolCalls || toolCalls.length === 0) {
-        finalContent = content;
+        // 收集流式积累的 tool_calls
+        var stcKeys = Object.keys(streamToolCallMap).sort(function(a,b) { return parseInt(a)-parseInt(b); });
+        for (var sk=0; sk<stcKeys.length; sk++) {
+          toolCalls.push(streamToolCallMap[stcKeys[sk]]);
+        }
+        // reasoning_content 已通过 onThinkingChunk 实时推送, finalReasoning 置空
+        finalReasoning = '';
+      } else {
+        // ===== 非流式 (standard) =====
+        var data = await resp.json().catch(function() { return {}; });
+        if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+          console.error('[DEEPSEEK] unexpected response shape');
+          throw new Error('AI 返回格式异常');
+        }
+        var choice = data.choices[0];
+        var message = choice.message || {};
+        content = typeof message.content === 'string' ? message.content : '';
+        toolCalls = message.tool_calls || [];
+        if (data.usage) {
+          lastUsage = data.usage;
+          totalUsage.prompt_tokens += data.usage.prompt_tokens || 0;
+          totalUsage.completion_tokens += data.usage.completion_tokens || 0;
+          totalUsage.total_tokens += data.usage.total_tokens || 0;
+          if (typeof data.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens = data.usage.prompt_cache_hit_tokens;
+          if (typeof data.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens = data.usage.prompt_cache_miss_tokens;
+        }
         if (useThinking) {
           var r = message.reasoning_content;
           if (typeof r === 'string' && r) finalReasoning = r;
         }
+      }
+
+      // 没 tool_calls：最终回复
+      if (!toolCalls || toolCalls.length === 0) {
+        finalContent = content;
         break;
       }
 
-      // 有 tool_calls：先把 assistant 消息（含 tool_calls）追加，再执行 tool
+      // 有 tool_calls：追加 assistant 消息 → 执行 tool → 进入下一轮
       workingMessages.push({
         role: 'assistant',
         content: content || '',
@@ -2489,37 +2560,18 @@ async function callDeepSeek(messages, options) {
         var tcId = tc.id || ('call_' + Date.now() + '_' + t);
         var tStart = Date.now();
         var toolResult = null;
-        try {
-          toolResult = await toolExecutor(tc);
-        } catch (e) {
-          toolResult = { tool_name: tcName, error: (e && e.message) || '工具执行失败' };
-        }
+        try { toolResult = await toolExecutor(tc); } catch (e) { toolResult = { tool_name: tcName, error: (e && e.message) || '工具执行失败' }; }
         var tElapsed = Date.now() - tStart;
         try { console.log('[DEEPSEEK] tool_call', tcName, 'elapsed_ms', tElapsed); } catch (e) {}
-
-        // 收集 tool_calls_info（供上层做徽章 / 统计）
         var infoObj = {
-          id: tcId,
-          name: tcName,
-          args: tcArgs,
-          elapsed_ms: tElapsed,
+          id: tcId, name: tcName, args: tcArgs, elapsed_ms: tElapsed,
           ok: !toolResult || !toolResult.error
         };
-        // search_web 特殊：把结果数记进去
-        if (tcName === 'search_web' && toolResult && toolResult.results) {
-          infoObj.results_count = toolResult.results.length;
-        }
+        if (tcName === 'search_web' && toolResult && toolResult.results) infoObj.results_count = toolResult.results.length;
         toolCallsInfo.push(infoObj);
-
-        // 追加 tool 消息（DeepSeek 要求 role=tool + tool_call_id）
         var toolContent = toolResult ? JSON.stringify(toolResult).slice(0, 8000) : '{}';
-        workingMessages.push({
-          role: 'tool',
-          tool_call_id: tcId,
-          content: toolContent
-        });
+        workingMessages.push({ role: 'tool', tool_call_id: tcId, content: toolContent });
       }
-      // 进入下一轮
     }
 
     // 如果循环结束还有 tool_calls（达到 maxToolRounds），最后内容可能为空
@@ -2777,6 +2829,10 @@ async function runDeepThinkAgent(opts) {
         tool_choice: 'auto',
         max_tool_rounds: 5,     // 内部最多 5 轮 tool_use
         max_tokens: 32768,
+        onThinkingChunk: function(chunk) {
+          // ★ 流式推送 thinking_chunk, 前端实时看到思考过程
+          sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: String(chunk).slice(0, 4000) });
+        },
         tool_executor: async function(tc) {
           // ★ R: 通过 tool_executor 收集 sources + 推 SSE
           var tRes = null;
@@ -2818,19 +2874,10 @@ async function runDeepThinkAgent(opts) {
     );
 
     finalContent = result.content || '';
-    finalReasoning = result.reasoning || '';
     usage = result.usage;
     finalModel = result.model || DEEPSEEK_MODEL_REASONER;
     toolCallsInfo = result.tool_calls_info || [];
-
-    // ★ R: 推 Agent 思考过程 (单次 thinking 一次性推, 不是分阶段)
-    if (finalReasoning) {
-      sseSend({
-        type: 'thinking_chunk',
-        agent_role: 'AI 智能体',
-        chunk: String(finalReasoning).slice(0, 8000)
-      });
-    }
+    // thinking_chunk 已通过 onThinkingChunk 流式推送, thinkingLog 已由 sseSend 记录
   } catch (e) {
     console.error('[DEEP-THINK] agent failed:', e && e.message);
     sseSend({ type: 'deep_think_stage', stage: 'error', message: 'AI 思考失败: ' + (e.message || '未知错误') });
