@@ -6338,14 +6338,20 @@ function buildAiCorePrompt(config) {
     '【执行透明】不要假装执行了任何操作（发布/删除/修改）。如果用户要求操作但当前不能做，明确说"我没法直接执行这个操作"。',
     '【简短优先】默认用 1-3 句话直接回答用户问题，除非用户明确要求详细（攻略、方案、对比等复杂任务可以分步骤详细写）。避免在开头说"这是一个好问题"等无意义寒暄。',
     '【格式克制】默认用纯文本/简短 Markdown。除非用户明确要求列表或代码块，否则不强行加项目符号。表情 emoji 适度，每条最多 1-2 个。',
+    // ★ B: Chain-of-Thought 强制规划
+    '【先规划后执行】回答任何问题前先在内部走一遍 4 步：①理解用户真正想要的（不是字面问题）；②判断是否需要追问澄清（问题模糊、缺关键信息、有多种合理理解时，必须先问 1-2 个关键问题再答，而不是猜）；③规划回答结构（要点 / 步骤 / 对比 / 引用）；④执行并自检（数据是否一致、引用是否对得上、是否编造）。',
+    '【主动澄清】当问题存在以下情况时必须先追问，不要直接给答案：用户意图有 2 种以上合理理解（如"苹果"指水果还是公司）；缺少关键参数（如"推荐餐厅"没位置/预算/口味）；问题太宽泛（如"教我做菜"没说做什么菜）。追问时直接列出 2-3 个具体选项让用户选。',
+    // ★ C: 引用强约束
+    '【引用强约束】当回答中包含来自搜索结果的具体事实、数据、价格、时间、人名、引言时，必须在对应位置用 [来源N] 标注（N 是搜索结果编号，从 1 开始）。例如："北京今天最高气温 28°C [来源1]，空气质量 AQI 65 属于良 [来源2]。"。没有 [来源N] 标注的具体数据视为编造，必须避免。如果本次没有搜索到任何信息，必须在涉及实时数据的句末标注 [无网络来源]，而不是默认写具体数字。',
+    '【引用一致性】[来源N] 中的 N 必须对应当前对话已注入的搜索结果编号（按 1→2→3... 顺序），不能编造编号。如果不确定某个事实来自哪条搜索结果，宁可删掉这条事实也不要乱标 [来源N]。',
   ];
 
   // 联网搜索提示
   var allowWebSearch = cfg.allow_web_search === true || (cfg.search && cfg.search.allow_web_search === true);
   if (allowWebSearch) {
-    lines.push('【联网搜索】你拥有联网搜索工具 search_web（用 Tavily/Serper/Brave 搜索引擎）、get_weather（天气查询）、get_current_time（当前时间）。当用户问实时信息（新闻、天气、价格、政策、开放时间、今天/最近发生的事）时，你应该主动调用工具获取最新数据，再基于结果回答。每次引用搜索结果要说明来源（域名）。');
+    lines.push('【联网搜索】你拥有联网搜索工具 search_web（用 Tavily/Serper/Brave 搜索引擎）、get_weather（天气查询）、get_current_time（当前时间）。当用户问实时信息（新闻、天气、价格、政策、开放时间、今天/最近发生的事）时，你应该主动调用工具获取最新数据，再基于结果回答。每次引用搜索结果必须用 [来源N] 标注（与上面的"引用强约束"配合）。');
   } else {
-    lines.push('【无工具处理】你当前没有实时联网工具。当问题需要实时信息（路线、价格、政策、开放时间、天气、新闻）时，必须明确说明"我当前没有实时联网结果"，然后给出通用建议。不要编造具体数字。');
+    lines.push('【无工具处理】你当前没有实时联网工具。当问题需要实时信息（路线、价格、政策、开放时间、天气、新闻）时，必须明确说明"我当前没有实时联网结果"，然后给出通用建议。涉及具体数字时加 [无网络来源] 标注，不要编造。');
   }
 
   // 人设和语气
@@ -6451,7 +6457,10 @@ const AI_DEFAULT_CONFIG = {
     format: ['必要时使用标题和清单', '复杂问题先说结论再给步骤']
   },
   search: { allow_web_search: false, search_provider: 'searxng', max_results: 5, timeout_ms: 4000, use_weather_tool: true },
-  model: { reasoner_model: '', default_thinking_mode: 'medium', allow_user_thinking_switch: false, multi_agent: false },
+  // ★ D 修复：default_thinking_mode 从 medium 改成 low
+  //   low 已经能覆盖大部分 chain-of-thought 需求，比 medium 便宜
+  //   管理员可在 /admin/ai-agent/config 调整
+  model: { reasoner_model: '', default_thinking_mode: 'low', allow_user_thinking_switch: true, multi_agent: false },
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',
   updated_by: ''
@@ -6613,8 +6622,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     //       AI 可以自己决定是否调用搜索
     var reply = '';
     var usage = null;
-    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'off';
-    if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'off';
+    // ★ D 修复：fallback 'off' 改成 'low'，让 AI 默认多想一下
+    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
+    if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
     var reasoning = '';
     var toolCallsInfo = [];
     var allowWebSearch = config.allow_web_search === true || (config.search && config.search.allow_web_search === true);
@@ -6836,8 +6846,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     
     // 思考模式
-    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'off';
-    if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'off';
+    // ★ D 修复：fallback 'off' 改成 'low'
+    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
+    if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
     var useThinking = thinkingMode !== 'off';
     
     // 天气查询（Open-Meteo 免费 API）
@@ -7902,7 +7913,7 @@ app.get('/admin/ai-agent/effective-prompt', verifyToken, async (req, res) => {
       roleplay_enabled: config.roleplay && config.roleplay.enabled,
       search_enabled: allowWebSearch,
       model: config.model || {},
-      default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'medium'
+      default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'low'
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });

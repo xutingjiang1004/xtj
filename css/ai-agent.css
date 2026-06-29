@@ -1549,6 +1549,27 @@
 .ai-msg-bubble strong { font-weight: 600; }
 .ai-msg-bubble em { font-style: italic; }
 .ai-msg-bubble a { color: var(--ai-primary, #2E9465); text-decoration: underline; }
+/* ★ C 关键修复：[来源N] 链接样式 — 让引用更醒目 */
+.ai-msg-bubble a.ai-source-link {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 1px 6px;
+  background: rgba(46, 148, 101, 0.08);
+  color: var(--ai-primary, #2E9465);
+  border: 1px solid rgba(46, 148, 101, 0.3);
+  border-radius: 4px;
+  text-decoration: none;
+  font-size: 0.85em;
+  font-weight: 600;
+  vertical-align: baseline;
+  line-height: 1.4;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ai-msg-bubble a.ai-source-link:hover {
+  background: rgba(46, 148, 101, 0.18);
+  border-color: rgba(46, 148, 101, 0.5);
+  text-decoration: none;
+}
 .ai-msg-bubble h1, .ai-msg-bubble h2, .ai-msg-bubble h3,
 .ai-msg-bubble h4, .ai-msg-bubble h5, .ai-msg-bubble h6 {
   margin: 8px 0 4px;
