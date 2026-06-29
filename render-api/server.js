@@ -771,8 +771,6 @@ function sanitizeAssistantVisibleText(text) {
   return s;
 }
 
-var summaryCache = new Map();
-
 // Open-Meteo 免费天气查询（无需 API Key）
 var CITY_COORDS = {
   '北京': { lat: 39.9042, lon: 116.4074 },
@@ -2498,9 +2496,9 @@ async function callDeepSeek(messages, options) {
             // usage (last delta usually)
             if (sJson.usage) {
               lastUsage = sJson.usage;
-              totalUsage.prompt_tokens += sJson.usage.prompt_tokens || 0;
-              totalUsage.completion_tokens += sJson.usage.completion_tokens || 0;
-              totalUsage.total_tokens += sJson.usage.total_tokens || 0;
+              totalUsage.prompt_tokens = sJson.usage.prompt_tokens || 0;
+              totalUsage.completion_tokens = sJson.usage.completion_tokens || 0;
+              totalUsage.total_tokens = sJson.usage.total_tokens || 0;
               if (typeof sJson.usage.prompt_cache_hit_tokens === 'number') totalUsage.prompt_cache_hit_tokens = sJson.usage.prompt_cache_hit_tokens;
               if (typeof sJson.usage.prompt_cache_miss_tokens === 'number') totalUsage.prompt_cache_miss_tokens = sJson.usage.prompt_cache_miss_tokens;
             }
@@ -3069,45 +3067,55 @@ async function runDeepThinkWorker(opts) {
 // ★ AI 智能体调用按 userName 限流，避免 IP 共享用户互相挤占额度
 // 限流维度：每用户每天 AI_AGENT_DAILY_LIMIT 次 / 每小时 AI_AGENT_HOURLY_LIMIT 次
 var aiUserRateStore = new Map(); // userName -> { hourly: {count, resetAt}, daily: {count, resetAt} }
+// 限流防竞态锁
+var aiRateLimitMutex = new Map();
 function checkAiUserRateLimit(userName) {
   if (!userName) return { allowed: false, reason: 'no_user' };
-  var now = Date.now();
-  var record = aiUserRateStore.get(userName);
-  if (!record) {
-    record = {
-      hourly: { count: 1, resetAt: now + 3600000 },
-      daily:  { count: 1, resetAt: now + 86400000 }
-    };
-    aiUserRateStore.set(userName, record);
+  // 串行化同用户限流检查，防并发竞态
+  if (aiRateLimitMutex.get(userName)) {
+    return { allowed: false, reason: 'concurrent' };
+  }
+  aiRateLimitMutex.set(userName, true);
+  try {
+    var now = Date.now();
+    var record = aiUserRateStore.get(userName);
+    if (!record) {
+      record = {
+        hourly: { count: 1, resetAt: now + 3600000 },
+        daily:  { count: 1, resetAt: now + 86400000 }
+      };
+      aiUserRateStore.set(userName, record);
+      return {
+        allowed: true,
+        remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - 1),
+        remainingDay:  Math.max(0, AI_AGENT_DAILY_LIMIT  - 1)
+      };
+    }
+
+    if (now > record.hourly.resetAt) {
+      record.hourly = { count: 1, resetAt: now + 3600000 };
+    } else if (record.hourly.count >= AI_AGENT_HOURLY_LIMIT) {
+      return { allowed: false, reason: 'hourly_limit', remainingHour: 0, remainingDay: Math.max(0, AI_AGENT_DAILY_LIMIT - record.daily.count) };
+    } else {
+      record.hourly.count++;
+    }
+
+    if (now > record.daily.resetAt) {
+      record.daily = { count: 1, resetAt: now + 86400000 };
+    } else if (record.daily.count >= AI_AGENT_DAILY_LIMIT) {
+      return { allowed: false, reason: 'daily_limit', remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count), remainingDay: 0 };
+    } else {
+      record.daily.count++;
+    }
+
     return {
       allowed: true,
-      remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - 1),
-      remainingDay:  Math.max(0, AI_AGENT_DAILY_LIMIT  - 1)
+      remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count),
+      remainingDay:  Math.max(0, AI_AGENT_DAILY_LIMIT  - record.daily.count)
     };
+  } finally {
+    aiRateLimitMutex.delete(userName);
   }
-
-  // 只在新窗口内先递增，达到上限则不递增直接拒绝
-  if (now > record.hourly.resetAt) {
-    record.hourly = { count: 1, resetAt: now + 3600000 };
-  } else if (record.hourly.count >= AI_AGENT_HOURLY_LIMIT) {
-    return { allowed: false, reason: 'hourly_limit', remainingHour: 0, remainingDay: Math.max(0, AI_AGENT_DAILY_LIMIT - record.daily.count) };
-  } else {
-    record.hourly.count++;
-  }
-
-  if (now > record.daily.resetAt) {
-    record.daily = { count: 1, resetAt: now + 86400000 };
-  } else if (record.daily.count >= AI_AGENT_DAILY_LIMIT) {
-    return { allowed: false, reason: 'daily_limit', remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count), remainingDay: 0 };
-  } else {
-    record.daily.count++;
-  }
-
-  return {
-    allowed: true,
-    remainingHour: Math.max(0, AI_AGENT_HOURLY_LIMIT - record.hourly.count),
-    remainingDay:  Math.max(0, AI_AGENT_DAILY_LIMIT  - record.daily.count)
-  };
 }
 
 // ===================== Token 管理（无状态签名令牌，服务重启不掉登录） =====================
@@ -3829,7 +3837,9 @@ app.post('/api/photo/delete', rateLimit(60000, 20), async (req, res) => {
     if (storagePath) {
       try { await supabase.storage.from('uploads').remove([storagePath]); } catch(_) {}
     }
-    const { error } = await supabase.from('posts').delete().eq('id', photoId);
+    var delQuery = supabase.from('posts').delete().eq('id', photoId);
+    if (!isAdmin && username) delQuery = delQuery.eq('user_name', username);
+    const { error } = await delQuery;
     if (error) return res.status(400).json({ error: sanitizeError(error) });
 
     return res.json({ ok: true });
@@ -4059,10 +4069,12 @@ app.post('/admin/blacklist', verifyToken, rateLimit(60000, 30), async (req, res)
 
 app.put('/admin/blacklist/:id/lift', verifyToken, async (req, res) => {
   const { id } = req.params;
+  const { data: target } = await supabase.from('blacklist').select('user_name').eq('id', id).maybeSingle();
   const { error } = await supabase.from('blacklist').update({
     is_active: false, lifted_at: new Date().toISOString(), lifted_by: ADMIN_USERNAME
   }).eq('id', id);
   if (error) return res.status(400).json({ error: sanitizeError(error) });
+  if (target) await logAdminAudit('unblacklist_user', ADMIN_USERNAME, 'user:' + target.user_name + ' blacklist_id:' + id);
   return res.json({ ok: true });
 });
 
@@ -6214,7 +6226,6 @@ app.post('/admin/pro-gifts/save', verifyToken, rateLimit(60000, 20), async (req,
       is_published: false,
       updated_at: new Date().toISOString()
     };
-    const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'xxz';
     if (id) {
       // 编辑已有的
       var { data: existing } = await supabase.from('posts')
@@ -7131,6 +7142,8 @@ async function loadAiContext(userName, convId) {
   var ctx = { history: [] };
 
   try {
+    // 验证 convId 防止 LIKE 注入
+    if (convId && !/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = null;
     // 1. 读取最近 AI 消息
     // ★ 关键：先按 created_at desc 取最近的消息（更准确反映"最近聊了什么"），
     //         然后在内存里 reverse 成时间正序给 AI。
@@ -7947,6 +7960,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       return safeEnd();
     }
 
+    // _sharedSearchMeta 在非思考模式搜索或思考模式搜索中赋值
+    var _sharedSearchMeta;
+    var reasoningStartedAt = 0;
+
     // 如果 FC 没启用或没触发 tool_calls，回退旧正则搜索注入
     if (!hasCalledTools && !aborted && allowSearch && !weatherResult && !useThinking) {
       var needsSearch = /最新|今天|现在|当前|刚刚|实时|新闻|资讯|天气|温度|价格|多少钱|汇率|政策|公告|开放时间|营业时间|百度|google|谷歌|iPhone|苹果发布|航班|地震|台风|比赛|比分|搜索|查一下|搜一下|查询|景点|旅游|攻略|推荐|怎么样|好不好|评价|评测|价格表/i.test(message);
@@ -8016,9 +8033,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
     }
 
-    // 共享搜索结果元数据（跨所有 finishStream 路径：正常、超时、错误）
-    // _sharedSearchMeta 在非思考模式搜索 (line 6923) 或思考模式搜索中赋值
-    var _sharedSearchMeta;
+    // 共享搜索结果元数据在非思考模式搜索或思考模式搜索中赋值
 
     // ----- 多 Agent 协作：拆解问题 → 搜索 → 合成 -----
     // 需要管理员在后台开启 multi_agent，思考/非思考模式均可

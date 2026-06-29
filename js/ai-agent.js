@@ -991,11 +991,21 @@
     } catch (e) {}
     setupBubbleCopy(answerEl, messagesEl);
 
-    // 渲染思考过程日志 (放进 <details> 内)
+    // 渲染思考过程日志 (放进 <details> 内, 先合并同角色)
     if (thinkingLog.length > 0) {
       var thinkLogBox = node.querySelector('.ai-think-thinking-body');
       if (thinkLogBox) {
-        thinkingLog.forEach(function(entry) {
+        var mergedLog = [];
+        for (var tli = 0; tli < thinkingLog.length; tli++) {
+          var mtl = thinkingLog[tli];
+          var mlast = mergedLog[mergedLog.length - 1];
+          if (mlast && mlast.agent_role === (mtl.agent_role || 'AI') && mlast.round === (mtl.round || 0)) {
+            mlast.chunk = (mlast.chunk || '') + (mtl.chunk || '');
+          } else {
+            mergedLog.push({ agent_role: mtl.agent_role || 'AI', chunk: mtl.chunk || '', round: mtl.round || 0 });
+          }
+        }
+        mergedLog.forEach(function(entry) {
           var entEl = el('div', { class: 'ai-thought-entry' });
           var roleLabel = entry.agent_role || 'AI';
           var roundLabel = entry.round ? ' · 第' + entry.round + '轮' : '';
@@ -1003,6 +1013,9 @@
           entEl.querySelector('.ai-thought-chunk').textContent = String(entry.chunk || '').slice(0, 4000);
           thinkLogBox.appendChild(entEl);
         });
+        // 更新 summary 显示合并后的步数
+        var summaryEl = node.querySelector('.ai-think-thinking summary span:last-child');
+        if (summaryEl) summaryEl.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
       }
     }
 
@@ -1842,11 +1855,22 @@
           contentRenderer.append(contentForRender);
         }
 
-        // 渲染思考过程日志 (放进 <details> 内, 不再 box 化)
+        // 渲染思考过程日志 (放进 <details> 内, 先合并同角色连续条目)
         var thinkLogBox = node.querySelector('.ai-think-thinking-body');
         if (thinkLogBox && thinkingLog.length > 0) {
           thinkLogBox.innerHTML = '';
-          thinkingLog.forEach(function(entry, idx) {
+          // 合并同角色连续条目
+          var mergedLog = [];
+          for (var tli = 0; tli < thinkingLog.length; tli++) {
+            var mtl = thinkingLog[tli];
+            var mlast = mergedLog[mergedLog.length - 1];
+            if (mlast && mlast.agent_role === (mtl.agent_role || 'AI') && mlast.round === (mtl.round || 0)) {
+              mlast.chunk = (mlast.chunk || '') + (mtl.chunk || '');
+            } else {
+              mergedLog.push({ agent_role: mtl.agent_role || 'AI', chunk: mtl.chunk || '', round: mtl.round || 0 });
+            }
+          }
+          mergedLog.forEach(function(entry, idx) {
             var entEl = el('div', { class: 'ai-thought-entry' });
             var roleLabel = entry.agent_role || 'AI';
             var roundLabel = entry.round ? ' · 第' + entry.round + '轮' : '';
@@ -1854,11 +1878,10 @@
             entEl.querySelector('.ai-thought-chunk').textContent = String(entry.chunk || '').slice(0, 4000);
             thinkLogBox.appendChild(entEl);
           });
-          // 折叠区显示条目数
           var summaryEl = node.querySelector('.ai-think-thinking summary');
           if (summaryEl) {
             var sumSpan = summaryEl.querySelector('span:last-child');
-            if (sumSpan) sumSpan.textContent = '查看思考过程 (' + thinkingLog.length + ' 步)';
+            if (sumSpan) sumSpan.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
           }
         } else {
           // 没有思考过程, 隐藏 details
@@ -3271,7 +3294,6 @@ function showChatMessages() {
         delBtn.disabled = false;
       }
     });
-    header.insertBefore(delBtn, newBtn);
 
     var newBtn = el('button', {
       type: 'button',
@@ -3305,7 +3327,7 @@ function showChatMessages() {
         newBtn.disabled = false;
       }
     });
-    header.appendChild(newBtn);
+    header.insertBefore(delBtn, newBtn);
     if (S.headerButtonsCleanup) {
       try { S.headerButtonsCleanup(); } catch (eCleanup) {}
     }
