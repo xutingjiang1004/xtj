@@ -923,15 +923,52 @@
       footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
     }
     if (role === 'assistant') {
-      // 搜索状态（历史重建：只显示条数和关键词，结果详情仅在直播时有）
+      // ★ P1 关键修复：搜索徽章
+      //   - 1 天内（search_expires_at > now）：完整显示"已联网搜索 · N 条结果"+ 可展开结果列表
+      //   - 1 天后：徽章保持显示，但标记"结果已过期"
+      //   - 永远显示徽章（用户原话"重新进对话框显示已联网搜索 搜到多少条信息"）
       if (msg.search_count > 0) {
-        var searchBar = el('div', { class: 'ai-search-status' });
+        var nowMs = Date.now();
+        var expiresAt = typeof msg.search_expires_at === 'number' ? msg.search_expires_at : 0;
+        var isExpired = expiresAt > 0 && nowMs > expiresAt;
+        var searchBar = el('div', { class: 'ai-search-status' + (isExpired ? ' expired' : '') });
         var searchLabel = '已联网搜索 · ' + msg.search_count + ' 条结果';
+        if (isExpired) searchLabel += '（结果已过期）';
         var queryStr = msg.search_query || '';
-        if (queryStr) {
+        if (queryStr && !isExpired) {
           searchLabel += ' · 搜索：' + queryStr;
         }
         searchBar.textContent = searchLabel;
+        // 1 天内 + 有 results 数组 → 可点击展开
+        if (!isExpired && Array.isArray(msg.search_results) && msg.search_results.length > 0) {
+          var expandBtn = el('span', { class: 'ai-search-toggle', text: '展开' });
+          searchBar.appendChild(expandBtn);
+          var listEl = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+          for (var si = 0; si < msg.search_results.length; si++) {
+            var sr = msg.search_results[si] || {};
+            var item = el('a', {
+              class: 'ai-search-detail-item',
+              href: sr.url || '#',
+              target: '_blank',
+              rel: 'noopener noreferrer'
+            });
+            item.appendChild(el('span', { class: 'ai-search-detail-title', text: sr.title || '(无标题)' }));
+            var snippet = sr.snippet || '';
+            if (snippet.length > 140) snippet = snippet.slice(0, 140) + '…';
+            if (snippet) item.appendChild(el('span', { class: 'ai-search-detail-snippet', text: snippet }));
+            var meta = (sr.source ? sr.source : '') + (sr.published_at ? ' · ' + sr.published_at : '');
+            if (meta) item.appendChild(el('span', { class: 'ai-search-detail-source', text: meta }));
+            listEl.appendChild(item);
+          }
+          searchBar.appendChild(listEl);
+          searchBar.style.cursor = 'pointer';
+          searchBar.addEventListener('click', function(ev) {
+            if (ev && ev.target && (ev.target.tagName === 'A' || ev.target.className === 'ai-search-detail-title')) return;
+            var isShown = listEl.style.display !== 'none';
+            listEl.style.display = isShown ? 'none' : 'block';
+            try { expandBtn.textContent = isShown ? '展开' : '收起'; } catch (e) {}
+          });
+        }
         node.appendChild(searchBar);
       }
       // 搜索到此处结束
@@ -1444,6 +1481,8 @@
         
         var searchCount = evt ? evt.search_count : 0;
         var searchQuery = evt ? evt.search_query : '';
+        var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
+        var searchExpiresAt = evt && typeof evt.search_expires_at === 'number' ? evt.search_expires_at : 0;
         var aiMsg = {
           role: 'assistant',
           content: content,
@@ -1452,6 +1491,8 @@
           thinking_mode: finalThinkingMode,
           search_count: searchCount,
           search_query: searchQuery,
+          search_results: searchResults,
+          search_expires_at: searchExpiresAt,
           usage: Object.assign({}, usageResult || {}, {
             model: finalModel,
             thinking_mode: finalThinkingMode
