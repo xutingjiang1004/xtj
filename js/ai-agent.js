@@ -3007,32 +3007,6 @@
     }
   }
   
-  // 渲染会话列表
-  function renderConversationList(container) {
-    container.innerHTML = '';
-    if (!S.conversations.length) {
-      container.appendChild(el('div', { class: 'ai-no-history', text: '暂无聊天记录' }));
-      return;
-    }
-    S.conversations.forEach(function(conv) {
-      var item = el('div', { class: 'ai-conv-item' + (conv.conversation_id === S.conversationId ? ' active' : '') });
-      item.setAttribute('data-conv-id', conv.conversation_id);
-      
-      var titleEl = el('div', { class: 'ai-conv-title', text: conv.title || '新对话' });
-      var timeEl = el('div', { class: 'ai-conv-time', text: conv.updated_at ? fmtTime(conv.updated_at) : '' });
-      item.appendChild(titleEl);
-      item.appendChild(timeEl);
-      
-      item.addEventListener('click', function() {
-        if (S.sending) return;
-        var cid = this.getAttribute('data-conv-id');
-        switchConversation(cid);
-      });
-      
-      container.appendChild(item);
-    });
-  }
-  
   // 切换会话
   function renderConversationListStyled(container) {
     container.innerHTML = '';
