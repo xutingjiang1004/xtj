@@ -1246,16 +1246,7 @@
 
     function clearFrame() {
       if (!rafId) return;
-      try { cancelFrame(rafId); }
-    function release() {
-      if (_rafId) {
-        try { cancelAnimationFrame(_rafId); } catch (e) {}
-        _rafId = 0;
-      }
-      if (_pending) _pending = '';
-      _active = false;
-    }
- catch (e) {}
+      try { cancelFrame(rafId); } catch (e) {}
       rafId = 0;
     }
 
@@ -1339,11 +1330,6 @@
         clearFrame();
         pending = '';
         targetEl = null;
-      },      cancel: function() {
-        cancelled = true;
-        clearFrame();
-        pending = '';
-        if (targetEl) targetEl.classList.remove(streamClass);
       }
     };
   }
