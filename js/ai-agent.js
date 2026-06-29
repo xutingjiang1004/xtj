@@ -24,11 +24,11 @@
     sending: false,
     loading: false,
     loadingMore: false,
-    // ★ D 修复：thinking_mode 默认从 off 改成 low
-    //   让 AI 默认多想一下（chain-of-thought）
-    //   节省 deepseek 思考成本（low 比 medium 便宜）
-    //   用户可在 UI 切换
-    thinkingMode: 'low',
+    // ★ M: thinking_mode 默认从 low 改成 max
+    //   用户要求: 普通聊天默认就用 max 深度思考
+    //   管理员可在后台 /admin/ai-agent/config 切换为 low/medium/high/max
+    //   普通用户不能在 UI 切换 (allow_user_thinking_switch: false)
+    thinkingMode: 'max',
     // ★ M: 深度思考模式 toggle 状态
     //   开启后本会话所有消息走 Planner→Workers→Synthesizer 多 agent 流程
     //   持久化到 localStorage, 重开对话框后恢复
@@ -917,8 +917,171 @@
     return container;
   }
 
+  // ★ O 修复 Bug 4: 从 history 恢复 think-card
+  //   退出对话框重进后, deep_think=true 的消息渲染成 think-card
+  //   包含折叠头部 (倒计时 + agent 数) + 展开后 (思考过程 + 最终答案 + agent 列表)
+  function buildThinkCardFromHistory(msg, messagesEl) {
+    var thinkingLog = Array.isArray(msg.thinking_log) ? msg.thinking_log : [];
+    var workerResults = Array.isArray(msg.worker_results) ? msg.worker_results : [];
+    var agentCount = msg.agent_count || (workerResults.length || 1);
+    var thinkDurationMs = typeof msg.think_duration_ms === 'number' ? msg.think_duration_ms : 0;
+    var searchResults = Array.isArray(msg.search_results) ? msg.search_results : [];
+    var searchExpiresAt = typeof msg.search_expires_at === 'number' ? msg.search_expires_at : 0;
+    var searchCount = msg.search_count || searchResults.length;
+    var searchQuery = msg.search_query || '';
+
+    var node = el('div', { class: 'ai-think-card collapsed' });
+    node.innerHTML =
+      '<div class="ai-think-header">' +
+        '<span class="ai-think-icon">⚡</span>' +
+        '<span class="ai-think-title">深度思考 · ' + agentCount + ' 个 agent</span>' +
+        '<span class="ai-think-duration">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
+        '<span class="ai-think-toggle">▶</span>' +
+      '</div>' +
+      '<div class="ai-think-body" style="display:none">' +
+        '<div class="ai-think-section">' +
+          '<div class="ai-think-section-title">🧠 思考过程 <span class="ai-think-section-hint">(' + thinkingLog.length + ' 条)</span></div>' +
+          '<div class="ai-think-log-body"></div>' +
+        '</div>' +
+        '<div class="ai-think-section">' +
+          '<div class="ai-think-section-title">📝 最终答案</div>' +
+          '<div class="ai-think-answer-body"></div>' +
+        '</div>' +
+        (workerResults.length > 0 ?
+          '<div class="ai-think-section">' +
+            '<div class="ai-think-section-title">👥 Agent 列表</div>' +
+            '<div class="ai-think-agents"></div>' +
+          '</div>' : '') +
+        '<div class="ai-think-search"></div>' +
+        '<div class="ai-msg-footer"></div>' +
+      '</div>';
+
+    // 折叠/展开切换
+    var headerEl = node.querySelector('.ai-think-header');
+    var bodyEl = node.querySelector('.ai-think-body');
+    var toggleIcon = node.querySelector('.ai-think-toggle');
+    function toggle() {
+      var isCollapsed = node.classList.contains('collapsed');
+      if (isCollapsed) {
+        node.classList.remove('collapsed');
+        node.classList.add('expanded');
+        bodyEl.style.display = '';
+        toggleIcon.textContent = '▼';
+      } else {
+        node.classList.add('collapsed');
+        node.classList.remove('expanded');
+        bodyEl.style.display = 'none';
+        toggleIcon.textContent = '▶';
+      }
+    }
+    headerEl.addEventListener('click', function(e) {
+      if (e.target.tagName === 'A') return;
+      toggle();
+    });
+
+    // 渲染 markdown + [来源N] className
+    var contentForRender = msg.content || '';
+    if (searchResults.length > 0) {
+      contentForRender = contentForRender.replace(/\[来源(\d+)\]/g, function(m, n) {
+        var idx = parseInt(n, 10);
+        if (isNaN(idx) || idx < 1 || idx > searchResults.length) return m;
+        var sr = searchResults[idx - 1] || {};
+        if (!sr.url) return m;
+        return '[来源' + n + '](' + sr.url + ')';
+      });
+    }
+    var answerBody = node.querySelector('.ai-think-answer-body');
+    answerBody.innerHTML = renderMarkdown(contentForRender);
+    try {
+      var as = answerBody.querySelectorAll('a');
+      for (var ai = 0; ai < as.length; ai++) {
+        var atxt = (as[ai].textContent || '').trim();
+        if (/^来源\d+$/.test(atxt)) as[ai].className = 'ai-source-link';
+      }
+    } catch (e) {}
+    setupBubbleCopy(answerBody, messagesEl);
+
+    // 渲染思考过程日志
+    if (thinkingLog.length > 0) {
+      var thinkLogBox = node.querySelector('.ai-think-log-body');
+      thinkingLog.forEach(function(entry) {
+        var entEl = el('div', { class: 'ai-thought-entry' });
+        var roleLabel = entry.agent_role || 'AI';
+        var roundLabel = entry.round ? ' (第 ' + entry.round + ' 轮)' : '';
+        entEl.innerHTML = '<div class="ai-thought-role">🧠 ' + roleLabel + roundLabel + '</div><div class="ai-thought-chunk"></div>';
+        entEl.querySelector('.ai-thought-chunk').textContent = String(entry.chunk || '').slice(0, 4000);
+        thinkLogBox.appendChild(entEl);
+      });
+    } else {
+      var thinkLogBox2 = node.querySelector('.ai-think-log-body');
+      thinkLogBox2.innerHTML = '<div class="ai-think-log-empty">（无思考过程记录）</div>';
+    }
+
+    // 渲染 agent 列表
+    if (workerResults.length > 0) {
+      var agentList = node.querySelector('.ai-think-agents');
+      agentList.innerHTML = workerResults.map(function(w) {
+        var statusLabel = { success: '✓', failed: '✗', cancelled: '⊘' }[w.status] || '○';
+        var elapsed = w.elapsed_ms ? Math.round(w.elapsed_ms / 1000) + 's' : '?';
+        return '<div class="ai-worker-row">' + statusLabel + ' ' + (w.role || 'agent') + ' · ' + elapsed + '</div>';
+      }).join('');
+    }
+
+    // 渲染搜索徽章
+    if (searchCount > 0 && searchResults.length > 0) {
+      var searchBox = node.querySelector('.ai-think-search');
+      var expired = searchExpiresAt > 0 && Date.now() > searchExpiresAt;
+      var sb = el('div', { class: 'ai-search-status' + (expired ? ' expired' : '') });
+      sb.textContent = '⚡ 深度搜索 · 已联网搜索 ' + searchCount + ' 条' + (expired ? '（结果已过期）' : '');
+      if (!expired) {
+        var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▶');
+        sb.appendChild(toggleBtn);
+        sb.style.cursor = 'pointer';
+        var panel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+        sb.appendChild(panel);
+        if (searchQuery) panel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + searchQuery }));
+        for (var si = 0; si < searchResults.length; si++) {
+          var sr = searchResults[si];
+          var itemEl = el('div', { class: 'ai-search-detail-item' });
+          var linkEl = el('a', { class: 'ai-search-detail-title', href: sr.url || '#', target: '_blank', rel: 'noopener noreferrer', text: sr.title || '无标题' });
+          itemEl.appendChild(linkEl);
+          if (sr.snippet) itemEl.appendChild(el('div', { class: 'ai-search-detail-snippet', text: String(sr.snippet).slice(0, 200) }));
+          itemEl.appendChild(el('div', { class: 'ai-search-detail-source', text: (sr.source || '') + ' · ' + (sr.published_at || '') }));
+          panel.appendChild(itemEl);
+        }
+        sb.onclick = function(e) {
+          if (e.target.tagName === 'A') return;
+          var h = panel.style.display === 'none';
+          panel.style.display = h ? '' : 'none';
+          toggleBtn.textContent = h ? ' ▼' : ' ▶';
+        };
+      }
+      searchBox.appendChild(sb);
+    }
+
+    // footer
+    var footer = node.querySelector('.ai-msg-footer');
+    if (msg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
+    footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 max · ⚡深度' }));
+
+    return node;
+  }
+
+  // ★ O 修复 Bug 4: 格式化 think_duration_ms
+  function formatThinkDuration(ms) {
+    if (!ms || ms <= 0) return '0s';
+    var sec = Math.round(ms / 1000);
+    var min = Math.floor(sec / 60);
+    var s = sec % 60;
+    return min > 0 ? (min + 'm ' + s + 's') : (s + 's');
+  }
+
   function buildMessageNode(msg, messagesEl) {
     var role = msg.role === 'assistant' ? 'assistant' : 'user';
+    // ★ O 修复 Bug 4: deep_think 消息渲染成 ai-think-card (从 history 恢复)
+    if (role === 'assistant' && msg.deep_think === true) {
+      return buildThinkCardFromHistory(msg, messagesEl);
+    }
     var node = el('div', { class: 'ai-msg ' + role + ' entering' });
     if (role === 'assistant' && shouldRenderReasoning(msg)) {
       node.appendChild(buildReasoningNode(msg.reasoning, messagesEl, msg.thinking_elapsed_ms));
@@ -1366,6 +1529,7 @@
       '<div class="ai-progress-bar"><div class="ai-progress-fill" style="width:5%"></div></div>' +
       '<div class="ai-progress-detail"></div>' +
       '<div class="ai-progress-agents"></div>' +
+      '<div class="ai-progress-thinking-log" style="display:none"></div>' +
       '<div class="ai-progress-actions">' +
         '<button type="button" class="ai-progress-stop">⏹ 停止思考</button>' +
       '</div>';
@@ -1374,6 +1538,24 @@
       ev.stopPropagation();
       cancelDeepThink();
     });
+    // ★ O 修复 Bug 1: 前端倒计时兜底 (即使 SSE 心跳丢了, 也能持续更新)
+    var cardStart = Date.now();
+    var cardEl = card;
+    var cardTimer = setInterval(function() {
+      if (S.deepThinkProgressCard !== cardEl || cardEl._done) {
+        clearInterval(cardTimer);
+        return;
+      }
+      // 优先用后端推送的 elapsed, 兜底用前端时间戳
+      var elapsedText = cardEl.querySelector('.ai-progress-elapsed').textContent;
+      if (elapsedText === '0s' || /^\d+s$/.test(elapsedText) === false) {
+        var sec = Math.floor((Date.now() - cardStart) / 1000);
+        var min = Math.floor(sec / 60);
+        var sStr = min > 0 ? (min + 'm ' + (sec % 60) + 's') : (sec + 's');
+        cardEl.querySelector('.ai-progress-elapsed').textContent = sStr;
+      }
+    }, 1000);
+    card._elapsedTimer = cardTimer;
     return card;
   }
 
@@ -1438,6 +1620,29 @@
     } else if (evt.type === 'deep_think_tool') {
       var last = detail.textContent || '';
       detail.textContent = '🔍 ' + (evt.agent_role || '') + ' 搜索中... ' + (evt.count || 0) + ' 条';
+    } else if (evt.type === 'thinking_chunk') {
+      // ★ O 修复 Bug 2: 累积思考过程, 用户可点开看
+      if (!card._thinkingLog) card._thinkingLog = [];
+      card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
+      var logBox = card.querySelector('.ai-progress-thinking-log');
+      if (logBox) {
+        if (logBox.style.display === 'none') {
+          logBox.style.display = '';
+        }
+        var roleLabel = evt.agent_role || 'AI';
+        var roundLabel = evt.round ? ' (第 ' + evt.round + ' 轮)' : '';
+        var entry = el('div', { class: 'ai-thought-entry' });
+        entry.innerHTML = '<div class="ai-thought-role">🧠 ' + roleLabel + roundLabel + '</div><div class="ai-thought-chunk"></div>';
+        entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 1500);
+        logBox.appendChild(entry);
+        // 自动滚动到最新
+        try { logBox.scrollTop = logBox.scrollHeight; } catch (e) {}
+        // 限制最多 100 条
+        while (logBox.children.length > 100) {
+          logBox.removeChild(logBox.firstChild);
+        }
+      }
+      detail.textContent = '🧠 ' + (evt.agent_role || 'AI') + ' 思考中...';
     } else if (evt.type === 'heartbeat') {
       var elapsedSec = Math.floor((evt.elapsed_ms || 0) / 1000);
       var min = Math.floor(elapsedSec / 60);
@@ -1586,39 +1791,73 @@
     var doneReceived = false;
     var evtHandled = false;
 
-    function ensureAssistantNode() {
-      if (!aiNode) {
-        try { progressCard.remove(); } catch (e) {}
-        aiNode = el('div', { class: 'ai-msg assistant entering generating' });
-        messagesEl.appendChild(aiNode);
-        S.autoScrollPinned = true;
-        scrollToBottom(messagesEl, true);
+    function ensureThinkCardNode() {
+      if (aiNode) return aiNode;
+      try { progressCard.remove(); } catch (e) {}
+      // ★ O 修复 Bug 4: think-card 取代普通 ai-msg 节点
+      //   折叠态: 头部 + 倒计时
+      //   展开态: 思考过程 + 最终答案
+      var node = el('div', { class: 'ai-think-card collapsed' });
+      node.innerHTML =
+        '<div class="ai-think-header">' +
+          '<span class="ai-think-icon">⚡</span>' +
+          '<span class="ai-think-title">深度思考中...</span>' +
+          '<span class="ai-think-duration">0s</span>' +
+          '<span class="ai-think-toggle">▶</span>' +
+        '</div>' +
+        '<div class="ai-think-body" style="display:none">' +
+          '<div class="ai-think-section">' +
+            '<div class="ai-think-section-title">🧠 思考过程 <span class="ai-think-section-hint">(点击展开)</span></div>' +
+            '<div class="ai-think-log-body"></div>' +
+          '</div>' +
+          '<div class="ai-think-section">' +
+            '<div class="ai-think-section-title">📝 最终答案</div>' +
+            '<div class="ai-think-answer-body"></div>' +
+          '</div>' +
+          '<div class="ai-think-section ai-think-agents-section" style="display:none">' +
+            '<div class="ai-think-section-title">👥 Agent 列表</div>' +
+            '<div class="ai-think-agents"></div>' +
+          '</div>' +
+          '<div class="ai-think-search"></div>' +
+          '<div class="ai-msg-footer"></div>' +
+        '</div>';
+      // 折叠/展开切换
+      var headerEl = node.querySelector('.ai-think-header');
+      var bodyEl = node.querySelector('.ai-think-body');
+      var toggleIcon = node.querySelector('.ai-think-toggle');
+      function toggle() {
+        var isCollapsed = node.classList.contains('collapsed');
+        if (isCollapsed) {
+          node.classList.remove('collapsed');
+          node.classList.add('expanded');
+          bodyEl.style.display = '';
+          toggleIcon.textContent = '▼';
+        } else {
+          node.classList.add('collapsed');
+          node.classList.remove('expanded');
+          bodyEl.style.display = 'none';
+          toggleIcon.textContent = '▶';
+        }
       }
-      return aiNode;
-    }
-    function ensureAssistantBubble() {
-      ensureAssistantNode();
-      aiBubble = aiNode.querySelector('.ai-msg-bubble');
-      if (!aiBubble) {
-        aiBubble = el('div', { class: 'ai-msg-bubble ai-typing', text: '' });
-        setupBubbleCopy(aiBubble, messagesEl);
-        aiNode.appendChild(aiBubble);
-      }
-      if (!contentRenderer) {
-        contentRenderer = createSmoothTextRenderer(aiBubble, {
-          minChunk: 8,
-          maxChunk: 24,
-          onRender: function() { scrollToBottom(messagesEl, false); }
-        });
-      }
-      return aiBubble;
+      headerEl.addEventListener('click', function(e) {
+        if (e.target.tagName === 'A') return;
+        toggle();
+      });
+      // 默认折叠 (完成后), 用户点开看
+      toggle();
+      messagesEl.appendChild(node);
+      aiNode = node;
+      S.autoScrollPinned = true;
+      scrollToBottom(messagesEl, true);
+      return node;
     }
 
-    function finishAiMessage(node, content, evt) {
-      if (contentRenderer) { try { contentRenderer.cancel(); } catch (e) {} contentRenderer = null; }
+    // ★ O 修复 Bug 4: 构造 think-card (取代普通 ai-msg 节点)
+    //   折叠态: 头部显示 "⚡ 已思考 38s · 5 个 agent" + 折叠按钮
+    //   展开态: 顶部思考过程日志 + 底部最终答案 (markdown)
+    //   退出对话框重进后, think-card 从 history 恢复
+    function finishThinkCard(node, content, evt) {
       if (node) node.classList.remove('generating');
-      if (aiBubble) aiBubble.classList.remove('ai-typing');
-      setAiRootState('ai-idle');
 
       var searchCount = evt ? (evt.search_count || 0) : 0;
       var searchQuery = evt ? (evt.search_query || '') : '';
@@ -1628,22 +1867,26 @@
       var agentCount = evt && evt.agent_count ? evt.agent_count : 0;
       var plannerInfo = evt && evt.planner ? evt.planner : null;
       var workerResults = evt && Array.isArray(evt.worker_results) ? evt.worker_results : null;
+      var thinkingLog = evt && Array.isArray(evt.thinking_log) ? evt.thinking_log : [];
+      var thinkDurationMs = evt && typeof evt.think_duration_ms === 'number' ? evt.think_duration_ms : 0;
 
       var aiMsg = {
         role: 'assistant',
         content: content,
         reasoning: '',
         created_at: new Date().toISOString(),
-        thinking_mode: 'high',
+        thinking_mode: 'max',
         deep_think: true,
         agent_count: agentCount,
         planner: plannerInfo,
         worker_results: workerResults,
+        thinking_log: thinkingLog,
+        think_duration_ms: thinkDurationMs,
         search_count: searchCount,
         search_query: searchQuery,
         search_results: searchResults,
         search_expires_at: searchExpiresAt,
-        usage: Object.assign({}, usage || {}, { model: finalModel, thinking_mode: 'high', deep_think: true, agent_count: agentCount })
+        usage: Object.assign({}, usage || {}, { model: finalModel, thinking_mode: 'max', deep_think: true, agent_count: agentCount })
       };
       S.messages.push(aiMsg);
 
@@ -1659,82 +1902,105 @@
             return '[来源' + n + '](' + sr.url + ')';
           });
         }
-        aiBubble.innerHTML = '';
-        aiBubble.innerHTML = renderMarkdown(contentForRender);
-        // 给 [来源N] 链接加 className
-        try {
-          var as = aiBubble.querySelectorAll('a');
-          for (var ai = 0; ai < as.length; ai++) {
-            var atxt = (as[ai].textContent || '').trim();
-            if (/^来源\d+$/.test(atxt)) as[ai].className = 'ai-source-link';
-          }
-        } catch (e) {}
+        // 渲染 markdown + [来源N] className
+        var answerBody = node.querySelector('.ai-think-answer-body');
+        if (answerBody) {
+          answerBody.innerHTML = renderMarkdown(contentForRender);
+          try {
+            var as = answerBody.querySelectorAll('a');
+            for (var ai = 0; ai < as.length; ai++) {
+              var atxt = (as[ai].textContent || '').trim();
+              if (/^来源\d+$/.test(atxt)) as[ai].className = 'ai-source-link';
+            }
+          } catch (e) {}
+          setupBubbleCopy(answerBody, messagesEl);
+        }
 
-        // 搜索徽章 + 1 天过期
-        if (searchCount > 0 && searchResults && searchResults.length > 0) {
-          var expired = searchExpiresAt > 0 && Date.now() > searchExpiresAt;
-          var sb = el('div', { class: 'ai-search-status' });
-          sb.textContent = '⚡ 深度思考 · 已联网搜索 ' + searchCount + ' 条' + (expired ? '（结果已过期）' : '');
-          if (!expired && searchResults.length > 0) {
-            var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▶');
-            sb.appendChild(toggleBtn);
-            sb.style.cursor = 'pointer';
-            var panel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
-            sb.appendChild(panel);
-            if (searchQuery) panel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + searchQuery }));
-            for (var si = 0; si < searchResults.length; si++) {
-              var sr = searchResults[si];
-              var itemEl = el('div', { class: 'ai-search-detail-item' });
-              var linkEl = el('a', { class: 'ai-search-detail-title', href: sr.url || '#', target: '_blank', rel: 'noopener noreferrer', text: sr.title || '无标题' });
-              itemEl.appendChild(linkEl);
-              if (sr.snippet) itemEl.appendChild(el('div', { class: 'ai-search-detail-snippet', text: String(sr.snippet).slice(0, 200) }));
-              itemEl.appendChild(el('div', { class: 'ai-search-detail-source', text: (sr.source || '') + ' · ' + (sr.published_at || '') }));
-              panel.appendChild(itemEl);
+        // 渲染思考过程日志
+        var thinkLogBox = node.querySelector('.ai-think-log-body');
+        if (thinkLogBox && thinkingLog.length > 0) {
+          thinkLogBox.innerHTML = '';
+          thinkingLog.forEach(function(entry) {
+            var entEl = el('div', { class: 'ai-thought-entry' });
+            var roleLabel = entry.agent_role || 'AI';
+            var roundLabel = entry.round ? ' (第 ' + entry.round + ' 轮)' : '';
+            entEl.innerHTML = '<div class="ai-thought-role">🧠 ' + roleLabel + roundLabel + '</div><div class="ai-thought-chunk"></div>';
+            entEl.querySelector('.ai-thought-chunk').textContent = String(entry.chunk || '').slice(0, 4000);
+            thinkLogBox.appendChild(entEl);
+          });
+        }
+
+        // 渲染 agent 列表
+        var agentList = node.querySelector('.ai-think-agents');
+        if (agentList && workerResults && workerResults.length > 0) {
+          agentList.innerHTML = workerResults.map(function(w) {
+            var statusLabel = { success: '✓', failed: '✗', cancelled: '⊘' }[w.status] || '○';
+            var elapsed = w.elapsed_ms ? Math.round(w.elapsed_ms / 1000) + 's' : '?';
+            return '<div class="ai-worker-row">' + statusLabel + ' ' + (w.role || 'agent') + ' · ' + elapsed + '</div>';
+          }).join('');
+        }
+
+        // 渲染搜索徽章 + 1 天过期
+        var searchBox = node.querySelector('.ai-think-search');
+        if (searchBox) {
+          if (searchCount > 0 && searchResults && searchResults.length > 0) {
+            var expired = searchExpiresAt > 0 && Date.now() > searchExpiresAt;
+            searchBox.style.display = '';
+            searchBox.innerHTML = '';
+            var sb = el('div', { class: 'ai-search-status' });
+            sb.textContent = '⚡ 深度搜索 · 已联网搜索 ' + searchCount + ' 条' + (expired ? '（结果已过期）' : '');
+            if (!expired && searchResults.length > 0) {
+              var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▶');
+              sb.appendChild(toggleBtn);
+              sb.style.cursor = 'pointer';
+              var panel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+              sb.appendChild(panel);
+              if (searchQuery) panel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + searchQuery }));
+              for (var si = 0; si < searchResults.length; si++) {
+                var sr = searchResults[si];
+                var itemEl = el('div', { class: 'ai-search-detail-item' });
+                var linkEl = el('a', { class: 'ai-search-detail-title', href: sr.url || '#', target: '_blank', rel: 'noopener noreferrer', text: sr.title || '无标题' });
+                itemEl.appendChild(linkEl);
+                if (sr.snippet) itemEl.appendChild(el('div', { class: 'ai-search-detail-snippet', text: String(sr.snippet).slice(0, 200) }));
+                itemEl.appendChild(el('div', { class: 'ai-search-detail-source', text: (sr.source || '') + ' · ' + (sr.published_at || '') }));
+                panel.appendChild(itemEl);
+              }
+              sb.onclick = function(e) {
+                if (e.target.tagName === 'A') return;
+                var h = panel.style.display === 'none';
+                panel.style.display = h ? '' : 'none';
+                toggleBtn.textContent = h ? ' ▼' : ' ▶';
+              };
             }
-            sb.onclick = function(e) {
-              if (e.target.tagName === 'A') return;
-              var h = panel.style.display === 'none';
-              panel.style.display = h ? '' : 'none';
-              toggleBtn.textContent = h ? ' ▼' : ' ▶';
-            };
+            searchBox.appendChild(sb);
+          } else {
+            searchBox.style.display = 'none';
           }
-          node.appendChild(sb);
         }
-        // 深度思考徽章 + agent 列表
-        if (agentCount > 0 || workerResults) {
-          var dtBadge = el('div', { class: 'ai-deep-think-badge' });
-          dtBadge.textContent = '⚡ 深度思考 · ' + (agentCount || 0) + ' 个 agent';
-          if (workerResults && workerResults.length > 0) {
-            var wrToggle = el('span', { class: 'ai-search-toggle' }, ' ▶');
-            dtBadge.appendChild(wrToggle);
-            dtBadge.style.cursor = 'pointer';
-            var wrPanel = el('div', { class: 'ai-worker-detail', style: 'display:none;' });
-            dtBadge.appendChild(wrPanel);
-            for (var wri = 0; wri < workerResults.length; wri++) {
-              var wr = workerResults[wri];
-              var wrRow = el('div', { class: 'ai-worker-row' });
-              var statusLabel = { success: '✓', failed: '✗', cancelled: '⊘' }[wr.status] || '○';
-              wrRow.textContent = statusLabel + ' ' + (wr.role || 'agent') + ' · ' + (wr.elapsed_ms ? Math.round(wr.elapsed_ms/1000) + 's' : '?');
-              wrPanel.appendChild(wrRow);
-            }
-            dtBadge.onclick = function(e) {
-              if (e.target.tagName === 'A') return;
-              var h = wrPanel.style.display === 'none';
-              wrPanel.style.display = h ? '' : 'none';
-              wrToggle.textContent = h ? ' ▼' : ' ▶';
-            };
+
+        // 倒计时: 持续累计 (think_duration_ms → 实际显示 "已思考 38s")
+        var durationSec = Math.round(thinkDurationMs / 1000);
+        var min = Math.floor(durationSec / 60);
+        var sec = durationSec % 60;
+        var durationStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
+        var durationLabel = node.querySelector('.ai-think-duration');
+        if (durationLabel) durationLabel.textContent = '已思考 ' + durationStr;
+
+        // 标题
+        var titleLabel = node.querySelector('.ai-think-title');
+        if (titleLabel) titleLabel.textContent = '⚡ 深度思考 · ' + (agentCount || 1) + ' 个 agent';
+
+        // footer (时间 + 思考 high/max + 用量)
+        var footer = node.querySelector('.ai-msg-footer');
+        if (footer) {
+          footer.innerHTML = '';
+          if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
+          footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 max · ⚡深度' }));
+          if (usage || finalModel) {
+            var usageLine = buildUsageLine(aiMsg.usage);
+            if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
           }
-          node.appendChild(dtBadge);
         }
-        // footer
-        var footer = el('div', { class: 'ai-msg-footer' });
-        if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
-        footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 high · ⚡深度' }));
-        if (usage || finalModel) {
-          var usageLine = buildUsageLine(aiMsg.usage);
-          if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
-        }
-        if (footer.children.length > 0) node.appendChild(footer);
       }
     }
 
@@ -1810,18 +2076,17 @@
           if (evt.type === 'content') {
             // 深度思考模式没有流式正文 (Synthesizer 一次性返回), 保留兼容
             aiContent += evt.text || '';
-            ensureAssistantBubble();
-            if (contentRenderer) contentRenderer.append(evt.text || '');
+            ensureThinkCardNode();
             continue;
           }
           if (evt.type === 'error') {
             try { progressCard.remove(); } catch (e) {}
             var errMsg = evt.error || 'AI 调用失败';
             if (aiContent) {
-              ensureAssistantNode();
+              ensureThinkCardNode();
               var errNote = el('div', { class: 'ai-error-note' }, errMsg);
               try { aiNode.appendChild(errNote); } catch (e) {}
-              finishAiMessage(aiNode, aiContent, evt);
+              finishThinkCard(aiNode, aiContent, evt);
             } else {
               notify(errMsg);
               S.messages.pop();
@@ -1839,17 +2104,19 @@
             S.abortController = null;
             S.deepThinkJob = null;
             S.deepThinkProgressCard = null;
+            // ★ 标记 progress card done, 停止前端倒计时
+            if (progressCard) { try { progressCard._done = true; } catch (e) {} }
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
             try {
               finalModel = evt.model || 'deepseek-v4-flash';
-              finalThinkingMode = evt.thinking_mode || 'high';
+              finalThinkingMode = evt.thinking_mode || 'max';
               if (evt.sanitized_content) aiContent = evt.sanitized_content;
               else if (evt.content) aiContent = evt.content;
               finalMeta = evt;
             } catch (e) {}
             if (aiContent) {
-              if (!aiNode) ensureAssistantNode();
-              finishAiMessage(aiNode, aiContent, evt);
+              if (!aiNode) ensureThinkCardNode();
+              finishThinkCard(aiNode, aiContent, evt);
             } else {
               notify('深度思考未返回内容');
             }
@@ -1869,15 +2136,16 @@
       }
 
       try { progressCard.remove(); } catch (e) {}
+      if (progressCard) { try { progressCard._done = true; } catch (e) {} }
       if (evtHandled) {
         // already handled in done
       } else if (aiNode && aiContent) {
-        finishAiMessage(aiNode, aiContent, finalMeta);
+        finishThinkCard(aiNode, aiContent, finalMeta);
       } else if (!doneReceived) {
         // 流意外结束, 没有 done
         if (aiContent) {
-          if (!aiNode) ensureAssistantNode();
-          finishAiMessage(aiNode, aiContent, finalMeta);
+          if (!aiNode) ensureThinkCardNode();
+          finishThinkCard(aiNode, aiContent, finalMeta);
         } else {
           S.messages.pop();
           removeLastUserMessage(messagesEl);
@@ -1888,12 +2156,13 @@
     } catch (fetchErr) {
       if (S._currentReqId !== reqId) return;
       try { progressCard.remove(); } catch (e) {}
+      if (progressCard) { try { progressCard._done = true; } catch (e) {} }
       if (fetchErr && fetchErr.name !== 'AbortError') {
         if (aiContent) {
-          ensureAssistantNode();
+          ensureThinkCardNode();
           var connNote = el('div', { class: 'ai-error-note' }, '连接中断, 已保留部分回复');
           try { aiNode.appendChild(connNote); } catch (e) {}
-          finishAiMessage(aiNode, aiContent, finalMeta);
+          finishThinkCard(aiNode, aiContent, finalMeta);
         } else {
           S.messages.pop();
           removeLastUserMessage(messagesEl);
@@ -1903,8 +2172,8 @@
       } else {
         // AbortError: 用户主动停止
         if (aiContent) {
-          if (!aiNode) ensureAssistantNode();
-          finishAiMessage(aiNode, aiContent, finalMeta);
+          if (!aiNode) ensureThinkCardNode();
+          finishThinkCard(aiNode, aiContent, finalMeta);
         } else {
           S.messages.pop();
           removeLastUserMessage(messagesEl);
