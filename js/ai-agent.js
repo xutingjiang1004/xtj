@@ -1491,7 +1491,8 @@
   }
 
   // 构造深度思考进度卡片 (极简风格)
-  var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 5.5-5 5.5-5-5.5z"/></svg>';
+  // ★ U2 重做: 4 角凹星 sparkle (ChatGPT/Claude 风格, 替代菱形)
+  var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" stroke="none" style="vertical-align:-2px"><path d="M8 1 L9.2 6.4 L15 8 L9.2 9.6 L8 15 L6.8 9.6 L1 8 L6.8 6.4 Z"/></svg>';
 
   function buildDeepThinkProgressCard() {
     var card = el('div', { class: 'ai-progress-card' });

@@ -2285,7 +2285,6 @@
   .ai-think-card {
     background: rgba(30, 42, 48, .85);
     border-color: rgba(255,255,255,.06);
-    border-left-color: rgba(66, 155, 122, .45);
   }
   .ai-think-card:hover { background: rgba(30, 42, 48, .92); }
   .ai-think-header:hover { background: rgba(66, 155, 122, .04); }
