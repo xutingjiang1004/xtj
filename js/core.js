@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -1972,11 +1972,11 @@ const ADMIN_NAME = "xxz";
         }
         window.safeText = safeText;
 
-        function showToast(message) {
+        function showToast(message, type) {
             const container = document.getElementById('toastContainer');
             if (!container) { console.warn("showToast: toastContainer not found"); return; }
             const toast = document.createElement('div');
-            toast.className = 'toast';
+            toast.className = 'toast' + (type === 'error' ? ' toast-error' : '');
             if (typeof window.__xtjUiTextRepair === 'function') {
                 try { var _repaired = window.__xtjUiTextRepair(message); if (_repaired != null) message = _repaired; } catch (e) {}
             }
@@ -1985,7 +1985,7 @@ const ADMIN_NAME = "xxz";
             setTimeout(() => {
                 toast.style.animation = 'toastFade 0.3s ease-out forwards';
                 setTimeout(() => toast.remove(), 300);
-            }, 2500);
+            }, type === 'error' ? 4000 : 2500);
         }
         window.showToast = showToast;
 
