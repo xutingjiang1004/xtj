@@ -2006,6 +2006,49 @@
             updateDeepThinkProgressCard(progressCard, evt);
             continue;
           }
+          if (evt.type === 'thinking_chunk' || evt.type === 'deep_think_init') {
+            // Show thinking process in real-time: create/reuse think-card and stream chunks
+            if (!aiNode) ensureThinkCardNode();
+            if (evt.type === 'thinking_chunk' && evt.chunk) {
+              var thinkBody = aiNode.querySelector('.ai-think-thinking-body');
+              var detailsEl = aiNode.querySelector('.ai-think-thinking');
+              var summaryEl = aiNode.querySelector('.ai-think-thinking summary span:last-child');
+              if (thinkBody) {
+                var roleLabel = evt.agent_role || 'AI 智能体';
+                var entry = document.createElement('div');
+                entry.className = 'ai-thought-entry';
+                entry.innerHTML = '<div class="ai-thought-role">▸ ' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
+                entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 4000);
+                thinkBody.appendChild(entry);
+                try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
+                // Limit log entries to avoid memory issues
+                while (thinkBody.children.length > 80) {
+                  thinkBody.removeChild(thinkBody.firstChild);
+                }
+              }
+              // Update summary count
+              if (summaryEl) {
+                var entryCount = thinkBody ? thinkBody.children.length : 0;
+                summaryEl.textContent = '查看思考过程 (' + entryCount + ' 步)';
+              }
+              // Auto-expand thinking details on first chunk
+              if (detailsEl && !detailsEl.open) {
+                detailsEl.open = true;
+              }
+              // Update header title to show thinking state
+              var titleEl = aiNode.querySelector('.ai-think-title');
+              if (titleEl && titleEl.textContent.indexOf('思考中') < 0) {
+                titleEl.textContent = '🧠 思考中...';
+              }
+            }
+            // Still update progress card heartbeat etc.
+            if (evt.type === 'deep_think_init' && evt.message) {
+              var titleEl2 = aiNode.querySelector('.ai-think-title');
+              if (titleEl2) titleEl2.textContent = '🧠 ' + evt.message;
+            }
+            scrollToBottom(messagesEl, true);
+            continue;
+          }
           if (evt.type === 'content') {
             // 深度思考模式没有流式正文 (Synthesizer 一次性返回), 保留兼容
             aiContent += evt.text || '';
