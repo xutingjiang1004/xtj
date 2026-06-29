@@ -2471,8 +2471,70 @@ async function callDeepSeek(messages, options) {
     }
 
     // 如果循环结束还有 tool_calls（达到 maxToolRounds），最后内容可能为空
+    // ★ O 修复 Bug 5: 不再用最后一轮的 content（可能是 planning 文本或 []），
+    //   强制再调一次 DeepSeek（不带 tools），让它基于已有 context 给出最终答案
     if (!finalContent) {
-      finalContent = content || '（AI 没有回复，请稍后再试）';
+      if (workingMessages.length > 0) {
+        try {
+          var noToolBody = {
+            model: model,
+            messages: workingMessages.slice(),
+            stream: false
+          };
+          if (useThinking) {
+            noToolBody.thinking = { type: 'enabled' };
+            noToolBody.reasoning_effort = thinkingLevel;
+          }
+          if (options && options.max_tokens && typeof options.max_tokens === 'number') {
+            noToolBody.max_tokens = options.max_tokens;
+          }
+          var noToolController = new AbortController();
+          var noToolTimer = setTimeout(function() { noToolController.abort(); }, useThinking ? 120000 : 60000);
+          var noToolResp = await fetch(DEEPSEEK_API_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + DEEPSEEK_API_KEY
+            },
+            body: JSON.stringify(noToolBody),
+            signal: noToolController.signal
+          });
+          clearTimeout(noToolTimer);
+          var noToolData = await noToolResp.json().catch(function() { return {}; });
+          if (noToolResp.ok && noToolData && noToolData.choices && noToolData.choices[0] && noToolData.choices[0].message) {
+            var noToolMsg = noToolData.choices[0].message;
+            var noToolContent = typeof noToolMsg.content === 'string' ? noToolMsg.content : '';
+            if (noToolContent && noToolContent.length > 10) {
+              // 过滤疑似 JSON 残留
+              if (noToolContent.indexOf('{') === 0 && noToolContent.length < 500) {
+                finalContent = '（AI 调用了太多工具, 已达上限, 请简化问题重试）';
+              } else {
+                finalContent = noToolContent;
+              }
+            }
+          }
+        } catch (e) {
+          console.error('[DEEPSEEK] noTool follow-up failed:', e && e.message);
+        }
+      }
+      if (!finalContent) {
+        finalContent = '（AI 思考过多轮但未给出最终回复, 请简化问题重试）';
+      }
+    } else {
+      // 已有 finalContent（最后一轮没 tool_call 时）
+      // ★ O 修复 Bug 5: 过滤疑似 tool_call args 残留 (e.g. {"query":"..."})
+      if (typeof finalContent === 'string') {
+        var trimmed = finalContent.trim();
+        if (trimmed.length < 200 && trimmed.charAt(0) === '{' && trimmed.charAt(trimmed.length - 1) === '}') {
+          // 检查是否像 JSON args
+          try {
+            var parsed = JSON.parse(trimmed);
+            if (parsed && typeof parsed === 'object' && (parsed.query || parsed.location || parsed.command)) {
+              finalContent = '（AI 返回了工具参数, 不是最终答案, 请重试）';
+            }
+          } catch (e) {}
+        }
+      }
     }
 
     // off 模式强制清空 reasoning
@@ -2548,16 +2610,39 @@ async function runMultiAgentFlow(opts) {
 
   // SSE helpers (与 chat/stream 共用 writeSse)
   function sseSend(obj) {
+    // ★ O 修复 Bug 2: side-effect, 记录 thinking_chunk 到 thinkingLog
+    if (obj && obj.type === 'thinking_chunk') {
+      try { thinkingLog.push({ agent_role: obj.agent_role, chunk: obj.chunk, round: obj.round || 0, ts: Date.now() }); } catch (e) {}
+    }
     try { writeSse(res, obj); } catch (e) {}
   }
   function isCancelled() { return cancelToken.cancelled === true; }
   function timeLeft() { return DEEP_THINK_CONFIG.MAX_DURATION_MS - (Date.now() - startTime); }
+
+  // ★ O 修复 Bug 3: 构造 history 文本 (从 ctx.history) — 注入到 Planner/Worker/Synthesizer
+  //   让 AI 知道上下文, 避免 "你卡了" 被当成新问题去搜索
+  function buildHistoryContext() {
+    if (!ctx || !Array.isArray(ctx.history) || ctx.history.length === 0) return '';
+    var lines = ['\n\n[历史对话上下文 (重要! 后续 agent 必须看到这些)]\n'];
+    // 最多取最近 10 条 (5 轮对话), 避免 prompt 过大
+    var recentHistory = ctx.history.slice(-10);
+    recentHistory.forEach(function(h, i) {
+      var role = h.role === 'user' ? '用户' : (h.role === 'assistant' ? 'AI' : h.role);
+      var content = String(h.content || '').slice(0, 800);
+      lines.push((i + 1) + '. [' + role + '] ' + content);
+    });
+    lines.push('\n[当前用户新消息]: ' + message);
+    return lines.join('\n');
+  }
+  var historyContext = buildHistoryContext();
 
   // 收集所有 worker 的 sources (用于 Synthesizer 统一编号)
   var allSources = [];
   var allSearchQueries = [];
   var workerResults = []; // { role, content, sources, status, elapsed_ms }
   var plannerInfo = null; // { complexity, reasoning, agent_count }
+  // ★ O 修复 Bug 2: 收集每个 agent 的思考过程 (给前端展示)
+  var thinkingLog = []; // [{ agent_role, chunk, round, ts }]
 
   // === 阶段 1: Planner ===
   sseSend({ type: 'deep_think_stage', stage: 'planning', message: '正在分析任务, 决定需要多少个 agent' });
@@ -2571,12 +2656,12 @@ async function runMultiAgentFlow(opts) {
     var planApiBody = {
       model: DEEPSEEK_MODEL_REASONER,
       messages: [
-        { role: 'system', content: DEEP_THINK_PLANNER_PROMPT },
+        { role: 'system', content: DEEP_THINK_PLANNER_PROMPT + (historyContext || '') },
         { role: 'user', content: message }
       ],
       stream: false,
       thinking: { type: 'enabled' },
-      reasoning_effort: 'high',
+      reasoning_effort: 'max',
       response_format: { type: 'json_object' },
       max_tokens: 4096
     };
@@ -2595,6 +2680,11 @@ async function runMultiAgentFlow(opts) {
     var planData = await planResp.json();
     planResult = (planData && planData.choices && planData.choices[0] && planData.choices[0].message && planData.choices[0].message.content) || '';
     planResult = String(planResult).trim();
+    // ★ O 修复 Bug 2: 推送 Planner 思考过程
+    var planReasoning = planData && planData.choices && planData.choices[0] && planData.choices[0].message && planData.choices[0].message.reasoning_content;
+    if (planReasoning) {
+      sseSend({ type: 'thinking_chunk', agent_role: 'Planner', chunk: String(planReasoning).slice(0, 4000) });
+    }
   } catch (e) {
     console.error('[DEEP-THINK] planner failed:', e && e.message);
     // Fallback: 1 个 agent (单 agent 模式)
@@ -2725,6 +2815,7 @@ async function runMultiAgentFlow(opts) {
   }).join('\n\n---\n\n');
 
   var synthPrompt = DEEP_THINK_SYNTHESIZER_PROMPT +
+    (historyContext || '') +
     '\n\n[用户原始问题]\n' + message +
     '\n\n[搜索结果列表 — ' + allSources.length + ' 条 — 用 [来源N] 引用]\n' + (sourcesList || '[无搜索结果]') +
     '\n\n[' + workerResults.length + ' 个 agent 报告]\n' + reportsList;
@@ -2737,12 +2828,12 @@ async function runMultiAgentFlow(opts) {
     var synthApiBody = {
       model: DEEPSEEK_MODEL_REASONER,
       messages: [
-        { role: 'system', content: DEEP_THINK_SYNTHESIZER_PROMPT },
+        { role: 'system', content: DEEP_THINK_SYNTHESIZER_PROMPT + (historyContext || '') },
         { role: 'user', content: synthPrompt }
       ],
       stream: false,
       thinking: { type: 'enabled' },
-      reasoning_effort: 'high',
+      reasoning_effort: 'max',
       max_tokens: 32768
     };
     var synthResp = await fetch(DEEPSEEK_API_URL, {
@@ -2761,6 +2852,11 @@ async function runMultiAgentFlow(opts) {
     synthContent = (synthData && synthData.choices && synthData.choices[0] && synthData.choices[0].message && synthData.choices[0].message.content) || '';
     synthContent = String(synthContent).trim();
     synthUsage = synthData.usage || null;
+    // ★ O 修复 Bug 2: 推送 Synthesizer 思考过程
+    var synthReasoning = synthData && synthData.choices && synthData.choices[0] && synthData.choices[0].message && synthData.choices[0].message.reasoning_content;
+    if (synthReasoning) {
+      sseSend({ type: 'thinking_chunk', agent_role: 'Synthesizer', chunk: String(synthReasoning).slice(0, 4000) });
+    }
   } catch (e) {
     console.error('[DEEP-THINK] synthesizer failed:', e && e.message);
     // Fallback: 直接拼接所有 worker reports
@@ -2788,7 +2884,8 @@ async function runMultiAgentFlow(opts) {
     sources: allSources,
     queries: allSearchQueries,
     synth_content: synthContent,
-    synth_usage: synthUsage
+    synth_usage: synthUsage,
+    thinking_log: thinkingLog  // ★ O 修复 Bug 2: 每个 agent 的思考过程
   };
 }
 
@@ -2807,13 +2904,15 @@ async function runDeepThinkWorker(opts) {
   var workerSystemPrompt = '你是 XTJ 深度思考模式下的 [' + agent.role + '] 专家.\n' +
     '你的具体任务: ' + agent.task_description + '\n' +
     '建议搜索关键词: ' + (agent.search_queries || []).join(' | ') + '\n\n' +
+    (historyContext || '') + '\n\n' +
     '执行规则:\n' +
     '1. 主动调用 search_web 工具获取最新信息 (可多次调用, 每次一个具体关键词)\n' +
     '2. 基于搜索结果产出 500-1500 字的本方面专业分析\n' +
     '3. 输出末尾列出本 agent 收集的所有引用 (title + url), 供 Synthesizer 统一编号\n' +
     '4. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
     '5. 不要做最终总结, Synthesizer 会整合所有 agent 的报告\n' +
-    '6. 不要使用"作为一个 AI"等废话, 直接开始分析';
+    '6. 不要使用"作为一个 AI"等废话, 直接开始分析\n' +
+    '7. ★ 必须看 [历史对话上下文], 不要把用户的补充 (如"你卡了") 当成新问题去搜';
 
   var messages = [
     { role: 'system', content: workerSystemPrompt },
@@ -2829,7 +2928,7 @@ async function runDeepThinkWorker(opts) {
     var r = null;
     try {
       r = await callDeepSeek(messages, {
-        thinking_mode: 'high',
+        thinking_mode: 'max',
         tools: AI_TOOLS,
         tool_choice: 'auto',
         max_tool_rounds: 1,  // 单轮只允许 1 个 tool call
@@ -2860,6 +2959,11 @@ async function runDeepThinkWorker(opts) {
     } catch (e) {
       console.error('[DEEP-THINK] worker callDeepSeek failed:', e && e.message);
       throw e;
+    }
+
+    // ★ O 修复 Bug 2: 每轮都推思考过程 (不只是最终轮)
+    if (r.reasoning && r.reasoning.length > 0) {
+      sseSend({ type: 'thinking_chunk', agent_role: agent.role, chunk: String(r.reasoning).slice(0, 4000), round: round });
     }
 
     if (!r.tool_calls || r.tool_calls.length === 0) {
@@ -6617,7 +6721,7 @@ function resolveConvId(r) {
   return getConvIdFromActorKey(r.actor_key);
 }
 
-function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingElapsedMs) {
+function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingElapsedMs, extra) {
   var obj = { role: role, convId: convId };
   if (usage) obj.usage = usage;
   if (reasoning) obj.reasoning = reasoning;
@@ -6636,6 +6740,17 @@ function buildMsgMeta(role, convId, usage, reasoning, seq, searchMeta, thinkingE
     }
     if (typeof searchMeta.expires_at === 'number' && searchMeta.expires_at > 0) {
       obj.search_expires_at = searchMeta.expires_at;
+    }
+  }
+  // ★ O 修复 Bug 4: 额外字段 (deep_think / planner / worker_results / thinking_log / think_duration_ms)
+  if (extra && typeof extra === 'object') {
+    if (extra.deep_think) obj.deep_think = true;
+    if (extra.agent_count) obj.agent_count = extra.agent_count;
+    if (extra.planner) obj.planner = extra.planner;
+    if (Array.isArray(extra.worker_results)) obj.worker_results = extra.worker_results;
+    if (Array.isArray(extra.thinking_log)) obj.thinking_log = extra.thinking_log;
+    if (typeof extra.think_duration_ms === 'number' && extra.think_duration_ms > 0) {
+      obj.think_duration_ms = extra.think_duration_ms;
     }
   }
   return JSON.stringify(obj);
@@ -6884,10 +6999,10 @@ const AI_DEFAULT_CONFIG = {
     format: ['必要时使用标题和清单', '复杂问题先说结论再给步骤']
   },
   search: { allow_web_search: false, search_provider: 'searxng', max_results: 5, timeout_ms: 4000, use_weather_tool: true },
-  // ★ D 修复：default_thinking_mode 从 medium 改成 low
-  //   low 已经能覆盖大部分 chain-of-thought 需求，比 medium 便宜
-  //   管理员可在 /admin/ai-agent/config 调整
-  model: { reasoner_model: '', default_thinking_mode: 'low', allow_user_thinking_switch: true, multi_agent: false },
+  // ★ M: default_thinking_mode 从 low 改成 max
+  //   用户要求: 普通聊天也用 max 思考程度
+  //   管理员可在 /admin/ai-agent/config 切换为 low/medium/high/max
+  model: { reasoner_model: '', default_thinking_mode: 'max', allow_user_thinking_switch: false, multi_agent: true },
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',
   updated_by: ''
@@ -7064,14 +7179,16 @@ async function handleDeepThinkChat(req, res) {
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
     if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
 
-    // 5. 立即推 meta + 启动心跳 (避免 Render 代理 60s 超时)
+    // 5. ★ O 修复 Bug 1: 立即推占位 + 高频心跳
+    //    flushHeaders 后立刻推 2 个占位事件, 防止 Render 反向代理 60s 无活动超时
     sseSend({ type: 'meta', conversation_id: convId, deep_think: true, start_time: startTime });
+    sseSend({ type: 'deep_think_init', message: '深度思考已启动, 请稍候...' });
 
     _heartbeatTimer = setInterval(function() {
       if (!res.writableEnded) {
         sseSend({ type: 'heartbeat', elapsed_ms: Date.now() - startTime });
       }
-    }, DEEP_THINK_CONFIG.HEARTBEAT_MS);
+    }, 1500);
 
     // 6. 运行多 agent 流程
     var flowResult = null;
@@ -7117,7 +7234,7 @@ async function handleDeepThinkChat(req, res) {
     // 9. 构造 usage
     var synthUsage = flowResult.synth_usage || null;
     var usageToStore = Object.assign({}, synthUsage || {}, {
-      thinking_mode: 'high',
+      thinking_mode: 'max',
       model: DEEPSEEK_MODEL_REASONER,
       deep_think: true,
       agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1
@@ -7126,6 +7243,16 @@ async function handleDeepThinkChat(req, res) {
     // 10. 保存到 messages
     if (!aborted) {
       try {
+        var totalDurationMs = Date.now() - startTime;  // ★ O 提前到这里
+        // ★ O 修复 Bug 4: 构造 extra 给 buildMsgMeta, 让历史消息能恢复 think_duration_ms + thinking_log
+        var deepThinkExtra = {
+          deep_think: true,
+          agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
+          planner: flowResult.planner || null,
+          worker_results: (flowResult.worker_results || []).map(function(w) { return { role: w.role, status: w.status, elapsed_ms: w.elapsed_ms || 0 }; }),
+          thinking_log: flowResult.thinking_log || [],
+          think_duration_ms: totalDurationMs
+        };
         await supabase.from('posts').insert([
           {
             user_name: userName,
@@ -7138,7 +7265,7 @@ async function handleDeepThinkChat(req, res) {
             user_name: userName,
             content: finalContent,
             media_type: AI_AGENT_MESSAGE_MARKER,
-            media_url: buildMsgMeta('assistant', convId, usageToStore, '', 2, searchMetaToStore),
+            media_url: buildMsgMeta('assistant', convId, usageToStore, '', 2, searchMetaToStore, totalDurationMs, deepThinkExtra),
             actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
           }
         ]);
@@ -7155,17 +7282,21 @@ async function handleDeepThinkChat(req, res) {
         sanitized_content: finalContent,
         conversation_id: convId,
         deep_think: true,
-        thinking_mode: 'high',
+        thinking_mode: 'max',
         model: DEEPSEEK_MODEL_REASONER,
         usage: synthUsage,
         agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
         planner: flowResult.planner || null,
         worker_results: (flowResult.worker_results || []).map(function(w) { return { role: w.role, status: w.status, elapsed_ms: w.elapsed_ms || 0 }; }),
+        // ★ O 修复 Bug 2: 思考过程日志 (前端展示)
+        thinking_log: flowResult.thinking_log || [],
+        // ★ O 修复 Bug 4: 倒计时 (前端展示已思考 X 秒)
+        think_duration_ms: totalDurationMs,
         search_count: flowResult.sources ? flowResult.sources.length : 0,
         search_query: (flowResult.queries && flowResult.queries[0]) || '',
         search_results: flowResult.sources ? flowResult.sources.slice(0, 50) : [],
         search_expires_at: nowTs + 86400000,
-        duration_ms: Date.now() - startTime,
+        duration_ms: totalDurationMs,
         remaining: { hour: rl.remainingHour, day: rl.remainingDay }
       });
     }
@@ -7270,9 +7401,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     //       AI 可以自己决定是否调用搜索
     var reply = '';
     var usage = null;
-    // ★ D 修复：fallback 'off' 改成 'low'，让 AI 默认多想一下
-    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
-    if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
+    // ★ M: fallback 'off' 改成 'max'，让 AI 默认深度思考
+    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'max';
+    if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
     var reasoning = '';
     var toolCallsInfo = [];
     var allowWebSearch = config.allow_web_search === true || (config.search && config.search.allow_web_search === true);
@@ -7494,9 +7625,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     
     // 思考模式
-    // ★ D 修复：fallback 'off' 改成 'low'
-    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
-    if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
+    // ★ M: fallback 'off' 改成 'max'，让 AI 默认深度思考
+    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'max';
+    if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
     var useThinking = thinkingMode !== 'off';
     
     // 天气查询（Open-Meteo 免费 API）
@@ -8561,7 +8692,7 @@ app.get('/admin/ai-agent/effective-prompt', verifyToken, async (req, res) => {
       roleplay_enabled: config.roleplay && config.roleplay.enabled,
       search_enabled: allowWebSearch,
       model: config.model || {},
-      default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'low'
+      default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'max'
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
