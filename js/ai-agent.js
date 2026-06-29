@@ -1527,6 +1527,7 @@
   }
 
   // 更新进度卡 (按 SSE 事件)
+  // ★ R 适配: 单智能体架构, 阶段简化为 init → agent → searching → done
   function updateDeepThinkProgressCard(card, evt) {
     if (!card) return;
     var stageText = card.querySelector('.ai-progress-stage-text');
@@ -1536,59 +1537,41 @@
     var agentsBox = card.querySelector('.ai-progress-agents');
 
     if (evt.type === 'deep_think_stage') {
+      // ★ R 改: 单智能体阶段映射
       var stageMap = {
-        planning: '规划关键词中...',
-        workers: '并行执行 ' + (card._agentCount || '多个') + ' 个 agent',
-        synthesizing: 'Synthesizer 整合中...'
+        init: '智能体启动中...',
+        agent: 'AI 智能体思考中...',
+        searching: '🔍 智能体搜索中...',
+        error: '✗ 失败'
       };
       stageText.textContent = stageMap[evt.stage] || evt.stage;
       titleText.textContent = '⚡ 深度思考中...';
-      if (evt.stage === 'planning') fill.style.width = '10%';
-      else if (evt.stage === 'workers') fill.style.width = '40%';
-      else if (evt.stage === 'synthesizing') fill.style.width = '85%';
+      if (evt.stage === 'init') fill.style.width = '10%';
+      else if (evt.stage === 'agent') fill.style.width = '40%';
+      else if (evt.stage === 'searching') fill.style.width = '70%';
+      else if (evt.stage === 'error') fill.style.width = '100%';
       if (evt.message) detail.textContent = evt.message;
     } else if (evt.type === 'deep_think_planned') {
-      card._agentCount = (evt.agents || []).length;
-      stageText.textContent = '启动 ' + (evt.agents || []).length + ' 个 agent';
+      // ★ R 改: 单智能体 (1 个), 不再显示 agent 列表
+      card._agentCount = 1;
+      stageText.textContent = 'AI 智能体就绪 (单 agent)';
       titleText.textContent = '⚡ 深度思考中...';
-      fill.style.width = '25%';
-      var agentList = (evt.agents || []).map(function(a) {
-        return '<div class="ai-agent-row pending" data-role="' + a.role + '">' +
-          '<span class="ai-agent-status">○</span> <span class="ai-agent-role">' + a.role + '</span>' +
-        '</div>';
-      }).join('');
-      agentsBox.innerHTML = agentList;
-      detail.textContent = 'Planner: ' + (evt.reasoning || '...');
+      fill.style.width = '20%';
+      if (agentsBox) {
+        // 隐藏 agent 列表 (R 架构只有 1 个智能体, 不需要列表)
+        agentsBox.innerHTML = '';
+        agentsBox.style.display = 'none';
+      }
+      detail.textContent = evt.reasoning || '单智能体动态决策中...';
     } else if (evt.type === 'deep_think_worker') {
-      var rows = agentsBox.querySelectorAll('.ai-agent-row');
-      var row = rows[evt.index];
-      if (row) {
-        var statusMap = { pending: ['○', 'pending'], running: ['⏳', 'running'], success: ['✓', 'success'], failed: ['✗', 'failed'], cancelled: ['⊘', 'cancelled'] };
-        var s = statusMap[evt.status] || ['○', 'pending'];
-        row.className = 'ai-agent-row ' + s[1];
-        row.querySelector('.ai-agent-status').textContent = s[0];
-        if (evt.round != null) {
-          var roleSpan = row.querySelector('.ai-agent-role');
-          var baseText = evt.role || roleSpan.textContent.replace(/\s*\(.*\)$/, '');
-          roleSpan.textContent = baseText + ' (思考第 ' + evt.round + '/' + (evt.max_rounds || 5) + ' 轮)';
-        }
-        if (evt.status === 'success' && evt.sources_count != null) {
-          var succRoleSpan = row.querySelector('.ai-agent-role');
-          succRoleSpan.textContent = succRoleSpan.textContent + ' · ' + evt.sources_count + ' 条引用';
-        }
-      }
-      // 更新进度条 (按 success 比例)
-      var successCount = 0;
-      rows.forEach(function(r) { if (r.classList.contains('success')) successCount++; });
-      if (rows.length > 0) {
-        var p = 25 + (successCount / rows.length) * 55;
-        fill.style.width = Math.min(80, p) + '%';
-      }
+      // ★ R: 不再有 worker 事件, 保留兼容
     } else if (evt.type === 'deep_think_tool') {
+      // ★ R 改: 单智能体搜索
       var last = detail.textContent || '';
-      detail.textContent = '🔍 ' + (evt.agent_role || '') + ' 搜索中... ' + (evt.count || 0) + ' 条';
+      detail.textContent = '🔍 智能体搜索: ' + (evt.query || '') + ' · ' + (evt.count || 0) + ' 条结果';
+      fill.style.width = '70%';
     } else if (evt.type === 'thinking_chunk') {
-      // ★ O 修复 Bug 2: 累积思考过程, 用户可点开看
+      // ★ R: 累积思考过程, 进度卡内显示 1 条 (单智能体)
       if (!card._thinkingLog) card._thinkingLog = [];
       card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
       var logBox = card.querySelector('.ai-progress-thinking-log');
@@ -1596,20 +1579,20 @@
         if (logBox.style.display === 'none') {
           logBox.style.display = '';
         }
-        var roleLabel = evt.agent_role || 'AI';
-        var roundLabel = evt.round ? ' (第 ' + evt.round + ' 轮)' : '';
+        var roleLabel = evt.agent_role || 'AI 智能体';
         var entry = el('div', { class: 'ai-thought-entry' });
-        entry.innerHTML = '<div class="ai-thought-role">🧠 ' + roleLabel + roundLabel + '</div><div class="ai-thought-chunk"></div>';
-        entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 1500);
+        entry.innerHTML = '<div class="ai-thought-role">🧠 ' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
+        entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 4000);
         logBox.appendChild(entry);
         // 自动滚动到最新
         try { logBox.scrollTop = logBox.scrollHeight; } catch (e) {}
-        // 限制最多 100 条
-        while (logBox.children.length > 100) {
+        // 限制最多 50 条 (单智能体一般只 1 条)
+        while (logBox.children.length > 50) {
           logBox.removeChild(logBox.firstChild);
         }
       }
-      detail.textContent = '🧠 ' + (evt.agent_role || 'AI') + ' 思考中...';
+      detail.textContent = '🧠 智能体思考中...';
+      fill.style.width = '50%';
     } else if (evt.type === 'heartbeat') {
       var elapsedSec = Math.floor((evt.elapsed_ms || 0) / 1000);
       var min = Math.floor(elapsedSec / 60);
