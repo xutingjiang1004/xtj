@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -2235,7 +2235,7 @@ const ADMIN_NAME = "xxz";
                     var { data, error } = await sb.rpc('get_user_restrictions', { p_user_name: currentUser });
                     if (error) { return; }
                     var prev = JSON.stringify(userRestrictions);
-                    userRestrictions = data || { is_banned: false, is_blacklisted: false, is_muted: false };
+                    userRestrictions = data && !Array.isArray(data) ? data : { is_banned: false, is_blacklisted: false, is_muted: false };
                     if (JSON.stringify(userRestrictions) !== prev) {
                         applyRestrictions();
                     }
@@ -4937,9 +4937,19 @@ function renderProfileActivityList(kind) {
             // 濞寸姾顕э拷?锛氬垎椤靛姞杞界浉鍏冲彉锟?
             saveViewHistory = function(entry) {
                 const history = getViewHistory();
-                history.unshift(normalizeViewHistoryEntry(entry));
-                if (history.length > 500) history.length = 500;
-                localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
+                var normalized = normalizeViewHistoryEntry(entry);
+                var postId = String(normalized.post_id || normalized.postId || '').trim();
+                var userName = String(normalized.user_name || normalized.userName || '').trim();
+                // 去重：相同 post_id + user_name 的记录不重复添加
+                var exists = postId ? history.some(function(h) {
+                    return String(h.post_id || h.postId || '') === postId &&
+                           String(h.user_name || h.userName || '') === userName;
+                }) : false;
+                if (!exists) {
+                    history.unshift(normalized);
+                    if (history.length > 500) history.length = 500;
+                    localStorage.setItem(VIEW_HISTORY_KEY, JSON.stringify(history));
+                }
             };
 
             function canTrackViewNow(postId) {
@@ -7093,7 +7103,7 @@ function renderProfileActivityList(kind) {
 
                     const post = normalizePost(postRes.data);
                     if (!post) {
-                        document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">帖子不存在或已删除/div>';
+                        document.getElementById('postDetailBody').innerHTML = '<div class="stat-empty">帖子不存在或已删除</div>';
                         return;
                     }
                     if (!canViewPost(post)) {
@@ -7209,7 +7219,7 @@ function renderProfileActivityList(kind) {
                             ${posts.slice(0, 3).map(p => renderPostItemHTML(p)).join('')}
                             ${posts.length > 3 ? `
                                 <div style="text-align:center; padding:8px 0;">
-                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${safeJsStr(name)}')">查看全部 ${posts.length} 条/button>
+                                    <button class="stat-view-btn" onclick="loadUserAllPosts('${safeJsStr(name)}')">查看全部 ${posts.length} 条</button>
                                 </div>
                             ` : ''}
                         </div>
@@ -7454,8 +7464,11 @@ function renderProfileActivityList(kind) {
             }
 
             function getMediaUrl(prefix, val) {
-                if (val.startsWith('http')) return val;
-                return sb.storage.from('uploads').getPublicUrl(val).data.publicUrl;
+                if (val.startsWith('http')) return sanitizeUrl(val);
+                if (!sb) return '';
+                try {
+                    return sb.storage.from('uploads').getPublicUrl(val).data.publicUrl;
+                } catch(e) { return ''; }
             }
 
             function sanitizeStorageFileName(name) {
