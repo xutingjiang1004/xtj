@@ -921,6 +921,8 @@
     var surface = root || wrapper();
     if (!root || !surface || surface.__xtjUnifiedPreviewHandlersInstalled) return;
     surface.__xtjUnifiedPreviewHandlersInstalled = true;
+    if (window.__xtjPreviewWindowHandlersInstalled) return;
+    window.__xtjPreviewWindowHandlersInstalled = true;
 
     surface.addEventListener('pointerdown', function (event) {
       if (isControl(event.target)) return;

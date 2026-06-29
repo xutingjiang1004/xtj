@@ -2897,7 +2897,7 @@ async function runDeepThinkWorker(opts) {
               var wArgs = JSON.parse(tc.function.arguments || '{}');
               if (wArgs && wArgs.query) queries.push(String(wArgs.query).slice(0, 100));
             } catch (e) {}
-            if (tRes && Array.isArray(tRes.results_count) === false && tRes.content) {
+            if (tRes && tRes.content) {
               try {
                 var wItems = JSON.parse(tRes.content || '[]');
                 if (Array.isArray(wItems)) {
@@ -5559,11 +5559,12 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
         }
         sent.push(r.user_name || r.email);
       } catch (e) {
-        console.error('[Email] 发送给 ' + r.email + ' 失败: ' + (e.code || '') + ' - ' + e.message);
+        var maskedEmail = r.email ? r.email.slice(0, 3) + '***@' + (r.email.split('@')[1] || '') : 'unknown';
+        console.error('[Email] 发送给 ' + maskedEmail + ' 失败: ' + (e.code || '') + ' - ' + e.message);
         // GAS 失败 → 回退 SendGrid → 回退 SMTP
         if (GMAIL_GAS_URL && SENDGRID_API_KEY) {
           try {
-            console.log('[Email] GAS 失败，回退到 SendGrid');
+            console.warn('[Email] GAS 失败，回退到 SendGrid');
             await sendViaSendGrid(r.email, subjectVal, bodyText, bodyHtml);
             sent.push(r.user_name || r.email);
             continue;
@@ -5613,9 +5614,8 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
           }
         } else if (!GMAIL_GAS_URL && usedPort === '465' && (e.code === 'ETIMEDOUT' || e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' || e.message.indexOf('timeout') > -1 || e.message.indexOf('connect') > -1)) {
           try {
-            usedPort = '587';
-            console.log('[Email] 465 连接失败，回退到 587 STARTTLS');
-            mailTransporter = nodemailer.createTransport({
+            console.warn('[Email] 465 连接失败，回退到 587 STARTTLS');
+            var fallbackTransporter = nodemailer.createTransport({
               host: 'smtp.gmail.com',
               port: 587,
               secure: false,
@@ -5625,8 +5625,7 @@ app.post('/admin/send-email', verifyToken, rateLimit(60000, 5), async (req, res)
               greetingTimeout: 10000,
               socketTimeout: 10000
             });
-            transporter = mailTransporter;
-            mailTransporterPort = '587';
+            transporter = fallbackTransporter;
             await transporter.sendMail({
               from: '"XTJ 管理员" <' + GMAIL_USER + '>',
               to: r.email,
@@ -6998,7 +6997,7 @@ async function handleDeepThinkChat(req, res) {
   var _controller, _heartbeatTimer;
 
   // 取消 token — 用于 /api/agent/chat/cancel
-  var cancelToken = { cancelled: false };
+  var cancelToken = { cancelled: false, userName: userName };
   var convId = String(req.body && req.body.conversation_id || '').trim();
   if (!convId) convId = genConvId();
   if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
@@ -7226,8 +7225,10 @@ app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
     if (!convId) return res.status(400).json({ error: 'conversation_id required' });
     var job = activeDeepThinkJobs.get(convId);
     if (job) {
+      if (job.userName && job.userName !== req.userName) {
+        return res.status(403).json({ error: '无权取消其他用户的深度思考' });
+      }
       job.cancelled = true;
-      try { console.log('[DEEP-THINK] cancelled by user, convId:', convId); } catch (e) {}
       return res.json({ ok: true, cancelled: true });
     }
     res.json({ ok: true, cancelled: false, message: 'no active deep think job' });
@@ -8190,7 +8191,14 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         
         // 捕获 search_web 工具的搜索结果元数据
         if (toolResult.tool_name === 'search_web' && !toolResult.error && toolResult.results_count > 0) {
-          _toolSearchMeta = { count: toolResult.results_count, query: toolResult.query || toolResults[ti].name };
+          var _parsedResults = null;
+          try { _parsedResults = JSON.parse(toolResult.content || '[]'); } catch (e) {}
+          _toolSearchMeta = {
+            count: toolResult.results_count,
+            query: toolResult.query || toolResults[ti].name,
+            results: Array.isArray(_parsedResults) ? _parsedResults.slice(0, 50) : null,
+            expires_at: Date.now() + 86400000
+          };
         }
         
         res.write('data: ' + JSON.stringify({
