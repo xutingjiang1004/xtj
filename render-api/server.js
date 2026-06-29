@@ -2701,12 +2701,20 @@ async function runDeepThinkAgent(opts) {
 
   // ★ R: 单智能体 prompt — 融合 Planner + Synthesizer 能力
   //   像 ChatGPT pro thinking 一样: 自然、不啰嗦、动态决策
+  // ★ S 改: 字数要求放宽, 让 AI 自主决定 (1+1=2 可 1-200 字, 复杂问题 500-10000 字)
   var DEEP_THINK_AGENT_PROMPT = `你是 XTJ AI 智能体, 当前处于"深度思考模式".
-你可以自主决定:
+你自己有脑子, 自己决定:
+
 1. **是否需要搜索** — 闲聊/常识/简单计算 不搜; 实时信息/具体数据/事件 搜
 2. **搜索几次** — 1-3 次足够, 别刷屏
 3. **思考深度** — 简单问题快速答; 复杂问题深入分析
-4. **答案长度** — 按问题需要, 别硬撑 (1+1=2 就 50-200 字, 旅游攻略可 800-2500 字)
+4. **答案长度** — 完全由你按问题需要决定, 别硬撑别凑字
+   - 1+1=? 你就 1-2 个字都行
+   - "你好" 就 1-2 句
+   - 单点常识 (Jennie 生日) 1-3 句
+   - 中等问题 100-500 字
+   - 复杂/深度问题 (攻略/方案/研究) 500-10000 字, 越长越详细
+   - 唯一原则: **怎么答最自然就怎么答, 别为了显专业而写废话**
 
 **风格要求** (像 ChatGPT pro thinking, 不要研究报告):
 - 直接给答案, 别"作为一个 AI"
@@ -2719,8 +2727,8 @@ async function runDeepThinkAgent(opts) {
 **执行规则**:
 - 需要搜索时: 调用 search_web 工具 (1-3 次, 每次精准关键词)
 - 不需要搜索时: 直接基于知识回答
-- 严禁"先皮亚诺公理"或类似废话
-- 1+1=2 就 1 行字, 别长篇大论`;
+- 1+1=2 就 1 行字, 别长篇大论
+- **记住: 你自己决定一切, 没人会限制你**`;
 
   // ★ R: 取消 token 检查
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
@@ -7218,7 +7226,7 @@ async function handleDeepThinkChat(req, res) {
       // ★ P 新增: 从 req.body / config 读取深度思考的思考程度
       //   顺序: 客户端 req body > config.deep_think.default_thinking_mode > 'max'
       var clientThinkingMode = (req.body && req.body.thinking_mode) || '';
-      flowResult = await runMultiAgentFlow({
+      flowResult = await runDeepThinkAgent({
         res: res,
         userName: userName,
         message: message,
