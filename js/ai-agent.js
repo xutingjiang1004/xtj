@@ -1246,7 +1246,16 @@
 
     function clearFrame() {
       if (!rafId) return;
-      try { cancelFrame(rafId); } catch (e) {}
+      try { cancelFrame(rafId); }
+    function release() {
+      if (_rafId) {
+        try { cancelAnimationFrame(_rafId); } catch (e) {}
+        _rafId = 0;
+      }
+      if (_pending) _pending = '';
+      _active = false;
+    }
+ catch (e) {}
       rafId = 0;
     }
 
@@ -1319,7 +1328,18 @@
           try { options.onRender(rendered); } catch (e3) {}
         }
       },
+
+      stop: function() {
+        if (cancelled) return;
+        clearFrame();
+      },
       cancel: function() {
+        if (cancelled) return;
+        cancelled = true;
+        clearFrame();
+        pending = '';
+        targetEl = null;
+      },      cancel: function() {
         cancelled = true;
         clearFrame();
         pending = '';
@@ -1523,6 +1543,9 @@
       }
     }, 1000);
     card._elapsedTimer = cardTimer;
+    card._cleanupTimer = function() {
+      try { clearInterval(cardTimer); } catch (e) {}
+    };
     return card;
   }
 
@@ -1615,7 +1638,17 @@
     if (S.deepThinkJob) {
       try { S.deepThinkJob.abort(); } catch (e) {}
     }
-    // 同时通知后端 cancel (fire-and-forget)
+    // Cleanup progress card timer and state
+    if (S.deepThinkProgressCard) {
+      try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
+      try { S.deepThinkProgressCard.classList.add('ai-progress-card-cancelled'); } catch (e) {}
+    }
+    // Reset sending state so user can send again
+    S.sending = false;
+    S.deepThinkJob = null;
+    S.deepThinkProgressCard = null;
+    S.abortController = null;
+    // Fire-and-forget cancel to server
     try {
       var token = localStorage.getItem('xtj_user_token');
       var headers = { 'Content-Type': 'application/json' };
@@ -1626,14 +1659,7 @@
         body: JSON.stringify({ conversation_id: S.conversationId || '' })
       }).catch(function() {});
     } catch (e) {}
-    if (S.deepThinkProgressCard) {
-      var stageText = S.deepThinkProgressCard.querySelector('.ai-progress-stage-text');
-      var titleText = S.deepThinkProgressCard.querySelector('.ai-progress-title');
-      if (stageText) stageText.textContent = '⊘ 已停止';
-      if (titleText) titleText.textContent = '⊘ 已停止';
-      try { S.deepThinkProgressCard.classList.add('ai-progress-card-cancelled'); } catch (e) {}
-    }
-    notify('已停止深度思考');
+    notify('\u5df2\u53d6\u6d88\u601d\u8003');
   }
 
   async function ensureUserAuthOrNotify() {
@@ -1744,9 +1770,17 @@
     var doneReceived = false;
     var evtHandled = false;
 
+    function safeRemoveProgressCard() {
+      if (progressCard) {
+        try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
+        safeRemoveProgressCard()
+        try { progressCard._done = true; } catch (e) {}
+      }
+    }
+
     function ensureThinkCardNode() {
       if (aiNode) return aiNode;
-      try { progressCard.remove(); } catch (e) {}
+      safeRemoveProgressCard()
       // ★ Q 重做: think-card 极简版 (像 ChatGPT/Gemini, 不是千层蛋糕)
       //   - 1 个外框 + 1 个 header + 1 个 body, 内部不再嵌套 box
       //   - header 整行可点击展开/折叠
@@ -1978,7 +2012,7 @@
         try {
           var errJson = await resp.json().catch(function() { return {}; });
           if (S._currentReqId !== reqId) return;
-          try { progressCard.remove(); } catch (e) {}
+          safeRemoveProgressCard()
           notify(String(errJson.error || ('AI 失败 (' + resp.status + ')')));
         } catch (e) {}
         resetSendingIfCurrent();
@@ -1986,7 +2020,7 @@
       }
 
       if (!resp.body) {
-        try { progressCard.remove(); } catch (e) {}
+        safeRemoveProgressCard()
         notify('AI 没有响应');
         resetSendingIfCurrent();
         return;
@@ -2096,7 +2130,7 @@
             continue;
           }
           if (evt.type === 'error') {
-            try { progressCard.remove(); } catch (e) {}
+            safeRemoveProgressCard()
             var errMsg = evt.error || 'AI 调用失败';
             if (aiContent) {
               ensureThinkCardNode();
@@ -2115,7 +2149,7 @@
             break;
           }
           if (evt.type === 'done') {
-            try { progressCard.remove(); } catch (e) {}
+            safeRemoveProgressCard()
             S.sending = false;
             S.abortController = null;
             S.deepThinkJob = null;
@@ -2146,13 +2180,13 @@
       }
 
       if (S._currentReqId !== reqId || aborted) {
-        try { progressCard.remove(); } catch (e) {}
+        safeRemoveProgressCard()
         if (aiNode) try { aiNode.remove(); } catch (e) {}
         resetSendingIfCurrent();
         return;
       }
 
-      try { progressCard.remove(); } catch (e) {}
+      safeRemoveProgressCard()
       if (progressCard) { try { progressCard._done = true; } catch (e) {} }
       if (evtHandled) {
         // already handled in done
@@ -2172,7 +2206,7 @@
       }
     } catch (fetchErr) {
       if (S._currentReqId !== reqId) return;
-      try { progressCard.remove(); } catch (e) {}
+      safeRemoveProgressCard()
       if (progressCard) { try { progressCard._done = true; } catch (e) {} }
       if (fetchErr && fetchErr.name !== 'AbortError') {
         if (aiContent) {
@@ -3582,6 +3616,13 @@ function showChatMessages() {
     S.active = false;
     clearReplyTimer();
     abortCurrentRequest(); // 内部已调用 clearStreamCleanup
+    // Clean up deep think state
+    if (S.deepThinkProgressCard) {
+      try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
+    }
+    S.deepThink = false;
+    S.deepThinkJob = null;
+    S.deepThinkProgressCard = null;
     // 重置所有状态，避免重开后残留
     S.sending = false;
     S.messages = [];
@@ -3644,6 +3685,9 @@ function showChatMessages() {
 
     var titleEl = document.getElementById('dockChatTitle');
     if (titleEl) titleEl.textContent = '消息';
+
+    // Clean up any active text renderers
+    try { window.__xtjActiveRenderers = null; } catch (e) {}
 
     try {
       if (typeof window.renderDockChatList === 'function') {
