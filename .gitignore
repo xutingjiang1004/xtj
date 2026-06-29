@@ -4,3 +4,5 @@ node_modules/
 .trae/
 *.log
 .DS_Store
+
+.codex/
