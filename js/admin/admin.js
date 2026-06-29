@@ -5109,6 +5109,7 @@ async function initAdminClient() {
             var or = cfg.output_rules || {};
             var sc = cfg.search || {};
             var mdl = cfg.model || {};
+            var dt = cfg.deep_think || {};  // ★ P 新增: 深度思考子配置
             var dbg = cfg.admin_debug || {};
 
             var html = [
@@ -5195,7 +5196,28 @@ async function initAdminClient() {
                 '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="modelMultiAgent"' + (mdl.multi_agent ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 多Agent协作（拆解问题→多关键词并行搜索→合成回答，思考/非思考模式均可）</label>',
                 '</div>',
                 '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
-                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;opacity:0.5;pointer-events:none;"><input type="checkbox" id="modelUserSwitch" disabled style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 允许用户切换（已禁用，由后台统一控制）</label>',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="modelUserSwitch"' + (mdl.allow_user_thinking_switch ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 允许用户切换（已禁用，由后台统一控制）</label>',
+                '</div>',
+                '</div>',
+
+                // ★ P 新增: 模块7.5: 深度思考模式 (Deep Think)
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">深度思考模式 (Deep Think)</h4>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="dtEnabled"' + (dt.enabled !== false ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 启用深度思考模式 (用户可点击顶部 ⚡ 按钮开启)</label>',
+                '</div>',
+                '<div class="form-group"><label>深度思考思考程度</label><select id="dtThinkingMode">' + selOpts(dt.default_thinking_mode, [{val:'low',label:'低'},{val:'medium',label:'中'},{val:'high',label:'高'},{val:'max',label:'极高 (max)'}]) + '</select></div>',
+                '<div style="font-size:11px;color:#888;margin:4px 0;line-height:1.5;padding:6px 8px;background:rgba(46,148,101,0.06);border-radius:4px;">',
+                '<strong>📌 深度思考说明:</strong><br>',
+                '• Planner 自主决定拆解 0~5 个 agent (简单问题 0 个, 复杂问题最多 5 个)<br>',
+                '• 每个 agent 可决定是否需要搜索 (need_search=true/false)<br>',
+                '• 1+1=? 这类极简单问题, Planner 判定为 "low", agents=[], Synthesizer 直接答 1+1=2<br>',
+                '• Jennie 生日 这类单点问题, Planner 判定为 "low", agents=[]<br>',
+                '• 济州岛旅游攻略 这类复杂问题, Planner 拆 3-5 个 agent, 配搜索<br>',
+                '• 整合风格像 ChatGPT pro thinking, 不是研究报告',
+                '</div>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="dtRequireHistory"' + (dt.require_history_injection !== false ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 注入历史对话上下文 (修复 "你卡了" 被当成新问题的 bug)</label>',
                 '</div>',
                 '</div>',
 
@@ -5333,6 +5355,13 @@ async function initAdminClient() {
                                 default_thinking_mode: document.getElementById('modelThinkingMode').value,
                                 allow_user_thinking_switch: document.getElementById('modelUserSwitch').checked,
                                 multi_agent: document.getElementById('modelMultiAgent').checked
+                            },
+                            // ★ P 新增: 深度思考子配置
+                            deep_think: {
+                                enabled: document.getElementById('dtEnabled').checked,
+                                default_thinking_mode: document.getElementById('dtThinkingMode').value,
+                                max_workers: 5,
+                                require_history_injection: document.getElementById('dtRequireHistory').checked
                             },
                             admin_debug: {
                                 show_effective_prompt: document.getElementById('debugPrompt').checked,
