@@ -1450,22 +1450,20 @@
   // ===================== M: 深度思考模式 — 进度卡 / toggle / cancel =====================
   // 切换深度思考模式 (持久化到 localStorage, 重开对话框后恢复)
   function toggleDeepThink() {
-    // ★ P 新增: 后端禁用时不允许开启
     if (!S.deepThinkEnabled) {
       notify('深度思考模式已被管理员关闭');
       return;
     }
-    if (S.sending) {
-      notify('当前消息处理中, 请稍后再切换');
+    if (S.sending && !S.deepThink) {
+      notify('当前消息处理中, 请稍后再开启深度思考');
       return;
     }
     S.deepThink = !S.deepThink;
     try { localStorage.setItem('xtj_ai_deep_think', S.deepThink ? '1' : '0'); } catch (e) {}
     refreshDeepThinkToggle();
-    if (!S.deepThink && S.deepThinkJob) {
-      // 关闭时如果正在跑, 取消
-      cancelDeepThink();
-    }
+    // 关闭深度思考时, 不取消当前正在进行的深度思考请求
+    // 允许用户切换模式, 后续消息用新模式发送
+    // 当前深度思考继续在后台运行
   }
 
   function refreshDeepThinkToggle() {
@@ -1493,21 +1491,16 @@
   }
 
   // 构造深度思考进度卡片 (极简风格)
-  var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" opacity=".35"/><circle cx="8" cy="8" r="3" fill="currentColor" opacity=".7"/></svg>';
+  var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8 2l5 5.5-5 5.5-5-5.5z"/></svg>';
 
   function buildDeepThinkProgressCard() {
     var card = el('div', { class: 'ai-progress-card' });
     card.innerHTML =
       '<div class="ai-progress-header">' +
-        '<span class="ai-progress-dot"></span>' +
-        '<span class="ai-progress-title">深度思考中...</span>' +
+        '<span class="ai-progress-icon">' + AI_THINK_ICON + '</span>' +
+        '<span class="ai-progress-title">思考中...</span>' +
         '<span class="ai-progress-elapsed">0s</span>' +
       '</div>' +
-      '<div class="ai-progress-stage">' +
-        '<span class="ai-progress-stage-dot"></span>' +
-        '<span>阶段: </span><span class="ai-progress-stage-text">启动中</span>' +
-      '</div>' +
-      '<div class="ai-progress-detail"></div>' +
       '<div class="ai-progress-thinking-log" style="display:none"></div>' +
       '<button type="button" class="ai-progress-stop">停止思考</button>';
     card.querySelector('.ai-progress-stop').addEventListener('click', function(ev) {
@@ -1515,50 +1508,32 @@
       ev.stopPropagation();
       cancelDeepThink();
     });
-    // 前端倒计时兜底
     var cardStart = Date.now();
     var cardEl = card;
     var cardTimer = setInterval(function() {
-      if (S.deepThinkProgressCard !== cardEl || cardEl._done) {
-        clearInterval(cardTimer);
-        return;
-      }
-      var elapsedText = cardEl.querySelector('.ai-progress-elapsed').textContent;
-      if (elapsedText === '0s' || /^\d+s$/.test(elapsedText) === false) {
+      if (S.deepThinkProgressCard !== cardEl || cardEl._done) { clearInterval(cardTimer); return; }
+      var el = cardEl.querySelector('.ai-progress-elapsed');
+      if (el && el.textContent === '0s') {
         var sec = Math.floor((Date.now() - cardStart) / 1000);
         var min = Math.floor(sec / 60);
-        cardEl.querySelector('.ai-progress-elapsed').textContent = min > 0 ? (min + 'm ' + (sec % 60) + 's') : (sec + 's');
+        el.textContent = min > 0 ? (min + 'm ' + (sec % 60) + 's') : (sec + 's');
       }
     }, 1000);
     card._elapsedTimer = cardTimer;
-    card._cleanupTimer = function() {
-      try { clearInterval(cardTimer); } catch (e) {}
-    };
+    card._cleanupTimer = function() { try { clearInterval(cardTimer); } catch (e) {} };
     return card;
   }
 
-  // 更新进度卡 (按 SSE 事件)
+  // 更新进度卡
   function updateDeepThinkProgressCard(card, evt) {
     if (!card) return;
-    var stageText = card.querySelector('.ai-progress-stage-text');
     var titleText = card.querySelector('.ai-progress-title');
-    var detail = card.querySelector('.ai-progress-detail');
 
     if (evt.type === 'deep_think_stage') {
-      var stageMap = {
-        init: '启动中',
-        agent: '思考中',
-        searching: '搜索中',
-        error: '失败'
-      };
-      stageText.textContent = stageMap[evt.stage] || evt.stage;
-      if (evt.message) detail.textContent = evt.message;
-    } else if (evt.type === 'deep_think_planned') {
-      stageText.textContent = '计划已就绪';
-      detail.textContent = evt.reasoning || '';
+      var stageMap = { init: '准备中...', agent: '思考中...', searching: '搜索中...', error: '失败' };
+      if (titleText) titleText.textContent = stageMap[evt.stage] || evt.stage;
     } else if (evt.type === 'deep_think_tool') {
-      detail.textContent = '正在搜索: ' + (evt.query || '') + ' (' + (evt.count || 0) + ' 条结果)';
-      stageText.textContent = '搜索中';
+      if (titleText) titleText.textContent = '搜索中...';
     } else if (evt.type === 'thinking_chunk') {
       if (!card._thinkingLog) card._thinkingLog = [];
       card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
@@ -1573,18 +1548,15 @@
         try { logBox.scrollTop = logBox.scrollHeight; } catch (e) {}
         while (logBox.children.length > 50) logBox.removeChild(logBox.firstChild);
       }
-      detail.textContent = '思考中...';
     } else if (evt.type === 'heartbeat') {
       var elapsedSec = Math.floor((evt.elapsed_ms || 0) / 1000);
       var min = Math.floor(elapsedSec / 60);
       var sec = elapsedSec % 60;
       card.querySelector('.ai-progress-elapsed').textContent = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
     } else if (evt.type === 'done') {
-      stageText.textContent = '完成';
-      titleText.textContent = '深度思考完成';
+      if (titleText) titleText.textContent = '思考完成';
     } else if (evt.type === 'error') {
-      stageText.textContent = '失败';
-      titleText.textContent = '思考中断';
+      if (titleText) titleText.textContent = '思考中断';
       card.classList.add('ai-progress-card-error');
     }
   }
@@ -2013,28 +1985,8 @@
             updateDeepThinkProgressCard(progressCard, evt);
             continue;
           }
-          if (evt.type === 'deep_think_stage' || evt.type === 'deep_think_planned' || evt.type === 'deep_think_worker' || evt.type === 'deep_think_tool') {
+          if (evt.type === 'deep_think_stage' || evt.type === 'deep_think_planned' || evt.type === 'deep_think_worker' || evt.type === 'deep_think_tool' || evt.type === 'deep_think_init') {
             updateDeepThinkProgressCard(progressCard, evt);
-            continue;
-          }
-          if (evt.type === 'deep_think_init') {
-            // Just update the progress card, don't create think-card yet
-            if (evt.message) {
-              var dt = progressCard.querySelector('.ai-progress-detail');
-              if (dt) dt.textContent = evt.message;
-            }
-            continue;
-          }
-          if (evt.type === 'deep_think_tool') {
-            // Show search tool usage in progress card
-            if (evt.tool_name === 'search_web') {
-              var dt2 = progressCard.querySelector('.ai-progress-detail');
-              var st = progressCard.querySelector('.ai-progress-stage-text');
-              if (dt2) dt2.textContent = '🔍 正在搜索相关资料...';
-              if (st) st.textContent = '搜索中';
-              var fill = progressCard.querySelector('.ai-progress-fill');
-              if (fill) fill.style.width = '35%';
-            }
             continue;
           }
           if (evt.type === 'thinking_chunk') {

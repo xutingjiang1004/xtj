@@ -519,48 +519,8 @@
     }
   };
 
-  // 领取 Pro 活动
-  window.claimProGift = async function(giftId) {
-    if (!giftId) return { ok: false, error: '缺少活动ID' };
-    for (var retry = 0; retry <= 1; retry++) {
-      try {
-        var headers = { 'Content-Type': 'application/json' };
-        if (typeof window.getUserAuthHeaders === 'function') {
-          var authHeaders = await window.getUserAuthHeaders();
-          if (authHeaders) {
-            headers['Authorization'] = authHeaders['Authorization'];
-          }
-        }
-        var resp = await fetch((window.API_BASE || '') + '/api/pro-gifts/claim', {
-          method: 'POST',
-          headers: headers,
-          body: JSON.stringify({ gift_id: giftId }),
-          signal: AbortSignal.timeout(10000)
-        });
-        if (resp.status === 401 || resp.status === 403) {
-          if (retry === 0) {
-            if (typeof window.clearUserToken === 'function') {
-              window.clearUserToken();
-            }
-            continue;
-          }
-          return { ok: false, error: '身份验证失败，请重新登录', needsReauth: true };
-        }
-        var data = await resp.json();
-        if (!resp.ok) {
-          return { ok: false, error: data.error || '领取失败' };
-        }
-        // 领取成功，刷新活动列表
-        if (typeof window.fetchProGifts === 'function') {
-          window.fetchProGifts();
-        }
-        return { ok: true, data: data };
-      } catch(e) {
-        if (retry === 0) continue;
-        return { ok: false, error: '网络错误，请稍后重试' };
-      }
-    }
-  };
+  // 领取 Pro 活动 — 由 core.js 提供完整实现 (含UI按钮状态管理)
+  // 此处不再重复定义, 避免覆盖 core.js 版本
 
   // 渲染活动列表
   function renderGiftList(container, gifts) {

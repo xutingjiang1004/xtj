@@ -1625,3 +1625,11 @@ html.xtj-pro-active .dock-tab.active .dt-svg {
   }
 }
 
+/* reduced-motion: 移动端/low-perf 设备减少动画 */
+@media (prefers-reduced-motion) {
+  .pro-style-preview-card,
+  .pro-style-preview-card *,
+  .pro-preview-bubble,
+  .pro-preview-post { animation: none !important; transition: none !important; }
+}
+
