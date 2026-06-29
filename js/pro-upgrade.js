@@ -600,8 +600,8 @@
   };
 
   // 全局领取回调（由按钮 onclick 触发）
-  window.onClaimGift = async function(giftId) {
-    var btn = event && event.target ? event.target : null;
+  window.onClaimGift = async function(giftId, ev) {
+    var btn = ev && ev.target ? ev.target : (typeof event !== 'undefined' ? event.target : null);
     if (btn) {
       btn.disabled = true;
       btn.textContent = '领取中...';
