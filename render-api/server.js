@@ -2576,7 +2576,7 @@ async function runMultiAgentFlow(opts) {
       ],
       stream: false,
       thinking: { type: 'enabled' },
-      reasoning_effort: 'high',
+      reasoning_effort: 'max',
       response_format: { type: 'json_object' },
       max_tokens: 4096
     };
@@ -2742,7 +2742,7 @@ async function runMultiAgentFlow(opts) {
       ],
       stream: false,
       thinking: { type: 'enabled' },
-      reasoning_effort: 'high',
+      reasoning_effort: 'max',
       max_tokens: 32768
     };
     var synthResp = await fetch(DEEPSEEK_API_URL, {
@@ -2829,7 +2829,7 @@ async function runDeepThinkWorker(opts) {
     var r = null;
     try {
       r = await callDeepSeek(messages, {
-        thinking_mode: 'high',
+        thinking_mode: 'max',
         tools: AI_TOOLS,
         tool_choice: 'auto',
         max_tool_rounds: 1,  // 单轮只允许 1 个 tool call
@@ -6884,10 +6884,10 @@ const AI_DEFAULT_CONFIG = {
     format: ['必要时使用标题和清单', '复杂问题先说结论再给步骤']
   },
   search: { allow_web_search: false, search_provider: 'searxng', max_results: 5, timeout_ms: 4000, use_weather_tool: true },
-  // ★ D 修复：default_thinking_mode 从 medium 改成 low
-  //   low 已经能覆盖大部分 chain-of-thought 需求，比 medium 便宜
-  //   管理员可在 /admin/ai-agent/config 调整
-  model: { reasoner_model: '', default_thinking_mode: 'low', allow_user_thinking_switch: true, multi_agent: false },
+  // ★ M: default_thinking_mode 从 low 改成 max
+  //   用户要求: 普通聊天也用 max 思考程度
+  //   管理员可在 /admin/ai-agent/config 切换为 low/medium/high/max
+  model: { reasoner_model: '', default_thinking_mode: 'max', allow_user_thinking_switch: false, multi_agent: true },
   admin_debug: { show_effective_prompt: true, show_model_info: true, show_reasoning_length: true },
   updated_at: '',
   updated_by: ''
@@ -7117,7 +7117,7 @@ async function handleDeepThinkChat(req, res) {
     // 9. 构造 usage
     var synthUsage = flowResult.synth_usage || null;
     var usageToStore = Object.assign({}, synthUsage || {}, {
-      thinking_mode: 'high',
+      thinking_mode: 'max',
       model: DEEPSEEK_MODEL_REASONER,
       deep_think: true,
       agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1
@@ -7155,7 +7155,7 @@ async function handleDeepThinkChat(req, res) {
         sanitized_content: finalContent,
         conversation_id: convId,
         deep_think: true,
-        thinking_mode: 'high',
+        thinking_mode: 'max',
         model: DEEPSEEK_MODEL_REASONER,
         usage: synthUsage,
         agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
@@ -7270,9 +7270,9 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     //       AI 可以自己决定是否调用搜索
     var reply = '';
     var usage = null;
-    // ★ D 修复：fallback 'off' 改成 'low'，让 AI 默认多想一下
-    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
-    if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
+    // ★ M: fallback 'off' 改成 'max'，让 AI 默认深度思考
+    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'max';
+    if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
     var reasoning = '';
     var toolCallsInfo = [];
     var allowWebSearch = config.allow_web_search === true || (config.search && config.search.allow_web_search === true);
@@ -7494,9 +7494,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
     
     // 思考模式
-    // ★ D 修复：fallback 'off' 改成 'low'
-    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'low';
-    if (['off', 'low', 'medium', 'high'].indexOf(thinkingMode) < 0) thinkingMode = 'low';
+    // ★ M: fallback 'off' 改成 'max'，让 AI 默认深度思考
+    var thinkingMode = (req.body && req.body.thinking_mode) || (config.model && config.model.default_thinking_mode) || 'max';
+    if (['off', 'low', 'medium', 'high', 'max'].indexOf(thinkingMode) < 0) thinkingMode = 'max';
     var useThinking = thinkingMode !== 'off';
     
     // 天气查询（Open-Meteo 免费 API）
@@ -8561,7 +8561,7 @@ app.get('/admin/ai-agent/effective-prompt', verifyToken, async (req, res) => {
       roleplay_enabled: config.roleplay && config.roleplay.enabled,
       search_enabled: allowWebSearch,
       model: config.model || {},
-      default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'low'
+      default_thinking_mode: (config.model && config.model.default_thinking_mode) || 'max'
     });
   } catch (e) {
     return res.status(500).json({ ok: false, error: e.message });
