@@ -7248,8 +7248,10 @@ async function handleDeepThinkChat(req, res) {
     try { clearInterval(_heartbeatTimer); } catch (e) {}
     if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
 
-    // 7. 清洗 Synthesizer 输出 (去除括号动作等)
-    var finalContent = sanitizeAssistantVisibleText(flowResult.synth_content || '');
+    // 7. 清洗最终内容 (R 架构: 单智能体直接 finalContent; M 架构: synth_content)
+    //   兼容: runDeepThinkAgent 返回 finalContent, runMultiAgentFlow 返回 synth_content
+    var _rawContent = flowResult.finalContent || flowResult.synth_content || '';
+    var finalContent = sanitizeAssistantVisibleText(_rawContent);
     if (!finalContent) finalContent = '（深度思考未生成内容, 请重试）';
 
     // 8. 构造 searchMeta
