@@ -7322,12 +7322,24 @@ async function handleDeepThinkChat(req, res) {
       try {
         var totalDurationMs = Date.now() - startTime;  // ★ O 提前到这里
         // ★ O 修复 Bug 4: 构造 extra 给 buildMsgMeta, 让历史消息能恢复 think_duration_ms + thinking_log
+        // ★ 合并同角色的连续 thinking_chunk, 避免保存数百个单字条目
+        var rawThinkingLog = flowResult.thinking_log || [];
+        var mergedThinkingLog = [];
+        for (var tli = 0; tli < rawThinkingLog.length; tli++) {
+          var rtl = rawThinkingLog[tli];
+          var last = mergedThinkingLog[mergedThinkingLog.length - 1];
+          if (last && last.agent_role === (rtl.agent_role || 'AI 智能体') && last.round === (rtl.round || 0)) {
+            last.chunk = (last.chunk || '') + (rtl.chunk || '');
+          } else {
+            mergedThinkingLog.push({ agent_role: rtl.agent_role || 'AI 智能体', chunk: rtl.chunk || '', round: rtl.round || 0 });
+          }
+        }
         var deepThinkExtra = {
           deep_think: true,
           agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
           planner: flowResult.planner || null,
           worker_results: (flowResult.worker_results || []).map(function(w) { return { role: w.role, status: w.status, elapsed_ms: w.elapsed_ms || 0 }; }),
-          thinking_log: flowResult.thinking_log || [],
+          thinking_log: mergedThinkingLog,
           think_duration_ms: totalDurationMs
         };
         await supabase.from('posts').insert([
