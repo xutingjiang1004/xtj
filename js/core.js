@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -8621,7 +8621,7 @@ function renderProfileActivityList(kind) {
                     return;
                 }
                 var html = [
-                    '<div class="chat-list-item" data-chat-user="__ai_agent__" role="button" tabindex="0" style="--xtj-enter-delay:0ms">',
+                    '<div class="chat-list-item ai-agent-entry" data-chat-user="__ai_agent__" role="button" tabindex="0" style="--xtj-enter-delay:0ms">',
                     '<div class="cli-avatar">🐱</div>',
                     '<div class="cli-info"><div class="cli-name">徐旭泽的小猫</div><div class="cli-preview">和小猫聊聊天</div></div>',
                     '<div class="cli-right"><span class="cli-time">AI</span></div>',
@@ -8634,6 +8634,8 @@ function renderProfileActivityList(kind) {
                     e.stopPropagation();
                     if (typeof window.__xtjOpenAiChat === 'function') {
                         window.__xtjOpenAiChat();
+                    } else if (window.__xtjAiAgent && typeof window.__xtjAiAgent.open === 'function') {
+                        window.__xtjAiAgent.open();
                     }
                 });
                 el.insertBefore(row, el.firstChild);
