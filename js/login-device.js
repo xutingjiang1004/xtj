@@ -609,12 +609,22 @@
         // Fetch failure monitoring (intercept fetch)
         try {
             var _origFetch = window.fetch;
-            window.fetch = function() {
+            window.fetch = function(input, init) {
+                // P0 修复: 正确捕获 URL, inner function 的 arguments 是它自己的
+                var _url = '';
+                try {
+                    if (typeof input === 'string') _url = input;
+                    else if (input && typeof input.url === 'string') _url = input.url;
+                    else if (input && typeof Request !== 'undefined' && input instanceof Request) _url = input.url;
+                } catch (_e) {}
                 return _origFetch.apply(this, arguments).catch(function(err) {
-                    var url = (arguments[0] && typeof arguments[0] === 'string') ? arguments[0] : ((arguments[0] && arguments[0].url) || '');
-                    // Skip reporting our own error/event endpoints to avoid loops
-                    if (url.indexOf('/client-error-log') >= 0) throw err;
-                    sendClientError('fetch_error', err.message || 'fetch failed', '', url, null, null);
+                    // 跳过 AbortError (Supabase SDK 5s timeout / page unload 自动 abort, 不是真错误)
+                    if (err && (err.name === 'AbortError' || /abort/i.test(String(err.message || '')))) {
+                        throw err;
+                    }
+                    // 跳过我们自己上报错误的端点
+                    if (_url.indexOf('/client-error-log') >= 0) throw err;
+                    sendClientError('fetch_error', (err && err.message) || 'fetch failed', '', _url, null, null);
                     throw err;
                 });
             };
