@@ -407,6 +407,23 @@ Pro 赠送活动系统上线、安全审计修复、设备识别精度大幅提�
 ### Remade
 - 重做后台安全防护与统计可视化基础设施
 
-## 说明
-- 本文件已按当前仓库实际状态重新整理。
-- 更早版本若仍有零散旧记录或乱码，以 Git 历史为准。
+## v0.93 - 2026-06-29 全面 Bug 审计修复 + 安全加固
+
+### 修复
+- **[严重] 服务器崩溃** — 修复 `POST /admin/pro-gifts/save` 中 `const ADMIN_USERNAME` 重复声明导致的 SyntaxError
+- **[严重] HTML 标签断裂** — `core.js` 两处标签闭合错误（`/div` `/button`）
+- **[严重] admin 头像上传** — `window._adminToken` 未定义导致 401；硬编码 `/api/admin/ai-agent/avatar` 路径
+- **[严重] AI Token 计数** — SSE 流式中 usage `+=` 累积叠加改为 `=` 覆盖
+- **[严重] 变量提升** — `_sharedSearchMeta`、`reasoningStartedAt` 声明在使用之后
+- **[中高] LIKE 注入** — `loadAiContext` 中 `convId` 未验证直接拼接 LIKE 过滤器，添加正则校验
+- **[中高] 限流竞态** — `checkAiUserRateLimit` 无并发锁，添加 per-user mutex
+- **[中高] 黑名单审计日志缺失** — 解除黑名单未记录审计日志
+- **[中高] 照片删除 TOCTOU** — 删除操作加 `user_name` 条件防竞态
+- **[中高] 浏览历史去重丢失** — `saveViewHistory` 覆盖版本无去重逻辑
+- **[中高] getMediaUrl 未防护** — `http` URL 直接返回未过 `sanitizeUrl`
+- **[中高] userRestrictions 数组覆盖** — Supabase 返回 `[]` 时覆盖默认对象
+- **[中高] doRespondReport 异步错误** — `.then()` 改为 `async/await`
+- **[中高] 报告轮询双重 interval** — `_adminReportPollTimer` 设置前未清理旧 timer
+- **[中] pro-upgrade.js event 引用** — 使用未声明全局 `event` 变量
+- **[中] ai-agent.js var 提升** — `newBtn` 声明前被 `insertBefore` 引用
+- **死代码清理** — 移除未使用的 `var summaryCache`

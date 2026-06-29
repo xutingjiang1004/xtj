@@ -5860,99 +5860,6 @@ const VIP_PLANS = [
 
 // 获取可用套餐列表
 // 2026-06-25：Pro 改为限量/限定/限时活动制，不再开放常驻购买
-app.get('/api/vip/plans', rateLimit(60000, 30), (req, res) => {
-  return res.json({
-    plans: [],
-    message: 'Pro 购买暂未开放，请通过管理员活动领取'
-  });
-});
-
-// 验证用户是否存在的辅助函数
-async function verifyUserExists(userName) {
-  const { data } = await supabase.from('posts')
-    .select('id')
-    .eq('user_name', userName)
-    .eq('media_type', AUTH_MARKER)
-    .limit(1);
-  return data && data.length > 0;
-}
-
-// 创建订单
-// 2026-06-25：Pro 改为限量/限定/限时活动制，create-order 不再直接激活 Pro
-// 也不再写 __vip_order__ 记录（避免脏数据）
-// 真正开通 Pro 的唯一合法路径是 /api/pro-gifts/claim
-app.post('/api/vip/create-order', rateLimit(60000, 10), async (req, res) => {
-  return res.status(403).json({
-    ok: false,
-    error: '暂未开放购买，请通过管理员发布的 Pro 活动领取'
-  });
-});
-
-// 直接激活VIP（免支付流程）- 2026-06-25 永久禁用（所有环境）
-// 真正开通 Pro 的唯一合法路径是 /api/pro-gifts/claim
-app.post('/api/vip/activate-test', rateLimit(60000, 5), async (req, res) => {
-  return res.status(404).json({
-    ok: false,
-    error: '测试激活端点已永久禁用，请通过管理员发布的 Pro 活动领取'
-  });
-});
-
-// 处理VIP支付完成（修复：先写VIP记录再更新订单，保证数据一致性）
-async function processVipPayment(userName, orderNo, plan) {
-  const now = new Date();
-  const expireAt = new Date(now.getTime() + plan.duration_days * 24 * 60 * 60 * 1000).toISOString();
-  const vipContent = JSON.stringify({
-    plan_id: plan.id,
-    plan_name: plan.name,
-    price: plan.price,
-    is_active: true,
-    order_no: orderNo,
-    start_at: now.toISOString(),
-    expire_at: expireAt,
-    features: plan.features,
-    activated_at: now.toISOString()
-  });
-
-  // ★ 修复 B1：先写VIP记录（"真金白银"），再更新订单状态（辅助记录）
-  // 如果VIP记录写入失败，订单仍为pending，用户可重试——不会出现"钱付了但VIP没开通"
-  const { error: vipErr } = await supabase.from('posts').insert([{
-    user_name: userName,
-    content: vipContent,
-    media_type: VIP_MARKER,
-    media_url: plan.id,
-    actor_key: 'vip_' + Date.now()
-  }]);
-
-  if (vipErr) throw vipErr;
-
-  // VIP记录写入成功后，再更新订单状态为paid
-  const { data: orders } = await supabase.from('posts')
-    .select('id')
-    .eq('media_type', VIP_ORDER_MARKER)
-    .eq('media_url', orderNo)
-    .limit(1);
-
-  if (orders && orders.length > 0) {
-    try {
-      var orderData = JSON.parse(orders[0].content || '{}');
-      orderData.status = 'paid';
-      orderData.paid_at = now.toISOString();
-      await supabase.from('posts').update({ content: JSON.stringify(orderData) }).eq('id', orders[0].id);
-    } catch(e) {
-      console.error('[VIP] 更新订单状态失败（VIP记录已写入）:', e.message);
-      // 订单状态更新失败不影响VIP生效——VIP记录已写入
-    }
-  }
-
-  return {
-    ok: true,
-    user_name: userName,
-    plan_name: plan.name,
-    expire_at: expireAt,
-    is_active: true
-  };
-}
-
 // 查询VIP状态
 app.get('/api/vip/status', rateLimit(60000, 60), async (req, res) => {
   try {
@@ -8273,14 +8180,17 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       });
       res.write('data: ' + JSON.stringify({ type: 'tool_calls', tools: toolsInfo }) + '\n\n');
       
-      // 执行所有工具
-      for (var ti = 0; ti < toolCallsArr.length; ti++) {
-        var tcExec = { function: { name: toolCallsArr[ti].name, arguments: toolCallsArr[ti].args } };
-        var toolResult = await executeToolCall(tcExec);
+      // 并行执行所有工具
+      var toolResults = await Promise.all(toolCallsArr.map(async function(tc) {
+        var tcExec = { function: { name: tc.name, arguments: tc.args } };
+        return { result: await executeToolCall(tcExec), id: tc.id, name: tc.name };
+      }));
+      for (var ti = 0; ti < toolResults.length; ti++) {
+        var toolResult = toolResults[ti].result;
         
         // 捕获 search_web 工具的搜索结果元数据
         if (toolResult.tool_name === 'search_web' && !toolResult.error && toolResult.results_count > 0) {
-          _toolSearchMeta = { count: toolResult.results_count, query: toolResult.query || toolCallsArr[ti].name };
+          _toolSearchMeta = { count: toolResult.results_count, query: toolResult.query || toolResults[ti].name };
         }
         
         res.write('data: ' + JSON.stringify({
@@ -8293,7 +8203,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
           error: toolResult.error || null
         }) + '\n\n');
         
-        roundMessages.push({ role: 'tool', content: JSON.stringify(toolResult), tool_call_id: toolCallsArr[ti].id });
+        roundMessages.push({ role: 'tool', content: JSON.stringify(toolResult), tool_call_id: toolResults[ti].id });
       }
       
       toolRound++;
