@@ -88,7 +88,7 @@
   }
 
   /* 2.1 PC 绔寜閽鏍硷細鏂硅銆佷笉閫忔槑銆佺函鑹茶儗鏅?鈥?璺熸墜鏈哄渾褰㈣兌鍥婂舰鎴愬尯鍒?*/
-  #panelPosts .post > .post-actions {
+  #panelPosts .post > .actions {
     display: flex;
     gap: 6px;
     margin-top: 10px;
@@ -112,7 +112,7 @@
   .xtj-pro-avatar-ring .avatar {
     z-index: 6 !important;
   }
-  #panelPosts .post > .post-actions .action-btn {
+  #panelPosts .post > .actions .action-btn {
     border-radius: 6px;
     background: var(--btn-soft, #f1f3f5);
     border: 1px solid var(--border-soft, rgba(0, 0, 0, 0.06));
@@ -124,38 +124,38 @@
     padding: 6px 12px;
     min-height: 32px;
   }
-  #panelPosts .post > .post-actions .action-btn:hover {
+  #panelPosts .post > .actions .action-btn:hover {
     background: var(--btn-soft-hover, #e6e9ec);
     border-color: var(--border-soft-hover, rgba(0, 0, 0, 0.12));
   }
   /* 宸茬偣璧炵姸鎬?鈥?鐢ㄦ煍鍜岀殑绾㈣壊锛屼笉鍒虹溂 */
-  #panelPosts .post > .post-actions .action-btn.liked {
+  #panelPosts .post > .actions .action-btn.liked {
     background: rgba(255, 59, 96, 0.08);
     color: #ff3b60;
     border-color: rgba(255, 59, 96, 0.2);
   }
   /* del/pin/edit 绛夌壒娈婃寜閽?鈥?閫忔槑鑳屾櫙 */
-  #panelPosts .post > .post-actions .action-btn.del,
-  #panelPosts .post > .post-actions .action-btn.pin,
-  #panelPosts .post > .post-actions .action-btn.edit {
+  #panelPosts .post > .actions .action-btn.del,
+  #panelPosts .post > .actions .action-btn.pin,
+  #panelPosts .post > .actions .action-btn.edit {
     background: transparent;
   }
   /* 鏆楄壊涓婚鎸夐挳 */
-  [data-theme="dark"] #panelPosts .post > .post-actions .action-btn {
+  [data-theme="dark"] #panelPosts .post > .actions .action-btn {
     background: #1f2622;
     border-color: rgba(255, 255, 255, 0.08);
     color: #c4cfc7;
   }
-  [data-theme="dark"] #panelPosts .post > .post-actions .action-btn:hover {
+  [data-theme="dark"] #panelPosts .post > .actions .action-btn:hover {
     background: #28322d;
   }
-  [data-theme="dark"] #panelPosts .post > .post-actions .action-btn.liked {
+  [data-theme="dark"] #panelPosts .post > .actions .action-btn.liked {
     background: rgba(255, 59, 96, 0.15);
     color: #ff5a78;
   }
-  [data-theme="dark"] #panelPosts .post > .post-actions .action-btn.del,
-  [data-theme="dark"] #panelPosts .post > .post-actions .action-btn.pin,
-  [data-theme="dark"] #panelPosts .post > .post-actions .action-btn.edit {
+  [data-theme="dark"] #panelPosts .post > .actions .action-btn.del,
+  [data-theme="dark"] #panelPosts .post > .actions .action-btn.pin,
+  [data-theme="dark"] #panelPosts .post > .actions .action-btn.edit {
     background: transparent;
   }
 
@@ -166,7 +166,7 @@
   }
 
   /* 甯栧瓙澶撮儴锛氬ご鍍?+ 鐢ㄦ埛鍚?+ 鏃堕棿 */
-  #panelPosts .post > .post-head {
+  #panelPosts .post > .post-header {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -174,7 +174,7 @@
   }
 
   /* 甯栧瓙鏂囨湰鍐呭 鈥?鍗曞垪鏄剧ず鏇村琛?*/
-  #panelPosts .post > .post-text {
+  #panelPosts .post > .content {
     font-size: 14.5px;
     line-height: 1.7;
     margin-bottom: 12px;
@@ -196,17 +196,17 @@
   }
 
   /* 甯栧瓙鍏冩暟鎹?+ 鎸夐挳 */
-  #panelPosts .post > .post-meta,
-  #panelPosts .post > .post-actions {
+  #panelPosts .post > .post-stats-text,
+  #panelPosts .post > .actions {
     font-size: 12px;
   }
 
-  #panelPosts .post > .post-actions {
+  #panelPosts .post > .actions {
     display: flex;
     gap: 6px;
     margin-top: 10px;
   }
-  #panelPosts .post > .post-actions button {
+  #panelPosts .post > .actions button {
     padding: 4px 10px;
     font-size: 12px;
   }
@@ -869,7 +869,7 @@
     background: rgba(35, 42, 52, 0.92) !important;
   }
   /* 鏂囧瓧鑹?*/
-  [data-theme="dark"] .post-text,
+  [data-theme="dark"] .content,
   [data-theme="dark"] .content,
   [data-theme="dark"] .profile-user-name,
   [data-theme="dark"] .profile-user-status,
@@ -982,7 +982,7 @@
   background: rgba(34, 34, 48, 0.96) !important;
 }
 
-[data-theme="dark"] .post-text,
+[data-theme="dark"] .content,
 [data-theme="dark"] .content,
 [data-theme="dark"] .profile-user-name,
 [data-theme="dark"] .profile-user-status,

@@ -1337,7 +1337,12 @@
             display: flex; flex-direction: column; align-items: flex-end;
             gap: 4px; flex-shrink: 0;
         }
-        .chat-list-item .cli-time { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+        .chat-list-item .cli-time { font-size: 11px; color: var(--text-muted);             white-space: nowrap;
+        }
+        .toast.toast-error {
+            background: rgba(180, 30, 30, 0.9);
+            box-shadow: 0 8px 32px rgba(180, 30, 30, 0.3);
+        }
         .chat-list-item .cli-badge {
             background: var(--like-color); color: white;
             min-width: 18px; height: 18px; border-radius: 9px;

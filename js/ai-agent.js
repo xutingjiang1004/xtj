@@ -13,6 +13,7 @@
   var USER_NAME_KEYS = ['xtj_user', 'xtj_username', 'xtj_user_name'];
   var PW_HASH_KEYS = ['xtj_pw_hash', 'xtj_password_hash'];
   var _isTouchMobile = typeof window !== 'undefined' && 'ontouchstart' in window && 'visualViewport' in window;
+  var escapeHtml = window.escapeHtml || function(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
 
   var S = {
     config: null,
@@ -1728,7 +1729,7 @@
     function safeRemoveProgressCard() {
       if (progressCard) {
         try { if (progressCard._cleanupTimer) progressCard._cleanupTimer(); } catch (e) {}
-        safeRemoveProgressCard()
+        try { progressCard.remove(); } catch (e) {}
         try { progressCard._done = true; } catch (e) {}
       }
     }
