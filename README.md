@@ -1,6 +1,13 @@
 # XTJ
 
-当前版本：`v0.92`
+当前版本：`v0.93`
+
+> **关于付费业务**：支付宝支付、VIP 订单、Pro 会员激活等相关业务代码暂不处理，当前主打免费模式。后续如需恢复收费业务，须先完成以下事项：
+> 1. 在 Render Dashboard 配齐 `ALIPAY_APP_ID` / `ALIPAY_PUBLIC_KEY` 环境变量
+> 2. 在支付宝回调 `/api/vip/notify` 中补全 `alipaySdk.checkNotifySign` 验签逻辑
+> 3. 为支付流程加事务保护（先插 VIP 记录再更新订单）
+> 4. 移除或加固 `/api/vip/activate-test` 测试端点（目前仅在环境变量缺失时自动关闭）
+> **以上功能默认跳过，待后续通知再恢复。**
 
 
 
