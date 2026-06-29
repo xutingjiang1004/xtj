@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -8398,13 +8398,13 @@ function renderProfileActivityList(kind) {
                             .eq("media_type", DM_MARKER)
                             .eq("user_name", window.currentUser)
                             .order("created_at", { ascending: false })
-                            .limit(120),
+                            .limit(40),
                         sb.from("posts")
                             .select("id, user_name, media_url, content, created_at, views, actor_key")
                             .eq("media_type", DM_MARKER)
                             .eq("media_url", window.currentUser)
                             .order("created_at", { ascending: false })
-                            .limit(120)
+                            .limit(40)
                     ]);
                     if (sentRes.error) throw sentRes.error;
                     if (recvRes.error) throw recvRes.error;
@@ -8433,14 +8433,9 @@ function renderProfileActivityList(kind) {
                     renderDockChatConversationList(el, convs);
                     window.dockChatListCacheTime = Date.now();
                     renderDockChatAiEntry(el);
+                    // 非阻塞加载头像: 先显示列表, 头像后台补上
                     hydrateDockChatAvatars(convs.map(function(c) { return c.other_user; }), function(changed) {
-                        var currentList = document.getElementById('dockChatList');
-                        if (!currentList) return;
-                        if (changed) {
-                            renderDockChatConversationList(currentList, convs);
-                            renderDockChatAiEntry(currentList);
-                        }
-                        patchDockChatConversationAvatars(currentList);
+                        if (changed) patchDockChatConversationAvatars(el);
                     });
                 } catch(e) {
                     window.dockChatListCacheTime = 0;
