@@ -29,6 +29,12 @@
     //   节省 deepseek 思考成本（low 比 medium 便宜）
     //   用户可在 UI 切换
     thinkingMode: 'low',
+    // ★ M: 深度思考模式 toggle 状态
+    //   开启后本会话所有消息走 Planner→Workers→Synthesizer 多 agent 流程
+    //   持久化到 localStorage, 重开对话框后恢复
+    deepThink: false,
+    deepThinkJob: null,         // AbortController for current deep think request
+    deepThinkProgressCard: null, // DOM node for progress card
     active: false,
     rootEl: null,
     messagesEl: null,
@@ -1315,6 +1321,166 @@
     };
   }
 
+  // ===================== M: 深度思考模式 — 进度卡 / toggle / cancel =====================
+  // 切换深度思考模式 (持久化到 localStorage, 重开对话框后恢复)
+  function toggleDeepThink() {
+    if (S.sending) {
+      notify('当前消息处理中, 请稍后再切换');
+      return;
+    }
+    S.deepThink = !S.deepThink;
+    try { localStorage.setItem('xtj_ai_deep_think', S.deepThink ? '1' : '0'); } catch (e) {}
+    refreshDeepThinkToggle();
+    if (!S.deepThink && S.deepThinkJob) {
+      // 关闭时如果正在跑, 取消
+      cancelDeepThink();
+    }
+  }
+
+  function refreshDeepThinkToggle() {
+    var btn = document.getElementById('aiDeepThinkToggle');
+    if (btn) {
+      if (S.deepThink) btn.classList.add('on');
+      else btn.classList.remove('on');
+    }
+  }
+
+  // 从 localStorage 恢复 deepThink 状态
+  function restoreDeepThinkState() {
+    try {
+      var saved = localStorage.getItem('xtj_ai_deep_think');
+      S.deepThink = saved === '1';
+    } catch (e) { S.deepThink = false; }
+  }
+
+  // 构造深度思考进度卡片
+  function buildDeepThinkProgressCard() {
+    var card = el('div', { class: 'ai-progress-card' });
+    card.innerHTML =
+      '<div class="ai-progress-header">' +
+        '<span class="ai-progress-icon">⚡</span>' +
+        '<span class="ai-progress-title">深度思考中...</span>' +
+        '<span class="ai-progress-elapsed">0s</span>' +
+      '</div>' +
+      '<div class="ai-progress-stage">阶段: <span class="ai-progress-stage-text">规划中</span></div>' +
+      '<div class="ai-progress-bar"><div class="ai-progress-fill" style="width:5%"></div></div>' +
+      '<div class="ai-progress-detail"></div>' +
+      '<div class="ai-progress-agents"></div>' +
+      '<div class="ai-progress-actions">' +
+        '<button type="button" class="ai-progress-stop">⏹ 停止思考</button>' +
+      '</div>';
+    card.querySelector('.ai-progress-stop').addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      cancelDeepThink();
+    });
+    return card;
+  }
+
+  // 更新进度卡 (按 SSE 事件)
+  function updateDeepThinkProgressCard(card, evt) {
+    if (!card) return;
+    var stageText = card.querySelector('.ai-progress-stage-text');
+    var titleText = card.querySelector('.ai-progress-title');
+    var fill = card.querySelector('.ai-progress-fill');
+    var detail = card.querySelector('.ai-progress-detail');
+    var agentsBox = card.querySelector('.ai-progress-agents');
+
+    if (evt.type === 'deep_think_stage') {
+      var stageMap = {
+        planning: '规划关键词中...',
+        workers: '并行执行 ' + (card._agentCount || '多个') + ' 个 agent',
+        synthesizing: 'Synthesizer 整合中...'
+      };
+      stageText.textContent = stageMap[evt.stage] || evt.stage;
+      titleText.textContent = '⚡ 深度思考中...';
+      if (evt.stage === 'planning') fill.style.width = '10%';
+      else if (evt.stage === 'workers') fill.style.width = '40%';
+      else if (evt.stage === 'synthesizing') fill.style.width = '85%';
+      if (evt.message) detail.textContent = evt.message;
+    } else if (evt.type === 'deep_think_planned') {
+      card._agentCount = (evt.agents || []).length;
+      stageText.textContent = '启动 ' + (evt.agents || []).length + ' 个 agent';
+      titleText.textContent = '⚡ 深度思考中...';
+      fill.style.width = '25%';
+      var agentList = (evt.agents || []).map(function(a) {
+        return '<div class="ai-agent-row pending" data-role="' + a.role + '">' +
+          '<span class="ai-agent-status">○</span> <span class="ai-agent-role">' + a.role + '</span>' +
+        '</div>';
+      }).join('');
+      agentsBox.innerHTML = agentList;
+      detail.textContent = 'Planner: ' + (evt.reasoning || '...');
+    } else if (evt.type === 'deep_think_worker') {
+      var rows = agentsBox.querySelectorAll('.ai-agent-row');
+      var row = rows[evt.index];
+      if (row) {
+        var statusMap = { pending: ['○', 'pending'], running: ['⏳', 'running'], success: ['✓', 'success'], failed: ['✗', 'failed'], cancelled: ['⊘', 'cancelled'] };
+        var s = statusMap[evt.status] || ['○', 'pending'];
+        row.className = 'ai-agent-row ' + s[1];
+        row.querySelector('.ai-agent-status').textContent = s[0];
+        if (evt.round != null) {
+          var roleSpan = row.querySelector('.ai-agent-role');
+          var baseText = evt.role || roleSpan.textContent.replace(/\s*\(.*\)$/, '');
+          roleSpan.textContent = baseText + ' (思考第 ' + evt.round + '/' + (evt.max_rounds || 5) + ' 轮)';
+        }
+        if (evt.status === 'success' && evt.sources_count != null) {
+          var succRoleSpan = row.querySelector('.ai-agent-role');
+          succRoleSpan.textContent = succRoleSpan.textContent + ' · ' + evt.sources_count + ' 条引用';
+        }
+      }
+      // 更新进度条 (按 success 比例)
+      var successCount = 0;
+      rows.forEach(function(r) { if (r.classList.contains('success')) successCount++; });
+      if (rows.length > 0) {
+        var p = 25 + (successCount / rows.length) * 55;
+        fill.style.width = Math.min(80, p) + '%';
+      }
+    } else if (evt.type === 'deep_think_tool') {
+      var last = detail.textContent || '';
+      detail.textContent = '🔍 ' + (evt.agent_role || '') + ' 搜索中... ' + (evt.count || 0) + ' 条';
+    } else if (evt.type === 'heartbeat') {
+      var elapsedSec = Math.floor((evt.elapsed_ms || 0) / 1000);
+      var min = Math.floor(elapsedSec / 60);
+      var sec = elapsedSec % 60;
+      var elapsedStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
+      card.querySelector('.ai-progress-elapsed').textContent = elapsedStr;
+    } else if (evt.type === 'done') {
+      stageText.textContent = '✓ 完成';
+      titleText.textContent = '✓ 深度思考完成';
+      fill.style.width = '100%';
+    } else if (evt.type === 'error') {
+      stageText.textContent = '✗ ' + (evt.error || '失败');
+      titleText.textContent = '✗ 深度思考中断';
+      card.classList.add('ai-progress-card-error');
+    }
+  }
+
+  // 取消深度思考
+  function cancelDeepThink() {
+    if (S.deepThinkJob) {
+      try { S.deepThinkJob.abort(); } catch (e) {}
+    }
+    // 同时通知后端 cancel (fire-and-forget)
+    try {
+      var token = localStorage.getItem('xtj_user_token');
+      var headers = { 'Content-Type': 'application/json' };
+      if (token) headers.Authorization = 'Bearer ' + token;
+      fetch(API_BASE + '/chat/cancel', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify({ conversation_id: S.conversationId || '' })
+      }).catch(function() {});
+    } catch (e) {}
+    if (S.deepThinkProgressCard) {
+      var stageText = S.deepThinkProgressCard.querySelector('.ai-progress-stage-text');
+      var titleText = S.deepThinkProgressCard.querySelector('.ai-progress-title');
+      if (stageText) stageText.textContent = '⊘ 已停止';
+      if (titleText) titleText.textContent = '⊘ 已停止';
+      try { S.deepThinkProgressCard.classList.add('ai-progress-card-cancelled'); } catch (e) {}
+    }
+    notify('已停止深度思考');
+  }
+
   async function ensureUserAuthOrNotify() {
     if (typeof window.ensureRealUserAuth !== 'function') return true;
     try {
@@ -1336,6 +1502,421 @@
     return false;
   }
 
+  // ===================== M: 深度思考模式发送 =====================
+  // 独立流程: 走 /api/agent/chat (deep_think=true) SSE 长连接
+  //   进度卡实时更新 (1-10 个 agent 状态)
+  //   done 后渲染最终答案 + [来源N] 标注 + 搜索徽章
+  async function handleSendDeepThink(text, input, sendBtn, messagesEl) {
+    var originalText = text;
+    function restoreInputText() {
+      input.value = originalText;
+      input.style.height = 'auto';
+      try { input.style.height = Math.min(input.scrollHeight, 120) + 'px'; if (!_isTouchMobile) input.focus(); } catch (e) {}
+      updateInputMetrics();
+    }
+
+    var authOk = await ensureUserAuthOrNotify();
+    if (!authOk) { S.sending = false; return; }
+
+    if (S.sending) {
+      abortCurrentRequest();
+      try { await new Promise(function(r) { setTimeout(r, 100); }); } catch (e) {}
+    }
+
+    S.clientRequestId++;
+    var reqId = 'cr_' + S.clientRequestId + '_' + Date.now();
+    S._currentReqId = reqId;
+    function resetSendingIfCurrent() {
+      if (S._currentReqId === reqId) {
+        S.sending = false;
+        S.deepThinkJob = null;
+        S.deepThinkProgressCard = null;
+        S.abortController = null;
+      }
+    }
+    S.sending = true;
+    clearReplyTimer();
+
+    // 1. 追加 user 消息
+    var nowIso = new Date().toISOString();
+    var userMsg = { role: 'user', content: text, created_at: nowIso };
+    S.messages.push(userMsg);
+    appendMessage(messagesEl, userMsg);
+    S.autoScrollPinned = true;
+    scrollToBottom(messagesEl, true);
+
+    // 2. 创建进度卡 (而不是 typing node)
+    var progressCard = buildDeepThinkProgressCard();
+    S.deepThinkProgressCard = progressCard;
+    messagesEl.appendChild(progressCard);
+    scrollToBottom(messagesEl, true);
+
+    // 3. 清空输入框
+    input.value = '';
+    input.style.height = 'auto';
+    updateInputMetrics();
+    if (_isTouchMobile) { try { input.blur(); } catch (e2) {} }
+    else { try { input.focus(); } catch (e2) {} }
+
+    // 4. 创建 AbortController
+    var controller = new AbortController();
+    S.abortController = controller;
+    S.deepThinkJob = controller;
+    S.currentStreamAborted = false;
+
+    var url = API_BASE + '/chat';
+    var auth = await getUserAuthPayload({ forceNoToken: false });
+    var headers = auth.headers || {};
+    var fetchBody = JSON.stringify({
+      message: text,
+      conversation_id: S.conversationId,
+      client_request_id: reqId,
+      deep_think: true
+    });
+
+    var aborted = false;
+    var aiContent = '';
+    var finalMeta = null;
+    var finalModel = '';
+    var finalThinkingMode = 'high';
+    var streamConvId = null;
+    var aiNode = null;
+    var aiBubble = null;
+    var contentRenderer = null;
+    var doneReceived = false;
+    var evtHandled = false;
+
+    function ensureAssistantNode() {
+      if (!aiNode) {
+        try { progressCard.remove(); } catch (e) {}
+        aiNode = el('div', { class: 'ai-msg assistant entering generating' });
+        messagesEl.appendChild(aiNode);
+        S.autoScrollPinned = true;
+        scrollToBottom(messagesEl, true);
+      }
+      return aiNode;
+    }
+    function ensureAssistantBubble() {
+      ensureAssistantNode();
+      aiBubble = aiNode.querySelector('.ai-msg-bubble');
+      if (!aiBubble) {
+        aiBubble = el('div', { class: 'ai-msg-bubble ai-typing', text: '' });
+        setupBubbleCopy(aiBubble, messagesEl);
+        aiNode.appendChild(aiBubble);
+      }
+      if (!contentRenderer) {
+        contentRenderer = createSmoothTextRenderer(aiBubble, {
+          minChunk: 8,
+          maxChunk: 24,
+          onRender: function() { scrollToBottom(messagesEl, false); }
+        });
+      }
+      return aiBubble;
+    }
+
+    function finishAiMessage(node, content, evt) {
+      if (contentRenderer) { try { contentRenderer.cancel(); } catch (e) {} contentRenderer = null; }
+      if (node) node.classList.remove('generating');
+      if (aiBubble) aiBubble.classList.remove('ai-typing');
+      setAiRootState('ai-idle');
+
+      var searchCount = evt ? (evt.search_count || 0) : 0;
+      var searchQuery = evt ? (evt.search_query || '') : '';
+      var searchResults = evt && Array.isArray(evt.search_results) ? evt.search_results : null;
+      var searchExpiresAt = evt && typeof evt.search_expires_at === 'number' ? evt.search_expires_at : 0;
+      var usage = evt && evt.usage ? evt.usage : null;
+      var agentCount = evt && evt.agent_count ? evt.agent_count : 0;
+      var plannerInfo = evt && evt.planner ? evt.planner : null;
+      var workerResults = evt && Array.isArray(evt.worker_results) ? evt.worker_results : null;
+
+      var aiMsg = {
+        role: 'assistant',
+        content: content,
+        reasoning: '',
+        created_at: new Date().toISOString(),
+        thinking_mode: 'high',
+        deep_think: true,
+        agent_count: agentCount,
+        planner: plannerInfo,
+        worker_results: workerResults,
+        search_count: searchCount,
+        search_query: searchQuery,
+        search_results: searchResults,
+        search_expires_at: searchExpiresAt,
+        usage: Object.assign({}, usage || {}, { model: finalModel, thinking_mode: 'high', deep_think: true, agent_count: agentCount })
+      };
+      S.messages.push(aiMsg);
+
+      if (node) {
+        // [来源N] 渲染
+        var contentForRender = content || '';
+        if (searchResults && searchResults.length > 0) {
+          contentForRender = contentForRender.replace(/\[来源(\d+)\]/g, function(m, n) {
+            var idx = parseInt(n, 10);
+            if (isNaN(idx) || idx < 1 || idx > searchResults.length) return m;
+            var sr = searchResults[idx - 1] || {};
+            if (!sr.url) return m;
+            return '[来源' + n + '](' + sr.url + ')';
+          });
+        }
+        aiBubble.innerHTML = '';
+        aiBubble.innerHTML = renderMarkdown(contentForRender);
+        // 给 [来源N] 链接加 className
+        try {
+          var as = aiBubble.querySelectorAll('a');
+          for (var ai = 0; ai < as.length; ai++) {
+            var atxt = (as[ai].textContent || '').trim();
+            if (/^来源\d+$/.test(atxt)) as[ai].className = 'ai-source-link';
+          }
+        } catch (e) {}
+
+        // 搜索徽章 + 1 天过期
+        if (searchCount > 0 && searchResults && searchResults.length > 0) {
+          var expired = searchExpiresAt > 0 && Date.now() > searchExpiresAt;
+          var sb = el('div', { class: 'ai-search-status' });
+          sb.textContent = '⚡ 深度思考 · 已联网搜索 ' + searchCount + ' 条' + (expired ? '（结果已过期）' : '');
+          if (!expired && searchResults.length > 0) {
+            var toggleBtn = el('span', { class: 'ai-search-toggle' }, ' ▶');
+            sb.appendChild(toggleBtn);
+            sb.style.cursor = 'pointer';
+            var panel = el('div', { class: 'ai-search-detail', style: 'display:none;' });
+            sb.appendChild(panel);
+            if (searchQuery) panel.appendChild(el('div', { class: 'ai-search-detail-query', text: '搜索：' + searchQuery }));
+            for (var si = 0; si < searchResults.length; si++) {
+              var sr = searchResults[si];
+              var itemEl = el('div', { class: 'ai-search-detail-item' });
+              var linkEl = el('a', { class: 'ai-search-detail-title', href: sr.url || '#', target: '_blank', rel: 'noopener noreferrer', text: sr.title || '无标题' });
+              itemEl.appendChild(linkEl);
+              if (sr.snippet) itemEl.appendChild(el('div', { class: 'ai-search-detail-snippet', text: String(sr.snippet).slice(0, 200) }));
+              itemEl.appendChild(el('div', { class: 'ai-search-detail-source', text: (sr.source || '') + ' · ' + (sr.published_at || '') }));
+              panel.appendChild(itemEl);
+            }
+            sb.onclick = function(e) {
+              if (e.target.tagName === 'A') return;
+              var h = panel.style.display === 'none';
+              panel.style.display = h ? '' : 'none';
+              toggleBtn.textContent = h ? ' ▼' : ' ▶';
+            };
+          }
+          node.appendChild(sb);
+        }
+        // 深度思考徽章 + agent 列表
+        if (agentCount > 0 || workerResults) {
+          var dtBadge = el('div', { class: 'ai-deep-think-badge' });
+          dtBadge.textContent = '⚡ 深度思考 · ' + (agentCount || 0) + ' 个 agent';
+          if (workerResults && workerResults.length > 0) {
+            var wrToggle = el('span', { class: 'ai-search-toggle' }, ' ▶');
+            dtBadge.appendChild(wrToggle);
+            dtBadge.style.cursor = 'pointer';
+            var wrPanel = el('div', { class: 'ai-worker-detail', style: 'display:none;' });
+            dtBadge.appendChild(wrPanel);
+            for (var wri = 0; wri < workerResults.length; wri++) {
+              var wr = workerResults[wri];
+              var wrRow = el('div', { class: 'ai-worker-row' });
+              var statusLabel = { success: '✓', failed: '✗', cancelled: '⊘' }[wr.status] || '○';
+              wrRow.textContent = statusLabel + ' ' + (wr.role || 'agent') + ' · ' + (wr.elapsed_ms ? Math.round(wr.elapsed_ms/1000) + 's' : '?');
+              wrPanel.appendChild(wrRow);
+            }
+            dtBadge.onclick = function(e) {
+              if (e.target.tagName === 'A') return;
+              var h = wrPanel.style.display === 'none';
+              wrPanel.style.display = h ? '' : 'none';
+              wrToggle.textContent = h ? ' ▼' : ' ▶';
+            };
+          }
+          node.appendChild(dtBadge);
+        }
+        // footer
+        var footer = el('div', { class: 'ai-msg-footer' });
+        if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
+        footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 high · ⚡深度' }));
+        if (usage || finalModel) {
+          var usageLine = buildUsageLine(aiMsg.usage);
+          if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
+        }
+        if (footer.children.length > 0) node.appendChild(footer);
+      }
+    }
+
+    try {
+      var resp = await fetch(url, {
+        method: 'POST',
+        headers: headers,
+        body: fetchBody,
+        signal: controller.signal
+      });
+
+      if (!resp.ok) {
+        try {
+          var errJson = await resp.json().catch(function() { return {}; });
+          if (S._currentReqId !== reqId) return;
+          try { progressCard.remove(); } catch (e) {}
+          notify(String(errJson.error || ('AI 失败 (' + resp.status + ')')));
+        } catch (e) {}
+        resetSendingIfCurrent();
+        return;
+      }
+
+      if (!resp.body) {
+        try { progressCard.remove(); } catch (e) {}
+        notify('AI 没有响应');
+        resetSendingIfCurrent();
+        return;
+      }
+
+      var reader = resp.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+
+      while (true) {
+        if (S._currentReqId !== reqId || controller.signal.aborted) {
+          aborted = true;
+          if (reader) try { reader.cancel(); } catch (e) {}
+          break;
+        }
+        var readResult;
+        try { readResult = await reader.read(); } catch (e) { break; }
+        if (readResult.done) break;
+        if (!S.active) { reader.cancel().catch(function(){}); break; }
+
+        buffer += decoder.decode(readResult.value, { stream: true });
+        var lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (var li = 0; li < lines.length; li++) {
+          var line = lines[li].trim();
+          if (!line || !line.startsWith('data: ')) continue;
+          var eventStr = line.slice(6);
+          var evt;
+          try { evt = JSON.parse(eventStr); } catch (e) { continue; }
+          if (!evt) continue;
+
+          if (S._currentReqId !== reqId) { aborted = true; break; }
+
+          // 深度思考事件分流
+          if (evt.type === 'meta') {
+            streamConvId = evt.conversation_id;
+            if (streamConvId) { S.conversationId = streamConvId; writeConvId(streamConvId); }
+            continue;
+          }
+          if (evt.type === 'heartbeat') {
+            updateDeepThinkProgressCard(progressCard, evt);
+            continue;
+          }
+          if (evt.type === 'deep_think_stage' || evt.type === 'deep_think_planned' || evt.type === 'deep_think_worker' || evt.type === 'deep_think_tool') {
+            updateDeepThinkProgressCard(progressCard, evt);
+            continue;
+          }
+          if (evt.type === 'content') {
+            // 深度思考模式没有流式正文 (Synthesizer 一次性返回), 保留兼容
+            aiContent += evt.text || '';
+            ensureAssistantBubble();
+            if (contentRenderer) contentRenderer.append(evt.text || '');
+            continue;
+          }
+          if (evt.type === 'error') {
+            try { progressCard.remove(); } catch (e) {}
+            var errMsg = evt.error || 'AI 调用失败';
+            if (aiContent) {
+              ensureAssistantNode();
+              var errNote = el('div', { class: 'ai-error-note' }, errMsg);
+              try { aiNode.appendChild(errNote); } catch (e) {}
+              finishAiMessage(aiNode, aiContent, evt);
+            } else {
+              notify(errMsg);
+              S.messages.pop();
+              removeLastUserMessage(messagesEl);
+              restoreInputText();
+            }
+            resetSendingIfCurrent();
+            if (reader) try { reader.cancel(); } catch (e) {}
+            aborted = true;
+            break;
+          }
+          if (evt.type === 'done') {
+            try { progressCard.remove(); } catch (e) {}
+            S.sending = false;
+            S.abortController = null;
+            S.deepThinkJob = null;
+            S.deepThinkProgressCard = null;
+            if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+            try {
+              finalModel = evt.model || 'deepseek-v4-flash';
+              finalThinkingMode = evt.thinking_mode || 'high';
+              if (evt.sanitized_content) aiContent = evt.sanitized_content;
+              else if (evt.content) aiContent = evt.content;
+              finalMeta = evt;
+            } catch (e) {}
+            if (aiContent) {
+              if (!aiNode) ensureAssistantNode();
+              finishAiMessage(aiNode, aiContent, evt);
+            } else {
+              notify('深度思考未返回内容');
+            }
+            doneReceived = true;
+            evtHandled = true;
+            break;
+          }
+        }
+        if (doneReceived || aborted) break;
+      }
+
+      if (S._currentReqId !== reqId || aborted) {
+        try { progressCard.remove(); } catch (e) {}
+        if (aiNode) try { aiNode.remove(); } catch (e) {}
+        resetSendingIfCurrent();
+        return;
+      }
+
+      try { progressCard.remove(); } catch (e) {}
+      if (evtHandled) {
+        // already handled in done
+      } else if (aiNode && aiContent) {
+        finishAiMessage(aiNode, aiContent, finalMeta);
+      } else if (!doneReceived) {
+        // 流意外结束, 没有 done
+        if (aiContent) {
+          if (!aiNode) ensureAssistantNode();
+          finishAiMessage(aiNode, aiContent, finalMeta);
+        } else {
+          S.messages.pop();
+          removeLastUserMessage(messagesEl);
+          restoreInputText();
+          notify('AI 暂时没有回应, 请稍后再试');
+        }
+      }
+    } catch (fetchErr) {
+      if (S._currentReqId !== reqId) return;
+      try { progressCard.remove(); } catch (e) {}
+      if (fetchErr && fetchErr.name !== 'AbortError') {
+        if (aiContent) {
+          ensureAssistantNode();
+          var connNote = el('div', { class: 'ai-error-note' }, '连接中断, 已保留部分回复');
+          try { aiNode.appendChild(connNote); } catch (e) {}
+          finishAiMessage(aiNode, aiContent, finalMeta);
+        } else {
+          S.messages.pop();
+          removeLastUserMessage(messagesEl);
+          restoreInputText();
+          notify('网络异常, 请检查连接后重试');
+        }
+      } else {
+        // AbortError: 用户主动停止
+        if (aiContent) {
+          if (!aiNode) ensureAssistantNode();
+          finishAiMessage(aiNode, aiContent, finalMeta);
+        } else {
+          S.messages.pop();
+          removeLastUserMessage(messagesEl);
+        }
+      }
+    }
+    resetSendingIfCurrent();
+    if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
+    updateInputMetrics();
+    scrollToBottom(messagesEl, true);
+  }
+
   async function handleSendMessage(input, sendBtn, messagesEl) {
     var text = String(input.value || '').trim();
     if (!text) { S.sending = false; return; }
@@ -1344,7 +1925,12 @@
       S.sending = false;
       return;
     }
-    
+
+    // ★ M: 深度思考模式分支 — 走独立流程 (Planner→Workers→Synthesizer)
+    if (S.deepThink) {
+      return handleSendDeepThink(text, input, sendBtn, messagesEl);
+    }
+
     var originalText = text;
     
     function restoreInputText() {
@@ -2363,6 +2949,23 @@ function showChatMessages() {
     info.appendChild(el('div', { class: 'ai-chat-header-status', id: 'aiChatHeaderStatus', text: getAiStatusText() }));
     header.appendChild(info);
 
+    // 深度思考 toggle 按钮 (M: 在历史按钮左边)
+    var deepThinkBtn = el('button', {
+      type: 'button',
+      class: 'ai-deep-think-toggle' + (S.deepThink ? ' on' : ''),
+      'aria-label': '深度思考模式',
+      title: '深度思考模式 (Planner→多 Agent→Synthesizer, 最长 10 分钟)',
+      id: 'aiDeepThinkToggle'
+    });
+    deepThinkBtn.appendChild(el('span', { class: 'ai-deep-think-icon', text: '⚡' }));
+    deepThinkBtn.appendChild(el('span', { class: 'ai-deep-think-label', text: '深度思考' }));
+    deepThinkBtn.addEventListener('click', function(ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      toggleDeepThink();
+    });
+    header.appendChild(deepThinkBtn);
+
     // 历史会话按钮
     var histBtn = el('button', {
       type: 'button', class: 'ai-chat-hist-btn', 'aria-label': '历史会话',
@@ -2541,6 +3144,9 @@ function showChatMessages() {
 
     S.resizeTimer = setTimeout(autoresize, 0);
 
+    // ★ M: 渲染后立刻同步深度思考 toggle 视觉
+    refreshDeepThinkToggle();
+
     return {
       root: root,
       messagesEl: messagesEl,
@@ -2556,6 +3162,8 @@ function showChatMessages() {
       notify('请先登录后再和徐旭泽的小猫聊天');
       return;
     }
+    // ★ M: 恢复深度思考模式状态
+    restoreDeepThinkState();
     S.active = true;
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) {

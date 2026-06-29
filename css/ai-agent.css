@@ -1570,6 +1570,239 @@
   border-color: rgba(46, 148, 101, 0.5);
   text-decoration: none;
 }
+
+/* ===================== M: 深度思考模式 — Toggle 按钮 ===================== */
+.ai-deep-think-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  margin-right: 4px;
+  border: 1px solid rgba(120, 120, 120, 0.3);
+  border-radius: 16px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text-secondary, #6b7280);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.2s, background 0.2s, color 0.2s, box-shadow 0.2s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.ai-deep-think-toggle:hover {
+  border-color: rgba(139, 92, 246, 0.5);
+  background: rgba(139, 92, 246, 0.04);
+}
+.ai-deep-think-toggle:active {
+  transform: scale(0.96);
+}
+.ai-deep-think-toggle.on {
+  border-color: rgba(139, 92, 246, 0.7);
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.12), rgba(99, 102, 241, 0.08));
+  color: rgb(124, 58, 237);
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.25);
+  font-weight: 500;
+}
+.ai-deep-think-toggle.on .ai-deep-think-icon {
+  animation: deep-think-pulse 2s ease-in-out infinite;
+}
+@keyframes deep-think-pulse {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(139, 92, 246, 0.4)); }
+  50% { transform: scale(1.15); filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.8)); }
+}
+.ai-deep-think-icon { font-size: 14px; line-height: 1; }
+.ai-deep-think-label { font-weight: inherit; }
+
+/* ===================== M: 深度思考进度卡 ===================== */
+.ai-progress-card {
+  margin: 10px 0;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.05), rgba(99, 102, 241, 0.04));
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--text-primary, #1f2937);
+  box-shadow: 0 1px 3px rgba(139, 92, 246, 0.08);
+}
+.ai-progress-card.ai-progress-card-cancelled {
+  border-color: rgba(120, 120, 120, 0.3);
+  background: rgba(0, 0, 0, 0.02);
+  opacity: 0.6;
+}
+.ai-progress-card.ai-progress-card-error {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.04);
+}
+
+.ai-progress-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: rgb(124, 58, 237);
+}
+.ai-progress-icon { font-size: 16px; }
+.ai-progress-title { flex: 1; }
+.ai-progress-elapsed {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary, #9ca3af);
+  font-family: ui-monospace, monospace;
+}
+
+.ai-progress-stage {
+  color: var(--text-secondary, #6b7280);
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.ai-progress-stage-text {
+  color: var(--text-primary, #1f2937);
+  font-weight: 500;
+}
+
+.ai-progress-bar {
+  height: 4px;
+  background: rgba(139, 92, 246, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 6px 0 8px;
+}
+.ai-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #8b5cf6, #6366f1, #3b82f6);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.ai-progress-detail {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary, #6b7280);
+  min-height: 16px;
+  margin-bottom: 4px;
+}
+
+.ai-progress-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+  border: 1px solid rgba(139, 92, 246, 0.1);
+}
+.ai-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  transition: color 0.2s;
+}
+.ai-agent-row.pending { color: var(--text-tertiary, #9ca3af); }
+.ai-agent-row.running {
+  color: rgb(124, 58, 237);
+  font-weight: 500;
+}
+.ai-agent-row.success { color: rgb(22, 163, 74); }
+.ai-agent-row.failed { color: rgb(220, 38, 38); }
+.ai-agent-row.cancelled { color: var(--text-tertiary, #9ca3af); text-decoration: line-through; }
+.ai-agent-status {
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+  font-weight: 600;
+}
+.ai-agent-row.running .ai-agent-status { animation: agent-pulse 1.2s ease-in-out infinite; }
+@keyframes agent-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+.ai-agent-role { flex: 1; }
+
+.ai-progress-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+.ai-progress-stop {
+  padding: 3px 12px;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  background: transparent;
+  color: rgb(220, 38, 38);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.ai-progress-stop:hover {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.6);
+}
+.ai-progress-stop:active { transform: scale(0.97); }
+
+/* 深度思考徽章 (在 AI 消息底部) */
+.ai-deep-think-badge {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: rgb(124, 58, 237);
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 6px;
+  user-select: none;
+}
+.ai-deep-think-badge .ai-search-toggle {
+  font-size: 10px;
+  margin-left: 4px;
+  opacity: 0.7;
+}
+.ai-worker-detail {
+  margin-top: 6px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 6px;
+  border: 1px solid rgba(139, 92, 246, 0.1);
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ai-worker-row {
+  line-height: 1.4;
+  color: var(--text-secondary, #6b7280);
+}
+.ai-msg-thinking-badge {
+  display: inline-block;
+  font-size: 10px;
+  padding: 1px 6px;
+  background: rgba(139, 92, 246, 0.08);
+  color: rgb(124, 58, 237);
+  border-radius: 3px;
+  margin-left: 6px;
+}
+
+/* 暗色模式适配 */
+@media (prefers-color-scheme: dark) {
+  .ai-deep-think-toggle {
+    border-color: rgba(180, 180, 180, 0.3);
+    color: var(--text-secondary, #9ca3af);
+  }
+  .ai-deep-think-toggle.on {
+    border-color: rgba(167, 139, 250, 0.6);
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.18), rgba(99, 102, 241, 0.12));
+    color: rgb(196, 181, 253);
+  }
+  .ai-progress-card {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(99, 102, 241, 0.08));
+    border-color: rgba(167, 139, 250, 0.3);
+  }
+  .ai-progress-agents {
+    background: rgba(0, 0, 0, 0.2);
+  }
+}
 .ai-msg-bubble h1, .ai-msg-bubble h2, .ai-msg-bubble h3,
 .ai-msg-bubble h4, .ai-msg-bubble h5, .ai-msg-bubble h6 {
   margin: 8px 0 4px;

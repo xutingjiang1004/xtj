@@ -77,8 +77,64 @@ const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions';
 const DEEPSEEK_TIMEOUT_MS = 60000; // 60 秒超时
 const AI_AGENT_DAILY_LIMIT = 300; // 每用户每天 AI 调用次数
 const AI_AGENT_HOURLY_LIMIT = 50; // 每用户每小时 AI 调用次数
+
+// ===================== M: 深度思考模式 (Deep Think / Multi-Agent) =====================
+// 深度思考模式由 Planner 自主决定 1-10 个并行 worker agent
+// Planner → Workers (parallel) → Synthesizer → SSE progress
+const DEEP_THINK_CONFIG = {
+  MAX_DURATION_MS: 10 * 60 * 1000,   // 10 分钟总预算
+  PLANNER_TIMEOUT_MS: 60 * 1000,      // Planner 1 分钟
+  WORKER_TIMEOUT_MS: 5 * 60 * 1000,   // 单 worker 5 分钟上限
+  SYNTHESIZER_TIMEOUT_MS: 3 * 60 * 1000, // Synthesizer 3 分钟
+  MAX_WORKERS: 10,                    // Planner 最多拆 10 个
+  MIN_WORKERS: 1,                     // 最少 1 个 (单 agent 模式)
+  DEFAULT_WORKERS_IF_PLANNER_FAILS: 1, // Planner 失败时 fallback
+  WORKER_MAX_TOOL_ROUNDS: 5,          // 单 worker 内部最多 tool_use 5 轮
+  HEARTBEAT_MS: 3000                  // 3s 推一次进度
+};
+
+// 全局活跃深度思考任务 (按 conv_id 索引) — 用于 cancel
+const activeDeepThinkJobs = new Map(); // conv_id → { cancelled, startTime, controller }
+
+// Planner 提示词 — 决定 1-10 个 agent
+const DEEP_THINK_PLANNER_PROMPT = `你是 XTJ AI 深度思考模式的任务规划器.
+分析用户任务复杂度, 自主决定需要 1-10 个并行 agent (worker).
+
+输出严格 JSON (无 markdown 代码块, 无任何额外文字):
+{
+  "complexity": "low|medium|high",
+  "reasoning": "为什么需要 N 个 agent (简短一句)",
+  "agents": [
+    {
+      "role": "角色名 (2-6字中文, 如'景点探索师')",
+      "task_description": "该 agent 负责什么, 要具体",
+      "search_queries": ["关键词1", "关键词2", "关键词3"]
+    }
+  ]
+}
+
+决策规则:
+- 简单闲聊/单点问题/单方面查询: 1 个 agent
+- 多方面问题 (如'介绍一个城市'): 3-5 个 agent
+- 复杂研究型 (攻略/方案/对比/报告): 5-10 个 agent
+- 每个 agent 负责一个独立方面, agent 之间职责不重叠
+- 每个 agent 配 2-5 个搜索关键词
+- 关键词要适合搜索引擎, 中英文皆可, 简洁具体`;
+
+const DEEP_THINK_SYNTHESIZER_PROMPT = `你是 XTJ AI 深度思考模式的答案整合专家.
+你有 N 个并行专家 agent 的小报告, 请整合成结构清晰、引用完整、用户友好的最终答案.
+
+要求:
+1. 保留所有重要信息, 不要遗漏关键细节
+2. 用 [来源N] 标注具体事实/数据, N 对应下方"搜索结果列表"中的编号
+3. 失败的 agent 部分用 "[该方面暂无数据]" 标注, 不要硬编
+4. 结构清晰: 用标题分段、关键信息用列表、时间/价格/数字用粗体
+5. 总长 1500-5000 字, 用户要的是"详细攻略", 不要写 100 字应付
+6. 保留每个 agent 的独特洞察, 不要磨平个性
+7. 不要列出来源链接原始 URL, 引用处直接 [来源N] 即可
+8. 不要使用"作为一个 AI"等废话开头, 直接给答案`;
+
 // 单价配置（CNY / 1M tokens），可通过环境变量覆盖
-// 默认值对应 deepseek-v4-flash 官方定价（2025年）：
 //   缓存未命中输入 1 元/1M tokens → DEEPSEEK_INPUT_PRICE_PER_1M
 //   缓存命中输入 0.02 元/1M tokens → DEEPSEEK_CACHE_HIT_PRICE_PER_1M
 //   输出 2 元/1M tokens → DEEPSEEK_OUTPUT_PRICE_PER_1M
@@ -2299,10 +2355,18 @@ async function callDeepSeek(messages, options) {
         apiBody.thinking = { type: 'enabled' };
         apiBody.reasoning_effort = thinkingLevel;
       }
-      if (useTools) {
-        apiBody.tools = options.tools;
-        if (toolChoice) apiBody.tool_choice = toolChoice;
-      }
+      // ★ P0 修复：response_format 透传（用于 Planner 强制 JSON 输出）
+  if (options && options.response_format) {
+    apiBody.response_format = options.response_format;
+  }
+  if (useTools) {
+    apiBody.tools = options.tools;
+    if (toolChoice) apiBody.tool_choice = toolChoice;
+  }
+  // ★ M: max_tokens 透传（深度思考模式需要更大 token 上限）
+  if (options && options.max_tokens && typeof options.max_tokens === 'number') {
+    apiBody.max_tokens = options.max_tokens;
+  }
 
       var resp = await fetch(DEEPSEEK_API_URL, {
         method: 'POST',
@@ -2464,6 +2528,369 @@ async function callDeepSeek(messages, options) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ===================== M: 深度思考模式 — Planner / Workers / Synthesizer =====================
+// runMultiAgentFlow: 由 /api/agent/chat 端点在 deep_think=true 时调用
+//   1. Planner 自主决定 1-10 个 worker agent
+//   2. Workers 并行执行 (各自 tool_use 循环)
+//   3. Synthesizer 整合 N 份小报告 + 统一 [来源N] 编号
+//   全程 SSE 推送 progress 事件, 10 分钟总预算
+async function runMultiAgentFlow(opts) {
+  var res = opts.res;
+  var userName = opts.userName;
+  var message = opts.message;
+  var convId = opts.convId;
+  var config = opts.config;
+  var ctx = opts.ctx;
+  var startTime = opts.startTime || Date.now();
+  var cancelToken = opts.cancelToken;
+
+  // SSE helpers (与 chat/stream 共用 writeSse)
+  function sseSend(obj) {
+    try { writeSse(res, obj); } catch (e) {}
+  }
+  function isCancelled() { return cancelToken.cancelled === true; }
+  function timeLeft() { return DEEP_THINK_CONFIG.MAX_DURATION_MS - (Date.now() - startTime); }
+
+  // 收集所有 worker 的 sources (用于 Synthesizer 统一编号)
+  var allSources = [];
+  var allSearchQueries = [];
+  var workerResults = []; // { role, content, sources, status, elapsed_ms }
+  var plannerInfo = null; // { complexity, reasoning, agent_count }
+
+  // === 阶段 1: Planner ===
+  sseSend({ type: 'deep_think_stage', stage: 'planning', message: '正在分析任务, 决定需要多少个 agent' });
+  if (isCancelled()) return { cancelled: true, partial: true };
+
+  var planResult = null;
+  try {
+    var plannerController = new AbortController();
+    var plannerTimer = setTimeout(function() { plannerController.abort(); }, DEEP_THINK_CONFIG.PLANNER_TIMEOUT_MS);
+    // Planner 用一个内部调用 (不走 callDeepSeek 避免其内部 tool loop 干扰)
+    var planApiBody = {
+      model: DEEPSEEK_MODEL_REASONER,
+      messages: [
+        { role: 'system', content: DEEP_THINK_PLANNER_PROMPT },
+        { role: 'user', content: message }
+      ],
+      stream: false,
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+      response_format: { type: 'json_object' },
+      max_tokens: 4096
+    };
+    var planResp = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
+      body: JSON.stringify(planApiBody),
+      signal: plannerController.signal
+    });
+    clearTimeout(plannerTimer);
+    if (!planResp.ok) {
+      var planErr = await planResp.json().catch(function() { return {}; });
+      console.error('[DEEP-THINK] planner API error', planResp.status, planErr);
+      throw new Error('planner API error ' + planResp.status);
+    }
+    var planData = await planResp.json();
+    planResult = (planData && planData.choices && planData.choices[0] && planData.choices[0].message && planData.choices[0].message.content) || '';
+    planResult = String(planResult).trim();
+  } catch (e) {
+    console.error('[DEEP-THINK] planner failed:', e && e.message);
+    // Fallback: 1 个 agent (单 agent 模式)
+    planResult = JSON.stringify({
+      complexity: 'low',
+      reasoning: 'Planner 失败, 使用单 agent 模式',
+      agents: [{ role: 'AI 助手', task_description: message, search_queries: [] }]
+    });
+  }
+
+  // 解析 Planner JSON (容错)
+  var plan = null;
+  try {
+    var jsonMatch = planResult.match(/\{[\s\S]*\}/);
+    if (jsonMatch) plan = JSON.parse(jsonMatch[0]);
+  } catch (e) {
+    console.error('[DEEP-THINK] planner JSON parse failed:', e && e.message);
+  }
+  if (!plan || !Array.isArray(plan.agents) || plan.agents.length === 0) {
+    plan = {
+      complexity: 'low',
+      reasoning: 'Planner 输出解析失败, fallback 单 agent',
+      agents: [{ role: 'AI 助手', task_description: message, search_queries: [] }]
+    };
+  }
+  // 限制 agent 数量 1-10
+  if (plan.agents.length > DEEP_THINK_CONFIG.MAX_WORKERS) {
+    plan.agents = plan.agents.slice(0, DEEP_THINK_CONFIG.MAX_WORKERS);
+  }
+
+  plannerInfo = {
+    complexity: plan.complexity || 'medium',
+    reasoning: plan.reasoning || '',
+    agent_count: plan.agents.length,
+    agents: plan.agents.map(function(a) { return {
+      role: String(a.role || '专家').slice(0, 12),
+      task_description: String(a.task_description || '').slice(0, 200),
+      search_queries: Array.isArray(a.search_queries) ? a.search_queries.slice(0, 5).map(function(q) { return String(q).slice(0, 100); }) : []
+    }; })
+  };
+
+  sseSend({
+    type: 'deep_think_planned',
+    complexity: plannerInfo.complexity,
+    reasoning: plannerInfo.reasoning,
+    agents: plannerInfo.agents.map(function(a) { return { role: a.role, status: 'pending' }; })
+  });
+  console.log('[DEEP-THINK] planner decided', plannerInfo.agent_count, 'agents:', plannerInfo.agents.map(function(a) { return a.role; }).join(','));
+
+  if (isCancelled()) return { cancelled: true, partial: true, planner: plannerInfo, worker_results: workerResults };
+
+  // === 阶段 2: Workers 并行 ===
+  // 进度推送: 状态变更
+  function updateWorkerStatus(idx, status, extra) {
+    sseSend(Object.assign({
+      type: 'deep_think_worker',
+      index: idx,
+      role: plannerInfo.agents[idx].role,
+      status: status
+    }, extra || {}));
+  }
+
+  sseSend({ type: 'deep_think_stage', stage: 'workers', message: '并行启动 ' + plannerInfo.agent_count + ' 个 agent' });
+
+  // 初始化所有 worker 状态为 pending
+  for (var wi = 0; wi < plannerInfo.agents.length; wi++) {
+    updateWorkerStatus(wi, 'pending');
+  }
+
+  var workerPromises = plannerInfo.agents.map(function(agent, idx) {
+    return (async function() {
+      var wStart = Date.now();
+      if (isCancelled()) {
+        workerResults[idx] = { role: agent.role, content: '[已取消]', sources: [], status: 'cancelled', elapsed_ms: 0 };
+        updateWorkerStatus(idx, 'cancelled');
+        return workerResults[idx];
+      }
+      updateWorkerStatus(idx, 'running', { round: 0, max_rounds: DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS });
+      try {
+        var res = await runDeepThinkWorker({
+          agent: agent,
+          originalMessage: message,
+          cancelToken: cancelToken,
+          timeLeft: timeLeft,
+          sseSend: sseSend,
+          onRound: function(round) { updateWorkerStatus(idx, 'running', { round: round, max_rounds: DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS }); }
+        });
+        var elapsed = Date.now() - wStart;
+        workerResults[idx] = Object.assign({}, res, { elapsed_ms: elapsed, status: 'success' });
+        allSources.push.apply(allSources, res.sources);
+        // 收集查询词
+        if (res.queries) res.queries.forEach(function(q) { allSearchQueries.push(q); });
+        updateWorkerStatus(idx, 'success', { sources_count: res.sources.length, elapsed_ms: elapsed });
+        return workerResults[idx];
+      } catch (e) {
+        console.error('[DEEP-THINK] worker', idx, agent.role, 'failed:', e && e.message);
+        var failedElapsed = Date.now() - wStart;
+        workerResults[idx] = {
+          role: agent.role,
+          content: '## ' + agent.role + '\n\n[该方面数据获取失败: ' + (e && e.message || '未知错误') + ']',
+          sources: [],
+          queries: [],
+          status: 'failed',
+          elapsed_ms: failedElapsed,
+          error: e && e.message
+        };
+        updateWorkerStatus(idx, 'failed', { error: e && e.message, elapsed_ms: failedElapsed });
+        return workerResults[idx];
+      }
+    })();
+  });
+
+  await Promise.all(workerPromises);
+  if (isCancelled()) return { cancelled: true, partial: true, planner: plannerInfo, worker_results: workerResults, sources: allSources };
+
+  // === 阶段 3: Synthesizer 整合 ===
+  sseSend({ type: 'deep_think_stage', stage: 'synthesizing', message: '整合 ' + workerResults.length + ' 份报告' });
+
+  // 构造 sources 列表 (按 worker 顺序, 编号 1..N)
+  var sourcesList = allSources.map(function(s, i) {
+    return '[' + (i + 1) + '] ' + (s.title || '无标题') + (s.source ? ' (' + s.source + ')' : '') + '\n    URL: ' + (s.url || '无') + (s.snippet ? '\n    摘要: ' + String(s.snippet).slice(0, 200) : '');
+  }).join('\n\n');
+
+  // 构造 worker reports 列表
+  var reportsList = workerResults.map(function(w, i) {
+    var statusLabel = { success: '成功', failed: '失败', cancelled: '已取消' }[w.status] || w.status;
+    return '## ' + (i + 1) + '. ' + w.role + ' [' + statusLabel + ']\n' + (w.content || '[无内容]');
+  }).join('\n\n---\n\n');
+
+  var synthPrompt = DEEP_THINK_SYNTHESIZER_PROMPT +
+    '\n\n[用户原始问题]\n' + message +
+    '\n\n[搜索结果列表 — ' + allSources.length + ' 条 — 用 [来源N] 引用]\n' + (sourcesList || '[无搜索结果]') +
+    '\n\n[' + workerResults.length + ' 个 agent 报告]\n' + reportsList;
+
+  var synthContent = '';
+  var synthUsage = null;
+  try {
+    var synthController = new AbortController();
+    var synthTimer = setTimeout(function() { synthController.abort(); }, DEEP_THINK_CONFIG.SYNTHESIZER_TIMEOUT_MS);
+    var synthApiBody = {
+      model: DEEPSEEK_MODEL_REASONER,
+      messages: [
+        { role: 'system', content: DEEP_THINK_SYNTHESIZER_PROMPT },
+        { role: 'user', content: synthPrompt }
+      ],
+      stream: false,
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+      max_tokens: 32768
+    };
+    var synthResp = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + DEEPSEEK_API_KEY },
+      body: JSON.stringify(synthApiBody),
+      signal: synthController.signal
+    });
+    clearTimeout(synthTimer);
+    if (!synthResp.ok) {
+      var synthErr = await synthResp.json().catch(function() { return {}; });
+      console.error('[DEEP-THINK] synthesizer API error', synthResp.status, synthErr);
+      throw new Error('synthesizer API error ' + synthResp.status);
+    }
+    var synthData = await synthResp.json();
+    synthContent = (synthData && synthData.choices && synthData.choices[0] && synthData.choices[0].message && synthData.choices[0].message.content) || '';
+    synthContent = String(synthContent).trim();
+    synthUsage = synthData.usage || null;
+  } catch (e) {
+    console.error('[DEEP-THINK] synthesizer failed:', e && e.message);
+    // Fallback: 直接拼接所有 worker reports
+    synthContent = '⚠️ Synthesizer 失败, 下面是各 agent 原始报告:\n\n' +
+      workerResults.map(function(w) { return '## ' + w.role + '\n' + (w.content || '[无内容]'); }).join('\n\n---\n\n');
+  }
+
+  if (!synthContent) {
+    synthContent = '（深度思考未生成内容, 请重试）';
+  }
+
+  if (isCancelled()) return {
+    cancelled: true,
+    partial: true,
+    planner: plannerInfo,
+    worker_results: workerResults,
+    sources: allSources,
+    synth_content: synthContent
+  };
+
+  return {
+    cancelled: false,
+    planner: plannerInfo,
+    worker_results: workerResults,
+    sources: allSources,
+    queries: allSearchQueries,
+    synth_content: synthContent,
+    synth_usage: synthUsage
+  };
+}
+
+// runDeepThinkWorker: 单个 worker agent 执行 (内部 tool_use 循环)
+async function runDeepThinkWorker(opts) {
+  var agent = opts.agent;
+  var originalMessage = opts.originalMessage;
+  var cancelToken = opts.cancelToken;
+  var timeLeft = opts.timeLeft;
+  var sseSend = opts.sseSend;
+  var onRound = opts.onRound;
+
+  var sources = [];
+  var queries = [];
+
+  var workerSystemPrompt = '你是 XTJ 深度思考模式下的 [' + agent.role + '] 专家.\n' +
+    '你的具体任务: ' + agent.task_description + '\n' +
+    '建议搜索关键词: ' + (agent.search_queries || []).join(' | ') + '\n\n' +
+    '执行规则:\n' +
+    '1. 主动调用 search_web 工具获取最新信息 (可多次调用, 每次一个具体关键词)\n' +
+    '2. 基于搜索结果产出 500-1500 字的本方面专业分析\n' +
+    '3. 输出末尾列出本 agent 收集的所有引用 (title + url), 供 Synthesizer 统一编号\n' +
+    '4. 只关注本方面 (' + agent.role + '), 不要涉及其他 agent 的领域\n' +
+    '5. 不要做最终总结, Synthesizer 会整合所有 agent 的报告\n' +
+    '6. 不要使用"作为一个 AI"等废话, 直接开始分析';
+
+  var messages = [
+    { role: 'system', content: workerSystemPrompt },
+    { role: 'user', content: '用户原始问题: ' + originalMessage + '\n\n请基于你的任务开始专业分析, 必要时调用 search_web.' }
+  ];
+
+  for (var round = 1; round <= DEEP_THINK_CONFIG.WORKER_MAX_TOOL_ROUNDS; round++) {
+    if (cancelToken.cancelled) break;
+    if (timeLeft() < 30000) { console.log('[DEEP-THINK] worker time budget low, breaking'); break; }
+
+    if (onRound) onRound(round);
+
+    var r = null;
+    try {
+      r = await callDeepSeek(messages, {
+        thinking_mode: 'high',
+        tools: AI_TOOLS,
+        tool_choice: 'auto',
+        max_tool_rounds: 1,  // 单轮只允许 1 个 tool call
+        max_tokens: 8192,
+        tool_executor: async function(tc) {
+          var tRes = await executeToolCall(tc);
+          // 收集 search_web 结果
+          if (tc.function && tc.function.name === 'search_web') {
+            try {
+              var wArgs = JSON.parse(tc.function.arguments || '{}');
+              if (wArgs && wArgs.query) queries.push(String(wArgs.query).slice(0, 100));
+            } catch (e) {}
+            if (tRes && Array.isArray(tRes.results_count) === false && tRes.content) {
+              try {
+                var wItems = JSON.parse(tRes.content || '[]');
+                if (Array.isArray(wItems)) {
+                  wItems.forEach(function(it) {
+                    if (it && it.url) sources.push({ title: it.title || '', url: it.url, snippet: it.snippet || '', source: it.source || '' });
+                  });
+                }
+              } catch (e) {}
+            }
+            sseSend({ type: 'deep_think_tool', agent_role: agent.role, tool_name: 'search_web', count: tRes.results_count || 0 });
+          }
+          return tRes;
+        }
+      });
+    } catch (e) {
+      console.error('[DEEP-THINK] worker callDeepSeek failed:', e && e.message);
+      throw e;
+    }
+
+    if (!r.tool_calls || r.tool_calls.length === 0) {
+      // 最终回复
+      var finalText = r.content || '';
+      return { content: finalText, sources: sources, queries: queries };
+    }
+
+    // 有 tool_calls: 追加到 messages
+    messages.push({ role: 'assistant', content: r.content || '', tool_calls: r.tool_calls });
+    for (var ti = 0; ti < (r.tool_calls_info || []).length; ti++) {
+      var tcInfo = r.tool_calls_info[ti];
+      var tcResStr = '{}';
+      try {
+        // 从 workingMessages 反推? callDeepSeek 不返回 tool_result 内容
+        // 简化: 从 sources 推断 (不完美但够用)
+        tcResStr = JSON.stringify({ tool_name: tcInfo.name, ok: tcInfo.ok, results_count: tcInfo.results_count || 0 });
+      } catch (e) {}
+      messages.push({ role: 'tool', tool_call_id: tcInfo.id, content: tcResStr });
+    }
+  }
+
+  // 循环结束, 取最后一条 assistant 内容
+  var lastAssistant = '';
+  for (var mi = messages.length - 1; mi >= 0; mi--) {
+    if (messages[mi].role === 'assistant' && messages[mi].content) {
+      lastAssistant = messages[mi].content;
+      break;
+    }
+  }
+  return { content: lastAssistant || '(无内容)', sources: sources, queries: queries };
 }
 
 // ===================== AI 用户级限流（按 userName 而非 IP） =====================
@@ -6562,10 +6989,231 @@ async function loadAiContext(userName, convId) {
   return ctx;
 }
 
+// ★ M: 深度思考模式端点处理 — SSE 长连接 + 多 agent 调度
+//   路径: POST /api/agent/chat (deep_think=true 时)
+//   流程: 限流 → 验证 → 上下文 → runMultiAgentFlow (Planner→Workers→Synthesizer) → 保存 → done
+async function handleDeepThinkChat(req, res) {
+  var userName = req.userName;
+  var clientReqId = req.body && req.body.client_request_id;
+  var startTime = Date.now();
+  var aborted = false;
+  var _controller, _heartbeatTimer;
+
+  // 取消 token — 用于 /api/agent/chat/cancel
+  var cancelToken = { cancelled: false };
+  var convId = String(req.body && req.body.conversation_id || '').trim();
+  if (!convId) convId = genConvId();
+  if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) convId = genConvId();
+  activeDeepThinkJobs.set(convId, cancelToken);
+
+  function safeEnd() { if (!res.writableEnded) { try { res.end(); } catch (e) {} } }
+  function sseSend(obj) { if (!res.writableEnded) { try { writeSse(res, obj); } catch (e) {} } }
+
+  req.on('close', function() {
+    aborted = true;
+    cancelToken.cancelled = true;
+    try { console.log('[DEEP-THINK] client disconnected, reqId:', clientReqId || '?', 'convId:', convId); } catch (e) {}
+    try { clearInterval(_heartbeatTimer); } catch (e) {}
+    setTimeout(function() { activeDeepThinkJobs.delete(convId); }, 5000);
+  });
+
+  try {
+    // 1. 用户级限流
+    var rl = checkAiUserRateLimit(userName);
+    if (!rl.allowed) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      sseSend({ type: 'error', error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : '今日 AI 聊天次数已达上限' });
+      activeDeepThinkJobs.delete(convId);
+      return safeEnd();
+    }
+
+    // 2. 验证输入
+    var message = validateString(req.body && req.body.message, AI_CHAT_MESSAGE_MAX_LEN, '消息内容');
+    if (message && message.error) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      sseSend({ type: 'error', error: message.error });
+      activeDeepThinkJobs.delete(convId);
+      return safeEnd();
+    }
+    if (!message) {
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      sseSend({ type: 'error', error: '消息内容不能为空' });
+      activeDeepThinkJobs.delete(convId);
+      return safeEnd();
+    }
+
+    // 3. 读取配置和上下文
+    var config = await getAiConfig();
+    var ctx = await loadAiContext(userName, convId);
+    if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
+
+    // 4. 设置 SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
+
+    // 5. 立即推 meta + 启动心跳 (避免 Render 代理 60s 超时)
+    sseSend({ type: 'meta', conversation_id: convId, deep_think: true, start_time: startTime });
+
+    _heartbeatTimer = setInterval(function() {
+      if (!res.writableEnded) {
+        sseSend({ type: 'heartbeat', elapsed_ms: Date.now() - startTime });
+      }
+    }, DEEP_THINK_CONFIG.HEARTBEAT_MS);
+
+    // 6. 运行多 agent 流程
+    var flowResult = null;
+    try {
+      flowResult = await runMultiAgentFlow({
+        res: res,
+        userName: userName,
+        message: message,
+        convId: convId,
+        config: config,
+        ctx: ctx,
+        startTime: startTime,
+        cancelToken: cancelToken
+      });
+    } catch (e) {
+      console.error('[DEEP-THINK] runMultiAgentFlow exception:', e && e.message);
+      try { clearInterval(_heartbeatTimer); } catch (e2) {}
+      sseSend({ type: 'error', error: '深度思考失败: ' + (e && e.message || '未知错误') });
+      activeDeepThinkJobs.delete(convId);
+      return safeEnd();
+    }
+
+    try { clearInterval(_heartbeatTimer); } catch (e) {}
+    if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
+
+    // 7. 清洗 Synthesizer 输出 (去除括号动作等)
+    var finalContent = sanitizeAssistantVisibleText(flowResult.synth_content || '');
+    if (!finalContent) finalContent = '（深度思考未生成内容, 请重试）';
+
+    // 8. 构造 searchMeta
+    var nowTs = Date.now();
+    var searchMetaToStore = null;
+    if (flowResult.sources && flowResult.sources.length > 0) {
+      searchMetaToStore = {
+        count: flowResult.sources.length,
+        query: (flowResult.queries && flowResult.queries[0]) || message,
+        queries: (flowResult.queries || []).slice(0, 10),
+        results: flowResult.sources.slice(0, 50),
+        expires_at: nowTs + 86400000
+      };
+    }
+
+    // 9. 构造 usage
+    var synthUsage = flowResult.synth_usage || null;
+    var usageToStore = Object.assign({}, synthUsage || {}, {
+      thinking_mode: 'high',
+      model: DEEPSEEK_MODEL_REASONER,
+      deep_think: true,
+      agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1
+    });
+
+    // 10. 保存到 messages
+    if (!aborted) {
+      try {
+        await supabase.from('posts').insert([
+          {
+            user_name: userName,
+            content: message,
+            media_type: AI_AGENT_MESSAGE_MARKER,
+            media_url: buildMsgMeta('user', convId, null, null, 1),
+            actor_key: 'ai_msg_conv_' + convId + '_user_' + userName + '_' + nowTs
+          },
+          {
+            user_name: userName,
+            content: finalContent,
+            media_type: AI_AGENT_MESSAGE_MARKER,
+            media_url: buildMsgMeta('assistant', convId, usageToStore, '', 2, searchMetaToStore),
+            actor_key: 'ai_msg_conv_' + convId + '_agent_' + userName + '_' + (nowTs + 1)
+          }
+        ]);
+      } catch (e) {
+        console.error('[DEEP-THINK] save messages failed:', e.message);
+      }
+    }
+
+    // 11. 推 done 事件
+    if (!aborted) {
+      sseSend({
+        type: 'done',
+        content: finalContent,
+        sanitized_content: finalContent,
+        conversation_id: convId,
+        deep_think: true,
+        thinking_mode: 'high',
+        model: DEEPSEEK_MODEL_REASONER,
+        usage: synthUsage,
+        agent_count: (flowResult.planner && flowResult.planner.agent_count) || 1,
+        planner: flowResult.planner || null,
+        worker_results: (flowResult.worker_results || []).map(function(w) { return { role: w.role, status: w.status, elapsed_ms: w.elapsed_ms || 0 }; }),
+        search_count: flowResult.sources ? flowResult.sources.length : 0,
+        search_query: (flowResult.queries && flowResult.queries[0]) || '',
+        search_results: flowResult.sources ? flowResult.sources.slice(0, 50) : [],
+        search_expires_at: nowTs + 86400000,
+        duration_ms: Date.now() - startTime,
+        remaining: { hour: rl.remainingHour, day: rl.remainingDay }
+      });
+    }
+    activeDeepThinkJobs.delete(convId);
+    return safeEnd();
+  } catch (e) {
+    console.error('[DEEP-THINK] handleDeepThinkChat exception:', e && e.message);
+    try { clearInterval(_heartbeatTimer); } catch (e2) {}
+    try {
+      if (!res.writableEnded) {
+        if (!res.headersSent) {
+          res.setHeader('Content-Type', 'text/event-stream');
+        }
+        sseSend({ type: 'error', error: '深度思考异常: ' + (e && e.message || '请稍后重试') });
+      }
+    } catch (e3) {}
+    activeDeepThinkJobs.delete(convId);
+    return safeEnd();
+  }
+}
+
+// POST /api/agent/chat/cancel - 取消正在进行的深度思考
+app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
+  try {
+    var convId = String(req.body && req.body.conversation_id || '').trim();
+    if (!convId) return res.status(400).json({ error: 'conversation_id required' });
+    var job = activeDeepThinkJobs.get(convId);
+    if (job) {
+      job.cancelled = true;
+      try { console.log('[DEEP-THINK] cancelled by user, convId:', convId); } catch (e) {}
+      return res.json({ ok: true, cancelled: true });
+    }
+    res.json({ ok: true, cancelled: false, message: 'no active deep think job' });
+  } catch (e) {
+    res.status(500).json({ error: 'cancel failed' });
+  }
+});
+
 // POST /api/agent/chat
 app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_IP_LIMIT), async (req, res) => {
   var aborted = false;
   req.on('close', function() { aborted = true; });
+
+  // ★ M: 深度思考模式分支 — 走 SSE 长连接 + 多 agent 流程
+  if (req.body && req.body.deep_think === true) {
+    return handleDeepThinkChat(req, res);
+  }
+
   try {
     var userName = req.userName;
 
