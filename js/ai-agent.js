@@ -24,11 +24,11 @@
     sending: false,
     loading: false,
     loadingMore: false,
-    // ★ D 修复：thinking_mode 默认从 off 改成 low
-    //   让 AI 默认多想一下（chain-of-thought）
-    //   节省 deepseek 思考成本（low 比 medium 便宜）
-    //   用户可在 UI 切换
-    thinkingMode: 'low',
+    // ★ M: thinking_mode 默认从 low 改成 max
+    //   用户要求: 普通聊天默认就用 max 深度思考
+    //   管理员可在后台 /admin/ai-agent/config 切换为 low/medium/high/max
+    //   普通用户不能在 UI 切换 (allow_user_thinking_switch: false)
+    thinkingMode: 'max',
     // ★ M: 深度思考模式 toggle 状态
     //   开启后本会话所有消息走 Planner→Workers→Synthesizer 多 agent 流程
     //   持久化到 localStorage, 重开对话框后恢复
@@ -1634,7 +1634,7 @@
         content: content,
         reasoning: '',
         created_at: new Date().toISOString(),
-        thinking_mode: 'high',
+        thinking_mode: 'max',
         deep_think: true,
         agent_count: agentCount,
         planner: plannerInfo,
@@ -1643,7 +1643,7 @@
         search_query: searchQuery,
         search_results: searchResults,
         search_expires_at: searchExpiresAt,
-        usage: Object.assign({}, usage || {}, { model: finalModel, thinking_mode: 'high', deep_think: true, agent_count: agentCount })
+        usage: Object.assign({}, usage || {}, { model: finalModel, thinking_mode: 'max', deep_think: true, agent_count: agentCount })
       };
       S.messages.push(aiMsg);
 
@@ -1729,7 +1729,7 @@
         // footer
         var footer = el('div', { class: 'ai-msg-footer' });
         if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
-        footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 high · ⚡深度' }));
+        footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '思考 max · ⚡深度' }));
         if (usage || finalModel) {
           var usageLine = buildUsageLine(aiMsg.usage);
           if (usageLine) footer.appendChild(el('span', { class: 'ai-msg-usage', text: usageLine }));
@@ -1842,7 +1842,7 @@
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
             try {
               finalModel = evt.model || 'deepseek-v4-flash';
-              finalThinkingMode = evt.thinking_mode || 'high';
+              finalThinkingMode = evt.thinking_mode || 'max';
               if (evt.sanitized_content) aiContent = evt.sanitized_content;
               else if (evt.content) aiContent = evt.content;
               finalMeta = evt;
