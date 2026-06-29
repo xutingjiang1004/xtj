@@ -3471,9 +3471,11 @@ function showChatMessages() {
     // ★ M: 恢复深度思考模式状态
     restoreDeepThinkState();
     S.active = true;
+    window.__xtjAiChatActive = true;
     var authOk = await ensureUserAuthOrNotify();
     if (!authOk) {
       S.active = false;
+      window.__xtjAiChatActive = false;
       return;
     }
 
@@ -3600,6 +3602,7 @@ function showChatMessages() {
   function closeAiChat() {
     if (!S.active) return;
     S.active = false;
+    window.__xtjAiChatActive = false;
     clearReplyTimer();
     abortCurrentRequest(); // 内部已调用 clearStreamCleanup
     // Clean up deep think state
