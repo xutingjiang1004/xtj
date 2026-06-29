@@ -934,7 +934,7 @@
     var node = el('div', { class: 'ai-think-card collapsed' });
     node.innerHTML =
       '<div class="ai-think-header">' +
-        '<span class="ai-think-icon">⚡</span>' +
+        '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
         '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
         '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
         '<span class="ai-think-chevron">▾</span>' +
@@ -942,7 +942,7 @@
       '<div class="ai-think-body">' +
         (thinkingLog.length > 0 ?
           '<details class="ai-think-thinking">' +
-            '<summary><span class="ai-think-summary-icon">🧠</span><span>查看思考过程 (' + thinkingLog.length + ' 步)</span></summary>' +
+            '<summary><span>查看思考过程 (' + thinkingLog.length + ' 步)</span></summary>' +
             '<div class="ai-think-thinking-body"></div>' +
           '</details>' : '') +
         (thinkingLog.length > 0 ? '<div class="ai-think-divider"></div>' : '') +
@@ -1010,7 +1010,9 @@
     if (footer) {
       footer.innerHTML = '';
       if (msg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(msg.created_at) }));
-      footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '⚡ ' + finalThinkingMode }));
+      var badge = el('span', { class: 'ai-msg-thinking-badge' });
+      badge.innerHTML = AI_THINK_ICON + ' ' + finalThinkingMode;
+      footer.appendChild(badge);
       if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
       if (msg.usage) {
         var usageLine = buildUsageLine(msg.usage);
@@ -1489,29 +1491,30 @@
     } catch (e) { S.deepThink = false; }
   }
 
-  // 构造深度思考进度卡片
+  // 构造深度思考进度卡片 (极简风格)
+  var AI_THINK_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" opacity=".35"/><circle cx="8" cy="8" r="3" fill="currentColor" opacity=".7"/></svg>';
+
   function buildDeepThinkProgressCard() {
     var card = el('div', { class: 'ai-progress-card' });
     card.innerHTML =
       '<div class="ai-progress-header">' +
-        '<span class="ai-progress-icon">⚡</span>' +
+        '<span class="ai-progress-dot"></span>' +
         '<span class="ai-progress-title">深度思考中...</span>' +
         '<span class="ai-progress-elapsed">0s</span>' +
       '</div>' +
-      '<div class="ai-progress-stage">阶段: <span class="ai-progress-stage-text">规划中</span></div>' +
-      '<div class="ai-progress-bar"><div class="ai-progress-fill" style="width:5%"></div></div>' +
+      '<div class="ai-progress-stage">' +
+        '<span class="ai-progress-stage-dot"></span>' +
+        '<span>阶段: </span><span class="ai-progress-stage-text">启动中</span>' +
+      '</div>' +
       '<div class="ai-progress-detail"></div>' +
-      '<div class="ai-progress-agents"></div>' +
       '<div class="ai-progress-thinking-log" style="display:none"></div>' +
-      '<div class="ai-progress-actions">' +
-        '<button type="button" class="ai-progress-stop">⏹ 停止思考</button>' +
-      '</div>';
+      '<button type="button" class="ai-progress-stop">停止思考</button>';
     card.querySelector('.ai-progress-stop').addEventListener('click', function(ev) {
       ev.preventDefault();
       ev.stopPropagation();
       cancelDeepThink();
     });
-    // ★ O 修复 Bug 1: 前端倒计时兜底 (即使 SSE 心跳丢了, 也能持续更新)
+    // 前端倒计时兜底
     var cardStart = Date.now();
     var cardEl = card;
     var cardTimer = setInterval(function() {
@@ -1519,13 +1522,11 @@
         clearInterval(cardTimer);
         return;
       }
-      // 优先用后端推送的 elapsed, 兜底用前端时间戳
       var elapsedText = cardEl.querySelector('.ai-progress-elapsed').textContent;
       if (elapsedText === '0s' || /^\d+s$/.test(elapsedText) === false) {
         var sec = Math.floor((Date.now() - cardStart) / 1000);
         var min = Math.floor(sec / 60);
-        var sStr = min > 0 ? (min + 'm ' + (sec % 60) + 's') : (sec + 's');
-        cardEl.querySelector('.ai-progress-elapsed').textContent = sStr;
+        cardEl.querySelector('.ai-progress-elapsed').textContent = min > 0 ? (min + 'm ' + (sec % 60) + 's') : (sec + 's');
       }
     }, 1000);
     card._elapsedTimer = cardTimer;
@@ -1536,85 +1537,53 @@
   }
 
   // 更新进度卡 (按 SSE 事件)
-  // ★ R 适配: 单智能体架构, 阶段简化为 init → agent → searching → done
   function updateDeepThinkProgressCard(card, evt) {
     if (!card) return;
     var stageText = card.querySelector('.ai-progress-stage-text');
     var titleText = card.querySelector('.ai-progress-title');
-    var fill = card.querySelector('.ai-progress-fill');
     var detail = card.querySelector('.ai-progress-detail');
-    var agentsBox = card.querySelector('.ai-progress-agents');
 
     if (evt.type === 'deep_think_stage') {
-      // ★ R 改: 单智能体阶段映射
       var stageMap = {
-        init: '智能体启动中...',
-        agent: 'AI 智能体思考中...',
-        searching: '🔍 智能体搜索中...',
-        error: '✗ 失败'
+        init: '启动中',
+        agent: '思考中',
+        searching: '搜索中',
+        error: '失败'
       };
       stageText.textContent = stageMap[evt.stage] || evt.stage;
-      titleText.textContent = '⚡ 深度思考中...';
-      if (evt.stage === 'init') fill.style.width = '10%';
-      else if (evt.stage === 'agent') fill.style.width = '40%';
-      else if (evt.stage === 'searching') fill.style.width = '70%';
-      else if (evt.stage === 'error') fill.style.width = '100%';
       if (evt.message) detail.textContent = evt.message;
     } else if (evt.type === 'deep_think_planned') {
-      // ★ R 改: 单智能体 (1 个), 不再显示 agent 列表
-      card._agentCount = 1;
-      stageText.textContent = 'AI 智能体就绪 (单 agent)';
-      titleText.textContent = '⚡ 深度思考中...';
-      fill.style.width = '20%';
-      if (agentsBox) {
-        // 隐藏 agent 列表 (R 架构只有 1 个智能体, 不需要列表)
-        agentsBox.innerHTML = '';
-        agentsBox.style.display = 'none';
-      }
-      detail.textContent = evt.reasoning || '单智能体动态决策中...';
-    } else if (evt.type === 'deep_think_worker') {
-      // ★ R: 不再有 worker 事件, 保留兼容
+      stageText.textContent = '计划已就绪';
+      detail.textContent = evt.reasoning || '';
     } else if (evt.type === 'deep_think_tool') {
-      // ★ R 改: 单智能体搜索
-      var last = detail.textContent || '';
-      detail.textContent = '🔍 智能体搜索: ' + (evt.query || '') + ' · ' + (evt.count || 0) + ' 条结果';
-      fill.style.width = '70%';
+      detail.textContent = '正在搜索: ' + (evt.query || '') + ' (' + (evt.count || 0) + ' 条结果)';
+      stageText.textContent = '搜索中';
     } else if (evt.type === 'thinking_chunk') {
-      // ★ R: 累积思考过程, 进度卡内显示 1 条 (单智能体)
       if (!card._thinkingLog) card._thinkingLog = [];
       card._thinkingLog.push({ agent_role: evt.agent_role, chunk: evt.chunk, round: evt.round || 0 });
       var logBox = card.querySelector('.ai-progress-thinking-log');
       if (logBox) {
-        if (logBox.style.display === 'none') {
-          logBox.style.display = '';
-        }
-        var roleLabel = evt.agent_role || 'AI 智能体';
+        if (logBox.style.display === 'none') logBox.style.display = '';
+        var roleLabel = evt.agent_role || 'AI';
         var entry = el('div', { class: 'ai-thought-entry' });
-        entry.innerHTML = '<div class="ai-thought-role">🧠 ' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
+        entry.innerHTML = '<div class="ai-thought-role">' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
         entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 4000);
         logBox.appendChild(entry);
-        // 自动滚动到最新
         try { logBox.scrollTop = logBox.scrollHeight; } catch (e) {}
-        // 限制最多 50 条 (单智能体一般只 1 条)
-        while (logBox.children.length > 50) {
-          logBox.removeChild(logBox.firstChild);
-        }
+        while (logBox.children.length > 50) logBox.removeChild(logBox.firstChild);
       }
-      detail.textContent = '🧠 智能体思考中...';
-      fill.style.width = '50%';
+      detail.textContent = '思考中...';
     } else if (evt.type === 'heartbeat') {
       var elapsedSec = Math.floor((evt.elapsed_ms || 0) / 1000);
       var min = Math.floor(elapsedSec / 60);
       var sec = elapsedSec % 60;
-      var elapsedStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
-      card.querySelector('.ai-progress-elapsed').textContent = elapsedStr;
+      card.querySelector('.ai-progress-elapsed').textContent = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
     } else if (evt.type === 'done') {
-      stageText.textContent = '✓ 完成';
-      titleText.textContent = '✓ 深度思考完成';
-      fill.style.width = '100%';
+      stageText.textContent = '完成';
+      titleText.textContent = '深度思考完成';
     } else if (evt.type === 'error') {
-      stageText.textContent = '✗ ' + (evt.error || '失败');
-      titleText.textContent = '✗ 深度思考中断';
+      stageText.textContent = '失败';
+      titleText.textContent = '思考中断';
       card.classList.add('ai-progress-card-error');
     }
   }
@@ -1767,31 +1736,24 @@
     function ensureThinkCardNode() {
       if (aiNode) return aiNode;
       safeRemoveProgressCard()
-      // ★ Q 重做: think-card 极简版 (像 ChatGPT/Gemini, 不是千层蛋糕)
-      //   - 1 个外框 + 1 个 header + 1 个 body, 内部不再嵌套 box
-      //   - header 整行可点击展开/折叠
-      //   - 思考过程区用 <details> 原生点击, 无需 JS
-      //   - 答案区直接展示, 无背景无边框
       var node = el('div', { class: 'ai-think-card collapsed' });
       node.innerHTML =
         '<div class="ai-think-header">' +
-          '<span class="ai-think-icon">⚡</span>' +
-          '<span class="ai-think-title">深度思考中…</span>' +
-          '<span class="ai-think-meta">0s</span>' +
+          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
+          '<span class="ai-think-title">思考中…</span>' +
+          '<span class="ai-think-meta"></span>' +
           '<span class="ai-think-chevron">▾</span>' +
         '</div>' +
         '<div class="ai-think-body">' +
           '<details class="ai-think-thinking">' +
-            '<summary><span class="ai-think-summary-icon">🧠</span><span>查看思考过程</span></summary>' +
+            '<summary><span>查看思考过程</span></summary>' +
             '<div class="ai-think-thinking-body"></div>' +
           '</details>' +
           '<div class="ai-think-divider"></div>' +
           '<div class="ai-think-answer"></div>' +
           '<div class="ai-msg-footer"></div>' +
         '</div>';
-      // header 整行可点击展开/折叠
       var headerEl = node.querySelector('.ai-think-header');
-      var bodyEl = node.querySelector('.ai-think-body');
       var chevronEl = node.querySelector('.ai-think-chevron');
       headerEl.addEventListener('click', function(e) {
         e.preventDefault();
@@ -1807,8 +1769,6 @@
           if (chevronEl) chevronEl.textContent = '▾';
         }
       });
-      // 默认折叠 (完成后, 用户点 header 才看答案)
-      // 不主动 toggle, 用 CSS 默认 collapsed
       messagesEl.appendChild(node);
       aiNode = node;
       S.autoScrollPinned = true;
@@ -1924,12 +1884,13 @@
           if (detailsEl) detailsEl.style.display = 'none';
         }
 
-        // ★ Q 重做: footer (时间 + 思考程度, 无 box)
         var footer = node.querySelector('.ai-msg-footer');
         if (footer) {
           footer.innerHTML = '';
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
-          footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: '⚡ ' + (finalThinkingMode || 'max') }));
+          var badge = el('span', { class: 'ai-msg-thinking-badge' });
+          badge.innerHTML = AI_THINK_ICON + ' ' + (finalThinkingMode || 'max');
+          footer.appendChild(badge);
           if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
           if (usage || finalModel) {
             var usageLine = buildUsageLine(aiMsg.usage);
@@ -1973,7 +1934,7 @@
         var durationStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
         var titleEl = node.querySelector('.ai-think-title');
         var metaEl = node.querySelector('.ai-think-meta');
-        if (titleEl) titleEl.textContent = '⚡ 已思考 ' + durationStr;
+        if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 已思考 ' + durationStr;
         if (metaEl) metaEl.textContent = (agentCount || 0) > 0 ? (agentCount + ' agent') : '';
 
         // ★ Q: 完成后**自动展开**让用户直接看答案, 但思考过程仍可点击折叠
@@ -2103,7 +2064,7 @@
               }
               var titleEl = aiNode.querySelector('.ai-think-title');
               if (titleEl && titleEl.textContent.indexOf('思考中') < 0) {
-                titleEl.textContent = '🧠 思考中...';
+                titleEl.innerHTML = AI_THINK_ICON + ' 思考中...';
               }
             }
             scrollToBottom(messagesEl, true);
@@ -3260,10 +3221,12 @@ function showChatMessages() {
       type: 'button',
       class: 'ai-deep-think-toggle' + (S.deepThink ? ' on' : ''),
       'aria-label': '深度思考模式',
-      title: '深度思考模式 (Planner→多 Agent→Synthesizer, 最长 10 分钟)',
+      title: '深度思考模式 — AI 会深度分析后再回答, 耗时较长但更准确',
       id: 'aiDeepThinkToggle'
     });
-    deepThinkBtn.appendChild(el('span', { class: 'ai-deep-think-icon', text: '⚡' }));
+    var dtIcon = el('span', { class: 'ai-deep-think-icon' });
+    dtIcon.innerHTML = AI_THINK_ICON;
+    deepThinkBtn.appendChild(dtIcon);
     deepThinkBtn.appendChild(el('span', { class: 'ai-deep-think-label', text: '深度思考' }));
     deepThinkBtn.addEventListener('click', function(ev) {
       ev.preventDefault();
