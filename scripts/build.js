@@ -14,7 +14,9 @@ function quote(value) {
 function cliCommand(binPath, args) {
   const quotedArgs = args.map(quote).join(' ');
   if (process.platform === 'win32') {
-    return quote(binPath) + (quotedArgs ? ' ' + quotedArgs : '');
+    var cmdPath = binPath.endsWith('.cmd') ? binPath : binPath + '.cmd';
+    if (!fs.existsSync(cmdPath)) cmdPath = binPath;
+    return quote(cmdPath) + (quotedArgs ? ' ' + quotedArgs : '');
   }
   return 'sh ' + quote(binPath) + (quotedArgs ? ' ' + quotedArgs : '');
 }
@@ -45,7 +47,9 @@ const CSS_FILES = [
   'css/ui-enhance.css',
   'css/pro-style.css',
   'css/desktop.css',
-  'css/visual-refinements.css'
+  'css/visual-refinements.css',
+  'css/admin.css',
+  'css/ai-agent.css'
 ];
 
 function minifyJS(filePath) {
