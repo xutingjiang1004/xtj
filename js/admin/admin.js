@@ -352,9 +352,9 @@
         if (registerAlertState.pollTimer) {
             clearInterval(registerAlertState.pollTimer);
         }
-        refreshRegisterAlerts();
+        refreshRegisterAlerts().catch(function() {});
         registerAlertState.pollTimer = setInterval(function() {
-            refreshRegisterAlerts();
+            refreshRegisterAlerts().catch(function() {});
         }, 60000);
     }
 
@@ -485,6 +485,7 @@
 
     function showToast(msg, type) {
         var wrap = document.getElementById('toastWrap');
+        if (!wrap) return;
         var item = document.createElement('div');
         item.className = 'toast-item toast-' + (type || 'info');
         item.textContent = msg;
@@ -571,7 +572,7 @@
             saveCurrentTab();
             showToast('正在刷新数据...', 'info');
 
-            var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist','progift','ai'];
+            var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','progift','ai'];
             allTabs.forEach(function(t) {
                 var panel = document.getElementById('tab' + getTabDomName(t));
                 var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
@@ -620,7 +621,7 @@ async function initAdminClient() {
         startSessionTimeoutMonitor();
         installAdminTabDoubleClickRefresh();
         
-        var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos','progift','ai'];
+        var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','photos','progift','ai'];
         var savedTab = localStorage.getItem(TAB_KEY);
         if (savedTab && allowedTabs.indexOf(savedTab) !== -1) {
             currentTab = savedTab;
@@ -644,12 +645,14 @@ async function initAdminClient() {
 
         if (_adminReportPollTimer) clearInterval(_adminReportPollTimer);
         _adminReportPollTimer = setInterval(async function() {
-            var prevLen = reportsData.length;
-            await loadReportsData();
-            if (currentTab === 'reports' && reportsData.length !== prevLen) {
-                var el = document.getElementById('tabReports');
-                if (el) renderReportsTab(el);
-            }
+            try {
+                var prevLen = reportsData.length;
+                await loadReportsData();
+                if (currentTab === 'reports' && reportsData.length !== prevLen) {
+                    var el = document.getElementById('tabReports');
+                    if (el) renderReportsTab(el);
+                }
+            } catch (e) { /* 静默, 下次重试 */ }
         }, 30000);
     }
 
@@ -688,6 +691,7 @@ async function initAdminClient() {
             ADMIN = name;
             await initAdminClient();
         } catch(e) {
+            ADMIN = null;
             err.textContent = 'API 连接失败，请检查网络';
             btn.disabled = false;
             btn.textContent = '登录';
@@ -725,13 +729,15 @@ async function initAdminClient() {
     };
 
     // 登录表单键盘导航：Enter 切换到下一栏/提交
-    document.getElementById('loginName').addEventListener('keydown', function(e) {
+    var loginNameEl = document.getElementById('loginName');
+    var loginPwEl = document.getElementById('loginPw');
+    if (loginNameEl) loginNameEl.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            document.getElementById('loginPw').focus();
+            if (loginPwEl) loginPwEl.focus();
         }
     });
-    document.getElementById('loginPw').addEventListener('keydown', function(e) {
+    if (loginPwEl) loginPwEl.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
             window.doAdminLogin();
@@ -741,6 +747,7 @@ async function initAdminClient() {
     async function loadAllData(keepTab) {
         if (adminDataLoading) return;
         adminDataLoading = true;
+        var lockTimeout = setTimeout(function() { adminDataLoading = false; }, 30000);
         try {
             if (!API_BASE) {
             throw new Error('API 未配置或未登录，拒绝加载数据');
@@ -781,6 +788,7 @@ async function initAdminClient() {
             showToast('数据加载失败，请刷新重试', 'error');
         } finally {
             adminDataLoading = false;
+            try { clearTimeout(lockTimeout); } catch (e) {}
         }
     }
 
@@ -1011,7 +1019,7 @@ async function initAdminClient() {
         }
         return users.map(function(name) {
             var activeClass = name === selected ? ' is-selected' : '';
-            var escapedName = escapeHtml(name).replace(/'/g, '&#39;');
+            var escapedName = escapeHtml(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             return '<button type="button" class="admin-user-option' + activeClass + '" onclick="selectAdminUserOption(\'' + inputId + '\', \'' + escapedName + '\')">' + escapeHtml(name) + '</button>';
         }).join('');
     }
@@ -1541,8 +1549,8 @@ async function initAdminClient() {
             try {
                 if (API_BASE) {
                     await apiCall('DELETE', '/admin/announcement/' + id);
-                } else {
-                    var key = ann ? ann.actor_key : 'admin_' + Date.now();
+                } else if (typeof sb !== 'undefined' && sb && sb.rpc) {
+                    var key = post ? post.actor_key : 'admin_' + Date.now();
                     var res = await sb.rpc('delete_post_with_actor', { p_post_id: id, p_actor_key: key });
                     if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
                 }
@@ -4206,7 +4214,7 @@ async function initAdminClient() {
             tag.className = 'email-manual-tag';
             tag.dataset.email = email;
             tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;';
-            tag.innerHTML = email + ' <span onclick="emailRemoveManual(this)" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span>';
+            tag.innerHTML = escapeHtml(email) + ' <span onclick="emailRemoveManual(this)" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span>';
             list.appendChild(tag);
             added++;
         });
@@ -4827,7 +4835,6 @@ async function initAdminClient() {
         }
     };
 
-    var _proGiftSavingFinal = false;
     var _manualGiftSubmittingFinal = false;
     var PRO_VISUAL_GIFT_FEATURES_FINAL = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
     var PRO_VISUAL_GIFT_LABELS_FINAL = {
@@ -5302,7 +5309,7 @@ async function initAdminClient() {
                         });
                         var result = await resp.json().catch(function() { return {}; });
                         if (result && result.ok && result.avatar_url) {
-                            if (previewEl) previewEl.innerHTML = '<img src="' + result.avatar_url + '?v=' + (result.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'🐱\'">';
+                            if (previewEl) previewEl.innerHTML = '<img src="' + escapeHtml(result.avatar_url) + '?v=' + (result.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'🐱\'">';
                             if (statusEl) statusEl.textContent = '上传成功，记得保存配置';
                             showToast('头像上传成功，请点击保存配置');
                         } else {
@@ -5398,11 +5405,14 @@ async function initAdminClient() {
             }
 
             // 检查搜索健康状态
+            var _searchHealthChecking = false;
             function checkSearchHealth() {
+                if (_searchHealthChecking) return;
+                _searchHealthChecking = true;
                 var resultEl = document.getElementById('searchHealthResult');
-                if (!resultEl) return;
+                if (!resultEl) { _searchHealthChecking = false; return; }
                 resultEl.textContent = '检查中...';
-                fetch('/api/agent/search-health?q=测试搜索健康')
+                fetch((window.API_BASE || '') + '/api/agent/search-health?q=测试搜索健康')
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         if (!data || data.ok === false) {
@@ -5436,7 +5446,8 @@ async function initAdminClient() {
                     })
                     .catch(function(e) {
                         resultEl.textContent = '检查失败: ' + (e && e.message || '网络错误');
-                    });
+                    })
+                    .finally(function() { _searchHealthChecking = false; });
             }
             // 暴露到全局
             window.checkSearchHealth = checkSearchHealth;
