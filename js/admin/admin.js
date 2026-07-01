@@ -688,6 +688,7 @@ async function initAdminClient() {
             ADMIN = name;
             await initAdminClient();
         } catch(e) {
+            ADMIN = null;
             err.textContent = 'API 连接失败，请检查网络';
             btn.disabled = false;
             btn.textContent = '登录';
@@ -725,13 +726,15 @@ async function initAdminClient() {
     };
 
     // 登录表单键盘导航：Enter 切换到下一栏/提交
-    document.getElementById('loginName').addEventListener('keydown', function(e) {
+    var loginNameEl = document.getElementById('loginName');
+    var loginPwEl = document.getElementById('loginPw');
+    if (loginNameEl) loginNameEl.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            document.getElementById('loginPw').focus();
+            if (loginPwEl) loginPwEl.focus();
         }
     });
-    document.getElementById('loginPw').addEventListener('keydown', function(e) {
+    if (loginPwEl) loginPwEl.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
             window.doAdminLogin();
@@ -741,6 +744,7 @@ async function initAdminClient() {
     async function loadAllData(keepTab) {
         if (adminDataLoading) return;
         adminDataLoading = true;
+        var lockTimeout = setTimeout(function() { adminDataLoading = false; }, 30000);
         try {
             if (!API_BASE) {
             throw new Error('API 未配置或未登录，拒绝加载数据');
@@ -781,6 +785,7 @@ async function initAdminClient() {
             showToast('数据加载失败，请刷新重试', 'error');
         } finally {
             adminDataLoading = false;
+            try { clearTimeout(lockTimeout); } catch (e) {}
         }
     }
 
@@ -1011,7 +1016,7 @@ async function initAdminClient() {
         }
         return users.map(function(name) {
             var activeClass = name === selected ? ' is-selected' : '';
-            var escapedName = escapeHtml(name).replace(/'/g, '&#39;');
+            var escapedName = escapeHtml(name).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
             return '<button type="button" class="admin-user-option' + activeClass + '" onclick="selectAdminUserOption(\'' + inputId + '\', \'' + escapedName + '\')">' + escapeHtml(name) + '</button>';
         }).join('');
     }
@@ -4206,7 +4211,7 @@ async function initAdminClient() {
             tag.className = 'email-manual-tag';
             tag.dataset.email = email;
             tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:rgba(47,109,246,0.1);border:1px solid rgba(47,109,246,0.2);border-radius:6px;font-size:11px;';
-            tag.innerHTML = email + ' <span onclick="emailRemoveManual(this)" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span>';
+            tag.innerHTML = escapeHtml(email) + ' <span onclick="emailRemoveManual(this)" style="cursor:pointer;opacity:0.5;font-size:14px;line-height:1;">×</span>';
             list.appendChild(tag);
             added++;
         });
@@ -5402,7 +5407,7 @@ async function initAdminClient() {
                 var resultEl = document.getElementById('searchHealthResult');
                 if (!resultEl) return;
                 resultEl.textContent = '检查中...';
-                fetch('/api/agent/search-health?q=测试搜索健康')
+                fetch((window.API_BASE || '') + '/api/agent/search-health?q=测试搜索健康')
                     .then(function(r) { return r.json(); })
                     .then(function(data) {
                         if (!data || data.ok === false) {
