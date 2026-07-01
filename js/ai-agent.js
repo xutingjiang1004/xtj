@@ -3656,13 +3656,16 @@ function showChatMessages() {
       tabindex: '0',
       'aria-label': '打开 ' + name
     });
-    var listAvatar = el('span', { class: 'chat-list-avatar ai-entry-avatar' });
-    renderCatAvatarNode(listAvatar, 'ai-entry-avatar-inner', cfg.avatar_url, cfg.avatar_version);
+    var listAvatar = el('span', { class: 'cli-avatar' });
+    renderCatAvatarNode(listAvatar, '', cfg.avatar_url, cfg.avatar_version);
     item.appendChild(listAvatar);
-    var meta = el('div', { class: 'chat-list-meta' });
-    meta.appendChild(el('div', { class: 'chat-list-name', text: name }));
+    var meta = el('div', { class: 'cli-info' });
+    meta.appendChild(el('div', { class: 'cli-name', text: name }));
+    meta.appendChild(el('div', { class: 'cli-preview', text: desc }));
     item.appendChild(meta);
-    item.appendChild(el('span', { class: 'chat-list-arrow', text: '›' }));
+    var right = el('div', { class: 'cli-right' });
+    right.appendChild(el('span', { class: 'cli-time', text: 'AI' }));
+    item.appendChild(right);
 
     function onActivate() {
       if (!window.currentUser) {
