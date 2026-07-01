@@ -2442,10 +2442,11 @@
         }
         if (aiBubble) {
           aiBubble.classList.remove('ai-typing');
-          // 确保气泡文字可见: 强制清除可能残留的隐藏样式
           aiBubble.style.opacity = '1';
-          aiBubble.style.display = '';
+          aiBubble.style.display = 'block';
           aiBubble.style.visibility = 'visible';
+          aiBubble.style.color = '#1f2937';
+          aiBubble.style.fontSize = '14px';
         }
         setAiRootState('ai-idle');
         
