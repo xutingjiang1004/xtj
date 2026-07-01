@@ -7545,7 +7545,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // ===== Function Calling：让 AI 自主决定调用工具 =====
     // 快速检测：只有明显需要搜索的消息才走 FC 非流式调用，普通对话直接秒回
     var needsFcCheck = allowSearch && !useThinking && !aborted;
-    var fcQuickIntent = /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何/i.test(message);
+    // 短消息(<=10字符如"666""你好""哈哈")不可能是搜索意图，跳过FC检查直接流式
+    var isShortMsg = message.length <= 10;
+    var fcQuickIntent = !isShortMsg && /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何/i.test(message);
     var fcWeatherIntent = !weatherResult && /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
     needsFcCheck = needsFcCheck && (fcQuickIntent || fcWeatherIntent);
     var hasCalledTools = false;
@@ -7563,7 +7565,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       };
 
       var fcController = new AbortController();
-      _fcTimer = setTimeout(function() { fcController.abort(); }, 2000);
+      _fcTimer = setTimeout(function() { fcController.abort(); }, 1000);
 
       try {
         var fcResp = await fetch(DEEPSEEK_API_URL, {
