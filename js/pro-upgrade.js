@@ -63,9 +63,10 @@
     if (local) return local;
 
     // 通过 API 查询 VIP 状态，不再直连 Supabase
-    if (typeof API_BASE !== 'undefined' && API_BASE) {
+    var _apiBase = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.API_BASE || window.location.origin;
+    if (_apiBase) {
       try {
-        var resp = await fetch(API_BASE + '/api/vip/status?user_name=' + encodeURIComponent(userName), {
+        var resp = await fetch(_apiBase + '/api/vip/status?user_name=' + encodeURIComponent(userName), {
           signal: AbortSignal.timeout(8000)
         });
         var data = await resp.json();
@@ -485,7 +486,8 @@
             headers['Authorization'] = authHeaders['Authorization'];
           }
         }
-        var resp = await fetch((window.API_BASE || '') + '/api/pro-gifts/available', {
+        var _apiBase2 = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.API_BASE || '';
+        var resp = await fetch(_apiBase2 + '/api/pro-gifts/available', {
           headers: headers,
           signal: AbortSignal.timeout(10000)
         });

@@ -169,19 +169,6 @@
   // but we enhance with better timing
 
   /* ==========================================================
-     6. Global Performance: Will-Change Strategy
-     ========================================================== */
-  document.addEventListener('DOMContentLoaded', function () {
-    // Add will-change hints to elements that animate
-    var animatedEls = document.querySelectorAll('.post.visible, .modal-box.active, .toast');
-    for (var i = 0; i < animatedEls.length; i++) {
-      if (!animatedEls[i].style.willChange) {
-        animatedEls[i].style.willChange = 'transform, opacity';
-      }
-    }
-  });
-
-  /* ==========================================================
      8. Expose API
      ========================================================== */
   window.XTJEffects = {
