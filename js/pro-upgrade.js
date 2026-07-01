@@ -547,7 +547,7 @@
         cfg.description ? '  <div class="pro-gift-card-desc">' + escapeHtml(cfg.description) + '</div>' : '',
         '  <div class="pro-gift-card-footer">',
         remain ? '    <span class="pro-gift-card-remain">剩余 ' + remain + ' 份</span>' : '',
-        disabled ? '' : '    <button class="pro-gift-card-btn" onclick="onClaimGift(\'' + escapeAttr(g.id || g.gift_id) + '\')">立即领取</button>',
+        disabled ? '' : '    <button class="pro-gift-card-btn" onclick="onClaimGift(\'' + escapeAttr(g.id || g.gift_id).replace(/\\/g, '\\\\') + '\', event)">立即领取</button>',
         '  </div>',
         '</div>'
       ].join('');
