@@ -842,16 +842,7 @@
 
   /* 7. 鏆楄壊涓婚涓嬬殑鐜荤拑鎬侀潰鏉跨◢寰寒涓€鐐癸紙閬垮厤澶粦锛?*/
 
-  /* 7.5 鏆楄壊涓婚鍏ㄥ眬閫傞厤锛圥C 绔ˉ鍏細post / publish-box / stats / profile 鍗?/ chat / photo-wall / input / button锛?*/
-  [data-theme="dark"] .post,
-  [data-theme="dark"] .publish-box,
-  [data-theme="dark"] .post-filter-bar,
-  [data-theme="dark"] .stats,
-  [data-theme="dark"] .profile-user-card,
-  [data-theme="dark"] .profile-activity-card,
-  [data-theme="dark"] .profile-setting-item,
-  [data-theme="dark"] .profile-totals-bar,
-  [data-theme="dark"] .xtj-vip-card,
+  /* Block 1 removed - superseded by Final True Dark Desktop Override below */
   [data-theme="dark"] .photo-wall-header,
   [data-theme="dark"] .photo-wall-item,
   [data-theme="dark"] .chat-header,
