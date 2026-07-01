@@ -138,7 +138,10 @@
     if (profileThemeToggle && profileThemeToggle.dataset.xtjThemeBound !== '1') {
       profileThemeToggle.dataset.xtjThemeBound = '1';
       profileThemeToggle.addEventListener('change', function () {
-        setTheme(this.checked ? 'dark' : 'light');
+        var that = this;
+        var next = that.checked ? 'dark' : 'light';
+        if (profileThemeToggle._debounceTimer) clearTimeout(profileThemeToggle._debounceTimer);
+        profileThemeToggle._debounceTimer = setTimeout(function() { setTheme(next); }, 100);
       });
     }
   }

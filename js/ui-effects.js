@@ -14,7 +14,9 @@
   var rippleSkipSelector = '.announcement-btn, .report-btn';
 
   function ensureRippleLayer(btn) {
-    var cs = window.getComputedStyle(btn);
+    if (!btn || !btn.ownerDocument) return null;
+    var cs;
+    try { cs = window.getComputedStyle(btn); } catch (e) { return null; }
     if (cs.position === 'static') btn.style.position = 'relative';
 
     var layer = btn.__xtjRippleLayer;
@@ -37,8 +39,9 @@
   }
 
   function spawnRipple(btn, clientX, clientY) {
-    if (!btn) return;
-    var rect = btn.getBoundingClientRect();
+    if (!btn || !btn.getBoundingClientRect) return;
+    var rect;
+    try { rect = btn.getBoundingClientRect(); } catch (e) { return; }
     var size = Math.max(rect.width, rect.height);
     var x = (typeof clientX === 'number' ? clientX : rect.left + rect.width / 2) - rect.left - size / 2;
     var y = (typeof clientY === 'number' ? clientY : rect.top + rect.height / 2) - rect.top - size / 2;
