@@ -1362,14 +1362,14 @@
       },
       isPaused: function() { return paused; },
       finish: function(finalText) {
-        // V3: 完成时直接 renderMarkdown, 去掉光标
         var idx = S.activeRenderers.indexOf(api);
         if (idx !== -1) S.activeRenderers.splice(idx, 1);
         if (cancelled || !targetEl) return;
         clearFrame();
         finished = true;
         paused = false;
-        if (typeof finalText === 'string') rendered = finalText;
+        // 只用有效内容覆盖, 避免空字符串清掉已流式渲染的文字
+        if (typeof finalText === 'string' && finalText.length > 0) rendered = finalText;
         pending = '';
         removeCursor();
         targetEl.innerHTML = renderMarkdown(rendered);
@@ -2415,7 +2415,12 @@
           finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
         }
         if (reasoningRenderer) reasoningRenderer.finish(thinking || '');
-        if (contentRenderer) contentRenderer.finish(content || '');
+        // 只在使用有效内容时调用 contentRenderer.finish, 避免空字符串清空已渲染文字
+        if (contentRenderer && content && content.length > 0) contentRenderer.finish(content);
+        else if (contentRenderer && (!content || content.length === 0)) {
+          // content 为空时只清理光标, 不覆盖 rendered
+          contentRenderer.stop && contentRenderer.stop();
+        }
         cleanupRenderers();
         if (node) {
           node.classList.remove('generating');
@@ -2918,7 +2923,7 @@
             } catch (e) {}
             
             // 如果后端做了清洗，替换已流式输出的气泡内容
-            if (evt.sanitized_content && aiBubble) {
+            if (evt.sanitized_content && evt.sanitized_content.length > 0 && aiBubble) {
               // 替换气泡中已输出的原始内容为清洗后正文
               if (contentRenderer) {
                 try { contentRenderer.cancel(); } catch (e) {}
