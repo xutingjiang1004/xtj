@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -1106,7 +1106,7 @@ const ADMIN_NAME = "xxz";
                 if (saveBtn) {
                     saveBtn.disabled = false;
                     saveBtn.textContent = saveBtn.dataset.originText || '保存视觉偏好';
-                    delete saveBtn.dataset.originText;
+                    saveBtn.removeAttribute('data-origin-text');
                 }
             }
         };
@@ -1177,7 +1177,7 @@ const ADMIN_NAME = "xxz";
                 if (saveBtn) {
                     saveBtn.disabled = false;
                     saveBtn.textContent = saveBtn.dataset.originText || '保存';
-                    delete saveBtn.dataset.originText;
+                    saveBtn.removeAttribute('data-origin-text');
                 }
             }
         };
@@ -7559,7 +7559,7 @@ function renderProfileActivityList(kind) {
                     return { kind: 'video', src: videoSrc, fullSrc: videoSrc };
                 }
                 var text = getDMMessageText(message).trim();
-                if (/^https?:\/\/\S+$/i.test(text)) {
+                if (/^https?:\/\/\S+$/i.test(text) && !/^data:/i.test(text)) {
                     if (/\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i.test(text)) {
                         return { kind: 'image', src: text, fullSrc: text };
                     }
