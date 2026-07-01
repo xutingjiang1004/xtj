@@ -2198,19 +2198,19 @@ function rateLimit(windowMs, maxRequests) {
     if (now > record.resetAt) {
       record.count = 0;
       record.resetAt = now + windowMs;
-    } else {
-      record.count++;
     }
-
+    if (record.count >= maxRequests) {
+      logAttack(key, 'RATE_LIMIT', req.method + ' ' + req.path);
+      res.setHeader('X-RateLimit-Limit', maxRequests);
+      res.setHeader('X-RateLimit-Remaining', 0);
+      res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetAt / 1000));
+      return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
+    }
+    record.count++;
     rateLimitStore.set(key, record);
     res.setHeader('X-RateLimit-Limit', maxRequests);
     res.setHeader('X-RateLimit-Remaining', Math.max(0, maxRequests - record.count));
     res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetAt / 1000));
-
-    if (record.count >= maxRequests) {
-      logAttack(key, 'RATE_LIMIT', req.method + ' ' + req.path);
-      return res.status(429).json({ error: '请求过于频繁，请稍后再试' });
-    }
     next();
   };
 }
@@ -7000,7 +7000,7 @@ async function handleDeepThinkChat(req, res) {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
-      sseSend({ type: 'error', error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : '今日 AI 聊天次数已达上限' });
+      sseSend({ type: 'error', error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : (rl.reason === 'concurrent' ? '请等待上一个请求完成' : '今日 AI 聊天次数已达上限') });
       activeDeepThinkJobs.delete(convId);
       return safeEnd();
     }
@@ -7199,6 +7199,7 @@ app.post('/api/agent/chat/cancel', authenticateUser, async (req, res) => {
   try {
     var convId = String(req.body && req.body.conversation_id || '').trim();
     if (!convId) return res.status(400).json({ error: 'conversation_id required' });
+    if (!/^[A-Z0-9\-]{6,}$/i.test(convId)) return res.status(400).json({ error: 'conversation_id 格式无效' });
     var job = activeDeepThinkJobs.get(convId);
     if (job) {
       if (job.userName && job.userName !== req.userName) {
@@ -7230,7 +7231,7 @@ app.post('/api/agent/chat', authenticateUser, rateLimit(3600000, AI_CHAT_HOURLY_
     var rl = checkAiUserRateLimit(userName);
     if (!rl.allowed) {
       return res.status(429).json({
-        error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : '今日 AI 聊天次数已达上限',
+        error: rl.reason === 'hourly_limit' ? 'AI 聊天太频繁了，休息一下' : (rl.reason === 'concurrent' ? '请等待上一个请求完成' : '今日 AI 聊天次数已达上限'),
         remainingHour: rl.remainingHour,
         remainingDay: rl.remainingDay
       });
@@ -9175,22 +9176,27 @@ setInterval(function() {
 }, 24 * 60 * 60 * 1000);
 
 // 自动清理 90 天前的 AI 聊天记录 (每天一次)
+var _aiCleanupLock = false;
 async function autoCleanupAiMessages() {
+  if (_aiCleanupLock) return;
+  _aiCleanupLock = true;
   try {
     var cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
-    var { count } = await supabase.from('posts')
+    var { count, error: countErr } = await supabase.from('posts')
       .select('id', { count: 'exact', head: true })
       .eq('media_type', AI_AGENT_MESSAGE_MARKER)
       .lt('created_at', cutoff);
-    if (!count) return;
+    if (countErr || !count) { _aiCleanupLock = false; return; }
     var deleted = 0;
     while (deleted < count) {
-      await supabase.from('posts').delete().eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
+      var { error: delErr } = await supabase.from('posts').delete().eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
+      if (delErr) { console.error('[AUTO-CLEANUP] delete error:', delErr && delErr.message); break; }
       deleted += 500;
       await new Promise(function(r) { setTimeout(r, 300); });
     }
     console.warn('[AUTO-CLEANUP] 已清理 ' + Math.min(deleted, count || 0) + ' 条 90 天前的 AI 消息');
   } catch (e) { /* 静默失败, 不影响主流程 */ }
+  _aiCleanupLock = false;
 }
 setInterval(autoCleanupAiMessages, 24 * 60 * 60 * 1000);
 // 服务启动 30s 后执行首次清理
