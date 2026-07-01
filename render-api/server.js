@@ -2274,7 +2274,12 @@ async function callDeepSeek(messages, options) {
     var lastUsage = null;
 
     for (var round = 0; round < maxToolRounds; round++) {
-      var useStream = !!(round === 0 && useThinking && options && typeof options.onThinkingChunk === 'function');
+      // V2: 只要给了 onThinkingChunk 或 onContentChunk 回调就用流式, 让答案也能流式推送
+      var hasThinkCb = (options && typeof options.onThinkingChunk === 'function');
+      var hasContentCb = (options && typeof options.onContentChunk === 'function');
+      var useStream = !!(hasThinkCb || hasContentCb);
+      // 第 2+ 轮 tool round 禁用流式(避免混乱), 只在最终答案轮(无tool_calls时)用流式
+      if (round > 0) useStream = false;
       var apiBody = {
         model: model,
         messages: workingMessages,
@@ -2349,9 +2354,10 @@ async function callDeepSeek(messages, options) {
             if (typeof sDelta.reasoning_content === 'string' && sDelta.reasoning_content) {
               try { options.onThinkingChunk(String(sDelta.reasoning_content).slice(0, 4000)); } catch (e) {}
             }
-            // content chunk → 累积
+            // content chunk → 累积 + V2: 推给 onContentChunk 回调(流式答案)
             if (typeof sDelta.content === 'string' && sDelta.content) {
               content += sDelta.content;
+              try { if (hasContentCb) options.onContentChunk(String(sDelta.content).slice(0, 4000)); } catch (e) {}
             }
             // tool_calls chunk → 累积
             if (Array.isArray(sDelta.tool_calls)) {
@@ -2692,14 +2698,25 @@ async function runDeepThinkAgent(opts) {
   var usage = null;
   var finalModel = DEEPSEEK_MODEL_REASONER;
   var toolCallsInfo = [];
-  // ★ U3: thinking chunk 节流缓冲区 (200ms 合并推送)
+  // V2: thinking chunk 节流缓冲区 — 首包立即推 + 后续 80ms 合并 (更流畅, 更低延迟)
   var _thinkingChunkBuf = '';
   var _thinkingChunkTimer = null;
+  var _thinkingFirstFlushed = false;
   function _flushThinkingChunk() {
     if (_thinkingChunkTimer) { clearTimeout(_thinkingChunkTimer); _thinkingChunkTimer = null; }
     var flushed = _thinkingChunkBuf;
     _thinkingChunkBuf = '';
     if (flushed) sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: flushed.slice(0, 4000) });
+  }
+  // V2: answer chunk 节流缓冲区 — 首包立即推 + 后续 50ms 合并 (答案比思考更敏感, 要快)
+  var _answerChunkBuf = '';
+  var _answerChunkTimer = null;
+  var _answerFirstFlushed = false;
+  function _flushAnswerChunk() {
+    if (_answerChunkTimer) { clearTimeout(_answerChunkTimer); _answerChunkTimer = null; }
+    var flushed = _answerChunkBuf;
+    _answerChunkBuf = '';
+    if (flushed) sseSend({ type: 'answer_chunk', chunk: flushed.slice(0, 8000) });
   }
 
   try {
@@ -2716,11 +2733,26 @@ async function runDeepThinkAgent(opts) {
         max_tool_rounds: 5,     // 内部最多 5 轮 tool_use
         max_tokens: 32768,
         onThinkingChunk: function(chunk) {
-          // 200ms 节流累积后推送，避免每个token单独一个SSE事件
+          // V2: 首包立即推送(无延迟), 后续 80ms 合并推送, 显著降低首字延迟
           _thinkingChunkBuf += String(chunk || '');
-          if (!_thinkingChunkTimer) {
-            _thinkingChunkTimer = setTimeout(function() { _flushThinkingChunk(); }, 200);
+          if (!_thinkingFirstFlushed) {
+            _thinkingFirstFlushed = true;
+            _flushThinkingChunk();
+            return;
           }
+          if (_thinkingChunkTimer) return;
+          _thinkingChunkTimer = setTimeout(function() { _flushThinkingChunk(); }, 80);
+        },
+        onContentChunk: function(chunk) {
+          // V2: 答案流 — 首包立即推 + 50ms 合并, 极低延迟
+          _answerChunkBuf += String(chunk || '');
+          if (!_answerFirstFlushed) {
+            _answerFirstFlushed = true;
+            _flushAnswerChunk();
+            return;
+          }
+          if (_answerChunkTimer) return;
+          _answerChunkTimer = setTimeout(function() { _flushAnswerChunk(); }, 50);
         },
         tool_executor: async function(tc) {
           // ★ R: 通过 tool_executor 收集 sources + 推 SSE
@@ -2766,12 +2798,14 @@ async function runDeepThinkAgent(opts) {
     usage = result.usage;
     finalModel = result.model || DEEPSEEK_MODEL_REASONER;
     toolCallsInfo = result.tool_calls_info || [];
-    // ★ U3: 推送最后残留的 thinking chunk buffer
+    // ★ V2: 推送最后残留的 thinking + answer chunk buffer
     _flushThinkingChunk();
+    _flushAnswerChunk();
     // thinking_chunk 已通过 onThinkingChunk 流式推送, thinkingLog 已由 sseSend 记录
   } catch (e) {
     console.error('[DEEP-THINK] agent failed:', e && e.message);
     _flushThinkingChunk();
+    _flushAnswerChunk();
     sseSend({ type: 'deep_think_stage', stage: 'error', message: 'AI 思考失败: ' + (e.message || '未知错误') });
     return {
       cancelled: isCancelled(),
