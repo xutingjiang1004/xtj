@@ -2427,11 +2427,14 @@
           finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
         }
         if (reasoningRenderer) reasoningRenderer.finish(thinking || '');
-        // 只在使用有效内容时调用 contentRenderer.finish, 避免空字符串清空已渲染文字
         if (contentRenderer && content && content.length > 0) contentRenderer.finish(content);
         else if (contentRenderer && (!content || content.length === 0)) {
-          // content 为空时只清理光标, 不覆盖 rendered
           contentRenderer.stop && contentRenderer.stop();
+        }
+        // 兜底: 无论渲染器状态如何, 直接往气泡写内容
+        if (content && content.length > 0 && aiBubble) {
+          aiBubble.innerHTML = renderMarkdown(content);
+          try { console.log('[AI-RENDER] direct set innerHTML len:', content.length, 'preview:', String(content).slice(0,50)); } catch(_) {}
         }
         cleanupRenderers();
         if (node) {
