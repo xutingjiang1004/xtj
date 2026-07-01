@@ -883,7 +883,7 @@ async function finishStream(res, opt) {
         }
       ]);
       saved = true;
-      console.log('[AGENT-STREAM] saved', 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'finish_reason:', finishReason);
+      // console.log('[AGENT-STREAM] saved', 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'finish_reason:', finishReason);
     } catch (saveErr) {
       console.error('[AGENT-STREAM] save failed:', saveErr && saveErr.message, 'userName:', opt.userName, 'convId:', String(opt.convId).slice(0, 8), 'content_len:', content.length, 'reasoning_len:', reasoning.length);
     }
@@ -915,7 +915,7 @@ async function finishStream(res, opt) {
     search_expires_at: searchMeta && typeof searchMeta.expires_at === 'number' ? searchMeta.expires_at : undefined
   });
 
-  console.log('[AGENT-STREAM] done finish_reason=', finishReason, 'complete=', isComplete, 'saved=', saved, 'content_len=', content.length);
+  // console.log('[AGENT-STREAM] done finish_reason=', finishReason, 'complete=', isComplete, 'saved=', saved, 'content_len=', content.length);
 
   // 异步更新会话摘要（仅成功保存时）
   if (hasContent && saved) {
@@ -6826,7 +6826,6 @@ function buildAiCorePrompt(config) {
 }
 
 // 动态上下文：每次可能变，独立 token 段
-// buildAiDynamicContext 已废弃，不再注入额外动态上下文
 function buildAiDynamicContext() { return ''; }
 
 // ===================== 全局 AI 配置读取 =====================
@@ -7558,7 +7557,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
 
     messages.push({ role: 'user', content: message });
 
-    console.log('[AGENT-STREAM] thinking_mode=', thinkingMode, 'useThinking=', useThinking, 'model=', usedModel, 'reasoning_effort=', useThinking ? thinkingMode : 'off', '|| message_len=', message.length, 'history_messages=', messages.length);
+    // console.log('[AGENT-STREAM] thinking_mode=', thinkingMode, 'useThinking=', useThinking, 'model=', usedModel, 'reasoning_effort=', useThinking ? thinkingMode : 'off', '|| message_len=', message.length, 'history_messages=', messages.length);
 
     // ===== Function Calling：让 AI 自主决定调用工具 =====
     // 快速检测：只有明显需要搜索的消息才走 FC 非流式调用，普通对话直接秒回
