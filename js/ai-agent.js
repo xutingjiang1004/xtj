@@ -1230,9 +1230,9 @@
   function takeSmoothTextChunk(pending, options) {
     pending = String(pending || '');
     if (!pending) return '';
-    // V2: 高级简洁节奏, 短小更精致
-    var minChunk = Math.max(1, options && options.minChunk || 2);
-    var maxChunk = Math.max(minChunk, options && options.maxChunk || 6);
+    // V2: 更快节奏, minChunk=3/maxChunk=12 配合 8-20字/帧, 流畅不卡
+    var minChunk = Math.max(1, options && options.minChunk || 3);
+    var maxChunk = Math.max(minChunk, options && options.maxChunk || 12);
     if (pending.length <= maxChunk) return pending;
 
     var punctuation = /[，。！？；：、,.!?;:\n]/;
@@ -1257,9 +1257,44 @@
     var rendered = '';
     var rafId = 0;
     var cancelled = false;
+    var finished = false;
     var streamClass = options.streamClass || 'ai-streaming-soft';
+    var usePlainTextStream = options.plainTextStream !== false;
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
+    // 光点 indicator
+    var indicator = null;
+    function ensureIndicator() {
+      if (indicator || !usePlainTextStream || finished) return;
+      try {
+        indicator = document.createElement('span');
+        indicator.className = 'ai-stream-indicator';
+        targetEl.appendChild(indicator);
+      } catch (e) {}
+    }
+    function removeIndicator() {
+      try { if (indicator && indicator.parentNode) indicator.parentNode.removeChild(indicator); } catch (e) {}
+      indicator = null;
+    }
+    function setPlainText(text) {
+      // V2: 流式阶段纯 textContent, 零 markdown 解析开销
+      if (targetEl._plainTextEl) {
+        targetEl._plainTextEl.textContent = text;
+        if (indicator && indicator.parentNode !== targetEl) {
+          try { targetEl.appendChild(indicator); } catch (e) {}
+        }
+      } else {
+        // 初始化纯文本节点 (替换当前内容), 最终 finish 时会替换为 markdown
+        targetEl.innerHTML = '';
+        var pre = document.createElement('div');
+        pre.className = 'ai-stream-text';
+        if (options.textClass) pre.className += ' ' + options.textClass;
+        pre.textContent = text;
+        targetEl._plainTextEl = pre;
+        targetEl.appendChild(pre);
+        ensureIndicator();
+      }
+    }
 
     function clearFrame() {
       if (!rafId) return;
@@ -1279,8 +1314,8 @@
         next = pending;
         pending = '';
       } else {
-        // V2: 高级简洁的流式节奏, 每帧 4-8 字, 看起来更精致
-        var frameBudget = pending.length > 160 ? 8 : (pending.length > 72 ? 6 : 4);
+        // V2: 更快的视觉速度, 每帧 8-20 字 (标点优先切分), 避免卡顿
+        var frameBudget = pending.length > 200 ? 20 : (pending.length > 80 ? 14 : 8);
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothTextChunk(pending, options);
           if (!chunk) break;
@@ -1290,13 +1325,17 @@
       }
       if (!next) return;
       rendered += next;
-      targetEl.innerHTML = renderMarkdown(rendered);
+      if (usePlainTextStream && !finished) {
+        setPlainText(rendered);
+      } else {
+        targetEl.innerHTML = renderMarkdown(rendered);
+      }
       if (typeof options.onRender === 'function') {
         try { options.onRender(rendered); } catch (e2) {}
       }
       if (!pending) {
         targetEl.classList.remove(streamClass);
-        if (typeof options.onDone === 'function') {
+        if (typeof options.onDone === 'function' && finished) {
           try { options.onDone(); } catch (e) {}
         }
       }
@@ -1320,7 +1359,7 @@
 
     return {
       append: function(text) {
-        if (cancelled || !targetEl || !text) return;
+        if (cancelled || !targetEl || !text || finished) return;
         pending += String(text);
         schedule();
       },
@@ -1330,11 +1369,17 @@
         emitText(true);
       },
       finish: function(finalText) {
+        // V2: 完成时一次性 renderMarkdown, 替换纯文本节点
         if (cancelled || !targetEl) return;
         clearFrame();
+        finished = true;
+        if (typeof finalText === 'string') rendered = finalText;
         pending = '';
-        rendered = String(finalText || '');
-        targetEl.innerHTML = renderMarkdown(rendered);
+        removeIndicator();
+        try {
+          targetEl._plainTextEl = null;
+          targetEl.innerHTML = renderMarkdown(rendered);
+        } catch (e) {}
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
           try { options.onRender(rendered); } catch (e3) {}
@@ -1343,7 +1388,6 @@
           try { options.onDone(); } catch (e) {}
         }
       },
-
       stop: function() {
         if (cancelled) return;
         clearFrame();
@@ -1355,7 +1399,10 @@
         if (cancelled) return;
         cancelled = true;
         clearFrame();
+        removeIndicator();
         pending = '';
+        rendered = '';
+        try { if (targetEl) { targetEl.innerHTML = ''; targetEl._plainTextEl = null; } } catch (e) {}
         targetEl = null;
       }
     };
@@ -1728,6 +1775,8 @@
     var aiNode = null;
     var aiBubble = null;
     var contentRenderer = null;
+    var answerRenderer = null;  // V2: 流式答案渲染器(answer_chunk用)
+    var answerStarted = false; // V2: 是否已进入回答阶段
     var doneReceived = false;
     var evtHandled = false;
 
@@ -1835,35 +1884,40 @@
           });
         }
 
-        // ★ Q 重做: 答案区 + typewriter 动画 (像 ChatGPT 一样逐字出现)
+        // ★ Q V2: 答案区 — 若 answerRenderer 已在流式中, 直接 finish; 否则走旧逐字兜底
         var answerEl = node.querySelector('.ai-think-answer');
-        if (answerEl) {
-          if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
-          // 先放 cursor, 然后逐字渲染
-          answerEl.innerHTML = '<span class="ai-typewriter-cursor"></span>';
-          // 用 createSmoothTextRenderer 已有函数 (逐字渲染 markdown)
-          contentRenderer = createSmoothTextRenderer(answerEl, {
-            initialDelay: 50,
-            perCharDelay: 8,    // 8ms/字, 快速自然
-            chunkSize: 3,       // 每次 3 个字, 减少重排
-            onDone: function() {
-              // 完成后去掉光标
-              try {
-                var cur = answerEl.querySelector('.ai-typewriter-cursor');
-                if (cur) cur.classList.remove('ai-typewriter-cursor');
-              } catch (e) {}
-              // [来源N] className 处理
-              try {
-                var as = answerEl.querySelectorAll('a');
-                for (var ai = 0; ai < as.length; ai++) {
-                  var atxt = (as[ai].textContent || '').trim();
-                  if (/^来源\d+$/.test(atxt)) as[ai].className = 'ai-source-link';
-                }
-              } catch (e) {}
-              setupBubbleCopy(answerEl, messagesEl);
+        function finalizeAnswer() {
+          // 完成后处理来源链接 + 复制按钮
+          try {
+            var as = answerEl.querySelectorAll('a');
+            for (var ai = 0; ai < as.length; ai++) {
+              var atxt = (as[ai].textContent || '').trim();
+              if (/^来源\d+$/.test(atxt)) as[ai].className = 'ai-source-link';
             }
-          });
-          contentRenderer.append(contentForRender);
+          } catch (e) {}
+          setupBubbleCopy(answerEl, messagesEl);
+          var titleEl = node.querySelector('.ai-think-title');
+          if (titleEl) titleEl.textContent = '已思考';
+        }
+        if (answerEl) {
+          if (answerRenderer) {
+            // V2: 流式渲染已在 answer_chunk 中进行, done 时只 finish 成 markdown
+            answerRenderer.finish(contentForRender);
+            answerRenderer = null;
+            finalizeAnswer();
+          } else {
+            if (contentRenderer) { try { contentRenderer.stop && contentRenderer.stop(); } catch (e) {} }
+            answerEl.innerHTML = '';
+            contentRenderer = createSmoothTextRenderer(answerEl, {
+              minChunk: 2, maxChunk: 6,
+              plainTextStream: true,
+              textClass: 'ai-stream-text-answer',
+              onDone: function() { finalizeAnswer(); }
+            });
+            contentRenderer.append(contentForRender);
+            contentRenderer.finish(contentForRender);
+            contentRenderer = null;
+          }
         }
 
         // 渲染思考过程日志 (放进 <details> 内, 先合并同角色连续条目)
@@ -2043,17 +2097,28 @@
               var summaryEl = aiNode.querySelector('.ai-think-thinking summary span:last-child');
               if (thinkBody) {
                 var roleLabel = evt.agent_role || 'AI 智能体';
-                // 同角色累积, 不每字创建新条目
                 var lastEntry = thinkBody.lastElementChild;
+                var chunkText = String(evt.chunk).slice(0, 4000);
                 if (lastEntry && lastEntry._role === roleLabel) {
                   var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
-                  if (lastChunk) lastChunk.textContent = (lastChunk.textContent || '') + String(evt.chunk).slice(0, 4000);
+                  if (lastChunk) {
+                    // V2: 直接 textContent 累积 (零解析), 末尾带光点提示"在思考"
+                    lastChunk.textContent = (lastChunk.textContent || '') + chunkText;
+                    if (lastChunk.querySelector('.ai-stream-indicator')) {
+                      try { lastChunk.removeChild(lastChunk.querySelector('.ai-stream-indicator')); } catch (e) {}
+                    }
+                    var dot = document.createElement('span'); dot.className = 'ai-stream-indicator';
+                    lastChunk.appendChild(dot);
+                  }
                 } else {
                   var entry = document.createElement('div');
                   entry.className = 'ai-thought-entry';
                   entry._role = roleLabel;
-                  entry.innerHTML = '<div class="ai-thought-role">▸ ' + roleLabel + '</div><div class="ai-thought-chunk"></div>';
-                  entry.querySelector('.ai-thought-chunk').textContent = String(evt.chunk).slice(0, 4000);
+                  entry.innerHTML = '<div class="ai-thought-role">▸ ' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
+                  var chunkEl = entry.querySelector('.ai-thought-chunk');
+                  chunkEl.textContent = chunkText;
+                  var dot2 = document.createElement('span'); dot2.className = 'ai-stream-indicator';
+                  chunkEl.appendChild(dot2);
                   thinkBody.appendChild(entry);
                 }
                 try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
@@ -2067,15 +2132,46 @@
                 detailsEl.open = true;
               }
               var titleEl = aiNode.querySelector('.ai-think-title');
-              if (titleEl && titleEl.textContent.indexOf('思考中') < 0) {
-                titleEl.innerHTML = AI_THINK_ICON + ' 思考中...';
+              if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 思考中…';
+              // 移除所有已完成条目上的光点, 只保留最后一个
+              if (thinkBody) {
+                var dots = thinkBody.querySelectorAll('.ai-thought-entry:not(:last-child) .ai-stream-indicator');
+                for (var di = 0; di < dots.length; di++) { try { dots[di].parentNode.removeChild(dots[di]); } catch (e2) {} }
               }
             }
             scrollToBottom(messagesEl, true);
             continue;
           }
+          if (evt.type === 'answer_chunk') {
+            // V2: 最终答案流式推送 - 立即实时渲染, 不等待 thinking 全部结束
+            if (!evt.chunk) continue;
+            if (!aiNode) ensureThinkCardNode();
+            if (!answerStarted) {
+              answerStarted = true;
+              var tTitle = aiNode.querySelector('.ai-think-title');
+              if (tTitle) tTitle.innerHTML = AI_THINK_ICON + ' 回答中…';
+              // 思考阶段结束: 移除最后一个思考条目光点
+              try {
+                var lastDot = aiNode.querySelector('.ai-thought-entry:last-child .ai-stream-indicator');
+                if (lastDot) lastDot.parentNode.removeChild(lastDot);
+              } catch (e) {}
+            }
+            var aEl = aiNode.querySelector('.ai-think-answer');
+            if (aEl && !answerRenderer) {
+              aEl.innerHTML = '';
+              answerRenderer = createSmoothTextRenderer(aEl, {
+                minChunk: 4, maxChunk: 16,
+                plainTextStream: true,
+                textClass: 'ai-stream-text-answer'
+              });
+            }
+            aiContent += String(evt.chunk);
+            if (answerRenderer) answerRenderer.append(evt.chunk);
+            scrollToBottom(messagesEl, true);
+            continue;
+          }
           if (evt.type === 'content') {
-            // 深度思考模式没有流式正文 (Synthesizer 一次性返回), 保留兼容
+            // 兜底: 非流式的最终 content 一次性到达
             aiContent += evt.text || '';
             ensureThinkCardNode();
             continue;
@@ -2132,6 +2228,9 @@
 
       if (S._currentReqId !== reqId || aborted) {
         safeRemoveProgressCard()
+        if (answerRenderer) { try { answerRenderer.cancel(); } catch (e) {} answerRenderer = null; }
+        if (contentRenderer) { try { contentRenderer.cancel(); } catch (e) {} contentRenderer = null; }
+        answerStarted = false;
         if (aiNode) try { aiNode.remove(); } catch (e) {}
         resetSendingIfCurrent();
         return;
@@ -2491,7 +2590,9 @@
         if (!contentRenderer) {
           contentRenderer = createSmoothTextRenderer(aiBubble, {
             minChunk: 4,
-            maxChunk: 12,
+            maxChunk: 16,
+            plainTextStream: true,
+            streamClass: 'ai-streaming-soft',
             onRender: function() {
               scrollToBottom(messagesEl, false);
             }
@@ -2790,12 +2891,13 @@
               if (!reasoningRenderer) {
                 body.textContent = '';
                 reasoningRenderer = createSmoothTextRenderer(body, {
-                  minChunk: 4,
-                  maxChunk: 12,
-                  onRender: function() {
-                    if (rn.classList.contains('expanded')) scrollToBottom(messagesEl, false);
-                  }
-                });
+                minChunk: 4,
+                maxChunk: 16,
+                plainTextStream: true,
+                onRender: function() {
+                  if (rn.classList.contains('expanded')) scrollToBottom(messagesEl, false);
+                }
+              });
               }
               reasoningRenderer.append(evt.text || '');
             }
