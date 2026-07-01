@@ -6780,14 +6780,21 @@ function buildAiCorePrompt(config) {
   else if (rs.detail_level === 'detailed') styleParts.push('详细');
 
   var toneParts = [];
+  // 幽默程度：low/medium/high 全部注入
   if (rs.humor_level === 'high') toneParts.push('幽默风趣');
   else if (rs.humor_level === 'low') toneParts.push('严肃');
+  else toneParts.push('中等幽默');
+  // 毒舌程度
   if (rs.sarcasm_level === 'high') toneParts.push('毒舌犀利');
   else if (rs.sarcasm_level === 'low') toneParts.push('温和');
+  else toneParts.push('中等毒舌');
+  // 温暖程度
   if (rs.warmth_level === 'high') toneParts.push('温暖友善');
   else if (rs.warmth_level === 'low') toneParts.push('冷淡疏离');
-  if (rs.use_markdown === false) toneParts.push('不用 Markdown');
-  if (rs.use_emoji === false) toneParts.push('不用 emoji');
+  else toneParts.push('中等温暖');
+  // markdown / emoji
+  toneParts.push(rs.use_markdown !== false ? '使用 Markdown' : '不用 Markdown');
+  toneParts.push(rs.use_emoji !== false ? '用 emoji' : '不用 emoji');
 
   if (styleParts.length) lines.push('回复风格：' + styleParts.join('，') + '。每条回复 ' + (rs.max_reply_chars || 1200) + ' 字以内。');
   if (toneParts.length) lines.push('语气风格：' + toneParts.join('，') + '。');
