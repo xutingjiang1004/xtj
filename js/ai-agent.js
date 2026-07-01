@@ -988,6 +988,11 @@
       });
     }
     var answerEl = node.querySelector('.ai-think-answer');
+    // 兜底：历史消息可能 content 为空，避免答案区空白
+    if (!contentForRender || !String(contentForRender).trim()) {
+      var hasThinkingLog = thinkingLog.length > 0 || (msg.reasoning && String(msg.reasoning).trim());
+      contentForRender = hasThinkingLog ? '（AI 只返回了思考过程，没有生成正文回复）' : '（AI 暂无回复）';
+    }
     answerEl.innerHTML = renderMarkdown(contentForRender);
     try {
       var as = answerEl.querySelectorAll('a');
@@ -1077,6 +1082,11 @@
       });
     }
     var bubble = el('div', { class: 'ai-msg-bubble' });
+    // 兜底：历史消息可能 content 为空（如 AI 只返回了思考过程），避免气泡空白
+    if (!contentForRender || !String(contentForRender).trim()) {
+      var hasReasoning = !!(msg.reasoning && String(msg.reasoning).trim());
+      contentForRender = hasReasoning ? '（AI 只返回了思考过程，没有生成正文回复）' : '（AI 暂无回复）';
+    }
     bubble.innerHTML = renderMarkdown(contentForRender);
     // ★ C 关键修复：给 [来源N] 链接加专属 className
     //   链接文本是 "来源1"/"来源2"... 时加 .ai-source-link，CSS 可以加特殊样式
@@ -2203,12 +2213,12 @@
               else if (evt.content) aiContent = evt.content;
               finalMeta = evt;
             } catch (e) {}
-            if (aiContent) {
-              if (!aiNode) ensureThinkCardNode();
-              finishThinkCard(aiNode, aiContent, evt);
-            } else {
-              notify('深度思考未返回内容');
+            if (!aiNode) ensureThinkCardNode();
+            // 没有正文时给出兜底提示，避免 think-card 答案区空白
+            if (!aiContent || !String(aiContent).trim()) {
+              aiContent = '（AI 只返回了思考过程，没有生成正文回复）';
             }
+            finishThinkCard(aiNode, aiContent, evt);
             doneReceived = true;
             evtHandled = true;
             break;
@@ -2427,14 +2437,23 @@
           finalThinkingElapsedMs = finalThinkingElapsedMs || thinkingTimer.stop();
         }
         if (reasoningRenderer) reasoningRenderer.finish(thinking || '');
-        if (contentRenderer && content && content.length > 0) contentRenderer.finish(content);
-        else if (contentRenderer && (!content || content.length === 0)) {
-          contentRenderer.stop && contentRenderer.stop();
+
+        // 判断是否有有效正文；没有时给出兜底提示，避免气泡完全空白
+        var hasContent = !!(content && String(content).trim().length > 0);
+        var hasThinking = !!(thinking && String(thinking).trim().length > 0);
+        var fallbackText = hasThinking ? '（AI 只返回了思考过程，没有生成正文回复）' : '（AI 暂无回复，请重试）';
+
+        if (contentRenderer) {
+          if (hasContent) {
+            contentRenderer.finish(content);
+          } else {
+            // 空内容时仍调用 finish，让渲染器内部兜底显示提示
+            contentRenderer.finish(fallbackText);
+          }
         }
-        // 兜底: 无论渲染器状态如何, 直接往气泡写内容
-        if (content && content.length > 0 && aiBubble) {
-          aiBubble.innerHTML = renderMarkdown(content);
-          try { console.log('[AI-RENDER] direct set innerHTML len:', content.length, 'preview:', String(content).slice(0,50)); } catch(_) {}
+        // 兜底: 无论渲染器状态如何, 直接往气泡写内容（保留 markdown 格式）
+        if (aiBubble) {
+          aiBubble.innerHTML = renderMarkdown(hasContent ? content : fallbackText);
         }
         cleanupRenderers();
         if (node) {
