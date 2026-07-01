@@ -999,10 +999,10 @@
         for (var tli = 0; tli < thinkingLog.length; tli++) {
           var mtl = thinkingLog[tli];
           var mlast = mergedLog[mergedLog.length - 1];
-          if (mlast && mlast.agent_role === (mtl.agent_role || 'AI') && mlast.round === (mtl.round || 0)) {
+          if (mlast && mlast.agent_role === (mtl.agent_role || 'AI 智能体') && mlast.round === (mtl.round || 0)) {
             mlast.chunk = (mlast.chunk || '') + (mtl.chunk || '');
           } else {
-            mergedLog.push({ agent_role: mtl.agent_role || 'AI', chunk: mtl.chunk || '', round: mtl.round || 0 });
+            mergedLog.push({ agent_role: mtl.agent_role || 'AI 智能体', chunk: mtl.chunk || '', round: mtl.round || 0 });
           }
         }
         mergedLog.forEach(function(entry) {
@@ -1294,6 +1294,9 @@
       }
       if (!pending) {
         targetEl.classList.remove(streamClass);
+        if (typeof options.onDone === 'function') {
+          try { options.onDone(); } catch (e) {}
+        }
       }
     }
 
@@ -1334,11 +1337,17 @@
         if (typeof options.onRender === 'function') {
           try { options.onRender(rendered); } catch (e3) {}
         }
+        if (typeof options.onDone === 'function') {
+          try { options.onDone(); } catch (e) {}
+        }
       },
 
       stop: function() {
         if (cancelled) return;
         clearFrame();
+        if (pending) {
+          emitText(true);
+        }
       },
       cancel: function() {
         if (cancelled) return;
@@ -1527,7 +1536,7 @@
     var cardTimer = setInterval(function() {
       if (S.deepThinkProgressCard !== cardEl || cardEl._done) { clearInterval(cardTimer); return; }
       var el = cardEl.querySelector('.ai-progress-elapsed');
-      if (el && el.textContent === '0s') {
+      if (el) {
         var sec = Math.floor((Date.now() - cardStart) / 1000);
         var min = Math.floor(sec / 60);
         el.textContent = min > 0 ? (min + 'm ' + (sec % 60) + 's') : (sec + 's');
@@ -1591,7 +1600,7 @@
     // Cleanup progress card timer and state
     if (S.deepThinkProgressCard) {
       try { if (S.deepThinkProgressCard._cleanupTimer) S.deepThinkProgressCard._cleanupTimer(); } catch (e) {}
-      try { S.deepThinkProgressCard.classList.add('ai-progress-card-cancelled'); } catch (e) {}
+      try { if (S.deepThinkProgressCard.parentNode) S.deepThinkProgressCard.parentNode.removeChild(S.deepThinkProgressCard); } catch (e) {}
     }
     // Reset sending state so user can send again
     S.sending = false;
@@ -1819,8 +1828,8 @@
             var idx = parseInt(n, 10);
             if (isNaN(idx) || idx < 1 || idx > searchResults.length) return m;
             var sr = searchResults[idx - 1] || {};
-            if (!sr.url) return m;
-            return '[来源' + n + '](' + sr.url + ')';
+        if (!sr.url) return m;
+        return '[来源' + n + '](' + sr.url.replace(/"/g, '%22').replace(/\)/g, '%29') + ')';
           });
         }
 
@@ -3647,13 +3656,16 @@ function showChatMessages() {
       tabindex: '0',
       'aria-label': '打开 ' + name
     });
-    var listAvatar = el('span', { class: 'chat-list-avatar ai-entry-avatar' });
-    renderCatAvatarNode(listAvatar, 'ai-entry-avatar-inner', cfg.avatar_url, cfg.avatar_version);
+    var listAvatar = el('span', { class: 'cli-avatar' });
+    renderCatAvatarNode(listAvatar, '', cfg.avatar_url, cfg.avatar_version);
     item.appendChild(listAvatar);
-    var meta = el('div', { class: 'chat-list-meta' });
-    meta.appendChild(el('div', { class: 'chat-list-name', text: name }));
+    var meta = el('div', { class: 'cli-info' });
+    meta.appendChild(el('div', { class: 'cli-name', text: name }));
+    meta.appendChild(el('div', { class: 'cli-preview', text: desc }));
     item.appendChild(meta);
-    item.appendChild(el('span', { class: 'chat-list-arrow', text: '›' }));
+    var right = el('div', { class: 'cli-right' });
+    right.appendChild(el('span', { class: 'cli-time', text: 'AI' }));
+    item.appendChild(right);
 
     function onActivate() {
       if (!window.currentUser) {

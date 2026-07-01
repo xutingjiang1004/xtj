@@ -2716,8 +2716,11 @@ async function runDeepThinkAgent(opts) {
         max_tool_rounds: 5,     // 内部最多 5 轮 tool_use
         max_tokens: 32768,
         onThinkingChunk: function(chunk) {
-          // ★ 流式推送 thinking_chunk, 前端实时看到思考过程
-          sseSend({ type: 'thinking_chunk', agent_role: 'AI 智能体', chunk: String(chunk).slice(0, 4000) });
+          // 200ms 节流累积后推送，避免每个token单独一个SSE事件
+          _thinkingChunkBuf += String(chunk || '');
+          if (!_thinkingChunkTimer) {
+            _thinkingChunkTimer = setTimeout(function() { _flushThinkingChunk(); }, 200);
+          }
         },
         tool_executor: async function(tc) {
           // ★ R: 通过 tool_executor 收集 sources + 推 SSE
@@ -7995,6 +7998,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     
     while (toolRound < MAX_TOOL_ROUNDS && !aborted) {
 
+    // 清理上一轮的泄漏（var 提升导致旧 controller/reader 不会被 GC）
+    if (typeof _reader !== 'undefined' && _reader) { try { _reader.cancel(); } catch (e) {} }
+    if (typeof controller !== 'undefined' && controller) { try { controller.abort(); } catch (e) {} }
     var controller = new AbortController();
     _controller = controller;
     var timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
@@ -8214,8 +8220,10 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
         roundMessages.push({ role: 'tool', content: JSON.stringify(toolResult), tool_call_id: toolResults[ti].id });
       }
       
+      // 将包含 tool_calls 的助理消息加入 roundMessages（缺少会导致下一轮上下文丢失）
+      roundMessages.push({ role: 'assistant', content: contentBuffer || '', tool_calls: toolCallsArr.map(function(t) { return { id: t.id, type: 'function', function: { name: t.name, arguments: t.args } }; }) });
       toolRound++;
-       // 后续轮次不再走思考模式，直接让模型用已有的思考+结果生成回答
+        // 后续轮次不再走思考模式，直接让模型用已有的思考+结果生成回答
        if (useThinking) {
          var freshMsgs = roundMessages.slice();
          apiBody = {
@@ -8769,6 +8777,10 @@ async function handleAvatarUpload(req, res) {
         actor_key: 'ai_config_' + Date.now()
       }]);
     }
+    
+    // 清除配置缓存，使新头像立即可见
+    aiConfigCache = null;
+    aiConfigFetchedAt = 0;
     
     return res.json({
       ok: true,
