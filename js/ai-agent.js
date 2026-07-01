@@ -2434,6 +2434,13 @@
         // 兜底: 无论渲染器状态如何, 直接往气泡写内容
         if (content && content.length > 0 && aiBubble) {
           aiBubble.innerHTML = renderMarkdown(content);
+          aiBubble.textContent += ' '; // trigger reflow
+          aiBubble.textContent = aiBubble.textContent.trim();
+          // 检查100ms后内容是否被清除
+          var checkBubble = aiBubble;
+          setTimeout(function() {
+            try { console.log('[AI-RENDER] 100ms后 innerHTML长度:', checkBubble.innerHTML.length, 'textContent长度:', checkBubble.textContent.length, 'parent可见:', checkBubble.offsetParent !== null); } catch(_) {}
+          }, 100);
           try { console.log('[AI-RENDER] direct set innerHTML len:', content.length, 'preview:', String(content).slice(0,50)); } catch(_) {}
         }
         cleanupRenderers();
