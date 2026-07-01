@@ -569,6 +569,11 @@
     // ===================== 前端错误监控（不采集输入内容） =====================
     (function() {
         var errorSent = {};
+        // 定期清理过期错误缓存，防止内存泄漏
+        setInterval(function() {
+            var _now = Date.now();
+            Object.keys(errorSent).forEach(function(k) { if (_now - errorSent[k] > 300000) delete errorSent[k]; });
+        }, 600000);
         function sendClientError(type, message, stack, url, line, col) {
             var errKey = (type + '|' + (message || '').slice(0, 100) + '|' + (url || '').slice(0, 100));
             var now = Date.now();
