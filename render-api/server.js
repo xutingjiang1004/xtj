@@ -890,6 +890,7 @@ async function finishStream(res, opt) {
   }
 
   // 发送 done
+  try { console.log('[SRV-DONE] hasContent:', hasContent, 'content_len:', content.length, 'reasoning_len:', reasoning.length, 'filtered:', contentWasFiltered, 'preview:', String(content).slice(0,60)); } catch(_) {}
   writeSse(res, {
     type: 'done',
     complete: isComplete,
