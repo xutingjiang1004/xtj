@@ -2274,6 +2274,10 @@ async function callDeepSeek(messages, options) {
     var lastUsage = null;
 
     for (var round = 0; round < maxToolRounds; round++) {
+      if (round > 0) {
+        clearTimeout(timer);
+        timer = setTimeout(function() { controller.abort(); }, useThinking ? 120000 : DEEPSEEK_TIMEOUT_MS);
+      }
       // V2: 只要给了 onThinkingChunk 或 onContentChunk 回调就用流式, 让答案也能流式推送
       var hasThinkCb = (options && typeof options.onThinkingChunk === 'function');
       var hasContentCb = (options && typeof options.onContentChunk === 'function');
@@ -7712,6 +7716,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       }
     }
 
+    var _sharedSearchMeta;
+    var reasoningStartedAt = 0;
+
     // FC fallback：AI 直接回答了，模拟流式输出
     if (hasFCFallbackContent && fcFallbackContent && !aborted) {
       var fcFallbackSanitized = sanitizeAssistantVisibleText(fcFallbackContent);
@@ -7742,8 +7749,8 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     }
 
     // _sharedSearchMeta 在非思考模式搜索或思考模式搜索中赋值
-    var _sharedSearchMeta;
-    var reasoningStartedAt = 0;
+    var _sharedSearchMeta2;
+    var reasoningStartedAt2 = 0;
 
     // 如果 FC 没启用或没触发 tool_calls，回退旧正则搜索注入
     if (!hasCalledTools && !aborted && allowSearch && !weatherResult && !useThinking) {
@@ -8314,7 +8321,7 @@ app.get('/api/agent/chat/conversations', authenticateUser, async (req, res) => {
       }
       convData[convId].msgCount++;
       
-      var meta = parseMsgMeta(r);
+      meta = parseMsgMeta(r);
       var msgContent = String(r.content || '');
       if (meta.role === 'assistant') {
         try {
