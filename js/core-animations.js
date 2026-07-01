@@ -36,16 +36,17 @@
     var overlay = document.getElementById(id);
     if (!overlay) return;
     if (hasGSAP()) {
-      var box = overlay.querySelector('.modal-box');
-      var prev = box ? box.__xtjMTl : null;
+    var box = overlay.querySelector('.modal-box');
+    if (!box) { if (_origCloseModal) _origCloseModal(id); return; }
+      var prev = box.__xtjMTl;
       if (prev) { prev.kill(); }
       gsap.set(overlay, { backdropFilter: 'blur(0px)', backgroundColor: 'rgba(0,0,0,0)' });
-      if (box) gsap.set(box, { y: 28, scale: 0.95, opacity: 0, filter: 'blur(6px)' });
+      gsap.set(box, { y: 28, scale: 0.95, opacity: 0, filter: 'blur(6px)' });
     }
     if (_origOpenModal) _origOpenModal(id);
     else { overlay.style.display = ''; overlay.classList.add('active'); }
     if (!hasGSAP()) return;
-    var box2 = overlay.querySelector('.modal-box');
+    var box2 = overlay.querySelector('.modal-box') || box;
     if (!box2) return;
     var tl = gsap.timeline();
     tl.to(overlay, { backdropFilter: 'blur(10px)', backgroundColor: 'rgba(0,0,0,0.35)', duration: 0.32, ease: 'power2.out' }, 0);
@@ -87,6 +88,7 @@
   window.toggleLike = async function (btn, postId) {
     if (!window.currentUser) { if (window.showToast) window.showToast('请先登录'); return; }
     var wasLiked = btn.classList.contains('liked');
+    if (!_origToggleLike) return;
     var result = await _origToggleLike(btn, postId);
     var isLikedNow = btn.classList.contains('liked');
     if (wasLiked || !isLikedNow || !hasGSAP()) return result;
@@ -130,7 +132,7 @@
   var _origOpenComment = window.openComment;
   window.openComment = function (postId) {
     if (!window.currentUser) { if (window.showToast) window.showToast('请先登录'); return; }
-    _origOpenComment(postId);
+    if (_origOpenComment) _origOpenComment(postId);
     if (!hasGSAP()) return;
     var overlay = document.getElementById('commentModal');
     if (!overlay) return;

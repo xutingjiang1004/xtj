@@ -1,6 +1,7 @@
 (function() {
   'use strict';
   if (window.__xtjProUpgradeLoaded) return;
+  var _createTimeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? function(ms) { return AbortSignal.timeout(ms); } : function(ms) { var c = new AbortController(); setTimeout(function() { c.abort(); }, ms); return c.signal; };
   window.__xtjProUpgradeLoaded = true;
 
   var VIP_MARKER = '__vip__';
@@ -67,7 +68,7 @@
     if (_apiBase) {
       try {
         var resp = await fetch(_apiBase + '/api/vip/status?user_name=' + encodeURIComponent(userName), {
-          signal: AbortSignal.timeout(8000)
+          signal: _createTimeoutSignal(8000)
         });
         var data = await resp.json();
         if (data && data.active_vip && data.active_vip.is_active && data.active_vip.expire_at) {
@@ -463,7 +464,11 @@
   }
 
   // 获取可用 Pro 活动列表（带 Authorization header）
+  var _fetchProGiftsLock = false;
   window.fetchProGifts = async function() {
+    if (_fetchProGiftsLock) return;
+    _fetchProGiftsLock = true;
+    try {
     var listEl = document.getElementById('proGiftList');
     if (!listEl) return;
     if (!window.currentUser) {
@@ -489,7 +494,7 @@
         var _apiBase2 = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.API_BASE || '';
         var resp = await fetch(_apiBase2 + '/api/pro-gifts/available', {
           headers: headers,
-          signal: AbortSignal.timeout(10000)
+          signal: _createTimeoutSignal(10000)
         });
         if (resp.status === 401 || resp.status === 403) {
           if (retry === 0) {
@@ -519,6 +524,7 @@
         listEl.innerHTML = '<div class="pro-gift-error">网络错误，请检查网络后重试</div>';
       }
     }
+    } finally { _fetchProGiftsLock = false; }
   };
 
   // 领取 Pro 活动 — 由 core.js 提供完整实现 (含UI按钮状态管理)
@@ -546,7 +552,7 @@
         cfg.description ? '  <div class="pro-gift-card-desc">' + escapeHtml(cfg.description) + '</div>' : '',
         '  <div class="pro-gift-card-footer">',
         remain ? '    <span class="pro-gift-card-remain">剩余 ' + remain + ' 份</span>' : '',
-        disabled ? '' : '    <button class="pro-gift-card-btn" onclick="onClaimGift(\'' + escapeAttr(g.id || g.gift_id) + '\')">立即领取</button>',
+        disabled ? '' : '    <button class="pro-gift-card-btn" onclick="onClaimGift(\'' + escapeAttr(g.id || g.gift_id).replace(/\\/g, '\\\\') + '\', event)">立即领取</button>',
         '  </div>',
         '</div>'
       ].join('');
@@ -571,6 +577,7 @@
 
   // 重新登录
   window.reAuthAndRefresh = function() {
+    try {
     // 清理旧凭证
     if (typeof window.clearUserToken === 'function') {
       window.clearUserToken();
@@ -599,6 +606,7 @@
         }
       };
     }
+    } catch(e) { try { console.warn('[Pro] reAuthAndRefresh error:', e); } catch(_) {} }
   };
 
   // 全局领取回调（由按钮 onclick 触发）

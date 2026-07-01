@@ -34,7 +34,7 @@
             var id = localStorage.getItem('xtj_device_id');
             if (id) return id;
         } catch(e) {}
-        var id;
+        id = id || '';
         if (typeof crypto !== 'undefined' && crypto.randomUUID) {
             id = crypto.randomUUID();
         } else {
@@ -585,6 +585,7 @@
                 var xhr = new XMLHttpRequest();
                 xhr.open('POST', API_BASE + '/api/client-error-log', true);
                 xhr.setRequestHeader('Content-Type', 'application/json');
+                xhr.onerror = function() {};
                 xhr.send(JSON.stringify({
                     type: type,
                     message: (message || '').slice(0, 500),

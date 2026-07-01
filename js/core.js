@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -1106,7 +1106,7 @@ const ADMIN_NAME = "xxz";
                 if (saveBtn) {
                     saveBtn.disabled = false;
                     saveBtn.textContent = saveBtn.dataset.originText || '保存视觉偏好';
-                    delete saveBtn.dataset.originText;
+                    saveBtn.removeAttribute('data-origin-text');
                 }
             }
         };
@@ -1177,7 +1177,7 @@ const ADMIN_NAME = "xxz";
                 if (saveBtn) {
                     saveBtn.disabled = false;
                     saveBtn.textContent = saveBtn.dataset.originText || '保存';
-                    delete saveBtn.dataset.originText;
+                    saveBtn.removeAttribute('data-origin-text');
                 }
             }
         };
@@ -2417,6 +2417,7 @@ const ADMIN_NAME = "xxz";
                         }
                     }
                 } catch(e) {
+                    try { console.warn('[saveUserInfo] failed:', e && e.message); } catch(_) {}
                 }
             }
 
@@ -4230,7 +4231,8 @@ function renderProfileActivityList(kind) {
                 openModal("commentModal");
                 setTimeout(() => document.getElementById("commInp").focus(), 100);
             };
-            document.getElementById("commBtn").onclick = async () => {
+            var commBtn = document.getElementById("commBtn");
+            if (commBtn) commBtn.onclick = async () => {
                 if (isUserMuted()) { showToast("您已被禁言，无法发表评论"); return; }
                 const content = document.getElementById("commInp").value.trim();
                 if (!content) { showToast("请输入评论内容"); return; }
@@ -4361,7 +4363,8 @@ function renderProfileActivityList(kind) {
                 closeOtherPostActionModals('delModal');
                 openModal("delModal");
             };
-            document.getElementById("delBtn").onclick = async () => {
+            var delBtn = document.getElementById("delBtn");
+            if (delBtn) delBtn.onclick = async () => {
                 if (!delPostId) return;
                 // ★ 入口强制解锁（同 openDelete）
                 if (window.__xtjDeleteInProgress && Date.now() - window.__xtjDeleteStartTime > 12000) {
@@ -5379,7 +5382,8 @@ function renderProfileActivityList(kind) {
                         } catch(e) {}
                     }
                 }
-                var safeName = username.replace(/'/g, "\\'");
+                var safeName = escapeHtml(username);
+                var safeNameJs = safeName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                 // Pro 外圈：1) 帖子冻结的 pro_at_post；2) VIP 历史（post.created_at 在某 Pro 期间内）；3) 当前 VIP 状态
                 var isPro = false;
         if (post) {
@@ -5405,11 +5409,11 @@ function renderProfileActivityList(kind) {
                     var safeImgUrl = escapeHtml(sanitizeUrl(avatarUrl));
                     var innerHtml = '<div class="avatar clickable"><img src="' + safeImgUrl + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"></div>';
                     if (isPro) {
-                        return '<div class="xtj-pro-avatar-ring" onclick="openUserProfile(\'' + safeName + '\')">' + innerHtml + '</div>';
+                        return '<div class="xtj-pro-avatar-ring" onclick="openUserProfile(\'' + safeNameJs + '\')">' + innerHtml + '</div>';
                     }
-                    return '<div class="avatar-wrap" onclick="openUserProfile(\'' + safeName + '\')">' + innerHtml + '</div>';
+                    return '<div class="avatar-wrap" onclick="openUserProfile(\'' + safeNameJs + '\')">' + innerHtml + '</div>';
                 } else {
-                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeName + '\')">' + (username[0] || '?').toUpperCase() + '</div>';
+                    return '<div class="avatar clickable" onclick="openUserProfile(\'' + safeNameJs + '\')">' + (username[0] || '?').toUpperCase() + '</div>';
                 }
             }
 
@@ -7555,7 +7559,7 @@ function renderProfileActivityList(kind) {
                     return { kind: 'video', src: videoSrc, fullSrc: videoSrc };
                 }
                 var text = getDMMessageText(message).trim();
-                if (/^https?:\/\/\S+$/i.test(text)) {
+                if (/^https?:\/\/\S+$/i.test(text) && !/^data:/i.test(text)) {
                     if (/\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/i.test(text)) {
                         return { kind: 'image', src: text, fullSrc: text };
                     }
@@ -8315,6 +8319,7 @@ function renderProfileActivityList(kind) {
 
             function dockChatGoBack() {
                 dockChatActiveUser = null;
+                dockChatSending = false;
                 _dockChatLoadSeq += 1;
                 // 如果当前处于 AI 聊天状态，优先关闭 AI 并恢复标准 UI
                 if (window.__xtjAiChatActive) {
@@ -8766,12 +8771,14 @@ function renderProfileActivityList(kind) {
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
-                    var imageBody = '<img class="msg-img" src="' + media.src + '" data-src="' + media.src + '" data-full-src="' + media.fullSrc + '" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" />';
+                    var safeSrc = escapeHtml(media.src);
+                    var safeFull = escapeHtml(media.fullSrc);
+                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" />';
                     if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }
                 if (media && media.kind === 'video') {
-                    var videoBody = '<video class="msg-img" src="' + media.src + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
+                    var videoBody = '<video class="msg-img" src="' + escapeHtml(media.src) + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
                     if (messageText) videoBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return videoBody;
                 }
