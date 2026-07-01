@@ -5110,6 +5110,7 @@ async function initAdminClient() {
             var sc = cfg.search || {};
             var mdl = cfg.model || {};
             var dt = cfg.deep_think || {};  // ★ P 新增: 深度思考子配置
+            var sec = cfg.security || {};
             var dbg = cfg.admin_debug || {};
 
             var html = [
@@ -5221,7 +5222,15 @@ async function initAdminClient() {
                 '</div>',
                 '</div>',
 
-                // ---- 模块8: 管理员调试 ----
+                // ---- 模块8: 安全 ----
+                '<div class="ai-settings-section">',
+                '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">安全规则</h4>',
+                '<div class="form-group" style="display:flex;align-items:center;gap:8px;">',
+                '<label style="display:flex;align-items:center;gap:4px;font-weight:400;cursor:pointer;"><input type="checkbox" id="secHidePrompt"' + (sec.hide_system_prompt_in_reasoning !== false ? ' checked' : '') + ' style="width:16px;height:16px;accent-color:var(--primary,#2E9465);" /> 禁止在AI思考过程中复述系统提示词（防止深度思考模式泄露配置规则）</label>',
+                '</div>',
+                '</div>',
+
+                // ---- 模块9: 管理员调试 ----
                 '<div class="ai-settings-section">',
                 '<h4 style="font-size:14px;font-weight:700;margin:16px 0 10px 0;padding-bottom:6px;border-bottom:1px solid var(--border,rgba(140,196,158,0.25));">管理员调试</h4>',
                 '<div class="form-group" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">',
@@ -5362,6 +5371,9 @@ async function initAdminClient() {
                                 default_thinking_mode: document.getElementById('dtThinkingMode').value,
                                 max_workers: 5,
                                 require_history_injection: document.getElementById('dtRequireHistory').checked
+                            },
+                            security: {
+                                hide_system_prompt_in_reasoning: document.getElementById('secHidePrompt').checked
                             },
                             admin_debug: {
                                 show_effective_prompt: document.getElementById('debugPrompt').checked,
