@@ -3425,9 +3425,14 @@ function showChatMessages() {
     var detailView = document.getElementById('dockChatDetailView');
     var panelChat = document.getElementById('panelChat');
     if (listView) listView.classList.add('hidden');
-    if (detailView) detailView.classList.remove('hidden');
+    if (detailView) {
+      detailView.classList.remove('hidden');
+      detailView.classList.add('ai-mode');
+      // 清理原有的聊天内容，避免与AI根节点冲突
+      var oldMsg = document.getElementById('dockChatMessages');
+      if (oldMsg) oldMsg.style.display = 'none';
+    }
     if (panelChat) panelChat.classList.add('ai-mode');
-    if (detailView) detailView.classList.add('ai-mode');
 
     var r = renderAiRoot();
     if (detailView) detailView.appendChild(r.root);
