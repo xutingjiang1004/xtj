@@ -9180,6 +9180,44 @@ app.get('/admin/ai-agent/conversation', verifyToken, async (req, res) => {
   }
 });
 
+// POST /admin/ai-agent/cleanup — 清理过期的 AI 聊天记录
+// older_than_days: 默认 90 天
+app.post('/admin/ai-agent/cleanup', verifyToken, async (req, res) => {
+  try {
+    var olderThanDays = parseInt(req.body && req.body.older_than_days, 10);
+    if (isNaN(olderThanDays) || olderThanDays < 7) olderThanDays = 90;
+    if (olderThanDays > 365) olderThanDays = 365;
+    var cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString();
+
+    var { count, error: countErr } = await supabase.from('posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .lt('created_at', cutoff);
+    if (countErr) return res.status(500).json({ error: '计数失败: ' + sanitizeError(countErr) });
+
+    if (!count) return res.json({ ok: true, deleted: 0, message: '没有需要清理的记录' });
+
+    var deleted = 0;
+    var batchSize = 500;
+    while (deleted < count) {
+      var { error: delErr } = await supabase.from('posts')
+        .delete()
+        .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+        .lt('created_at', cutoff)
+        .limit(batchSize);
+      if (delErr) return res.status(500).json({ error: '删除失败: ' + sanitizeError(delErr), deleted: deleted, total: count });
+      deleted += batchSize;
+      await new Promise(function(r) { setTimeout(r, 200); });
+    }
+
+    console.warn('[ADMIN-CLEANUP] 清理完成: 删除 ' + deleted + ' 条 ' + olderThanDays + ' 天前的 AI 消息');
+    return res.json({ ok: true, deleted: deleted, older_than_days: olderThanDays, cutoff: cutoff });
+  } catch (e) {
+    console.error('[ADMIN-CLEANUP] exception:', e && e.message);
+    return res.status(500).json({ error: '清理异常: ' + (e && e.message || '') });
+  }
+});
+
 
 // 自动清理旧日志（每24小时执行一次）
 setInterval(function() {
@@ -9187,6 +9225,28 @@ setInterval(function() {
   cleanupOldLogs('security').catch(function() {});
   cleanupOldLogs('error').catch(function() {});
 }, 24 * 60 * 60 * 1000);
+
+// 自动清理 90 天前的 AI 聊天记录 (每天一次)
+async function autoCleanupAiMessages() {
+  try {
+    var cutoff = new Date(Date.now() - 90 * 86400000).toISOString();
+    var { count } = await supabase.from('posts')
+      .select('id', { count: 'exact', head: true })
+      .eq('media_type', AI_AGENT_MESSAGE_MARKER)
+      .lt('created_at', cutoff);
+    if (!count) return;
+    var deleted = 0;
+    while (deleted < count) {
+      await supabase.from('posts').delete().eq('media_type', AI_AGENT_MESSAGE_MARKER).lt('created_at', cutoff).limit(500);
+      deleted += 500;
+      await new Promise(function(r) { setTimeout(r, 300); });
+    }
+    console.warn('[AUTO-CLEANUP] 已清理 ' + Math.min(deleted, count || 0) + ' 条 90 天前的 AI 消息');
+  } catch (e) { /* 静默失败, 不影响主流程 */ }
+}
+setInterval(autoCleanupAiMessages, 24 * 60 * 60 * 1000);
+// 服务启动 30s 后执行首次清理
+setTimeout(function() { autoCleanupAiMessages().catch(function() {}); }, 30000);
 
 // ===================== 启动 =====================
 const port = process.env.PORT || 3000;
