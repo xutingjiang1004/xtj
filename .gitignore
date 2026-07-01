@@ -6,3 +6,8 @@ node_modules/
 .DS_Store
 
 .codex/
+
+# Private keys
+*.pem
+*.key
+secrets.*
