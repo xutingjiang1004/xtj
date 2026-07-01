@@ -6772,14 +6772,25 @@ function buildAiCorePrompt(config) {
     lines.push('你有 search_web / get_weather / get_current_time 等工具。需要实时信息时主动调用，引用结果用 [来源N] 标注。');
   }
 
-  // 回复风格 — 管理员可配置
+  // 回复风格 — 管理员可配置，所有字段全部接入
   var styleParts = [];
-  if (rs.directness === 'direct') styleParts.push('直接回答');
-  else if (rs.directness === 'gentle') styleParts.push('委婉回答');
+  if (rs.directness === 'direct') styleParts.push('直接');
+  else if (rs.directness === 'gentle') styleParts.push('委婉');
   if (rs.detail_level === 'brief') styleParts.push('简洁');
   else if (rs.detail_level === 'detailed') styleParts.push('详细');
-  else styleParts.push('自然回答');
-  lines.push('回复风格：' + styleParts.join('，') + '。每条回复 ' + (rs.max_reply_chars || 1200) + ' 字以内。');
+
+  var toneParts = [];
+  if (rs.humor_level === 'high') toneParts.push('幽默风趣');
+  else if (rs.humor_level === 'low') toneParts.push('严肃');
+  if (rs.sarcasm_level === 'high') toneParts.push('毒舌犀利');
+  else if (rs.sarcasm_level === 'low') toneParts.push('温和');
+  if (rs.warmth_level === 'high') toneParts.push('温暖友善');
+  else if (rs.warmth_level === 'low') toneParts.push('冷淡疏离');
+  if (rs.use_markdown === false) toneParts.push('不用 Markdown');
+  if (rs.use_emoji === false) toneParts.push('不用 emoji');
+
+  if (styleParts.length) lines.push('回复风格：' + styleParts.join('，') + '。每条回复 ' + (rs.max_reply_chars || 1200) + ' 字以内。');
+  if (toneParts.length) lines.push('语气风格：' + toneParts.join('，') + '。');
 
   // 管理员额外指令
   if (sysPrompt) lines.push('管理员指令：' + sysPrompt);
