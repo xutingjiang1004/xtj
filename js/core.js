@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿// console.log('[XTJ] core.js loaded, starting...');
 
             var XTJ_RUNTIME_CONFIG = window.XTJ_CONFIG || {
                 API_BASE: window.location.origin,
@@ -8766,12 +8766,14 @@ function renderProfileActivityList(kind) {
                 var media = resolveDockChatMedia(message);
                 var messageText = getDMMessageText(message);
                 if (media && media.kind === 'image') {
-                    var imageBody = '<img class="msg-img" src="' + media.src + '" data-src="' + media.src + '" data-full-src="' + media.fullSrc + '" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" />';
+                    var safeSrc = escapeHtml(media.src);
+                    var safeFull = escapeHtml(media.fullSrc);
+                    var imageBody = '<img class="msg-img" src="' + safeSrc + '" data-src="' + safeSrc + '" data-full-src="' + safeFull + '" onclick="openImageViewer(this.getAttribute(\'data-full-src\') || this.src)" onerror="window.handleDockChatImageError(this)" loading="lazy" />';
                     if (messageText) imageBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return imageBody;
                 }
                 if (media && media.kind === 'video') {
-                    var videoBody = '<video class="msg-img" src="' + media.src + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
+                    var videoBody = '<video class="msg-img" src="' + escapeHtml(media.src) + '" controls preload="metadata" onclick="event.stopPropagation()" style="cursor:default;"></video>';
                     if (messageText) videoBody += '<div class="msg-text">' + escapeHtml(messageText) + '</div>';
                     return videoBody;
                 }

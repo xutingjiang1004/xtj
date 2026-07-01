@@ -152,8 +152,12 @@
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     // 斜体
     s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    // 链接
-    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // 链接 (阻止 javascript:/data:/vbscript: 等危险协议)
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(m, label, href) {
+      var safe = href.replace(/^javascript:/i, 'blocked:').replace(/^data:/i, 'blocked:').replace(/^vbscript:/i, 'blocked:');
+      if (safe !== href) return '<span class="ai-blocked-link" title="已屏蔽危险链接">' + label + '</span>';
+      return '<a href="' + safe + '" target="_blank" rel="noopener">' + label + '</a>';
+    });
     // 无序列表
     s = s.replace(/^- (.+)$/gm, '<li>$1</li>');
     s = s.replace(/(<li>.*<\/li>\n?)+/g, function(m) { return '<ul>' + m + '</ul>'; });
@@ -1611,7 +1615,7 @@
       var logBox = card.querySelector('.ai-progress-thinking-log');
       if (logBox) {
         if (logBox.style.display === 'none') logBox.style.display = '';
-        var roleLabel = evt.agent_role || 'AI';
+        var roleLabel = escapeHtml(evt.agent_role || 'AI');
         // 同角色累积到最后一个条目, 不每字创建新条目
         var lastEntry = logBox.lastElementChild;
         if (lastEntry && lastEntry._role === roleLabel) {
@@ -3489,10 +3493,9 @@ function showChatMessages() {
         S.paused = false;
         pauseBtn.textContent = '暂停';
       } else {
-        // 暂停渲染 + 中断流式读取
         S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
         S.paused = true;
-        if (S.abortController) { try { S.abortController.abort(); } catch (e) {} }
+        // 只暂停前端渲染, 不kill SSE, resume后继续看积累的内容
         pauseBtn.textContent = '继续';
       }
     });

@@ -2196,7 +2196,7 @@ function rateLimit(windowMs, maxRequests) {
     const record = rateLimitStore.get(key) || { count: 0, resetAt: now + windowMs };
 
     if (now > record.resetAt) {
-      record.count = 1;
+      record.count = 0;
       record.resetAt = now + windowMs;
     } else {
       record.count++;
@@ -2292,7 +2292,7 @@ async function callDeepSeek(messages, options) {
       if (options && options.response_format) {
         apiBody.response_format = options.response_format;
       }
-      if (useTools && !(useStream && round === 0)) {
+      if (useTools) {
         apiBody.tools = options.tools;
         if (toolChoice) apiBody.tool_choice = toolChoice;
       }
@@ -7039,10 +7039,8 @@ async function handleDeepThinkChat(req, res) {
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
     if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
 
-    // 5. ★ O 修复 Bug 1: 立即推占位 + 高频心跳
-    //    flushHeaders 后立刻推 2 个占位事件, 防止 Render 反向代理 60s 无活动超时
+    // 5. 立即推 meta 确认连接 + 高频心跳防超时
     sseSend({ type: 'meta', conversation_id: convId, deep_think: true, start_time: startTime });
-    sseSend({ type: 'deep_think_init', message: '深度思考已启动, 请稍候...' });
 
     _heartbeatTimer = setInterval(function() {
       if (!res.writableEnded) {
