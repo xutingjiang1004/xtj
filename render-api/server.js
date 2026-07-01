@@ -8584,7 +8584,13 @@ app.get('/api/agent/chat/history', authenticateUser, async (req, res) => {
           //   1 天后只显示徽章，内容标记过期
           search_results: Array.isArray(m.search_results) ? m.search_results : [],
           search_expires_at: typeof m.search_expires_at === 'number' ? m.search_expires_at : 0,
-          thinking_elapsed_ms: m.thinking_elapsed_ms || 0
+          thinking_elapsed_ms: m.thinking_elapsed_ms || 0,
+          // ★ 深度思考消息恢复所需字段
+          deep_think: m.deep_think === true,
+          agent_count: m.agent_count || 0,
+          thinking_log: Array.isArray(m.thinking_log) ? m.thinking_log : [],
+          worker_results: Array.isArray(m.worker_results) ? m.worker_results : [],
+          think_duration_ms: typeof m.think_duration_ms === 'number' ? m.think_duration_ms : 0
         };
       })
     });
