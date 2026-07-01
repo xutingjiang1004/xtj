@@ -485,6 +485,7 @@
 
     function showToast(msg, type) {
         var wrap = document.getElementById('toastWrap');
+        if (!wrap) return;
         var item = document.createElement('div');
         item.className = 'toast-item toast-' + (type || 'info');
         item.textContent = msg;
@@ -644,12 +645,14 @@ async function initAdminClient() {
 
         if (_adminReportPollTimer) clearInterval(_adminReportPollTimer);
         _adminReportPollTimer = setInterval(async function() {
-            var prevLen = reportsData.length;
-            await loadReportsData();
-            if (currentTab === 'reports' && reportsData.length !== prevLen) {
-                var el = document.getElementById('tabReports');
-                if (el) renderReportsTab(el);
-            }
+            try {
+                var prevLen = reportsData.length;
+                await loadReportsData();
+                if (currentTab === 'reports' && reportsData.length !== prevLen) {
+                    var el = document.getElementById('tabReports');
+                    if (el) renderReportsTab(el);
+                }
+            } catch (e) { /* 静默, 下次重试 */ }
         }, 30000);
     }
 
