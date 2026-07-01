@@ -352,9 +352,9 @@
         if (registerAlertState.pollTimer) {
             clearInterval(registerAlertState.pollTimer);
         }
-        refreshRegisterAlerts();
+        refreshRegisterAlerts().catch(function() {});
         registerAlertState.pollTimer = setInterval(function() {
-            refreshRegisterAlerts();
+            refreshRegisterAlerts().catch(function() {});
         }, 60000);
     }
 
@@ -572,7 +572,7 @@
             saveCurrentTab();
             showToast('正在刷新数据...', 'info');
 
-            var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','blacklist','progift','ai'];
+            var allTabs = ['ann','stats','users','security','posts','likes','comments','reports','bans','mutes','photos','email','audit','errorlog','progift','ai'];
             allTabs.forEach(function(t) {
                 var panel = document.getElementById('tab' + getTabDomName(t));
                 var btn = document.getElementById('tab' + getTabDomName(t) + 'Btn');
@@ -621,7 +621,7 @@ async function initAdminClient() {
         startSessionTimeoutMonitor();
         installAdminTabDoubleClickRefresh();
         
-        var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','blacklist','photos','progift','ai'];
+        var allowedTabs = ['ann','stats','users','security','audit','errorlog','posts','likes','comments','reports','bans','mutes','photos','progift','ai'];
         var savedTab = localStorage.getItem(TAB_KEY);
         if (savedTab && allowedTabs.indexOf(savedTab) !== -1) {
             currentTab = savedTab;
@@ -1549,8 +1549,8 @@ async function initAdminClient() {
             try {
                 if (API_BASE) {
                     await apiCall('DELETE', '/admin/announcement/' + id);
-                } else {
-                    var key = ann ? ann.actor_key : 'admin_' + Date.now();
+                } else if (typeof sb !== 'undefined' && sb && sb.rpc) {
+                    var key = post ? post.actor_key : 'admin_' + Date.now();
                     var res = await sb.rpc('delete_post_with_actor', { p_post_id: id, p_actor_key: key });
                     if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
                 }
@@ -4835,7 +4835,6 @@ async function initAdminClient() {
         }
     };
 
-    var _proGiftSavingFinal = false;
     var _manualGiftSubmittingFinal = false;
     var PRO_VISUAL_GIFT_FEATURES_FINAL = ['custom_theme', 'pro_chat_bubble', 'pro_post_style'];
     var PRO_VISUAL_GIFT_LABELS_FINAL = {
@@ -5310,7 +5309,7 @@ async function initAdminClient() {
                         });
                         var result = await resp.json().catch(function() { return {}; });
                         if (result && result.ok && result.avatar_url) {
-                            if (previewEl) previewEl.innerHTML = '<img src="' + result.avatar_url + '?v=' + (result.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'🐱\'">';
+                            if (previewEl) previewEl.innerHTML = '<img src="' + escapeHtml(result.avatar_url) + '?v=' + (result.avatar_version || 0) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.parentElement.textContent=\'🐱\'">';
                             if (statusEl) statusEl.textContent = '上传成功，记得保存配置';
                             showToast('头像上传成功，请点击保存配置');
                         } else {
@@ -5406,9 +5405,12 @@ async function initAdminClient() {
             }
 
             // 检查搜索健康状态
+            var _searchHealthChecking = false;
             function checkSearchHealth() {
+                if (_searchHealthChecking) return;
+                _searchHealthChecking = true;
                 var resultEl = document.getElementById('searchHealthResult');
-                if (!resultEl) return;
+                if (!resultEl) { _searchHealthChecking = false; return; }
                 resultEl.textContent = '检查中...';
                 fetch((window.API_BASE || '') + '/api/agent/search-health?q=测试搜索健康')
                     .then(function(r) { return r.json(); })
@@ -5444,7 +5446,8 @@ async function initAdminClient() {
                     })
                     .catch(function(e) {
                         resultEl.textContent = '检查失败: ' + (e && e.message || '网络错误');
-                    });
+                    })
+                    .finally(function() { _searchHealthChecking = false; });
             }
             // 暴露到全局
             window.checkSearchHealth = checkSearchHealth;
