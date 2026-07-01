@@ -1,6 +1,7 @@
 (function() {
   'use strict';
   if (window.__xtjProUpgradeLoaded) return;
+  var _createTimeoutSignal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? function(ms) { return AbortSignal.timeout(ms); } : function(ms) { var c = new AbortController(); setTimeout(function() { c.abort(); }, ms); return c.signal; };
   window.__xtjProUpgradeLoaded = true;
 
   var VIP_MARKER = '__vip__';
@@ -67,7 +68,7 @@
     if (_apiBase) {
       try {
         var resp = await fetch(_apiBase + '/api/vip/status?user_name=' + encodeURIComponent(userName), {
-          signal: AbortSignal.timeout(8000)
+          signal: _createTimeoutSignal(8000)
         });
         var data = await resp.json();
         if (data && data.active_vip && data.active_vip.is_active && data.active_vip.expire_at) {
@@ -489,7 +490,7 @@
         var _apiBase2 = (window.XTJ_CONFIG && window.XTJ_CONFIG.API_BASE) || window.API_BASE || '';
         var resp = await fetch(_apiBase2 + '/api/pro-gifts/available', {
           headers: headers,
-          signal: AbortSignal.timeout(10000)
+          signal: _createTimeoutSignal(10000)
         });
         if (resp.status === 401 || resp.status === 403) {
           if (retry === 0) {
