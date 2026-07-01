@@ -1416,7 +1416,10 @@
         removeCursor();
         pending = '';
         rendered = '';
-        try { if (targetEl) targetEl.innerHTML = ''; } catch (e) {}
+        // 如果已经 finish（正常完成），不要清空目标元素，避免把最终内容抹掉
+        if (!finished) {
+          try { if (targetEl) targetEl.innerHTML = ''; } catch (e) {}
+        }
         targetEl = null;
       }
     };
