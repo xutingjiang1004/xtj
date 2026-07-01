@@ -36,7 +36,8 @@
     var overlay = document.getElementById(id);
     if (!overlay) return;
     if (hasGSAP()) {
-      var box = overlay.querySelector('.modal-box');
+    var box = overlay.querySelector('.modal-box');
+    if (!box) { if (_origCloseModal) _origCloseModal(id); return; }
       var prev = box ? box.__xtjMTl : null;
       if (prev) { prev.kill(); }
       gsap.set(overlay, { backdropFilter: 'blur(0px)', backgroundColor: 'rgba(0,0,0,0)' });
@@ -87,6 +88,7 @@
   window.toggleLike = async function (btn, postId) {
     if (!window.currentUser) { if (window.showToast) window.showToast('请先登录'); return; }
     var wasLiked = btn.classList.contains('liked');
+    if (!_origToggleLike) return;
     var result = await _origToggleLike(btn, postId);
     var isLikedNow = btn.classList.contains('liked');
     if (wasLiked || !isLikedNow || !hasGSAP()) return result;
@@ -130,7 +132,7 @@
   var _origOpenComment = window.openComment;
   window.openComment = function (postId) {
     if (!window.currentUser) { if (window.showToast) window.showToast('请先登录'); return; }
-    _origOpenComment(postId);
+    if (_origOpenComment) _origOpenComment(postId);
     if (!hasGSAP()) return;
     var overlay = document.getElementById('commentModal');
     if (!overlay) return;
