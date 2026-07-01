@@ -1230,8 +1230,9 @@
   function takeSmoothTextChunk(pending, options) {
     pending = String(pending || '');
     if (!pending) return '';
-    var minChunk = Math.max(1, options && options.minChunk || 4);
-    var maxChunk = Math.max(minChunk, options && options.maxChunk || 12);
+    // V2: 高级简洁节奏, 短小更精致
+    var minChunk = Math.max(1, options && options.minChunk || 2);
+    var maxChunk = Math.max(minChunk, options && options.maxChunk || 6);
     if (pending.length <= maxChunk) return pending;
 
     var punctuation = /[，。！？；：、,.!?;:\n]/;
@@ -1278,7 +1279,8 @@
         next = pending;
         pending = '';
       } else {
-        var frameBudget = pending.length > 160 ? 24 : (pending.length > 72 ? 16 : 10);
+        // V2: 高级简洁的流式节奏, 每帧 4-8 字, 看起来更精致
+        var frameBudget = pending.length > 160 ? 8 : (pending.length > 72 ? 6 : 4);
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothTextChunk(pending, options);
           if (!chunk) break;
@@ -1902,9 +1904,9 @@
         if (footer) {
           footer.innerHTML = '';
           if (aiMsg.created_at) footer.appendChild(el('span', { class: 'ai-msg-time', text: fmtTime(aiMsg.created_at) }));
-          var badge = el('span', { class: 'ai-msg-thinking-badge' });
-          badge.innerHTML = AI_THINK_ICON + ' ' + (finalThinkingMode || 'max');
-          footer.appendChild(badge);
+          // V2: 简洁模式标签, 去掉重复 sparkle
+          footer.appendChild(el('span', { class: 'ai-msg-thinking-badge', text: (finalThinkingMode || 'max') + ' 思考' }));
+          // V2: 合并 agent 数, 避免与 header meta 重复
           if (agentCount > 0) footer.appendChild(el('span', { class: 'ai-msg-agent-badge', text: agentCount + ' agent' }));
           if (usage || finalModel) {
             var usageLine = buildUsageLine(aiMsg.usage);
@@ -1948,8 +1950,10 @@
         var durationStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
         var titleEl = node.querySelector('.ai-think-title');
         var metaEl = node.querySelector('.ai-think-meta');
-        if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 已思考 ' + durationStr;
-        if (metaEl) metaEl.textContent = (agentCount || 0) > 0 ? (agentCount + ' agent') : '';
+        // V2: 去掉重复 sparkle (footer 已有模式标签), header 只放纯文字"已思考 Xs"
+        if (titleEl) titleEl.textContent = '已思考 ' + durationStr;
+        // V2: 去掉重复 1 agent (footer 已有 agent-badge), header meta 留空
+        if (metaEl) metaEl.textContent = '';
 
         // ★ Q: 完成后**自动展开**让用户直接看答案, 但思考过程仍可点击折叠
         if (node.classList.contains('collapsed')) {

@@ -1716,141 +1716,151 @@
   50% { opacity: 1; transform: scale(1.08); }
 }
 
-/* ===================== Q: 深度思考 think-card (ChatGPT/Gemini 风格) ===================== */
+/* ===================== V2: 深度思考 think-card (高级简洁干净) ===================== */
 .ai-think-card {
-  margin: 8px 0;
-  border: 1px solid rgba(140, 196, 158, .16);
-  border-left: 3px solid rgba(66, 155, 122, .5);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, .6);
+  margin: 10px 0;
+  border: 1px solid rgba(0, 0, 0, .08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .5);
   font-size: 14px;
-  color: rgba(40, 50, 50, .95);
+  color: rgba(40, 50, 50, .92);
   overflow: hidden;
-  transition: border-color .22s, box-shadow .22s, background .22s;
+  transition: border-color .2s, box-shadow .2s, background .2s;
 }
 .ai-think-card:hover {
-  border-color: rgba(66, 155, 122, .3);
-  box-shadow: 0 4px 16px rgba(82, 138, 120, .04);
-  background: rgba(255, 255, 255, .7);
+  border-color: rgba(0, 0, 0, .14);
+  background: rgba(255, 255, 255, .65);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .03);
 }
-.ai-think-card.collapsed { border-left-color: rgba(66, 155, 122, .3); }
+.ai-think-card.collapsed {
+  border-color: rgba(0, 0, 0, .06);
+  background: rgba(250, 250, 250, .45);
+}
 
 .ai-think-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
+  gap: 6px;
+  padding: 7px 12px;
   cursor: pointer;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
-  transition: background .18s;
-  min-height: 40px;
+  transition: background .15s;
+  min-height: 34px;
 }
-.ai-think-header:hover { background: rgba(66, 155, 122, .04); }
-.ai-think-header:active { background: rgba(66, 155, 122, .08); transform: scale(.995); }
+.ai-think-header:hover { background: rgba(0, 0, 0, .025); }
+.ai-think-header:active { background: rgba(0, 0, 0, .05); }
 
 .ai-think-icon {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px; height: 20px;
-  color: rgb(48, 138, 106);
+  width: 16px; height: 16px;
+  color: rgba(120, 120, 130, .9);
 }
 .ai-think-icon svg { width: 100%; height: 100%; }
 .ai-think-title {
   flex: 1;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 500;
   color: var(--text-primary, #1f2937);
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: .01em;
 }
 .ai-think-meta {
-  font-size: 11px;
-  color: rgba(148, 158, 158, .75);
+  font-size: 10.5px;
+  color: rgba(140, 150, 160, .85);
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 .ai-think-chevron {
-  font-size: 10px;
-  color: rgba(148, 158, 158, .7);
+  font-size: 9px;
+  color: rgba(140, 150, 160, .7);
   flex-shrink: 0;
-  margin-left: 4px;
-  transition: transform .26s cubic-bezier(.34, 1.56, .64, 1);
+  margin-left: 2px;
+  transition: transform .24s cubic-bezier(.34, 1.56, .64, 1);
+  width: 12px;
+  text-align: center;
 }
 
 .ai-think-body {
   max-height: 0; opacity: 0; overflow: hidden;
-  padding: 0 16px;
+  padding: 0 14px;
   border-top: 0 solid rgba(0,0,0,.04);
-  transition: max-height .28s cubic-bezier(.22,1,.36,1), opacity .24s, padding .2s, border-top-width .2s;
+  transition: max-height .3s cubic-bezier(.22,1,.36,1), opacity .24s, padding .22s, border-top-width .22s;
   box-sizing: border-box;
 }
 .ai-think-card.expanded .ai-think-body {
   max-height: 3000px; opacity: 1;
-  padding: 8px 16px 12px;
+  padding: 6px 14px 10px;
   border-top-width: 1px;
+  border-top-color: rgba(0, 0, 0, .04);
 }
 
 /* 思考过程 details */
-.ai-think-thinking { margin: 6px 0 0; font-size: 12px; }
+.ai-think-thinking { margin: 4px 0 0; font-size: 12px; }
 .ai-think-thinking summary {
   cursor: pointer; user-select: none; list-style: none;
-  display: flex; align-items: center; gap: 6px;
-  padding: 6px 0;
-  color: var(--text-tertiary, #9ca3af);
-  font-size: 12px;
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 0;
+  color: rgba(140, 150, 160, .9);
+  font-size: 11.5px;
   border-radius: 4px;
   transition: color .12s;
 }
-.ai-think-thinking summary:hover { color: var(--text-secondary, #6b7280); }
+.ai-think-thinking summary:hover { color: rgba(80, 80, 80, .95); }
 .ai-think-thinking summary::-webkit-details-marker { display: none; }
 .ai-think-thinking summary::marker { display: none; }
 .ai-think-thinking summary::before {
   content: '▸';
   display: inline-block;
-  font-size: 10px;
+  font-size: 9px;
   transition: transform .2s;
-  color: var(--text-tertiary, #9ca3af);
+  color: rgba(140, 150, 160, .7);
+  width: 10px;
 }
 .ai-think-thinking[open] summary::before { transform: rotate(90deg); }
 .ai-think-thinking-body {
-  max-height: 260px; overflow-y: auto;
-  padding: 6px 4px 6px 18px;
-  margin-top: 4px;
+  max-height: 240px; overflow-y: auto;
+  padding: 4px 4px 4px 16px;
+  margin-top: 2px;
   font-size: 12px;
   line-height: 1.7;
-  color: var(--text-secondary, #6b7280);
+  color: rgba(100, 110, 120, .9);
 }
-.ai-think-thinking-body::-webkit-scrollbar { width: 4px; }
+.ai-think-thinking-body::-webkit-scrollbar { width: 3px; }
 .ai-think-thinking-body::-webkit-scrollbar-thumb { background: rgba(0,0,0,.08); border-radius: 2px; }
 
 /* 思考日志条目 */
-.ai-thought-entry { padding: 3px 0; border-bottom: 1px dashed rgba(0,0,0,.03); }
+.ai-thought-entry { padding: 3px 0; border-bottom: 1px dashed rgba(0,0,0,.04); }
 .ai-thought-entry:last-child { border-bottom: none; }
 .ai-thought-role {
-  font-weight: 600;
-  color: rgb(48, 138, 106);
+  font-weight: 500;
+  color: rgba(100, 110, 120, .85);
   font-size: 10px;
   margin-bottom: 2px;
+  letter-spacing: .02em;
 }
 .ai-thought-chunk {
-  font-size: 11px; line-height: 1.7;
-  color: var(--text-secondary, #6b7280);
+  font-size: 11.5px; line-height: 1.7;
+  color: rgba(70, 80, 90, .88);
   white-space: pre-wrap; word-break: break-word;
-  max-height: 200px; overflow-y: auto;
+  max-height: 180px; overflow-y: auto;
 }
 
 /* 答案区 */
 .ai-think-answer {
-  margin: 8px 0 4px;
+  margin: 8px 0 2px;
   font-size: 14px; line-height: 1.75;
   color: var(--text-primary, #1f2937);
   word-break: break-word;
+  letter-spacing: .005em;
 }
-.ai-think-answer p { margin: .5em 0; }
+.ai-think-answer p { margin: .55em 0; }
 .ai-think-answer p:first-child { margin-top: 0; }
 .ai-think-answer p:last-child { margin-bottom: 0; }
 .ai-think-answer h1, .ai-think-answer h2, .ai-think-answer h3,
@@ -1870,9 +1880,9 @@
 }
 .ai-think-answer pre code { background: transparent; padding: 0; }
 .ai-think-answer blockquote {
-  border-left: 3px solid rgba(139,92,246,.3);
+  border-left: 2px solid rgba(0,0,0,.12);
   margin: .6em 0; padding: .2em .8em;
-  color: var(--text-secondary, #6b7280);
+  color: rgba(100, 110, 120, .9);
 }
 .ai-think-answer table { border-collapse: collapse; margin: .6em 0; font-size: 13px; }
 .ai-think-answer th, .ai-think-answer td {
@@ -1880,13 +1890,13 @@
 }
 .ai-think-answer a.ai-source-link {
   display: inline-block;
-  background: rgba(139,92,246,.08);
-  color: rgb(48, 138, 106);
+  background: rgba(0,0,0,.04);
+  color: rgba(70, 80, 100, .9);
   padding: 0 4px; border-radius: 3px;
   font-size: .85em; text-decoration: none;
   margin: 0 1px; font-weight: 500;
 }
-.ai-think-answer a.ai-source-link:hover { background: rgba(66,155,122,.16); }
+.ai-think-answer a.ai-source-link:hover { background: rgba(0,0,0,.08); }
 
 /* 分隔线 */
 .ai-think-divider {
@@ -1904,7 +1914,7 @@
   content: '▌';
   display: inline-block;
   margin-left: 1px;
-  color: rgba(48, 138, 106, .85);
+  color: rgba(100, 110, 120, .85);
   animation: ai-cursor-blink 1s steps(2, start) infinite;
   font-weight: 500;
 }
@@ -1912,320 +1922,48 @@
 
 /* footer */
 .ai-think-card .ai-msg-footer {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   margin-top: 8px; padding-top: 6px;
-  font-size: 11px; color: var(--text-tertiary, #9ca3af);
+  font-size: 10.5px; color: rgba(140, 150, 160, .85);
 }
-.ai-think-card .ai-msg-time { font-size: 11px; }
+.ai-think-card .ai-msg-time { font-size: 10.5px; }
 .ai-think-card .ai-msg-thinking-badge {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 2px 7px;
-  background: rgba(66, 155, 122, .08);
-  color: rgb(48, 138, 106);
-  border-radius: 4px;
-  font-size: 11px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 1px 6px;
+  background: rgba(0, 0, 0, .04);
+  color: rgba(100, 110, 120, .9);
+  border-radius: 3px;
+  font-size: 10.5px; font-weight: 500;
+  letter-spacing: .02em;
 }
 .ai-think-card .ai-msg-agent-badge {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 2px 7px;
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 1px 6px;
   background: rgba(0,0,0,.04);
-  color: var(--text-secondary, #6b7280);
-  border-radius: 4px;
-  font-size: 11px;
+  color: rgba(100, 110, 120, .9);
+  border-radius: 3px;
+  font-size: 10.5px;
+  letter-spacing: .02em;
 }
-.ai-think-card .ai-msg-usage { font-size: 11px; }
+.ai-think-card .ai-msg-usage { font-size: 10.5px; }
 
 /* 搜索来源 */
 .ai-search-supplement {
   margin: 6px 0;
   padding: 6px 10px;
-  background: rgba(66, 155, 122, .04);
-  border: 1px solid rgba(66, 155, 122, .1);
-  border-radius: 8px;
+  background: rgba(0, 0, 0, .025);
+  border: 1px solid rgba(0, 0, 0, .06);
+  border-radius: 6px;
   font-size: 11px;
   line-height: 1.6;
   color: var(--text-secondary, #6b7280);
 }
 .ai-search-supplement a.ai-search-detail-title {
-  color: rgb(48, 138, 106);
+  color: rgba(80, 90, 110, .95);
   text-decoration: none;
   font-weight: 500;
 }
 .ai-search-supplement a.ai-search-detail-title:hover { text-decoration: underline; }
-
-/* ===================== Q: 深度思考 think-card 极简版 (像 ChatGPT/Gemini) ===================== */
-/* 1 个外框 + 1 个 header + 1 个 body, 内部不再嵌套 box (解决千层蛋糕) */
-.ai-think-card {
-  margin: 8px 0;
-  border: 1px solid rgba(140, 196, 158, 0.18);
-  border-left: 3px solid rgba(66, 155, 122, 0.6);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.62);
-  font-size: 14px;
-  color: rgba(40, 50, 50, 0.95);
-  overflow: hidden;
-  transition:
-    border-color 220ms ease,
-    box-shadow 220ms ease,
-    background 220ms ease;
-}
-.ai-think-card:hover {
-  border-color: rgba(66, 155, 122, 0.35);
-  box-shadow: 0 6px 20px rgba(82, 138, 120, 0.06);
-  background: rgba(255, 255, 255, 0.72);
-}
-
-.ai-think-card.collapsed { border-left-color: rgba(66, 155, 122, 0.35); }
-
-.ai-think-card.collapsed .ai-think-body {
-  max-height: 0;
-  opacity: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  border-top-width: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.ai-think-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  cursor: pointer;
-  user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  transition: background 180ms ease;
-  min-height: 40px;
-}
-.ai-think-header:hover {
-  background: rgba(66, 155, 122, 0.04);
-}
-.ai-think-header:active {
-  background: rgba(66, 155, 122, 0.08);
-  transform: scale(0.995);
-}
-
-.ai-think-icon {
-  font-size: 13px;
-  color: rgb(48, 138, 106);
-  flex-shrink: 0;
-}
-.ai-think-title {
-  flex: 1;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary, #1f2937);
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.ai-think-meta {
-  font-size: 11px;
-  color: rgba(148, 158, 158, 0.8);
-  flex-shrink: 0;
-}
-.ai-think-chevron {
-  font-size: 11px;
-  color: rgba(148, 158, 158, 0.8);
-  flex-shrink: 0;
-  margin-left: 4px;
-  transition: transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.ai-think-body {
-  padding: 8px 16px 12px;
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
-  transition: max-height 280ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease, padding 200ms ease, border-top-width 200ms ease;
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  box-sizing: border-box;
-}
-.ai-think-card.expanded .ai-think-body {
-  max-height: 3000px;
-  opacity: 1;
-  border-top-width: 1px;
-}
-
-/* <details> 思考过程: 原生折叠, 无 box */
-.ai-think-thinking { margin: 8px 0 0 0; font-size: 12px; }
-.ai-think-thinking summary {
-  cursor: pointer;
-  user-select: none;
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 0;
-  color: var(--text-tertiary, #9ca3af);
-  font-size: 12px;
-  border-radius: 4px;
-  transition: color 0.12s;
-}
-.ai-think-thinking summary:hover { color: var(--text-secondary, #6b7280); }
-.ai-think-thinking summary::-webkit-details-marker { display: none; }
-.ai-think-thinking summary::marker { display: none; }
-.ai-think-thinking summary::before {
-  content: '▸';
-  display: inline-block;
-  font-size: 10px;
-  transition: transform 0.2s;
-  color: var(--text-tertiary, #9ca3af);
-}
-.ai-think-thinking[open] summary::before { transform: rotate(90deg); }
-.ai-think-summary-icon { font-size: 11px; }
-.ai-think-thinking-body {
-  max-height: 300px;
-  overflow-y: auto;
-  padding: 6px 4px 6px 18px;
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--text-secondary, #6b7280);
-}
-.ai-think-thinking-body::-webkit-scrollbar { width: 6px; }
-.ai-think-thinking-body::-webkit-scrollbar-track { background: transparent; }
-.ai-think-thinking-body::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 3px;
-}
-
-/* 思考日志条目 (无 box) */
-.ai-thought-entry {
-  padding: 3px 0;
-  border-bottom: 1px dashed rgba(0, 0, 0, 0.04);
-}
-.ai-thought-entry:last-child { border-bottom: none; }
-.ai-thought-role {
-  font-weight: 600;
-  color: rgb(48, 138, 106);
-  font-size: 10px;
-  margin-bottom: 2px;
-}
-.ai-thought-chunk {
-  font-size: 11px;
-  line-height: 1.7;
-  color: var(--text-secondary, #6b7280);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-/* 答案区: 无 box, 直接渲染 markdown */
-.ai-think-answer {
-  margin: 8px 0 4px 0;
-  font-size: 14px;
-  line-height: 1.75;
-  color: var(--text-primary, #1f2937);
-  word-break: break-word;
-}
-.ai-think-answer p { margin: 0.5em 0; }
-.ai-think-answer p:first-child { margin-top: 0; }
-.ai-think-answer p:last-child { margin-bottom: 0; }
-.ai-think-answer h1, .ai-think-answer h2, .ai-think-answer h3,
-.ai-think-answer h4, .ai-think-answer h5, .ai-think-answer h6 {
-  margin: 0.8em 0 0.4em 0;
-  font-weight: 600;
-  line-height: 1.4;
-}
-.ai-think-answer ul, .ai-think-answer ol { padding-left: 1.5em; }
-.ai-think-answer li { margin: 0.2em 0; }
-.ai-think-answer pre {
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 6px;
-  padding: 10px 12px;
-  overflow-x: auto;
-  font-size: 13px;
-  margin: 0.6em 0;
-}
-.ai-think-answer code {
-  background: rgba(0, 0, 0, 0.04);
-  border-radius: 3px;
-  padding: 1px 4px;
-  font-size: 0.9em;
-}
-.ai-think-answer pre code { background: transparent; padding: 0; }
-.ai-think-answer blockquote {
-  border-left: 3px solid rgba(139, 92, 246, 0.3);
-  margin: 0.6em 0;
-  padding: 0.2em 0.8em;
-  color: var(--text-secondary, #6b7280);
-}
-.ai-think-answer table { border-collapse: collapse; margin: 0.6em 0; font-size: 13px; }
-.ai-think-answer th, .ai-think-answer td {
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  padding: 4px 8px;
-}
-.ai-think-answer a.ai-source-link {
-  display: inline-block;
-  background: rgba(139, 92, 246, 0.08);
-  color: rgb(48, 138, 106);
-  padding: 0 4px;
-  border-radius: 3px;
-  font-size: 0.85em;
-  text-decoration: none;
-  margin: 0 1px;
-  font-weight: 500;
-}
-.ai-think-answer a.ai-source-link:hover { background: rgba(66, 155, 122, 0.16); }
-
-/* 分隔线 */
-.ai-think-divider {
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.06), transparent);
-  margin: 6px 0 2px 0;
-}
-
-/* ★ Q: typewriter 打字光标 */
-@keyframes ai-cursor-blink {
-  0%, 49% { opacity: 1; }
-  50%, 100% { opacity: 0; }
-}
-.ai-typewriter-cursor::after {
-  content: '▌';
-  display: inline-block;
-  margin-left: 1px;
-  color: rgba(48, 138, 106, 0.85);
-  animation: ai-cursor-blink 1s steps(2, start) infinite;
-  font-weight: 500;
-}
-.ai-typewriter-cursor { display: inline; }
-
-/* footer (无 box) */
-.ai-think-card .ai-msg-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-  padding-top: 6px;
-  font-size: 11px;
-  color: var(--text-tertiary, #9ca3af);
-}
-.ai-think-card .ai-msg-time { font-size: 11px; }
-.ai-think-card .ai-msg-thinking-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  background: rgba(66, 155, 122, 0.08);
-  color: rgb(48, 138, 106);
-  border-radius: 3px;
-  font-size: 11px;
-  font-weight: 500;
-}
-.ai-think-card .ai-msg-agent-badge {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  background: rgba(0, 0, 0, 0.04);
-  color: var(--text-secondary, #6b7280);
-  border-radius: 3px;
-  font-size: 11px;
-}
-.ai-think-card .ai-msg-usage { font-size: 11px; }
 
 /* 进度卡内的思考过程日志 (实时, 进度卡本身仍保留 box 风格) */
 .ai-progress-thinking-log {
@@ -2287,7 +2025,7 @@
     border-color: rgba(255,255,255,.06);
   }
   .ai-think-card:hover { background: rgba(30, 42, 48, .92); }
-  .ai-think-header:hover { background: rgba(66, 155, 122, .04); }
+  .ai-think-header:hover { background: rgba(255, 255, 255, .03); }
   .ai-think-title { color: #f3f4f6; }
   .ai-think-body { border-top-color: rgba(255,255,255,.05); }
   .ai-think-answer { color: #e5e7eb; }
@@ -2297,8 +2035,8 @@
   .ai-think-answer code { background: rgba(255,255,255,.06); }
   .ai-think-answer th, .ai-think-answer td { border-color: rgba(255,255,255,.1); }
   .ai-think-card .ai-msg-thinking-badge {
-    background: rgba(66, 155, 122, .1);
-    color: rgb(128, 212, 182);
+    background: rgba(255, 255, 255, .06);
+    color: #9ca3af;
   }
   .ai-think-card .ai-msg-agent-badge {
     background: rgba(255,255,255,.04);
@@ -2308,8 +2046,8 @@
     background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
   }
   .ai-think-answer a.ai-source-link {
-    background: rgba(66, 155, 122, .1);
-    color: rgb(128, 212, 182);
+    background: rgba(255, 255, 255, .06);
+    color: #cbd5e1;
   }
 }
 .ai-msg-bubble h1, .ai-msg-bubble h2, .ai-msg-bubble h3,
