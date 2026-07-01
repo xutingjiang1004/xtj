@@ -1314,6 +1314,7 @@
       }
       if (!next) return;
       rendered += next;
+      try { console.log('[AI-RENDER] emitText', rendered.length, 'chars, target:', (targetEl && targetEl.className) || 'null'); } catch(_) {}
       targetEl.innerHTML = renderMarkdown(rendered);
       ensureCursor();
       if (typeof options.onRender === 'function') {
@@ -1381,6 +1382,7 @@
           rendered = '（AI 暂无回复，请重试）';
           targetEl.classList.add('ai-empty-fallback');
         }
+        try { console.log('[AI-RENDER] finish', rendered.length, 'chars, fallback:', rendered.indexOf('AI 暂无回复') >= 0, 'target:', (targetEl && targetEl.className) || 'null'); } catch(_) {}
         targetEl.innerHTML = renderMarkdown(rendered);
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
