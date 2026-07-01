@@ -464,7 +464,11 @@
   }
 
   // 获取可用 Pro 活动列表（带 Authorization header）
+  var _fetchProGiftsLock = false;
   window.fetchProGifts = async function() {
+    if (_fetchProGiftsLock) return;
+    _fetchProGiftsLock = true;
+    try {
     var listEl = document.getElementById('proGiftList');
     if (!listEl) return;
     if (!window.currentUser) {
@@ -520,6 +524,7 @@
         listEl.innerHTML = '<div class="pro-gift-error">网络错误，请检查网络后重试</div>';
       }
     }
+    } finally { _fetchProGiftsLock = false; }
   };
 
   // 领取 Pro 活动 — 由 core.js 提供完整实现 (含UI按钮状态管理)
@@ -572,6 +577,7 @@
 
   // 重新登录
   window.reAuthAndRefresh = function() {
+    try {
     // 清理旧凭证
     if (typeof window.clearUserToken === 'function') {
       window.clearUserToken();
@@ -600,6 +606,7 @@
         }
       };
     }
+    } catch(e) { try { console.warn('[Pro] reAuthAndRefresh error:', e); } catch(_) {} }
   };
 
   // 全局领取回调（由按钮 onclick 触发）

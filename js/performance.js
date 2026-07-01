@@ -25,10 +25,10 @@
         var cores = (typeof navigator.hardwareConcurrency !== 'undefined') ? navigator.hardwareConcurrency : 0;
         var firefox = /firefox/i.test(navigator.userAgent || '');
 
-        if (reduced || (coarse && (mem && mem <= 4 || cores && cores <= 6)) || (mem && mem <= 2) || (cores && cores <= 4)) {
+        if (reduced || (coarse && (mem > 0 && mem <= 4 || cores > 0 && cores <= 6)) || (mem > 0 && mem <= 2) || (cores > 0 && cores <= 4)) {
             return 'lite';
         }
-        if (coarse || firefox || (mem && mem <= 8) || (cores && cores <= 8)) {
+        if (coarse || firefox || (mem > 0 && mem <= 8) || (cores > 0 && cores <= 8)) {
             return 'balanced';
         }
         return 'full';
