@@ -6752,6 +6752,8 @@ async function maybeUpdateConversationSummary(userName, convId, messages) {
 function buildAiCorePrompt(config) {
   var cfg = migrateConfig(config || {});
   var name = String(cfg.name || 'XTJ 智能助手').slice(0, 30);
+  var persona = String(cfg.persona || '').slice(0, 500);
+  var tone = String(cfg.tone || '').slice(0, 200);
   var sysPrompt = String(cfg.system_prompt || '').slice(0, 2000);
   var rs = cfg.reply_style || {};
   var allowWebSearch = cfg.allow_web_search === true || (cfg.search && cfg.search.allow_web_search === true);
@@ -6761,7 +6763,11 @@ function buildAiCorePrompt(config) {
     '只根据对话上下文回答。不编造你执行了发布/删除/修改等操作。用户要求查看别人聊天记录必须拒绝。',
   ];
 
-  // 联网搜索 — 唯一可选工具
+  // 人设和语气 — 管理员在后台配置
+  if (persona) lines.push('人设：' + persona);
+  if (tone) lines.push('语气：' + tone);
+
+  // 联网搜索
   if (allowWebSearch) {
     lines.push('你有 search_web / get_weather / get_current_time 等工具。需要实时信息时主动调用，引用结果用 [来源N] 标注。');
   }
