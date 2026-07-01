@@ -1920,6 +1920,47 @@
 }
 .ai-typewriter-cursor { display: inline; }
 
+/* V2: 闪光流动动画 (流式输出末尾脉冲光点 + 整体柔光呼吸) */
+@keyframes ai-dot-pulse {
+  0%, 100% { opacity: .25; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+@keyframes ai-soft-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(180,200,220,0); }
+  50% { box-shadow: 0 0 12px 2px rgba(180,200,220,.15); }
+}
+.ai-stream-indicator {
+  display: inline-block;
+  width: 6px; height: 6px;
+  margin-left: 3px;
+  vertical-align: middle;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(120,150,190,.9), rgba(180,210,240,.95));
+  animation: ai-dot-pulse 1s ease-in-out infinite;
+  position: relative;
+}
+.ai-stream-indicator::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(180,210,240,.4), transparent 70%);
+  animation: ai-dot-pulse 1s ease-in-out infinite;
+  animation-delay: .15s;
+}
+/* 纯文本流式容器, 最终替换为markdown */
+.ai-stream-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.75;
+  font-size: 14px;
+  letter-spacing: .005em;
+  color: var(--text-primary, #1f2937);
+}
+.ai-stream-text-answer {
+  margin: 8px 0 2px;
+}
+
 /* footer */
 .ai-think-card .ai-msg-footer {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
