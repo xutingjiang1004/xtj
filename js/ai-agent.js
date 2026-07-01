@@ -2833,7 +2833,7 @@
               // 已有部分回复，保留内容并追加错误提示
               var errNote = el('div', { class: 'ai-error-note' }, errMsg);
               try { aiNode.appendChild(errNote); } catch (e) {}
-              if (!aiNode) ensureAssistantBubble();
+              ensureAssistantBubble();
               finishAiMessage(aiNode, aiContent, aiReasoning, evt);
             } else {
               // 没有内容，回滚
@@ -2951,8 +2951,7 @@
             var streamSaved = evt.saved === true;
             
             if (aiContent) {
-              if (!aiNode) ensureAssistantBubble();
-              // 有内容就显示
+              ensureAssistantBubble();
               finishAiMessage(aiNode, aiContent, aiReasoning, evt);
             } else if (aiReasoning) {
               if (!aiNode) ensureReasoningNode();
