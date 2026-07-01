@@ -1635,7 +1635,8 @@
       var elapsedSec = Math.floor((evt.elapsed_ms || 0) / 1000);
       var min = Math.floor(elapsedSec / 60);
       var sec = elapsedSec % 60;
-      card.querySelector('.ai-progress-elapsed').textContent = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
+      var el = card.querySelector('.ai-progress-elapsed');
+      if (el) el.textContent = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
     } else if (evt.type === 'done') {
       if (titleText) titleText.textContent = '思考完成';
     } else if (evt.type === 'error') {
@@ -1997,7 +1998,7 @@
           searchBox.innerHTML = searchHtml;
           var thinkBody = node.querySelector('.ai-think-body');
           if (thinkBody) {
-            var answerEl = node.querySelector('.ai-think-answer');
+            answerEl = node.querySelector('.ai-think-answer');
             if (answerEl) {
               thinkBody.insertBefore(searchBox, answerEl);
             } else {
@@ -3022,15 +3023,13 @@
           notify('网络异常，请检查连接后重试');
         }
       } else {
-        try { typingNode.remove(); } catch (e) {}
+        // AbortError: 用户主动停止
         if (aiContent) {
           finishAiMessage(aiNode, aiContent, aiReasoning, null);
         } else {
-          if (!aiContent) {
-            S.messages.pop();
-            removeLastUserMessage(messagesEl);
-            restoreInputText();
-          }
+          try { typingNode.remove(); } catch (e) {}
+          S.messages.pop();
+          removeLastUserMessage(messagesEl);
         }
       }
     }
@@ -3271,6 +3270,7 @@ function showChatMessages() {
   function renderAiRoot() {
     var old = document.getElementById('aiChatRoot');
     if (old) {
+      if (S.statusTimer) { try { clearInterval(S.statusTimer); } catch (e) {} S.statusTimer = null; }
       try { old.remove(); } catch (e) {}
     }
 
@@ -3664,7 +3664,8 @@ function showChatMessages() {
 
     // ★ P 新增: 如果后端禁用了深度思考, 强制关闭 toggle
     if (!S.deepThinkEnabled && S.deepThink) {
-      S.deepThink = false;
+    S.deepThink = false;
+    try { localStorage.setItem('xtj_ai_deep_think', '0'); } catch (e) {}
       try { localStorage.setItem('xtj_ai_deep_think', '0'); } catch (e) {}
       try { refreshDeepThinkToggle(); } catch (e) {}
     }
