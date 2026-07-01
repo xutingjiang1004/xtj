@@ -3310,6 +3310,7 @@ function showChatMessages() {
         newBtn.disabled = false;
       }
     });
+    header.appendChild(newBtn);
     header.insertBefore(delBtn, newBtn);
     if (S.headerButtonsCleanup) {
       try { S.headerButtonsCleanup(); } catch (eCleanup) {}
