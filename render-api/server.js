@@ -7530,7 +7530,11 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     writeSse(res, { type: 'meta', conversation_id: convId });
     if (aborted) return safeEnd();
     
-    // 读取全局 AI 配置 + 上下文
+    // 立即发送思考开始信号, 让前端显示"思考中..."而非干等
+    writeSse(res, { type: 'reasoning_start', message: '正在分析问题...', start_time: Date.now() });
+    if (aborted) return safeEnd();
+    
+    // 读取全局 AI 配置 + 上下文 (并行)
     var configPromise = getAiConfig();
     var ctxPromise = loadAiContext(userName, convId);
     var [config, ctx] = await Promise.all([configPromise, ctxPromise]);
