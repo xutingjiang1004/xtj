@@ -1372,6 +1372,11 @@
         if (typeof finalText === 'string' && finalText.length > 0) rendered = finalText;
         pending = '';
         removeCursor();
+        // 兜底: 如果渲染完还是空的, 显示提示
+        if (!rendered || rendered.trim().length === 0) {
+          rendered = '（AI 暂无回复，请重试）';
+          targetEl.classList.add('ai-empty-fallback');
+        }
         targetEl.innerHTML = renderMarkdown(rendered);
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
@@ -3476,6 +3481,7 @@ function showChatMessages() {
 
     sendBtn.addEventListener('click', doSend);
     pauseBtn.addEventListener('click', function() {
+      if (!S.sending) return;
       if (!S.activeRenderers || S.activeRenderers.length === 0) return;
       var anyPaused = S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
       if (anyPaused) {
@@ -3483,8 +3489,10 @@ function showChatMessages() {
         S.paused = false;
         pauseBtn.textContent = '暂停';
       } else {
+        // 暂停渲染 + 中断流式读取
         S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
         S.paused = true;
+        if (S.abortController) { try { S.abortController.abort(); } catch (e) {} }
         pauseBtn.textContent = '继续';
       }
     });
