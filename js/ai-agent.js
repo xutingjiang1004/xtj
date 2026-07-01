@@ -2437,7 +2437,13 @@
         if (node) {
           node.classList.remove('generating');
         }
-        if (aiBubble) aiBubble.classList.remove('ai-typing');
+        if (aiBubble) {
+          aiBubble.classList.remove('ai-typing');
+          // 确保气泡文字可见: 强制清除可能残留的隐藏样式
+          aiBubble.style.opacity = '1';
+          aiBubble.style.display = '';
+          aiBubble.style.visibility = 'visible';
+        }
         setAiRootState('ai-idle');
         
         if (thinking && finalThinkingMode !== 'off') {
