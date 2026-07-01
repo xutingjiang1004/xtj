@@ -45,6 +45,7 @@
     inputBarEl: null,
     inputEl: null,
     sendBtnEl: null,
+    pauseBtnEl: null,
     bound: false,
     autoScrollPinned: true,
     viewportCleanup: null,
@@ -57,6 +58,8 @@
     abortController: null,
     clientRequestId: 0,
     currentStreamAborted: false,
+    paused: false,
+    activeRenderers: [],
     conversations: [],
     conversationsEl: null,
     showingHistory: false,
@@ -1258,42 +1261,24 @@
     var rafId = 0;
     var cancelled = false;
     var finished = false;
+    var paused = false;
     var streamClass = options.streamClass || 'ai-streaming-soft';
-    var usePlainTextStream = options.plainTextStream !== false;
     var requestFrame = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function(cb) { return setTimeout(cb, 16); };
     var cancelFrame = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : clearTimeout;
-    // 光点 indicator
-    var indicator = null;
-    function ensureIndicator() {
-      if (indicator || !usePlainTextStream || finished) return;
+    // V3: 末尾呼吸竖线光标 (替代闪光光点)
+    var cursor = null;
+    function ensureCursor() {
+      if (cursor || finished || cancelled) return;
       try {
-        indicator = document.createElement('span');
-        indicator.className = 'ai-stream-indicator';
-        targetEl.appendChild(indicator);
+        cursor = document.createElement('span');
+        cursor.className = 'ai-stream-cursor';
+        cursor.setAttribute('aria-hidden', 'true');
+        targetEl.appendChild(cursor);
       } catch (e) {}
     }
-    function removeIndicator() {
-      try { if (indicator && indicator.parentNode) indicator.parentNode.removeChild(indicator); } catch (e) {}
-      indicator = null;
-    }
-    function setPlainText(text) {
-      // V2: 流式阶段纯 textContent, 零 markdown 解析开销
-      if (targetEl._plainTextEl) {
-        targetEl._plainTextEl.textContent = text;
-        if (indicator && indicator.parentNode !== targetEl) {
-          try { targetEl.appendChild(indicator); } catch (e) {}
-        }
-      } else {
-        // 初始化纯文本节点 (替换当前内容), 最终 finish 时会替换为 markdown
-        targetEl.innerHTML = '';
-        var pre = document.createElement('div');
-        pre.className = 'ai-stream-text';
-        if (options.textClass) pre.className += ' ' + options.textClass;
-        pre.textContent = text;
-        targetEl._plainTextEl = pre;
-        targetEl.appendChild(pre);
-        ensureIndicator();
-      }
+    function removeCursor() {
+      try { if (cursor && cursor.parentNode) cursor.parentNode.removeChild(cursor); } catch (e) {}
+      cursor = null;
     }
 
     function clearFrame() {
@@ -1314,8 +1299,8 @@
         next = pending;
         pending = '';
       } else {
-        // V2: 更快的视觉速度, 每帧 8-20 字 (标点优先切分), 避免卡顿
-        var frameBudget = pending.length > 200 ? 20 : (pending.length > 80 ? 14 : 8);
+        // V3: 直接渲染 markdown, 每帧 12-28 字, 快速自然
+        var frameBudget = pending.length > 300 ? 28 : (pending.length > 120 ? 20 : 12);
         while (pending && next.length < frameBudget) {
           var chunk = takeSmoothTextChunk(pending, options);
           if (!chunk) break;
@@ -1325,17 +1310,14 @@
       }
       if (!next) return;
       rendered += next;
-      if (usePlainTextStream && !finished) {
-        setPlainText(rendered);
-      } else {
-        targetEl.innerHTML = renderMarkdown(rendered);
-      }
+      targetEl.innerHTML = renderMarkdown(rendered);
+      ensureCursor();
       if (typeof options.onRender === 'function') {
         try { options.onRender(rendered); } catch (e2) {}
       }
       if (!pending) {
         targetEl.classList.remove(streamClass);
-        if (typeof options.onDone === 'function' && finished) {
+        if (finished && typeof options.onDone === 'function') {
           try { options.onDone(); } catch (e) {}
         }
       }
@@ -1343,13 +1325,13 @@
 
     function tick() {
       rafId = 0;
-      if (cancelled) return;
+      if (cancelled || paused) return;
       emitText(false);
       if (pending) schedule();
     }
 
     function schedule() {
-      if (cancelled || !pending || rafId) return;
+      if (cancelled || !pending || rafId || paused) return;
       if (reducedMotion) {
         emitText(true);
         return;
@@ -1357,29 +1339,40 @@
       rafId = requestFrame(tick);
     }
 
-    return {
+    var api = {
       append: function(text) {
         if (cancelled || !targetEl || !text || finished) return;
         pending += String(text);
-        schedule();
+        if (S.activeRenderers.indexOf(api) === -1) S.activeRenderers.push(api);
+        if (!paused) schedule();
       },
       flush: function() {
         if (cancelled || !targetEl) return;
         clearFrame();
         emitText(true);
       },
+      pause: function() {
+        paused = true;
+        clearFrame();
+      },
+      resume: function() {
+        if (!paused) return;
+        paused = false;
+        if (pending) schedule();
+      },
+      isPaused: function() { return paused; },
       finish: function(finalText) {
-        // V2: 完成时一次性 renderMarkdown, 替换纯文本节点
+        // V3: 完成时直接 renderMarkdown, 去掉光标
+        var idx = S.activeRenderers.indexOf(api);
+        if (idx !== -1) S.activeRenderers.splice(idx, 1);
         if (cancelled || !targetEl) return;
         clearFrame();
         finished = true;
+        paused = false;
         if (typeof finalText === 'string') rendered = finalText;
         pending = '';
-        removeIndicator();
-        try {
-          targetEl._plainTextEl = null;
-          targetEl.innerHTML = renderMarkdown(rendered);
-        } catch (e) {}
+        removeCursor();
+        targetEl.innerHTML = renderMarkdown(rendered);
         targetEl.classList.remove(streamClass);
         if (typeof options.onRender === 'function') {
           try { options.onRender(rendered); } catch (e3) {}
@@ -1391,21 +1384,22 @@
       stop: function() {
         if (cancelled) return;
         clearFrame();
-        if (pending) {
-          emitText(true);
-        }
+        if (pending) emitText(true);
       },
       cancel: function() {
+        var idx2 = S.activeRenderers.indexOf(api);
+        if (idx2 !== -1) S.activeRenderers.splice(idx2, 1);
         if (cancelled) return;
         cancelled = true;
         clearFrame();
-        removeIndicator();
+        removeCursor();
         pending = '';
         rendered = '';
-        try { if (targetEl) { targetEl.innerHTML = ''; targetEl._plainTextEl = null; } } catch (e) {}
+        try { if (targetEl) targetEl.innerHTML = ''; } catch (e) {}
         targetEl = null;
       }
     };
+    return api;
   }
 
   function bindVisualViewport(messagesEl, input, inputBar) {
@@ -1653,9 +1647,12 @@
     }
     // Reset sending state so user can send again
     S.sending = false;
+    S.paused = false;
+    S.activeRenderers = [];
     S.deepThinkJob = null;
     S.deepThinkProgressCard = null;
     S.abortController = null;
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
     // Fire-and-forget cancel to server
     try {
       var token = localStorage.getItem('xtj_user_token');
@@ -1721,9 +1718,13 @@
         S.deepThinkJob = null;
         S.deepThinkProgressCard = null;
         S.abortController = null;
+        S.paused = false;
+        S.activeRenderers = [];
+        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
       }
     }
     S.sending = true;
+    if (S.pauseBtnEl) S.pauseBtnEl.style.display = '';
     clearReplyTimer();
 
     // 1. 追加 user 消息
@@ -1910,8 +1911,6 @@
             answerEl.innerHTML = '';
             contentRenderer = createSmoothTextRenderer(answerEl, {
               minChunk: 2, maxChunk: 6,
-              plainTextStream: true,
-              textClass: 'ai-stream-text-answer',
               onDone: function() { finalizeAnswer(); }
             });
             contentRenderer.append(contentForRender);
@@ -2101,24 +2100,13 @@
                 var chunkText = String(evt.chunk).slice(0, 4000);
                 if (lastEntry && lastEntry._role === roleLabel) {
                   var lastChunk = lastEntry.querySelector('.ai-thought-chunk');
-                  if (lastChunk) {
-                    // V2: 直接 textContent 累积 (零解析), 末尾带光点提示"在思考"
-                    lastChunk.textContent = (lastChunk.textContent || '') + chunkText;
-                    if (lastChunk.querySelector('.ai-stream-indicator')) {
-                      try { lastChunk.removeChild(lastChunk.querySelector('.ai-stream-indicator')); } catch (e) {}
-                    }
-                    var dot = document.createElement('span'); dot.className = 'ai-stream-indicator';
-                    lastChunk.appendChild(dot);
-                  }
+                  if (lastChunk) lastChunk.textContent = (lastChunk.textContent || '') + chunkText;
                 } else {
                   var entry = document.createElement('div');
                   entry.className = 'ai-thought-entry';
                   entry._role = roleLabel;
                   entry.innerHTML = '<div class="ai-thought-role">▸ ' + escapeHtml(roleLabel) + '</div><div class="ai-thought-chunk"></div>';
-                  var chunkEl = entry.querySelector('.ai-thought-chunk');
-                  chunkEl.textContent = chunkText;
-                  var dot2 = document.createElement('span'); dot2.className = 'ai-stream-indicator';
-                  chunkEl.appendChild(dot2);
+                  entry.querySelector('.ai-thought-chunk').textContent = chunkText;
                   thinkBody.appendChild(entry);
                 }
                 try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
@@ -2133,11 +2121,6 @@
               }
               var titleEl = aiNode.querySelector('.ai-think-title');
               if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 思考中…';
-              // 移除所有已完成条目上的光点, 只保留最后一个
-              if (thinkBody) {
-                var dots = thinkBody.querySelectorAll('.ai-thought-entry:not(:last-child) .ai-stream-indicator');
-                for (var di = 0; di < dots.length; di++) { try { dots[di].parentNode.removeChild(dots[di]); } catch (e2) {} }
-              }
             }
             scrollToBottom(messagesEl, true);
             continue;
@@ -2150,19 +2133,12 @@
               answerStarted = true;
               var tTitle = aiNode.querySelector('.ai-think-title');
               if (tTitle) tTitle.innerHTML = AI_THINK_ICON + ' 回答中…';
-              // 思考阶段结束: 移除最后一个思考条目光点
-              try {
-                var lastDot = aiNode.querySelector('.ai-thought-entry:last-child .ai-stream-indicator');
-                if (lastDot) lastDot.parentNode.removeChild(lastDot);
-              } catch (e) {}
             }
             var aEl = aiNode.querySelector('.ai-think-answer');
             if (aEl && !answerRenderer) {
               aEl.innerHTML = '';
               answerRenderer = createSmoothTextRenderer(aEl, {
-                minChunk: 4, maxChunk: 16,
-                plainTextStream: true,
-                textClass: 'ai-stream-text-answer'
+                minChunk: 4, maxChunk: 16
               });
             }
             aiContent += String(evt.chunk);
@@ -2198,9 +2174,12 @@
           if (evt.type === 'done') {
             safeRemoveProgressCard()
             S.sending = false;
+            S.paused = false;
+            S.activeRenderers = [];
             S.abortController = null;
             S.deepThinkJob = null;
             S.deepThinkProgressCard = null;
+            if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
             // ★ 标记 progress card done, 停止前端倒计时
             if (progressCard) { try { progressCard._done = true; } catch (e) {} }
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
@@ -2334,9 +2313,13 @@
       if (S._currentReqId === reqId) {
         S.sending = false;
         S.abortController = null;
+        S.paused = false;
+        S.activeRenderers = [];
+        if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
       }
     }
     S.sending = true;
+    if (S.pauseBtnEl) S.pauseBtnEl.style.display = '';
     clearReplyTimer();
     
     var nowIso = new Date().toISOString();
@@ -2591,7 +2574,6 @@
           contentRenderer = createSmoothTextRenderer(aiBubble, {
             minChunk: 4,
             maxChunk: 16,
-            plainTextStream: true,
             streamClass: 'ai-streaming-soft',
             onRender: function() {
               scrollToBottom(messagesEl, false);
@@ -2893,7 +2875,6 @@
                 reasoningRenderer = createSmoothTextRenderer(body, {
                 minChunk: 4,
                 maxChunk: 16,
-                plainTextStream: true,
                 onRender: function() {
                   if (rn.classList.contains('expanded')) scrollToBottom(messagesEl, false);
                 }
@@ -2914,7 +2895,10 @@
           if (evt.type === 'done') {
             try { typingNode.remove(); } catch (e) {}
             S.sending = false;
+            S.paused = false;
+            S.activeRenderers = [];
             S.abortController = null;
+            if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
             if (_isTouchMobile) { try { input.blur(); } catch (e) {} }
             if (thinkingTimer) {
               finalThinkingElapsedMs = thinkingTimer.stop();
@@ -3463,6 +3447,13 @@ function showChatMessages() {
       id: 'aiChatSendBtn',
       'aria-label': '发送'
     }, '发送');
+    var pauseBtn = el('button', {
+      type: 'button',
+      class: 'ai-chat-pause',
+      id: 'aiChatPauseBtn',
+      'aria-label': '暂停',
+      style: 'display:none'
+    }, '暂停');
 
     function autoresize() {
       try {
@@ -3479,6 +3470,19 @@ function showChatMessages() {
     }
 
     sendBtn.addEventListener('click', doSend);
+    pauseBtn.addEventListener('click', function() {
+      if (!S.activeRenderers || S.activeRenderers.length === 0) return;
+      var anyPaused = S.activeRenderers.some(function(r) { return r.isPaused && r.isPaused(); });
+      if (anyPaused) {
+        S.activeRenderers.forEach(function(r) { if (r.resume) r.resume(); });
+        S.paused = false;
+        pauseBtn.textContent = '暂停';
+      } else {
+        S.activeRenderers.forEach(function(r) { if (r.pause) r.pause(); });
+        S.paused = true;
+        pauseBtn.textContent = '继续';
+      }
+    });
     input.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
         e.preventDefault();
@@ -3489,6 +3493,7 @@ function showChatMessages() {
 
     inputBar.appendChild(input);
     inputBar.appendChild(sendBtn);
+    inputBar.appendChild(pauseBtn);
     root.appendChild(inputBar);
 
     S.resizeTimer = setTimeout(autoresize, 0);
@@ -3496,12 +3501,14 @@ function showChatMessages() {
     // ★ M: 渲染后立刻同步深度思考 toggle 视觉
     refreshDeepThinkToggle();
 
+    S.pauseBtnEl = pauseBtn;
     return {
       root: root,
       messagesEl: messagesEl,
       inputBar: inputBar,
       input: input,
-      sendBtn: sendBtn
+      sendBtn: sendBtn,
+      pauseBtn: pauseBtn
     };
   }
 
@@ -3662,6 +3669,9 @@ function showChatMessages() {
     S.deepThinkProgressCard = null;
     // 重置所有状态，避免重开后残留
     S.sending = false;
+    S.paused = false;
+    S.activeRenderers = [];
+    if (S.pauseBtnEl) { S.pauseBtnEl.style.display = 'none'; S.pauseBtnEl.textContent = '暂停'; }
     S.messages = [];
     S.oldestCursor = null;
     S.hasMore = false;
