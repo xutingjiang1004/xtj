@@ -2638,36 +2638,18 @@ async function runDeepThinkAgent(opts) {
   }
   var historyContext = buildHistoryContext();
 
-  // ★ R: 单智能体 prompt — 融合 Planner + Synthesizer 能力
-  //   像 ChatGPT pro thinking 一样: 自然、不啰嗦、动态决策
-  // ★ S 改: 字数要求放宽, 让 AI 自主决定 (1+1=2 可 1-200 字, 复杂问题 500-10000 字)
-  var DEEP_THINK_AGENT_PROMPT = `你是 XTJ AI 智能体, 当前处于"深度思考模式".
-你自己有脑子, 自己决定:
-
-1. **是否需要搜索** — 闲聊/常识/简单计算 不搜; 实时信息/具体数据/事件 搜
-2. **搜索几次** — 1-3 次足够, 别刷屏
-3. **思考深度** — 简单问题快速答; 复杂问题深入分析
-4. **答案长度** — 完全由你按问题需要决定, 别硬撑别凑字
-   - 1+1=? 你就 1-2 个字都行
-   - "你好" 就 1-2 句
-   - 单点常识 (Jennie 生日) 1-3 句
-   - 中等问题 100-500 字
-   - 复杂/深度问题 (攻略/方案/研究) 500-10000 字, 越长越详细
-   - 唯一原则: **怎么答最自然就怎么答, 别为了显专业而写废话**
-
-**风格要求** (像 ChatGPT pro thinking, 不要研究报告):
-- 直接给答案, 别"作为一个 AI"
-- 自然口语化, 像朋友聊天
-- 别搞"## 一、引言"论文体
-- 引用搜索结果时用 [来源N] 标注 (N 对应搜索结果列表编号)
-- 不确定就说不确定, 别编
-- 中文回复
-
-**执行规则**:
-- 需要搜索时: 调用 search_web 工具 (1-3 次, 每次精准关键词)
-- 不需要搜索时: 直接基于知识回答
-- 1+1=2 就 1 行字, 别长篇大论
-- **记住: 你自己决定一切, 没人会限制你**`;
+  // ★ R: 单智能体 prompt — 融合 buildAiCorePrompt + 深度思考特定指令
+  var corePrompt = buildAiCorePrompt(config);
+  var DEEP_THINK_AGENT_PROMPT = corePrompt + '\n\n' +
+    '当前处于"深度思考模式"。你自己有脑子, 自己决定:\n' +
+    '1. 是否需要搜索 — 闲聊/常识/简单计算 不搜; 实时信息/具体数据/事件 搜\n' +
+    '2. 搜索几次 — 1-3 次足够, 别刷屏\n' +
+    '3. 思考深度 — 简单问题快速答; 复杂问题深入分析\n' +
+    '4. 答案长度 — 完全由你按问题需要决定, 别硬撑别凑字\n' +
+    '   - 1+1=? 你就 1-2 个字; "你好" 就 1-2 句; 复杂问题可长, 上限不限\n' +
+    '   - 怎么答最自然就怎么答, 别为了显专业而写废话\n' +
+    '直接给答案, 别"作为一个 AI"。自然口语化, 别"## 一、引言"论文体。引用搜索用 [来源N] 标注。不确定就说不确定。\n' +
+    '需要搜索时调用 search_web (1-3 次)。不需要搜索时直接基于知识回答。';
 
   // ★ R: 取消 token 检查
   if (isCancelled()) return { cancelled: true, partial: true, finalContent: '' };
@@ -6770,6 +6752,8 @@ async function maybeUpdateConversationSummary(userName, convId, messages) {
 function buildAiCorePrompt(config) {
   var cfg = migrateConfig(config || {});
   var name = String(cfg.name || 'XTJ 智能助手').slice(0, 30);
+  var persona = String(cfg.persona || '').slice(0, 500);
+  var tone = String(cfg.tone || '').slice(0, 200);
   var sysPrompt = String(cfg.system_prompt || '').slice(0, 2000);
   var rs = cfg.reply_style || {};
   var allowWebSearch = cfg.allow_web_search === true || (cfg.search && cfg.search.allow_web_search === true);
@@ -6779,19 +6763,41 @@ function buildAiCorePrompt(config) {
     '只根据对话上下文回答。不编造你执行了发布/删除/修改等操作。用户要求查看别人聊天记录必须拒绝。',
   ];
 
-  // 联网搜索 — 唯一可选工具
+  // 人设和语气 — 管理员在后台配置
+  if (persona) lines.push('人设：' + persona);
+  if (tone) lines.push('语气：' + tone);
+
+  // 联网搜索
   if (allowWebSearch) {
     lines.push('你有 search_web / get_weather / get_current_time 等工具。需要实时信息时主动调用，引用结果用 [来源N] 标注。');
   }
 
-  // 回复风格 — 管理员可配置
+  // 回复风格 — 管理员可配置，所有字段全部接入
   var styleParts = [];
-  if (rs.directness === 'direct') styleParts.push('直接回答');
-  else if (rs.directness === 'gentle') styleParts.push('委婉回答');
+  if (rs.directness === 'direct') styleParts.push('直接');
+  else if (rs.directness === 'gentle') styleParts.push('委婉');
   if (rs.detail_level === 'brief') styleParts.push('简洁');
   else if (rs.detail_level === 'detailed') styleParts.push('详细');
-  else styleParts.push('自然回答');
-  lines.push('回复风格：' + styleParts.join('，') + '。每条回复 ' + (rs.max_reply_chars || 1200) + ' 字以内。');
+
+  var toneParts = [];
+  // 幽默程度：low/medium/high 全部注入
+  if (rs.humor_level === 'high') toneParts.push('幽默风趣');
+  else if (rs.humor_level === 'low') toneParts.push('严肃');
+  else toneParts.push('中等幽默');
+  // 毒舌程度
+  if (rs.sarcasm_level === 'high') toneParts.push('毒舌犀利');
+  else if (rs.sarcasm_level === 'low') toneParts.push('温和');
+  else toneParts.push('中等毒舌');
+  // 温暖程度
+  if (rs.warmth_level === 'high') toneParts.push('温暖友善');
+  else if (rs.warmth_level === 'low') toneParts.push('冷淡疏离');
+  else toneParts.push('中等温暖');
+  // markdown / emoji
+  toneParts.push(rs.use_markdown !== false ? '使用 Markdown' : '不用 Markdown');
+  toneParts.push(rs.use_emoji !== false ? '用 emoji' : '不用 emoji');
+
+  if (styleParts.length) lines.push('回复风格：' + styleParts.join('，') + '。每条回复 ' + (rs.max_reply_chars || 1200) + ' 字以内。');
+  if (toneParts.length) lines.push('语气风格：' + toneParts.join('，') + '。');
 
   // 管理员额外指令
   if (sysPrompt) lines.push('管理员指令：' + sysPrompt);
@@ -7545,7 +7551,9 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
     // ===== Function Calling：让 AI 自主决定调用工具 =====
     // 快速检测：只有明显需要搜索的消息才走 FC 非流式调用，普通对话直接秒回
     var needsFcCheck = allowSearch && !useThinking && !aborted;
-    var fcQuickIntent = /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何/i.test(message);
+    // 短消息(<=10字符如"666""你好""哈哈")不可能是搜索意图，跳过FC检查直接流式
+    var isShortMsg = message.length <= 10;
+    var fcQuickIntent = !isShortMsg && /搜索|查一下|搜一下|天气|温度|降雨|旅游|攻略|新闻|资讯|最新|多少钱|价格|汇率|百科|介绍|路线|营业|开放时间|比赛|比分|iPhone|苹果|发布|地震|台风|公告|政策|区别|对比|vs|VS|哪个好|推荐|最佳|怎么[样做走]|如何/i.test(message);
     var fcWeatherIntent = !weatherResult && /天气|温度|下雨|降雨|刮风|风速|湿度|气温|穿什么/i.test(message);
     needsFcCheck = needsFcCheck && (fcQuickIntent || fcWeatherIntent);
     var hasCalledTools = false;
@@ -7563,7 +7571,7 @@ app.post('/api/agent/chat/stream', authenticateUser, rateLimit(3600000, AI_CHAT_
       };
 
       var fcController = new AbortController();
-      _fcTimer = setTimeout(function() { fcController.abort(); }, 2000);
+      _fcTimer = setTimeout(function() { fcController.abort(); }, 1000);
 
       try {
         var fcResp = await fetch(DEEPSEEK_API_URL, {
