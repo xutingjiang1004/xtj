@@ -975,9 +975,9 @@
         '</div>' +
         '<div class="ai-think-body">' +
           (thinkingLog.length > 0 ? '<div class="ai-think-thinking-body"></div>' : '') +
-          '<div class="ai-think-answer"></div>' +
-          '<div class="ai-msg-footer"></div>' +
-        '</div>';
+        '</div>' +
+        '<div class="ai-think-answer"></div>' +
+        '<div class="ai-msg-footer"></div>';
     } else {
       node = el('div', { class: 'ai-think-card collapsed' });
       node.innerHTML =
@@ -993,10 +993,9 @@
               '<summary><span>查看思考过程 (' + thinkingLog.length + ' 步)</span></summary>' +
               '<div class="ai-think-thinking-body"></div>' +
             '</details>' : '') +
-          (thinkingLog.length > 0 ? '<div class="ai-think-divider"></div>' : '') +
-          '<div class="ai-think-answer"></div>' +
-          '<div class="ai-msg-footer"></div>' +
-        '</div>';
+        '</div>' +
+        '<div class="ai-think-answer"></div>' +
+        '<div class="ai-msg-footer"></div>';
 
       // header 整行可点击展开/折叠
       var headerEl = node.querySelector('.ai-think-header');
@@ -2135,10 +2134,9 @@
             '<summary><span>查看思考过程</span></summary>' +
             '<div class="ai-think-thinking-body"></div>' +
           '</details>' +
-          '<div class="ai-think-divider"></div>' +
-          '<div class="ai-think-answer"></div>' +
-          '<div class="ai-msg-footer"></div>' +
-        '</div>';
+        '</div>' +
+        '<div class="ai-think-answer"></div>' +
+        '<div class="ai-msg-footer"></div>';
       var headerEl = node.querySelector('.ai-think-header');
       var chevronEl = node.querySelector('.ai-think-chevron');
       headerEl.addEventListener('click', function(e) {
@@ -2436,7 +2434,20 @@
       msgs.appendChild(el('div', { style: 'padding:20px;text-align:center;color:#999;font-size:13px;', text: '加载中...' }));
       try {
         var hist = await apiRequest('GET', '/chat/history?conversation_id=' + encodeURIComponent(S.dtConversationId) + '&limit=50');
-        if (hist && hist.ok && Array.isArray(hist.data && hist.data.messages)) {
+        var hasMessages = hist && hist.ok && Array.isArray(hist.data && hist.data.messages) && hist.data.messages.length > 0;
+        // 如果指定 convId 没找到消息，尝试加载最近对话
+        if (!hasMessages) {
+          var fallback = await apiRequest('GET', '/chat/history?limit=50');
+          if (fallback && fallback.ok && Array.isArray(fallback.data && fallback.data.messages) && fallback.data.messages.length > 0) {
+            hist = fallback;
+            hasMessages = true;
+            if (fallback.data.conversation_id) {
+              S.dtConversationId = fallback.data.conversation_id;
+              saveDtConvId();
+            }
+          }
+        }
+        if (hasMessages) {
           msgs.innerHTML = '';
           hist.data.messages.forEach(function(msg) {
             if (msg.role === 'user') {
@@ -2445,13 +2456,11 @@
               userNode.appendChild(el('div', { class: 'dt-msg-content', text: msg.content || '' }));
               msgs.appendChild(userNode);
             } else if (msg.role === 'assistant') {
-              // 用 think-card 渲染助手回复
               var thinkNode = buildThinkCardFromHistory(msg, msgs, true);
               if (thinkNode) msgs.appendChild(thinkNode);
             }
           });
         } else {
-          // 历史为空，显示空状态
           if (!msgs.querySelector('.dt-empty')) resetDeepThinkPageEmpty();
         }
       } catch (e) {
@@ -2654,9 +2663,9 @@
         '</div>' +
         '<div class="ai-think-body">' +
           '<div class="ai-think-thinking-body"></div>' +
-          '<div class="ai-think-answer"></div>' +
-          '<div class="ai-msg-footer"></div>' +
-        '</div>';
+        '</div>' +
+        '<div class="ai-think-answer"></div>' +
+        '<div class="ai-msg-footer"></div>';
       dtMessagesEl.appendChild(node);
       aiNode = node;
       scrollToBottom(dtMessagesEl, true);
