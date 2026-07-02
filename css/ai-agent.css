@@ -1908,7 +1908,7 @@
 
 /* ===================== Deep Think 二级页面专项优化 ===================== */
 
-/* 1. 思考卡片更紧凑；collapsed 也显示答案，只折叠思考过程 */
+/* 1. 思考卡片更紧凑 */
 #panelDeepThink .ai-think-card {
   margin: 10px 0;
   border-radius: 18px;
@@ -1937,36 +1937,31 @@
   font-size: 10px;
   padding: 1px 6px;
 }
-#panelDeepThink .ai-think-body,
-#panelDeepThink .ai-think-card.collapsed .ai-think-body {
+#panelDeepThink .ai-think-body {
   max-height: none;
   opacity: 1;
   overflow: visible;
   padding: 8px 12px 12px;
   border-top-width: 1px;
 }
-#panelDeepThink .ai-think-card.collapsed .ai-think-thinking {
-  display: none;
-}
 
-/* 思考过程：无内部滚动，完全随 .dt-messages 滚动；视觉紧凑 */
-#panelDeepThink .ai-think-thinking {
-  padding: 4px 8px;
+/* 思考过程：直接显示，固定高度，内部滚动 */
+#panelDeepThink .ai-think-thinking-body {
+  max-height: 150px;
+  overflow-y: auto;
+  padding: 6px 6px 6px 10px;
+  margin: 0 0 8px;
   border-radius: 12px;
   background: rgba(140, 196, 158, .06);
-  margin: 0 0 8px;
-}
-#panelDeepThink .ai-think-thinking summary {
-  padding: 3px 0 3px 20px;
-  font-size: 11px;
-}
-#panelDeepThink .ai-think-thinking-body {
-  max-height: none !important;
-  overflow: visible !important;
-  padding: 4px 2px 4px 8px !important;
   font-size: 11px;
   line-height: 1.55;
   color: rgba(75, 95, 88, .88);
+  scroll-behavior: smooth;
+}
+#panelDeepThink .ai-think-thinking-body::-webkit-scrollbar { width: 4px; }
+#panelDeepThink .ai-think-thinking-body::-webkit-scrollbar-thumb {
+  background: rgba(140, 196, 158, .3);
+  border-radius: 10px;
 }
 #panelDeepThink .ai-thought-entry {
   padding: 3px 0;
@@ -1976,6 +1971,9 @@
 #panelDeepThink .ai-thought-role {
   font-size: 10px;
   margin-bottom: 1px;
+}
+#panelDeepThink .ai-thought-role::before {
+  display: none; /* 去掉呼吸点点 */
 }
 #panelDeepThink .ai-thought-content {
   font-size: 11px;

@@ -946,7 +946,7 @@
   // ★ O 修复 Bug 4: 从 history 恢复 think-card
   //   退出对话框重进后, deep_think=true 的消息渲染成 think-card
   // ★ Q 重做: 极简版 (与 handleSendDeepThink 一致结构)
-  function buildThinkCardFromHistory(msg, messagesEl) {
+  function buildThinkCardFromHistory(msg, messagesEl, simpleMode) {
     var thinkingLog = Array.isArray(msg.thinking_log) ? msg.thinking_log : [];
     var workerResults = Array.isArray(msg.worker_results) ? msg.worker_results : [];
     var agentCount = msg.agent_count || (workerResults.length || 0);
@@ -954,42 +954,59 @@
     var searchResults = Array.isArray(msg.search_results) ? msg.search_results : [];
     var finalThinkingMode = (msg.usage && msg.usage.thinking_mode) || msg.thinking_mode || 'max';
 
-    var node = el('div', { class: 'ai-think-card collapsed' });
-    node.innerHTML =
-      '<div class="ai-think-header">' +
-        '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
-        '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
-        '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
-        '<span class="ai-think-chevron">▾</span>' +
-      '</div>' +
-      '<div class="ai-think-body">' +
-        (thinkingLog.length > 0 ?
-          '<details class="ai-think-thinking">' +
-            '<summary><span>查看思考过程 (' + thinkingLog.length + ' 步)</span></summary>' +
-            '<div class="ai-think-thinking-body"></div>' +
-          '</details>' : '') +
-        (thinkingLog.length > 0 ? '<div class="ai-think-divider"></div>' : '') +
-        '<div class="ai-think-answer"></div>' +
-        '<div class="ai-msg-footer"></div>' +
-      '</div>';
+    var node;
+    if (simpleMode) {
+      // 二级页面：简洁结构，无 details/summary/chevron
+      node = el('div', { class: 'ai-think-card expanded dt-simple-card' });
+      node.innerHTML =
+        '<div class="ai-think-header">' +
+          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
+          '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
+          '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
+        '</div>' +
+        '<div class="ai-think-body">' +
+          (thinkingLog.length > 0 ? '<div class="ai-think-thinking-body"></div>' : '') +
+          '<div class="ai-think-answer"></div>' +
+          '<div class="ai-msg-footer"></div>' +
+        '</div>';
+    } else {
+      node = el('div', { class: 'ai-think-card collapsed' });
+      node.innerHTML =
+        '<div class="ai-think-header">' +
+          '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
+          '<span class="ai-think-title">已思考 ' + formatThinkDuration(thinkDurationMs) + '</span>' +
+          '<span class="ai-think-meta">' + (agentCount > 0 ? (agentCount + ' agent') : '') + '</span>' +
+          '<span class="ai-think-chevron">▾</span>' +
+        '</div>' +
+        '<div class="ai-think-body">' +
+          (thinkingLog.length > 0 ?
+            '<details class="ai-think-thinking">' +
+              '<summary><span>查看思考过程 (' + thinkingLog.length + ' 步)</span></summary>' +
+              '<div class="ai-think-thinking-body"></div>' +
+            '</details>' : '') +
+          (thinkingLog.length > 0 ? '<div class="ai-think-divider"></div>' : '') +
+          '<div class="ai-think-answer"></div>' +
+          '<div class="ai-msg-footer"></div>' +
+        '</div>';
 
-    // header 整行可点击展开/折叠
-    var headerEl = node.querySelector('.ai-think-header');
-    var chevronEl = node.querySelector('.ai-think-chevron');
-    headerEl.addEventListener('click', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      var isCollapsed = node.classList.contains('collapsed');
-      if (isCollapsed) {
-        node.classList.remove('collapsed');
-        node.classList.add('expanded');
-        if (chevronEl) chevronEl.textContent = '▴';
-      } else {
-        node.classList.add('collapsed');
-        node.classList.remove('expanded');
-        if (chevronEl) chevronEl.textContent = '▾';
-      }
-    });
+      // header 整行可点击展开/折叠
+      var headerEl = node.querySelector('.ai-think-header');
+      var chevronEl = node.querySelector('.ai-think-chevron');
+      headerEl.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var isCollapsed = node.classList.contains('collapsed');
+        if (isCollapsed) {
+          node.classList.remove('collapsed');
+          node.classList.add('expanded');
+          if (chevronEl) chevronEl.textContent = '▴';
+        } else {
+          node.classList.add('collapsed');
+          node.classList.remove('expanded');
+          if (chevronEl) chevronEl.textContent = '▾';
+        }
+      });
+    }
 
     // 渲染 markdown + [来源N] className
     var contentForRender = msg.content || '';
@@ -1040,9 +1057,11 @@
           entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
           thinkLogBox.appendChild(entEl);
         });
-        // 更新 summary 显示合并后的步数
-        var summaryEl = node.querySelector('.ai-think-thinking summary span:last-child');
-        if (summaryEl) summaryEl.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
+        // 非简洁模式才更新 summary
+        if (!simpleMode) {
+          var summaryEl = node.querySelector('.ai-think-thinking summary span:last-child');
+          if (summaryEl) summaryEl.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
+        }
       }
     }
 
@@ -2367,7 +2386,7 @@
               msgs.appendChild(userNode);
             } else if (msg.role === 'assistant') {
               // 用 think-card 渲染助手回复
-              var thinkNode = buildThinkCardFromHistory(msg, msgs);
+              var thinkNode = buildThinkCardFromHistory(msg, msgs, true);
               if (thinkNode) msgs.appendChild(thinkNode);
             }
           });
@@ -2548,40 +2567,19 @@
     function ensureThinkCardNode() {
       if (aiNode) return aiNode;
       safeRemoveProgressCard();
-      // 二级页面中思考卡片默认展开（答案可见），但思考过程 details 默认折叠
-      var node = el('div', { class: 'ai-think-card expanded generating' });
+      // 二级页面：思考卡片直接展示思考过程（无 details/summary），顶部仅保留标题
+      var node = el('div', { class: 'ai-think-card expanded generating dt-simple-card' });
       node.innerHTML =
         '<div class="ai-think-header">' +
           '<span class="ai-think-icon">' + AI_THINK_ICON + '</span>' +
           '<span class="ai-think-title">思考中…</span>' +
           '<span class="ai-think-meta"></span>' +
-          '<span class="ai-think-chevron">▾</span>' +
         '</div>' +
         '<div class="ai-think-body">' +
-          '<details class="ai-think-thinking">' +
-            '<summary><span>查看思考过程</span></summary>' +
-            '<div class="ai-think-thinking-body"></div>' +
-          '</details>' +
-          '<div class="ai-think-divider"></div>' +
+          '<div class="ai-think-thinking-body"></div>' +
           '<div class="ai-think-answer"></div>' +
           '<div class="ai-msg-footer"></div>' +
         '</div>';
-      var headerEl = node.querySelector('.ai-think-header');
-      var chevronEl = node.querySelector('.ai-think-chevron');
-      headerEl.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        var isCollapsed = node.classList.contains('collapsed');
-        if (isCollapsed) {
-          node.classList.remove('collapsed');
-          node.classList.add('expanded');
-          if (chevronEl) chevronEl.textContent = '▴';
-        } else {
-          node.classList.add('collapsed');
-          node.classList.remove('expanded');
-          if (chevronEl) chevronEl.textContent = '▾';
-        }
-      });
       dtMessagesEl.appendChild(node);
       aiNode = node;
       scrollToBottom(dtMessagesEl, true);
@@ -2668,14 +2666,6 @@
             entEl.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(String(entry.chunk || '').slice(0, 4000));
             thinkLogBox.appendChild(entEl);
           });
-          var summaryEl = node.querySelector('.ai-think-thinking summary');
-          if (summaryEl) {
-            var sumSpan = summaryEl.querySelector('span:last-child');
-            if (sumSpan) sumSpan.textContent = '查看思考过程 (' + mergedLog.length + ' 步)';
-          }
-        } else {
-          var detailsEl = node.querySelector('.ai-think-thinking');
-          if (detailsEl) detailsEl.style.display = 'none';
         }
 
         var footer = node.querySelector('.ai-msg-footer');
@@ -2724,12 +2714,8 @@
         var durationStr = min > 0 ? (min + 'm ' + sec + 's') : (sec + 's');
         var titleEl = node.querySelector('.ai-think-title');
         var metaEl = node.querySelector('.ai-think-meta');
-        if (titleEl) titleEl.textContent = '已思考 ' + durationStr;
+        if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 已思考 ' + durationStr;
         if (metaEl) metaEl.textContent = '';
-
-        // 二级页面中不自动展开思考卡片，保持用户选择/默认折叠状态
-        var chev = node.querySelector('.ai-think-chevron');
-        if (chev) chev.textContent = node.classList.contains('expanded') ? '▴' : '▾';
       }
     }
 
@@ -2808,7 +2794,6 @@
             if (evt.chunk) {
               var thinkBody = aiNode.querySelector('.ai-think-thinking-body');
               var detailsEl = aiNode.querySelector('.ai-think-thinking');
-              var summaryEl = aiNode.querySelector('.ai-think-thinking summary span:last-child');
               if (thinkBody) {
                 var roleLabel = evt.agent_role || 'AI 智能体';
                 var lastEntry = thinkBody.lastElementChild;
@@ -2824,14 +2809,10 @@
                   entry.querySelector('.ai-thought-chunk').textContent = cleanReasoningText(chunkText);
                   thinkBody.appendChild(entry);
                 }
+                // 二级页面：思考过程区域内部自动滚动
                 try { thinkBody.scrollTop = thinkBody.scrollHeight; } catch (e) {}
                 while (thinkBody.children.length > 80) thinkBody.removeChild(thinkBody.firstChild);
               }
-              if (summaryEl) {
-                var entryCount = thinkBody ? thinkBody.children.length : 0;
-                summaryEl.textContent = '查看思考过程 (' + entryCount + ' 步)';
-              }
-              // 二级页面：不自动展开思考过程，保持折叠让用户自己点击查看
               var titleEl = aiNode.querySelector('.ai-think-title');
               if (titleEl) titleEl.innerHTML = AI_THINK_ICON + ' 思考中…';
             }
