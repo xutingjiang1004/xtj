@@ -1977,6 +1977,10 @@
   line-height: 1.7;
   color: rgba(80, 95, 90, .9);
 }
+.ai-think-card.generating .ai-think-thinking-body {
+  max-height: none;
+  overflow-y: visible;
+}
 .ai-think-thinking-body::-webkit-scrollbar { width: 4px; }
 .ai-think-thinking-body::-webkit-scrollbar-thumb { background: rgba(140, 196, 158, .25); border-radius: 10px; }
 
