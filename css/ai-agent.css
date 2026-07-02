@@ -2404,6 +2404,7 @@
   max-height: 3000px; opacity: 1;
   padding: 10px 16px 14px;
   border-top-width: 1px;
+  overflow-y: auto;
 }
 
 /* 思考过程 details */
