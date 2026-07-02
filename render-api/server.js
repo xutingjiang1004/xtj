@@ -121,10 +121,11 @@ setInterval(function() {
 function buildHistoryContext(ctx, message) {
   if (!ctx || !Array.isArray(ctx.history) || ctx.history.length === 0) return '';
   var lines = ['\n\n[历史对话上下文 (重要! 你必须看到这些)]\n'];
-  var recentHistory = ctx.history.slice(-10);
+  // ★ 缓存优化：最近 6 条 (原 10)，每条 ≤ 500 字符。太多历史会撑爆 user 消息
+  var recentHistory = ctx.history.slice(-6);
   recentHistory.forEach(function(h, i) {
     var role = h.role === 'user' ? '用户' : (h.role === 'assistant' ? 'AI' : h.role);
-    var content = String(h.content || '').slice(0, 800);
+    var content = String(h.content || '').slice(0, 500);
     lines.push((i + 1) + '. [' + role + '] ' + content);
   });
   lines.push('\n[当前用户新消息]: ' + (message || ''));
@@ -407,6 +408,23 @@ const AI_TOOLS = [
         properties: {}
       }
     }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'compress_history',
+      description: '压缩历史对话。当历史消息已经很长（>10 条或上下文快接近模型上限），你判断继续累加会导致响应变慢/费用变高/超过上下文限制时，主动调用此工具压缩历史。压缩后会用一段简洁的摘要替换原历史（保留关键事实和上下文），后续对话继续基于摘要+最近几条消息。\n\n调用时机建议：\n- 历史消息 ≥ 8 条 且 累计内容很多\n- 用户聊到完全不相关的新话题，旧的细节可以丢\n- 你感觉前面的细节对你回答当前问题没用了\n\n压缩后只需简短回答，无需重复摘要内容。',
+      parameters: {
+        type: 'object',
+        properties: {
+          summary: {
+            type: 'string',
+            description: '对历史的精炼摘要。包含：用户身份/偏好/重要事实、对话主线、未解决问题。每条用一行，不要超过 800 字。'
+          }
+        },
+        required: ['summary']
+      }
+    }
   }
 ];
 
@@ -457,6 +475,11 @@ async function executeToolCall(toolCall) {
       var weekday = weekdays[now.getDay()];
       var timeResult = '【当前时间】\n北京时间：' + cnf + '\n星期：' + weekday + '\n时区：Asia/Shanghai (UTC+8)';
       return { tool_name: name, content: timeResult };
+    }
+    case 'compress_history': {
+      var summary = String(args.summary || '').trim().slice(0, 2000);
+      if (!summary) return { tool_name: name, error: '摘要为空' };
+      return { tool_name: name, content: '✓ 历史已压缩，' + summary.length + ' 字符摘要已应用。后续对话基于此摘要 + 最近消息继续。', _compressed: true, summary: summary };
     }
     default:
       return { tool_name: name, error: '未知工具: ' + name };
@@ -2702,6 +2725,25 @@ async function callDeepSeek(messages, options) {
         try { console.log('[DEEPSEEK] tool_call', tcName, 'elapsed_ms', tElapsed); } catch (e) {}
         return { tcId: tcId, tcName: tcName, tcArgs: tcArgs, toolResult: toolResult, tElapsed: tElapsed };
       }));
+
+      // ★ 缓存优化：处理 compress_history — 用摘要替换历史（保留 system + 最近 2 条）
+      var compressSummary = null;
+      toolResults.forEach(function(r) {
+        if (r.tcName === 'compress_history' && r.toolResult && r.toolResult._compressed && r.toolResult.summary) {
+          compressSummary = r.toolResult.summary;
+        }
+      });
+      if (compressSummary) {
+        var sysMsgs = workingMessages.filter(function(m) { return m.role === 'system'; });
+        var userAsst = workingMessages.filter(function(m) { return m.role === 'user' || m.role === 'assistant'; });
+        // 保留 system + 最近 2 条 user/assistant
+        var keep = userAsst.slice(-2);
+        workingMessages = sysMsgs.concat([
+          { role: 'user', content: '[历史摘要] ' + compressSummary + '\n(以上是之前对话的摘要。最近 2 条消息保留在下方)' },
+          { role: 'assistant', content: '已了解历史摘要，请继续回答当前问题。' }
+        ]).concat(keep);
+        try { console.log('[DEEPSEEK] history compressed to summary, new length:', workingMessages.length, 'summary chars:', compressSummary.length); } catch (e) {}
+      }
       toolResults.forEach(function(r) {
         toolCallsInfo.push({ id: r.tcId, name: r.tcName, args: r.tcArgs, elapsed_ms: r.tElapsed, ok: !r.toolResult || !r.toolResult.error });
         if (r.tcName === 'search_web' && r.toolResult && typeof r.toolResult.results_count === 'number') {
@@ -7037,7 +7079,10 @@ const AI_CHAT_MESSAGE_MAX_LEN = Math.min(
   Math.max(parseInt(process.env.AI_CHAT_MESSAGE_MAX_LEN || '50000', 10) || 50000, 1000),
   100000
 );
-const AI_CHAT_HISTORY_LIMIT = 10;
+// ★ 缓存优化：历史消息保留 20 条 (原 10)，更稳定的前缀，命中率更高
+// 同时每条历史消息截断到 4000 字符 (~1500 tokens)，防止单条长消息撑爆请求
+const AI_CHAT_HISTORY_LIMIT = 20;
+const AI_CHAT_HISTORY_MSG_MAX_CHARS = 4000;
 const AI_CHAT_HOURLY_IP_LIMIT = 200;
 
 // 生成简短的 conversation_id
@@ -7421,7 +7466,10 @@ async function loadAiContext(userName, convId) {
             try { console.warn('[AI-PARSE] parseMsgMeta error:', e && e.message); } catch(ee) {}
           }
         }
-        return { role: meta.role || 'user', content: content.slice(0, AI_CHAT_MESSAGE_MAX_LEN) };
+        // ★ 缓存优化：标准化空白字符，确保历史消息在重新加载时字符串完全一致
+        // 否则 unicode 空白/换行差异会导致缓存前缀不匹配
+        var normalized = content.replace(/\r\n/g, '\n').replace(/[\u00A0\u2003\u2002]/g, ' ').replace(/[ \t]+/g, ' ').slice(0, AI_CHAT_HISTORY_MSG_MAX_CHARS);
+        return { role: meta.role || 'user', content: normalized };
       });
     }
   } catch (e) {
