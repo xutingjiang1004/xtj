@@ -1008,31 +1008,13 @@
       });
     }
 
-    // 渲染 markdown + [来源N] className
     var contentForRender = msg.content || '';
-    if (searchResults.length > 0) {
-      contentForRender = contentForRender.replace(/\[来源(\d+)\]/g, function(m, n) {
-        var idx = parseInt(n, 10);
-        if (isNaN(idx) || idx < 1 || idx > searchResults.length) return m;
-        var sr = searchResults[idx - 1] || {};
-        if (!sr.url) return m;
-        return '[来源' + n + '](' + sr.url + ')';
-      });
-    }
     var answerEl = node.querySelector('.ai-think-answer');
-    // 兜底：历史消息可能 content 为空，避免答案区空白
     if (!contentForRender || !String(contentForRender).trim()) {
       var hasThinkingLog = thinkingLog.length > 0 || (msg.reasoning && String(msg.reasoning).trim());
       contentForRender = hasThinkingLog ? '（AI 只返回了思考过程，没有生成正文回复）' : '（AI 暂无回复）';
     }
     answerEl.innerHTML = renderMarkdown(contentForRender);
-    try {
-      var as = answerEl.querySelectorAll('a');
-      for (var ai = 0; ai < as.length; ai++) {
-        var atxt = (as[ai].textContent || '').trim();
-        if (/^来源\d+$/.test(atxt)) as[ai].className = 'ai-source-link';
-      }
-    } catch (e) {}
     setupBubbleCopy(answerEl, messagesEl);
 
     // 渲染思考过程日志 (放进 <details> 内, 先合并同角色)
@@ -1102,37 +1084,13 @@
     if (role === 'assistant' && shouldRenderReasoning(msg)) {
       node.appendChild(buildReasoningNode(msg.reasoning, messagesEl, msg.thinking_elapsed_ms));
     }
-    // ★ C 关键修复：把 [来源N] 标记渲染成可点击链接
-    //   AI prompt 要求引用具体事实时必须用 [来源N]（N 从 1 开始）
-    //   这里把 N 替换成 [来源N](url)，让 renderMarkdown 转成 <a>
     var contentForRender = msg.content || '';
-    if (role === 'assistant' && Array.isArray(msg.search_results) && msg.search_results.length > 0) {
-      contentForRender = contentForRender.replace(/\[来源(\d+)\]/g, function(m, n) {
-        var idx = parseInt(n, 10);
-        if (isNaN(idx) || idx < 1 || idx > msg.search_results.length) return m;
-        var sr = msg.search_results[idx - 1] || {};
-        if (!sr.url) return m;
-        return '[来源' + n + '](' + sr.url + ')';
-      });
-    }
     var bubble = el('div', { class: 'ai-msg-bubble' });
-    // 兜底：历史消息可能 content 为空（如 AI 只返回了思考过程），避免气泡空白
     if (!contentForRender || !String(contentForRender).trim()) {
       var hasReasoning = !!(msg.reasoning && String(msg.reasoning).trim());
       contentForRender = hasReasoning ? '（AI 只返回了思考过程，没有生成正文回复）' : '（AI 暂无回复）';
     }
     bubble.innerHTML = renderMarkdown(contentForRender);
-    // ★ C 关键修复：给 [来源N] 链接加专属 className
-    //   链接文本是 "来源1"/"来源2"... 时加 .ai-source-link，CSS 可以加特殊样式
-    try {
-      var as = bubble.querySelectorAll('a');
-      for (var ai = 0; ai < as.length; ai++) {
-        var atxt = (as[ai].textContent || '').trim();
-        if (/^来源\d+$/.test(atxt)) {
-          as[ai].className = 'ai-source-link';
-        }
-      }
-    } catch (e) {}
     setupBubbleCopy(bubble, messagesEl);
     node.appendChild(bubble);
     // 底部信息栏：时间 · 思考程度 · 用量（仅 assistant 有思考标签和用量）
@@ -1942,29 +1900,9 @@
       S.messages.push(aiMsg);
 
       if (node) {
-        // [来源N] 渲染
         var contentForRender = content || '';
-        if (searchResults && searchResults.length > 0) {
-          contentForRender = contentForRender.replace(/\[来源(\d+)\]/g, function(m, n) {
-            var idx = parseInt(n, 10);
-            if (isNaN(idx) || idx < 1 || idx > searchResults.length) return m;
-            var sr = searchResults[idx - 1] || {};
-        if (!sr.url) return m;
-        return '[来源' + n + '](' + sr.url.replace(/"/g, '%22').replace(/\)/g, '%29') + ')';
-          });
-        }
-
-        // ★ Q V2: 答案区 — 若 answerRenderer 已在流式中, 直接 finish; 否则走旧逐字兜底
         var answerEl = node.querySelector('.ai-think-answer');
         function finalizeAnswer() {
-          // 完成后处理来源链接 + 复制按钮
-          try {
-            var as = answerEl.querySelectorAll('a');
-            for (var ai = 0; ai < as.length; ai++) {
-              var atxt = (as[ai].textContent || '').trim();
-              if (/^来源\d+$/.test(atxt)) as[ai].className = 'ai-source-link';
-            }
-          } catch (e) {}
           setupBubbleCopy(answerEl, messagesEl);
           var titleEl = node.querySelector('.ai-think-title');
           if (titleEl) titleEl.textContent = '已思考';
@@ -2602,27 +2540,9 @@
       var thinkDurationMs = evt && typeof evt.think_duration_ms === 'number' ? evt.think_duration_ms : 0;
 
       if (node) {
-        // [来源N] 渲染
         var contentForRender = content || '';
-        if (searchResults && searchResults.length > 0) {
-          contentForRender = contentForRender.replace(/\[来源(\d+)\]/g, function(m, n) {
-            var idx = parseInt(n, 10);
-            if (isNaN(idx) || idx < 1 || idx > searchResults.length) return m;
-            var sr = searchResults[idx - 1] || {};
-            if (!sr.url) return m;
-            return '[来源' + n + '](' + sr.url.replace(/"/g, '%22').replace(/\)/g, '%29') + ')';
-          });
-        }
-
         var answerEl = node.querySelector('.ai-think-answer');
         function finalizeAnswer() {
-          try {
-            var as = answerEl.querySelectorAll('a');
-            for (var ai = 0; ai < as.length; ai++) {
-              var atxt = (as[ai].textContent || '').trim();
-              if (/^来源\d+$/.test(atxt)) as[ai].className = 'ai-source-link';
-            }
-          } catch (e) {}
           setupBubbleCopy(answerEl, dtMessagesEl);
           var titleEl = node.querySelector('.ai-think-title');
           if (titleEl) titleEl.textContent = '已思考';
