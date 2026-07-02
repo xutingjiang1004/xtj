@@ -7255,13 +7255,19 @@ function buildAiCorePrompt(config) {
     rs.use_emoji !== false ? '用 emoji' : '不用 emoji'
   ].join('，');
 
+  var emojiRule = rs.use_emoji === true
+    ? '【emoji 规则】偶尔用 emoji 增加语气（每条最多 1 个），且必须是有意义的强调，不是每句话末尾都加！禁止一连串表情如 😏😁😂💀。'
+    : '【emoji 规则】不用 emoji。';
+
   var lines = [
     '你是 ' + name + '。',
     persona ? '人设：' + persona : '',
     sysPrompt ? '指令：' + sysPrompt : '',
     '风格：' + style + '。每条 ≤ ' + (rs.max_reply_chars || 1200) + ' 字。',
     allowWebSearch ? '可用工具：search_web / get_weather / get_current_time。' : '',
-    '只回答对话内容；不编造已执行的操作；拒绝查他人记录。中文回复，不写括号动作。'
+    emojiRule,
+    '【输出硬性规则】1) 一条回复只表达一个核心观点，不要分点罗列。2) 短句为主，别写长段落。3) 不写"作为一个 AI"开场白。4) 不写括号动作描写（如 "*笑了笑*"）。',
+    '只回答对话内容；不编造已执行的操作；拒绝查他人记录。中文回复。'
   ];
 
   return lines.filter(Boolean).join('\n');
@@ -7507,30 +7513,28 @@ async function handleDeepThinkChat(req, res) {
       return safeEnd();
     }
 
-    // ★ 提取消息中嵌入的文件 (base64 → 文本)
-    message = await extractEmbeddedFiles(message);
-
-    // 3. 读取配置和上下文
-    var config = await getAiConfig();
-    var ctx = await loadAiContext(userName, convId);
-    if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
-
-    // 4. 设置 SSE headers
+    // ★ 立即设置 SSE headers 并发送 meta + 启动心跳, 让前端秒级收到响应
+    // 之前 Supabase 调用阻塞了 meta 推送, 导致前端要等 5-20 秒才看到"思考中..."
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
     if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
-
-    // 5. 立即推 meta 确认连接 + 高频心跳防超时
     sseSend({ type: 'meta', conversation_id: convId, deep_think: true, start_time: startTime });
-
     _heartbeatTimer = setInterval(function() {
       if (!res.writableEnded) {
         sseSend({ type: 'heartbeat', elapsed_ms: Date.now() - startTime });
       }
     }, 1500);
+
+    // 3. 提取消息中嵌入的文件 (base64 → 文本)
+    message = await extractEmbeddedFiles(message);
+
+    // 4. 读取配置和上下文
+    var config = await getAiConfig();
+    var ctx = await loadAiContext(userName, convId);
+    if (aborted) { activeDeepThinkJobs.delete(convId); return safeEnd(); }
 
     // ★ P 改: 提前计算思考程度 (后面 usage 和 done 事件也要用)
     var clientThinkingMode = (req.body && req.body.thinking_mode) || '';
