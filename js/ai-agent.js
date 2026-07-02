@@ -1875,8 +1875,6 @@
         var metaEl = node.querySelector('.ai-think-meta');
         if (titleEl) titleEl.textContent = '已思考 ' + durStr;
         if (metaEl) metaEl.textContent = '';
-        var dtDetails2 = node.querySelector('.ai-think-thinking');
-        if (dtDetails2) dtDetails2.open = false;
         if (node.classList.contains('collapsed')) { node.classList.remove('collapsed'); node.classList.add('expanded'); }
       }
     }
@@ -2317,10 +2315,6 @@
         // V2: 去掉重复 1 agent (footer 已有 agent-badge), header meta 留空
         if (metaEl) metaEl.textContent = '';
 
-        // ★ 完成后**自动折叠思考过程**, 但答案保持可见
-        var dtDetails = node.querySelector('.ai-think-thinking');
-        if (dtDetails) dtDetails.open = false;
-        // 确保卡片展开 (答案可见)
         if (node.classList.contains('collapsed')) {
           node.classList.remove('collapsed');
           node.classList.add('expanded');
