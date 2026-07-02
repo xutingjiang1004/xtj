@@ -1964,6 +1964,25 @@
   color: rgba(75, 95, 88, .88);
 }
 #panelDeepThink .ai-think-thinking-body::-webkit-scrollbar { display: none; }
+/* 关键：去掉每个 agent 内容的内部滚动条和高度限制 */
+#panelDeepThink .ai-thought-chunk,
+#panelDeepThink .dt-simple-card .ai-thought-chunk {
+  max-height: none !important;
+  height: auto !important;
+  overflow: visible !important;
+  overflow-y: visible !important;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+#panelDeepThink .ai-thought-chunk::-webkit-scrollbar { display: none; }
+/* 兜底：确保思考过程区域及其所有子元素都不出现滚动条 */
+#panelDeepThink .ai-think-thinking-body,
+#panelDeepThink .ai-think-thinking-body *,
+#panelDeepThink .ai-thought-chunk,
+#panelDeepThink .ai-thought-chunk * {
+  overflow: visible !important;
+  max-height: none !important;
+}
 #panelDeepThink .ai-thought-entry {
   padding: 3px 0;
   margin-bottom: 2px;

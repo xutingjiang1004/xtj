@@ -2587,8 +2587,7 @@
         }
         .dock-tab.active .dt-label { font-weight: 700; }
         .dock-tab:active { transform: none !important; }
-        .dock-tab:focus,
-        .dock-tab:focus-visible,
+        .dock-tab:focus:not(:focus-visible),
         .dock-tab:focus-within,
         .dock-tab:active,
         .dock-tab:hover {
@@ -2597,9 +2596,9 @@
             -webkit-box-shadow: none !important;
         }
         .dock-tab:focus-visible {
-            outline: none !important;
-            box-shadow: none !important;
-            -webkit-box-shadow: none !important;
+            outline: 2px solid var(--primary, #16a085) !important;
+            outline-offset: -2px !important;
+            box-shadow: 0 0 0 4px rgba(22, 160, 133, 0.15) !important;
         }
         .dock-tab::-moz-focus-inner {
             border: 0 !important;

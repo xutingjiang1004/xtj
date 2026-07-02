@@ -1550,7 +1550,7 @@ async function initAdminClient() {
                 if (API_BASE) {
                     await apiCall('DELETE', '/admin/announcement/' + id);
                 } else if (typeof sb !== 'undefined' && sb && sb.rpc) {
-                    var key = post ? post.actor_key : 'admin_' + Date.now();
+                    var key = ann ? ann.actor_key : 'admin_' + Date.now();
                     var res = await sb.rpc('delete_post_with_actor', { p_post_id: id, p_actor_key: key });
                     if (res.error) { showToast('删除失败: ' + res.error.message, 'error'); return; }
                 }
