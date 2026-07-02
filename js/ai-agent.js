@@ -2514,13 +2514,29 @@
       } catch (e) {}
     }
 
-    // 在显示面板前先定位到最底部（无动画），避免用户看到从顶部滚动的过程
-    if (msgs) {
-      try { msgs.scrollTop = msgs.scrollHeight; } catch (e) {}
-    }
-
     panel.classList.remove('hidden');
     panel.classList.add('active');
+
+    // 等待两帧 + 一个小延时，确保所有子元素布局完成（markdown 渲染、图片等）
+    // 然后用 scrollIntoView 定位到最后一条消息，scrollIntoView 兼容性比 scrollTop=scrollHeight 更好
+    if (msgs) {
+      var scrollToEnd = function() {
+        try {
+          // 找最后一条用户消息或助手消息
+          var last = msgs.lastElementChild;
+          if (last && last !== msgs) {
+            try { last.scrollIntoView({ block: 'end', behavior: 'auto' }); } catch (e) {}
+          }
+          // 兜底：直接设 scrollTop
+          try { msgs.scrollTop = msgs.scrollHeight; } catch (e) {}
+        } catch (e) {}
+      };
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          setTimeout(scrollToEnd, 50);
+        });
+      });
+    }
 
     var input = document.getElementById('dtInput');
     if (input) {
